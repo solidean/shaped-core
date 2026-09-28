@@ -71,11 +71,11 @@ kernel void k(constant frame& f [[buffer(0)]])               index       = the m
 
 texture*<...>            -> readonly_texture, + texture_dimension     (access::write / read_write -> readwrite_texture)
 sampler                  -> sampler
-constant T& / constant T*-> uniform_buffer
+constant T& / constant T*-> constants_buffer
 device T*                -> readwrite_structured_buffer              (a `const` pointee -> readonly_structured_buffer)
 raytracing::*_acceleration_structure -> acceleration_structure
 T name[k]                -> count = k, occupying k CONSECUTIVE indices
-constant T& x [[buffer(4)]] on the entry point -> the INLINE-CONSTANTS block: uniform_buffer, no group, no space
+constant T& x [[buffer(4)]] on the entry point -> the INLINE-CONSTANTS block: constants_buffer, no group, no space
 // GOTCHA: any other [[buffer]] / [[texture]] / [[sampler]] on the entry point itself is an ERROR — the backend binds
 //   only argument buffers (group N at [[buffer(N)]], N <= sg::reserved_binding_group) and the inline block.
 // GOTCHA: `#pragma sc numthreads x y z` counts only in the lines DIRECTLY above the signature (blank, pragma and

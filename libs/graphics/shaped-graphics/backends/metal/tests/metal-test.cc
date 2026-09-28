@@ -30,8 +30,8 @@ TEST("sg metal - a context comes up and describes its adapter")
     CHECK(!ctx->accepts_shader_format(sg::shader_format::dxil));
 
     // Every device Metal hands out is real hardware; there is no software rasterizer to fall back to.
-    CHECK(!ctx->adapter().is_software);
-    CHECK(!ctx->adapter().name.empty());
+    CHECK(!ctx->metrics.adapter().is_software);
+    CHECK(!ctx->metrics.adapter().name.empty());
 }
 
 TEST("sg metal - ray tracing is reported, and it is the device's answer")

@@ -197,11 +197,12 @@ public:
         case sg::feature::geometry_shader:
         case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
-        case sg::feature::readwrite_storage_formats:
+        case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
+        case sg::feature::multisampled_array_textures:
             return true;
-        case sg::feature::extended_storage_formats:
-            return _extended_storage_formats;
+        case sg::feature::extended_image_formats:
+            return _extended_image_formats;
         case sg::feature::unaligned_block_compression:
             return _unaligned_block_textures;
         }
@@ -568,7 +569,7 @@ public:
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;
-    void advance_epoch() override;
+    void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override;
     void retire_completed_epochs() override;
     void block_until_submissions_complete() override;
@@ -592,6 +593,9 @@ public:
     // create_dx12_context fills this in once it has picked an adapter, like every other member here.
     using sg::context::set_adapter_info;
 
+    /// The context's stat totals, for the transfer systems that count into them.
+    [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
+
     ComPtr<IDXGIFactory4> _factory;
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
@@ -605,7 +609,7 @@ public:
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
-    bool _extended_storage_formats = false; // bgra8_unorm's typed UAV, cached at creation
+    bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.

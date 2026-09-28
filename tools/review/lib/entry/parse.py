@@ -24,6 +24,7 @@ from .grammar import (
     FRONT_KNOWN,
     FRONT_REQUIRED,
     HEADING_RE,
+    RETIRED_BLOCK_TYPES,
     SEVERITIES,
     SHOW_KINDS,
     STATES,
@@ -506,6 +507,10 @@ def parse_text(text: str, path: Path, slug: str = "", pending_round: int = 0) ->
             raise ReviewParseError(path, number, f"malformed block heading {heading.strip()!r}",
                                    "write `## <type>` or `## <type> <argument>`")
         block_type, head = m.group(1), (m.group(2) or "").strip()
+        if block_type in RETIRED_BLOCK_TYPES:
+            raise ReviewParseError(path, number, f"unknown block type {block_type!r}",
+                                   f"`{block_type}` was retired: write it as `## {RETIRED_BLOCK_TYPES[block_type]}`, "
+                                   "which introduces what the entry needs in its own words")
         if block_type not in BLOCK_TYPES:
             # A block type is lowercase kebab-case, so anything else here is usually a markdown heading
             # inside a block whose body is markdown — an `artifact` above all.

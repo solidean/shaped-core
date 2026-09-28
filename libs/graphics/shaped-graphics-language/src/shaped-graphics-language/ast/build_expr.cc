@@ -77,6 +77,8 @@ expr_id builder::expression_node(form_id form)
     case form_kind::identifier:
         if (text_of(form) == "self")
             return make_expr(form, self_ref{});
+        if (text_of(form) == "void")
+            return make_expr(form, void_ref{});
         return make_expr(form, name{.where = f.where});
     case form_kind::wildcard:
         return make_expr(form, wildcard{});
@@ -178,6 +180,9 @@ expr_id builder::curly_list_expression(form_id form)
     if (total > 0 && typed == total)
     {
         auto const fields = fields_of(form, diagnostic_kind::expected_member);
+        for (auto const& f : ast.at(fields))
+            if (f.is_named_only)
+                report(diagnostic_kind::named_only_not_allowed_here, f.form);
         return make_expr(form, struct_type{.fields = fields});
     }
     if (typed > 0)
@@ -582,6 +587,8 @@ void builder::report_jump_target(form_id form, cc::string_view keyword)
         auto const owner = owners[i].owner;
         auto const is_loop = owner == body_owner::value_loop || owner == body_owner::statement_loop;
         auto const is_one_line = owners[i].one_line == form;
+        if (owner == body_owner::test)
+            break;
 
         if (is_loop_jump)
         {

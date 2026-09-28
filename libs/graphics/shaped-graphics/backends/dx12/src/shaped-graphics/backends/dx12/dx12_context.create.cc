@@ -444,9 +444,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS8, &options8, sizeof(options8)))
        && options8.UnalignedBlockTexturesSupported;
 
-    // Of the storage formats beyond the portable set, bgra8_unorm is the one whose typed UAV D3D12 leaves optional.
+    // Of the image formats beyond the portable set, bgra8_unorm is the one whose typed UAV D3D12 leaves optional.
     auto bgra8 = D3D12_FEATURE_DATA_FORMAT_SUPPORT{.Format = DXGI_FORMAT_B8G8R8A8_UNORM};
-    auto const extended_storage_formats
+    auto const extended_image_formats
         = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &bgra8, sizeof(bgra8)))
        && (bgra8.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) != 0;
 
@@ -460,7 +460,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_queue = cc::move(queue);
     ctx->_raytracing_tier = raytracing_tier;
     ctx->_unaligned_block_textures = unaligned_block_textures;
-    ctx->_extended_storage_formats = extended_storage_formats;
+    ctx->_extended_image_formats = extended_image_formats;
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 

@@ -1,5 +1,7 @@
 #include <clean-core/common/assertf.hh>
 #include <shaped-graphics/resource/impl/texture_copy_region.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg::impl
 {
@@ -51,5 +53,14 @@ void assert_texture_region_in_bounds(raw_texture_handle const& texture,
                "texture copy region offset ({}, {}, {}) + size ({}, {}, {}) exceeds subresource extent ({}, {}, {})",
                region.offset[0], region.offset[1], region.offset[2], region.size[0], region.size[1], region.size[2],
                full.size[0], full.size[1], full.size[2]);
+}
+
+isize packed_region_bytes(raw_texture_handle const& texture, texture_region const& region)
+{
+    auto const format = texture->format();
+    auto const block = format_block_extent(format);
+    auto const blocks_x = isize((region.size[0] + block - 1) / block);
+    auto const blocks_y = isize((region.size[1] + block - 1) / block);
+    return blocks_x * blocks_y * isize(region.size[2]) * isize(format_block_size(format));
 }
 } // namespace sg::impl

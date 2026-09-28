@@ -33,48 +33,48 @@ public:
     // Every factory here addresses in bytes and takes no C++ element type — a `cc::offset_size` range, plus an explicit stride where the view is structured.
     // The buffer's usage must cover the access, which each one asserts.
     //
-    // For the element-typed path — `as_readonly_buffer()`, `as_uniform_buffer()`, … inferring `T` — wrap the buffer in a `buffer<T>` (buffer.hh).
+    // For the element-typed path — `as_readonly_buffer()`, `as_constants_buffer()`, … inferring `T` — wrap the buffer in a `buffer<T>` (buffer.hh).
     // The friction here is deliberate.
     //
     // A view is a subrange, so it can fail its placement rules on an offset or size a caller computed at runtime, which is what each `try_` twin is for.
     // A missing `buffer_usage` flag asserts either way: the usage was chosen at creation, so getting it wrong is a contract bug rather than a runtime condition.
     // The draw-input factories have no `try_` twin, since they can only fail bounds.
 
-    /// Raw uniform (constant buffer) view over an explicit byte range, returning the erased arm — there is no untyped uniform view.
+    /// Raw constants buffer view over an explicit byte range, returning the erased arm — there is no untyped constants view.
     /// The range must fit, its offset must be 256-byte aligned, and its size must be at most the 64 KiB max CBV.
-    [[nodiscard]] raw_buffer_view as_raw_uniform_buffer(cc::offset_size byte_range) const
+    [[nodiscard]] raw_buffer_view as_raw_constants_buffer(cc::offset_size byte_range) const
     {
-        CC_ASSERT(_usage.has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
-        assert_uniform_range(byte_range);
-        return raw_buffer_view{.access = view_class::uniform,
-                               .shape = view_shape::uniform_block,
+        CC_ASSERT(_usage.has(buffer_usage::constants_buffer), "buffer lacks constants_buffer usage");
+        assert_constants_range(byte_range);
+        return raw_buffer_view{.bound_as = view_class::constants,
+                               .shape = view_shape::constants_block,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
                                .size_in_bytes = byte_range.size};
     }
 
-    /// Checked as_raw_uniform_buffer — nullopt when the byte range breaks the uniform block rules.
-    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_uniform_buffer(cc::offset_size byte_range) const
+    /// Checked as_raw_constants_buffer — nullopt when the byte range breaks the constants block rules.
+    [[nodiscard]] cc::optional<raw_buffer_view> try_as_raw_constants_buffer(cc::offset_size byte_range) const
     {
-        CC_ASSERT(_usage.has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
-        if (!is_valid_uniform_range(byte_range))
+        CC_ASSERT(_usage.has(buffer_usage::constants_buffer), "buffer lacks constants_buffer usage");
+        if (!is_valid_constants_range(byte_range))
             return {};
-        return as_raw_uniform_buffer(byte_range);
+        return as_raw_constants_buffer(byte_range);
     }
 
-    /// A raw, byte-addressed read-only view (SRV, `shape == raw`) of the whole buffer.
+    /// A byte-addressed read-only view (SRV, `shape == bytes`) of the whole buffer.
     [[nodiscard]] raw_buffer_view as_raw_readonly() const
     {
         return as_raw_readonly({.offset = 0, .size = _size_in_bytes});
     }
 
-    /// A raw, byte-addressed read-only view of `byte_range` bytes (SRV, `shape == raw`).
+    /// A byte-addressed read-only view of `byte_range` bytes (SRV, `shape == bytes`).
     [[nodiscard]] raw_buffer_view as_raw_readonly(cc::offset_size byte_range) const
     {
         CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         assert_storage_range(byte_range);
-        return raw_buffer_view{.access = view_class::readonly,
-                               .shape = view_shape::raw,
+        return raw_buffer_view{.bound_as = view_class::readonly,
+                               .shape = view_shape::bytes,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
                                .size_in_bytes = byte_range.size};
@@ -86,7 +86,7 @@ public:
     {
         CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         assert_strided_range(byte_range, stride_in_bytes);
-        return raw_buffer_view{.access = view_class::readonly,
+        return raw_buffer_view{.bound_as = view_class::readonly,
                                .shape = view_shape::structured,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
@@ -118,19 +118,19 @@ public:
         return as_raw_readonly(byte_range, stride_in_bytes);
     }
 
-    /// A raw, byte-addressed read-write view (UAV, `shape == raw`) of the whole buffer.
+    /// A byte-addressed read-write view (UAV, `shape == bytes`) of the whole buffer.
     [[nodiscard]] raw_buffer_view as_raw_readwrite() const
     {
         return as_raw_readwrite({.offset = 0, .size = _size_in_bytes});
     }
 
-    /// A raw, byte-addressed read-write view of `byte_range` bytes (UAV, `shape == raw`).
+    /// A byte-addressed read-write view of `byte_range` bytes (UAV, `shape == bytes`).
     [[nodiscard]] raw_buffer_view as_raw_readwrite(cc::offset_size byte_range) const
     {
         CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         assert_storage_range(byte_range);
-        return raw_buffer_view{.access = view_class::readwrite,
-                               .shape = view_shape::raw,
+        return raw_buffer_view{.bound_as = view_class::readwrite,
+                               .shape = view_shape::bytes,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
                                .size_in_bytes = byte_range.size};
@@ -142,7 +142,7 @@ public:
     {
         CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         assert_strided_range(byte_range, stride_in_bytes);
-        return raw_buffer_view{.access = view_class::readwrite,
+        return raw_buffer_view{.bound_as = view_class::readwrite,
                                .shape = view_shape::structured,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
@@ -289,20 +289,20 @@ protected:
             && byte_range.offset % stride_in_bytes == 0;
     }
 
-    /// Whether a byte range is a legal uniform block view (see assert_uniform_range).
-    [[nodiscard]] bool is_valid_uniform_range(cc::offset_size byte_range) const
+    /// Whether a byte range is a legal constants block view (see assert_constants_range).
+    [[nodiscard]] bool is_valid_constants_range(cc::offset_size byte_range) const
     {
-        return is_valid_byte_range(byte_range) && byte_range.offset % uniform_buffer_offset_alignment == 0
-            && byte_range.size <= max_uniform_buffer_size;
+        return is_valid_byte_range(byte_range) && byte_range.offset % constants_buffer_offset_alignment == 0
+            && byte_range.size <= max_constants_buffer_size;
     }
 
-    /// Checks the uniform block rules: in bounds, a 256-byte-aligned offset, and at most the 64 KiB max CBV size.
-    void assert_uniform_range(cc::offset_size byte_range) const
+    /// Checks the constants block rules: in bounds, a 256-byte-aligned offset, and at most the 64 KiB max CBV size.
+    void assert_constants_range(cc::offset_size byte_range) const
     {
-        CC_ASSERT(byte_range.offset % uniform_buffer_offset_alignment == 0, "uniform block offset must be 256-byte "
-                                                                            "aligned");
+        CC_ASSERT(byte_range.offset % constants_buffer_offset_alignment == 0, "constants block offset must be 256-byte "
+                                                                              "aligned");
         assert_byte_range(byte_range);
-        CC_ASSERT(byte_range.size <= max_uniform_buffer_size, "uniform range exceeds the 64 KiB max CBV size");
+        CC_ASSERT(byte_range.size <= max_constants_buffer_size, "constants range exceeds the 64 KiB max CBV size");
     }
 
     /// Bounds-checks a shader-facing storage (readonly / readwrite) view range: in bounds, a 256-byte-aligned offset, and a size that is a whole number of 4-byte words.

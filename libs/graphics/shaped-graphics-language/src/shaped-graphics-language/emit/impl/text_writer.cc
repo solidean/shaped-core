@@ -1,5 +1,6 @@
 #include "dialect.hh"
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
@@ -132,10 +133,11 @@ struct writer
         d.write_local(declaration, {.name = name, .type = type_text(p, d, x.type), .is_mut = true});
         line(declaration);
 
-        auto const& members = p.structs[p.struct_of_type[index_of(x.type)]].members;
+        auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
         auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
-        for (auto i = isize(0); i < arguments.size() && i < members.size(); ++i)
-            line(cc::format("{}.{} = {};", name, members[i].name, expr(arguments[i]).text));
+        for (auto i = isize(0); i < arguments.size() && i < planned.member_of.size(); ++i)
+            if (planned.member_of[i] >= 0)
+                line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name, expr(arguments[i]).text));
     }
 
     /// `is_broken` gives every argument a line of its own, which is how a struct built as a statement's value reads.
@@ -149,7 +151,11 @@ struct writer
             return {.text = cc::move(name)};
         }
 
-        auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
+        // A void argument stands for a field no target declares, and its value is no value to write (EMIT-106).
+        auto arguments = cc::vector<flat_expr_id>();
+        for (auto const a : p.e.at(x.node.as<flat_construct>().arguments))
+            if (p.e.at(a).type != checked_module::void_type)
+                arguments.push_back(a);
         // a vector stays on its line: its arguments are short, and `vec3f(0.45, 0.8, -0.4)` is how a shader reads
         auto const is_split = is_broken && arguments.size() > 1 && !is_builtin_type(p.m, x.type);
         auto text = cc::string(type_text(p, d, x.type));
@@ -172,6 +178,214 @@ struct writer
         }
         text += ")";
         return {.text = cc::move(text)};
+    }
+
+    /// A value inside a root its target writes as a memory form: a constant block, or a buffer's element.
+    struct memory_ref
+    {
+        memory_form const* form = nullptr;
+        /// What reaches the root: the block's global, or `buffer[index]`.
+        cc::string root;
+        /// Member positions from the root down, as `memory_leaf::path` holds them.
+        cc::vector<i32> path;
+        type_id type = type_id::none;
+    };
+
+    /// Where `id` reads or writes inside a root written as its memory form; nothing for every other expression.
+    /// A component of a builtin, `v.x`, is not one: it is read from the rebuilt value, and written by `assign`.
+    cc::optional<memory_ref> memory_of(flat_expr_id id)
+    {
+        auto const& x = p.e.at(id);
+        if (auto const* const b = x.node.try_as<flat_binding_member>())
+        {
+            if (resource_of(p, b->binding, b->member) >= 0)
+                return {};
+            auto const& block = *block_of(p, b->binding);
+            if (!block.form.has_value())
+                return {};
+            return memory_ref{.form = &block.form.value(),
+                              .root = block.name,
+                              .path = {block.block_member_of[b->member]},
+                              .type = x.type};
+        }
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto const* const buffer = p.e.at(element->buffer).node.try_as<flat_binding_member>();
+            auto const found = buffer != nullptr ? resource_of(p, buffer->binding, buffer->member) : -1;
+            if (found < 0 || !p.resources[found].element_form.has_value())
+                return {};
+            return memory_ref{.form = &p.resources[found].element_form.value(),
+                              .root = cc::format("{}[{}]", p.resources[found].name, expr(element->index).text),
+                              .path = {},
+                              .type = x.type};
+        }
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            if (is_builtin_type(p.m, p.e.at(member->object).type))
+                return {};
+            auto inner = memory_of(member->object);
+            if (!inner.has_value())
+                return {};
+            inner.value().path.push_back(member->member);
+            inner.value().type = x.type;
+            return inner;
+        }
+        return {};
+    }
+
+    static bool starts_with(cc::span<i32 const> path, cc::span<i32 const> prefix)
+    {
+        if (path.size() < prefix.size())
+            return false;
+        for (auto i = isize(0); i < prefix.size(); ++i)
+            if (path[i] != prefix[i])
+                return false;
+        return true;
+    }
+
+    memory_leaf const& leaf_at(memory_ref const& r) const
+    {
+        for (auto const& leaf : r.form->leaves)
+            if (leaf.path.size() == r.path.size() && starts_with(leaf.path, r.path))
+                return leaf;
+        CC_UNREACHABLE("every builtin value of a root is a leaf of its memory form");
+    }
+
+    cc::string field_text(memory_ref const& r, memory_leaf const& leaf, isize i) const
+    {
+        return cc::format("{}.{}", r.root, r.form->fields[leaf.fields[i]].name);
+    }
+
+    /// The value `r` addresses, rebuilt from the fields that hold it.
+    cc::string read_memory(memory_ref const& r)
+    {
+        auto const type = cc::string(type_text(p, d, r.type));
+        if (is_builtin_type(p.m, r.type))
+        {
+            auto const& leaf = leaf_at(r);
+            if (leaf.is_packed)
+                return cc::format("{}({})", type, field_text(r, leaf, 0));
+            if (!leaf.is_split)
+                return field_text(r, leaf, 0);
+            auto const& record = *p.m.builtin_type_of(r.type);
+            auto pieces = cc::vector<cc::string>();
+            if (record.leaf_count > 4 && !d.has_struct_constructor())
+            {
+                // MSL builds a matrix from its columns, not from its scalars.
+                auto const column = cc::string(builtin_spelling(p, "float4"));
+                for (auto c = 0; c < 4; ++c)
+                    pieces.push_back(cc::format("{}({}, {}, {}, {})", column, field_text(r, leaf, c * 4),
+                                                field_text(r, leaf, c * 4 + 1), field_text(r, leaf, c * 4 + 2),
+                                                field_text(r, leaf, c * 4 + 3)));
+            }
+            else
+                for (auto i = isize(0); i < leaf.fields.size(); ++i)
+                    pieces.push_back(field_text(r, leaf, i));
+            auto text = cc::format("{}(", type);
+            for (auto i = isize(0); i < pieces.size(); ++i)
+                text.appendf("{}{}", i == 0 ? "" : ", ", pieces[i]);
+            return text + ")";
+        }
+
+        // A struct is its members, each read the same way; a void member is no member of the text (EMIT-106).
+        auto text = cc::format("{}{}", type, d.has_struct_constructor() ? "(" : "{");
+        auto is_first = true;
+        auto const members = p.m.at(p.m.at(r.type).members);
+        for (auto i = isize(0); i < members.size(); ++i)
+        {
+            if (members[i].type == checked_module::void_type)
+                continue;
+            auto inner = r;
+            inner.path.push_back(i32(i));
+            inner.type = members[i].type;
+            text.appendf("{}{}", is_first ? "" : ", ", read_memory(inner));
+            is_first = false;
+        }
+        return text + (d.has_struct_constructor() ? ")" : "}");
+    }
+
+    /// The text of the value at `path` below `value`, a value of the root's type at `from`: its members by their names.
+    cc::string member_path_text(cc::string_view value, type_id from, cc::span<i32 const> path) const
+    {
+        auto text = cc::string(value);
+        auto type = from;
+        for (auto const step : path)
+        {
+            auto const& planned = p.structs[p.struct_of_type[index_of(type)]];
+            text.appendf(".{}", planned.members[planned.member_of[step]].name);
+            type = p.m.at(p.m.at(type).members)[step].type;
+        }
+        return text;
+    }
+
+    /// Stores `value` at `r`, or only its `component` where one is given, piece by piece where the value is split.
+    void write_memory(memory_ref const& r, i32 component, cc::string_view value, type_id value_type)
+    {
+        if (is_builtin_type(p.m, r.type))
+        {
+            auto const& leaf = leaf_at(r);
+            auto const& record = *p.m.builtin_type_of(r.type);
+            if (!leaf.is_split)
+            {
+                auto const place = field_text(r, leaf, 0);
+                line(component < 0
+                         ? cc::format("{} = {};", place, value)
+                         : cc::format("{}.{} = {};", place, p.m.at(p.m.at(r.type).members)[component].name, value));
+                return;
+            }
+            if (component >= 0)
+            {
+                line(cc::format("{} = {};", field_text(r, leaf, component), value));
+                return;
+            }
+            auto const name = p.names.mint("stored");
+            auto declaration = cc::string();
+            d.write_local(declaration, {.name = name, .type = type_text(p, d, value_type), .value = value});
+            line(declaration);
+            for (auto i = 0; i < record.leaf_count; ++i)
+            {
+                auto const piece = record.leaf_count > 4
+                                     ? cc::format("{}[{}][{}]", name, i / 4, i % 4)
+                                     : cc::format("{}.{}", name, p.m.at(p.m.at(r.type).members)[i].name);
+                line(cc::format("{} = {};", field_text(r, leaf, i), piece));
+            }
+            return;
+        }
+
+        // A struct is stored leaf by leaf from one evaluation of the value.
+        auto const name = p.names.mint("stored");
+        auto declaration = cc::string();
+        d.write_local(declaration, {.name = name, .type = type_text(p, d, value_type), .value = value});
+        line(declaration);
+        for (auto const& leaf : r.form->leaves)
+        {
+            if (!starts_with(leaf.path, r.path))
+                continue;
+            auto inner = r;
+            inner.path = leaf.path;
+            inner.type = leaf.type;
+            auto const below = cc::span<i32 const>(leaf.path).subspan(
+                {.offset = r.path.size(), .size = leaf.path.size() - r.path.size()});
+            write_memory(inner, -1, member_path_text(name, r.type, below), leaf.type);
+        }
+    }
+
+    /// `place = value;`, through a memory form where the place is in one.
+    void assign(flat_assign const& a)
+    {
+        auto const value = expr(a.value, true).text;
+        auto target = memory_of(a.place);
+        auto component = -1;
+        if (!target.has_value())
+            if (auto const* const member = p.e.at(a.place).node.try_as<flat_member>();
+                member != nullptr && is_builtin_type(p.m, p.e.at(member->object).type))
+            {
+                target = memory_of(member->object);
+                component = member->member;
+            }
+        if (target.has_value())
+            return write_memory(target.value(), component, value, p.e.at(a.value).type);
+        line(cc::format("{} = {};", expr(a.place).text, value));
     }
 
     /// Every call is written from its registry record; nothing here knows one builtin from another.
@@ -212,6 +426,20 @@ struct writer
     rendered expr(flat_expr_id id, bool is_broken = false)
     {
         auto const& x = p.e.at(id);
+        if (auto const memory = memory_of(id); memory.has_value())
+            return {.text = read_memory(memory.value())};
+        // A component of a vector in a memory form is read from the field that holds it, not from the rebuilt vector.
+        if (auto const* const member = x.node.try_as<flat_member>())
+            if (auto const* const record = p.m.builtin_type_of(p.e.at(member->object).type);
+                record != nullptr && record->leaf_count <= 4)
+                if (auto const object = memory_of(member->object); object.has_value())
+                {
+                    auto const& leaf = leaf_at(object.value());
+                    auto const component = p.m.at(p.m.at(p.e.at(member->object).type).members)[member->member].name;
+                    if (leaf.is_split)
+                        return {.text = field_text(object.value(), leaf, member->member)};
+                    return {.text = cc::format("{}.{}", field_text(object.value(), leaf, 0), component)};
+                }
         auto result = rendered();
         x.node.visit(
             [&](flat_invalid const&) {}, [&](flat_literal const& l)
@@ -219,8 +447,8 @@ struct writer
             [&](flat_int_literal const& l)
             {
                 auto const is_wrapped = l.value == -2147483647 - 1;
-                result = {.text = int_literal_text(l.value),
-                          .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary};
+                auto text = l.is_unsigned ? cc::to_string(u32(l.value)) + "u" : int_literal_text(l.value);
+                result = {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary};
             },
             [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
             [&](flat_enum_value const& v)
@@ -231,12 +459,11 @@ struct writer
                 // A buffer is a global of its own; every other member is a field of a block, `@inline` or its group's.
                 if (auto const found = resource_of(p, b.binding, b.member); found >= 0)
                 {
-                    result = {.text = d.resource_reference(p.resources[found])};
+                    result = {.text = p.resources[found].name};
                     return;
                 }
                 auto const& block = *block_of(p, b.binding);
-                result = {.text = cc::format("{}.{}", d.block_reference(block),
-                                             block.members[block.block_member_of[b.member]].name)};
+                result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
             },
             [&](flat_buffer_element const& b)
             {
@@ -248,11 +475,14 @@ struct writer
                 auto const object_type = p.e.at(member.object).type;
                 auto object = wrapped(expr(member.object), level::primary);
                 // A builtin's fields are spelled alike everywhere: x, y, z, w.
-                auto const name
-                    = is_builtin_type(p.m, object_type)
-                        ? cc::string_view(p.m.at(p.m.at(object_type).members)[member.member].name)
-                        : cc::string_view(p.structs[p.struct_of_type[index_of(object_type)]].members[member.member].name);
-                result = {.text = cc::format("{}.{}", object, name)};
+                if (is_builtin_type(p.m, object_type))
+                {
+                    result
+                        = {.text = cc::format("{}.{}", object, p.m.at(p.m.at(object_type).members)[member.member].name)};
+                    return;
+                }
+                auto const& planned = p.structs[p.struct_of_type[index_of(object_type)]];
+                result = {.text = cc::format("{}.{}", object, planned.members[planned.member_of[member.member]].name)};
             },
             [&](flat_construct const&) { result = construct(x, is_broken); },
             [&](flat_call const& c) { result = call(c); }, [&](flat_not const& n)
@@ -396,18 +626,14 @@ struct writer
     {
         s.node.visit([&](flat_let const& let) { declare(let.local, let.value, p.e.at(let.local).is_mut); },
                      [&](flat_var const& var) { declare(var.local, var.value, true); },
-                     [&](flat_assign const& a)
-                     {
-                         auto const value = expr(a.value, true).text;
-                         line(cc::format("{} = {};", expr(a.place).text, value));
-                     },
+                     [&](flat_assign const& a) { assign(a); },
                      // `validate` refuses a tree that holds one
                      [&](flat_print const&) {}, //
                      [&](flat_eval const& v)
                      {
                          // A call that gives nothing is a statement as it stands, in every target.
                          auto text = cc::string();
-                         if (p.e.at(v.value).type == checked_module::nothing_type)
+                         if (p.e.at(v.value).type == checked_module::void_type)
                              text = cc::format("{};", expr(v.value).text);
                          else
                              d.write_eval(text, expr(v.value).text);
@@ -439,8 +665,16 @@ struct writer
                      [&](flat_once const& o) { once(o); },             //
                      [&](flat_break const&) { line("break;"); },       //
                      [&](flat_switch const& sw) { switch_(sw); },
+                     // a core tree holds none, and the plan refuses one that is not core (EMIT-66)
+                     [&](flat_check const&) {},
                      [&](flat_return const& r)
                      {
+                         // A void result was erased by LEGAL-52, and a compute entry point has none either.
+                         if (!is_valid(r.value))
+                         {
+                             line("return;");
+                             return;
+                         }
                          auto const& value = p.e.at(r.value);
                          if (needs_member_assignment(value))
                          {

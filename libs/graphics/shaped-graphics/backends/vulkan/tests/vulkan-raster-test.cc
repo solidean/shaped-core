@@ -179,8 +179,12 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
     compute_shader.workgroup_size = sg::compute_dimensions{.x = 64, .y = 1, .z = 1};
     compute_shader.bytecode = cc::make_pinned_data(
         cc::span<byte const>(reinterpret_cast<byte const*>(double_compute_spirv), isize(sizeof(double_compute_spirv))));
-    compute_shader.bindings.push_back(
-        {.name = "Output", .group_index = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_structured_buffer});
+    compute_shader.bindings.push_back({.name = "Output",
+                                       .group_index = 0,
+                                       .index = 0,
+                                       .count = 1,
+                                       .type = sg::binding_type::buffer,
+                                       .access = sg::access_mode::read_write});
 
     auto compute_group_layout = ctx.cached.acquire_binding_group_layout(compute_shader.bindings);
     auto compute_pipeline_layout
@@ -197,7 +201,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
 
     // The raster half, reading the same buffer.
     auto raster_shader_bindings = cc::vector<sg::binding>{
-        {.name = "Values", .group_index = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_structured_buffer}};
+        {.name = "Values", .group_index = 0, .index = 0, .count = 1, .type = sg::binding_type::buffer}};
     auto raster_group_layout = ctx.cached.acquire_binding_group_layout(raster_shader_bindings);
     auto raster_pipeline_layout
         = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {raster_group_layout}});

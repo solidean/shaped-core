@@ -13,8 +13,8 @@ Back to the [specification](_index.md).
 ```sgl
 binding post:
     texel_size: float2
-    src: texture2d[float4]
-    dst: out image2d[.rgba8_unorm]
+    src: texture_2d[float4]
+    dst: out image_2d[.rgba8_unorm]
     sampler bilinear:
         filter = .linear
         address = .clamp_edge
@@ -31,25 +31,24 @@ That is the common case, and it is why `constants[T]` below is rarer than it loo
 The table is the one sg already commits to.
 `sg::binding_type` in [binding.hh](../../../shaped-graphics/src/shaped-graphics/binding/binding.hh) is the portable set every backend maps to, and SGL spells it rather than deciding it again.
 
-| SGL | `sg::binding_type` | what it is |
-|---|---|---|
-| a plain value type | `uniform_buffer` | a field of the group's implicit constant buffer |
-| `constants[T]` | `uniform_buffer` | a constant buffer that comes from somewhere else, already laid out |
-| `buffer[T]` | `readonly_structured_buffer` | an array of `T` the shader reads |
-| `mut buffer[T]` | `readwrite_structured_buffer` | an array of `T` the shader reads and writes |
-| `bytes` | `readonly_raw_buffer` | raw bytes, addressed by offset |
-| `mut bytes` | `readwrite_raw_buffer` | raw bytes the shader also writes |
-| `texture2d[T]` and its neighbours | `readonly_texture` | a texture the shader samples or loads |
-| `texture2d_depth` and its neighbours | `readonly_texture` | a depth texture, sample type `depth` |
-| `image2d[.F]` and its neighbours | `readwrite_texture`, `storage_access::read` | a storage texture the shader only reads |
-| `mut image2d[.F]` | `readwrite_texture`, `storage_access::read_write` | a storage texture the shader reads and writes |
-| `out image2d[.F]` | `readwrite_texture`, `storage_access::write` | a storage texture the shader only writes |
-| `sampler`, `comparison_sampler` | `sampler` | a sampler the host binds |
-| `sampler name:` with settings | a static sampler of the group's layout | a sampler nobody binds |
+| SGL | `sg::binding_type` | `sg::access_mode` | what it is |
+|---|---|---|---|
+| a plain value type | `constants_buffer` | `read` | a field of the group's implicit constant buffer |
+| `constants[T]` | `constants_buffer` | `read` | a constant buffer that comes from somewhere else, already laid out |
+| `buffer[T]` | `buffer` | `read` | an array of `T` the shader reads |
+| `mut buffer[T]` | `buffer` | `read_write` | an array of `T` the shader reads and writes |
+| `bytes` | `bytes` | `read` | raw bytes, addressed by offset |
+| `mut bytes` | `bytes` | `read_write` | raw bytes the shader also writes |
+| `texture_2d[T]` and its neighbours | `texture` | `read` | a texture the shader samples or loads |
+| `texture_2d_depth` and its neighbours | `texture` | `read` | a depth texture, sample type `depth` |
+| `image_2d[.F]` and its neighbours | `image` | `read` | a storage texture the shader only reads |
+| `mut image_2d[.F]` | `image` | `read_write` | a storage texture the shader reads and writes |
+| `out image_2d[.F]` | `image` | `write` | a storage texture the shader only writes |
+| `sampler`, `comparison_sampler` | `sampler` | `read` | a sampler the host binds |
+| `sampler name:` with settings | a static sampler of the group's layout | — | a sampler nobody binds |
 
-**sg names the descriptor class, SGL names the resource.**
-sg's `readwrite_texture` is every storage texture, whatever its access, because its axis is SRV against UAV.
-SGL's `image` is the same object, and its access word says what the shader does with it.
+**sg and SGL name the same two things: the resource, and what the shader does with it.**
+The type is the kind, and the access word is `sg::access_mode`, so every row above is one-to-one.
 
 ## Access
 
@@ -62,7 +61,7 @@ Three spellings, and a resource takes the ones it has.
 **A buffer is never `out`.**
 No target has a write-only buffer, and WGSL refuses one in as many words: *access mode 'write' is not valid for the 'storage' address space*.
 **A texture is never `mut` or `out`**, since a sampled texture is read-only on every target.
-An image has all three, exactly as `sg::storage_access` has three.
+An image has all three, exactly as `sg::access_mode` has three.
 
 The asymmetry is WebGPU's rather than ours.
 Core WebGPU allows read-write storage only for the `r32` formats, so an image of any other format is unmarked or `out` there, and `mut` needs a feature ([Features](#features)).
@@ -71,33 +70,34 @@ dx12 and vulkan do not ask — a UAV is read-write to them whatever the shader s
 ## Textures and images
 
 **A sampled texture and a storage texture are two families, because every target gives them different type arguments.**
-A sampled texture goes through the texture unit and shows the shader a component type: `texture2d[float4]`.
-A storage texture is addressed per texel, and the shader has to name its memory format: `image2d[.rgba8_unorm]`.
+A sampled texture goes through the texture unit and shows the shader a component type: `texture_2d[float4]`.
+A storage texture is addressed per texel, and the shader has to name its memory format: `image_2d[.rgba8_unorm]`.
 WGSL spells the format inside the type, `texture_storage_2d<rgba8unorm, write>`, and vulkan wants it for a storage image read without `shaderStorageImageReadWithoutFormat`.
 HLSL ignores it, so carrying it costs dx12 nothing.
 
 "image" is Vulkan's and GLSL's word for a storage texture, and the more widely shared of the candidates.
 
 **One family was the alternative, and it lost.**
-`texture2d` alone would take a component type when unmarked and a format under `mut` or `out`.
+`texture_2d` alone would take a component type when unmarked and a format under `mut` or `out`.
 The argument's kind would then depend on the word to its left, and a read-only storage texture would have no spelling at all.
 
 ### Shapes
 
 Every shape sg's `texture_view_dimension` has is a type.
-The digit is fused to the word, as in `float4`, and `_` separates only real words.
+Each is spelled as sg spells its texture of that shape, `texture_2d` for `sg::texture_2d`, so the shader and the host say the same word.
+The digit is set off by `_`, unlike a vector's `float4`, because it names a dimension rather than a count.
 
 | sg `texture_view_dimension` | texture | depth texture | image |
 |---|---|---|---|
-| `tex_1d` | `texture1d` | — | `image1d` |
-| `tex_1d_array` | `texture1d_array` | — | `image1d_array` |
-| `tex_2d` | `texture2d` | `texture2d_depth` | `image2d` |
-| `tex_2d_array` | `texture2d_array` | `texture2d_array_depth` | `image2d_array` |
-| `tex_3d` | `texture3d` | — | `image3d` |
+| `tex_1d` | `texture_1d` | — | `image_1d` |
+| `tex_1d_array` | `texture_1d_array` | — | `image_1d_array` |
+| `tex_2d` | `texture_2d` | `texture_2d_depth` | `image_2d` |
+| `tex_2d_array` | `texture_2d_array` | `texture_2d_array_depth` | `image_2d_array` |
+| `tex_3d` | `texture_3d` | — | `image_3d` |
 | `cube` | `texture_cube` | `texture_cube_depth` | — |
 | `cube_array` | `texture_cube_array` | `texture_cube_array_depth` | — |
-| `tex_2d_ms` | `texture2d_ms` | `texture2d_ms_depth` | — |
-| `tex_2d_ms_array` | `texture2d_ms_array`, feature only | — | — |
+| `tex_2d_ms` | `texture_2d_ms` | `texture_2d_ms_depth` | — |
+| `tex_2d_ms_array` | `texture_2d_ms_array`, feature only | — | — |
 
 No target has a cube or a multisampled storage texture, and no target has a 1D or 3D depth texture.
 A depth texture is its own type, with the sg shape and then `_depth`, because it has functions of its own: comparison sampling.
@@ -120,24 +120,24 @@ WebGPU wants a sampled texture's sample type on the layout before any texture is
 
 ```sgl
 binding lighting:
-    albedo: texture2d[float4]
-    ids: texture2d[uint]
-    shadow: texture2d_depth
-    @unfilterable positions: texture2d[float4]
+    albedo: texture_2d[float4]
+    ids: texture_2d[uint]
+    shadow: texture_2d_depth
+    @unfilterable positions: texture_2d[float4]
 ```
 
 SGL never sees a sampled texture's format, so it cannot know that a view bound later is 32-bit float.
 That refusal is sg's: binding such a view to a `filterable_float` layout is an error on every backend unless the device has the feature ([Features](#features)).
 
-### Storage formats
+### Image formats
 
-**An image's argument is a value of sg's format enum**, spelled as an enum case: `image2d[.rgba8_unorm]`.
+**An image's argument is a value of sg's format enum**, spelled as an enum case: `image_2d[.rgba8_unorm]`.
 A format is not a type, and its name is sg's `sg::pixel_format` name, so the shader, the generated host code and every diagnostic say the same word.
 The WGSL writer maps it to WGSL's spelling (`rgba8unorm`, and `rg11b10ufloat` for `rg11b10_float`).
 
-The portable formats are core WebGPU's storage formats:
+The portable formats are core WebGPU's image formats:
 `rgba8_unorm`, `rgba8_snorm`, `rgba8_uint`, `rgba8_sint`, `rgba16_uint`, `rgba16_sint`, `rgba16_float`, and the `r32`, `rg32` and `rgba32` formats in `float`, `uint` and `sint`.
-Every other storage format needs a feature.
+Every other image format needs a feature.
 
 ## Samplers
 
@@ -149,7 +149,7 @@ sampler linear_clamp:
     address = .clamp_edge
 
 binding material:
-    albedo: texture2d[float4]
+    albedo: texture_2d[float4]
     sampler albedo_smp:
         filter = .linear
         max_anisotropy = 8
@@ -170,7 +170,7 @@ binding material:
 A static sampler's kind needs no spelling: it follows from its settings, `comparison` when `compare` is set, and `non_filtering` when every filter is nearest.
 
 **A sampler's settings** are one `name = value` per line ([AST-76](syntax/ast.md#bindings-and-samplers)), and each sets a field of `sg::sampler`.
-They are the names slib's `#pragma sc static` reads in HLSL, so both languages say the same thing.
+They are the names slib's `#pragma sc static` takes in hand-written HLSL, so both languages say the same thing.
 They apply in order, so a later setting overrides what an earlier one set, `filter` included:
 
 | setting | sets |
@@ -186,16 +186,31 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 ## Features
 
 **SGL refuses a non-portable form by feature, never by target.**
-A form that some backend lacks is a normal error on every target, unless the function opts into the feature that grants it.
+A form that some backend lacks is a normal error on every target, unless a `require` of its feature grants it.
 Opting in is what makes a shader non-portable on purpose, and the host then asks the device before it builds a pipeline.
-The opt-in itself is unbuilt ([feature-levels.md](incubator/feature-levels.md)), so today each of these is refused with a diagnostic naming its feature.
+
+```sgl
+require extended_image_formats
+
+binding post:
+    require readwrite_image_formats
+    acc: mut image_2d[.rgba16_float]
+```
+
+A `require` stands in the file, in a binding, or in a function body.
+It permits a feature and costs nothing where nothing uses it.
+What an entry point needs of a device is what the bindings it lists use, which `sgl describe` reports per entry point and per pipeline.
+An entry point must declare each of those itself: by its file, by a binding it lists, or in its body.
+[Features](semantics/checking.md#features) holds the rules.
 
 | form | the feature that grants it |
 |---|---|
-| `texture2d_ms_array` | multisampled arrays, which WebGPU lacks |
-| `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_storage_formats`, WebGPU's `texture-formats-tier2` |
-| `image*[.F]` with `F` outside the portable storage formats | the tier-1 storage formats, WebGPU's `texture-formats-tier1` |
-| filtering a 32-bit float texture | float32 filtering, WebGPU's `float32-filterable`; refused by sg at bind time |
+| `texture_2d_ms_array` | `sg::feature::multisampled_array_textures`, which WebGPU lacks |
+| `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_image_formats`, WebGPU's `texture-formats-tier2` |
+| `image*[.F]` with `F` outside the portable image formats | `sg::feature::extended_image_formats`, WebGPU's `texture-formats-tier1` |
+| filtering a 32-bit float texture | `sg::feature::float32_filtering`, WebGPU's `float32-filterable`; refused by sg at bind time, never by SGL |
+
+`binding_arrays` and `raytracing` are names a `require` accepts, and nothing in SGL uses either yet.
 
 ## Which group a binding is
 
@@ -226,10 +241,11 @@ An `@inline` binding anywhere but the last position of a list is a normal error,
 A group-scope static sampler takes a slot like any sampler, since sg matches it by name to a sampler binding.
 
 **SGL states every fact of a binding itself.**
-Dimension, sample type, storage format, storage access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
+Dimension, sample type, image format, access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
 The generated group's table is what the host builds its layout from, so that is where every fact reaches sg.
-A compiled shader only has to fit that layout, and sg's fit check compares a binding's name, slot, count and kind — never the facts beyond them.
-The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and an image's format through slib's `#pragma sc format`.
+The compiled shader states them too, from the same declaration: slib builds it from what SGL says, and takes only the bytecode from the target's compiler.
+That compiler's reflection of the text is compared on every compile, and a disagreement is logged as the SGL bug it is, never used.
+The WGSL SGL writes states every fact; HLSL states the dimension, and the vulkan text an image's format as `[[vk::image_format]]`.
 HLSL cannot say `unfilterable` at all, which costs nothing, since dx12 and vulkan read none of it.
 Building the layout by reflecting the WGSL instead was declined: that text is written from the same declaration, so reading it back is `sgl describe` with a parser in between.
 And `texture_2d<f32>` fits a filterable and an unfilterable layout alike, so the reflection could not even recover `@unfilterable`.
@@ -253,6 +269,41 @@ Every call is inlined, so resources are parameters of the entry point alone.
 An image's access maps one-to-one onto `access::read`, `access::write` and `access::read_write`, and a depth texture is `depth2d<float>`.
 A file-scope static sampler can be a `constexpr sampler` in the text.
 
+## Footprint
+
+**An entry point carries its footprint: what its code does to each slot of the bindings it lists.**
+A binding's access is what its layout permits, and a group is declared once and bound to many pipelines, so that is the union of what they all do.
+One entry point usually does less: a `mut buffer` it only loads from is a read to it, and a member it never names is untouched.
+sg places barriers by the footprint, so that difference is a barrier a pipeline does not pay.
+
+**A slot is one resource member, or a binding's constant block as a whole.**
+The plain members of a group share one constant buffer, so reading any of them reads the block, spelled by the binding's name alone.
+A sampler is no slot: nothing orders against one.
+An `@inline` binding is none either, since sg sets it as constants rather than binding it.
+
+**How a slot is touched: read, write, or both.**
+
+* A buffer element read as a value is a read, and one assigned to is a write; `values[i] += x` is both.
+* A resource handed to a builtin is used as the builtin's parameter declares it: an `out` parameter writes, a `mut` one reads and writes, and an unmarked one reads.
+  `size` reads, since the text it becomes uses the resource.
+* A constant member read anywhere reads the block.
+
+**It is computed over the code the entry point runs, after inlining, in the form an emitter prints.**
+So a use in a called function counts, a use in a branch that may not run counts, and a use only a check or an `assert` makes does not, since the text holds neither.
+A use behind a constant that is always false still counts while the emitted text still holds it; removing it from both is dead-code elimination's job, never the footprint's alone.
+That is the invariant sg relies on: **the footprint covers everything the emitted text uses**, because a slot it calls untouched gets no layout transition at all.
+It is its own pass over that tree rather than something each emitter records as it prints.
+One pass serves every target and a pin judges it once, where four emitters would each have to tell a load from a store at every print site.
+
+**`sgl describe` reports it**, one `slot: access` per touched slot, and slib hands it to sg with the compiled shader.
+A pin in a source states it, which [CHK-267](semantics/checking.md#entry-points) judges:
+
+```sgl
+@expect(footprint = "work: read, work.values: read write")
+@compute(64) fun scale(@thread_id id: int3){work}:
+    work.values[id.x] += work.factor
+```
+
 ## What the compiler carries today
 
 The syntax above is what the AST builds; the check pass is what limits it.
@@ -263,17 +314,18 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
-  The builtins that take one are the `DEBUG_` stand-ins in `prelude/builtins.sgl`, until textures have methods ([texture-methods.md](incubator/texture-methods.md)).
+  The builtins that take one are `sample`, `load`, `store` and `size` in `prelude/builtins.sgl`, called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
 Three targets write a group, and the fourth declines rather than guessing.
-WGSL gives each resource its own `@group`/`@binding`, and HLSL writes `#pragma sc group n` and a namespace, so that every register stays slib's binding pass's to assign.
+WGSL gives each resource its own `@group`/`@binding`, and HLSL declares each at file scope with `register(<class>slot, spaceN)` on dx12 and `[[vk::binding(slot, N)]]` on vulkan.
 A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
 MSL declines every group until slib has a compiler that turns its text into a metallib.
 
-A struct element type, `bytes`, `constants[T]` and a file-scope `sampler` all parse and are then reported.
+`bytes`, `constants[T]` and a file-scope `sampler` all parse and are then reported.
+A struct element type is placed by the storage rule of [the layout rules](semantics/emitting.md#layout).
 A file-scope sampler waits for slib to carry a pipeline layout's static samplers, which it has no spelling for yet.
 That is deliberate.
 The shape is decided, so it is written down here and the AST constructs it.
@@ -283,8 +335,10 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 
 * `values.length` — WGSL, HLSL and SPIR-V can all answer it without packing data, and MSL cannot: a Metal buffer argument is a pointer and carries no length.
   Until metal is a target with a compiler behind it, a shader passes the count in.
-* The layout of a struct element type: our own rules, portable across the four targets, with explicit padding where they need it, and the generated host struct matching byte for byte.
 * A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).
-* Arrays of textures and images, which need `sg::feature::binding_arrays` and so the feature opt-in.
+* Arrays of textures and images, which `require binding_arrays` grants once they exist.
+  Their footprint says whether and how the code indexes them and whether an index is dynamic; which elements it reaches stays the host's to declare per dispatch.
+* SGL may come to name that per-dispatch array declaration itself — tentatively `access` — rather than leaving it to the host alone.
+* Whether a footprint entry distinguishes a uniform dynamic index from a non-uniform one, which some backends pay for differently.

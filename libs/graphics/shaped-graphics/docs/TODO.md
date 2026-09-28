@@ -3,6 +3,32 @@
 Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
+- **A declared native scope, so foreign code can record onto an sg command list.**
+  Vendor SDKs (DLSS Ray Reconstruction, FSR Ray Regeneration) take the native device, list and resources, and assume the resources are already in the state they need.
+  Nothing public reaches a native handle today, and reaching into a backend's privates would bypass the barrier tracker silently.
+  The shape: `sg::dx12::native_scope::open(cmd, accesses)` names every resource the foreign code touches and how, in the neutral `access_flags` vocabulary, and emits their barriers.
+  It then hands out the native list, device and resources, asserting on one that was not declared.
+  Closing it records the declared states as current and invalidates the list's cached pipeline, heap and root bindings.
+  It is a second member of "access is inferred, never declared (with one exception)", for the same reason the bindless declaration is the first.
+  dx12 first, vulkan when a member needs it; sr's [denoising.md](../../shaped-rendering/docs/denoising.md) is the consumer.
+  Pin it with a test that clears through the scope and checks sg's next inferred barrier.
+- **A barrier-only dx12 submit once landed outside any test.**
+  One full `dev.py check` failed `shaped-graphics-test` on debug-nopch with the debug layer's "recorded only Barrier commands" warning, logged under no test owner.
+  The message is allowlisted, but only inside a test, so an unowned one fails the run.
+  It did not reproduce in 105 further runs of the suite on that preset, 60 of them under concurrent load.
+  Ruled out by reading: the copy-queue windows record only copies, `prepare_texture_for_async` and routine ticks run on the test's thread, and shutdown submits nothing.
+  A barrier-only list is almost always an entry pre-list, whose need depends on submit order, which fits a rare failure; which thread submitted without an owner is unknown.
+  Next step when it recurs: have the dx12 relay name the raising thread, and attach a stack to this one message.
+- **A footprint is only as exact as the code the emitter prints.**
+  SGL removes no dead code yet, so a use behind a constant-false branch still counts, and costs the barrier it implies.
+  Dead-code removal belongs on the tree both the emitter and the footprint read, never in the footprint alone, since an untouched slot records no layout transition.
+- **An atomic has its own access flag and nothing reads it differently yet.**
+  `shader_atomic` orders as a read and a write, which is what both D3D12 and Vulkan formally want between two atomic dispatches.
+  Letting atomic-after-atomic run free is a tracker change once SGL has atomics to set the flag.
+- **Exportable memory and shared fences.**
+  OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
+  That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.
+  Not needed for OIDN on the CPU, which goes through the existing download and upload; built with the OIDN member.
 - **A pipeline-level static sampler (`bound_sampler`) is bound by dx12 and webgpu only.**
   vulkan created the `VkSampler`s and bound them to no set, and metal read `static_samplers` not at all, so a shader sampling through one read nothing.
   Both now refuse a pipeline layout that carries one, rather than building a pipeline that samples garbage.
@@ -104,7 +130,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
     ```
     auto cmd = ctx->create_command_list();
-    cmd->ensure_layout(tex, sg::texture_layout::shader_readonly);  // entry requirement recorded
+    cmd->ensure_layout(tex, sg::texture_layout::shader_texture);  // entry requirement recorded
     ctx->upload.bytes_to_texture(tex, pinned);                     // fixup settles COMMON, job enqueued
     ctx->submit_command_list(cc::move(cmd));                       // entry barrier moves it to SHADER_RESOURCE
     ```
@@ -249,7 +275,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   It is load-bearing on the wasm builds without threads, where every one of those atomics keeps its interlock for a concurrency that cannot happen.
 - **Views.** See [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
-  - **reflection-driven validation** of a view's `T` and access class against the shader;
+  - **reflection-driven validation** of a view's `T` and view class against the shader;
   - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
 - **An optional clear value on `texture_description`.**
   D3D12 takes a `D3D12_CLEAR_VALUE` at resource creation and uses it to pick a fast-clear path.
@@ -375,7 +401,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **Per-test attribution of WebGPU errors.**
     One arriving after the test that caused it lands on the driver; an error scope per invocation would name the test.
   - **A stream whose source has nothing ready cannot be waited for** when a list touches its resource, so that list sees what landed so far and a warning.
-  - **Storage views ignore `depth_slice_range`**, which WebGPU cannot express.
+  - **Image views ignore `depth_slice_range`**, which WebGPU cannot express.
   - **emdawnwebgpu passes `WGPU_QUERY_SET_INDEX_UNDEFINED` to JS as 4294967295**, which wgpu refuses and Dawn accepts.
     Each query set's last slot is a discard target until that is fixed — docs/bugs-external/webgpu-timestamp-write-index-sentinel.
   - **A native Dawn build**, an additive CMake gate over the same sources.

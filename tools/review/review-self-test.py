@@ -789,6 +789,16 @@ def test_changes_path_takes_several_prefixes_globs_and_excludes(root: Path) -> N
     assert path_filter("!docs/")("lib/a.cc") and not path_filter("!docs/")("docs/a.md")
 
 
+def test_changes_path_globs_do_not_cross_folders(root: Path) -> None:
+    """`dir/*.cc` means that folder's files, as in gitignore; `**` is how a glob reaches into subfolders."""
+    from tools.review.cmd.changes import path_filter
+
+    assert path_filter("lib/lsp/*.cc")("lib/lsp/server.cc")
+    assert not path_filter("lib/lsp/*.cc")("lib/lsp/protocol/server.cc"), "`*` stays within one folder"
+    assert path_filter("lib/**/*.cc")("lib/lsp/protocol/server.cc") and path_filter("lib/**/*.cc")("lib/a.cc")
+    assert path_filter("*.cc")("lib/lsp/protocol/server.cc"), "a glob without a `/` matches a file name anywhere"
+
+
 def test_a_round_that_asks_is_owed_an_intro(root: Path) -> None:
     """A round opening on facts makes its reader reconstruct the question before weighing anything.
 
@@ -907,6 +917,15 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     assert kinds["..<"] == "Token.Operator", "a range must not be read as the number `0.`"
     assert kinds["+"] == "Token.Operator", "the child of a trailing comment's line is still code"
 
+    # The keywords are the form parser's list, which is what the language adds a keyword to; this lexer is a copy of it.
+    from tools.review.lib.render import sgl_lexer
+    parser = (REPO_ROOT / "libs/graphics/shaped-graphics-language/src/shaped-graphics-language/forms/form_parser.cc").read_text(encoding="utf-8")
+    listed = re.search(r"sgl_keywords\[\] = \{(.*?)\};", parser, re.S)
+    assert listed, "form_parser.cc no longer declares sgl_keywords"
+    keywords = set(re.findall(r'"([a-z_]+)"', listed.group(1)))
+    lexed = sgl_lexer._DECLARATION_KEYWORDS | sgl_lexer._CONTROL_KEYWORDS
+    assert lexed == keywords, f"the lexer draws {sorted(lexed - keywords)} and misses {sorted(keywords - lexed)}"
+
     declared = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed("pipeline shadow:\n")]
     assert ("Token.Keyword.Declaration", "pipeline") in declared or ("Token.Keyword", "pipeline") in declared
     assert ("Token.Name.Class", "shadow") in declared, "a pipeline's name is drawn like a declared type's"
@@ -927,11 +946,11 @@ def test_sgl_type_positions_survive_qualifiers_and_arguments(root: Path) -> None
 
     An index into a value keeps its operands as plain names, which is what tells the two square lists apart.
     """
-    source = "    a: mut buffer[float]\n    b: out image2d[rgba8unorm]\n    x = v[i]\n"
+    source = "    a: mut buffer[float]\n    b: out image_2d[rgba8unorm]\n    x = v[i]\n"
     tokens = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(source)]
     kinds = {value: kind for kind, value in tokens}
     assert kinds["mut"] == kinds["out"] == "Token.Keyword"
-    assert kinds["buffer"] == kinds["image2d"] == "Token.Name.Class", "a qualified type is still a type"
+    assert kinds["buffer"] == kinds["image_2d"] == "Token.Name.Class", "a qualified type is still a type"
     assert kinds["float"] == kinds["rgba8unorm"] == "Token.Name.Class", "a type's arguments are types"
     assert kinds["v"] == kinds["i"] == "Token.Name", "an index into a value is not a type argument"
 
@@ -1081,6 +1100,7 @@ def test_a_retired_background_block_is_an_unknown_block_type(root: Path) -> None
             parse_text(ENTRY + f"\n## context/{tier}\n\nBackground.\n", Path("entry.md"))
         except ReviewParseError as e:
             assert f"unknown block type 'context/{tier}'" in str(e), e
+            assert "write it as `## prose`" in str(e), "a retired type names what replaced it"
             assert e.line == ENTRY.count("\n") + 2, e.line
         else:
             raise AssertionError(f"`context/{tier}` must not parse")
@@ -1384,6 +1404,107 @@ def test_the_last_artifact_block_is_the_one_that_publishes(root: Path) -> None:
     assert "first draft" not in blocks[-1].prose
 
 
+def test_finalize_tags_an_answer_a_later_follow_up_replaced(root: Path) -> None:
+    """Every answer is gathered, and one an answered `follows:` ask refined or reversed says so.
+
+    Written after a design gather listed "statics are reached only as `T.foo`" beside its reversal, unmarked,
+    so the overridden answer read as a rule of its own.
+    """
+    from tools.review.lib.core.config import ReviewConfig
+    from tools.review.lib.goals.finalize import design_summary, replaced_asks
+
+    text = (
+        "---\nid: 140\ntitle: candidates\ngroup: topics\nstate: open\n---\n\n"
+        "## ask  statics\nround: 1\n\nAre statics candidates?\n\n- radio: no\n- radio: yes\n\n"
+        "## ask  statics-again\nround: 2\nfollows: statics\n\nAre they, after all?\n\n- radio: no\n- radio: yes\n\n"
+        "## ask  unanswered\nround: 2\nfollows: statics-again\n\nAnd a third time?\n\n- radio: no\n"
+    )
+    entry = parse_text(text, Path("140-candidates.md"))
+    answers = AnswerFile(root / "a.json")
+    answers.upsert(entry.ask("statics"), selected=["no"], text="", round_number=1)
+    answers.upsert(entry.ask("statics-again"), selected=["yes"], text="", round_number=2)
+    pairs = [(entry, answers)]
+
+    # an open follow-up has decided nothing, so it replaces nothing
+    assert replaced_asks(pairs) == {("140", "statics"): "statics-again"}
+    summary = design_summary(ReviewConfig(name="d", goals=["design"]), pairs)
+    assert "**candidates / statics (replaced by statics-again)**: no" in summary, summary
+    assert "**candidates / statics-again**: yes" in summary, summary
+
+
+def test_finalize_tags_a_replaced_ask_only_in_its_own_entry(root: Path) -> None:
+    """A `follows:` names an ask in its own entry, so a same-named ask in another entry stays untagged.
+
+    Written after `replaced_asks` keyed by ask name alone, and a follow-up in one entry marked every entry's `fix` replaced.
+    """
+    from tools.review.lib.core.config import ReviewConfig
+    from tools.review.lib.goals.finalize import design_summary, pr_comment, replaced_asks, work_order
+
+    followed = parse_text(
+        "---\nid: 150\ntitle: followed\ngroup: topics\nstate: open\n---\n\n"
+        "## ask  fix\nround: 1\n\nFix it?\n\n- radio: no\n- radio: yes\n\n"
+        "## ask  fix-again\nround: 2\nfollows: fix\n\nFix it after all?\n\n- radio: no\n- radio: yes\n",
+        Path("150-followed.md"))
+    plain = parse_text(
+        "---\nid: 160\ntitle: plain\ngroup: topics\nstate: open\n---\n\n"
+        "## ask  fix\nround: 1\n\nFix this one?\n\n- radio: no\n- radio: yes\n",
+        Path("160-plain.md"))
+    followed_answers = AnswerFile(root / "followed.json")
+    followed_answers.upsert(followed.ask("fix"), selected=["no"], text="", round_number=1)
+    followed_answers.upsert(followed.ask("fix-again"), selected=["yes"], text="", round_number=2)
+    plain_answers = AnswerFile(root / "plain.json")
+    plain_answers.upsert(plain.ask("fix"), selected=["yes"], text="", round_number=1)
+    pairs = [(followed, followed_answers), (plain, plain_answers)]
+
+    assert replaced_asks(pairs) == {("150", "fix"): "fix-again"}
+    cfg = ReviewConfig(name="d", goals=["design"])
+    summary = design_summary(cfg, pairs)
+    assert "**followed / fix (replaced by fix-again)**: no" in summary, summary
+    assert "**plain / fix**: yes" in summary, summary
+    assert "plain / fix (replaced" not in summary, summary
+    assert pr_comment(cfg, pairs).count("_replaced by `fix-again` below:_") == 1
+    assert work_order(cfg, pairs).count("replaced by `fix-again`, and done there:") == 1
+
+
+def test_a_read_only_command_sees_past_an_entry_that_does_not_parse(root: Path) -> None:
+    """One stale entry must not hide the rest of the review from `edit`, `show`, `status` or `validate`.
+
+    Written after a review holding one retired `context/cold` block could not even list its entries,
+    which is exactly the moment someone needs the path of the broken one to fix it.
+    """
+    from tools.review.cmd.context import Context
+    from tools.review.lib.core.paths import ReviewPaths
+
+    paths = ReviewPaths(root)
+    paths.entries_dir.mkdir(parents=True)
+    good = "---\nid: 010\ntitle: good\ngroup: meta\nstate: open\n---\n\n## prose\n\nFine.\n"
+    (paths.entries_dir / "010-good.md").write_text(good, encoding="utf-8")
+    stale = good.replace("010", "020") + "\n## context/cold\n\nOld.\n"
+    (paths.entries_dir / "020-stale.md").write_text(stale, encoding="utf-8")
+
+    entries, broken = Context.__new__(Context).entries_tolerant(paths)
+    assert [e.slug for e in entries] == ["010-good"], [e.slug for e in entries]
+    assert len(broken) == 1 and Path(broken[0].path).name == "020-stale.md", broken
+
+
+def test_text_that_leaves_the_page_carries_no_raw_escape(root: Path) -> None:
+    """`raw:` only steers the annotation pass, so a drafted comment or a summary must not carry it to its reader."""
+    from tools.review.lib.render.markdown import strip_raw
+
+    text = (
+        "See `raw:build/<preset>/x` and ``raw:a `b` c``, [the guide](raw:../guide.md).\n"
+        "```raw:cpp:libs/a.cc\nint raw:x;\n```\n"
+        "```raw\nplain\n```\n"
+        "`rawish` stays, and so does `x raw: y`.\n"
+    )
+    assert strip_raw(text) == (
+        "See `build/<preset>/x` and ``a `b` c``, [the guide](../guide.md).\n"
+        "```cpp:libs/a.cc\nint raw:x;\n```\n"
+        "```\nplain\n```\n"
+        "`rawish` stays, and so does `x raw: y`.\n"
+    ), strip_raw(text)
+
+
 def test_a_change_only_an_orientation_entry_claims_is_reported(root: Path) -> None:
     """Accounted for and not read is invisible in both coverage gates, so it gets its own line.
 
@@ -1534,6 +1655,130 @@ def test_an_ambiguous_reference_is_a_problem(root: Path) -> None:
     """Always fixable by writing a longer path, so failing on it costs nothing and buys a guarantee."""
     tokens = _tokens(root, "See `TODO.md`.")
     assert tokens[0].problem and "names 2 files" in tokens[0].problem, tokens[0].problem
+
+
+MIRRORED = [
+    "src/stages/08_ring_ir/mod.rs",
+    "src/stages/09_reg_ir/mod.rs",
+    "tests/stages/08_ring_ir/mod.rs",
+    "src/stages/08_ring_ir/compile.rs",
+    "tests/stages/08_ring_ir/compile.rs",
+    "src/lib.rs",
+]
+
+
+def _context_tokens(root: Path, front: str, blocks: str, paths: list[str] = MIRRORED):
+    text = f"---\nid: 040\ntitle: t\n{front}---\n\n{blocks}"
+    return build_tokens(parse_text(text, Path("entry.md")), _index_of(root, paths))
+
+
+def test_an_entry_s_context_folder_is_where_a_short_path_looks_first(root: Path) -> None:
+    """A tree whose tests mirror its sources makes every bare basename ambiguous, so an entry says where it lives.
+
+    The context folder is looked in first; a path found nowhere under it resolves repository-wide exactly as before,
+    so naming `src/lib.rs` from an entry about stage 8 still works.
+    """
+    blocks = "## prose\n\nSee `compile.rs`, `mod.rs` and `lib.rs`.\n"
+    by_text = {t.text: t for t in _context_tokens(root, "context: src/stages/08_ring_ir/\n", blocks)}
+    assert by_text["compile.rs"].path == "src/stages/08_ring_ir/compile.rs", by_text["compile.rs"]
+    assert by_text["mod.rs"].path == "src/stages/08_ring_ir/mod.rs", by_text["mod.rs"]
+    assert by_text["lib.rs"].path == "src/lib.rs" and not by_text["lib.rs"].problem, by_text["lib.rs"]
+    assert not any(t.problem for t in by_text.values()), [t.problem for t in by_text.values()]
+
+    # A block narrows it further, for the one block about the tests.
+    blocks = "## prose\ncontext: tests/\n\nSee `compile.rs`.\n"
+    token = _context_tokens(root, "context: src/\n", blocks)[0]
+    assert token.path == "tests/stages/08_ring_ir/compile.rs" and not token.problem, token
+
+
+def test_a_context_folder_prefers_its_own_file_over_a_namesake_below_it(root: Path) -> None:
+    """A server beside its protocol subfolder has two `server.hh`, and the context names the shallower one.
+
+    Only matches at the same depth under the context stay ambiguous.
+    """
+    paths = ["lsp/server.hh", "lsp/protocol/server.hh", "lsp/a/x.hh", "lsp/b/x.hh"]
+    tokens = _context_tokens(root, "context: lsp/\n", "## prose\n\nSee `server.hh` and `x.hh`.\n", paths)
+    by_text = {t.text: t for t in tokens}
+    assert by_text["server.hh"].path == "lsp/server.hh", by_text["server.hh"]
+    assert by_text["x.hh"].problem, "two matches at one depth are still ambiguous"
+
+
+def test_a_context_folder_that_resolves_nowhere_is_a_problem(root: Path) -> None:
+    """A typo'd context would otherwise quietly leave every short path to the repository-wide lookup."""
+    tokens = _context_tokens(root, "context: src/stages/99_nope/\n", "## prose\n\nSee `lib.rs`.\n")
+    problems = [t.problem for t in tokens if t.problem]
+    assert any("99_nope" in p and "context" in p for p in problems), problems
+
+
+def test_a_planned_folder_holds_the_files_a_design_will_create(root: Path) -> None:
+    """A design review names files that do not exist yet, and marking each one `new:` would drown the entry.
+
+    `planned:` names the folder once, and a path under it, or a bare name, that resolves nowhere is drawn as new.
+    The folder itself does not exist either, so it is never resolved and never a context problem.
+    """
+    blocks = ("## prose\n\nSee `src/stages/10_lsp/framing.rs`, `server.rs`, `src/stages/10_lsp/session.wgsl`"
+              " and `src/stages/10_lsp/wire/`.\n")
+    tokens = _context_tokens(root, "planned: ./src/stages/10_lsp/\n", blocks)
+    by_text = {t.text: t for t in tokens}
+    assert not any(t.problem for t in tokens), [(t.text, t.problem) for t in tokens]
+    for text in ("src/stages/10_lsp/framing.rs", "server.rs", "src/stages/10_lsp/session.wgsl", "src/stages/10_lsp/wire/"):
+        assert by_text[text].css == "ref-new", by_text.get(text)
+        assert "planned under src/stages/10_lsp/" in by_text[text].note, by_text[text]
+    assert not by_text["server.rs"].path, "a planned file links nowhere, since there is nothing to open"
+
+
+def test_a_planned_folder_never_shadows_a_real_file(root: Path) -> None:
+    """A real file resolves as it always does, and only what resolves nowhere is judged against the plan."""
+    blocks = "## prose\n\nSee `lib.rs` and `src/stages/08_ring_ir/compile.rs`.\n"
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert by_text["lib.rs"].path == "src/lib.rs" and by_text["lib.rs"].css == "ref", by_text["lib.rs"]
+    assert by_text["src/stages/08_ring_ir/compile.rs"].css == "ref", by_text
+
+
+def test_a_path_outside_the_planned_folder_is_still_a_problem(root: Path) -> None:
+    """The plan excuses one folder, so a typo'd path elsewhere keeps failing, and so does a bare folder name."""
+    blocks = "## prose\n\nSee `src/stages/11_nope/framing.rs` and `wire/`.\n"
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert "not a file in this repository" in by_text["src/stages/11_nope/framing.rs"].problem, by_text
+    assert "not a folder in this repository" in by_text["wire/"].problem, by_text
+
+    # Without a plan a bare missing name is the same error it always was.
+    token = _context_tokens(root, "", "## prose\n\nSee `server.rs`.\n")[0]
+    assert "not a file in this repository" in token.problem, token
+
+
+def test_a_block_s_planned_folder_overrides_the_entry_s(root: Path) -> None:
+    blocks = ("## prose\nplanned: src/stages/12_dap/\n\n"
+              "See `src/stages/12_dap/adapter.rs` and `src/stages/10_lsp/framing.rs`.\n")
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert by_text["src/stages/12_dap/adapter.rs"].css == "ref-new", by_text
+    assert "not a file in this repository" in by_text["src/stages/10_lsp/framing.rs"].problem, by_text
+
+
+def test_a_planned_folder_does_not_turn_a_member_access_into_a_file(root: Path) -> None:
+    """A planned folder admits unfamiliar suffixes, and a call or a longer word is where that would misfire."""
+    blocks = "## prose\n\nCall `obj.size()` on `sr::window.headless`.\n"
+    tokens = _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
+    assert not tokens, tokens
+
+
+def test_a_planned_folder_does_not_make_member_accesses_files(root: Path) -> None:
+    """A planned folder draws what resolves nowhere as new, so it must not widen what counts as a reference.
+
+    A design review's fences are full of field accesses, and each would otherwise become a planned file.
+    """
+    blocks = "## prose\n\n```cpp\nauto n = p.node; v.x = 1; cfg.value; it.first; e.g.\n```\n"
+    tokens = _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
+    assert not tokens, [(t.text, t.css) for t in tokens]
+
+
+def test_an_ambiguous_reference_names_its_candidates_ready_to_paste(root: Path) -> None:
+    """The fix is always a longer path, so the message carries every one of them as something to copy."""
+    tokens = _context_tokens(root, "", "## prose\n\nSee `mod.rs`.\n")
+    problem = tokens[0].problem
+    for path in ("src/stages/08_ring_ir/mod.rs", "src/stages/09_reg_ir/mod.rs", "tests/stages/08_ring_ir/mod.rs"):
+        assert f"`{path}`" in problem, problem
+    assert "context:" in problem, f"the message should name the context folder as the other remedy: {problem}"
 
 
 def test_prose_that_merely_holds_a_dot_is_not_a_reference(root: Path) -> None:
@@ -2092,6 +2337,28 @@ def test_mojibake_is_reported(root: Path) -> None:
     assert "cp1252" in warnings[0], warnings[0]
 
 
+def test_an_acknowledgement_a_later_ask_replaced_is_no_orphan(root: Path) -> None:
+    """`validate` agrees with `reconcile`: an answered acknowledgement outlives the round that offered it.
+
+    Written after a round-2 ask on an entry acknowledged in round 1 drew "an answer to 'acknowledged-r1' has no ask",
+    which the block grammar doc says is not an orphan.
+    """
+    from tools.review.cmd.validate import orphan_answer_warnings
+
+    front = "---\nid: 012\ntitle: t\ngroup: meta\nstate: open\n---\n\n"
+    first = parse_text(front + "## prose\nround: 1\n\nBody.\n", Path("e.md"), slug="012-t")
+    second = parse_text(
+        front + "## prose\nround: 1\n\nBody.\n\n## ask  next\nround: 2\n\nWell?\n\n- radio: yes\n", Path("e.md"), slug="012-t"
+    )
+    with tempfile.TemporaryDirectory(prefix="review-ack-orphan-") as answer_dir:
+        answers = AnswerFile.load(Path(answer_dir) / "012.json", "012")
+        answers.upsert(first.acknowledgement, selected=["Read and acknowledged"], text="", round_number=1)
+        answers.upsert(second.ask("next"), selected=["yes"], text="", round_number=2)
+        answers.answers["gone"] = answers.answers["next"]
+        warnings = orphan_answer_warnings(second, answers)
+    assert len(warnings) == 1 and "'gone'" in warnings[0], warnings
+
+
 def test_append_decodes_stdin_as_utf8(root: Path) -> None:
     """`append` reads stdin as UTF-8 rather than through the locale, and `-` means stdin.
 
@@ -2117,6 +2384,157 @@ def test_append_decodes_stdin_as_utf8(root: Path) -> None:
     path = root / "addition.md"
     path.write_text(text, encoding="utf-8")
     assert read_addition(str(path)) == text
+
+
+def design_review(root: Path, entries: dict[str, str], files: dict[str, str] | None = None):
+    """A design review over a one-commit repository holding `files`, with these entries written into it.
+
+    Returns a function running the CLI from the repository, as (exit code, stdout + stderr).
+    """
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", files or {"a.txt": "one\n"})
+    cli = [sys.executable, str(REPO_ROOT / "review.py")]
+
+    def run(*argv: str) -> tuple[int, str]:
+        done = subprocess.run(cli + list(argv), cwd=repo, capture_output=True, text=True, encoding="utf-8")
+        return done.returncode, done.stdout + done.stderr
+
+    code, out = run("init", "d", "--goal", "design")
+    assert code == 0, out
+    folder = repo / ".tmp" / "reviews" / "d" / "entries"
+    for slug, text in entries.items():
+        (folder / f"{slug}.md").write_text(text, encoding="utf-8")
+    return run
+
+
+def test_a_blank_line_that_turns_an_asks_attributes_into_prose_is_reported(root: Path) -> None:
+    """A blank line after `## ask name` makes `discharges:` a sentence, which discharges nothing and said nothing.
+
+    The blank line is the documented escape for prose that must open with `key:`, so this is a warning rather than an error;
+    on an ask, an opening line that is a key the ask accepts is almost always the slip rather than the escape.
+    """
+    front = "---\nid: {n}\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhat, and the options.\n\n"
+    slipped = front.format(n="010") + "## ask  which\n\ndischarges: CHANGE-AAAA\n\nWhich way?\n\n- radio: this\n"
+    # Stamped: the tool puts `round:` straight under the heading, which leaves the blank line where it was.
+    stamped = front.format(n="020") + "## ask  which\nround: 1\n\nfollows: other\n\nWhich way?\n\n- radio: this\n"
+    fine = front.format(n="030") + "## ask  which\n\nWhich way?\n\n- radio: this\n"
+    run = design_review(root, {"010-slipped": slipped, "020-stamped": stamped, "030-fine": fine})
+    code, out = run("validate", "d")
+    assert "010-slipped:13" in out and "`discharges:`" in out and "blank line" in out, out
+    assert "020-stamped:14" in out and "`follows:`" in out, out
+    assert "030-fine" not in out, f"an ask opening on prose must not be reported: {out}"
+
+
+def test_an_ask_answered_only_in_the_text_box_is_answered(root: Path) -> None:
+    """Typing in the free-text box and picking no option is an answer, on the page and in every command.
+
+    A round appended after it asks only the synthetic acknowledgement, so it owes no intro either.
+    Driven end to end — saved through the server, frozen by `delta --finalize`, appended to — because each of those
+    has its own idea of what answered means.
+    """
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.serve.app import ReviewApp
+    from tools.review.lib.serve.watch import Watcher
+
+    entry = ("---\nid: 010\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhich way, and the options.\n\n"
+             "## ask  which\n\nWhich way?\n\n- radio: this\n- radio: that\n")
+    run = design_review(root, {"010-x": entry})
+    paths = ReviewPaths(root / "repo" / ".tmp" / "reviews" / "d")
+    app = ReviewApp(root / "repo", paths, Watcher(paths))
+
+    status, _ = app.save_answer({"entry": "010-x", "ask": "which", "selected": [], "text": "neither, do X",
+                                 "round": app.config().next_round})
+    assert status == 200
+    row = next(r for r in app.state()["entries"] if r["slug"] == "010-x")
+    assert row["answered"] == row["asks"] == 1, row
+    code, out = run("delta", "d", "--finalize")
+    assert code == 0 and "neither, do X" in out, out
+
+    addition = root / "more.md"
+    addition.write_text("## prose\n\nHow the answer was carried out.\n", encoding="utf-8")
+    code, out = run("append", "d", "010", "--file", str(addition))
+    assert code == 0, out
+
+    code, out = run("validate", "d")
+    assert "no `intro`" not in out, f"a text-only answer left its round open: {out}"
+    code, out = run("status", "d", "--json")
+    assert code == 0 and '"which"' not in out, f"status still lists the ask as open: {out}"
+    row = next(r for r in app.state()["entries"] if r["slug"] == "010-x")
+    assert row["answered"] == 1, f"the nav counts the text-only answer as missing: {row}"
+
+
+def test_validate_checks_only_the_entries_it_is_given(root: Path) -> None:
+    """Parallel writers each own a number range, and each grepped one shared report for their own lines.
+
+    A broken entry outside the selection must not stop the check either: it belongs to another writer, mid-edit.
+    """
+    front = "---\nid: {n}\ntitle: t\ngroup: topics\n---\n\n## prose\n\n{body}\n"
+    run = design_review(root, {
+        "010-mine": front.format(n="010", body="See `nope/missing.txt`."),
+        "020-mine-too": front.format(n="020", body="Fine."),
+        "030-theirs": "---\nid: 030\ntitle: t\n---\n\n## bogus\n\nHalf written.\n",
+    })
+
+    code, out = run("validate", "d", "010..020")
+    assert code == 1 and "010-mine" in out and "missing.txt" in out, out
+    assert "030" not in out and "bogus" not in out, f"an entry outside the range was checked: {out}"
+    assert "2 of 3 entries" in out, out
+
+    code, out = run("validate", "d", "020")
+    assert code == 0 and "missing.txt" not in out, out
+
+    code, out = run("validate", "d", "030-theirs")
+    assert code == 1 and "bogus" in out, out
+
+    code, out = run("validate", "d", "040")
+    assert code != 0 and "040" in out, f"a selector matching nothing must say so: {out}"
+
+
+def test_a_hint_names_the_tool_the_way_it_was_invoked(root: Path) -> None:
+    """A `next:` line is pasted as it stands, and `uv run review.py` only works from inside the tool's own repository.
+
+    The tool reviews other repositories from their own checkout, where the script is a path somewhere else.
+    """
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": "one\n"})
+    commit(repo, "second", {"a.txt": "two\n"})
+    script = REPO_ROOT / "review.py"
+    folder = root / "elsewhere"
+    done = subprocess.run([sys.executable, str(script), "--dir", str(folder), "init", "r", "--goal", "pr-comment",
+                           "--range", "HEAD~1..HEAD"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+    assert done.returncode == 0, done.stderr or done.stdout
+    hint = next((line for line in done.stdout.splitlines() if line.startswith("next:")), "")
+    assert hint == f"next: uv run {script.as_posix()} --dir {folder.as_posix()} ingest r", hint
+
+
+def test_coverage_reports_discharge_progress(root: Path) -> None:
+    """Gate 1 says every change has an id; the progress says how many an ask has accounted for yet."""
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": numbered(3), "b.txt": numbered(3)})
+    commit(repo, "second", {"a.txt": numbered(6), "b.txt": numbered(5)})
+    cli = [sys.executable, str(REPO_ROOT / "review.py")]
+    for argv in (["init", "r", "--goal", "pr-comment", "--range", "HEAD~1..HEAD"], ["ingest", "r"]):
+        done = subprocess.run(cli + argv, cwd=repo, capture_output=True, text=True, encoding="utf-8")
+        assert done.returncode == 0, done.stderr or done.stdout
+
+    ledger = Ledger.load(repo / ".tmp" / "reviews" / "r" / "changes" / "ledger.jsonl")
+    ids = sorted(c.id for c in ledger.live())
+    assert len(ids) == 2, f"the fixture should ingest two changes, one per file: {ids}"
+    (repo / ".tmp" / "reviews" / "r" / "entries" / "050-x.md").write_text(
+        f"---\nid: 050\ntitle: x\n---\n\n## ask  ok\ndischarges: {ids[0]}\n\nFine?\n\n- radio: yes\n",
+        encoding="utf-8")
+
+    done = subprocess.run(cli + ["coverage", "r"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+    assert done.returncode == 0, done.stderr or done.stdout
+    assert "1/2 changes discharged" in done.stdout, done.stdout
+    done = subprocess.run(cli + ["coverage", "r", "--json"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+    assert json.loads(done.stdout)["discharged"] == 1, done.stdout
 
 
 def test_design_review_refuses_a_range(root: Path) -> None:
@@ -2296,16 +2714,129 @@ def test_a_collapsed_diff_is_fetched_rather_than_embedded(root: Path) -> None:
         status, _ = get(base, "/api/change?id=CHANGE-NOPE")
         assert status == 404, "a change outside the ledger must 404"
 
-        # And the collapsed card in an entry carries the id rather than the diff.
-        _, state = get(base, "/api/state")
-        for row in state["entries"]:
-            _, entry = get(base, "/api/entry/" + row["slug"])
-            html = entry.get("html", "")
-            if 'class="change" data-change=' in html:
-                assert "difflines" not in html.split('data-change=')[1][:400], \
-                    f"{row['slug']}: a collapsed card must not embed its diff"
+        # And a collapsed card carries the id rather than the diff.
+        _, cards = get(base, "/api/changes?ids=" + with_body[0].id)
+        assert 'class="change" data-change=' in cards["html"], cards["html"]
+        assert "difflines" not in cards["html"], "a collapsed card must not embed its diff"
     finally:
         server.shutdown()
+
+
+def test_a_collapsed_changes_block_is_fetched_when_opened(root: Path) -> None:
+    """A collapsed block ships one summary line, and its cards arrive only when it is opened.
+
+    An lgtm entry discharging a hundred changes drew a hundred card rows nobody reads, so the block is the unit
+    that loads lazily rather than each diff inside it.
+    A comment on a diff line stays in the entry, because a remark must never sit behind a click.
+    """
+    server, base, app = serve_fixture(root)
+    try:
+        ids = [c.id for c in app.ledger().live()]
+        assert ids, "the fixture ingests at least one change"
+        (app.paths.entries_dir / "050-lgtm.md").write_text(
+            "---\nid: 050\ntitle: lgtm\n---\n\n"
+            f"## changes  {' '.join(ids)}\nshow: collapsed\n\n"
+            f"## ask  fine\ndischarges: {' '.join(ids)}\n\nFine?\n\n- radio: yes\n",
+            encoding="utf-8",
+        )
+        status, entry = get(base, "/api/entry/050-lgtm")
+        assert status == 200, entry
+        html = entry["html"]
+        assert f'data-changes="{" ".join(ids)}"' in html, "a collapsed block carries its ids for the fetch"
+        assert "change-head" not in html, "a collapsed block must not draw its cards until it is opened"
+
+        status, cards = get(base, "/api/changes?ids=" + ",".join(ids))
+        assert status == 200, cards
+        for change_id in ids:
+            assert change_id in cards["html"], f"{change_id} missing from the fetched cards"
+        assert 'class="change" data-change=' in cards["html"], "each fetched card still fetches its own diff"
+
+        status, _ = get(base, "/api/changes?ids=CHANGE-NOPE")
+        assert status == 200, "an id outside the ledger is drawn as missing, as it is inline"
+    finally:
+        server.shutdown()
+
+
+def _counting(module, name: str):
+    """Wrap `module.name` so calls to it are counted; returns (counter, restore)."""
+    original = getattr(module, name)
+    calls = [0]
+
+    def counted(*args, **kwargs):
+        calls[0] += 1
+        return original(*args, **kwargs)
+
+    setattr(module, name, counted)
+    return calls, lambda: setattr(module, name, original)
+
+
+def test_an_answer_re_renders_only_its_own_entry(root: Path) -> None:
+    """An autosave changes one entry's answers, so the warm-up after it renders that entry and nothing else.
+
+    The rendered cache used to be keyed on the whole folder, so every autosave threw away every entry and the
+    watcher's prebuild rendered the review again — seconds of work per keystroke pause on a large review.
+    """
+    from tools.review.lib.serve import app as app_module
+
+    server, _, app = serve_fixture(root)
+    server.shutdown()
+    for number in ("050", "060"):
+        (app.paths.entries_dir / f"{number}-x.md").write_text(
+            f"---\nid: {number}\ntitle: x\n---\n\n## ask  q\n\nWhich?\n\n- radio: this\n- radio: that\n",
+            encoding="utf-8",
+        )
+    app.prebuild()
+    renders, restore = _counting(app_module, "render_entry")
+    try:
+        app.prebuild()
+        assert renders[0] == 0, f"nothing changed, yet the warm-up rendered {renders[0]} entries"
+        status, _ = app.save_answer({"entry": "050-x", "ask": "q", "selected": ["this"], "text": "because",
+                                     "round": app.config().next_round})
+        assert status == 200
+        app.prebuild()
+        assert renders[0] == 1, f"one answer re-rendered {renders[0]} entries"
+        _, payload = app.entry_html("050-x")
+        assert "because" in payload["html"], "the re-render must show the answer just saved"
+    finally:
+        restore()
+
+
+def test_a_state_refresh_re_parses_only_the_entry_that_changed(root: Path) -> None:
+    """The nav's state is asked for after every autosave, and it used to parse every entry each time."""
+    from tools.review.lib.entry import parse as parse_module
+
+    server, _, app = serve_fixture(root)
+    server.shutdown()
+    app.state()
+    parses, restore = _counting(parse_module, "parse_text")
+    try:
+        app.state()
+        assert parses[0] == 0, f"nothing changed, yet state parsed {parses[0]} entries"
+        target = app.paths.entry_files()[0]
+        target.write_text(target.read_text(encoding="utf-8") + "\n## prose\n\nMore.\n", encoding="utf-8")
+        app.state()
+        assert parses[0] == 1, f"one edited entry cost {parses[0]} parses"
+    finally:
+        restore()
+
+
+def test_a_sha_is_asked_about_once_per_server(root: Path) -> None:
+    """Whether a hex string names a commit is a git process on every entry render unless it is remembered."""
+    server, _, app = serve_fixture(root)
+    server.shutdown()
+    sha = Git(app.repo).rev_parse("HEAD")
+    for number in ("050", "060"):
+        (app.paths.entries_dir / f"{number}-x.md").write_text(
+            f"---\nid: {number}\ntitle: x\n---\n\n## prose\n\nLanded in {sha[:10]}.\n", encoding="utf-8")
+    asked, restore = _counting(Git, "which_are_commits")
+    try:
+        _, first = app.entry_html("050-x")
+        _, second = app.entry_html("060-x")
+        assert any(t["kind"] == "commit" for t in first["tokens"]), "the sha must be recognised at all"
+        assert any(t["kind"] == "commit" for t in second["tokens"]), "and recognised the second time too"
+        assert asked[0] == 1, f"git was asked {asked[0]} times about one sha"
+    finally:
+        restore()
 
 
 def test_a_dev_py_example_runs_with_its_output_mirrored(root: Path) -> None:

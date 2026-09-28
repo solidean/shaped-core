@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
+#include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/resource/subresource.hh>
 
 /// dx12's barrier layer: translate the backend-neutral access vocabulary (stages / access / layout) into D3D12 enhanced-barrier bits.
@@ -34,9 +35,38 @@ namespace sg::backend::dx12
                                                          sg::access_barrier const& b);
 
 /// Submits a collected batch of buffer + texture barriers in a single `Barrier` call, at most one group of each type.
-/// A no-op when both spans are empty.
+/// A no-op when every span is empty.
 /// Requires enhanced-barrier support (ID3D12GraphicsCommandList7).
 void submit_barriers(ID3D12GraphicsCommandList* list,
                      cc::span<D3D12_BUFFER_BARRIER const> buffer_barriers,
-                     cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers);
+                     cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers,
+                     cc::span<D3D12_GLOBAL_BARRIER const> global_barriers = {});
+
+/// Folds a buffer barrier into `global`, which then orders everything `b` did and more.
+/// A global barrier starts as `D3D12_GLOBAL_BARRIER{}` with both accesses NO_ACCESS; see make_empty_global_barrier.
+void merge_into_global_barrier(D3D12_GLOBAL_BARRIER& global, D3D12_BUFFER_BARRIER const& b);
+
+/// A global barrier that orders nothing yet, for merge_into_global_barrier to widen.
+[[nodiscard]] D3D12_GLOBAL_BARRIER make_empty_global_barrier();
+
+/// Adds the batch `submit_barriers` would emit to `sink`'s stats: its records by kind, and one call if it is not empty.
+/// `sink` is a list's sg::impl::stat_counts or the context's sg::impl::stat_totals.
+template <class Sink>
+void count_barriers(Sink& sink,
+                    cc::span<D3D12_BUFFER_BARRIER const> buffer_barriers,
+                    cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers,
+                    cc::span<D3D12_GLOBAL_BARRIER const> global_barriers = {})
+{
+    if (buffer_barriers.empty() && texture_barriers.empty() && global_barriers.empty())
+        return;
+    sink.add(sg::stat::barrier_calls);
+    sink.add(sg::stat::buffer_barriers, buffer_barriers.size());
+    sink.add(sg::stat::texture_barriers, texture_barriers.size());
+    sink.add(sg::stat::global_barriers, global_barriers.size());
+    auto transitions = isize(0);
+    for (auto const& t : texture_barriers)
+        if (t.LayoutBefore != t.LayoutAfter)
+            ++transitions;
+    sink.add(sg::stat::texture_transitions, transitions);
+}
 } // namespace sg::backend::dx12

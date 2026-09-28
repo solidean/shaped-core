@@ -87,7 +87,6 @@ public:
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
-
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}\n{{\n", s.name);
@@ -100,8 +99,13 @@ public:
             return;
         auto const& c = p.constants.value();
         out.appendf("struct {}\n{{\n", c.block_name);
-        for (auto const& member : c.members)
-            write_member(out, nullptr, member, p);
+        // Its memory form where MSL's own rule would place a member elsewhere than SGL (memory_form.hh).
+        if (c.form.has_value())
+            for (auto const& f : c.form.value().fields)
+                out.appendf("{}{} {};\n", k_indent, f.type, f.name);
+        else
+            for (auto const& member : c.members)
+                write_member(out, nullptr, member, p);
         out += "};\n\n";
     }
 

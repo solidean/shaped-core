@@ -97,6 +97,35 @@ Zero and the non-finites are a **precondition**, not a fallback: `frexp` quietly
 `split_pow2` and `exponent_of` assert instead, and every real caller has already branched on zero for its own reasons.
 Subnormals are normalized rather than reported with a zero exponent — which is the trap a naive read of the exponent field falls into.
 
+### `fixed_int` is modular arithmetic plus explicit widths
+
+`tg::fixed_int<Bits>` / `tg::fixed_uint<Bits>` (spelled `fi32` … `fi256`, `fu32` … `fu256`) exist for exact geometry predicates.
+A predicate's intermediates have bounds known in advance, so what it needs is not a bigint.
+It needs integers of a chosen width, and arithmetic whose result width the caller picks: `tg::mul<fi192>(a, b)` for two `fi128` below `2^80` and `2^90`.
+
+- **Every operator wraps modulo `2^Bits`, and takes one type on both sides.**
+  No width changes silently: the constructor only widens, `x.truncated_to<T>()` narrows, and mixing widths is a compile error.
+  That is what makes `fi192 r = a * b` over `fi128` fail to compile, since it would wrap at 128 bits before widening.
+- **`tg::add` / `sub` / `mul<R>` compute the exact result into `R`, and `R` is a claim.**
+  Unchecked it wraps; `SC_CHECK_WIDE_ARITH` checks it, and `tg::checked_*` always does.
+  The checks are not `CC_ASSERT`s because these calls sit in the hottest predicate loops, where the default dev preset must not pay for them.
+- **An operation on one value is a member, one combining two values is free.**
+  `x.truncated_to<T>()`, `x.shifted_left<T>(n)`, `x.to_f64()` against `tg::mul<R>(a, b)` and `tg::div_floor(a, b)`.
+- **Up to 256 bits the arithmetic is generated, loop-free and branch-free.**
+  `tools/gen-fixed-int.py` picks the `(R, A, B)` triples by the bounds the operands' widths imply and writes one header per result width into `fixed_int/generated/`; its docstring has the rule.
+  Everything else runs the generic bodies in `fixed_int/impl/core.hh`, which are a second, independent formulation the tests hold the generated ones against.
+  Regenerate with `uv run libs/base/typed-geometry/tools/gen-fixed-int.py --write`; `dev.py check` fails when the committed output drifts.
+- **Division truncates, like the builtins, and floor and ceiling are named.**
+  `tg::div_floor<Q>(x, w)` is the case predicates need: a quotient known to fit `Q` (32 bits) comes from one estimate plus one exact remainder rather than a long division.
+  The estimate is a `cc::udiv128` of the top words, measured ~20% faster than an f64 estimate and ~2.7× faster than Knuth D on x64.
+  MSVC ARM64 has no 128 ÷ 64 instruction, so there it is a software division, and still correct.
+- **Float conversions are correctly rounded, with no fast variant.**
+  `to_f64` / `to_f32` round to nearest with ties to even, via a sticky bit over everything below the top 64 bits.
+  That costs ~20% against dropping the sticky bit, measured on fi256, which is too little to be worth a second, subtly different function.
+- **`x.sign()` is the predicate's answer**: -1, 0 or +1 from the OR of the limbs and the sign bit, without a branch or a comparison.
+- **A `fixed_int` is a scalar**, so `vec<3, fi64>` exists — and its operations wrap at the element width, so a dot product over `fi64` is computed in `fi64`.
+  Width-aware `dot` and `cross` belong to a predicate layer on top of this one.
+
 ## See also
 
 - [scalar/traits.hh](../../src/typed-geometry/scalar/traits.hh) — the seam and per-scalar specializations.

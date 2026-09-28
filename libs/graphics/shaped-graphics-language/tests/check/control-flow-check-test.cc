@@ -107,16 +107,24 @@ TEST("sgl check - every path of a function that returns a value ends in a return
     CHECK(body_reports("for i in 0 ..< n:\n    return 1.0\n").starts_with("missing-return user:[f]"));
 }
 
-TEST("sgl check - a function without a return type returns nothing")
+TEST("sgl check - a function without a return type returns void")
 {
     CHECK(reports_for("fun note(x: float):\n    if x < 0.0 => return\n    print x\n") == "");
-    CHECK(reports_for("fun note(x: float):\n    return x\n")
-          == "type-mismatch user:[x] note has no return type, so its return has no value\n");
+    CHECK(reports_for("fun note(x: float):\n    return x\n") == "type-mismatch user:[x] note returns void, got float\n");
     CHECK(reports_for("fun half(x: float) -> float:\n    return\n")
           == "type-mismatch user:[return] half returns float, and this return has no value\n");
-    CHECK(reports_for("fun note(x: float):\n    print x\nfun f(k: float) -> float:\n    let y = note k\n    return k\n")
-          == "type-mismatch user:[note k] a let takes a value, and this is nothing\n");
     CHECK(reports_for("fun note(x: float):\n    print x\nfun f(k: float) -> float:\n    note k\n    return k\n") == "");
+    // CHK-215: void is a value like any other, and `-> void` is what leaving out the return type means
+    CHECK(reports_for("fun note(x: float):\n    print x\nfun f(k: float) -> float:\n    let y = note k\n    return k\n")
+          == "");
+    CHECK(reports_for("fun note(x: float) -> void:\n    print x\n    return void\n") == "");
+    CHECK(reports_for("fun note(x: float):\n    print x\nfun relay(x: float):\n    return note x\n") == "");
+    CHECK(reports_for("fun same(a: void, b: void) => a == b and not (a != b)\nfun f(k: float) -> float:\n"
+                      "    let v: void = void\n    if same(v, void) => return k\n    return 0.0\n")
+          == "");
+    // CHK-214: a binding member is a slot of a layout, and a void one fills none
+    CHECK(reports_for("binding frame:\n    marker: void\nfun f(k: float) -> float => k\n")
+          == "type-mismatch user:[void] marker is void, and a binding member has to hold something\n");
 }
 
 TEST("sgl check - an arrow body without a return type returns what its expression is")
@@ -135,12 +143,11 @@ TEST("sgl check - an arrow body without a return type returns what its expressio
     // what it infers is what a caller has to fit
     CHECK(reports_for("fun flag(x: float) => x < 0.5\nfun f(k: float) -> float:\n    return flag k\n")
           == "type-mismatch user:[flag k] expected float, got bool\n");
-    // a BLOCK body without `-> T` still returns nothing
+    // a BLOCK body without `-> T` still returns void
     CHECK(reports_for("fun note(x: float):\n    return x * 0.5\n")
-          == "type-mismatch user:[x * 0.5] note has no return type, so its return has no value\n");
-    // no value, no result
-    CHECK(reports_for("fun note(x: float):\n    print x\nfun relay(x: float) => note x\n")
-          == "type-mismatch user:[note x] the body of relay is its result, and this is nothing\n");
+          == "type-mismatch user:[x * 0.5] note returns void, got float\n");
+    // an arrow body that is void is a void result
+    CHECK(reports_for("fun note(x: float):\n    print x\nfun relay(x: float) => note x\n") == "");
     // a body that does not check is one report, and the caller of the function says nothing
     CHECK(reports_for("fun broken(x: float) => x + missing\nfun f(k: float) -> float:\n    return broken k\n")
           == "unknown-name user:[missing] missing\n");

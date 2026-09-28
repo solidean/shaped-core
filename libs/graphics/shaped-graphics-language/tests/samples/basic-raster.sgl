@@ -20,7 +20,7 @@ binding frame:
 
 binding instance:
     model: mat4
-    tex_color: texture2d[rgba8]
+    tex_color: texture_2d[rgba8]
 
 // the reason we annotate bindings on functions is that we can have a lot more bindings and variants per file
 // and our modules can also have a lot of them

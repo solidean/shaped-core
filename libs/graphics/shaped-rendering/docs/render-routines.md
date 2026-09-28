@@ -43,5 +43,18 @@ shader-derived (layouts, pipelines — rebuilt by `init` on every reload), imgui
 The atlas lives on a routine of its own, reached through a dependency token, so every target format shares one instead of getting a copy each.
 Sorting members by which of those they are is most of the design work — the first two live on the routine, and only the third does not.
 
+## Inline constants: use the generated struct
+
+A shader package entry of the form `file.hlsl:constants:<block>` makes the build emit a C++ struct matching that constant block.
+It emits the `static_assert`s too, pinning the struct's size and every field's absolute offset.
+**Pass that generated type to `set_inline_constants` directly**, the way the denoise routines do, rather than declaring a local mirror of it.
+
+A local mirror is one more declaration that can drift, and asserting it against the generated one is weaker than what the generator already checks.
+A size-only assertion, in particular, passes through any reordering of same-sized fields.
+
+`sr::imgui_routine` does carry a mirror, and it has a reason to.
+`sr::impl::imgui_ortho_constants` is a public type built from `tg::vec2f`, so the two genuinely are different declarations that must agree.
+Absent a reason of that kind, use the generated struct.
+
 Concrete routines arrive here as they are implemented, each with its own tests.
 See [structure.md](structure.md) for the roadmap.

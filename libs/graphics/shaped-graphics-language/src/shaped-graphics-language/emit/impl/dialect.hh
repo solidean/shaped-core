@@ -59,13 +59,7 @@ public:
     /// The structs of `p.structs` and the constant block, each followed by an empty line.
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;
 
-    /// How the body names a resource, which is the bare global everywhere but HLSL, where it stands in a namespace.
-    [[nodiscard]] virtual cc::string resource_reference(planned_resource const& b) const { return b.name; }
-
-    /// How a group's constant block is named where a member is read through it.
-    [[nodiscard]] virtual cc::string block_reference(planned_constants const& b) const { return b.name; }
-
-    /// The resources of one binding, which is one group: HLSL wraps them, and WGSL writes each with its own address.
+    /// The resources of one binding, which is one group, each declared at file scope with its own address.
     /// One group: its constant block when it has one, then its resources; never called for a group with neither.
     virtual void write_group(cc::string& out,
                              plan const& p,

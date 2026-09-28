@@ -68,6 +68,24 @@ TEST("sgl driver - a line and a column are 1-based, and end of file is a place")
     CHECK(sgl::line_column_of(source, 7) == at(3, 1));
     CHECK(sgl::line_column_of(source, 9) == at(3, 3));
     CHECK(sgl::line_column_of(source, 100) == at(3, 3));
+
+    // a bare `\r` ends a line, as it does in the line tree
+    auto const old_mac = cc::string_view("ab\rcd\r\ref");
+    CHECK(sgl::line_column_of(old_mac, 2) == at(1, 3));
+    CHECK(sgl::line_column_of(old_mac, 3) == at(2, 1));
+    CHECK(sgl::line_column_of(old_mac, 6) == at(3, 1));
+    CHECK(sgl::line_column_of(old_mac, 7) == at(4, 1));
+}
+
+TEST("sgl driver - every diagnostic kind has a summary a reader understands without its name")
+{
+    // `literal_needs_type` is the last kind; a kind added after it moves this bound
+    for (auto k = 0; k <= int(sgl::diagnostic_kind::literal_needs_type); ++k)
+    {
+        auto const kind = sgl::diagnostic_kind(k);
+        CHECK(!sgl::summary_of(kind).empty());
+        CHECK(sgl::summary_of(kind) != sgl::to_string(kind));
+    }
 }
 
 TEST("sgl driver - a diagnostic is one line with its place, its level and its kind")
@@ -76,7 +94,12 @@ TEST("sgl driver - a diagnostic is one line with its place, its level and its ki
                                    .level = sgl::severity::normal_error,
                                    .where = {.offset = 4, .length = 3}};
     CHECK(sgl::format_diagnostic("a.sgl", "ab\ncd", d, "foo") == "a.sgl:2:2: error: unknown-name: foo");
-    CHECK(sgl::format_diagnostic("a.sgl", "ab\ncd", d) == "a.sgl:2:2: error: unknown-name");
+    CHECK(sgl::format_diagnostic("a.sgl", "ab\ncd", d)
+          == "a.sgl:2:2: error: unknown-name: a name that nothing in scope declares");
+    // without a detail, the kind's summary says what the name alone does not
+    CHECK(sgl::summary_of(sgl::diagnostic_kind::unknown_name) == "a name that nothing in scope declares");
+    CHECK(sgl::format_note("a.sgl", "ab\ncd", {.offset = 1, .length = 1}, "declared here")
+          == "a.sgl:1:2: note: declared here");
 }
 
 TEST("sgl driver - an entry point is found by its name, and the text is the emitter's")
@@ -143,4 +166,13 @@ TEST("sgl driver - a tree past the depth limit is refused by name, never as a ho
         CHECK(past.contains("error: nesting-too-deep: 'main_ps' nests deeper than 40 levels")).context(past);
         CHECK(!past.contains("not-core")).context(past);
     }
+}
+
+TEST("sgl driver - a request to run the tests makes one that fails an error, and an untested request ignores them")
+{
+    auto const source = cube_source() + "\ntest 1 < 2\n\n// deliberately false\ntest 2 < 1\n";
+    CHECK(sgl::compile_to_text({.source = source, .entry_point = "main_ps"}).has_value());
+    auto const e = error_of({.source = source, .source_name = "cube.sgl", .entry_point = "main_ps", .run_tests = true});
+    CHECK(e.contains(": error: test-failed: 1 of 1 checks failed (deliberately false)\n"));
+    CHECK(e.contains(": note: `2 < 1` is 2 < 1\n"));
 }

@@ -66,7 +66,7 @@ kernel void main0(device frame& f [[buffer(0)]], uint t [[thread_position_in_gri
     CHECK(compiled.entry_point == "main0");
     REQUIRE(compiled.bindings.size() == 1);
     CHECK(compiled.bindings[0].name == "values");
-    CHECK(compiled.bindings[0].type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(compiled.bindings[0].type == sg::binding_type::buffer);
 
     // A metallib where this host has the toolchain, MSL source where it does not — the backend takes either.
     auto const is_metal_format

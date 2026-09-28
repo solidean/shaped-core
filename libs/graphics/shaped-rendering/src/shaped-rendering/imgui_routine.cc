@@ -179,7 +179,7 @@ cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
     auto const* const constants_binding = [&]() -> sg::binding const*
     {
         for (auto const& b : compiled_vs->bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
+            if (b.type == sg::binding_type::constants_buffer)
                 return &b;
         return nullptr;
     }();
@@ -250,9 +250,11 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
 
     // Textures first, and BEFORE any refusal below: a draw may sample an atlas imgui only just grew, and imgui's own
     // bookkeeping has to keep up whether or not we can draw this frame.
-    // These go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them at submit.
+    // A new texture's bytes go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them
+    // at submit; an update is recorded straight onto this list, because by then the atlas has been sampled and the
+    // copy queue cannot move it out of `shader_texture` for itself.
     auto textures = self.acquire_exclusive(self->_textures);
-    textures->service_requests(ctx, draw_data);
+    textures->service_requests(cmd, draw_data);
 
     // Polled rather than waited on: execute runs inside the caller's rendering scope, so nothing here may block, and
     // a throw would leave their command list unsubmitted.
@@ -312,7 +314,7 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
                 // The layout comes from init rather than from the create: this is the frame path, and
                 // acquiring would hash the declared table and take the pipeline cache's lock per switch.
                 bound_group = ctx.transient.create_binding_group(
-                    cmd, self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
+                    cmd, self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_texture_view()});
                 scope.bind<shaders::imgui_bindings>(*bound_group);
                 bound_texture = dc.GetTexID();
             }

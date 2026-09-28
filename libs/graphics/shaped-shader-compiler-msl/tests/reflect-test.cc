@@ -60,7 +60,7 @@ TEST("ssc::msl reflect - an argument buffer becomes one group, member ids intact
     auto const* albedo = binding_named(bindings, "albedo");
     REQUIRE(albedo != nullptr);
     CHECK(albedo->index == 0);
-    CHECK(albedo->type == sg::binding_type::readonly_texture);
+    CHECK(albedo->type == sg::binding_type::texture);
     REQUIRE(albedo->texture_dimension.has_value());
     CHECK(albedo->texture_dimension.value() == sg::texture_view_dimension::tex_2d);
 
@@ -73,15 +73,17 @@ TEST("ssc::msl reflect - an argument buffer becomes one group, member ids intact
     auto const* lights = binding_named(bindings, "lights");
     REQUIRE(lights != nullptr);
     CHECK(lights->index == 2);
-    CHECK(lights->type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(lights->type == sg::binding_type::buffer);
+    CHECK(lights->access == sg::access_mode::read_write);
 
     auto const* readonly = binding_named(bindings, "readonly");
     REQUIRE(readonly != nullptr);
-    CHECK(readonly->type == sg::binding_type::readonly_structured_buffer);
+    CHECK(readonly->type == sg::binding_type::buffer);
+    CHECK(readonly->access == sg::access_mode::read); // `device T const*`, which is the only thing that says so
 
     auto const* tint = binding_named(bindings, "tint");
     REQUIRE(tint != nullptr);
-    CHECK(tint->type == sg::binding_type::uniform_buffer);
+    CHECK(tint->type == sg::binding_type::constants_buffer);
 }
 
 TEST("ssc::msl reflect - a declared-but-unreferenced binding is still reported")
@@ -130,8 +132,8 @@ kernel void blur(constant outputs& o [[buffer(0)]]) { (void)o; }
     auto r = ssc::msl::impl::reflect(source, "blur", sg::shader_stage::compute);
     REQUIRE(r.has_value());
     REQUIRE(r.value().bindings.size() == 1);
-    CHECK(r.value().bindings[0].type == sg::binding_type::readwrite_texture);
-    CHECK(r.value().bindings[0].storage_access == sg::storage_access::read_write);
+    CHECK(r.value().bindings[0].type == sg::binding_type::image);
+    CHECK(r.value().bindings[0].access == sg::access_mode::read_write);
 }
 
 TEST("ssc::msl reflect - a resource bound straight on the entry point is refused, since the backend binds none")
@@ -214,7 +216,7 @@ vertex pixel_input main_vs(cube_vertex v [[stage_in]], constant constants_data& 
     // No group and no space is what sg's layout fit recognizes as the inline block, by that clause and not its name.
     auto const& constants = r.value().bindings[0];
     CHECK(constants.name == "constants");
-    CHECK(constants.type == sg::binding_type::uniform_buffer);
+    CHECK(constants.type == sg::binding_type::constants_buffer);
     CHECK(!constants.group_index.has_value());
     CHECK(!constants.space.has_value());
 }

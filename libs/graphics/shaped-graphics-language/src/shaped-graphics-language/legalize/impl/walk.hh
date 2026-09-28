@@ -13,7 +13,7 @@ namespace sgl::check::impl
 /// Raise it only against that budget.
 ///
 /// It is a language limit as well: a top-level `let x = a + b + …` of 40 terms is past it.
-/// The check pass refuses such an entry point as `nesting-too-deep` (CHK-214), so no walk here ever meets the hole it
+/// The check pass refuses such an entry point as `nesting-too-deep` (CHK-268), so no walk here ever meets the hole it
 /// would leave behind.
 /// The real fix is iterative walks over an explicit work stack for `interpret`'s `eval` and the legalizer's expression
 /// walks, with a cycle caught by an on-path bit rather than by depth; the limit could then be far higher.
@@ -118,7 +118,9 @@ void for_each_expr_of(flat_stmt const& s, Fn&& fn)
                  [&](flat_once const&) {},     //
                  [&](flat_break const&) {},    //
                  [&](flat_case const& n) { visit(n.scrutinee); }, [&](flat_switch const& n) { visit(n.scrutinee); },
-                 [&](flat_return const& n) { visit(n.value); });
+                 [&](flat_return const& n) { visit(n.value); },
+                 // its condition is the statements of its body
+                 [&](flat_check const&) {});
 }
 
 /// Calls `fn(ast::range_of<flat_expr_id>)` for the patterns of every arm of `s`, in the order they are tried.
@@ -157,6 +159,8 @@ void for_each_body_of(flat_entry_point const& e, flat_stmt const& s, Fn&& fn)
         fn(f->body);
     else if (auto const* const o = s.node.try_as<flat_once>())
         fn(o->body);
+    else if (auto const* const k = s.node.try_as<flat_check>())
+        fn(k->body);
     else if (auto const* const c = s.node.try_as<flat_case>())
     {
         if (is_known(e, c->arms))

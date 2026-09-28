@@ -65,7 +65,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale 
     // to 16 bytes, but root constants have no such alignment requirement.
     cc::vector<sg::binding> out_bindings;
     for (auto const& b : shader.bindings)
-        if (b.type != sg::binding_type::uniform_buffer)
+        if (b.type != sg::binding_type::constants_buffer)
             out_bindings.push_back(b);
     REQUIRE(out_bindings.size() == 1);
 
@@ -79,13 +79,15 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale 
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::uniform_buffer,
+        .type = sg::binding_type::constants_buffer,
         .block_size = isize(sizeof(params)),
     };
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
     auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
+    // Reflection reports the inline block as a slot of its own, which no group holds; it must not unkey the footprint.
+    CHECK(pipeline->footprint().is_known());
 
     // Two independent outputs so the two dispatches don't alias: out1 for the full set, out2 for the partial.
     auto const byte_size = isize(count) * isize(sizeof(u32));

@@ -10,17 +10,55 @@ There is no public `declare_access`. What a resource is used as follows from the
 
 - `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source.
 - `cmd.copy` ⇒ `copy_read` on src plus `copy_write` on dst, and a self-copy is one combined access.
-- A compute `dispatch` ⇒ each bound view's access class: `readonly` ⇒ `shader_read`, `readwrite` ⇒ `shader_write`, `uniform` ⇒ `uniform_read`, `acceleration_structure` ⇒ `accel_read`.
+- A dispatch, a draw or a trace ⇒ what the bound pipeline's code does to each bound view, which is its **footprint** (below).
 
 The mapping lives in [access_inference.hh](../../src/shaped-graphics/barrier/access_inference.hh), so every backend agrees on the semantics.
+
+### Access follows the footprint
+
+**A pipeline carries its footprint: what its code does to each binding, and in which stages.**
+A group is declared once and bound to many pipelines, so the access its layout allows is the union over all of them.
+One pipeline usually does less: a `mut buffer` an entry point only loads from is a read to that pipeline, and a binding it never names is untouched.
+[footprint.hh](../../src/shaped-graphics/barrier/footprint.hh) holds it; a compiled shader carries one, and pipeline creation resolves every stage's against the layout.
+
+At an op, each bound view is declared with the footprint's access and stages, and its layout still comes from its view class.
+
+- **An untouched binding is not declared at all** — no hazard, and no layout transition.
+  That is sound only while the footprint covers everything the shader statically uses, which holds because SGL computes it on the tree its emitter prints.
+- **A read through a writable view is `storage_read`**, not `shader_read`: D3D12 wants `UNORDERED_ACCESS` before any access through a UAV, whatever the shader does.
+  A storage read and write together are the one access the API infers at first use, so they take the first-write freebie.
+- **Stages narrow too**: a slot only the pixel shader reads is declared at `fragment`, so a barrier before it does not stall vertex work.
+
+Where a footprint comes from decides how far it narrows:
+
+- `exact` — SGL's own analysis, after inlining.
+- `reflected` — a compiler's reflection: a binding it omits is untouched, one it keeps is used as its declaration allows.
+- `none` — nothing is known, and every view counts as its class says: a writable view is written.
+
+A footprint naming a binding the layout does not hold is keyed differently from it, and is not used at all rather than read as "untouched".
+The inline-constants block is the exception: it is set on the list rather than bound, so a slot naming it is simply skipped.
+
+**A check a shader edit can flip logs and degrades; it never asserts.**
+Hot reload replaces a shader under a running program, so a declaration that disagreed with the old code may disagree with the new one at any frame.
+Such a mismatch logs an error once per pipeline, binding and kind of mismatch, and falls back to a barrier that covers both sides.
+Only a mistake in the host's own code — a declaration naming no bound array, an element out of range — asserts.
 
 **The one exception — arrays / bindless.**
 Element usage of a resource *array* bound to a shader cannot be inferred: the shader may index only some elements, or use them differently.
 So the caller declares it explicitly, split by resource family since buffers carry no layout.
 `declare_array_buffer_access` takes `array_buffer_access` `{index, stages, access}`; `declare_array_texture_access` takes `array_texture_access`, which also names the required `layout`.
 A declaration applies to the next dispatch only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
-Declarations are **accounted for**: the dispatch asserts that every bound array binding was declared — an empty element span declares "unused", a missing declaration is a bug.
-Declaring a vacant (null-handle) or out-of-range element asserts too.
+The footprint still says whether the code touches the array at all:
+
+- an array the code never indexes needs no declaration, and one declared anyway is dropped;
+- one it indexes and nobody declared logs an error, and every element is covered at the op's stages — one global barrier for the buffers, and a transition for each texture whose layout is wrong;
+- one declared unused (an empty span) that the code writes is covered the same way;
+- declarations that write nothing, for an array the code writes, log an error, and every declared element is covered for the code's write too;
+- a declared access the code cannot perform logs an error, and the barrier covers the declaration and the code together.
+
+A declaration narrower than the code element by element is the caller's to make: the footprint knows only what the code does to the array as a whole.
+
+Declaring a vacant (null-handle) or out-of-range element, or an array no bound group holds, asserts.
 See [bindings — array bindings](bindings.md#array-bindings).
 
 ## The vocabulary is backend-neutral
@@ -29,10 +67,20 @@ See [bindings — array bindings](bindings.md#array-bindings).
 `access_flag` says what an op does (`shader_read`, `copy_write`, …), and `pipeline_stage_flag` says where (`compute`, `copy`, …).
 Both are `cc::flags` sets — `access_flags` and `pipeline_stage_flags` — so a declared access carries several of each at once.
 `texture_layout` says how the texels are arranged, and buffers are always `general`.
-A texture uses `shader_readonly` / `shader_readwrite` / `render_target` / `depth_readonly` / `depth_readwrite` / `copy_src` / `copy_dst` / `present`.
+A texture uses `shader_texture` / `shader_image` / `render_target` / `depth_readonly` / `depth_readwrite` / `copy_src` / `copy_dst` / `present`.
 None of it is any one backend's spelling, and each value documents its D3D12 and Vulkan mapping.
 `is_unordered_write` marks the writes that need a hazard barrier — shader, copy and accel writes.
 Color and depth *targets* are ROP-ordered freebies.
+
+## Draws inside one render pass on webgpu
+
+WebGPU emits no barriers sg can see, and it orders every pass after the one before it.
+What it does not order is two draws of one render pass: a pixel shader writing a buffer, and the next draw reading it, may race.
+So the webgpu backend ends the pass before a draw that touches what an earlier draw of the open pass wrote, or writes what one read, and reopens it with its targets loaded.
+A vertex or index fetch is a read like any other, so a draw fetching a buffer an earlier draw of the pass wrote splits too.
+Which draws write is the bound pipeline's footprint; draws that only read split nothing.
+`render_pass_splits` counts every end and reopen in the middle of a rendering scope, whatever forced it — on webgpu a copy recorded inside the scope counts as much as this hazard.
+Vulkan and metal count theirs in the same stat.
 
 ## Minimal barriers: the three-timeline state
 
@@ -224,7 +272,7 @@ It submits the whole batch in one `Barrier` call, with one `D3D12_BARRIER_GROUP`
 A dispatch binding many resources pays one barrier call, not one per binding.
 And a resource bound *more than once* to the same op — two views of one texture, say — merges its declares into a single barrier carrying the **union** of the accesses.
 
-When those bindings need *different* layouts — a texture bound as both a sampled (`shader_readonly`/SRV) and a storage (`shader_readwrite`/UAV) view — `combine_layouts` picks one that serves both.
+When those bindings need *different* layouts — a texture bound as both a texture (`shader_texture`/SRV) and an image (`shader_image`/UAV) view — `combine_layouts` picks one that serves both.
 No specialized D3D12 layout serves both an SRV and a UAV, so it falls back to `general` (COMMON) and warns once, since sampling in COMMON is slower.
 A genuinely incompatible pair, such as copy-dest plus sampled in one op, asserts.
 

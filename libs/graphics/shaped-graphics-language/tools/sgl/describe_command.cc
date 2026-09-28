@@ -74,8 +74,10 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
             mo.write("size", m.size);
             continue;
         }
-        mo.write("mut", m.is_mut);
+        mo.write("access", cc::string_view(m.access));
         mo.write("slot", m.slot);
+        if (m.kind == sgl::described_member_kind::buffer)
+            mo.write("stride", m.stride);
         mo.write("host_name", cc::string_view(m.host_name));
         // The sg enum values a binding of this kind states, each written only where it applies.
         auto const optional = [&](cc::string_view key, cc::string const& value)
@@ -85,8 +87,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         };
         optional("texture_dimension", m.texture_dimension);
         optional("sample_type", m.sample_type);
-        optional("storage_format", m.storage_format);
-        optional("storage_access", m.storage_access);
+        optional("image_format", m.image_format);
         optional("sampler_type", m.sampler_type);
         if (m.static_sampler.has_value())
         {
@@ -128,6 +129,22 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
     }
 }
 
+void write_memory_struct(babel::json::object_writer& o, sgl::described_memory_struct const& s)
+{
+    o.write("name", cc::string_view(s.name));
+    o.write("space", cc::string_view(s.space));
+    o.write("size", s.size);
+    auto members = o.write_array("members");
+    for (auto const& m : s.members)
+    {
+        auto mo = members.write_object(babel::json::layout::compact);
+        mo.write("name", cc::string_view(m.name));
+        mo.write("type", cc::string_view(m.type));
+        mo.write("offset", m.offset);
+        mo.write("size", m.size);
+    }
+}
+
 void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point const& e)
 {
     o.write("name", cc::string_view(e.name));
@@ -137,9 +154,20 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const n : e.workgroup)
             grid.write(n);
     }
-    auto list = o.write_array("bindings", babel::json::layout::compact);
-    for (auto const& name : e.bindings)
-        list.write(cc::string_view(name));
+    {
+        auto list = o.write_array("bindings", babel::json::layout::compact);
+        for (auto const& name : e.bindings)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("features", babel::json::layout::compact);
+        for (auto const& name : e.features)
+            list.write(cc::string_view(name));
+    }
+    // One `slot: access` per touched slot, the way a corpus pin spells it.
+    auto list = o.write_array("footprint", babel::json::layout::compact);
+    for (auto const& slot : e.footprint)
+        list.write(cc::string_view(sgl::check::footprint_text(cc::span<sgl::check::slot_footprint const>(&slot, 1))));
 }
 
 void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const& p)
@@ -158,6 +186,11 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
     {
         auto list = o.write_array("targets", babel::json::layout::compact);
         for (auto const& name : p.targets)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("features", babel::json::layout::compact);
+        for (auto const& name : p.features)
             list.write(cc::string_view(name));
     }
     {
@@ -223,6 +256,14 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
             {
                 auto o = structs.write_object();
                 write_struct(o, s);
+            }
+        }
+        {
+            auto structs = root.write_array("memory_structs");
+            for (auto const& s : d.memory_structs)
+            {
+                auto o = structs.write_object();
+                write_memory_struct(o, s);
             }
         }
         {

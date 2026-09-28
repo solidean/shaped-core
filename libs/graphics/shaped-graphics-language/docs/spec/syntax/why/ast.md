@@ -38,11 +38,18 @@ It cannot be a keyword of the form parser either.
 A keyword that leads a line starts a keyword form, so `self.x = 0` would read as the keyword `self` with an argument, and not as an assignment.
 A reserved name gets both: the form parser sees an identifier, and the AST gives that identifier its one meaning.
 
+## AST-137
+
+`void` is a reserved name rather than a keyword for the reason `self` is.
+It leads a line as a value, `void == f()`, and a keyword there would start a keyword form.
+It is also both a type and a value, and which one is decided by the position it stands in, which only the check pass knows.
+Types as values would make the second reading follow from the first: the value `void` in a type position is its own type.
+
 ## AST-14
 
 Square brackets were chosen for type arguments so that parsing needs no lookup ([FORM-22](forms.md#form-22)).
 The same holds one phase later.
-`texture2d[rgba8]` applies a type, `weights[3]` reads an element, and `table[float]` could be either until `table` is known.
+`texture_2d[rgba8]` applies a type, `weights[3]` reads an element, and `table[float]` could be either until `table` is known.
 One `index` node with arguments serves both, and resolution relabels nothing: it only decides how the node is evaluated.
 
 ## AST-15
@@ -98,6 +105,12 @@ That frees the same spelling inside a parenthesis, where `name = value` is a nam
 Every signature scans the same way: a name, then `(`.
 A function without parameters that could drop the `()` would look like a property, and inside a struct the two must be told apart by shape alone.
 It also keeps `[…]`, `(…)` and `{…}` in one fixed order with the middle one always present, so the eye finds the bindings of a function without reading the brackets before them.
+
+## AST-143
+
+AST-67 reserves a signature without `()` for exactly one reading, a property, and an extension is where that reading is wanted outside a type.
+Inside a type a property needs no keyword, since its shape alone tells it from a method there.
+At file level `fun` is what makes a line a declaration, so an extension property keeps it, and the missing `()` is what says property.
 
 ## AST-74
 

@@ -25,15 +25,15 @@ bool is_sample_element(cc::string_view name)
     return false;
 }
 
-cc::string_view access_prefix(image_access access)
+cc::string_view access_prefix(access_mode access)
 {
     switch (access)
     {
-    case image_access::read:
+    case access_mode::read:
         return "";
-    case image_access::read_write:
+    case access_mode::read_write:
         return "mut ";
-    case image_access::write:
+    case access_mode::write:
         return "out ";
     }
     return "";
@@ -57,7 +57,7 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
             return cc::string(shape.image);
         return t.format < 0
                  ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
-                 : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_storage_formats[t.format].name);
+                 : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_image_formats[t.format].name);
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
     default:
@@ -69,7 +69,7 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
 type_id checker::resource_type(check::type_info info)
 {
     info.spelled = spelling_of(info, out);
-    // Interned, as a buffer is: two mentions of `texture2d[float4]` are one type.
+    // Interned, as a buffer is: two mentions of `texture_2d[float4]` are one type.
     for (auto i = isize(0); i < out.types.size(); ++i)
         if (out.types[i] == info)
             return type_id(i);
@@ -78,10 +78,17 @@ type_id checker::resource_type(check::type_info info)
     return id;
 }
 
-void checker::judge_feature(i32 file, source_span where, cc::string_view form, cc::string_view feature)
+void checker::judge_feature(i32 file, source_span where, cc::string_view form, feature needed)
 {
+    // CHK-201: granted by a `require` of the file, or of the binding whose members are being compiled
+    if (file_features[file].has(needed) || granted.has(needed))
+    {
+        if (used_features != nullptr)
+            used_features->set(needed);
+        return;
+    }
     report(diagnostic_kind::needs_feature, file, where,
-           cc::format("{} needs {}, which a function cannot opt into yet", form, feature));
+           cc::format("{} needs {}, which `require {}` grants", form, name_of(needed), name_of(needed)));
 }
 
 type_id checker::resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text)
@@ -151,24 +158,24 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
                               out.name_of(element)));
             return checked_module::error_type;
         }
-        if (!texture->feature.empty())
-            judge_feature(file, where, text, texture->feature);
+        if (texture->shape == texture_shape::d2_ms_array)
+            judge_feature(file, where, text, feature::multisampled_array_textures);
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
     // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats.
     // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
     auto const* const dot = ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>();
-    auto const format = dot != nullptr ? find_storage_format(text_of(file, dot->name)) : -1;
+    auto const format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
     if (format < 0)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[0].value),
-               "an image takes one of sg's storage formats as an enum case: `.rgba8_unorm`");
+               "an image takes one of sg's image formats as an enum case: `.rgba8_unorm`");
         return checked_module::error_type;
     }
-    if (!k_storage_formats[format].is_portable)
-        judge_feature(file, where, cc::format("an image of .{}", k_storage_formats[format].name),
-                      "sg::feature::extended_storage_formats");
+    if (!k_image_formats[format].is_portable)
+        judge_feature(file, where, cc::format("an image of .{}", k_image_formats[format].name),
+                      feature::extended_image_formats);
     return resource_type({.kind = type_kind::image, .shape = image->shape, .format = format});
 }
 
@@ -191,16 +198,16 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     if (t.kind == type_kind::image)
     {
         auto qualified = t;
-        qualified.access = is_write_only ? image_access::write : image_access::read_write;
-        if (!is_write_only && !k_storage_formats[t.format].is_readwrite_portable)
-            judge_feature(file, where, cc::format("a `mut` image of .{}", k_storage_formats[t.format].name),
-                          "sg::feature::readwrite_storage_formats");
+        qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
+        if (!is_write_only && !k_image_formats[t.format].is_readwrite_portable)
+            judge_feature(file, where, cc::format("a `mut` image of .{}", k_image_formats[t.format].name),
+                          feature::readwrite_image_formats);
         return resource_type(cc::move(qualified));
     }
     if (t.kind == type_kind::texture)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, where,
-               "a texture is only ever read; a storage texture the shader writes is an image, such as `image2d`");
+               "a texture is only ever read; a storage texture the shader writes is an image, such as `image_2d`");
         return checked_module::error_type;
     }
     if (is_write_only)
@@ -325,16 +332,16 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
     return state;
 }
 
-void checker::judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments)
+void checker::judge_filtering(i32 file, source_span call, cc::span<written_argument const> arguments)
 {
     // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
     auto texture = cc::string();
     auto sampler = cc::string();
-    for (auto const& a : ast_of(file).at(arguments))
+    for (auto const& a : arguments)
     {
-        if (!ast::is_valid(a.value))
+        if (!ast::is_valid(a.expr) || a.splat_member >= 0)
             continue;
-        auto const& where = out.files[file].target_at(a.value);
+        auto const& where = out.files[file].target_at(a.expr);
         if (where.kind != target_kind::binding_member)
             continue;
         auto const& m = out.at(out.bindings[out.at(where.symbol).info].members)[where.index];
@@ -359,7 +366,7 @@ void checker::judge_filtering(i32 file, source_span call, ast::range_of<ast::arg
 
 cc::string sgl::check::texel_name_of(i32 format)
 {
-    auto const& f = k_storage_formats[format];
+    auto const& f = k_image_formats[format];
     auto const stem = f.component == value_kind::scalar_float ? "float"
                     : f.component == value_kind::scalar_int   ? "int"
                                                               : "uint";
@@ -378,7 +385,7 @@ type_id checker::resolve_pattern_type(i32 file, ast::expr_id expr)
         if (inner == checked_module::error_type || out.at(inner).kind != type_kind::image || out.at(inner).format >= 0)
             return inner == checked_module::error_type ? inner : qualify_resource(file, expr, inner, q->access);
         auto qualified = out.at(inner);
-        qualified.access = q->access == ast::type_access::write_only ? image_access::write : image_access::read_write;
+        qualified.access = q->access == ast::type_access::write_only ? access_mode::write : access_mode::read_write;
         auto const result = resource_type(cc::move(qualified));
         set_type(file, expr, result);
         return result;
@@ -435,12 +442,12 @@ bool checker::takes(type_id parameter, type_id argument) const
     // A pattern that reads takes an image the shader may read, one that writes an image it may write.
     switch (p.access)
     {
-    case image_access::read:
-        return a.access != image_access::write;
-    case image_access::write:
-        return a.access != image_access::read;
-    case image_access::read_write:
-        return a.access == image_access::read_write;
+    case access_mode::read:
+        return a.access != access_mode::write;
+    case access_mode::write:
+        return a.access != access_mode::read;
+    case access_mode::read_write:
+        return a.access == access_mode::read_write;
     }
     return false;
 }

@@ -1,7 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
-#include <shaped-graphics/binding/layout_fit.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh> // acquire(ctx) asks it which formats it accepts
 #include <shaped-shader-library/shader_asset.hh>
@@ -97,18 +96,34 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format) 
     return shader;
 }
 
-sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx) const
+bool slib::shader_asset::can_build(sg::shader_format format) const
 {
     auto const library = _library.lock();
     if (library == nullptr)
-        return make_failed_shader(cc::format("the shader library that owns '{}' is gone", _virtual_path));
+        return false;
 
-    auto const language = library->language_of(_virtual_path);
+    return library->can_compile(library->language_of(_virtual_path), format);
+}
 
+bool slib::shader_asset::can_acquire(sg::context const& ctx) const
+{
+    // The same loop acquire(ctx) runs, which is what makes this a prediction of it rather than a second opinion.
+    for (auto const format : ctx.accepted_shader_formats())
+        if (this->can_build(format))
+            return true;
+
+    return false;
+}
+
+sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx) const
+{
     // The context lists what it takes in preference order, so the first one we can actually build wins.
     for (auto const format : ctx.accepted_shader_formats())
-        if (library->can_compile(language, format))
+        if (this->can_build(format))
             return acquire(format);
+
+    if (_library.expired())
+        return make_failed_shader(cc::format("the shader library that owns '{}' is gone", _virtual_path));
 
     return make_failed_shader(
         cc::format("no compiler registered to build '{}' into a format this context accepts", _virtual_path));
@@ -200,20 +215,4 @@ sg::async_compute_pipeline slib::acquire_compute_pipeline(sg::context* ctx,
 {
     auto const shader = co_await asset->acquire(*ctx);
     co_return co_await ctx->cached.acquire_compute_pipeline({.shader = shader, .layout = layout});
-}
-
-cc::string slib::reflection_mismatch(cc::string_view entry,
-                                     sg::compiled_shader const& compiled,
-                                     cc::span<listed_group const> listed,
-                                     cc::optional<sg::binding> const& inline_block)
-{
-    // The listed groups, at the slots their positions give: exactly the layout this entry point states.
-    auto groups = cc::vector<cc::span<sg::binding const>>();
-    for (auto const& group : listed)
-    {
-        while (groups.size() <= group.position)
-            groups.push_back({});
-        groups[group.position] = group.bindings;
-    }
-    return sg::describe_layout_misfit(entry, compiled.bindings, groups, inline_block);
 }

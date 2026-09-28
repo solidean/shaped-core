@@ -60,7 +60,7 @@ TEST("ssc::msl end to end - the reflected bindings build the layout the backend 
     // One binding, reflected out of the text rather than written by hand beside it.
     REQUIRE(shader.value().bindings.size() == 1);
     CHECK(shader.value().bindings[0].name == "values");
-    CHECK(shader.value().bindings[0].type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(shader.value().bindings[0].type == sg::binding_type::buffer);
 
     auto layout = ctx->create_metal_binding_group_layout(shader.value().bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value()).context(layout.has_error() ? layout.error().to_string() : cc::string());

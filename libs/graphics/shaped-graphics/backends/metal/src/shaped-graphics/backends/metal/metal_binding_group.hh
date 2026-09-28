@@ -21,7 +21,7 @@
 class sg::backend::metal::metal_binding_group final : public sg::binding_group
 {
 public:
-    /// One scalar binding's buffer, under the access class its bound view carries.
+    /// One scalar binding's buffer, under the view class its bound view carries.
     ///
     /// **The class is what keeps a read after a read free.** A declare naming `shader_read | shader_write` for every
     /// bound resource makes each draw meet the previous draw's unordered write, so a loop that only ever reads still
@@ -29,14 +29,18 @@ public:
     struct bound_buffer
     {
         sg::raw_buffer_handle buffer;
-        sg::view_class access = sg::view_class::uniform;
+        sg::view_class bound_as = sg::view_class::constants;
+        /// Its position in the group layout's `bindings()`, which the pipeline's footprint is keyed by.
+        isize binding = -1;
     };
 
     /// The texture twin of `bound_buffer`, carried for the same reason.
     struct bound_texture
     {
         sg::raw_texture_handle texture;
-        sg::view_class access = sg::view_class::readonly;
+        sg::view_class bound_as = sg::view_class::readonly;
+        /// Its position in the group layout's `bindings()`, which the pipeline's footprint is keyed by.
+        isize binding = -1;
     };
 
     /// One element of an array binding: whichever resource is bound at that index, or neither where it is vacant.
@@ -56,6 +60,10 @@ public:
     {
         cc::string name;
         bool is_texture = false;
+        /// Its position in the group layout's `bindings()`.
+        isize binding = -1;
+        /// What its elements are bound as, which an undeclared array falls back to.
+        sg::view_class bound_as = sg::view_class::readonly;
         cc::vector<array_element> elements;
     };
 

@@ -22,7 +22,7 @@ constexpr cc::string_view k_image_names[] = {"texture_storage_2d",
                                              "texture_storage_3d",
                                              "",
                                              ""};
-/// Parallel to `image_access`.
+/// Parallel to `access_mode`.
 constexpr cc::string_view k_accesses[] = {"read", "read_write", "write"};
 
 using namespace sgl;
@@ -79,16 +79,35 @@ public:
         out.appendf("const {}: i32 = {};\n", name, value);
     }
 
+    /// A root's memory form: its pieces as fields, each where SGL's layout puts it (memory_form.hh).
+    static void write_form(cc::string& out, memory_form const& form)
+    {
+        out.appendf("struct {} {{\n", form.name);
+        for (auto const& f : form.fields)
+            out.appendf("{}{}: {},\n", k_indent, f.name, f.type);
+        out += "}\n\n";
+    }
+
+    void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
+    {
+        if (block.form.has_value())
+            return write_form(out, block.form.value());
+        out.appendf("struct {} {{\n", block.block_name);
+        write_members(out, block.members, p);
+        out += "}\n\n";
+    }
+
     void write_group(cc::string& out,
                      plan const& p,
                      planned_constants const* block,
                      cc::span<planned_resource const> buffers) const override
     {
+        for (auto const& b : buffers)
+            if (b.element_form.has_value())
+                write_form(out, b.element_form.value());
         if (block != nullptr)
         {
-            out.appendf("struct {} {{\n", block->block_name);
-            write_members(out, block->members, p);
-            out += "}\n\n";
+            write_block_struct(out, p, *block);
             out.appendf("@group({}) @binding({}) var<uniform> {}: {};\n", block->group, block->slot, block->name,
                         block->block_name);
         }
@@ -104,7 +123,8 @@ public:
         // WGSL has no static sampler: the layout carries it, and the group binds it (slib's WGSL notes).
         if (t.kind == type_kind::buffer)
             out.appendf("{} var<storage, {}> {}: {};\n", address, b.is_mut ? "read_write" : "read", b.name,
-                        resource_text(p, b.type));
+                        b.element_form.has_value() ? cc::format("array<{}>", b.element_form.value().name)
+                                                   : resource_text(p, b.type));
         else
             out.appendf("{} var {}: {};\n", address, b.name, resource_text(p, b.type));
     }
@@ -121,7 +141,7 @@ public:
                 return cc::string(k_depth_names[isize(t.shape)]);
             return cc::format("{}<{}>", k_texture_names[isize(t.shape)], scalar_of(p, t.element));
         case type_kind::image:
-            return cc::format("{}<{}, {}>", k_image_names[isize(t.shape)], k_storage_formats[t.format].wgsl,
+            return cc::format("{}<{}, {}>", k_image_names[isize(t.shape)], k_image_formats[t.format].wgsl,
                               k_accesses[isize(t.access)]);
         case type_kind::sampler:
             return t.is_comparison ? "sampler_comparison" : "sampler";
@@ -144,7 +164,6 @@ public:
             out += "diagnostic(off, derivative_uniformity);\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
-
         for (auto const& s : p.structs)
         {
             out.appendf("struct {} {{\n", s.name);
@@ -155,9 +174,7 @@ public:
         if (!p.constants.has_value())
             return;
         auto const& c = p.constants.value();
-        out.appendf("struct {} {{\n", c.block_name);
-        write_members(out, c.members, p);
-        out += "}\n\n";
+        write_block_struct(out, p, c);
         out.appendf("@group({}) @binding({}) var<uniform> {}: {};\n\n", k_inline_constants_group,
                     k_inline_constants_binding, c.name, c.block_name);
     }

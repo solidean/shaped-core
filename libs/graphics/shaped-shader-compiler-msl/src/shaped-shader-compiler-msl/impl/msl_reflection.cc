@@ -312,12 +312,12 @@ constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_grou
     {
         binding.texture_dimension = dimension;
 
-        // `access::read` is the default when the type does not say, and only a writable one is a storage texture.
+        // `access::read` is the default when the type does not say, and only a writable one is a storage image.
         auto const writes = has_word(type, "write") || has_word(type, "read_write");
-        binding.type = writes ? sg::binding_type::readwrite_texture : sg::binding_type::readonly_texture;
-        if (writes)
-            binding.storage_access
-                = has_word(type, "read_write") ? sg::storage_access::read_write : sg::storage_access::write;
+        binding.type = writes ? sg::binding_type::image : sg::binding_type::texture;
+        binding.access = !writes            ? sg::access_mode::read
+                         : has_word(type, "read_write") ? sg::access_mode::read_write
+                                                        : sg::access_mode::write;
         return binding;
     }
 
@@ -337,17 +337,16 @@ constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_grou
     // A buffer, and which kind follows from the address space rather than from the pointee.
     if (has_word(type, "constant"))
     {
-        binding.type = sg::binding_type::uniform_buffer;
+        binding.type = sg::binding_type::constants_buffer;
         return binding;
     }
 
     if (has_word(type, "device") || has_word(type, "threadgroup"))
     {
-        // Every `device T*` is structured: MSL spells a raw byte-addressed buffer exactly the same way, so the text
+        // Every `device T*` is a `buffer`: MSL spells a raw byte-addressed buffer exactly the same way, so the text
         // cannot tell them apart — see msl_reflection.hh.
-        auto const readonly = has_word(type, "const");
-        binding.type
-            = readonly ? sg::binding_type::readonly_structured_buffer : sg::binding_type::readwrite_structured_buffer;
+        binding.type = sg::binding_type::buffer;
+        binding.access = has_word(type, "const") ? sg::access_mode::read : sg::access_mode::read_write;
         return binding;
     }
 
@@ -573,7 +572,7 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
             auto binding = binding_of(param.value(), cc::string_view(entry_point));
             if (binding.has_error())
                 return cc::error(cc::move(binding).error());
-            if (binding.value().type != sg::binding_type::uniform_buffer)
+            if (binding.value().type != sg::binding_type::constants_buffer)
                 return cc::error(cc::format("'{}' of '{}' sits at the inline-constants index [[buffer({})]], so it "
                                             "must "
                                             "be a `constant T&`",

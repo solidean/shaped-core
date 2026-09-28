@@ -28,7 +28,7 @@ A `case` over such a type would stop needing a `_` to be accepted, and an emitte
 WGSL demands one unconditionally, so the attribute never reaches its text; the saving is HLSL's and MSL's alone, which is a thin reason to build it before something needs it.
 
 **Nested declarations** inside an `enum` block are `unsupported-yet` in the first version and are meant to work.
-They are the same question `struct` has, and [members-and-properties.md](members-and-properties.md) is where the members half of it lives.
+They are the same question `struct` has; an enum's properties and methods are [CHK-233](../semantics/checking.md#members-and-constructors).
 
 ## What it touches
 

@@ -12,6 +12,7 @@ bytes_future context_download_scope::bytes_from_buffer(raw_buffer_handle buffer,
 {
     CC_ASSERT(buffer != nullptr, "async download source buffer is null");
     impl::assert_async_transfer_target(*buffer);
+    _ctx._stats.add(stat::bytes_downloaded_async, size_in_bytes);
     return _ctx.async_download_bytes_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
 }
 
@@ -27,6 +28,7 @@ bytes_future context_download_scope::bytes_from_texture(raw_texture_handle textu
     impl::assert_texture_region_in_bounds(texture, subresource, box);
     if (box.is_empty()) // no copy — a ready, empty future
         return bytes_future(cc::pinned_data<byte const>(), make_ready_completion());
+    _ctx._stats.add(stat::bytes_downloaded_async, impl::packed_region_bytes(texture, box));
     return _ctx.async_download_bytes_from_texture(cc::move(texture), subresource, box);
 }
 

@@ -20,6 +20,10 @@ from .highlight import highlight_code, highlight_diff
 from .markdown import render as render_markdown
 from .markdown import render_inline
 
+# How many ids an ask's `discharges` line shows before it folds into a count.
+_DISCHARGES_SHOWN = 6
+
+
 def _esc(text: str) -> str:
     return html.escape(text, quote=True)
 
@@ -42,7 +46,7 @@ def _summary_html(change) -> str:
             f'{_esc(text[len(path):])}</span>')
 
 
-def _change_card(change, body: str, *, open_by_default: bool) -> str:
+def _change_card(change, body: str, *, has_body: bool, open_by_default: bool) -> str:
     """One change, with its diff inline when the block asked to show it and on demand when it did not.
 
     A collapsed diff used to ship anyway, and it is by far the largest thing a review sends: one entry here
@@ -56,7 +60,7 @@ def _change_card(change, body: str, *, open_by_default: bool) -> str:
     """
     summary = _summary_html(change)
     reason = f'<div class="change-reason">{_esc(change.reason)}</div>' if change.reason else ""
-    if not body:
+    if not has_body:
         return (f'<div class="change"><div class="change-head"><code>{_esc(change.id)}</code>'
                 f'{summary}</div>{reason}</div>')
     head = (f'<summary class="change-head"><code>{_esc(change.id)}</code>{summary}</summary>{reason}')
@@ -206,27 +210,63 @@ def _example_html(block: Block, ctx: dict) -> str:
     return f'<section class="example">{head}{commentary}{source}{output}{provenance}</section>'
 
 
+def change_cards(change_ids: list[str], *, ledger, paths: ReviewPaths, visible: bool,
+                 comments: list[Comment] | None = None) -> str:
+    """The cards for these changes; a collapsed card carries only its id and fetches its diff when opened.
+
+    `comments` puts each change's line comments under its card; the lazily fetched list passes none, since the
+    entry already drew them where they cannot be hidden.
+    """
+    cards = []
+    for change_id in change_ids:
+        change = ledger.resolve(change_id)
+        if change is None:
+            cards.append(f'<div class="change missing"><code>{_esc(change_id)}</code> is not in the ledger</div>')
+            continue
+        diff_path = paths.change_diff(change.id)
+        has_body = change.has_body and diff_path.is_file()
+        # Only an inline diff is read here: a collapsed card needs to know that a body exists, never what it says.
+        body = diff_path.read_text(encoding="utf-8", errors="replace") if has_body and visible else ""
+        cards.append(_change_card(change, body, has_body=has_body, open_by_default=visible))
+        on_lines = [c for c in comments or [] if c.change == change.id]
+        if on_lines:
+            cards.append(f'<div class="line-comments">{"".join(_comment_card(c) for c in on_lines)}</div>')
+    return "".join(cards)
+
+
+def _lazy_changes(block: Block, ctx: dict) -> str:
+    """A collapsed `changes` block as one line, with its cards fetched when it is opened.
+
+    An lgtm entry can discharge a hundred changes, and a hundred card rows are DOM, bytes and annotator work
+    spent on a list the reader almost never opens.
+    Line comments stay outside the disclosure, because a remark hidden behind a click is a remark not read.
+    """
+    ids = block.change_ids
+    ledger = ctx["ledger"]
+    known = [c for c in (ledger.resolve(i) for i in ids) if c is not None]
+    files = len({c.path for c in known if c.path})
+    count = f"{len(ids)} change{'' if len(ids) == 1 else 's'}"
+    where = f" in {files} file{'' if files == 1 else 's'}" if files else ""
+    missing = len(ids) - len(known)
+    bad = f' <span class="changes-missing">{missing} not in the ledger</span>' if missing else ""
+    on_lines = [c for c in ctx["comments"] if c.change in {k.id for k in known}]
+    notes = f'<div class="line-comments">{"".join(_comment_card(c) for c in on_lines)}</div>' if on_lines else ""
+    return (f'<details class="changes-list" data-changes="{_esc(" ".join(ids))}">'
+            f'<summary class="changes-head">{count}{where}{bad}</summary>'
+            f'<div class="changes-body"><span class="change-pending">loading the changes…</span></div>'
+            f'</details>{notes}')
+
+
 def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
     repo: Path = ctx["repo"]
 
     if block.type == "changes":
-        visible = block.attrs.get("show", "collapsed") == "visible"
-        cards = []
-        for change_id in block.change_ids:
-            change = ctx["ledger"].resolve(change_id)
-            if change is None:
-                cards.append(f'<div class="change missing"><code>{_esc(change_id)}</code> is not in the ledger</div>')
-                continue
-            body = ""
-            diff_path: Path = ctx["paths"].change_diff(change.id)
-            if change.has_body and diff_path.is_file():
-                body = diff_path.read_text(encoding="utf-8", errors="replace")
-            cards.append(_change_card(change, body, open_by_default=visible))
-            on_lines = [c for c in ctx["comments"] if c.change == change.id]
-            if on_lines:
-                cards.append(f'<div class="line-comments">{"".join(_comment_card(c) for c in on_lines)}</div>')
         commentary = render_markdown(block.prose, repo=repo)
-        return f'<section class="changes">{commentary}{"".join(cards)}</section>'
+        if block.attrs.get("show", "collapsed") != "visible":
+            return f'<section class="changes">{commentary}{_lazy_changes(block, ctx)}</section>'
+        cards = change_cards(block.change_ids, ledger=ctx["ledger"], paths=ctx["paths"], visible=True,
+                             comments=ctx["comments"])
+        return f'<section class="changes">{commentary}{cards}</section>'
 
     if block.type == "example":
         return _example_html(block, ctx)
@@ -255,7 +295,13 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
         discharges = ""
         if block.discharges:
             ids = " ".join(f"<code>{_esc(i)}</code>" for i in block.discharges)
-            discharges = f'<div class="discharges">discharges {ids}</div>'
+            count = len(block.discharges)
+            # A long list is folded: it is bookkeeping, and a hundred ids above the options push them off screen.
+            if count > _DISCHARGES_SHOWN:
+                discharges = (f'<details class="discharges"><summary>discharges {count} changes</summary>'
+                              f'{ids}</details>')
+            else:
+                discharges = f'<div class="discharges">discharges {ids}</div>'
 
         if answer is not None and not answer.tentative:
             body = _answer_card(answer, repo=repo)

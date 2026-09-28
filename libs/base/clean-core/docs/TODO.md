@@ -182,6 +182,12 @@ Add entries as we discover them, and remove them as they land.
   The cost is a sweep: tests that block get `#if !CC_NEVER_BLOCK` or become async, and the few code paths that branch on it say so.
   Meanwhile sg has no blocking spellings of its own left, and `sv::viewer`'s synchronous frame loop is the one caller of `async_blocking_get` a wasm build would reach.
 
+- **No general cancellation token.**
+  `cc::async` can fail with a `cancelled` error, but nothing lets a caller *ask* running work to stop.
+  `cnet::cancel_token` is the one token in the repo — copyable, thread-safe, hierarchical — and it is scoped to clean-net's socket operations.
+  The first user outside clean-net is `sgl lsp`, which stops a stale test run with a bare `cc::atomic<bool>`, read between tests and by SGL's interpreter.
+  Generalising cnet's token into clean-core is the candidate; [async.md](systems/async.md) lists cancellation propagation through a graph as a follow-up beside it.
+
 - **The async-vs-direct tax in `tests/benchmarks/async/async-benchmark.cc` is not believable.**
   A 512-node chain reports 423x over the direct analog, off a direct baseline of 0.36 ns per step — under one cycle for a call plus an add.
   The direct side is almost certainly folding despite the XOR-into-sink, so the column is measuring the optimizer rather than the machinery, and every tax in that file is suspect by the same argument.

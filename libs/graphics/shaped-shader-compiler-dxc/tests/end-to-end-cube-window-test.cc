@@ -216,7 +216,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::uniform_buffer,
+        .type = sg::binding_type::constants_buffer,
         .block_size = isize(sizeof(tg::mat4f)),
     };
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);

@@ -55,12 +55,11 @@ TEST("sg metal - copy usage needs no metal bit")
     // So the two sg flags that say so map to nothing, and a copy-only texture asks for no usage bits.
     CHECK(mtl::texture_usage_of(sg::texture_usage::copy_src | sg::texture_usage::copy_dst) == MTL::TextureUsageUnknown);
 
-    CHECK(mtl::texture_usage_of(sg::texture_usage::readonly_texture) == MTL::TextureUsageShaderRead);
+    CHECK(mtl::texture_usage_of(sg::texture_usage::texture) == MTL::TextureUsageShaderRead);
     CHECK(mtl::texture_usage_of(sg::texture_usage::render_target) == MTL::TextureUsageRenderTarget);
 
-    // A read-write texture is readable too — Metal spells the two bits separately where sg has one usage.
-    CHECK(mtl::texture_usage_of(sg::texture_usage::readwrite_texture)
-          == (MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite));
+    // An image is readable too — Metal spells the two bits separately where sg has one usage.
+    CHECK(mtl::texture_usage_of(sg::texture_usage::image) == (MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite));
 }
 
 ASYNC_TEST("sg metal - a texture round-trips through inline transfer")
@@ -127,12 +126,12 @@ TEST("sg metal - a one-face view of a cube is a 2D texture")
                                                        .height = 32,
                                                        .mip_levels = 1,
                                                        .is_cube = true,
-                                                       .usage = sg::texture_usage::readonly_texture});
+                                                       .usage = sg::texture_usage::texture});
     REQUIRE(texture != nullptr);
 
     // Face 2 alone, which is where reusing the texture's own type asks for a one-slice Cube.
     auto* const face = ctx->texture_views().acquire(
-        {.access = sg::view_class::readonly,
+        {.bound_as = sg::view_class::texture,
          .texture = texture,
          .view_dimension = sg::texture_view_dimension::tex_2d,
          .range = {{.start = 0, .end = 1}, {.start = 2, .end = 3}, {.start = 0, .end = 1}}});
@@ -141,7 +140,7 @@ TEST("sg metal - a one-face view of a cube is a 2D texture")
 
     // And the whole cube, in its own format and shape, is the texture itself rather than a minted view.
     auto* const whole = ctx->texture_views().acquire(
-        {.access = sg::view_class::readonly,
+        {.bound_as = sg::view_class::texture,
          .texture = texture,
          .view_dimension = sg::texture_view_dimension::cube,
          .range = {{.start = 0, .end = 1}, {.start = 0, .end = 6}, {.start = 0, .end = 1}}});
@@ -163,11 +162,11 @@ ASYNC_TEST("sg metal - a cached view is evicted with its texture")
                                                            .width = 32,
                                                            .height = 32,
                                                            .mip_levels = 4,
-                                                           .usage = sg::texture_usage::readonly_texture});
+                                                           .usage = sg::texture_usage::texture});
         REQUIRE(texture != nullptr);
 
         auto* const mip = ctx->texture_views().acquire(
-            {.access = sg::view_class::readonly,
+            {.bound_as = sg::view_class::texture,
              .texture = texture,
              .view_dimension = sg::texture_view_dimension::tex_2d,
              .range = {{.start = 1, .end = 2}, {.start = 0, .end = 1}, {.start = 0, .end = 1}}});

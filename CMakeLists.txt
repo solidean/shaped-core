@@ -82,6 +82,13 @@ endif()
 # what you are chasing is in mimalloc's own behavior.
 option(SC_MIMALLOC "Back the default memory resource with mimalloc; OFF uses the global operator new" ON)
 
+# Check typed-geometry's wide-arithmetic claims at runtime: the result width a tg::mul<R> or tg::add<R> names, a shift
+# amount, a float converted into a fixed_int.
+# These sit in the hottest loops of exact geometry predicates, which is why they are not CC_ASSERTs and default OFF.
+# A whole-build switch, never per-target: a header-only check compiled two ways in one program is an ODR violation.
+# The debug-nopch presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
+option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and preconditions at runtime" OFF)
+
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
 #

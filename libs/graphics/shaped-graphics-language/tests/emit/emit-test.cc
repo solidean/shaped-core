@@ -204,48 +204,33 @@ TEST("sgl emit - a group's plain member is a field of the constant buffer the gr
                                0, target::wgsl);
     REQUIRE(e.errors.size() == 1);
     CHECK(e.errors[0].kind == sgl::emit::error_kind::unsupported);
-    CHECK(e.errors[0].detail == "a member of type 'bool' in a binding: 'scene.lit'");
+    CHECK(e.errors[0].detail
+          == "a member of type 'bool' in a binding: 'scene.lit', whose bool has no layout; bool32 has one");
 }
 
-TEST("sgl emit - an inline block whose members would sit elsewhere in one target than in another is an error")
+TEST("sgl emit - a group's constant buffer states every member's offset on vulkan, so no compiler flag lays it out")
 {
-    CHECK(errors_of(with_edges("@inline binding look:\n"
-                               "    scale: float\n"
-                               "    tint: float3\n"
-                               "\n"
-                               "@pixel fun main_ps(p: pixel_input){look} -> frame:\n"
-                               "    return {\n"
-                               "        color = float4(..look.tint, look.scale)\n"
-                               "    }\n"))
-          == "layout-mismatch 'look.tint' is at byte 4 in HLSL, at byte 16 in WGSL and at byte 16 in MSL\n");
-
-    // MSL alone disagrees here: its float3 is 16 bytes, so nothing fits into the tail HLSL and WGSL both fill.
-    CHECK(errors_of(with_edges("@inline binding look:\n"
-                               "    tint: float3\n"
-                               "    scale: float\n"
-                               "\n"
-                               "@pixel fun main_ps(p: pixel_input){look} -> frame:\n"
-                               "    return {\n"
-                               "        color = float4(..look.tint, look.scale)\n"
-                               "    }\n"))
-          == "layout-mismatch 'look.scale' is at byte 12 in HLSL, at byte 12 in WGSL and at byte 16 in MSL\n");
-
-    // A block of full rows packs alike everywhere, and vulkan states each offset since a push-constant block packs tight.
-    auto const hlsl = text_of(with_edges("@inline binding look:\n"
-                                         "    tint: float3\n"
-                                         "    to_world: mat4\n"
-                                         "    scale: float\n"
-                                         "\n"
-                                         "@pixel fun main_ps(p: pixel_input){look} -> frame:\n"
-                                         "    let n = look.to_world * p.normal\n"
-                                         "    return {\n"
-                                         "        color = float4(..n, look.scale)\n"
-                                         "    }\n"),
-                              target::hlsl_vulkan);
-    CHECK(hlsl.contains("    [[vk::offset(0)]] float3 tint;\n"));
-    CHECK(hlsl.contains("    [[vk::offset(16)]] column_major float4x4 to_world;\n"));
-    CHECK(hlsl.contains("    [[vk::offset(80)]] float scale;\n"));
-    CHECK(hlsl.contains("    const float3 n = mul(look.to_world, float4(p.normal, 0.0)).xyz;\n"));
+    auto const source
+        = with_edges("binding scene:\n"
+                     "    exposure: float\n"
+                     "    gamma: float\n"
+                     "    jitter: float2\n"
+                     "    tint: float3\n"
+                     "\n"
+                     "@pixel fun main_ps(p: pixel_input){scene} -> frame:\n"
+                     "    return {\n"
+                     "        color = float4(..scene.tint, scene.exposure + scene.gamma + scene.jitter.x)\n"
+                     "    }\n");
+    CHECK(emit_source(source, 0, target::hlsl_vulkan)
+              .text.contains("struct scene_data\n"
+                             "{\n"
+                             "    [[vk::offset(0)]] float exposure;\n"
+                             "    [[vk::offset(4)]] float gamma;\n"
+                             "    [[vk::offset(8)]] float2 jitter;\n"
+                             "    [[vk::offset(16)]] float3 tint;\n"
+                             "};\n"));
+    // dx12 gets none, as the push-constant block does not (EMIT-40): it packs a constant buffer this way by itself.
+    CHECK(!emit_source(source, 0, target::hlsl_dx12).text.contains("vk::offset"));
 }
 
 TEST("sgl emit - a direction is transformed with w = 0, and WGSL parenthesizes the product it swizzles")

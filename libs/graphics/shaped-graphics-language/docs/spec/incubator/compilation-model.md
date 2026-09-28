@@ -62,10 +62,6 @@ On Metal that means bindings take the first buffer indices and vertex buffers co
 Matrix layout is the first case: column-major, the vector on the right, and a `tg::mat4f` uploads as its bytes.
 A very good reason looks like the transformation matrix of a ray tracing instance, whose layout and meaning the APIs give.
 
-**Reflection should come from SGL itself, sooner rather than later.**
-It can be more precise and more consistent than what each target's compiler reports.
-The first path takes it from the downstream compilers.
-
 **The prelude is a file on disk**, written in SGL, that the compiler reads and places in front of the program.
 That needs no multi-file compilation.
 
@@ -92,5 +88,7 @@ That needs no multi-file compilation.
 * Whether on-demand compilation is recursive or asynchronous.
 * How a dependency cycle is reported when its loop passes through a type expression.
 * Whether a file without a `module` line is a module of its own.
+* How the files of a module are found.
+  What is settled: the compiler takes a project as in-memory sources and never reads a file; finding the files of each module, and their text, happens outside its core.
 * How an inlined early `return` is written in targets that have no `goto`.
 * How much of an inlined program's source structure the readable text can keep.

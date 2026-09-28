@@ -134,13 +134,13 @@ public:
 
         auto features = VkPhysicalDeviceFeatures{};
         vkGetPhysicalDeviceFeatures(_physical_device, &features);
-        _extended_storage_formats = features.shaderStorageImageExtendedFormats == VK_TRUE;
+        _extended_image_formats = features.shaderStorageImageExtendedFormats == VK_TRUE;
 
         // shaderStorageImageExtendedFormats does not cover bgra8_unorm, whose storage is asked per format.
         auto bgra8 = VkFormatProperties{};
         vkGetPhysicalDeviceFormatProperties(_physical_device, VK_FORMAT_B8G8R8A8_UNORM, &bgra8);
         if ((bgra8.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
-            _extended_storage_formats = false;
+            _extended_image_formats = false;
 
         // Linear filtering of the three 32-bit float formats is optional in Vulkan, so it is asked per format.
         _float32_filtering = true;
@@ -165,6 +165,9 @@ public:
 
     // create_vulkan_context fills this in once it has picked a physical device.
     using sg::context::set_adapter_info;
+
+    /// The context's stat totals, for the transfer systems that count into them.
+    [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
 
     /// Whether this device has the ray-tracing extensions, which are optional above the required floor.
     /// Read by every command list's cmd.raytracing.is_supported(), so a device without them reports honestly
@@ -242,13 +245,14 @@ public:
         case sg::feature::geometry_shader:
         case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
-        case sg::feature::readwrite_storage_formats:
+        case sg::feature::readwrite_image_formats:
         case sg::feature::unaligned_block_compression:
+        case sg::feature::multisampled_array_textures:
             return true;
         case sg::feature::float32_filtering:
             return _float32_filtering;
-        case sg::feature::extended_storage_formats:
-            return _extended_storage_formats;
+        case sg::feature::extended_image_formats:
+            return _extended_image_formats;
         }
         return false;
     }
@@ -640,7 +644,7 @@ public:
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;
-    void advance_epoch() override;
+    void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override;
     void retire_completed_epochs() override;
     void block_until_submissions_complete() override;
@@ -775,7 +779,7 @@ public:
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed
     bool _float32_filtering = false;
-    bool _extended_storage_formats = false;
+    bool _extended_image_formats = false;
 
     // The device's memory types, read once at construction: they never change, and a staging ring allocates far too
     // often to re-query them per allocation.

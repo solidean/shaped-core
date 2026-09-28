@@ -174,16 +174,31 @@ void dx12_command_list::flush_barriers()
     // Flush every resource whose access was declared since the last flush.
     // Flushing here rather than per declare merges the several declares of a resource bound more than once to this op into one barrier carrying the union of stages/access.
     // Each resource appears at most once here (track_* enqueues it only on the first binding this op), so each is flushed exactly once.
+    auto global = make_empty_global_barrier();
+    auto has_global = false;
     for (auto const& b : _pending_barrier_buffers)
         if (auto const bar = b->flush_access(slot()); bar.needed)
-            _pending_buffer_barriers.push_back(make_buffer_barrier(b->_resource.Get(), bar));
+        {
+            auto const barrier = make_buffer_barrier(b->_resource.Get(), bar);
+            if (_global_barrier_buffers.contains(b.get()))
+            {
+                merge_into_global_barrier(global, barrier);
+                has_global = true;
+            }
+            else
+                _pending_buffer_barriers.push_back(barrier);
+        }
+    _global_barrier_buffers.clear();
     for (auto const& t : _pending_barrier_textures)
         for (auto const& sb : t->flush_texture_access(slot()))
             _pending_texture_barriers.push_back(make_texture_barrier(t->_resource.Get(), sb.range, sb.barrier));
     _pending_barrier_buffers.clear();
     _pending_barrier_textures.clear();
 
-    submit_barriers(_list.Get(), _pending_buffer_barriers, _pending_texture_barriers);
+    auto const globals
+        = has_global ? cc::span<D3D12_GLOBAL_BARRIER const>(&global, 1) : cc::span<D3D12_GLOBAL_BARRIER const>();
+    count_barriers(_stats, _pending_buffer_barriers, _pending_texture_barriers, globals);
+    submit_barriers(_list.Get(), _pending_buffer_barriers, _pending_texture_barriers, globals);
     _pending_buffer_barriers.clear();
     _pending_texture_barriers.clear();
 }
@@ -231,6 +246,8 @@ void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeli
     // bound groups to one nullptr per group slot (a new pipeline may have a different slot count).
     _bound_pipeline_layout = dp->layout.get();
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->groups.size(), nullptr);
+    _bound_footprint = &pipeline.footprint();
+    _bound_footprint_owner = &pipeline;
 }
 
 void dx12_command_list::compute_bind_group(int group_index, sg::binding_group const& group)
@@ -302,24 +319,10 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
     // Declare each bound group's shader accesses before the dispatch: the tracker emits any intra-list
     // hazard barrier (e.g. a prior copy_write → shader_read RAW, or a WAW between two dispatches).
     // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
-    for (auto const* bound_group : _bound_groups)
-    {
-        if (bound_group == nullptr)
-            continue;
-
-        for (auto const& view : bound_group->hazard_views)
-            if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flag::compute, sg::shader_access_of(view.access));
-
-        // Bound textures also transition to the layout their access class needs (a sampled texture to
-        // shader_readonly, a storage texture to shader_readwrite) — the inferred layout is shader_layout_of.
-        for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flag::compute,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
-    }
+    declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
-    declare_array_accesses();
+    declare_array_accesses(_bound_footprint_owner, sg::pipeline_stage_flag::compute);
 
     // Emit every hazard the bound resources declared, batched, right before the dispatch consumes them.
     flush_barriers();
@@ -347,6 +350,8 @@ void dx12_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const& 
 
     _bound_pipeline_layout = rp->layout.get();
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->groups.size(), nullptr);
+    _bound_footprint = &pipeline.footprint();
+    _bound_footprint_owner = &pipeline;
 }
 
 void dx12_command_list::raytracing_bind_group(int group_index, sg::binding_group const& group)
@@ -380,22 +385,10 @@ void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table con
 
     // Declare each bound group's accesses at the raytracing stage (a bound TLAS surfaces as accel_read), same
     // rhythm as compute_dispatch.
-    for (auto const* bound_group : _bound_groups)
-    {
-        if (bound_group == nullptr)
-            continue;
-
-        for (auto const& view : bound_group->hazard_views)
-            if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flag::raytracing, sg::shader_access_of(view.access));
-
-        for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flag::raytracing,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
-    }
+    declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::raytracing);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
-    declare_array_accesses();
+    declare_array_accesses(_bound_footprint_owner, sg::pipeline_stage_flag::raytracing);
 
     // The shader table buffer is read by the fixed-function ray dispatch.
     track_buffer_access(dt->buffer, sg::pipeline_stage_flag::raytracing, sg::access_flag::shader_read);
@@ -433,77 +426,140 @@ void dx12_command_list::compute_declare_array_texture_access(cc::string_view bin
     _pending_array_texture_declares.push_back(cc::move(declare));
 }
 
-void dx12_command_list::declare_array_accesses()
+void dx12_command_list::declare_group_accesses(cc::span<dx12_binding_group const* const> groups,
+                                               sg::impl::pipeline_footprint const* footprint,
+                                               sg::pipeline_stage_flags op_stages)
 {
-    // The bound groups' array bindings, resolved by name — also the accounting set: every array binding must be
-    // covered by a declaration, since which elements a shader indexes cannot be inferred and silently skipping
-    // one would leave its resources untracked (wrong layouts, missed hazards).
+    for (auto group = 0; group < int(groups.size()); ++group)
+    {
+        auto const* bound_group = groups[group];
+        if (bound_group == nullptr)
+            continue;
+
+        for (auto const& view : bound_group->hazard_views)
+            if (view.buffer)
+                if (auto const a = sg::access_at(footprint, group, view.binding, view.bound_as, op_stages); a.has_value())
+                    track_buffer_access(view.buffer, a.value().stages, a.value().access);
+
+        // A bound texture also moves to the layout its view class needs, a sampled one to shader_texture and a
+        // storage one to shader_image, but only where the code touches it at all.
+        for (auto const& tv : bound_group->texture_hazard_views)
+            if (auto const a = sg::access_at(footprint, group, tv.binding, tv.bound_as, op_stages); a.has_value())
+                track_texture_access(tv.texture, tv.range, a.value().stages, a.value().access,
+                                     sg::shader_layout_of(tv.bound_as));
+    }
+}
+
+void dx12_command_list::declare_array_accesses(void const* pipeline, sg::pipeline_stage_flags op_stages)
+{
+    // Which elements of an array a shader indexes cannot be inferred, so the caller declares them per dispatch.
+    // How those declarations meet what the code does to the array is sg::impl::plan_array_declarations' to decide.
     auto const find_array_binding = [&](cc::string_view name, bool want_texture) -> dx12_array_binding const*
     {
-        for (auto const* bound_group : _bound_groups)
-        {
-            if (bound_group == nullptr)
-                continue;
-            for (auto const& ab : bound_group->array_bindings)
-                if (ab.name == name && ab.is_texture == want_texture)
-                    return &ab;
-        }
+        for (auto group = 0; group < int(_bound_groups.size()); ++group)
+            if (_bound_groups[group] != nullptr)
+                for (auto const& ab : _bound_groups[group]->array_bindings)
+                    if (ab.name == name && ab.is_texture == want_texture)
+                        return &ab;
         return nullptr;
     };
 
+    // A mistake in the host's own declarations asserts, whatever the code does with the array.
     for (auto const& declare : _pending_array_buffer_declares)
     {
-        auto const* ab = find_array_binding(declare.name, false);
+        auto const* const ab = find_array_binding(declare.name, false);
         CC_ASSERT(ab != nullptr, "declare_array_buffer_access names no buffer array binding of a bound group");
         for (auto const& e : declare.elements)
         {
-            CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of "
-                                                                          "range");
-            auto const& element = ab->elements[e.index];
-            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (a null-handle view)");
-            track_buffer_access(element.buffer, e.stages, e.access);
+            CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of range");
+            CC_ASSERT(!ab->elements[e.index].is_vacant(), "declared array element is vacant (a null-handle view)");
         }
     }
-
     for (auto const& declare : _pending_array_texture_declares)
     {
-        auto const* ab = find_array_binding(declare.name, true);
+        auto const* const ab = find_array_binding(declare.name, true);
         CC_ASSERT(ab != nullptr, "declare_array_texture_access names no texture array binding of a bound group");
         for (auto const& e : declare.elements)
         {
-            CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of "
-                                                                          "range");
-            auto const& element = ab->elements[e.index];
-            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (a null-handle view)");
-            track_texture_access(element.texture, element.range, e.stages, e.access, e.layout);
+            CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of range");
+            CC_ASSERT(!ab->elements[e.index].is_vacant(), "declared array element is vacant (a null-handle view)");
         }
     }
 
-#if CC_ASSERT_ENABLED
-    // The reverse direction of the accounting: an undeclared array binding is a hard error, not "no access" —
-    // an empty-span declaration is the way to say a dispatch touches no elements of an array.
-    for (auto const* bound_group : _bound_groups)
+    for (auto group = 0; group < int(_bound_groups.size()); ++group)
     {
-        if (bound_group == nullptr)
+        if (_bound_groups[group] == nullptr)
             continue;
-        for (auto const& ab : bound_group->array_bindings)
+        for (auto const& ab : _bound_groups[group]->array_bindings)
         {
-            bool declared = false;
+            auto declared = sg::impl::array_declarations();
+            auto const gather = [&](auto const& declares)
+            {
+                for (auto const& declare : declares)
+                    if (declare.name == ab.name)
+                    {
+                        declared.named = true;
+                        for (auto const& e : declare.elements)
+                        {
+                            declared.any_element = true;
+                            declared.access |= e.access;
+                        }
+                    }
+            };
             if (ab.is_texture)
-            {
-                for (auto const& declare : _pending_array_texture_declares)
-                    declared |= declare.name == ab.name;
-            }
+                gather(_pending_array_texture_declares);
             else
+                gather(_pending_array_buffer_declares);
+
+            auto use = cc::optional<sg::impl::slot_use>();
+            if (_bound_footprint != nullptr && _bound_footprint->is_known())
+                use = _bound_footprint->use_of(group, ab.binding);
+            auto const plan = sg::impl::plan_array_declarations(pipeline, ab.name, use, ab.bound_as, op_stages, declared);
+
+            switch (plan.how)
             {
-                for (auto const& declare : _pending_array_buffer_declares)
-                    declared |= declare.name == ab.name;
+            case sg::impl::array_plan::mode::skip:
+                break;
+            case sg::impl::array_plan::mode::as_declared:
+                if (ab.is_texture)
+                {
+                    for (auto const& declare : _pending_array_texture_declares)
+                        if (declare.name == ab.name)
+                            for (auto const& e : declare.elements)
+                            {
+                                auto const& element = ab.elements[e.index];
+                                track_texture_access(element.texture, element.range, e.stages, e.access | plan.widen_by,
+                                                     e.layout);
+                            }
+                }
+                else
+                {
+                    for (auto const& declare : _pending_array_buffer_declares)
+                        if (declare.name == ab.name)
+                            for (auto const& e : declare.elements)
+                                track_buffer_access(ab.elements[e.index].buffer, e.stages, e.access | plan.widen_by);
+                }
+                break;
+            case sg::impl::array_plan::mode::cover_all:
+                // One global barrier for the buffers rather than one per element.
+                for (auto const& element : ab.elements)
+                {
+                    if (element.buffer != nullptr)
+                    {
+                        track_buffer_access(element.buffer, plan.cover_stages, plan.cover_access);
+                        _global_barrier_buffers.insert(element.buffer.get());
+                    }
+                    else if (element.texture != nullptr)
+                    {
+                        // A global barrier moves no layout, so a texture still gets its own transition where it needs one.
+                        track_texture_access(element.texture, element.range, plan.cover_stages, plan.cover_access,
+                                             sg::shader_layout_of(ab.bound_as));
+                    }
+                }
+                break;
             }
-            CC_ASSERT(declared, "a bound array binding has no declare_array_*_access for this dispatch (declare an "
-                                "empty span if it is unused)");
         }
     }
-#endif
 
     _pending_array_buffer_declares.clear();
     _pending_array_texture_declares.clear();
@@ -683,7 +739,6 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
 {
     // Barrier resolution plus ExecuteCommandLists — the per-submit CPU cost a frame pays whatever the GPU does.
     CC_RECORD_SCOPE("sg.command_list.submit");
-    CC_RECORD_ACCUM("sg.submits", cc::rec::unit_count, 1);
 
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
@@ -719,7 +774,10 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                       "a declared access was never flushed by a GPU op");
 
             if (!entry_barriers.empty())
+            {
+                count_barriers(_stats, {}, entry_barriers);
                 submit_barriers(acquire_pre_list(*cmd), {}, entry_barriers);
+            }
             if (cmd->_pre_list)
             {
                 HRESULT const pre_closed = cmd->_pre_list->Close();
@@ -771,6 +829,9 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
 
             // Stamp this list's deferred downloads with the token and hand them to the actor under the same lock, so the actor's copy order matches submission — and thus ring-allocation — order.
             _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
+
+            _stats.fold(sg::impl::recorded_stats(*cmd));
+            _stats.add(sg::stat::command_lists_submitted);
             return t;
         });
 

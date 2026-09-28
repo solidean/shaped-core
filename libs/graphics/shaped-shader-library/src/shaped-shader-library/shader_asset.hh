@@ -40,6 +40,16 @@ public:
     /// For tests and tools that have no context.
     [[nodiscard]] sg::async_compiled_shader acquire(sg::shader_format format) const;
 
+    /// Whether a registered compiler connects this shader's language to `format`.
+    ///
+    /// Asked BEFORE acquiring, by a caller that would rather report "not supported" than hand back a failed shader —
+    /// a support query, say, whose answer is a promise about what a later call will do.
+    /// False for an asset whose library is gone, and for one whose package was never added to a library at all.
+    [[nodiscard]] bool can_build(sg::shader_format format) const;
+
+    /// Whether `can_build` holds for any format `ctx` accepts, which is exactly what `acquire(ctx)` will look for.
+    [[nodiscard]] bool can_acquire(sg::context const& ctx) const;
+
     /// Bumped whenever a reload replaces the shader for any format.
     /// Cache it to know when to rebuild a pipeline; it only moves inside acquire(), which is where a staged compile is promoted.
     [[nodiscard]] u64 generation() const;
@@ -104,13 +114,6 @@ private:
     mutable cc::mutex<state> _state;
 };
 
-/// One group an entry point lists: the position that numbers it, and the bindings its generated type declares.
-struct slib::listed_group
-{
-    int position = 0;
-    cc::span<sg::binding const> bindings;
-};
-
 namespace slib
 {
 /// The compute pipeline of `asset` over `layout`, once the shader has compiled for `ctx`.
@@ -122,13 +125,4 @@ namespace slib
 [[nodiscard]] sg::async_compute_pipeline acquire_compute_pipeline(sg::context* ctx,
                                                                   shader_asset_handle asset,
                                                                   sg::pipeline_layout_handle layout);
-
-/// What keeps `compiled`'s reflection from fitting the groups `entry` lists, one line each; empty where it fits.
-///
-/// sg::describe_layout_misfit against the layout the list states, which is where the rules are.
-/// `inline_block` is the listed `@inline` binding.
-[[nodiscard]] cc::string reflection_mismatch(cc::string_view entry,
-                                             sg::compiled_shader const& compiled,
-                                             cc::span<listed_group const> listed,
-                                             cc::optional<sg::binding> const& inline_block);
 } // namespace slib

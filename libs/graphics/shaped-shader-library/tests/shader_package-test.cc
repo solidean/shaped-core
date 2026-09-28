@@ -132,7 +132,7 @@ TEST("slib - a binding entry generates the group its namespace declares", exclus
     // Declaration order, and one counter across register classes — the sampler takes index 1, not s0.
     CHECK(bindings[0].name == "albedo");
     CHECK(bindings[0].index == 0);
-    CHECK(bindings[0].type == sg::binding_type::readonly_texture);
+    CHECK(bindings[0].type == sg::binding_type::texture);
     CHECK(bindings[0].texture_dimension.value() == sg::texture_view_dimension::tex_2d);
 
     CHECK(bindings[1].name == "linear_sampler");
@@ -141,7 +141,8 @@ TEST("slib - a binding entry generates the group its namespace declares", exclus
 
     CHECK(bindings[2].name == "histogram");
     CHECK(bindings[2].index == 2);
-    CHECK(bindings[2].type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(bindings[2].type == sg::binding_type::buffer);
+    CHECK(bindings[2].access == sg::access_mode::read_write);
 
     // The group number is both the SPIR-V set and the HLSL space, so every binding carries it twice.
     for (auto const& binding : bindings)

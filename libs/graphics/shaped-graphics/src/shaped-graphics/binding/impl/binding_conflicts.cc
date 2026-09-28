@@ -17,17 +17,16 @@ namespace
 
     switch (b.type)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         return 1; // b
     case sg::binding_type::sampler:
         return 2; // s
-    case sg::binding_type::readwrite_structured_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
-    case sg::binding_type::readwrite_texture:
-        return 3; // u
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readonly_raw_buffer:
-    case sg::binding_type::readonly_texture:
+    case sg::binding_type::image:
+        return 3; // u, even for an image the shader only reads
+    case sg::binding_type::buffer:
+    case sg::binding_type::bytes:
+        return b.access == sg::access_mode::read ? 4 : 3; // t : u
+    case sg::binding_type::texture:
     case sg::binding_type::acceleration_structure:
         return 4; // t
     }
@@ -92,7 +91,7 @@ cc::optional<cc::string> sg::impl::find_binding_conflict(cc::span<compiled_shade
                         "group must declare it in one shared header, so both see the same numbering.",
                         describe(addr), other.binding->name, other.entry_point, b.name, shader->entry_point);
 
-                if (same_address && same_name && other.binding->type != b.type)
+                if (same_address && same_name && !sg::is_same_kind(*other.binding, b))
                     return cc::format("two stages declare '{}' at {} with different kinds, in '{}' and '{}'", b.name,
                                       describe(addr), other.entry_point, shader->entry_point);
 
