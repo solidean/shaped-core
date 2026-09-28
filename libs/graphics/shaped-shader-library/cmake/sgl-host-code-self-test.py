@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import sgl_description  # noqa: E402
 import sgl_host_code  # noqa: E402
 from sgl_description import SglFile  # noqa: E402
 
@@ -264,6 +265,46 @@ def a_packed_vertex_member_is_its_bytes_on_the_host_and_its_format_in_the_layout
     expect_in(".format = sg::vertex_attribute_format::rgba8_unorm", source, "a packed member's format")
     expect_in(".format = sg::vertex_attribute_format::u32", source, "an integer member's format, from its type")
     expect_in(".format = sg::vertex_attribute_format::vec3f", source, "a float member's format, from its type")
+
+
+# ---- a pipeline -------------------------------------------------------------------------------------------------------
+
+# Every stage filled, and a vertex stage that draws from no vertex buffer.
+TESSELLATED = {
+    "name": "tessellated",
+    "vertex": "vs",
+    "tessellation_control": "tc",
+    "tessellation_evaluation": "te",
+    "geometry": "gs",
+    "pixel": "ps",
+    "vertex_input": "",
+    "target_set": "",
+    "targets": [],
+    "layout": ["shadow"],
+    "inline": "",
+    "open": [],
+    "settings": [],
+    "frozen": ["layout = shadow@0", "inline constants = ", "vertex input = ", "target set = ",
+               "stages = vs, tc, te, gs, ps", "features = geometry_shader, tessellation_shader"],
+}
+
+
+@test
+def a_pipeline_names_every_stage_in_pipeline_definitions_field_order():
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)], pipelines=[(FILE, TESSELLATED)])
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {FILE.path: "shadow"}, {})
+    # a designated initializer follows the declaration, which is not the order a vertex passes the stages
+    fields = [".vertex = &ns::shadow.vs,", ".pixel = &ns::shadow.ps,", ".geometry = &ns::shadow.gs,",
+              ".tessellation_control = &ns::shadow.tc,", ".tessellation_evaluation = &ns::shadow.te,"]
+    positions = []
+    for f in fields:
+        expect_in(f, source, "a stage of the pipeline")
+        positions.append(source.index(f))
+    expect_equal(positions, sorted(positions), "the stages in pipeline_definition's field order")
+    expect_in('    "stages = vs, tc, te, gs, ps",\n', source, "the stages frozen, in the order a vertex passes them")
+    expect_not_in(".vertex_input", source, "a vertex stage that draws from no vertex buffer")
+    header = sgl_host_code.emit_pipelines(entries, {FILE.path: "shadow"})
+    expect_in("vs, tc, te, gs and ps, writing depth alone", header, "the stages the doc comment names")
 
 
 # ---- the runner -----------------------------------------------------------------------------------------------------
