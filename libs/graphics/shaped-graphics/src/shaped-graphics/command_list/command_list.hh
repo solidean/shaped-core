@@ -142,6 +142,18 @@ protected:
     void close_rendering();
     void bind_raster_pipeline(raster_pipeline const& pipeline);
 
+    // What every facade calls instead of the bind, dispatch and draw seams.
+    // They keep what is bound, so a dispatch or a draw that binds one buffer to write and to read is refused
+    // (impl::find_write_aliasing), and then forward.
+    void bind_compute_pipeline(compute_pipeline const& pipeline);
+    void bind_compute_group(int group_index, binding_group const& group);
+    void dispatch(int x, int y, int z);
+    void bind_raster_group(int group_index, binding_group const& group);
+    void bind_raster_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views);
+    void bind_raster_index_buffer(index_buffer_view const& view);
+    void draw(draw_config const& config);
+    void draw_indexed(draw_indexed_config const& config);
+
     // Raster draw recording (reached through cmd.raster / cmd.raster.manual).
     // bind_pipeline sets the graphics PSO + root signature and the IA topology, bind_group binds through
     // that root signature, and the set/bind ops configure IA + dynamic state.
@@ -205,6 +217,14 @@ protected:
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
 
 private:
+    void check_raster_aliasing(bool indexed) const;
+
     cc::string _rendering_target_set;                       // of the open rendering, or empty
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
+
+    // What is bound, by slot; the backend keeps each bound object alive for the recording, so the pointers stay valid.
+    binding_group const* _compute_groups[max_binding_groups] = {};
+    binding_group const* _raster_groups[max_binding_groups] = {};
+    raw_buffer const* _vertex_buffers[max_vertex_buffers] = {};
+    raw_buffer const* _index_buffer = nullptr;
 };

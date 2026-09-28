@@ -88,7 +88,80 @@ void command_list::close_rendering()
 {
     _rendering_target_set.clear();
     _rendering_formats = {};
+    // A rendering scope binds nothing the next one inherits.
+    for (auto& g : _raster_groups)
+        g = nullptr;
+    for (auto& vb : _vertex_buffers)
+        vb = nullptr;
+    _index_buffer = nullptr;
     raster_end_rendering();
+}
+
+void command_list::bind_compute_pipeline(compute_pipeline const& pipeline)
+{
+    // Every backend drops its bound groups with a new pipeline, so the tracking here does too.
+    for (auto& g : _compute_groups)
+        g = nullptr;
+    compute_bind_pipeline(pipeline);
+}
+
+void command_list::bind_compute_group(int group_index, binding_group const& group)
+{
+    CC_ASSERT(group_index >= 0 && group_index < max_binding_groups, "binding-group slot out of range");
+    _compute_groups[group_index] = &group;
+    compute_bind_group(group_index, group);
+}
+
+void command_list::dispatch(int x, int y, int z)
+{
+    if (auto const refusal = impl::find_write_aliasing(_compute_groups, {}); refusal.has_value())
+        CC_ASSERTF(false, "{}", refusal.value());
+    compute_dispatch(x, y, z);
+}
+
+void command_list::bind_raster_group(int group_index, binding_group const& group)
+{
+    CC_ASSERT(group_index >= 0 && group_index < max_binding_groups, "binding-group slot out of range");
+    _raster_groups[group_index] = &group;
+    raster_bind_group(group_index, group);
+}
+
+void command_list::bind_raster_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views)
+{
+    CC_ASSERT(first_slot >= 0 && first_slot + views.size() <= max_vertex_buffers, "vertex-buffer slot out of range");
+    for (auto i = isize(0); i < views.size(); ++i)
+        _vertex_buffers[first_slot + i] = views[i].buffer.get();
+    raster_bind_vertex_buffers(first_slot, views);
+}
+
+void command_list::bind_raster_index_buffer(index_buffer_view const& view)
+{
+    _index_buffer = view.buffer.get();
+    raster_bind_index_buffer(view);
+}
+
+void command_list::check_raster_aliasing(bool indexed) const
+{
+    raw_buffer const* reads[max_vertex_buffers + 1] = {};
+    for (auto i = 0; i < max_vertex_buffers; ++i)
+        reads[i] = _vertex_buffers[i];
+    reads[max_vertex_buffers] = indexed ? _index_buffer : nullptr;
+    if (auto const refusal = impl::find_write_aliasing(_raster_groups, reads); refusal.has_value())
+        CC_ASSERTF(false, "{}", refusal.value());
+}
+
+void command_list::draw(draw_config const& config)
+{
+    _stats.add(stat::draws);
+    check_raster_aliasing(false);
+    raster_draw(config);
+}
+
+void command_list::draw_indexed(draw_indexed_config const& config)
+{
+    _stats.add(stat::draws);
+    check_raster_aliasing(true);
+    raster_draw_indexed(config);
 }
 
 void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
@@ -117,6 +190,8 @@ void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
                    "this pipeline is built for {} samples, and the open rendering has {}", built.sample_count,
                    open.sample_count);
     }
+    for (auto& g : _raster_groups)
+        g = nullptr;
     raster_bind_pipeline(pipeline);
 }
 
@@ -152,23 +227,23 @@ void rendering_scope::bind_pipeline(raster_pipeline const& pipeline)
 }
 void rendering_scope::bind_group(int group_index, binding_group const& group)
 {
-    _cmd.raster_bind_group(group_index, group);
+    _cmd.bind_raster_group(group_index, group);
 }
 void rendering_scope::bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot, views);
+    _cmd.bind_raster_vertex_buffers(first_slot, views);
 }
 void rendering_scope::bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
+    _cmd.bind_raster_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
 }
 void rendering_scope::bind_vertex_buffer(vertex_buffer_view const& view, int slot)
 {
-    _cmd.raster_bind_vertex_buffers(slot, cc::span<vertex_buffer_view const>(&view, 1));
+    _cmd.bind_raster_vertex_buffers(slot, cc::span<vertex_buffer_view const>(&view, 1));
 }
 void rendering_scope::bind_index_buffer(index_buffer_view const& view)
 {
-    _cmd.raster_bind_index_buffer(view);
+    _cmd.bind_raster_index_buffer(view);
 }
 void rendering_scope::declare_array_buffer_access(cc::string_view binding_name,
                                                   cc::span<array_buffer_access const> elements)
@@ -202,13 +277,11 @@ void rendering_scope::set_inline_constants(cc::span<byte const> data, cc::option
 }
 void rendering_scope::draw(draw_config const& config)
 {
-    _cmd._stats.add(stat::draws);
-    _cmd.raster_draw(config);
+    _cmd.draw(config);
 }
 void rendering_scope::draw_indexed(draw_indexed_config const& config)
 {
-    _cmd._stats.add(stat::draws);
-    _cmd.raster_draw_indexed(config);
+    _cmd.draw_indexed(config);
 }
 
 void command_list_raster_manual_scope::begin_rendering(rendering_info const& info)
@@ -235,23 +308,23 @@ void command_list_raster_scope::bind_pipeline(raster_pipeline const& pipeline)
 }
 void command_list_raster_scope::bind_group(int group_index, binding_group const& group)
 {
-    _cmd.raster_bind_group(group_index, group);
+    _cmd.bind_raster_group(group_index, group);
 }
 void command_list_raster_scope::bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot, views);
+    _cmd.bind_raster_vertex_buffers(first_slot, views);
 }
 void command_list_raster_scope::bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
+    _cmd.bind_raster_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
 }
 void command_list_raster_scope::bind_vertex_buffer(vertex_buffer_view const& view, int slot)
 {
-    _cmd.raster_bind_vertex_buffers(slot, cc::span<vertex_buffer_view const>(&view, 1));
+    _cmd.bind_raster_vertex_buffers(slot, cc::span<vertex_buffer_view const>(&view, 1));
 }
 void command_list_raster_scope::bind_index_buffer(index_buffer_view const& view)
 {
-    _cmd.raster_bind_index_buffer(view);
+    _cmd.bind_raster_index_buffer(view);
 }
 void command_list_raster_scope::declare_array_buffer_access(cc::string_view binding_name,
                                                             cc::span<array_buffer_access const> elements)
@@ -285,13 +358,11 @@ void command_list_raster_scope::set_inline_constants(cc::span<byte const> data, 
 }
 void command_list_raster_scope::draw(draw_config const& config)
 {
-    _cmd._stats.add(stat::draws);
-    _cmd.raster_draw(config);
+    _cmd.draw(config);
 }
 void command_list_raster_scope::draw_indexed(draw_indexed_config const& config)
 {
-    _cmd._stats.add(stat::draws);
-    _cmd.raster_draw_indexed(config);
+    _cmd.draw_indexed(config);
 }
 
 void command_list_raster_manual_scope::bind_pipeline(raster_pipeline const& pipeline)
@@ -300,23 +371,23 @@ void command_list_raster_manual_scope::bind_pipeline(raster_pipeline const& pipe
 }
 void command_list_raster_manual_scope::bind_group(int group_index, binding_group const& group)
 {
-    _cmd.raster_bind_group(group_index, group);
+    _cmd.bind_raster_group(group_index, group);
 }
 void command_list_raster_manual_scope::bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot, views);
+    _cmd.bind_raster_vertex_buffers(first_slot, views);
 }
 void command_list_raster_manual_scope::bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot)
 {
-    _cmd.raster_bind_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
+    _cmd.bind_raster_vertex_buffers(first_slot, cc::span<vertex_buffer_view const>(views.begin(), isize(views.size())));
 }
 void command_list_raster_manual_scope::bind_vertex_buffer(vertex_buffer_view const& view, int slot)
 {
-    _cmd.raster_bind_vertex_buffers(slot, cc::span<vertex_buffer_view const>(&view, 1));
+    _cmd.bind_raster_vertex_buffers(slot, cc::span<vertex_buffer_view const>(&view, 1));
 }
 void command_list_raster_manual_scope::bind_index_buffer(index_buffer_view const& view)
 {
-    _cmd.raster_bind_index_buffer(view);
+    _cmd.bind_raster_index_buffer(view);
 }
 void command_list_raster_manual_scope::declare_array_buffer_access(cc::string_view binding_name,
                                                                    cc::span<array_buffer_access const> elements)
@@ -350,12 +421,10 @@ void command_list_raster_manual_scope::set_inline_constants(cc::span<byte const>
 }
 void command_list_raster_manual_scope::draw(draw_config const& config)
 {
-    _cmd._stats.add(stat::draws);
-    _cmd.raster_draw(config);
+    _cmd.draw(config);
 }
 void command_list_raster_manual_scope::draw_indexed(draw_indexed_config const& config)
 {
-    _cmd._stats.add(stat::draws);
-    _cmd.raster_draw_indexed(config);
+    _cmd.draw_indexed(config);
 }
 } // namespace sg

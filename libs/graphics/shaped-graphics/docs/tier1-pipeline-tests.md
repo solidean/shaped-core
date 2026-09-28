@@ -43,8 +43,7 @@ A combinatorial sweep — every blend factor against every op — narrows to a c
 
 ## Binding semantics, executed
 
-- **One buffer written and read through two views of one dispatch** runs on dx12 and vulkan, and WebGPU refuses it even for disjoint ranges.
-  sg refuses nothing itself yet, so a program that does it works on two backends and fails validation on the third; the test skips on webgpu.
+- **A buffer written and read within one render pass but by different draws** is what WebGPU refuses at pass scope, which sg checks per draw only.
 - A buffer view's size, which SGL cannot observe yet: it has no buffer length, which WGSL's `arrayLength` and HLSL's `GetDimensions` both give.
 - Bound state from one rendering scope to the next, which wants a raster pipeline with a binding array; a dispatch's group not leaking into a draw is executed.
 

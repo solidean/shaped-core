@@ -110,7 +110,10 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
-    return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
+    auto group = _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
+    if (group.has_value())
+        impl::set_buffer_uses(*group.value(), impl::buffer_uses_of(views));
+    return group;
 }
 
 binding_group_handle context_persistent_scope::create_binding_group(binding_group_layout_handle layout,
@@ -135,7 +138,10 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
-    return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
+    auto group = _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
+    if (group.has_value())
+        impl::set_buffer_uses(*group.value(), impl::buffer_uses_of(views));
+    return group;
 }
 
 staging_binding_group_handle context_persistent_scope::create_staging_binding_group(binding_group_layout_handle layout)

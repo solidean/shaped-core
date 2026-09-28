@@ -198,46 +198,77 @@ ASYNC_INVOCABLE_TEST("sg - a buffer view's offset is where the shader's index 0 
     }
 }
 
-ASYNC_INVOCABLE_TEST("sg - a read-only and a read-write view of one buffer work side by side in one dispatch",
+ASYNC_INVOCABLE_TEST("sg - one buffer bound for writing and for reading in one dispatch is refused on every backend",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    // WebGPU refuses a buffer written in a dispatch and bound there another way too, even through disjoint ranges.
-    // sg does not refuse it itself yet, which libs/graphics/shaped-graphics/docs/tier1-pipeline-tests.md carries.
-    if (ctx->backend() == sg::backend_kind::webgpu)
-        SKIP("webgpu refuses one buffer both written and read in a dispatch");
 
-    // Quarter 1 of one buffer is the source view and quarter 2 the target view, beside bystanders in 0 and 3.
+    // WebGPU refuses a buffer written in a dispatch and bound there another way too, even through disjoint ranges.
+    // sg refuses it itself, on every backend, so a program that works on one backend works on all of them.
     constexpr int quarter = 64;
     auto const pipeline = co_await shaders::dispatch.copy_within.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::within>();
-    auto initial = cc::vector<i32>();
-    for (auto i = 0; i < 4 * quarter; ++i)
-        initial.push_back(i);
-    auto const all = ctx->persistent.create_buffer_from_data(cc::move(initial), sg::buffer_usage::readonly_buffer
-                                                                                    | sg::buffer_usage::readwrite_buffer
-                                                                                    | sg::buffer_usage::copy_src);
+    auto const usage
+        = sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    // No contents, so no upload is left running: nothing here executes.
+    auto const all
+        = sg::buffer<i32>::from_raw(ctx->persistent.create_raw_buffer(4 * quarter * isize(sizeof(i32)), usage));
+    auto const aliased = shaders::within{.source = all.as_readonly_buffer({.offset = quarter, .size = quarter}),
+                                         .target = all.as_readwrite_buffer({.offset = 2 * quarter, .size = quarter})};
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->persistent.create_binding_group(layout, aliased);
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    CHECK_ASSERTS(cmd->compute.dispatch_threads(quarter));
+    // A staging group's snapshot is checked the same way, where the device has staging groups.
+    if (ctx->supports(sg::feature::binding_arrays))
+    {
+        auto staging = ctx->persistent.create_staging_binding_group(layout);
+        staging->set_binding("within.source", aliased.source);
+        staging->set_binding("within.target", aliased.target);
+        auto const snapshot = staging->snapshot();
+        cmd->compute.bind_group(0, *snapshot);
+        CHECK_ASSERTS(cmd->compute.dispatch_threads(quarter));
+    }
+    ctx->drop_command_list(cc::move(cmd));
+    co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - two views that both write one buffer are allowed in one dispatch",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // `typed_step` shifts its ints and its uints, here two halves of one buffer, and WebGPU allows two writable views.
+    constexpr int count = 64;
+    auto const pipeline = co_await shaders::dispatch.typed_step.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::typed>();
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const halves = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_filled(2 * count, 8u), usage);
+    auto const vectors = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(count), usage);
+    auto const ints = sg::buffer<i32>::from_raw(halves.raw());
 
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
         *cmd, layout,
-        shaders::within{.source = all.as_readonly_buffer({.offset = quarter, .size = quarter}),
-                        .target = all.as_readwrite_buffer({.offset = 2 * quarter, .size = quarter})});
+        shaders::typed{.ints = ints.as_readwrite_buffer({.offset = 0, .size = count}),
+                       .uints = halves.as_readwrite_buffer({.offset = count, .size = count}),
+                       .vectors = vectors.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
-    cmd->compute.dispatch_threads(quarter);
-    auto const back = cmd->download.data_from_buffer(all);
+    cmd->compute.dispatch_threads(count);
+    auto const back = cmd->download.data_from_buffer(halves);
     ctx->submit_command_list(cc::move(cmd));
 
     auto const got = co_await back.data();
-    REQUIRE(got.size() == 4 * quarter);
-    for (auto i = 0; i < 4 * quarter; ++i)
-    {
-        auto const expected = i >= 2 * quarter && i < 3 * quarter ? i - quarter + 1 : i;
-        CHECK(got[i] == expected).context(cc::format("element {}", i));
-    }
+    REQUIRE(got.size() == 2 * count);
+    for (auto i = 0; i < 2 * count; ++i)
+        CHECK(got[i] == 4u).context(cc::format("element {}", i));
 }
 
 ASYNC_INVOCABLE_TEST("sg - two groups rebound between dispatches, and one group shared by two pipelines of one layout",
@@ -380,4 +411,6 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));
     CHECK((co_await back.data())[0] == 1); // the dispatch before the scope ran, gathering a 1
+    // The draw that asserted used the rects' vertex buffers, whose uploads nothing else waits on.
+    co_await ctx->idle_completion();
 }

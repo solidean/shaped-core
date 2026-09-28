@@ -747,6 +747,7 @@ cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its
 cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
+//   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pair)

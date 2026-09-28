@@ -182,7 +182,33 @@ cc::result<binding_group_handle> staging_binding_group::try_snapshot()
     CC_RETURN_IF_ERROR(r);
     _snapshot = cc::move(r.value());
     _dirty = false;
+
+    auto uses = cc::vector<impl::buffer_use>();
+    for (auto const& elements : _element_uses)
+        for (auto const& use : elements)
+            if (use.buffer != nullptr)
+                uses.push_back(use);
+    impl::set_buffer_uses(*_snapshot, cc::move(uses));
     return _snapshot;
+}
+
+void staging_binding_group::record_uses(binding_slot slot, int first_element, cc::span<raw_view const> views)
+{
+    auto const index = isize(u32(slot));
+    if (_element_uses.size() <= index)
+        _element_uses.resize_to_defaulted(index + 1);
+    auto& elements = _element_uses[index];
+    auto const count = isize(info_of(slot).declared->count);
+    if (elements.size() < count)
+        elements.resize_to_defaulted(count);
+    for (auto i = isize(0); i < views.size(); ++i)
+    {
+        auto const* buffer = try_as_buffer_view(views[i]);
+        elements[first_element + i]
+            = buffer != nullptr
+                ? impl::buffer_use{.buffer = buffer->buffer.get(), .writes = buffer->bound_as == view_class::readwrite}
+                : impl::buffer_use{};
+    }
 }
 
 void staging_binding_group::write_run(binding_slot slot, int first_element, cc::span<raw_view const> views)
@@ -225,6 +251,7 @@ void staging_binding_group::write_run(binding_slot slot, int first_element, cc::
     }
 
     write_view_descriptors(info.first_descriptor + first_element, b, views);
+    record_uses(slot, first_element, views);
     _dirty = true;
 }
 
@@ -240,6 +267,10 @@ void staging_binding_group::clear_run(binding_slot slot, int first_element, int 
         return;
 
     clear_view_descriptors(info.first_descriptor + first_element, b, count);
+    auto const index = isize(u32(slot));
+    if (index < _element_uses.size())
+        for (auto i = first_element; i < first_element + count && i < _element_uses[index].size(); ++i)
+            _element_uses[index][i] = {};
     _dirty = true;
 }
 } // namespace sg

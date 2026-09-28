@@ -103,6 +103,14 @@ For buffer and texture kinds they line up exactly: `view_class_of(binding)` and 
 A buffer's access picks its view class, `readonly` or `readwrite`; an image is `view_class::image` whatever its access, since its view carries none.
 That equivalence is what lets a binding validate a bound view with no backend involved, and it is why a binding's kind and access mirror the view's `(view_class, view_shape)` one-to-one.
 
+### A buffer written in a dispatch or a draw is bound no other way there
+
+**A dispatch or a draw that binds a buffer through a writable view asserts if any other view there reads that buffer**, whatever the ranges.
+That covers a read-only or constant view in any bound group, and the vertex and index buffers of a draw.
+WebGPU refuses it, so sg refuses it on every backend, and a program that runs on one backend runs on the others.
+Two writable views of one buffer are allowed, as WebGPU allows them.
+The command list keeps what each dispatch and draw binds, and each group records the buffers it binds as it is made (`impl::find_write_aliasing`).
+
 ## Features
 
 **A form some device lacks is refused where it is lacking, and refused alike on every backend.**

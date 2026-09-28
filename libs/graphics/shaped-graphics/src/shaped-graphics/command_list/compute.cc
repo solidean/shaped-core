@@ -18,24 +18,24 @@ void command_list_compute_scope::bind_pipeline(compute_pipeline const& pipeline)
     _bound_wg_x = wg.x;
     _bound_wg_y = wg.y;
     _bound_wg_z = wg.z;
-    _cmd.compute_bind_pipeline(pipeline);
+    _cmd.bind_compute_pipeline(pipeline);
 }
 
 void command_list_compute_scope::bind_group(int group_index, binding_group const& group)
 {
-    _cmd.compute_bind_group(group_index, group);
+    _cmd.bind_compute_group(group_index, group);
 }
 
 void command_list_compute_scope::dispatch_groups(int x, int y, int z)
 {
     _cmd._stats.add(stat::dispatches);
-    _cmd.compute_dispatch(x, y, z);
+    _cmd.dispatch(x, y, z);
 }
 
 void command_list_compute_scope::dispatch_threads(int x, int y, int z)
 {
     _cmd._stats.add(stat::dispatches);
-    _cmd.compute_dispatch(ceil_div(x, _bound_wg_x), ceil_div(y, _bound_wg_y), ceil_div(z, _bound_wg_z));
+    _cmd.dispatch(ceil_div(x, _bound_wg_x), ceil_div(y, _bound_wg_y), ceil_div(z, _bound_wg_z));
 }
 
 void command_list_compute_scope::declare_array_buffer_access(cc::string_view binding_name,
