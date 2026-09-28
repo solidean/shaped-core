@@ -235,6 +235,9 @@ def a_binding_array_is_a_fixed_array_of_views_gathered_as_one_binding():
               "            elements.push_back(element);\n"
               "        views.push_back({.slot = sg::binding_slot(0), .view = cc::move(elements)});\n", source,
               "every element gathered, in order")
+    # sg keys a view by its position among the group's bindings, which is 1 here although `params` starts at register 8
+    expect_in("        views.push_back({.slot = sg::binding_slot(1), .view = cc::move(elements)});\n", source,
+              "a binding after an array keyed by its position, not its register")
 
 
 # ---- a vertex input ---------------------------------------------------------------------------------------------------

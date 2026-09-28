@@ -284,17 +284,20 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     if not dynamic:
         out.append("    (void)samplers;\n")
     out.append(f"    views.reserve({len(views)});\n")
+    # sg keys a view by its position in declared_bindings(), which a binding array's run of registers no longer matches.
+    position = {m["name"]: i + (1 if has_block(binding) else 0) for i, m in enumerate(resources)}
     for member in views:
+        slot = position[member["name"]]
         if member.get("count", 1) > 1:
             # one view per element, in element order
             out.append("    {\n")
             out.append("        auto elements = cc::vector<sg::raw_view>();\n")
             out.append(f"        for (auto const& element : {member['name']})\n")
             out.append("            elements.push_back(element);\n")
-            out.append(f"        views.push_back({{.slot = sg::binding_slot({member['slot']}), .view = cc::move(elements)}});\n")
+            out.append(f"        views.push_back({{.slot = sg::binding_slot({slot}), .view = cc::move(elements)}});\n")
             out.append("    }\n")
             continue
-        out.append(f"    views.push_back({{.slot = sg::binding_slot({member['slot']}), .view = {member['name']}}});\n")
+        out.append(f"    views.push_back({{.slot = sg::binding_slot({slot}), .view = {member['name']}}});\n")
     for member in dynamic:
         out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = {member["name"]}}});\n')
     out.append("}\n")
