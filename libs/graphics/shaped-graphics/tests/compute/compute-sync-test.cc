@@ -92,10 +92,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     // sg asks the dispatch which elements of a bound array it touches, since the index is the shader's to pick.
-    auto const reads = cc::vector<sg::array_buffer_access>{
-        {.index = 0, .stages = sg::pipeline_stage_flag::compute, .access = sg::access_flag::shader_read},
-        {.index = 1, .stages = sg::pipeline_stage_flag::compute, .access = sg::access_flag::shader_read},
-        {.index = 2, .stages = sg::pipeline_stage_flag::compute, .access = sg::access_flag::shader_read}};
+    auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
+                                                           {.index = 1, .access = sg::access_flag::shader_read},
+                                                           {.index = 2, .access = sg::access_flag::shader_read}};
     cmd->compute.declare_array_buffer_access("lanes.sources", reads);
     cmd->compute.dispatch_threads(count);
     auto const back = cmd->download.data_from_buffer(merged);
