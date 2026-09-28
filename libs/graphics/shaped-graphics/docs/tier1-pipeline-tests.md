@@ -38,7 +38,6 @@ That is the property to design for: a test in which `.less` and `.less_equal` bo
 The shape that gives it: one target, a row of small quads, one quad per enum value, each with inputs chosen so that every value of the enum produces a different pixel from the same inputs.
 Two values that could agree on the chosen inputs get a second quad with inputs that separate them.
 
-- **Texture view dimensions**: each shape sampled at one texel whose value encodes its layer, face or slice, so a wrong dimension reads a wrong value.
 - **The sampler fields no explicit-level probe reaches**: `address_w`, which only a 3D texture reads, and `max_anisotropy` and `mip_lod_bias`, which want a pixel stage's derivatives.
 
 **Default and `--thorough`.**

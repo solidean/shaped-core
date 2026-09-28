@@ -1,0 +1,36 @@
+// A texture of every shape, and the views that bind one slice, face or cube of another shape as a lower one.
+// Every texel's red channel names where it sits, so a view of the wrong dimension, slice or face reads a wrong name.
+
+binding shape_views:
+    line: texture_1d[float4]
+    lines: texture_1d_array[float4]
+    line_of_lines: texture_1d[float4]
+    plane: texture_2d[float4]
+    planes: texture_2d_array[float4]
+    plane_of_planes: texture_2d[float4]
+    later_planes: texture_2d_array[float4]
+    volume: texture_3d[float4]
+    cube: texture_cube[float4]
+    face_of_cube: texture_2d[float4]
+    faces_of_cube: texture_2d_array[float4]
+    cubes: texture_cube_array[float4]
+    cube_of_cubes: texture_cube[float4]
+    names: mut buffer[float]
+    sampler nearest:
+        filter = .nearest
+
+// A cube is sampled towards the centre of the face it names, which every backend numbers +x, -x, +y, -y, +z, -z.
+@compute(1) fun read_shapes(@thread_id id: int3){shape_views}:
+    shape_views.names[0] = shape_views.line.load(1).x
+    shape_views.names[1] = shape_views.lines.load(1, layer = 2).x
+    shape_views.names[2] = shape_views.line_of_lines.load(1).x
+    shape_views.names[3] = shape_views.plane.load(int2(1, 1)).x
+    shape_views.names[4] = shape_views.planes.load(int2(1, 0), layer = 2).x
+    shape_views.names[5] = shape_views.plane_of_planes.load(int2(1, 0)).x
+    shape_views.names[6] = shape_views.later_planes.load(int2(0, 1), layer = 1).x
+    shape_views.names[7] = shape_views.volume.load(int3(1, 0, 2)).x
+    shape_views.names[8] = shape_views.cube.sample(float3(0.0, 1.0, 0.0), shape_views.nearest, level = 0.0).x
+    shape_views.names[9] = shape_views.face_of_cube.load(int2(0, 0)).x
+    shape_views.names[10] = shape_views.faces_of_cube.load(int2(0, 0), layer = 3).x
+    shape_views.names[11] = shape_views.cubes.sample(float3(0.0, 0.0, -1.0), shape_views.nearest, layer = 1, level = 0.0).x
+    shape_views.names[12] = shape_views.cube_of_cubes.sample(float3(1.0, 0.0, 0.0), shape_views.nearest, level = 0.0).x
