@@ -196,6 +196,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "stage-not-allowed";
     case diagnostic_kind::invalid_pipeline:
         return "invalid-pipeline";
+    case diagnostic_kind::nesting_too_deep:
+        return "nesting-too-deep";
     case diagnostic_kind::shadows_unshadowable:
         return "shadows-unshadowable";
     case diagnostic_kind::test_captures_runtime_value:
@@ -460,6 +462,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an index into a binding array that may differ between invocations, without `nonuniform`";
     case diagnostic_kind::needless_nonuniform:
         return "a `nonuniform` mark on an index that is the same in every invocation";
+    case diagnostic_kind::nesting_too_deep:
+        return "an entry point that nests deeper than the compiler walks, once every call is inlined";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -564,6 +568,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::feature_not_declared:
     case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
+    case diagnostic_kind::nesting_too_deep:
     case diagnostic_kind::shadows_unshadowable:
     case diagnostic_kind::test_captures_runtime_value:
     case diagnostic_kind::test_must_end_in_check:

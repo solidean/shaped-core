@@ -188,7 +188,7 @@ A hex literal is how a mask or a bit pattern is written, and a mask that means o
 Reading it as the number it spells is CHK-253 as it stands, so no rule of its own decides what it converts to.
 A pattern with the top bit set belongs in a `uint`, or is built with `int.from_bits`.
 
-## CHK-268
+## CHK-313
 
 `/` and `%` are where an integer answer and a float answer differ, and a reader of `1 / 3` cannot tell which the writer meant.
 Folding literals, which the [literal-types](../../incubator/literal-types.md) incubator sketches, makes that expression an error rather than a silent `0`.

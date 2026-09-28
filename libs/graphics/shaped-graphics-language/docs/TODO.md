@@ -14,7 +14,7 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   The general feature is a type parameterized on an integer or an enum value, which math templated on a dimension wants as well, and it lets code branch on the value.
 - **Scoped extensions.** An extension inside a type's block is `unsupported-yet` (CHK-237).
   It is meant to extend the type it names where that block alone sees it, as when implementing a method.
-- **Literal folding.** `1 / 3` over integer literals alone is refused (CHK-268), and so is an operator over them that only a float takes (CHK-257).
+- **Literal folding.** `1 / 3` over integer literals alone is refused (CHK-313), and so is an operator over them that only a float takes (CHK-257).
   Folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in their place.
 - **What `discard` does to a quad's derivatives, per target.** SGL writes `discard;` and MSL `discard_fragment();`, which every target reads as "no effect after this".
   Whether the pixel keeps running as a helper is where they differ, and a sample after a discard in a neighbouring pixel depends on it.

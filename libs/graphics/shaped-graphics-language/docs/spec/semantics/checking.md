@@ -407,7 +407,7 @@ fun shade(k: float) -> float:
   That is an `int` sum, difference, product, negation, absolute value or left shift outside the `int`s, and a `uint` shifted left past its top bit.
   It is also a negative `int` converted to `uint`, and a `float` result that is infinite or NaN.
   A `uint` sum, difference and product wrap, as WGSL folds them.
-* **CHK-268** A `/` or a `%` whose operands are all integer literals is the normal error `literal-needs-type`, although `int` has both ([why](why/checking.md#chk-268)).
+* **CHK-313** A `/` or a `%` whose operands are all integer literals is the normal error `literal-needs-type`, although `int` has both ([why](why/checking.md#chk-313)).
   So `1 / 3` is an error, and `1.0 / 3`, `(1 as int) / 3` and a division of two `int` locals are not.
 * **CHK-71** No matching candidate is the normal error `no-matching-overload`, and its detail spells the call with its argument types and says why each candidate did not match.
 * **CHK-72** Matching candidates without a best are the normal error `ambiguous-overload` ([why](why/checking.md#chk-72)).
@@ -716,6 +716,10 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
 * **CHK-213** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet` at its name.
   A gap of the pass is never a silent loss of the entry point.
+* **CHK-268** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
+  A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
+  A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
+  This is an implementation limit rather than a rule of the language, and it is expected to rise.
 
 ## Control flow
 
@@ -867,6 +871,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306 |
+| `nesting-too-deep` | CHK-268 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
@@ -876,7 +881,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `literal-not-representable` | CHK-60, CHK-61, CHK-253 |
 | `call-spelling` | CHK-256 |
 | `literal-conversion-result` | CHK-85 |
-| `literal-needs-type` | CHK-257, CHK-268 |
+| `literal-needs-type` | CHK-257, CHK-313 |
 | `shift-out-of-range` | CHK-270 |
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312 |

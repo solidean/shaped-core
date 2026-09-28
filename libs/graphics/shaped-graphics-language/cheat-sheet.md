@@ -497,7 +497,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A literal converts where a type is expected** (CHK-81, CHK-253): `(1, 2)` or `{a = 1}` is a call of the struct's name, `1` meets a float.
   Leaving its default type is one step of a literal's chain; candidates rank by dominance over those chains, then a type-scope function wins (CHK-254).
   `0xff`, `0b1010` are integer literals like decimal ones (CHK-269); `&`, `|`, `^`, `~`, `<<`, `>>` take int, uint and their vectors, a shift's count keeps its low five bits.
-  `1 / 3` is `literal-needs-type` (CHK-268): `/` and `%` over integer literals alone say nothing of int or float; an integer literal is held in 64 bits and refused only in a type that cannot hold it.
+  `1 / 3` is `literal-needs-type` (CHK-313): `/` and `%` over integer literals alone say nothing of int or float; an integer literal is held in 64 bits and refused only in a type that cannot hold it.
 - **The maths builtins** are records of `register_math.cc`: trig, `exp`/`log`, `pow`, `sqrt`/`inverse_sqrt`, rounding, `sign`, `step`/`smoothstep`.
   Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.

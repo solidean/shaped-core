@@ -205,6 +205,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     non_uniform_index,
     /// A `nonuniform` mark on an index the check pass proves uniform, which pays for nothing; a warning.
     needless_nonuniform,
+    /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.
+    nesting_too_deep,
 };
 
 namespace sgl

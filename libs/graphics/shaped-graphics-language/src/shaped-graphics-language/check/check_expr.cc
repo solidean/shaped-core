@@ -1057,7 +1057,7 @@ type_id checker::resolve_overload(function_scope& scope,
                cc::format("a shift by {} moves every bit out of 32; a count is 0 to 31", arguments.numbers[1].integer));
         return error_type;
     }
-    // CHK-268: `/` and `%` are the operators whose integer and float answers differ, so over integer literals alone
+    // CHK-313: `/` and `%` are the operators whose integer and float answers differ, so over integer literals alone
     // `1 / 3` would be a silent 0 that literal folding is meant to refuse; the literal says which is meant instead
     if (is_integer_literals && (spelling == "operator /" || spelling == "operator %"))
     {
