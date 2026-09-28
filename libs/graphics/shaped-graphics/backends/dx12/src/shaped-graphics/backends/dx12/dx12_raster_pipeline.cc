@@ -220,6 +220,9 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
 
 cc::pinned_data<byte const> dx12_raster_pipeline::cached_pipeline_data() const
 {
+    if (layout->has_static_samplers)
+        return {}; // see dx12_pipeline_layout::has_static_samplers
+
     ComPtr<ID3DBlob> blob;
     if (FAILED(pipeline_state->GetCachedBlob(&blob)) || blob->GetBufferSize() == 0)
         return {};

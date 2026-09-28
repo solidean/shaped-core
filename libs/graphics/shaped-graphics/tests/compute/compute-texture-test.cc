@@ -333,10 +333,10 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // One shader under two layouts that differ only in their bound sampler's address mode.
-    // A dx12 driver restored a blob of the clamping pipeline as the repeating twin whenever the process had built only
-    // the twin, which the file-sampler test above met depending on the order tests ran in.
+    // A dx12 driver restored a correct blob of the clamping pipeline as the repeating twin, in a process that had built
+    // the twin first, which the file-sampler test above met depending on the order tests ran in.
     // One process cannot build that blob without building the clamping pipeline first, which hides the fault.
-    // So what is pinned is the rule that avoids it: on dx12 such a pipeline never takes a blob.
+    // So what is pinned is the rule that avoids it: on dx12 such a pipeline neither hands out nor takes a blob.
     auto const& shader = co_await shaders::textures.copy_clamped->acquire(*ctx);
     auto const layout_with = [&](sg::sampler_address_mode address)
     {
@@ -356,7 +356,10 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler
         {.shader = shader, .layout = clamping, .cached_pipeline = first->cached_pipeline_data()});
 
     if (ctx->backend() == sg::backend_kind::dx12)
+    {
+        CHECK(first->cached_pipeline_data().empty());
         CHECK(!rebuilt->used_cached_pipeline());
+    }
     CHECK((co_await clamped_copy_mismatches(ctx, twin)) != 0); // the twin repeats, so the check can tell them apart
     CHECK((co_await clamped_copy_mismatches(ctx, rebuilt)) == 0);
 }

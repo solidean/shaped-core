@@ -47,8 +47,10 @@ public:
     int inline_constants_num_32bit = 0;   ///< block_size / 4, for full-replace size validation
 
     /// Whether the root signature carries a static sampler, a group's or the layout's own.
-    /// **A pipeline over one is never built from a cached blob.**
-    /// The driver can hand back a PSO built for another root signature whose static samplers differ, once the process
-    /// has built that one: tests/compute/compute-texture-test.cc's file-sampler test failed that way, order-dependently.
+    /// **A pipeline over one neither restores from a cached blob nor hands one out.**
+    /// A correct blob, restored in a process that has built the same shader under a static sampler that differs, came
+    /// back sampling through that other sampler.
+    /// The driver accepted the blob and reported no error; a blob stored in such a process was wrong too, and persisted.
+    /// Seen on an RTX 5070 Ti with driver 32.0.15.9186; a pipeline without static samplers restores correctly there.
     bool has_static_samplers = false;
 };
