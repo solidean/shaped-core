@@ -804,7 +804,7 @@ constexpr cc::string_view k_msl[] = {
     "trunc",
 
     // Everything else the Metal toolchain declares where the program's structs are: at global scope, or in `metal`.
-    // Found by declaring each identifier of its headers as a struct and as a function, and keeping those that failed.
+    // Taken from Apple metal version 32023.883 (metalfe-32023.883) by tools/msl-probe/run.py, which regenerates this block.
     "add_const",
     "add_const_t",
     "add_pointer",
