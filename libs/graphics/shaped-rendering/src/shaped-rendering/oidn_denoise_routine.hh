@@ -15,26 +15,22 @@ struct sr::oidn_options
     /// and derives its own, and this is `options_for` handing it the caller's instead.
     f32 input_scale = 1.0f;
 
-    /// The largest tile the network may run at, which is what trades memory against wasted work.
+    /// The largest tile the network may run at, which trades memory against the overlap computed twice.
     ///
-    /// A cap rather than the size used, and 0 takes the network's own default.
-    /// The overlap around a tile is computed twice, so a bigger cap means fewer tiles and less repeated work: a 1080p
-    /// frame is 500 ms at 384, 378 at the default 512 and 276 at 768, for 197, 277 and 602 MiB of tensors.
+    /// A cap rather than the size used, and 0 takes the network's own default of 512.
+    /// It never changes the image; denoising.md has the measured time and memory per cap.
     i32 max_tile = 0;
 };
 
 /// Intel Open Image Denoise: a trained spatial denoiser, run as our own compute shaders.
 ///
-/// **The weights are Intel's and the inference is ours.**
-/// OIDN's own GPU kernels are CUDA, HIP, SYCL and Metal sources built on vendor GEMM libraries, and its CPU device
-/// would mean a download and an upload every frame — so shaped-rendering runs the network itself, which is what makes
-/// this the one trained member that needs no vendor's hardware and no memory shared across two APIs.
+/// **The weights are Intel's and the inference is ours**, so it needs no vendor SDK and no particular GPU.
+/// Its output is held to Intel's own filter by a test; denoising.md has why it runs this way, and what it costs.
 ///
-/// That it computes what Intel computes is measured rather than assumed: `oidn-network-test.cc` compares a denoised
-/// image against OIDN's own filter, and the docs carry the number.
+/// **Far too slow for a frame loop** — roughly 0.2 s per megapixel — so `automatic` never picks it; name it.
 ///
-/// **Only where the weights were fetched** — `extern/oidn-weights`, which dev.py hydrates on demand.
-/// Everywhere else this routine still exists and reports `unsupported`.
+/// **Only where the weights were fetched** (`extern/oidn-weights`, a default fetch) and on a backend its HLSL
+/// compiles for; everywhere else this routine still exists and reports `unsupported`.
 ///
 /// **Spatial, so it denoises a converging mean** rather than one frame's samples, and it reads no history.
 /// It requires an albedo and a normal, because the network it runs has nine input channels and those are six of them.
@@ -57,8 +53,7 @@ public:
     /// see extern/oidn-weights/dependency.yml for why.
     [[nodiscard]] static oidn_options options_for(denoise_settings const& settings);
 
-    /// Whether this build can run it, which is whether the weights were fetched.
-    /// It asks nothing of the device: the network is ordinary compute.
+    /// Whether this build and context can run it: the weights were fetched, and its shaders build here.
     [[nodiscard]] static bool is_available(sg::context const& ctx);
 
 protected:

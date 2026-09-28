@@ -356,6 +356,7 @@ sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_s
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
+sr::oidn_denoise_routine::execute(cmd, inputs, history, {.input_scale = 1.0f})   // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP, never `automatic`
 ```
 
 - **A named member that cannot run reports `unsupported`, logs once, and writes nothing** — only `automatic` chooses.

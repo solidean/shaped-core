@@ -9,9 +9,7 @@
 
 /// Open Image Denoise's trained U-Net, run as our own compute shaders.
 ///
-/// The weights are Intel's and the inference is ours, which is the whole point: OIDN's own GPU kernels are CUDA, HIP,
-/// SYCL and Metal built on vendor GEMM libraries, and its CPU device would mean a download and an upload every frame.
-/// The network is sixteen 3x3 convolutions, four max pools and four nearest upsamples, so it runs wherever sg does.
+/// The weights are Intel's and the inference is ours; denoising.md says why, and what it measures.
 ///
 /// The TOPOLOGY is fixed here and the WIDTHS come from the weights file, which is the split that keeps a weights bump
 /// honest: a changed layer count fails to find its tensor, and a changed width fails the shape test beside it.
@@ -108,13 +106,8 @@ public:
     ///
     /// A CAP rather than the size used: `create` picks the tile under it that computes the fewest pixels, which is
     /// usually smaller and never larger.
-    /// The twenty-five feature maps are what this buys down — they cost 2.7 GiB for a whole 1080p frame and about
-    /// 277 MiB at this cap, which is the whole reason tiling exists here.
-    ///
-    /// It trades that memory against WASTED WORK rather than against quality, because the overlap is a fixed 80 per
-    /// side and everything within it is computed twice.
-    /// Measured end to end on a 1080p frame: 384 takes 500 ms for 197 MiB, 512 takes 378 for 277, and 768 takes 276
-    /// for 602 — so this is the knee, and a caller who wants the rest can raise it.
+    /// It trades feature-map memory against the overlap computed twice, never against quality.
+    /// denoising.md has the measured time and memory per cap.
     static constexpr int k_default_tile = 512;
 
     /// How much of a tile is discarded on each side, so its interior sees what a whole-image run would.

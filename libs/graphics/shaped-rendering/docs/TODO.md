@@ -6,8 +6,9 @@ Bigger design intent lives in [structure.md](structure.md).
 - First routines on the framework: texture compression, tonemapping.
 - The OIDN weights are found through a compile-time path, which is fine for a test and not for a shipped binary.
   `SR_OIDN_WEIGHTS_DIR` points into the source tree; the member will want the blob staged beside the executable the way OIDN's own runtime is, or embedded.
-- Denoising: `fsr_rr` is the one member left — [denoising.md](denoising.md) is the design.
-  It waits for a tracer that splits diffuse from specular radiance and writes hit distances, which is what NRD wants too, so the tracer work buys both.
+- Denoising, beyond à-trous, SVGF and OIDN — [denoising.md](denoising.md) is the design and the order:
+  sg's declared native scope and DLSS Ray Reconstruction next; then FSR Ray Regeneration.
+  NRD waits for a tracer that splits diffuse from specular radiance and writes hit distances.
 - Half precision for the OIDN network, which is the one acceleration it could take that is portable.
   DX12 has it as SM 6.2 with `-enable-16bit-types`, Vulkan as `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, Metal has `half` outright, and WebGPU has the optional `shader-f16` feature.
   Optional on all four rather than guaranteed, so it wants a feature level rather than an assumption — but a shipped one, unlike the matrix instructions this network would really like.

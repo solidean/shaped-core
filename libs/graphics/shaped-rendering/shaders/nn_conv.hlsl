@@ -66,12 +66,8 @@ using namespace nn_conv_bindings;
 //
 // 8 was swept rather than picked, over a whole 256x256 tile: 4 is 5.8 ms, 8 is 5.3, 12 is 6.3, 16 is 7.2 and 24 is
 // 9.1.
-// The best run got shorter when the reads became float4, because the window they hold grew four times as wide in
-// registers — it was 32 when a thread read one channel at a time, and 16 once the weights were transposed.
-// Blocking the OUTPUT CHANNELS too was tried under both weight layouts and does not pay — 16x1 is 8.0 ms where 16x2
-// is 10.9 and 8x2 is 9.4.
-// The sixty-four lanes of a wave already read the same input, so that traffic is a broadcast rather than something a
-// second blocking dimension could amortize, and the registers it costs buy nothing back.
+// Re-sweep it whenever the reads change width, since the window a thread holds in registers grows with them.
+// Blocking the output channels as well does not pay; denoising.md has the measurement.
 //
 // `sr::impl::oidn_network` dispatches against this, and the two must agree; a mismatch is a wrong image, which the
 // oracle test against OIDN's own filter catches immediately.
@@ -130,7 +126,7 @@ using namespace nn_conv_bindings;
         // FOUR input channels at a time, which is the whole reason every tensor's channel count is padded to four.
         //
         // A channel is contiguous within a texel, so one float4 fetches four of them.
-        // The input reads were two thirds of this shader's time before they were batched; denoising.md has the numbers.
+        // The input reads were two thirds of this shader's time before they were batched.
         for (uint i = 0; i < in_channels; i += 4u)
         {
             bool const from_a = i < a;

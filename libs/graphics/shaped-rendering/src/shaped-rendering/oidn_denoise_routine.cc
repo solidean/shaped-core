@@ -19,8 +19,17 @@ oidn_options oidn_denoise_routine::options_for(denoise_settings const& settings)
 
 bool oidn_denoise_routine::is_available(sg::context const& ctx)
 {
-    (void)ctx;
-    return impl::oidn_weights_present();
+    if (!impl::oidn_weights_present())
+        return false;
+
+    // The shaders are HLSL, so on a backend its compiler does not serve the member is unsupported however many
+    // weights were fetched.
+    for (auto const& asset :
+         {shaders::nn_conv.compute.main_cs, shaders::nn_input.compute.main_cs, shaders::nn_output.compute.main_cs,
+          shaders::nn_pool.compute.main_cs, shaders::nn_upsample.compute.main_cs})
+        if (asset == nullptr || !asset->can_acquire(ctx))
+            return false;
+    return true;
 }
 
 cc::shared_async<cc::unit> oidn_denoise_routine::init(sg::routine_init_scope scope)

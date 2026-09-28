@@ -377,10 +377,10 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
 
         // The tile is CHOSEN to compute the fewest pixels, not taken as large as the cap allows.
         //
-        // Cost is flat per computed pixel — about 80 ms per megapixel on the machine this was tuned on — so what a
-        // tile size decides is only how much of the image is computed more than once.
+        // Cost is flat per computed pixel, so what a tile size decides is only how much of the image is computed more
+        // than once.
         // That is not monotonic: a tile whose interior divides the image badly computes more than a smaller one whose
-        // interior divides it well, which is why 512 measured slower than 448 over 1920x1080 AND cost more memory.
+        // interior divides it well.
         //
         // The two axes are independent, because a tile's count along one depends on its extent along that one alone.
         auto const best_extent = [&](int image, int limit)

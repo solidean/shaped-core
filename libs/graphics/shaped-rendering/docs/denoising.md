@@ -13,7 +13,7 @@ This is the design, including the parts not built yet.
 |---|---|---|---|
 | `atrous` | spatial | dx12, vulkan (HLSL through DXC); WARP included | done |
 | `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
-| `oidn` | spatial | dx12, vulkan (HLSL through DXC) | done, weights fetched on demand |
+| `oidn` | spatial, trained | dx12, vulkan (HLSL through DXC) | done; named only, not real-time |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
 | `fsr_rr` | temporal, upscales | AMD RDNA 4; dx12 | planned |
 
@@ -29,137 +29,90 @@ The vendor products that denoise are Ray Reconstruction and Ray Regeneration, an
 NRD — vendor-neutral, real-time, compute shaders — stays on the roadmap, and what it waits for is the tracer rather than the denoiser.
 It wants radiance split into diffuse and specular, with hit distances.
 
-**OIDN's network is ours to run, and it is run rather than called.**
-Intel's own GPU kernels are CUDA, HIP, SYCL and Metal built on vendor GEMM libraries, and its CPU device would mean a download and an upload every frame.
-The weights are a separate Apache-2.0 repository, and the network they describe is sixteen 3x3 convolutions with a bias and a ReLU, four 2x2 max pools and four nearest upsamples with a skip concat.
-So shaped-rendering runs it in its own compute shaders, on every backend sg has, with no exportable memory and no round trip.
+## The OIDN member
 
-The topology is a table in `impl/oidn_network.cc` and the layer widths come out of the weights file.
-That split is what keeps a weights bump honest: a changed layer count fails to find its tensor, and a changed width fails the shape test beside it.
+**Intel's weights, our inference.**
+OIDN's own GPU devices are CUDA, HIP, SYCL and Metal over vendor GEMM libraries, and would share memory with sg through an OS handle sg cannot export.
+Its CPU device would cost a download and an upload every frame.
+The weights are a separate Apache-2.0 repository, and they describe a small U-Net: sixteen 3x3 convolutions with a bias and a ReLU, four 2x2 max pools, and four nearest upsamples with a skip concat.
+So the member runs that network in five compute shaders of its own, with no vendor SDK and no particular hardware.
+They are HLSL today, so it runs where the other native members do, on dx12 and vulkan.
 
-**The network runs in tiles, and its memory is why.**
-It holds twenty-five feature maps at once, because the skips have to stay live across the whole decoder.
-Run whole that is 5.4 MiB at 64x64, 2.7 GiB at 1080p and 10.7 GiB at 4K, measured by `oidn_network::feature_bytes_for` rather than estimated.
-So the tensors are sized by a tile instead, capped at 512 pixels by default, which is about 277 MiB whatever the image is.
-Half precision would halve the untiled figure and settle nothing.
+**It is correct and portable, and far too slow for a frame loop** — roughly 0.2 s per megapixel, which is why `automatic` never picks it.
+One network is fetched, `rt_hdr_alb_nrm`: HDR radiance with an albedo and a normal, the guides the tracer writes, and the network OIDN's balanced quality uses for them.
 
-**A convolution thread produces a RUN of texels, which is what made the network affordable at all.**
-Producing one texel per thread spends a whole row of weights on a single output and reuses none of it.
-Producing several spends the same row on all of them, and one loaded input row serves all three kernel columns instead of being fetched three times.
-That one change took a 256x256 tile from 91 ms to 18.5.
+### How it runs
 
-**The weights are stored with the OUTPUT channel innermost, because that is the dimension a wave varies.**
-A lane's output channel is what differs across the wave, so the original `[o][ky][kx][i]` made a single weight load touch sixty-four rows scattered `9 * in_channels` floats apart.
-Turning it inside out to `[ky][kx][i][o]` makes that load one or two cache lines, and is worth about 1.25x once the blocking is re-tuned.
+- **The topology is a table and the widths are data.**
+  `impl/oidn_network.cc` lists the layers, and every width is read from the weights file.
+  A weights bump then fails to find a tensor, or fails the shape test in `tza-test.cc`, rather than drifting.
+- **The weights are read once per process** and packed into one buffer as `[ky][kx][i][o]`.
+  The output channel is innermost because it is what varies across a wave, so one weight load touches one or two cache lines.
+- **Every channel count is padded to a multiple of four**, so a convolution reads its source four channels per `float4`.
+  Only three shapes need it: the nine input channels, the three output ones, and the seventy-three `dec_conv1a` concatenates.
+  A padding channel holds a hard zero under a weight of zero, since a NaN left in memory survives a multiply by nothing.
+- **A convolution thread produces a run of eight texels.**
+  Each weight load is spent on all eight, and each loaded input row on all three kernel columns.
+- **Large images run in tiles**, because the network holds twenty-five feature maps at once — the skips stay live across the decoder.
+  Run whole that is 2.7 GiB at 1080p and 10.7 GiB at 4K, which `oidn_network::feature_bytes_for` computes.
+  - A tile computes an 80-pixel border on every side and discards it.
+    80 is where the receptive field ends: tiled and whole agree to a mean below 1e-6 at 80, differ by 1.4e-03 at 64, and by 2.8e-01 with no overlap.
+    OIDN derives its own overlap as `round_up(receptiveField / 2, tileAlignment)`, which puts its base model in the same range.
+  - Every tile's origin is a multiple of sixteen, the grid four pools need, and an edge tile is shifted inward to end where the whole run's padded tensor ends.
+    So a tile reads exactly the input pixels the whole run reads.
+  - An axis that fits under the cap stays one span, whatever the other axis needs.
+  - Within the cap, `oidn_options::max_tile` with a default of 512, `create` picks per axis the tile that computes the fewest pixels rather than the largest.
+    Over 1920x1080 a 512 tile computes more than a 448 one, because its interior divides the image badly.
+  - Raising the cap is the one knob that pays: it buys back overlap for memory, per the table below.
+    OIDN itself never tiles below 768.
+- **Binding groups are built with the network**, since a tile changes push constants and nothing a group names.
+  Only the two that name the caller's own textures are made per call, and never per tile.
 
-**Every channel count is padded to a multiple of four, so the source is read four channels at a time.**
-This is OIDN's `tensorBlockC` in our own terms, and the measurement asked for it.
-Hoisting the input reads out of the channel loop took a tile from 7.4 ms to 2.6, so they were two thirds of the time.
-A channel is contiguous within a texel, so one `float4` fetches four of them.
-Only three of the network's shapes are not already a multiple of four: the nine input channels, the three output ones, and the seventy-three `dec_conv1a` concatenates.
-So the padding costs almost nothing to compute.
-A padding channel carries a hard zero and a weight of zero, because a NaN left in memory would survive being multiplied by nothing.
-Together with a re-swept run of eight texels that is 7.6 ms to 5.3.
+### Measured
 
-**It is worth less than the instruction count suggests, and that says where the limit now is.**
-Four times fewer load instructions bought 1.4x rather than 4x.
-The eighteen texels of a window are far apart in memory, so a `float4` and a `float` from the same texel cost the same cache line.
-So what remains is memory divergence rather than issue rate.
-The fix for that is a layout where a window's texels are contiguous, which is CHW — the layout OIDN's CPU device uses and its GPU device does not.
+One 1080p frame on the development machine's dx12 GPU, by tile cap; the default cap of 512 chooses a 480x432 tile.
 
-**Blocking the output channels as well was tried under both weight layouts and does not pay.**
-16x1 is 8.0 ms where 16x2 is 10.9 and 8x2 is 9.4.
-The sixty-four lanes of a wave already read the same input, so that traffic is a broadcast rather than something a second blocking dimension could amortize.
-The registers it costs therefore buy nothing back.
-This is the one place where the obvious next step is measurably wrong, which is why it is written down rather than left to be retried.
+| cap | time | feature maps |
+|---|---|---|
+| 384 | 500 ms | 197 MiB |
+| 512 | 378 ms | 277 MiB |
+| 640 | 308 ms | 451 MiB |
+| 768 | 276 ms | 602 MiB |
 
-**Against OIDN's own GPU device we are still far behind, and that is the comparison that matters.**
-Their CUDA device filters a 256x256 tile in 0.67 ms against our 5.3, and a whole 1080p frame in 20.6 ms against our 378 — 8x and 18x.
-Both were timed the same way: device-resident buffers, warmed, best of several, with only the filter and its sync inside the clock.
-The CPU comparison flatters us and is not the bar — for the record it is 30 ms against our 5.3 at 256x256.
+OIDN's own CUDA device filters the same frame in 20.6 ms.
+Both were timed alike: device-resident buffers, warmed, best of several, with only the filter and its sync on the clock.
 
-**The gap is architectural rather than a matter of tuning.**
-OIDN's GPU path is `cutlass::conv::device::ImplicitGemmConvolution` over `TensorNHWC`, in fp16, on tensor cores.
-The SM80 instantiation uses a `GemmShape<16, 8, 16>` instruction with a fused `LinearCombinationRelu` epilogue.
-Their weights are `ohwi` and their activations `hwc`, with channels padded to eight; `CUDADevice::init` sets `tensorBlockC = 8` and says why, "required by Tensor Core operations".
-Ours is fp32 SIMT, sustaining about 3.2 TFLOP/s of roughly 20-25 peak — 80 ms per computed megapixel, and a 1080p frame computes 4.7 of them.
-So even a perfectly tuned fp32 kernel lands near 60 ms and is still 3x off: the rest is the matrix hardware, which on DirectX means cooperative vectors.
-That is also what an SGL port cannot reach today, since SGL stays on the intersection of its backends and neither fp16 nor a matrix type is in it.
+- **Cost is flat per computed pixel**, about 80 ms per computed megapixel.
+  So the cap trades memory against the overlap computed twice, and never against quality.
+- **The gap to CUDA is architectural.**
+  OIDN runs cutlass implicit-GEMM convolutions in fp16 on tensor cores, with channels padded to eight, "required by Tensor Core operations".
+  Ours is fp32 SIMT at about 3.2 TFLOP/s of a roughly 20-25 peak.
+  A perfect fp32 kernel would still land near 60 ms; the rest is matrix hardware, which neither the HLSL we compile nor SGL reaches today.
+- **The limit is memory divergence, not issue rate.**
+  Reading four channels per load cut load instructions fourfold and bought 1.4x, because a window's eighteen texels lie far apart and a `float4` costs the same cache line as a `float`.
+  A layout that keeps a window's texels contiguous, as OIDN's CPU device does with CHW, is what would pay next.
+- **Blocking the output channels as well does not pay, under either weight layout.**
+  On a 256x256 tile, 16x1 is 8.0 ms where 16x2 is 10.9 and 8x2 is 9.4.
+  The wave's lanes already share the input, so a second blocking dimension only costs registers.
+- **Half precision would buy memory rather than speed**, since the limit is cache lines rather than bytes, and memory is what buys a larger tile.
+  It is optional on every backend, so it wants a feature level; [TODO.md](TODO.md) has what that takes.
+- **Once the member runs on WebGPU, its default limits will cap the tile before memory does.**
+  `maxStorageBufferBindingSize` defaults to 128 MiB, and the largest binding is one full-resolution map of sixty-four channels.
+  That is 50 MiB at the default cap, 110 MiB at 768 and 137 MiB at 1024, so the cap cannot go far past 768 on a device with default limits.
+- Reproducing the CUDA timing means creating `oidn::DeviceType::CUDA` in `tests/oidn_reference.cc`, with `OpenImageDenoise_device_cuda.dll` from the upstream archive beside the core.
+  The fetch keeps only the CPU device.
 
-**Reproducing the GPU comparison takes a file we deliberately do not fetch.**
-`fetch-oidn.py` keeps the CPU device module and drops the CUDA, HIP and SYCL ones.
-So `OpenImageDenoise_device_cuda.dll` has to be taken out of the upstream archive and put beside the core before `oidn::DeviceType::CUDA` will create.
+### Held to Intel's output
 
-**The tile is CHOSEN to compute the fewest pixels, not taken as large as it may be.**
-Cost is flat per computed pixel — about 80 ms per megapixel on the machine this was tuned on — so the only thing a tile size decides is how much of the image is computed twice.
-That is not monotonic in the tile: over 1920x1080 a 512 tile computes more than a 448 one, because its interior divides the image badly, and it costs more memory for the privilege.
-So `create` searches under the cap, per axis, since a tile's count along one axis depends on its extent along that one alone.
-It was worth 495 ms down to 378 at a 512 cap, and 350 MiB down to 277 at the same time.
+`oidn-network-test.cc` runs Intel's own filter over the same input and compares, through `tests/oidn_reference.hh`.
+The library it needs is fetched on request, with `uv run extern/oidn/fetch-oidn.py`, and the comparison skips without it.
 
-**The cap is 512 by default, and it trades memory against wasted work rather than against quality.**
-The overlap is a fixed 80 per side and everything inside it is computed twice, so a larger cap means fewer tiles.
-Measured end to end on a 1080p frame: 384 takes 500 ms for 197 MiB, 512 takes 378 for 277, 640 takes 308 for 451, and 768 takes 276 for 602.
-`oidn_options::max_tile` is how a caller buys the rest, and 0 takes this default.
+- Untiled, over 64x64: a mean difference of 4.9e-07 and a worst of 4.3e-06.
+- Tiled, nine tiles over 384x384 at a 288 cap: a mean of 4.9e-07 and a worst of 6.6e-06.
+- Reading the weights in the wrong source layout moves the mean to 0.29, and decoding subnormal weights one exponent off moves it to 1.0e-05.
+  The bounds sit a decade above the measured values, between the two.
 
-**WebGPU's default limits cap that before memory does.**
-`maxStorageBufferBindingSize` defaults to 128 MiB, and one level-0 feature map with sixty-four channels is the largest single binding this network makes.
-At the 512 cap the chosen tile is 480x432 and that map is 50 MiB; at 768 it is 640x704 and 110 MiB; at 1024 it is 800x704 and 137 MiB, which no longer binds.
-So the cap cannot go far past 768 on a device offering only the defaults, whatever the total memory allows.
-`maxComputeInvocationsPerWorkgroup` defaults to 256 against the 64 these shaders use, and `maxComputeWorkgroupStorageSize` to 48 KiB, so neither of those is close.
-
-**Half precision is the one acceleration this network could take that is portable.**
-DX12 has it as SM 6.2 with `-enable-16bit-types`, Vulkan as `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, and Metal has `half` outright.
-WebGPU has the optional `shader-f16` feature, which WGSL gates behind `enable f16;` and allows in storable and host-shareable types at two bytes.
-Optional on all four rather than guaranteed, so it is a feature level rather than a floor — but a shipped one, unlike the matrix instructions.
-What stops us is ours rather than theirs: slib passes DXC no flag and has no option to, and sg has no capability to gate on.
-The webgpu backend already has the shape for one, in `k_optional_features`.
-For THIS shader it would buy memory rather than speed, because the limit measured above is cache lines rather than bytes — and memory is what buys a larger tile.
-
-
-**A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**
-At that overlap a tiled image agrees with the same image run whole BIT FOR BIT, so the number is where the network's receptive field ends.
-At 64 the two are 1.4e-03 apart, and with no overlap at all 2.8e-01 — which is what a seam looks like.
-Nothing improves above 80, so it is a threshold rather than a quality knob.
-OIDN derives its own the same way, as `tileOverlap = round_up(receptiveField / 2, tileAlignment)`.
-Our measured 80 implies a receptive field of about 160, which is the range their base model sits in.
-That agreement was found after the fact and is worth more than deriving it would have been: the number came from the image rather than from their source, and then matched it.
-
-Their minimum tile is larger than ours, at `max(4 * tileOverlap, 768)`.
-A 768 tile would cut a 1080p frame's wasted work from 3.2x to 2.3x and cost about 780 MiB of fp32 tensors, so it is a memory decision rather than a correctness one.
-
-**An edge tile is shifted inward rather than allowed to hang over the image.**
-Hanging over means filling the overhang by repeating the border pixel, and that smear is an image the whole-frame run never sees.
-It moves the result, and it moves it further the wider the overlap is.
-So before this was fixed the error GREW with the overlap, which is the opposite of how a halo behaves and is what gave the bug away.
-
-**Binding groups are built with the network, not with a dispatch.**
-A tile changes push constants and nothing a group names, so all twenty-four internal groups are made once and reused by every tile and every frame.
-Only the two that name the caller's own textures are per call, and they are still not per tile.
-Built per dispatch instead, a 1080p frame wants 240 tiles x 26 groups, which overruns the transient descriptor region — that is how this was found rather than reasoned about.
-
-**That it computes what Intel computes is measured, not assumed.**
-`oidn_filter_reference` runs OIDN's own filter over the same input, and the test compares the two.
-The difference is a mean of 1.0e-05 and a worst of 7.5e-05 across a 64x64 image, which is what sixteen layers of fp32 on the GPU against their CPU inference costs.
-The TILED path is held to the same standard by a second oracle: nine tiles over a 384x384 image land a mean of 1.1e-05 and a worst of 1.4e-04 against Intel's whole-image filter.
-So tiling costs nothing measurable in agreement, and the first oracle alone would not have shown that, because 64x64 fits one tile and never tiles at all.
-Reading the weights in the wrong source layout moves that mean to 0.29, four orders of magnitude out, which is the margin the bound is set against.
-It is the only test that can ask the question: every other one checks a piece against its own definition, and a self-consistent mistake passes all of them.
-
-**The radiance handed over is de-modulated, which is what keeps a surface's texture from being filtered as noise.**
-NRD's input contract asks that radiance carry no material information, and `NRD_MaterialFactors` is the helper it ships for the purpose.
-So that is what the repack divides by and the resolve multiplies back.
-The factors are written to scratch by the repack rather than recomputed by the resolve, because NRD requires both directions to use the same ones.
-Storing them makes that structural, instead of two passes independently agreeing on a camera, a normal and a roughness.
-That is why `albedo` and `specular_albedo` are REQUIRED guides for this member rather than optional ones.
-
-It is partial by construction, because NRD floors both factors well above zero and calls the specular half a biased solution.
-On a checkerboard albedo under one flat normal, the case where nothing but the albedo says there is an edge, the member keeps about nine tenths of the contrast.
-Feeding radiance straight through keeps under one tenth of it.
-
-**Two conventions run the other way round from ours, and both are carried in settings rather than in a repack.**
-NRD reads a motion vector as `pixelUvPrev = pixelUv + mv`, so its units are UV and its direction is previous minus current, where ours is pixels and current minus previous.
-`motionVectorScale` carries the reciprocal extent and the sign, so the guide itself is handed over untouched.
-Its matrices, despite what `NRDSettings.h` says in prose, are built column by column from the `float[16]`, which is `tg`'s own convention, so they are copied rather than transposed.
+It is the only test that can catch a self-consistent mistake: every other one checks a piece against its own definition.
 
 ## The contract
 
@@ -201,7 +154,7 @@ Whether a vendor member can honour this is open — it may write its own alpha a
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
 `dlss_rr`, `fsr_rr`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
-`oidn` is never chosen: at about a quarter of a second per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
+`oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 A silent fallback would make a comparison between two named members compare one with itself, which is the failure the framework's three-state readiness exists to prevent.
 
@@ -214,13 +167,9 @@ Instead the front's `init` prewarms every supported member, so prewarming the fr
 `sr::denoise_history` is the images a member keeps between calls for one image stream: a temporal member's history, and the scratch a spatial member ping-pongs through.
 It is move-only, since a copy would fork a history, and the caller holds one per stream.
 
-**It holds textures and nothing else, which is what the next member changes.**
-A vendor member keeps a *feature handle* — an object the SDK creates once for a resolution and a set of options, and that every later call passes back — and that is not an `sg::texture_2d`.
-The successor is one owning pointer to a member-defined state object in place of the fixed array.
-Each member declares its own struct, `_prepare` allocates the one the resolved method wants, and a member reaches its own through a checked cast.
-That is deliberately not built yet.
-It buys nothing for two texture-only members, and the port does not get harder while there are only two.
-The caller's own declaration does not change either way, so it lands with the member that needs it.
+**It holds textures, plus one object of the member's own.**
+State that is not a texture — OIDN's network today, a vendor member's *feature handle* later — sits in a type-erased `std::shared_ptr<void>`, so `denoise.hh` names no member's type.
+`_prepare` drops it with the textures whenever the member or the extent changes, and it may hold only what is safe to drop mid-frame, as sg resources are.
 
 **A temporal history is large.**
 svgf holds eight full-screen images — six `rgba32_float` and the moments pair `rg32_float` — which is about 221 MiB per 1080p stream and 886 MiB at 2160p.
@@ -275,17 +224,10 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
   It then hands out the native list and resources.
   Closing it records the declared states and invalidates the list's cached bindings.
   Without it a vendor SDK would bypass sg's barrier tracking silently.
-- **OIDN needs nothing sg does not have either, because the member runs the network rather than the library.**
-  Intel's own GPU devices would need exportable memory and shared fences, which sg has not got; its CPU device would need only a download and an upload, and costs a frame of latency for them.
-  Running the weights ourselves is what avoids both, and it is why this is the one trained member that needs neither a vendor SDK nor a particular vendor's hardware.
-  The library is still fetched, for the oracle test alone.
+- **OIDN needs nothing sg does not have either**, because the member runs the network rather than the library.
 - **The vendor SDKs are fetched on request, never by default.**
   DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
-  OIDN is the exception, and its size is why the question was open.
-  It is Apache-2.0, so nothing about it is a license a person accepts, and it is fetched on demand like SDL3.
-  The measurement settled it: the Windows release is 83 MB unpacked, and `OpenImageDenoise_core.dll` alone is 50.6 MB of that because the trained weights live inside it.
-  So no install plan makes this dependency small.
-  The CPU-only subset `extern/oidn/fetch-oidn.py` keeps is 52.8 MB — the same order as SDL3's 49.6 MB, which was already a default fetch.
+  Intel's OIDN library is on request too, for the oracle test alone; its 1.8 MB of weights are a default fetch, since the member runs them.
 
 ## Seeing it
 
@@ -299,6 +241,7 @@ Turning `fresh samples` off switches to the accumulating half, where `samples` c
 
 - The front's policy — what `automatic` picks, that a named member it cannot run writes nothing — runs on WARP through à-trous.
 - à-trous itself: a flat image stays flat, a guide edge does not bleed, and a deep mean is left close to itself.
+- OIDN: every operation against a reference implementation, tiled against whole on aligned, unaligned and one-axis shapes, and the network against Intel's own filter.
 - SVGF itself: a static noisy stream converges, a moving one is followed through its motion vectors, and a depth jump or a reset drops the history rather than ghosting it.
   The moving test is the one that pins reprojection at all.
   It runs the same shifting image twice — once with an honest motion vector, once told nothing moved — and requires the honest one to converge substantially further.
