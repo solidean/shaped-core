@@ -268,6 +268,7 @@ public:
     /// It costs nothing but the history: the progressive mean already restarts on any camera change, so a cut that
     /// does not move the camera does nothing at all.
     /// The request survives until a frame actually traces this view, so cutting a throttled view is not lost.
+    /// A view whose layers do not denoise has no history to cut, and the call then does nothing.
     void camera_cut();
 
     /// Pins this view to a fixed pixel resolution instead of taking the rect it lands in.
