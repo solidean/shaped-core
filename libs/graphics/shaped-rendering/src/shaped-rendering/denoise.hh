@@ -10,6 +10,8 @@
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec.hh>
 
+#include <memory>
+
 /// Denoising — and, once a member supports it, upscaling — behind one call.
 ///
 /// `sr::denoise_routine` is the front: a caller names a method (or `automatic`) and the front forwards to the
@@ -205,26 +207,15 @@ struct sr::denoise_outcome
 /// Dropping the history of a view nobody is looking at is how a caller gets that back, and is what a caller with many
 /// views should do.
 ///
-/// It holds images and nothing else.
-/// A member needing state that is not a texture — a vendor feature handle, which dlss_rr and fsr_rr both take — is
-/// what replaces the fixed array with a per-member state object; see libs/graphics/shaped-rendering/docs/denoising.md.
+/// It holds images, plus at most one object of the member's own for state that is not a texture.
 class sr::denoise_history
 {
 public:
     denoise_history() = default;
-    denoise_history(denoise_history&&) noexcept;
-    denoise_history& operator=(denoise_history&&) noexcept;
+    denoise_history(denoise_history&&) noexcept = default;
+    denoise_history& operator=(denoise_history&&) noexcept = default;
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
-
-    /// Releases whatever a member is holding for this stream.
-    ///
-    /// **The GPU must be done with this history**, which for a member holding device memory is a real requirement
-    /// rather than good manners: state released while a frame that used it is still in flight is a use-after-free
-    /// with no diagnostic.
-    /// A caller dropping a history mid-frame drains first; sv drops one only when its view goes, which is after the
-    /// store has let the epoch complete.
-    ~denoise_history();
 
     /// How many images a member may keep here.
     /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
@@ -251,14 +242,10 @@ private:
 
     /// A member's own per-stream object — for OIDN, the network and its feature maps.
     ///
-    /// Opaque, with the release function beside it, so this header names no member's type and a history still frees
-    /// what it holds without knowing what that is.
-    /// `_prepare` releases it whenever it drops the rest, since the state is built for one extent.
-    void* _vendor_state = nullptr;
-    void (*_release_vendor_state)(void*) = nullptr;
-
-    /// Drops `_vendor_state` through `_release_vendor_state`, and forgets both.
-    void _release_vendor();
+    /// Type-erased so this header names no member's type; `make_shared` captured the deleter that frees it.
+    /// It must hold only what is safe to drop mid-frame, as sg resources are.
+    /// `_prepare` drops it whenever it drops the rest, since the state is built for one extent.
+    std::shared_ptr<void> _member_state;
 
     denoise_method _method = denoise_method::none;
     tg::vec2i _extent = tg::vec2i(0, 0);

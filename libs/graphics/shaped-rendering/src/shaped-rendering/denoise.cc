@@ -41,10 +41,16 @@ namespace
 }
 
 /// The members `automatic` walks, best first.
+///
+/// `oidn` is in neither: at about a quarter of a second per megapixel it is a reference-quality member, not one a
+/// frame loop can afford, so a caller has to name it.
 constexpr denoise_method temporal_preference[] = {
-    denoise_method::dlss_rr, denoise_method::fsr_rr, denoise_method::svgf, denoise_method::oidn, denoise_method::atrous,
+    denoise_method::dlss_rr,
+    denoise_method::fsr_rr,
+    denoise_method::svgf,
+    denoise_method::atrous,
 };
-constexpr denoise_method spatial_preference[] = {denoise_method::oidn, denoise_method::atrous};
+constexpr denoise_method spatial_preference[] = {denoise_method::atrous};
 
 /// Which refusal a bit stands for, so one reason being logged does not silence the other.
 enum class refusal_reason : u32
@@ -127,66 +133,14 @@ denoise_guide_set denoise_inputs::present_guides() const
     return set;
 }
 
-denoise_history::denoise_history(denoise_history&& other) noexcept
-  : _method(other._method),
-    _extent(other._extent),
-    _reset_requested(other._reset_requested),
-    _frame(other._frame),
-    _vendor_state(other._vendor_state),
-    _release_vendor_state(other._release_vendor_state)
-{
-    for (auto i = 0; i < 8; ++i)
-        _state[i] = cc::move(other._state[i]);
-
-    // Moved FROM rather than shared: two histories releasing one object is the double free this exists to prevent,
-    // and the type is move-only precisely so there is one owner.
-    other._vendor_state = nullptr;
-    other._release_vendor_state = nullptr;
-}
-
-denoise_history& denoise_history::operator=(denoise_history&& other) noexcept
-{
-    if (this == &other)
-        return *this;
-
-    // Whatever this held is going away, so it owes its release before it is overwritten.
-    _release_vendor();
-
-    _method = other._method;
-    _extent = other._extent;
-    _reset_requested = other._reset_requested;
-    _frame = other._frame;
-    for (auto i = 0; i < 8; ++i)
-        _state[i] = cc::move(other._state[i]);
-
-    _vendor_state = other._vendor_state;
-    _release_vendor_state = other._release_vendor_state;
-    other._vendor_state = nullptr;
-    other._release_vendor_state = nullptr;
-    return *this;
-}
-
-denoise_history::~denoise_history()
-{
-    _release_vendor();
-}
-
-void denoise_history::_release_vendor()
-{
-    if (_vendor_state != nullptr && _release_vendor_state != nullptr)
-        _release_vendor_state(_vendor_state);
-    _vendor_state = nullptr;
-    _release_vendor_state = nullptr;
-}
-
 bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
 {
     auto const changed = _method != method || _extent != extent;
     auto const restarted = changed || _reset_requested;
     if (changed)
     {
-        // The state is built for one extent and one member, so it goes with them.
-        _release_vendor();
+        // The member's object is built for one extent and one member, so it goes with them.
+        _member_state = nullptr;
 
         // Built for another member or size, so nothing in it can be reused.
         for (auto& t : _state)
@@ -304,18 +258,28 @@ denoise_guide_set optional_guides(denoise_method m)
     return {};
 }
 
-denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings)
+namespace
+{
+/// `resolve_denoise_method` against a support answer the caller already has.
+[[nodiscard]] denoise_method resolve_with(denoise_support const& support, denoise_settings const& settings)
 {
     if (settings.method != denoise_method::automatic)
         return settings.method;
 
-    auto const support = query_denoise_support(ctx);
     auto const preference = settings.fresh_samples ? cc::span<denoise_method const>(temporal_preference)
                                                    : cc::span<denoise_method const>(spatial_preference);
     for (auto const m : preference)
         if (support.supports(m))
             return m;
     return denoise_method::none;
+}
+} // namespace
+
+denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings)
+{
+    if (settings.method != denoise_method::automatic)
+        return settings.method;
+    return resolve_with(query_denoise_support(ctx), settings);
 }
 
 tg::vec2i denoise_input_extent(sg::context const& ctx, denoise_settings const& settings, tg::vec2i output_extent)
@@ -365,8 +329,10 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     (void)try_acquire(cmd);
 
     auto& ctx = cmd.context();
-    auto const method = resolve_denoise_method(ctx, settings);
-    if (method == denoise_method::none || !query_denoise_support(ctx).supports(method))
+    // Asked once and used twice, since the resolver and the support check want the same answer.
+    auto const support = query_denoise_support(ctx);
+    auto const method = resolve_with(support, settings);
+    if (method == denoise_method::none || !support.supports(method))
     {
         // The resolved method rather than what was asked for, so both refusal paths report a member rather than
         // `automatic`, which is not one.

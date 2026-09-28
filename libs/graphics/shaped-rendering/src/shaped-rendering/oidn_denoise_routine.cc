@@ -13,15 +13,6 @@ namespace sr
 using impl::extent_of;
 using impl::is_set;
 
-namespace
-{
-/// The per-stream network, held in the caller's history through its opaque vendor slot.
-void release_network(void* p)
-{
-    delete static_cast<impl::oidn_network*>(p);
-}
-} // namespace
-
 oidn_options oidn_denoise_routine::options_for(denoise_settings const& settings)
 {
     return {.input_scale = settings.exposure};
@@ -73,23 +64,16 @@ denoise_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
     auto const extent = extent_of(in.color);
     auto const restarted = history._prepare(denoise_method::oidn, extent);
 
-    if (history._vendor_state == nullptr)
+    if (history._member_state == nullptr)
     {
-        // Owned raw because the history's slot is a `void*` with a release function beside it — the one shape that
-        // lets `denoise.hh` free a member's state without naming its type.
-        auto* const fresh = new impl::oidn_network();
+        auto fresh = std::make_shared<impl::oidn_network>();
         auto const tile = options.max_tile > 0 ? options.max_tile : impl::oidn_network::k_default_tile;
         if (!fresh->create(ctx, extent, tile))
-        {
-            delete fresh;
             return outcome_of(denoise_status::failed);
-        }
-
-        history._vendor_state = fresh;
-        history._release_vendor_state = &release_network;
+        history._member_state = cc::move(fresh);
     }
 
-    auto& network = *static_cast<impl::oidn_network*>(history._vendor_state);
+    auto& network = *static_cast<impl::oidn_network*>(history._member_state.get());
 
     // The pipelines are built from shaders `init` already compiled, so this is a tick rather than a wait.
     if (!network.prepare())

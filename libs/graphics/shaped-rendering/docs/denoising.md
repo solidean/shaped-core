@@ -200,7 +200,8 @@ Whether a vendor member can honour this is open — it may write its own alpha a
 **Explicit means explicit.**
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
-`dlss_rr`, `fsr_rr`, `svgf`, then the spatial ones for a caller feeding fresh frames; `oidn`, then `atrous` for a caller denoising a converging mean.
+`dlss_rr`, `fsr_rr`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
+`oidn` is never chosen: at about a quarter of a second per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 A silent fallback would make a comparison between two named members compare one with itself, which is the failure the framework's three-state readiness exists to prevent.
 
