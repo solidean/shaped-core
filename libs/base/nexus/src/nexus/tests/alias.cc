@@ -38,6 +38,9 @@ nx::test_declaration const* nx::setup::find_test(cc::string_view name) const
 
 void nx::setup::define_alias(cc::string name, cc::vector<alias_fragment> fragments, cc::source_location loc)
 {
+    if (auto const* const named = find_test(name))
+        loc = named->location;
+
     _registry->add_alias(test_alias{
         .name = cc::move(name),
         .fragments = cc::move(fragments),
