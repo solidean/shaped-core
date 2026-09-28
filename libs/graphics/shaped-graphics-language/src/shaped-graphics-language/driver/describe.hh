@@ -153,6 +153,7 @@ struct sgl::described_entry_point
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
+    /// A `@workgroup` binding is left out, since the host binds nothing for it.
     cc::vector<cc::string> bindings;
     /// The `sg::feature`s a device needs to run it, by name, in the enum's order.
     cc::vector<cc::string> features;

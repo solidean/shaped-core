@@ -108,7 +108,7 @@ See [bindings](bindings.md#array-bindings) and [TODO](../TODO.md).
 ## Deferred
 
 **Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and **array bindings in a draw**.
-Geometry and tessellation stages are **in** (dx12). See [TODO](../TODO.md).
+Geometry and tessellation stages are **in** (dx12 and vulkan). See [TODO](../TODO.md).
 
 ## See also
 

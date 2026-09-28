@@ -239,14 +239,14 @@ fun shade(k: float) -> float:
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages`, `@shadowable` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect` |
 | a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding` |
 | an enum | `@builtin`, `@shadowable` |
 | a const | `@shadowable` |
 | a test | `@expect` |
-| a binding | `@inline`, `@shadowable`, `@no_padding` |
-| a binding member | `@unfilterable`, `@non_filtering` |
-| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct` |
+| a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding` |
+| a binding member | `@unfilterable`, `@non_filtering`, `@sampler` |
+| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 
@@ -457,7 +457,7 @@ fun f() -> float:
 
 * **CHK-87** A function that carries `@vertex` or `@pixel` is an **entry point** of that stage; one that carries two stages is the normal error `invalid-entry-point`.
   `@compute`, `@geometry`, `@tessellation_control` and `@tessellation_evaluation` make an entry point too, each of its own stage.
-* **CHK-88** A raster entry point takes at most one parameter without a stage input's attribute, its **stage struct**, which is of a struct type with fields and comes first.
+* **CHK-88** A vertex or pixel entry point takes at most one parameter without a stage input's attribute, its **stage struct**, which is of a struct type with fields and comes first.
   A `@pixel fun` takes one; a `@vertex fun` may take none, and then draws from no vertex buffer.
 * **CHK-89** The stage struct of a `@vertex fun` is of a `@vertex struct`.
 * **CHK-271** A parameter marked with a stage input's attribute is a **stage input**: a value the GPU hands the invocation ([why](why/checking.md#chk-271)).
@@ -522,7 +522,8 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 * **CHK-261** A binding requires what its own `require` lines name and what its members use, and an entry point that lists it needs all of that of a device ([why](why/checking.md#chk-261)).
 * **CHK-262** An entry point declares a feature by a `require` of its file, of a binding it lists, or among the lines of its own body ([why](why/checking.md#chk-262)).
   A `require` inside a nested block is `unsupported-yet`.
-* **CHK-263** What an entry point needs of a device is what the bindings it lists require, never what it merely may use ([why](why/checking.md#chk-263)).
+* **CHK-263** What an entry point needs of a device is what it uses, never what it merely may use ([why](why/checking.md#chk-263)).
+  It needs what the bindings it lists require, its stage inputs (CHK-272), a member it takes per sample (CHK-274) and its stage itself (CHK-301, CHK-304, CHK-306).
   It is judged once every body is checked, and a use is counted wherever it stands, reached or not.
 * **CHK-264** A feature an entry point needs and does not declare is the normal error `feature-not-declared` at its name, with a note at each listed binding that needs it.
 * **CHK-265** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
@@ -598,7 +599,7 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
   It is read by element alone, `name[i]`, and naming it whole is `wrong-kind-of-name`; an element is the resource, which only a builtin takes.
   `T[]`, an array of samplers and one of more than one dimension are `unsupported-yet`.
   An access word stands before it and qualifies its element: `out image_2d[.rgba8_unorm][4]`.
-* **CHK-300** An index into a binding array that the uniformity pass cannot prove the same in every invocation is `non-uniform-index` unless it is `nonuniform i`.
+* **CHK-300** An index into a binding array that the uniformity pass cannot prove the same in every invocation is `non-uniform-index` unless it is `nonuniform i` ([why](why/checking.md#chk-300)).
   `nonuniform i` is its argument unchanged, and on an index the pass proves uniform it is the warning `needless-nonuniform`.
 
 ## Workgroup memory
@@ -651,7 +652,7 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-304** `@tessellation_control(partitioning = p, winding = w)` makes an entry point of the tessellation control stage, which needs `tessellation_shader`.
   `p` is `.integer`, `.fractional_even` or `.fractional_odd`, and `w` is `.clockwise` or `.counter_clockwise`.
   Power-of-two partitioning is none of them, since vulkan lacks it.
-  It takes one parameter, the patch: an array of from 1 to 32 of the struct the vertex stage returns, and it returns a **factors struct**.
+  It takes one parameter besides its stage inputs, the patch: an array of from 1 to 32 of the struct the vertex stage returns, and it returns a **factors struct**.
 * **CHK-305** A factors struct has exactly one `@edge_factors` member, `float[2]`, `float[3]` or `float[4]`, which makes its domain isolines, triangles or quads.
   It has one `@inside_factors` member, `float` for triangles and `float[2]` for quads, and none for isolines; any other member reaches the evaluation stage as it is.
 * **CHK-306** `@tessellation_evaluation` makes an entry point of the tessellation evaluation stage, which needs `tessellation_shader`.
@@ -805,7 +806,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-307 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |
@@ -816,7 +817,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-279, CHK-281 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281 |
 | `not-assignable` | CHK-112, CHK-236 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162 |
@@ -831,11 +832,11 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-feature` | CHK-258 |
 | `feature-not-declared` | CHK-264 |
 | `unused-require` | CHK-265 |
-| `stage-not-allowed` | CHK-193, CHK-298 |
+| `stage-not-allowed` | CHK-193, CHK-277, CHK-298 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-93, CHK-294, CHK-301 to CHK-306 |
-| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-307 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |

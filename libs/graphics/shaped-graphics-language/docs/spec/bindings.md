@@ -186,7 +186,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 ## Sampling
 
 **A texture is read through its methods, which are builtins of the prelude called with the texture first.**
-`frame.sky.sample(dir, smp)` is `sample(frame.sky, dir, smp)`, and every argument after the coordinate that is not the sampler is named.
+`frame.sky.sample(dir, smp)` is `sample(frame.sky, dir, smp)`, and every argument of a sample or a gather after the coordinate that is not the sampler is named.
 
 | method | of | takes |
 |---|---|---|
@@ -322,6 +322,8 @@ let fixed = materials.albedo[materials.slot].sample(p.uv)
 * It is listed like any binding and takes no group, as `@inline` constants take none, since no host binds it; describe tells the host nothing of it.
 * Its members are values — scalars, vectors, structs and arrays of them — and never a resource (CHK-292).
 * A shader writes it, and only a compute entry point may list it (CHK-294).
+* A barrier waits for every thread of the workgroup, after which each sees what the others wrote (EMIT-131).
+  `workgroup_barrier()` makes workgroup memory visible, `storage_barrier()` buffers and `texture_barrier()` images.
 * Everything it holds together fits 16 KiB, WebGPU's default limit and vulkan's required minimum (CHK-293).
 * Nothing is defined before it is stored: no target but WGSL zeroes it, and a shader that relies on either pays for it on every target.
   The interpreter reports a read of what was never stored as a program error (EVAL-92).
@@ -429,7 +431,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
-  The builtins that take one are `sample`, `load`, `store` and `size` in `prelude/builtins.sgl`, called as methods of it: `tex.sample(uv, smp)`.
+  The builtins that take one are the texture methods of [Sampling](#sampling), called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
 * Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform`.

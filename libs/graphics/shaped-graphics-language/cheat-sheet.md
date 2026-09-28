@@ -42,11 +42,11 @@ auto const t = sgl::test_source(text, "colors.sgl");
 #include <shaped-graphics-language/driver/describe.hh>
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
-d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`), block_size
+d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`; a binding array: `count` slots from `slot`), block_size
                                            // texture / image / sampler members also carry the sg enum values of their binding:
                                            // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
-d.value().entry_points                     // name, stage, workgroup, bindings (the list as written), footprint
+d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint
 @expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
 d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths)
                                            // bindings and structs carry `shape`: check::structural_hash of their members,
@@ -468,9 +468,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **Recursion is `recursive-call`**, once per loop of calls, at the call that closes it: `a -> b -> a`.
 - **Bindings are an effect.** A call needs the callee's `{…}` list inside the caller's, or it is `binding-not-listed` at the call; so an entry point lists what its shader reads.
 - **`require` permits, and use sets the floor.** `require extended_image_formats` in a file, a binding or a body grants the feature, named as `sg::feature` names it.
-  An entry point needs what the bindings it lists use, and must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
+  An entry point needs what the bindings it lists use, its stage inputs, a member it takes per sample and its stage.
+  It must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
   A form used without a grant is `needs-feature`, an unknown name `unknown-feature`, and a body `require` nothing needed is the WARNING `unused-require`; a file's or a binding's never is.
-  WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures` or `raytracing` as `target-lacks-feature`.
+  WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` or `tessellation_shader` as `target-lacks-feature`.
+  MSL refuses one needing `geometry_shader` or `tessellation_shader` the same way.
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.
   A `loop:` without a `break` never ends; a `while` always may, whatever its condition.
   What follows a jump in its list is the WARNING `unreachable-code`.
@@ -502,6 +504,19 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **Geometry and tessellation stages** (CHK-301 to CHK-307): `@geometry(max_vertices = N)` takes `tri: varyings[3]` and last `stream: mut triangle_stream[varyings]`.
   `@tessellation_control(partitioning = …, winding = …)` takes the patch and returns a factors struct, and `@tessellation_evaluation` takes both and `@domain_location`.
   HLSL writes them; WGSL and MSL refuse by the feature, so they are tested in C++ rather than in the corpus, which emits for all four targets.
+- **`T[N]` is a value like a struct** (CHK-285 to CHK-290): copied where passed, `float[3, 5]` is three arrays of five, and `xs.length` is a constant.
+  `T[N].filled(v)` and a square literal `[a, b, c]` build one; `T[]` is a binding member's alone.
+- **`discard` is a jump, and only a `@pixel fun` may reach it** (CHK-277): anywhere else it is `stage-not-allowed` at the `discard`.
+  A path that ends in one needs no value, and the uniformity pass does not count it as an exit (CHK-284).
+- **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
+  Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
+- **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+- **A binding array, `texture_2d[float4][64]`, needs `binding_arrays`** and is read by element alone (CHK-299).
+  An index the uniformity pass cannot prove uniform is `nonuniform i`, or it is `non-uniform-index`; a needless mark is a warning (CHK-300).
+- **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
+  A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
+- **`@sampler(name)` on a texture member names a sampler of the same binding** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
+  A call without a sampler on a texture without one is `missing-sampler`.
 - **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
@@ -515,7 +530,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A `@builtin struct` is keyed by its name, a `@builtin fun` by its name AND its parameter types**, against the registry.
   An `@operator` function is found through its operator alone: no lookup sees its name, which is documentation and what a dump shows.
 - **Adding a builtin touches ONE record**, then `uv run dev.py check sgl-prelude --fix` regenerates `prelude/builtins.sgl`.
-  No emitter, interpreter or layout switch exists to extend, and a test adds `fract` to a registry of its own to keep that true.
+  No emitter, interpreter or layout switch exists to extend, and a test adds `sawtooth` to a registry of its own to keep that true.
 - **The user file is the LAST file, not file 1.** Behind the library's prelude it is file 2; a test with one prelude file of its own still has it at 1.
 - **An entry point with any error has no flat tree.** `m.entry_points` holds only what an emitter may read.
 - **The check pass writes the structured form**, and only `once` and a bare `break` never come from it.

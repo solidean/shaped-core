@@ -24,8 +24,9 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **Texture methods in MSL.** Every method has an MSL spelling, pinned by the registry's tests, which no emitted entry point reaches until MSL takes a group.
   The first corpus shader that binds a texture on Metal is where each one meets a Metal compiler.
 - **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, a file-scope `@sampler`, and gathers of integer textures.
-- **Features used in a body.** Only a binding member uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
-  The first builtin or binding array that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.
+- **Features used in a body.** Only an entry point's signature uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
+  A listed binding's member does, and so do a stage input, a member taken per sample and the stage itself (CHK-263).
+  The first builtin that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.
   A `require` inside a nested block, and `if feature f:` to branch on one, wait for that too.
 - **Features used through another symbol.** A binding's `required` counts only the uses resolved while its members compile, and `checker::compile` clears the grant around any symbol they demand.
   No such symbol can hold a resource yet; once a type alias or a struct field can, its use has to reach every binding that names it.

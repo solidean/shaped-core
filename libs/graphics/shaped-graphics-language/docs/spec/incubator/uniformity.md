@@ -20,13 +20,13 @@ Or the gradient is computed before the branch, where every pixel of the quad sti
 **It replaced a stopgap.**
 The WGSL text of an entry point that sampled used to open with `diagnostic(off, derivative_uniformity);`, which kept Tint quiet and left the undefined result in place.
 
-## What it touches
+## What it touched
 
-* Checking: a pass over the inlined flat tree of each entry point, and a diagnostic kind for a sample in non-uniform control flow.
-* The builtin registry: which builtins take implicit derivatives, which the record already says for the emitters.
-* Syntax: an attribute on an `if`, a loop or a `case` that asserts it is uniform, or some other place to state it.
-* Texture methods: a `sample` that takes explicit gradients, and the derivative builtins to compute them ([texture-methods.md](texture-methods.md)).
-* Emitting: the WGSL directive is removed.
+* Checking: a pass over the core tree of each entry point, and the diagnostic kind `non-uniform-control-flow` for a call in non-uniform control flow.
+* The builtin registry: a record says whether its builtin takes derivatives implicitly or is a barrier, and the pass reads that alone.
+* Texture methods: `sample(…, grad_x = …, grad_y = …)` takes explicit gradients, and `ddx` and `ddy` compute them ([texture-methods.md](texture-methods.md)).
+* Emitting: the WGSL directive is gone.
+* Syntax is untouched: an annotation that asserts a branch uniform is still open.
 
 ## Already fixed by the syntax
 

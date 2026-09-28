@@ -372,3 +372,11 @@ Composed literally, `float[3][5]` would be five arrays of three, the reverse of 
 Making it mean the C order instead would break aliasing: with `type row = float[5]`, `row[3]` has to be three rows.
 So several dimensions are one group, outermost first, and two groups in a row are refused rather than read one way or the other.
 `length` names the count, since the texture methods already use `size` for texels and `count` would read as a binding's descriptor count.
+
+## CHK-300
+
+The uniformity pass already knows which index is non-uniform, so the compiler could insert the mark itself.
+The author writes it instead, because it keeps the cost visible in the source.
+On hardware that needs the mark, a marked access becomes a loop over the distinct indices in the wave.
+A refactor that makes an index non-uniform then fails loudly, where an inserted mark would slow it silently.
+The strict rule is also additively relaxable: making the mark optional later breaks no program, while hiding the cost now and asking for it back later would.

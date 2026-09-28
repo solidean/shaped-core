@@ -4,6 +4,7 @@
 
 Tier 1 ([testing.md](testing.md#tier-1--backend-agnostic-api-tests-tests)) runs one test body against every backend, and it is where sg's pipeline semantics belong.
 Today it executes a thin slice of them: SGL shaders double a buffer, bind groups by position, sample a few textures, and draw instanced and indexed quads.
+`compute/compute-sync-test.cc` runs workgroup memory, barriers, atomics and a binding array read through a `nonuniform` index.
 The fixed-function state, the draw parameters and most binding semantics are validated but never executed on a GPU.
 
 SGL can now say what these tests need: stage inputs, integer and bit arithmetic, `discard`, depth and sample-mask output, interpolation, vertex formats,
@@ -23,8 +24,8 @@ Without them each test repeats the forty lines of setup `raster-test.cc` carries
 A draw covers whole pixels, a check reads interior pixels only, and a value is chosen exact in its format — rgba8 in steps of 1/255, r32f and rgba16f in powers of two.
 Where rasterization rules or precision may differ, the check takes a tolerance and says why.
 
-**One `.sgl` fixture per topic**, beside the four in `tests/shaders/sgl/`: `depth_stencil.sgl`, `blend.sgl`, `vertex_input.sgl`, `dispatch.sgl`, `bindings.sgl`.
-A pipeline's state is swept through `acquire_raster_pipeline(p, customize)`, so one SGL pipeline serves every value of an enum.
+**One `.sgl` fixture per topic**, beside the ones in `tests/shaders/sgl/`: `depth_stencil.sgl`, `blend.sgl`, `vertex_input.sgl`, `dispatch.sgl`, `bindings.sgl`.
+A pipeline's state is swept through `acquire_raster_pipeline(p, {}, customize)`, so one SGL pipeline serves every value of an enum.
 
 ## The enum zoo
 
@@ -74,7 +75,6 @@ A combinatorial sweep — every blend factor against every op — narrows to a c
 - A read-only and a read-write view of one buffer.
 - Two to four groups at once, rebound between dispatches, and one group shared by two pipelines of one layout.
 - Bound state across `render_to` scopes: a group bound in one scope is not bound in the next, and a compute-bound group does not leak into a draw.
-- A binding array read through `nonuniform` indices, which is what the bindless tests never execute today.
 
 ## SGL semantics that only a GPU pins
 
@@ -88,8 +88,6 @@ What SGL states for every target, and each backend has to be shown to do:
 - **Flat interpolation takes the first vertex** of the primitive, on every backend.
 - **Depth output**, plain and conservative, against the depth test; **sample mask output** against a multisampled target.
 - **`gather`'s texel order**, the same four texels in the same order on every backend.
-- **A barrier and workgroup memory**: a reduction whose result is wrong if any thread reads before every thread has written.
-- **Atomics**: a counter every thread of every group increments, whose total is the thread count.
 
 ## Geometry and tessellation stages
 
@@ -113,7 +111,7 @@ Tier 2 keeps one native-route smoke test per backend — an embedded blob, compu
 
 - **`vertex_attribute_format`** has 32-bit components and two 8-bit formats; half floats, 16-bit integers and normalized values, `snorm8x4` and `unorm10_10_10_2` are missing.
   SGL's `@format` takes each case once sg has it (CHK-275).
-- **`workgroup_count`** is `unsupported-yet` in SGL, since no backend gives it to a shader; hidden inline constants written per dispatch would.
+- **`workgroup_count`** is no stage input of SGL at all, since no backend gives it to a shader; hidden inline constants written per dispatch would.
 - **Workgroup memory above 16 KiB** is refused as over the portable limit; a feature for a larger budget, which dx12 and Apple GPUs have, would lift it.
 - **Storage writes and atomics in a vertex stage** need a feature, `vertex_stores`, which WebGPU's core lacks.
 - **File-scope samplers** are unbound on vulkan and metal, so SGL refuses them for now.
