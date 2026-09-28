@@ -267,11 +267,21 @@ ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they 
     constexpr auto src_h = 4;
     constexpr auto channels = 2;
 
+    // Which corner of a 2x2 block holds its maximum, 0 to 3 as top-left, top-right, bottom-left, bottom-right.
+    // It differs per block and per channel, so a pool that returns any fixed corner gets some block wrong.
+    auto const max_corner = [](int bx, int by, int c) { return (bx + 2 * by + c) % 4; };
+    auto const value_at = [&](int x, int y, int c)
+    {
+        auto const corner = (x % 2) + 2 * (y % 2);
+        auto const peak = corner == max_corner(x / 2, y / 2, c) ? 1000.0f : 0.0f;
+        return peak + f32((y * src_w + x) * channels + c);
+    };
+
     auto source = cc::vector<f32>();
     for (auto y = 0; y < src_h; ++y)
         for (auto x = 0; x < src_w; ++x)
             for (auto c = 0; c < channels; ++c)
-                source.push_back(f32((y * src_w + x) * channels + c));
+                source.push_back(value_at(x, y, c));
 
     auto cmd = ctx.create_command_list();
 
@@ -310,12 +320,13 @@ ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they 
     auto const got_pool = co_await pooled_back.data();
     auto const got_up = co_await up_back.data();
 
-    // The pool takes the maximum of the 2x2 block, which for this ramp is its bottom-right texel.
+    // The pool takes the maximum of the 2x2 block, which is the corner `max_corner` put the peak in.
     for (auto y = 0; y < src_h / 2; ++y)
         for (auto x = 0; x < src_w / 2; ++x)
             for (auto c = 0; c < channels; ++c)
             {
-                auto const expected = f32(((y * 2 + 1) * src_w + (x * 2 + 1)) * channels + c);
+                auto const corner = max_corner(x, y, c);
+                auto const expected = value_at(x * 2 + corner % 2, y * 2 + corner / 2, c);
                 auto const got = got_pool[(y * (src_w / 2) + x) * channels + c];
                 CHECK(got == expected)
                     .context(cc::format("pool at {},{} channel {}: got {}, expected {}", x, y, c, got, expected));

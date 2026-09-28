@@ -15,7 +15,7 @@ namespace sr::impl
 namespace
 {
 /// Where the weights blob sits, baked in at configure time.
-/// See the viewer TODO: a shipped binary wants it staged beside itself rather than read out of the source tree.
+/// A shipped binary wants the weights staged beside it instead; libs/graphics/shaped-rendering/docs/TODO.md has it.
 constexpr char const* k_weights_dir = SR_OIDN_WEIGHTS_DIR;
 
 /// The tensors the network runs through, in the order they are produced.
@@ -446,8 +446,10 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
     {
         auto const e = level_extent(extent, _source->feature_levels[t]);
         auto const count = isize(e[0]) * isize(e[1]) * isize(_source->feature_channels[t]);
-        _features.push_back(ctx.persistent.create_buffer<f32>(
-            count, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer));
+        // The last tensor can also be copied out, which is what `output_tensor` is for.
+        auto const usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer
+                         | (t == f_out ? sg::buffer_usage::copy_src : sg::buffer_usage{});
+        _features.push_back(ctx.persistent.create_buffer<f32>(count, usage));
     }
 
     _weights = ctx.persistent.create_buffer<f32>(_source->packed.size(),
@@ -634,6 +636,12 @@ void oidn_network::build_groups()
             _programs.upsample_layout,
             shaders::nn_upsample_bindings{.gSource = _features[u.source].as_readonly_buffer(),
                                           .gTarget = _features[u.target].as_readwrite_buffer()}));
+}
+
+sg::buffer<f32> const& oidn_network::output_tensor() const
+{
+    CC_ASSERT(_features.size() == f_count, "the network was not created");
+    return _features[f_out];
 }
 
 bool oidn_network::is_ready() const

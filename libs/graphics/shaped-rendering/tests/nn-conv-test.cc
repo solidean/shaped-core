@@ -31,7 +31,6 @@ using namespace cc::primitive_defines;
 namespace
 {
 constexpr int k_height = 5;
-constexpr int k_out = 4;
 
 /// How many texels one shader thread produces along x; must match NN_CONV_TEXELS in nn_conv.hlsl.
 constexpr int k_texels_per_thread = 8;
@@ -45,6 +44,7 @@ struct conv_case
     int width = 0;
     int in_a = 0;
     int in_b = 0;
+    int out = 4;
 };
 
 /// Deterministic, and spread over positive and negative so a dropped sign does not cancel out.
@@ -63,11 +63,11 @@ struct conv_case
                                              cc::span<f32 const> bias)
 {
     auto const in = c.in_a + c.in_b;
-    auto out = cc::vector<f32>::create_filled(size_t(c.width * k_height * k_out), 0.0f);
+    auto out = cc::vector<f32>::create_filled(size_t(c.width * k_height * c.out), 0.0f);
 
     for (auto y = 0; y < k_height; ++y)
         for (auto x = 0; x < c.width; ++x)
-            for (auto o = 0; o < k_out; ++o)
+            for (auto o = 0; o < c.out; ++o)
             {
                 auto sum = bias[o];
                 for (auto ky = -1; ky <= 1; ++ky)
@@ -84,10 +84,10 @@ struct conv_case
                         {
                             auto const value
                                 = i < c.in_a ? source_a[texel * c.in_a + i] : source_b[texel * c.in_b + (i - c.in_a)];
-                            sum += weights[(tap * in + i) * k_out + o] * value;
+                            sum += weights[(tap * in + i) * c.out + o] * value;
                         }
                     }
-                out[(y * c.width + x) * k_out + o] = cc::max(sum, 0.0f);
+                out[(y * c.width + x) * c.out + o] = cc::max(sum, 0.0f);
             }
 
     return out;
@@ -128,10 +128,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
 
-    for (auto const c : {conv_case{.width = 19, .in_a = 8, .in_b = 0}, conv_case{.width = 19, .in_a = 8, .in_b = 4}})
+    // The third case has more output channels than one 64-thread group, so the second group is checked too.
+    for (auto const c : {conv_case{.width = 19, .in_a = 8, .in_b = 0}, conv_case{.width = 19, .in_a = 8, .in_b = 4},
+                         conv_case{.width = 19, .in_a = 8, .in_b = 4, .out = 68}})
     {
         auto const in = c.in_a + c.in_b;
-        auto const label = cc::format("width {}, {} + {} channels", c.width, c.in_a, c.in_b);
+        auto const label = cc::format("width {}, {} + {} channels in, {} out", c.width, c.in_a, c.in_b, c.out);
 
         // The inputs, filled so that no two positions share a value — a stride read the wrong way round then lands on
         // a different number rather than on a coincidence.
@@ -144,11 +146,11 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
             source_b.push_back(sample_value(n + 5003));
 
         auto weights = cc::vector<f32>();
-        for (auto n = 0; n < k_out * 9 * in; ++n)
+        for (auto n = 0; n < c.out * 9 * in; ++n)
             weights.push_back(sample_value(n + 13) * 0.4f);
 
         auto bias = cc::vector<f32>();
-        for (auto o = 0; o < k_out; ++o)
+        for (auto o = 0; o < c.out; ++o)
             bias.push_back(sample_value(o + 101) * 0.2f);
 
         // One buffer carries the weights and the bias, as the network's does.
@@ -176,7 +178,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
         cmd->upload.data_to_buffer(weight_buffer, packed);
 
         auto const target_buffer = ctx.transient.create_buffer<f32>(
-            c.width * k_height * k_out, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+            c.width * k_height * c.out, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
         // The shader reads its sources four channels at a time, so they are bound as float4 views of the same memory.
         auto const a4 = buffer_a.try_reinterpret_as<tg::vec4f>();
@@ -195,7 +197,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
             .width = u32(c.width),
             .height = u32(k_height),
             .in_channels = u32(in),
-            .out_channels = u32(k_out),
+            .out_channels = u32(c.out),
             .weight_offset = 0,
             .bias_offset = u32(weights.size()),
             .in_channels_a = u32(c.in_a),
@@ -206,20 +208,20 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
         cmd->compute.bind_pipeline(*built);
         cmd->compute.bind<sr::shaders::nn_conv_bindings>(*group);
         cmd->compute.set_inline_constants(constants);
-        cmd->compute.dispatch_threads(k_out, (c.width + k_texels_per_thread - 1) / k_texels_per_thread, k_height);
+        cmd->compute.dispatch_threads(c.out, (c.width + k_texels_per_thread - 1) / k_texels_per_thread, k_height);
 
         auto const readback = sg::data_future<f32>(cmd->download.data_from_buffer(target_buffer));
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
 
         auto const got = co_await readback.data();
-        REQUIRE(got.size() == c.width * k_height * k_out);
+        REQUIRE(got.size() == c.width * k_height * c.out);
 
         auto const expected = reference_conv(c, source_a, source_b, weights, bias);
 
         auto worst = 0.0f;
         auto worst_at = 0;
-        for (auto n = 0; n < c.width * k_height * k_out; ++n)
+        for (auto n = 0; n < c.width * k_height * c.out; ++n)
         {
             auto const d = tg::abs(got[n] - expected[n]);
             if (d > worst)

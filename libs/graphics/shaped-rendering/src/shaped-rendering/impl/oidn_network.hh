@@ -188,6 +188,12 @@ public:
     /// How many tiles one `execute` runs, which is 1 whenever the image fits a tile.
     [[nodiscard]] tg::vec2i tile_counts() const { return _tile_counts; }
 
+    /// The network's last tensor, `dec_conv0`'s output: HWC over `padded_extent`, three channels padded to four.
+    ///
+    /// Raw, before the output pass sanitizes a NaN to zero, so a test reads it to see a network that has gone wrong.
+    /// After a tiled `execute` it holds the last tile.
+    [[nodiscard]] sg::buffer<f32> const& output_tensor() const;
+
     /// How much of a tile is kept, and how much of it is the overlap discarded on each side.
     [[nodiscard]] tg::vec2i tile_step() const { return _tile_step; }
     [[nodiscard]] int tile_overlap() const { return _overlap; }

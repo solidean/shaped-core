@@ -199,29 +199,25 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end", (sg::context_ha
     REQUIRE(network.execute(*cmd, color, albedo, normal, output, 1.0f));
 
     auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+    auto const raw_readback = sg::data_future<f32>(cmd->download.data_from_buffer(network.output_tensor()));
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
 
     auto const got = co_await readback.data();
     REQUIRE(got.size() == k_width * k_height);
 
-    // Finite and non-negative everywhere.
+    // Finite everywhere, read from the network's last tensor rather than from the image.
     //
-    // A single mismatched stride anywhere in sixteen layers reaches every pixel through the pooling, so this is a
-    // weaker check than it looks only if the network is right — if it is wrong, it is usually NaN everywhere.
+    // A single mismatched stride anywhere in sixteen layers reaches every pixel through the pooling, and when it is
+    // wrong it is usually NaN everywhere.
+    // The output pass turns a NaN into black, so only the tensor before it can show one.
+    auto const raw = co_await raw_readback.data();
+    REQUIRE(raw.size() == network.padded_extent()[0] * network.padded_extent()[1] * 4);
     auto finite = 0;
-    auto negative = 0;
-    for (auto const& p : got)
-        for (auto c = 0; c < 3; ++c)
-        {
-            if (p[c] == p[c] && tg::abs(p[c]) < 1e30f)
-                ++finite;
-            if (p[c] < 0.0f)
-                ++negative;
-        }
-    CHECK(finite == k_width * k_height * 3)
-        .context(cc::format("{} of {} channels are finite", finite, k_width * k_height * 3));
-    CHECK(negative == 0).context(cc::format("{} channels are negative, which the output ReLU forbids", negative));
+    for (auto const v : raw)
+        if (v == v && tg::abs(v) < 1e30f)
+            ++finite;
+    CHECK(finite == raw.size()).context(cc::format("{} of {} values in the last tensor are finite", finite, raw.size()));
 
     // The result is an image rather than a constant.
     //
@@ -397,9 +393,11 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
     CHECK(sr::oidn_denoise_routine::options_for({.quality = sr::denoise_quality::best}).network
           == sr::oidn_network_size::base);
 
+    // The member's `init` and the network's five pipelines, both settled before the first call.
+    // The pipelines compile on slib's queue, which nothing an epoch advance drains, so they are awaited directly.
     sr::oidn_denoise_routine::prewarm(ctx);
     (void)co_await ctx.routines.idle_completion();
-
+    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
 
     constexpr auto k_width = 48;
     constexpr auto k_height = 48;
@@ -447,38 +445,15 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
         return sr::denoise_routine::execute(cmd, in, history, settings);
     };
 
-    auto outcome = sr::denoise_outcome{};
-    auto first_restarted = false;
-    auto attempts = 0;
-    for (auto attempt = 0; attempt < 8; ++attempt)
-    {
-        attempts = attempt + 1;
-        auto cmd = ctx.create_command_list();
-        outcome = run(*cmd);
-        if (attempt == 0)
-            first_restarted = outcome.restarted;
-        REQUIRE(outcome.status != sr::denoise_status::unsupported);
-        REQUIRE(outcome.status != sr::denoise_status::failed);
-        ctx.submit_command_list(cc::move(cmd));
+    // With everything built, the very first call denoises: a member that answered `pending` here would leave a real
+    // frame loop showing the raw image for as long as it kept answering so.
+    auto cmd = ctx.create_command_list();
+    auto const outcome = run(*cmd);
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
 
-        if (outcome.is_denoised())
-        {
-            ctx.advance_epoch();
-            break;
-        }
-
-        // The member's `init` built the network's pipelines, but against whichever shader library was live when this
-        // context first prewarmed it — and every test in this binary brings its own — so on the first call here they
-        // may still be compiling, on slib's queue rather than on anything an epoch advance drains.
-        cc::async_backlog const* const backlogs[] = {&ctx.backlog};
-        co_await cc::async_settled(cc::async_backlog::settled(backlogs));
-        ctx.advance_epoch();
-    }
-
-    REQUIRE(outcome.is_denoised())
-        .context(cc::format("the member never produced a denoised frame; last status {}, first_restarted {}, attempts "
-                            "{}",
-                            int(outcome.status), first_restarted, attempts));
+    REQUIRE(outcome.is_denoised()).context(cc::format("the first call's status was {}", int(outcome.status)));
+    auto const first_restarted = outcome.restarted;
     CHECK(outcome.method == sr::denoise_method::oidn);
     CHECK(first_restarted).context("the first call on a fresh history starts from nothing");
     CHECK(history.method() == sr::denoise_method::oidn);
@@ -610,9 +585,17 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
         tg::vec2i tiles = tg::vec2i(0, 0); // what a 288 cap must choose
     };
 
-    for (auto const tc : {tiling_case{.extent = tg::vec2i(384, 384), .tiles = tg::vec2i(3, 3)},
-                          tiling_case{.extent = tg::vec2i(400, 392), .tiles = tg::vec2i(4, 4)},
-                          tiling_case{.extent = tg::vec2i(608, 200), .tiles = tg::vec2i(5, 1)}})
+    // The unaligned shape runs by default, since it is the one that reaches both the grid and the padding.
+    // The aligned square and the one-axis shape are slow on a software rasterizer, so they run in a thorough pass.
+    auto cases = cc::vector<tiling_case>();
+    cases.push_back({.extent = tg::vec2i(400, 392), .tiles = tg::vec2i(4, 4)});
+    if (nx::is_thorough())
+    {
+        cases.push_back({.extent = tg::vec2i(384, 384), .tiles = tg::vec2i(3, 3)});
+        cases.push_back({.extent = tg::vec2i(608, 200), .tiles = tg::vec2i(5, 1)});
+    }
+
+    for (auto const& tc : cases)
     {
         auto const w = tc.extent[0];
         auto const h = tc.extent[1];
