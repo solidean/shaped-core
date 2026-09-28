@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
@@ -9,7 +10,8 @@
 
 /// Open Image Denoise's trained U-Net, run as our own compute shaders.
 ///
-/// The weights are Intel's and the inference is ours; denoising.md says why, and what it measures.
+/// The weights are Intel's and the inference is ours.
+/// libs/graphics/shaped-rendering/docs/denoising.md says why, and what it measures.
 ///
 /// The TOPOLOGY is fixed here and the WIDTHS come from the weights file, which is the split that keeps a weights bump
 /// honest: a changed layer count fails to find its tensor, and a changed width fails the shape test beside it.
@@ -107,7 +109,7 @@ public:
     /// A CAP rather than the size used: `create` picks the tile under it that computes the fewest pixels, which is
     /// usually smaller and never larger.
     /// It trades feature-map memory against the overlap computed twice, never against quality.
-    /// denoising.md has the measured time and memory per cap.
+    /// libs/graphics/shaped-rendering/docs/denoising.md has the measured time and memory per cap.
     static constexpr int k_default_tile = 512;
 
     /// How much of a tile is discarded on each side, so its interior sees what a whole-image run would.

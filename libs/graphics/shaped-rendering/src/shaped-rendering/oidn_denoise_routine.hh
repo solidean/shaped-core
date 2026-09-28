@@ -18,14 +18,16 @@ struct sr::oidn_options
     /// The largest tile the network may run at, which trades memory against the overlap computed twice.
     ///
     /// A cap rather than the size used, and 0 takes the network's own default of 512.
-    /// It never changes the image; denoising.md has the measured time and memory per cap.
+    /// It never changes the image.
+    /// libs/graphics/shaped-rendering/docs/denoising.md has the measured time and memory per cap.
     i32 max_tile = 0;
 };
 
 /// Intel Open Image Denoise: a trained spatial denoiser, run as our own compute shaders.
 ///
 /// **The weights are Intel's and the inference is ours**, so it needs no vendor SDK and no particular GPU.
-/// Its output is held to Intel's own filter by a test; denoising.md has why it runs this way, and what it costs.
+/// Its output is held to Intel's own filter by a test.
+/// libs/graphics/shaped-rendering/docs/denoising.md has why it runs this way, and what it costs.
 ///
 /// **Far too slow for a frame loop** — roughly 0.2 s per megapixel — so `automatic` never picks it; name it.
 ///
