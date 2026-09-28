@@ -22,12 +22,15 @@ constexpr cc::string_view k_image_names[]
     = {"RWTexture1D", "RWTexture1DArray", "RWTexture2D", "RWTexture2DArray", "", "", "RWTexture3D", "", ""};
 
 /// `position` -> `POSITION`, which is how a dx12 input layout names a vertex attribute.
-cc::string upper_cased(cc::string_view name)
+/// `uv1` -> `UV1_`: HLSL reads a trailing number as the semantic's index, and dx12 refuses a name that ends in one.
+cc::string vertex_semantic(cc::string_view name)
 {
     auto result = cc::string(name);
     for (auto& c : result.as_mutable_span())
         if (c >= 'a' && c <= 'z')
             c = char(c - 'a' + 'A');
+    if (!result.empty() && result.back() >= '0' && result.back() <= '9')
+        result += '_';
     return result;
 }
 
@@ -74,7 +77,7 @@ public:
         switch (s.role)
         {
         case struct_role::vertex_input:
-            return upper_cased(member.source_name);
+            return vertex_semantic(member.source_name);
         case struct_role::stage_link:
             return cc::format("SGL{}", member.location);
         case struct_role::patch_constants:

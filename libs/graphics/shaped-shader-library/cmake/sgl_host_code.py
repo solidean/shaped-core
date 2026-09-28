@@ -37,6 +37,12 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "bool32": ("slib::gpu_bool", 4, None),
 }
 
+
+def dx12_semantic(name: str) -> str:
+    """The dx12 semantic of a vertex input member (EMIT-28): its name in upper case, and a `_` after a trailing digit,
+    which HLSL would otherwise read as the semantic's index."""
+    return name.upper() + ("_" if name[-1:].isdigit() else "")
+
 def memory_structs_of(entries: SglEntries) -> dict[str, int]:
     """Every struct the package places in GPU memory, by name, and its size: each is a host type named as SGL names it."""
     return {s["name"]: s["size"] for _, s in entries.memory_structs}
@@ -562,7 +568,7 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
         out = []
         for m in members:
             cpp = vertex_member_host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m)
-            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{m['name'].upper()}` on dx12\n")
+            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{dx12_semantic(m['name'])}` on dx12\n")
         return "".join(out)
 
     out = [f"\nnamespace {namespace}\n{{\n"]
@@ -617,7 +623,7 @@ def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: 
     out.append("            .attributes = {\n")
     for member in struct["members"]:
         fmt = vertex_format(package, file, name, member)
-        out.append(f'                {{.semantic = "{member["name"].upper()}", '
+        out.append(f'                {{.semantic = "{dx12_semantic(member["name"])}", '
                    f".format = sg::vertex_attribute_format::{fmt}, "
                    f".offset = cc::isize(offsetof({owner(member['stream'])}, {member['name']})), "
                    f".slot = {slot_of[member['stream']]}}},\n")

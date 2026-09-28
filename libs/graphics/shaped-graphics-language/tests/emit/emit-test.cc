@@ -317,6 +317,24 @@ TEST("sgl emit - a struct of the program is declared before its first use, and b
                         "    );\n"));
 }
 
+TEST("sgl emit - a vertex member whose name ends in a digit gets a semantic that does not")
+{
+    // HLSL reads `UV1` as the semantic `UV` at index 1, and dx12 refuses an input layout naming `UV1`.
+    auto const source = cc::string("@vertex struct two_uvs:\n"
+                                   "    uv0: float2\n"
+                                   "    uv1: float2\n"
+                                   "\n"
+                                   "struct pixel_input:\n"
+                                   "    @position position: hpos4\n"
+                                   "\n"
+                                   "@vertex fun main_vs(v: two_uvs) -> pixel_input:\n"
+                                   "    return {\n"
+                                   "        position = hpos4(v.uv0.x, v.uv1.y, 0.0, 1.0)\n"
+                                   "    }\n");
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("    float2 uv0 : UV0_;\n    float2 uv1 : UV1_;\n"));
+}
+
 TEST("sgl emit - a member whose dx12 semantic would be a system value is an error")
 {
     CHECK(errors_of("@vertex struct mesh_vertex:\n"
