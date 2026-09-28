@@ -138,11 +138,10 @@ kernel void blur(constant outputs& o [[buffer(0)]]) { (void)o; }
 
 TEST("ssc::msl reflect - a resource bound straight on the entry point is refused, since the backend binds none")
 {
-    // The metal backend sets group N's argument buffer at [[buffer(N)]] and never a texture or a sampler slot.
+    // The metal backend sets group N's argument buffer at [[buffer(N)]], and never a texture slot.
     char const* const sources[] = {
         "kernel void k(device float* data [[buffer(0)]]) { (void)data; }",
         "kernel void k(texture2d<float> tex [[texture(0)]]) { (void)tex; }",
-        "kernel void k(sampler s [[sampler(0)]]) { (void)s; }",
     };
 
     for (auto const* const source : sources)
@@ -151,6 +150,25 @@ TEST("ssc::msl reflect - a resource bound straight on the entry point is refused
         REQUIRE(r.has_error());
         CHECK(r.error().to_string().contains("argument buffers only")).context(r.error().to_string());
     }
+}
+
+TEST("ssc::msl reflect - a sampler slot of the entry point is the layout's static sampler of that index, in no group")
+{
+    auto r = ssc::msl::impl::reflect("kernel void k(sampler edge [[sampler(2)]]) { (void)edge; }", "k",
+                                     sg::shader_stage::compute);
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().bindings.size() == 1);
+    auto const& edge = r.value().bindings[0];
+    CHECK(edge.name == "edge");
+    CHECK(edge.type == sg::binding_type::sampler);
+    CHECK(edge.index == 2);
+    CHECK(!edge.group_index.has_value());
+    CHECK(!edge.space.has_value());
+
+    // a sampler slot holds a sampler and nothing else
+    auto wrong = ssc::msl::impl::reflect("kernel void k(texture2d<float> t [[sampler(0)]]) { (void)t; }", "k",
+                                         sg::shader_stage::compute);
+    REQUIRE(wrong.has_error());
 }
 
 TEST("ssc::msl reflect - a built-in parameter is a value the hardware supplies, never a binding")
