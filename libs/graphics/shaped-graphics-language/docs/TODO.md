@@ -18,7 +18,8 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   Folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in their place.
 - **What `discard` does to a quad's derivatives, per target.** SGL writes `discard;` and MSL `discard_fragment();`, which every target reads as "no effect after this".
   Whether the pixel keeps running as a helper is where they differ, and a sample after a discard in a neighbouring pixel depends on it.
-  The tier-1 foliage test pins it per backend; a target that terminates gets the emulation the design settled: a flag, guarded stores, and the real discard at the end.
+  sg's tier-1 pixel-semantics test pins it per backend, and dx12 and vulkan keep the pixel as a helper.
+  A target that terminates gets the emulation the design settled: a flag, guarded stores, and the real discard at the end.
 - **Texture methods in MSL.** Every method has an MSL spelling, pinned by the registry's tests, which no emitted entry point reaches until MSL takes a group.
   The first corpus shader that binds a texture on Metal is where each one meets a Metal compiler.
 - **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, a file-scope `@sampler`, and gathers of integer textures.

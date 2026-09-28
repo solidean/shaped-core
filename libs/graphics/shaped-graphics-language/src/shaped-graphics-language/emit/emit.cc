@@ -177,7 +177,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     result.layouts = impl::layouts_of(plan);
     if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none)
     {
-        result.color_targets = i32(m.at(m.at(e.result).members).size());
+        // a depth or a sample mask is an output of its own and no target (EMIT-130)
+        result.color_targets = 0;
+        for (auto const& member : m.at(m.at(e.result).members))
+            result.color_targets += member.output == check::pixel_output::color ? 1 : 0;
         result.target_struct = cc::string(m.name_of(e.result));
     }
     return result;

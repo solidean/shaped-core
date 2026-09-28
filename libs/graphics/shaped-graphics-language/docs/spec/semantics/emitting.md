@@ -263,6 +263,7 @@ binding affine:
 * **EMIT-130** A `@depth` member is `SV_Depth` in HLSL, `@builtin(frag_depth)` in WGSL and `[[depth(any)]]` in MSL.
   A `@sample_mask` member is `SV_Coverage`, `@builtin(sample_mask)` and `[[sample_mask]]`.
   The conservative forms are `SV_DepthGreaterEqual` / `SV_DepthLessEqual` and `[[depth(greater)]]` / `[[depth(less)]]`; WGSL has none, and drops the promise, which changes no result.
+  On dx12 a pixel stage writing `.greater_equal` or `.less_equal` takes its `@position` as `noperspective centroid`, which DXIL requires of one.
 * **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
 * **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.

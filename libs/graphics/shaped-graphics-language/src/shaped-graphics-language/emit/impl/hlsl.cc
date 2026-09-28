@@ -113,9 +113,23 @@ public:
         return "";
     }
 
+    /// Whether the entry point is a pixel stage writing `@depth(.greater_equal)` or `@depth(.less_equal)`.
+    [[nodiscard]] static bool writes_conservative_depth(plan const& p)
+    {
+        if (p.e.entry_stage != stage::pixel || !check::is_valid(p.e.result))
+            return false;
+        for (auto const& m : p.m.at(p.m.at(p.e.result).members))
+            if (m.output == check::pixel_output::depth_greater_equal || m.output == check::pixel_output::depth_less_equal)
+                return true;
+        return false;
+    }
+
     void write_member(cc::string& out, planned_struct const* owner, planned_member const& member, plan const& p) const
     {
         out += k_indent;
+        // EMIT-130: DXIL takes a conservative depth only from a pixel stage whose position is interpolated at the centroid
+        if (!_is_vulkan && member.is_position && writes_conservative_depth(p))
+            out += "noperspective centroid ";
         auto const has_location = owner != nullptr && member.location >= 0 && owner->role != struct_role::render_targets;
         if (_is_vulkan && has_location)
             out.appendf("[[vk::location({})]] ", member.location);
