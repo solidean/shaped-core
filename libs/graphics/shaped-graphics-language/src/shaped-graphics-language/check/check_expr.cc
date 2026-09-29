@@ -138,6 +138,14 @@ void checker::check_defaults(symbol_id id)
     auto const index = out.at(id).info;
     // by value: checking a default may compile another function, and `functions` then moves
     auto const info = out.functions[index];
+    auto has_default = false;
+    for (auto const& p : out.at(info.parameters))
+        has_default = has_default || (ast::is_valid(p.field) && p.has_default);
+    if (!has_default)
+    {
+        notes[index].are_defaults_sound = true;
+        return;
+    }
     auto scope = function_scope{.function = id, .file = file, .result = info.result};
     // CHK-243: a method's `self` is a parameter before every default
     auto const* const f = ast.at(out.at(id).declaration).node.try_as<ast::fun_decl>();
@@ -1434,10 +1442,18 @@ void checker::note_near_misses(i32 file,
 
 cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call_arguments const& arguments)
 {
-    // by value: a literal argument may compile another function, and `parameters` then moves
+    // Read in place, by position: a literal argument may compile another function, and `out.parameters` then moves.
     auto const range = out.functions[out.at(candidate).info].parameters;
-    auto const parameters = cc::vector<parameter>::create_copy_of(out.at(range));
-    auto bound = bind_arguments(parameters, arguments);
+    // Most candidates of a call fail on their count alone, which is decided before anything is allocated.
+    auto required = isize(0);
+    for (auto const& p : out.at(range))
+        required += p.has_default ? 0 : 1;
+    if (arguments.written.size() > isize(range.count) || arguments.written.size() < required)
+        return cc::nullopt;
+    // what `chain_of` reads of a parameter, copied without its name since a compile may move the original
+    auto const shape_of
+        = [&](isize p) { return parameter{.type = out.at(range)[p].type, .is_mut = out.at(range)[p].is_mut}; };
+    auto bound = bind_arguments(out.at(range), arguments);
     if (bound.failure != miss_reason::none)
         return cc::nullopt;
     auto result = candidate_match{.candidate = candidate,
@@ -1446,22 +1462,22 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     // CHK-340: a parameter whose type names a type parameter binds it to what the argument is, exactly; a function
     // and a literal wait until the rest are bound, since what they meet depends on it
     auto deferred = cc::vector<isize>();
-    for (auto p = isize(0); p < parameters.size(); ++p)
+    for (auto p = isize(0); p < isize(range.count); ++p)
     {
         auto const i = result.slots[p];
         if (i < 0 || arguments.undefineds[i])
             continue;
-        if (is_open(parameters[p].type))
+        if (is_open(out.at(range)[p].type))
         {
             // a number binds the type it was checked as, since nothing asks it for another
             if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0)
                 deferred.push_back(p);
-            else if (parameters[p].is_mut != arguments.written[i].is_mut
-                     || !unify(parameters[p].type, arguments.types[i], result.bindings))
+            else if (out.at(range)[p].is_mut != arguments.written[i].is_mut
+                     || !unify(out.at(range)[p].type, arguments.types[i], result.bindings))
                 return cc::nullopt;
             continue;
         }
-        auto const length = chain_of(file, parameters[p], arguments, i);
+        auto const length = chain_of(file, shape_of(p), arguments, i);
         if (!length.has_value())
             return cc::nullopt;
         result.chains[i] = length.value();
@@ -1473,7 +1489,7 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
         {
             // by value: demanding a candidate may push to `function_arguments`
             auto const f = function_arguments[arguments.functions[i]];
-            auto const& taking = out.at(parameters[p].type);
+            auto const& taking = out.at(out.at(range)[p].type);
             if (taking.kind != type_kind::function)
                 return cc::nullopt;
             // a lambda binds what its body gives when it is checked, after the call chose this candidate
@@ -1506,7 +1522,7 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
                 if (has_mut)
                     continue;
                 auto trial = result.bindings;
-                if (unify(parameters[p].type, function_type(types, info.result), trial))
+                if (unify(out.at(range)[p].type, function_type(types, info.result), trial))
                 {
                     ++matching;
                     chosen = cc::move(trial);
@@ -1517,7 +1533,7 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
             result.bindings = cc::move(chosen);
             continue;
         }
-        auto taking = parameters[p];
+        auto taking = shape_of(p);
         taking.type = substitute(taking.type, result.bindings);
         if (is_open(taking.type))
             return cc::nullopt;

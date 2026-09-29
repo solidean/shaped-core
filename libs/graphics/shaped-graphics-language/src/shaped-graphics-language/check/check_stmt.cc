@@ -510,16 +510,20 @@ void checker::find_recursion()
     auto state = cc::vector<u8>::create_filled(notes.size(), 0);
     auto path = cc::vector<symbol_id>();
 
+    // Each function's calls, so a visit walks its own edges rather than every edge of the module.
+    auto calls_of = cc::vector<cc::vector<isize>>::create_defaulted(notes.size());
+    for (auto i = isize(0); i < calls.size(); ++i)
+        if (auto const info = out.at(calls[i].caller).info; info >= 0)
+            calls_of[info].push_back(i);
+
     auto const visit = [&](auto&& self, symbol_id f) -> void
     {
         state[out.at(f).info] = 1;
         path.push_back(f);
-        for (auto i = isize(0); i < calls.size(); ++i)
+        for (auto const i : calls_of[out.at(f).info])
         {
             // by value: a report does not touch `calls`, and a copy keeps this loop honest if one ever does
             auto const edge = calls[i];
-            if (edge.caller != f)
-                continue;
             auto const seen = state[out.at(edge.callee).info];
             if (seen == 0)
                 self(self, edge.callee);

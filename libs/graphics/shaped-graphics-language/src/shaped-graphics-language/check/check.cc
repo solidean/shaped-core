@@ -221,6 +221,9 @@ isize checker::error_count() const
 
 ast::attribute const* checker::find_attribute(i32 file, ast::range_of<ast::attribute> range, cc::string_view name) const
 {
+    // most declarations carry none, and this is asked many names per declaration
+    if (range.empty())
+        return nullptr;
     for (auto const& a : ast_of(file).at(range))
         if (text_of(file, a.name) == name)
             return &a;

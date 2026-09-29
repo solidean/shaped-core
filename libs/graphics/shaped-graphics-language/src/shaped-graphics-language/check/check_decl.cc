@@ -1277,24 +1277,27 @@ void checker::compile_function(symbol_id id)
     {
         auto const name = text_of(file, p.name);
         // CHK-271: a stage input is a parameter its attribute marks, one attribute per input
-        cc::string_view known_on_parameter[16] = {};
-        auto known_count = isize(0);
-        for (auto const& input : stage_inputs())
-            known_on_parameter[known_count++] = input.name;
-        judge_attributes(file, p.attributes, cc::span<cc::string_view const>(known_on_parameter, known_count),
-                         "a parameter");
         auto input = stage_input::none;
-        for (auto const& candidate : stage_inputs())
-            if (find_attribute(file, p.attributes, candidate.name) != nullptr)
-            {
-                if (input != stage_input::none)
+        if (!p.attributes.empty())
+        {
+            cc::string_view known_on_parameter[16] = {};
+            auto known_count = isize(0);
+            for (auto const& candidate : stage_inputs())
+                known_on_parameter[known_count++] = candidate.name;
+            judge_attributes(file, p.attributes, cc::span<cc::string_view const>(known_on_parameter, known_count),
+                             "a parameter");
+            for (auto const& candidate : stage_inputs())
+                if (find_attribute(file, p.attributes, candidate.name) != nullptr)
                 {
-                    report(diagnostic_kind::invalid_attribute_arguments, file, p.name,
-                           cc::format("{} is marked as two stage inputs; a parameter is one", name));
-                    is_failed = true;
+                    if (input != stage_input::none)
+                    {
+                        report(diagnostic_kind::invalid_attribute_arguments, file, p.name,
+                               cc::format("{} is marked as two stage inputs; a parameter is one", name));
+                        is_failed = true;
+                    }
+                    input = candidate.input;
                 }
-                input = candidate.input;
-            }
+        }
         // `mut self` was reported as itself; a mut parameter is spelled on its type (CHK-315)
         if (p.is_mut && f.receiver != ast::receiver_kind::mut_self)
             report(diagnostic_kind::unexpected_keyword, file, p.name,

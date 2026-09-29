@@ -5,6 +5,12 @@ An idea that may be far off, or that we may never want, belongs in the [spec inc
 What the compiler carries today is the [spec](spec/_index.md); a construct it does not carry yet is `unsupported-yet` there.
 `DEBUG_` in a name marks a stand-in for something listed here.
 
+- **Check the prelude once per process.** Every compile checks all of the prelude, bodies included, and the prelude is most of what a small program costs.
+  On `debug-linux-clang` a ten-line compute shader checks in about 50 ms, nearly all of it prelude.
+  The debug CI leg's SGL suite runs close to its 60-second limit for that reason, since several tests compile hundreds of programs.
+  The way out is a checked prelude shared by every compile, which the checker's single arena per module does not allow yet.
+  The test `sgl profile - checking a small program behind the prelude, sampled` measures it.
+
 - **A debug build overflows its stack well inside `k_max_depth`.** A compute entry point whose store sums a 150-term chain (`x + 1.0 + … + 1.0`) crashes `sgl describe` on `debug-nopch-clang`.
   It did so before the footprint became a linear pass too.
   The recursive passes each guard their own depth at 200, which a release frame fits and a debug frame does not.
