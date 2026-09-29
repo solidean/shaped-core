@@ -205,8 +205,8 @@ struct sgl::builtins::function_record
     bool is_atomic = false;
     /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
     bool is_nonuniform_mark = false;
-    /// Takes one argument more than its signature names, of the type its first argument holds: a stream's `emit`,
-    /// whose vertex is a struct of the program (CHK-303).
+    /// Takes one argument more than its signature names, of a struct of the program: a stream's `emit` its vertex, of
+    /// the type the stream holds (CHK-303), and a trace its payload, which the call writes through (CHK-329).
     bool takes_element = false;
     /// What a device needs to run a call of it: an entry point that reaches one needs it too, and declares it (CHK-322).
     check::feature_set features;

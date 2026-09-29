@@ -60,11 +60,11 @@ namespace sgl::check
 namespace sgl::check
 {
 /// The bit of `s` in a set of stages, as `function_info::stages` holds one.
-[[nodiscard]] constexpr u8 stage_bit(stage s)
+[[nodiscard]] constexpr u16 stage_bit(stage s)
 {
-    return u8(1u << u8(s));
+    return u16(1u << u8(s));
 }
-inline constexpr u8 k_every_stage = 0xFF;
+inline constexpr u16 k_every_stage = 0xFFFF;
 } // namespace sgl::check
 
 /// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").
@@ -111,6 +111,18 @@ enum class sgl::check::stage : sgl::u8
     tessellation_control,
     /// A `@tessellation_evaluation` fun: it takes a patch, its factors and a point of the domain, and returns a vertex (CHK-306).
     tessellation_evaluation,
+    /// The ray-tracing stages (CHK-326): where a dispatch of rays starts, one invocation per launch index.
+    raygen,
+    /// What a ray that hit nothing runs, with its ray type's payload.
+    miss,
+    /// What the nearest accepted hit runs, once per trace.
+    closest_hit,
+    /// What decides a candidate the traversal could not decide alone.
+    any_hit,
+    /// What finds the hits in a procedural primitive's box.
+    intersection,
+    /// A function another ray-tracing stage calls through a table.
+    callable,
 };
 
 namespace sgl::check
@@ -132,6 +144,18 @@ namespace sgl::check
         return "tessellation_control";
     case stage::tessellation_evaluation:
         return "tessellation_evaluation";
+    case stage::raygen:
+        return "raygen";
+    case stage::miss:
+        return "miss";
+    case stage::closest_hit:
+        return "closest_hit";
+    case stage::any_hit:
+        return "any_hit";
+    case stage::intersection:
+        return "intersection";
+    case stage::callable:
+        return "callable";
     case stage::none:
         break;
     }
@@ -171,6 +195,9 @@ enum class sgl::check::stage_input : sgl::u8
     workgroup_id,
     /// Where in the tessellated domain the evaluation stage runs: barycentric for triangles, `(u, v)` otherwise.
     domain_location,
+    /// A ray-tracing stage's launch index, and the size of the launch (CHK-327).
+    launch_id,
+    launch_size,
 };
 
 /// What the checker knows of one stage input: the attribute, the stage that has it, its type and the feature it needs.
@@ -181,7 +208,7 @@ struct sgl::check::stage_input_info
     cc::string_view name;
     stage in_stage = stage::none;
     /// The other stages that have it, each without a feature: a `stage_bit` mask.
-    u8 also_in = 0;
+    u16 also_in = 0;
     /// The name of its builtin type.
     cc::string_view type;
     /// -1 for an input every device has; otherwise a `feature` (check/features.hh).
@@ -459,7 +486,7 @@ struct sgl::check::function_info
     tessellation_partitioning partitioning = tessellation_partitioning::integer;
     bool is_clockwise = true;
     /// The stages an entry point may be of to reach it, one bit per `stage` (`stage_bit`); every stage without `@stages`.
-    u8 stages = k_every_stage;
+    u16 stages = k_every_stage;
     /// For an entry point, the features a device needs to run it: what it uses, never what it merely declares (CHK-263).
     /// Empty for every other function.
     feature_set features;
@@ -598,6 +625,21 @@ struct sgl::check::target
     i32 index = -1;
 
     constexpr bool operator==(target const&) const = default;
+};
+
+/// `trace(world, r, set.ray, mut payload)`: a trace of a ray-tracing pipeline's ray type (CHK-329).
+struct sgl::check::ray_trace
+{
+    i32 file = 0;
+    ast::expr_id call = ast::expr_id::none;
+    /// The ray set, a `rays` declaration.
+    symbol_id set = symbol_id::none;
+    /// The ray type's position in its set, which is the trace's ray contribution and its miss index.
+    i32 ray = 0;
+    /// The function the trace stands in, whose ray type it is a trace graph's edge from.
+    symbol_id caller = symbol_id::none;
+
+    constexpr bool operator==(ray_trace const&) const = default;
 };
 
 /// One argument a call wrote, in the order it wrote them, which is the order they are evaluated in (EVAL-80).

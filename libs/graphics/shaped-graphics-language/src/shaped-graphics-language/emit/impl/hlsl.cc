@@ -419,6 +419,24 @@ public:
         for (auto const& parameter : parameters)
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
 
+        // EMIT-136: a ray-tracing stage is a library export, named by its kind, whose payload is `inout`
+        if (p.e.entry_stage >= stage::raygen)
+        {
+            auto const kind = p.e.entry_stage == stage::raygen       ? "raygeneration"
+                            : p.e.entry_stage == stage::miss         ? "miss"
+                            : p.e.entry_stage == stage::closest_hit  ? "closesthit"
+                            : p.e.entry_stage == stage::any_hit      ? "anyhit"
+                            : p.e.entry_stage == stage::intersection ? "intersection"
+                                                                     : "callable";
+            auto rt = cc::string();
+            if (check::is_valid(p.e.input))
+                rt = cc::format("inout {} {}", type_text(p, *this, p.e.input), p.locals[0]);
+            if (p.e.entry_stage == stage::closest_hit || p.e.entry_stage == stage::any_hit)
+                rt += ", in BuiltInTriangleIntersectionAttributes sgl_attributes";
+            out.appendf("[shader(\"{}\")]\nvoid {}({})\n{{\n", kind, p.entry_name, rt);
+            return;
+        }
+
         if (p.e.entry_stage == stage::compute)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);

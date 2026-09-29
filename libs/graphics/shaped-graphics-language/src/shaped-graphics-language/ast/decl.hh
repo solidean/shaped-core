@@ -69,6 +69,8 @@ struct sgl::ast::struct_decl
     range_of<decl_id> members;
     /// No block at all: the type has no members one could name, which differs from a block that declares none.
     bool is_opaque = false;
+    /// `rays name:`, a ray set: each member a ray type and the payload it carries (AST-150).
+    bool is_ray_set = false;
 
     constexpr bool operator==(struct_decl const&) const = default;
 };
@@ -132,6 +134,8 @@ struct sgl::ast::pipeline_decl
     range_of<argument> stages;
     /// Whether the short form was written, so `pipeline p = ()` is told apart from an empty block.
     bool is_short_form = false;
+    /// `hit_group name:`, one row of a ray-tracing pipeline's table, whose settings name its shaders (AST-150).
+    bool is_hit_group = false;
 
     constexpr bool operator==(pipeline_decl const&) const = default;
 };

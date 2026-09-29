@@ -441,7 +441,7 @@ struct checker
     /// True for the prelude's `int3`, the type a dispatch reports a thread's id as.
     [[nodiscard]] bool is_int3(type_id type) const;
     /// The stages a `@stages` attribute names, as `function_info::stages`; every stage without one or after a bad one.
-    [[nodiscard]] u8 stages_of(i32 file, ast::attribute const* a);
+    [[nodiscard]] u16 stages_of(i32 file, ast::attribute const* a);
     [[nodiscard]] interpolation interpolation_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
@@ -460,6 +460,14 @@ struct checker
     type_id check_stream_call(function_scope& scope, ast::expr_id id, ast::call const& call, type_id stream);
     /// CHK-301 to CHK-306: an entry point of the geometry or a tessellation stage, which `judge_entry_point` hands on.
     void judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
+    /// The ray set a `rays` declaration made of `symbol`, and its ray types; null for any other symbol.
+    [[nodiscard]] bool is_ray_set(symbol_id symbol) const;
+    /// `set.ray` as an expression: the set and the ray's position, or `none` where `expr` names no ray type.
+    [[nodiscard]] cc::optional<ray_trace> ray_type_of(i32 file, ast::expr_id expr);
+    /// `trace(world, r, set.ray, mut payload)`, the trace of a ray-tracing stage (CHK-329).
+    type_id check_pipeline_trace(function_scope& scope, ast::expr_id id, ast::call const& call, ray_trace ray);
+    /// CHK-326: an entry point of a ray-tracing stage, which `judge_entry_point` hands on.
+    void judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
     /// The one name of a `@stream(name)` or a `@sampler(name)`; empty without one, and after a bad argument it reports.
     [[nodiscard]] cc::string name_argument_of(i32 file, ast::attribute const* a);
     /// The members of a struct or a binding, collected locally and appended whole so the range stays contiguous.

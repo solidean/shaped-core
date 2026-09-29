@@ -225,6 +225,7 @@ struct pipeline_info;
 enum class target_kind : u8;
 struct target;
 struct written_argument;
+struct ray_trace;
 struct call_record;
 enum class miss_reason : u8;
 struct near_miss;

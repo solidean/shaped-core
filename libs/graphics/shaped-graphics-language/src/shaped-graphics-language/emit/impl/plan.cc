@@ -47,7 +47,8 @@ bool is_called_by_a_builtin(checked_module const& m, emit::target t, cc::string_
 struct_role input_role(flat_entry_point const& e)
 {
     // A compute parameter crosses no edge: it is a system value, or a struct of them.
-    if (e.entry_stage == stage::compute)
+    // a ray-tracing stage's payload is a plain struct the target hands over by reference
+    if (e.entry_stage == stage::compute || e.entry_stage >= stage::raygen)
         return struct_role::plain;
     // the geometry and the tessellation stages take an array of what the stage before hands on
     return e.entry_stage == stage::vertex ? struct_role::vertex_input : struct_role::stage_link;
@@ -1056,6 +1057,9 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         return k_workgroup_id;
     case stage_input::domain_location:
         return k_domain_location;
+    // a ray-tracing stage reads its launch through builtins, which flatten binds its parameters to
+    case stage_input::launch_id:
+    case stage_input::launch_size:
     case stage_input::none:
         break;
     }

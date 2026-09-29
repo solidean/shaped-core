@@ -751,6 +751,19 @@ struct writer
                              line("return;");
                              return;
                          }
+                         // EMIT-136: an any hit's decision is the target's call that ends the stage, and a plain return
+                         // accepts the candidate
+                         if (p.e.entry_stage == check::stage::any_hit)
+                         {
+                             auto const decision = p.names.mint("decision");
+                             line(cc::format("const int {} = {};", decision, expr(r.value, true).text));
+                             line(cc::format("if ({} == 1)", decision));
+                             line("    IgnoreHit();");
+                             line(cc::format("if ({} == 2)", decision));
+                             line("    AcceptHitAndEndSearch();");
+                             line("return;");
+                             return;
+                         }
                          auto const& value = p.e.at(r.value);
                          if (needs_member_assignment(value))
                          {

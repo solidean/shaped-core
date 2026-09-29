@@ -737,6 +737,10 @@ struct flattener
                 return flatten_void_equality(id, type, spelling == "==", arguments[0].value, arguments[1].value);
         }
 
+        for (auto const& t : c.out.ray_traces)
+            if (t.call == id && t.file == file())
+                return flatten_ray_trace(id, call, t);
+
         auto const record = tables().call_at(id);
         // CHK-319: a call through a parameter of function type records no callee, and inlines what was handed over
         if (record >= 0 && !is_valid(c.out.call_records[record].callee) && ast::is_valid(call.callee))
@@ -750,6 +754,84 @@ struct flattener
         if (record < 0 || (where.kind != target_kind::overload && where.kind != target_kind::constructor))
             return fail();
         return flatten_bound_call(id, type, c.out.call_records[record]);
+    }
+
+    /// CHK-329: `trace(world, r, set.ray, mut p)` is the target's trace, with the ray's position in its set as its
+    /// contribution and its miss, and the set's size as its multiplier.
+    /// The payload is handed over as a local the call writes through, copied in and out where it is another place.
+    flat_expr_id flatten_ray_trace(ast::expr_id id, ast::call const& call, ray_trace const& t)
+    {
+        auto const arguments = ast().at(call.arguments);
+        auto const where = origin{.file = file(), .expr = id};
+        auto const world = flatten_expr(arguments[0].value);
+        auto const world_type = tables().type_at(arguments[0].value);
+        auto const* const overloads = c.prelude_names.get_ptr("trace_ray");
+        auto callee = symbol_id::none;
+        for (auto const candidate :
+             overloads == nullptr ? cc::span<symbol_id const>() : cc::span<symbol_id const>(*overloads))
+            if (c.out.at(c.out.functions[c.out.at(candidate).info].parameters)[0].type == world_type)
+                callee = candidate;
+        if (!is_valid(callee) || !is_valid(world))
+            return fail();
+
+        // the ray once, then its fields
+        auto ray = flatten_expr(arguments[1].value);
+        if (!is_valid(ray))
+            return fail();
+        if (!is_substitutable(ray))
+        {
+            auto const local = add_local(local_kind::let, "ray", entry.at(ray).type);
+            add_stmt(where, flat_let{.local = local, .value = ray});
+            ray = local_ref(local, id);
+        }
+        auto const fields = c.out.at(c.out.at(entry.at(ray).type).members);
+        auto const field
+            = [&](i32 m) { return add_expr(fields[m].type, id, flat_member{.object = again(ray, id), .member = m}); };
+
+        auto flags = add_expr(c.out.at(c.out.functions[c.out.at(callee).info].parameters)[5].type, id,
+                              flat_int_literal{.value = 0});
+        auto mask = add_expr(int_type(), id, flat_int_literal{.value = 0xff});
+        for (auto i = isize(4); i < arguments.size(); ++i)
+        {
+            auto const name = c.text_of(file(), arguments[i].name);
+            (name == "flags" ? flags : mask) = flatten_expr(arguments[i].value);
+        }
+        auto const count = c.out.at(c.out.at(c.out.at(t.set).type).members).size();
+
+        auto place = flatten_expr(arguments[3].value);
+        if (!is_valid(place))
+            return fail();
+        auto const is_local = entry.at(place).node.is<flat_local_ref>();
+        auto payload = place;
+        if (!is_local)
+        {
+            place = with_bound_index(place, id);
+            auto const local = add_local(local_kind::var, "payload", entry.at(place).type);
+            add_stmt(where, flat_var{.local = local});
+            add_stmt(where, flat_assign{.place = add_expr(entry.at(place).type, id, flat_local_ref{.local = local}),
+                                        .value = again(place, id)});
+            payload = local_ref(local, id);
+        }
+
+        flat_expr_id const values[] = {
+            world,
+            field(0),
+            field(1),
+            field(2),
+            field(3),
+            flags,
+            mask,
+            add_expr(int_type(), id, flat_int_literal{.value = t.ray}),
+            add_expr(int_type(), id, flat_int_literal{.value = i32(count)}),
+            add_expr(int_type(), id, flat_int_literal{.value = t.ray}),
+            payload,
+        };
+        auto const traced = builtin_call(id, callee, values);
+        if (is_local)
+            return traced;
+        add_stmt(where, flat_eval{.value = traced});
+        add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
+        return add_expr(checked_module::void_type, id, flat_construct{});
     }
 
     /// The element `place` names, over a local holding its index where evaluating the index twice could differ.
@@ -2212,8 +2294,54 @@ void checker::flatten_entry_point(symbol_id id)
             f.entry.names.reserve(other.name);
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
+    // CHK-326: a ray-tracing stage's one parameter of the target is its payload, `locals[0]`, which the stage writes
+    // through; its launch, its ray and its hit it reads from the target where the entry point starts
+    if (info.entry_stage >= stage::raygen)
+    {
+        f.entry.input = type_id::none;
+        for (auto const& parameter : parameters)
+            if (parameter.is_mut)
+            {
+                auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
+                f.entry.input = parameter.type;
+                f.current()->bound.push_back(
+                    {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+            }
+        for (auto const& parameter : parameters)
+        {
+            if (parameter.is_mut)
+                continue;
+            auto const source = parameter.input == stage_input::launch_id     ? cc::string_view("launch_index")
+                              : parameter.input == stage_input::launch_size   ? cc::string_view("launch_dimensions")
+                              : out.name_of(parameter.type) == "ray"          ? cc::string_view("current_ray")
+                              : out.name_of(parameter.type) == "triangle_hit" ? cc::string_view("current_triangle_hit")
+                              : out.name_of(parameter.type) == "triangle_candidate"
+                                  ? cc::string_view("current_triangle_candidate")
+                                  : cc::string_view();
+            auto const* const found = prelude_names.get_ptr(source);
+            if (source.empty() || found == nullptr || found->empty())
+            {
+                f.is_failed = true;
+                continue;
+            }
+            auto const read = found->front();
+            auto value = flat_expr_id::none;
+            if (is_valid(out.at(read).intrinsic))
+                value = f.builtin_call(ast::expr_id::none, read, {});
+            else
+            {
+                auto const inlined = f.inline_call(ast::expr_id::none, read, {});
+                value = f.add_expr(parameter.type, ast::expr_id::none,
+                                   flat_block{.label = inlined.label, .body = inlined.body});
+            }
+            auto const local = f.add_local(local_kind::let, parameter.name, parameter.type);
+            f.add_stmt({.file = s.file, .expr = ast::expr_id::none}, flat_let{.local = local, .value = value});
+            f.current()->bound.push_back(
+                {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+        }
+    }
     // Every parameter is a local, in the order written: the stage struct at `locals[0]` when there is one.
-    for (auto const& parameter : parameters)
+    for (auto const& parameter : info.entry_stage >= stage::raygen ? cc::span<check::parameter const>() : parameters)
     {
         auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
         f.current()->bound.push_back(

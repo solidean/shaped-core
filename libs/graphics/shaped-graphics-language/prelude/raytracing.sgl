@@ -154,6 +154,54 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let zero = float4(0.0, 0.0, 0.0, 0.0)
     return triangle_hit(false, r.t_max, r, 0, 0, 0, 0, float3(0.0, 0.0, 0.0), false, zero, zero, zero, zero, zero, zero)
 
+// ---- what a ray-tracing stage is handed -----------------------------------------------------------------------------
+//
+// A stage's parameter of these types is its ray, its hit or its candidate, which its entry point reads from the target.
+
+@internal fun current_ray() -> ray:
+    let o = world_ray_origin()
+    let d = world_ray_direction()
+    return ray(origin = o, direction = d, t_min = ray_t_min(), t_max = ray_t_current())
+
+@internal fun current_triangle_hit() -> triangle_hit:
+    let b = hit_barycentrics()
+    return triangle_hit(
+        true
+        ray_t_current()
+        current_ray()
+        hit_instance_id()
+        hit_instance_index()
+        hit_geometry_index()
+        hit_primitive_index()
+        float3(1.0 - b.x - b.y, b.x, b.y)
+        hit_is_front_face()
+        hit_object_to_world_row(0)
+        hit_object_to_world_row(1)
+        hit_object_to_world_row(2)
+        hit_world_to_object_row(0)
+        hit_world_to_object_row(1)
+        hit_world_to_object_row(2)
+    )
+
+@internal fun current_triangle_candidate() -> triangle_candidate:
+    let b = hit_barycentrics()
+    return triangle_candidate(
+        ray_t_current()
+        current_ray()
+        hit_instance_id()
+        hit_instance_index()
+        hit_geometry_index()
+        hit_primitive_index()
+        float3(1.0 - b.x - b.y, b.x, b.y)
+        hit_is_front_face()
+        hit_object_to_world_row(0)
+        hit_object_to_world_row(1)
+        hit_object_to_world_row(2)
+        hit_world_to_object_row(0)
+        hit_world_to_object_row(1)
+        hit_world_to_object_row(2)
+    )
+
 // ---- the native form ------------------------------------------------------------------------------------------------
 
 @internal fun candidate_of(q: ray_query, r: ray) -> triangle_candidate:

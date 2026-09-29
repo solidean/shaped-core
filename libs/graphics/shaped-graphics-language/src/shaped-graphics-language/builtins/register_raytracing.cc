@@ -310,6 +310,71 @@ written write_query(call_context const& ctx)
     }
 }
 
+/// What a ray-tracing stage reads of its launch, its ray and its hit, as `data`: a position in `k_stage_reads`.
+struct stage_read
+{
+    cc::string_view signature;
+    cc::string_view hlsl;
+    evaluator evaluate;
+};
+
+constexpr stage_read k_stage_reads[] = {
+    {"@stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3",
+     "int3(DispatchRaysIndex())", nothing},
+    {"@stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_dimensions() -> int3",
+     "int3(DispatchRaysDimensions())", nothing},
+    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_origin() -> pos3", "WorldRayOrigin()", nothing},
+    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_direction() -> vec3", "WorldRayDirection()",
+     nothing},
+    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_min() -> float", "RayTMin()", zero_float},
+    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_current() -> float", "RayTCurrent()", zero_float},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_instance_id() -> int", "int(InstanceID())", zero_int},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_instance_index() -> int", "int(InstanceIndex())", zero_int},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_geometry_index() -> int", "int(GeometryIndex())", zero_int},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_primitive_index() -> int", "int(PrimitiveIndex())", zero_int},
+    {"@stages(.closest_hit, .any_hit) fun hit_barycentrics() -> float2", "sgl_attributes.barycentrics", zero_float2},
+    {"@stages(.closest_hit, .any_hit) fun hit_is_front_face() -> bool", "(HitKind() == HIT_KIND_TRIANGLE_FRONT_FACE)",
+     no_bool},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_object_to_world_row(row: int) -> float4",
+     "ObjectToWorld3x4()[{}]", zero_float4},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_world_to_object_row(row: int) -> float4",
+     "WorldToObject3x4()[{}]", zero_float4},
+};
+
+constexpr cc::string_view k_stage_reads_hlsl[] = {
+    "DispatchRaysIndex",
+    "DispatchRaysDimensions",
+    "WorldRayOrigin",
+    "WorldRayDirection",
+    "RayTMin",
+    "RayTCurrent",
+    "InstanceID",
+    "InstanceIndex",
+    "GeometryIndex",
+    "PrimitiveIndex",
+    "sgl_attributes",
+    "HitKind",
+    "HIT_KIND_TRIANGLE_FRONT_FACE",
+    "ObjectToWorld3x4",
+    "WorldToObject3x4",
+};
+
+written write_stage_read(call_context const& ctx)
+{
+    // the pipeline has no WGSL form, and MSL's is written from the kernel that calls the stage
+    if (ctx.target != language::hlsl)
+        return {};
+    auto const& read = k_stage_reads[ctx.data];
+    if (ctx.arguments.empty())
+        return {.text = cc::string(read.hlsl)};
+    // a row of a matrix: the argument stands where the spelling holds `{}`
+    auto const hole = read.hlsl.find("{}");
+    auto text = cc::string(read.hlsl.subview({.offset = 0, .size = hole}));
+    text += ctx.arguments[0].text;
+    text += read.hlsl.subview({.offset = hole + 2, .size = read.hlsl.size() - hole - 2});
+    return {.text = cc::move(text)};
+}
+
 /// `sg_acceleration_roots[k / 4][k % 4]`: the root of the entry point's k-th acceleration member, which only the
 /// emulated form reads (the internal doc `raytracing-polyfill.md`).
 written write_polyfill(call_context const& ctx)
@@ -322,6 +387,27 @@ written write_polyfill(call_context const& ctx)
     }
     return {.text = cc::format("sg_acceleration_pool[{}]", ctx.arguments[0].text)};
 }
+
+/// A ray-tracing stage's trace: (world, origin, direction, t_min, t_max, flags, mask, contribution, multiplier, miss,
+/// payload).
+written write_trace_ray(call_context const& ctx)
+{
+    if (ctx.target != language::hlsl)
+        return {};
+    auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
+    auto result = written();
+    result.lines.push_back(cc::format("RayDesc {};", desc));
+    result.lines.push_back(cc::format("{}.Origin = {};", desc, ctx.arguments[1].text));
+    result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
+    result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
+    result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
+    result.text = cc::format("TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {})", ctx.arguments[0].text,
+                             ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text, ctx.arguments[8].text,
+                             ctx.arguments[9].text, desc, ctx.arguments[10].text);
+    return result;
+}
+
+constexpr cc::string_view k_trace_ray_hlsl[] = {"RayDesc", "TraceRay"};
 
 spelling query_spelling(query_op op)
 {
@@ -422,6 +508,33 @@ void sgl::builtins::register_raytracing(registry& r)
                 query_op(u32(query_op::read_base) + read * 2 + (is_committed ? 1 : 0)),
                 is_committed ? "/// Of the committed hit." : "/// Of the candidate.");
         }
+
+    r.add_comment("// What a ray-tracing stage reads of its launch, its ray and its hit, which raytracing.sgl hands "
+                  "its "
+                  "entry point.");
+    for (auto i = u32(0); i < u32(sizeof(k_stage_reads) / sizeof(k_stage_reads[0])); ++i)
+        r.add(function_record{
+            .signature = cc::string(k_stage_reads[i].signature),
+            .evaluate = k_stage_reads[i].evaluate,
+            .write
+            = {.kind = spelling_kind::custom, .custom = write_stage_read, .data = i, .hlsl_names = k_stage_reads_hlsl},
+            .features = check::feature_set(check::feature::raytracing_pipeline),
+        });
+
+    r.add_comment("// A ray-tracing stage's trace, which a `trace` naming a ray type of its set lowers to (CHK-329).");
+    for (auto const geometry : {"triangles", "procedural", "mixed"})
+        r.add(function_record{
+            .signature
+            = cc::format("@stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.{}], "
+                         "origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, "
+                         "contribution: int, multiplier: int, miss: int)",
+                         geometry),
+            .doc = "/// Traces a ray through the pipeline's tables, handing the payload over past the signature.",
+            .evaluate = nothing,
+            .write = {.kind = spelling_kind::custom, .custom = write_trace_ray, .hlsl_names = k_trace_ray_hlsl},
+            .takes_element = true,
+            .features = check::feature_set(check::feature::raytracing_pipeline),
+        });
 
     r.add_comment("// The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc "
                   "raytracing-polyfill.md).");

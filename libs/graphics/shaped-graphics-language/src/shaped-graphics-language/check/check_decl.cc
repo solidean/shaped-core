@@ -33,26 +33,23 @@ bool checker::is_int3(type_id type) const
 }
 
 /// `@stages(.pixel)` or `@stages(.vertex, .pixel)`: a bad argument reports and leaves every stage.
-sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
+sgl::u16 checker::stages_of(i32 file, ast::attribute const* a)
 {
     if (a == nullptr)
         return k_every_stage;
 
     // CHK-208: each argument is one stage as an enum case; the function is reached only from an entry point of one.
-    auto result = u8(0);
+    auto result = u16(0);
     auto const arguments = ast_of(file).at(a->arguments);
     for (auto const& argument : arguments)
     {
         auto const* const dot
             = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
         auto const name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
-        auto const s = name == "vertex"                  ? stage::vertex
-                     : name == "pixel"                   ? stage::pixel
-                     : name == "compute"                 ? stage::compute
-                     : name == "geometry"                ? stage::geometry
-                     : name == "tessellation_control"    ? stage::tessellation_control
-                     : name == "tessellation_evaluation" ? stage::tessellation_evaluation
-                                                         : stage::none;
+        auto s = stage::none;
+        for (auto i = u8(stage::vertex); i <= u8(stage::callable); ++i)
+            if (name == stage_name(stage(i)))
+                s = stage(i);
         if (!argument.name.empty() || argument.is_splat || s == stage::none)
         {
             report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
@@ -60,7 +57,7 @@ sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
                    ".pixel)`");
             return k_every_stage;
         }
-        result = u8(result | stage_bit(s));
+        result = u16(result | stage_bit(s));
     }
     if (arguments.empty())
     {
@@ -1105,7 +1102,22 @@ void checker::compile_function(symbol_id id)
     // An entry point's attributes may be pipeline settings, which every pipeline it is a stage of starts from.
     auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
                               || find_attribute(file, d.attributes, "pixel") != nullptr;
-    cc::string_view const known[] = {"builtin",
+    // CHK-326: a ray-tracing stage is an attribute of its name, and an entry point has one
+    auto ray_stage = stage::none;
+    auto ray_stages = 0;
+    for (auto i = u8(stage::raygen); i <= u8(stage::callable); ++i)
+        if (find_attribute(file, d.attributes, stage_name(stage(i))) != nullptr)
+        {
+            ray_stage = stage(i);
+            ++ray_stages;
+        }
+    cc::string_view const known[] = {"raygen",
+                                     "miss",
+                                     "closest_hit",
+                                     "any_hit",
+                                     "intersection",
+                                     "callable",
+                                     "builtin",
                                      "pure",
                                      "operator",
                                      "vertex",
@@ -1330,8 +1342,9 @@ void checker::compile_function(symbol_id id)
         .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
         .result = result,
         .bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())},
-        .entry_stage
-        = stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr, control != nullptr, is_evaluation),
+        .entry_stage = ray_stage != stage::none ? ray_stage
+                                                : stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr,
+                                                           control != nullptr, is_evaluation),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
         .max_vertices = max_vertices,
@@ -1354,7 +1367,7 @@ void checker::compile_function(symbol_id id)
     }
 
     auto const stages = i32(is_vertex) + i32(is_pixel) + i32(compute != nullptr) + i32(geometry != nullptr)
-                      + i32(control != nullptr) + i32(is_evaluation);
+                      + i32(control != nullptr) + i32(is_evaluation) + ray_stages;
     if (stages > 1)
         report(diagnostic_kind::invalid_entry_point, file, f.name, "an entry point has one stage");
     else if (!is_failed && stages == 1)
@@ -1509,6 +1522,15 @@ void checker::judge_entry_point(symbol_id id)
         return;
     }
 
+    // CHK-326: a ray-tracing stage takes what its kind is handed, and its payload as the caller's place
+    if (info.entry_stage >= stage::raygen)
+    {
+        auto forward = invalid;
+        judge_ray_stage(id, forward);
+        notes[s.info].is_valid_entry = is_valid;
+        return;
+    }
+
     // CHK-271: at most one stage struct, first, and then the stage inputs, each of this stage, each once, of its type
     auto structs = 0;
     auto seen = cc::vector<stage_input>();
@@ -1639,8 +1661,8 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
         {.input = stage_input::primitive_id,
          .name = "primitive_id",
          .in_stage = stage::pixel,
-         .also_in = u8(stage_bit(stage::geometry) | stage_bit(stage::tessellation_control)
-                       | stage_bit(stage::tessellation_evaluation)),
+         .also_in = u16(stage_bit(stage::geometry) | stage_bit(stage::tessellation_control)
+                        | stage_bit(stage::tessellation_evaluation)),
          .type = "int",
          .feature = i32(feature::primitive_index)},
         {.input = stage_input::thread_id, .name = "thread_id", .in_stage = stage::compute, .type = "int3"},
@@ -1652,6 +1674,19 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
          .name = "domain_location",
          .in_stage = stage::tessellation_evaluation,
          .type = "float3"},
+        // CHK-327: every ray-tracing stage knows which ray of the launch it runs for
+        {.input = stage_input::launch_id,
+         .name = "launch_id",
+         .in_stage = stage::raygen,
+         .also_in = u16(stage_bit(stage::miss) | stage_bit(stage::closest_hit) | stage_bit(stage::any_hit)
+                        | stage_bit(stage::intersection) | stage_bit(stage::callable)),
+         .type = "int3"},
+        {.input = stage_input::launch_size,
+         .name = "launch_size",
+         .in_stage = stage::raygen,
+         .also_in = u16(stage_bit(stage::miss) | stage_bit(stage::closest_hit) | stage_bit(stage::any_hit)
+                        | stage_bit(stage::intersection) | stage_bit(stage::callable)),
+         .type = "int3"},
     };
     return k_inputs;
 }

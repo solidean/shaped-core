@@ -72,6 +72,9 @@ void checker::judge_entry_features(symbol_id id)
         needed.set(feature::geometry_shader);
     if (info.entry_stage == stage::tessellation_control || info.entry_stage == stage::tessellation_evaluation)
         needed.set(feature::tessellation_shader);
+    // CHK-326: the ray-tracing stages are the pipeline's, which a device grants
+    if (info.entry_stage >= stage::raygen)
+        needed.set(feature::raytracing_pipeline);
     // CHK-274: a pixel stage that takes a member per sample runs per sample, which vulkan gives only with a feature
     if (info.entry_stage == stage::pixel)
         for (auto const& parameter : out.at(info.parameters))

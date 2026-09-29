@@ -1391,6 +1391,30 @@
 /// Of the committed hit.
 @builtin fun ray_query_committed_world_to_object_row(q: ray_query, row: int) -> float4
 
+// What a ray-tracing stage reads of its launch, its ray and its hit, which raytracing.sgl hands its entry point.
+@builtin @stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3
+@builtin @stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_dimensions() -> int3
+@builtin @stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_origin() -> pos3
+@builtin @stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_direction() -> vec3
+@builtin @stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_min() -> float
+@builtin @stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_current() -> float
+@builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_instance_id() -> int
+@builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_instance_index() -> int
+@builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_geometry_index() -> int
+@builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_primitive_index() -> int
+@builtin @stages(.closest_hit, .any_hit) fun hit_barycentrics() -> float2
+@builtin @stages(.closest_hit, .any_hit) fun hit_is_front_face() -> bool
+@builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_object_to_world_row(row: int) -> float4
+@builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_world_to_object_row(row: int) -> float4
+
+// A ray-tracing stage's trace, which a `trace` naming a ray type of its set lowers to (CHK-329).
+/// Traces a ray through the pipeline's tables, handing the payload over past the signature.
+@builtin @stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.triangles], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, multiplier: int, miss: int)
+/// Traces a ray through the pipeline's tables, handing the payload over past the signature.
+@builtin @stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.procedural], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, multiplier: int, miss: int)
+/// Traces a ray through the pipeline's tables, handing the payload over past the signature.
+@builtin @stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.mixed], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, multiplier: int, miss: int)
+
 // The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc raytracing-polyfill.md).
 /// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
 @builtin @pure fun acceleration_root(world: acceleration_structure[.triangles]) -> uint
