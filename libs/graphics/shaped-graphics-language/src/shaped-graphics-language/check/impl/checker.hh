@@ -191,8 +191,20 @@ struct call_arguments
     /// Parallel to `written`: a tuple or object literal, as a position in `checker::literals`; -1 for anything else.
     /// Such a literal has no type of its own, so its entry in `types` is `none` (CHK-81).
     cc::vector<i32> literals;
+    /// Parallel to `written`: a function's name or a lambda, as a position in `checker::function_arguments`; -1 for
+    /// anything else, including a parameter of function type handed on, which has its type.
+    cc::vector<i32> functions;
     /// An argument had the error type or was reported, so the call reports nothing about its arguments.
     bool is_poisoned = false;
+};
+
+/// A function's name or a lambda written as an argument, which has no type until a parameter of function type meets it.
+struct function_argument
+{
+    ast::expr_id expr = ast::expr_id::none;
+    bool is_lambda = false;
+    /// The functions of the name, for a name.
+    cc::vector<symbol_id> functions;
 };
 
 /// One candidate that takes a call's arguments: which argument fills which parameter, and at what cost.
@@ -284,6 +296,10 @@ struct checker
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     cc::map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
     /// The types `resource_type` and `buffer_type` interned, by spelling, so a mention looks up only its equals.
+    /// The function arguments of every call checked so far; `call_arguments::functions` indexes it.
+    cc::vector<function_argument> function_arguments;
+    /// True while a parameter's type is resolved, the one place a function type may stand (CHK-317).
+    bool allows_function_type = false;
     cc::map<cc::string, cc::vector<type_id>> interned_types;
     cc::vector<pending_extension> pending_extensions;
     /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
@@ -508,6 +524,14 @@ struct checker
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
     /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
     [[nodiscard]] type_id resource_type(type_info info);
+    /// `(parameters) -> result`, interned: two mentions of one signature share an id (CHK-317).
+    [[nodiscard]] type_id function_type(cc::span<type_id const> parameters, type_id result);
+    /// Of `candidates`, the function whose signature is exactly `type`'s; `none` where no single one is.
+    [[nodiscard]] symbol_id function_of_type(cc::span<symbol_id const> candidates, type_id type);
+    /// A lambda handed to a parameter of function type `type`, checked where it stands (CHK-318).
+    type_id check_lambda(function_scope& scope, ast::expr_id expr, type_id type);
+    /// A call through a parameter of function type (CHK-319).
+    type_id check_function_call(function_scope& scope, ast::expr_id id, ast::call const& call, local_name const& local);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
     [[nodiscard]] type_id resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text);
     /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.

@@ -356,8 +356,28 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     }
     else if (e.node.is<ast::struct_type>())
         unsupported(file, where, "an anonymous struct type");
-    else if (e.node.is<ast::function_type>())
-        unsupported(file, where, "a function type");
+    else if (auto const* const fn = e.node.try_as<ast::function_type>())
+    {
+        // CHK-317: a parameter's type alone, and its parameters and result are value types
+        auto const outer = allows_function_type;
+        allows_function_type = false;
+        auto parameters = cc::vector<type_id>();
+        auto is_sound = true;
+        for (auto const& p : ast_of(file).at(fn->parameters))
+        {
+            auto const t = ast::is_valid(p.type) ? resolve_value_type(file, p.type, scope) : checked_module::error_type;
+            is_sound = is_sound && t != checked_module::error_type;
+            parameters.push_back(t);
+        }
+        auto const r
+            = ast::is_valid(fn->result) ? resolve_value_type(file, fn->result, scope) : checked_module::error_type;
+        allows_function_type = outer;
+        if (!outer)
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   "a function type is the type of a parameter, and of nothing else");
+        else if (is_sound && r != checked_module::error_type)
+            result = function_type(parameters, r);
+    }
     else if (e.node.is<ast::tuple>())
         unsupported(file, where, "a tuple type");
     else if (e.node.is<ast::member>())
@@ -1164,6 +1184,7 @@ void checker::compile_function(symbol_id id)
         auto const is_receiver = f.receiver != ast::receiver_kind::none && &p == &ast.at(f.parameters).front();
         // CHK-315: `p: mut T` over a value type is the caller's place; over a resource or a stream `mut` is its access
         auto is_mut_parameter = false;
+        allows_function_type = !is_builtin && geometry == nullptr;
         if (auto const* const q = ast::is_valid(p.type) ? ast.at(p.type).node.try_as<ast::qualified_type>() : nullptr;
             q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr)
         {
@@ -1189,6 +1210,7 @@ void checker::compile_function(symbol_id id)
             type = receiver;
         else
             report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
+        allows_function_type = false;
         is_failed = is_failed || type == checked_module::error_type;
 
         auto const index = isize(&p - ast.fields.data());

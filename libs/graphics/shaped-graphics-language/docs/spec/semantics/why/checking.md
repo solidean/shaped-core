@@ -302,6 +302,12 @@ EVAL-78's `no-check-ran` catches a run that checked nothing too, but only when t
 A test whose asserts are what it checks pays one line for it, `true // why`, which also says why it checks nothing else.
 A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing: it is fail-closed already.
 
+## CHK-317
+
+A function value is a compile-time entity (the incubator's inferred-comptime idea), and the parameter is the one place it can be spelled so that every call through it is known statically.
+A local or a field of function type would need a function value at runtime, a tag and a switch at every call, which breaks the performance contract without saying so.
+Ray tracing is the first user: a trace takes its candidate decisions as functions, and the software traversal calls them inside its loop.
+
 ## CHK-315
 
 A mut parameter is written on its type because that is where `mut` already stands for a geometry stage's stream, and for the access of a resource.

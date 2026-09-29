@@ -392,6 +392,16 @@ fun shade(k: float) -> float:
 * **CHK-252** A candidate does not bind where an argument names no parameter, a parameter is filled twice, a positional argument reaches a named-only parameter or lies past the last.
   It does not bind either where a parameter without a default is left unfilled.
   A parameter left unfilled takes its default.
+* **CHK-317** A **function type** `(A, B) -> R` is the type of a parameter and of nothing else ([why](why/checking.md#chk-317)).
+  A local, a field, a member, a result or an element of one is `wrong-kind-of-name`.
+  Two function types of the same parameter types and result are one type.
+* **CHK-318** A parameter of function type takes a function's name, an arrow lambda `x => value`, or a parameter of the same function type handed on.
+  A name takes the one function of its name whose parameters and result are the type's exactly, none of them `mut`; a builtin or an entry point is none.
+  A lambda takes the type's parameter types, a parameter type it writes must be the same, and its value must be the type's result.
+  It is checked where it stands, and it sees every name visible there; any other lambda is `unsupported-yet`.
+  A function or a lambda meets no parameter of any other type, and its chain has length 0.
+* **CHK-319** A call of a parameter of function type is a call of the function it was handed, inlined where the parameter is called.
+  A lambda is written out there with the names it saw where it was written, so a function value is never a value of any target.
 * **CHK-316** `mut x` in a call hands over a place, and it fills a mut parameter alone ([why](why/checking.md#chk-316)).
   A mut parameter takes an argument marked `mut` and nothing else, and a marked argument binds to nothing else.
   The argument is a place by the rules of an assignment's left side, or `not-assignable`, and its type is the parameter's exactly, so its chain has length 0.

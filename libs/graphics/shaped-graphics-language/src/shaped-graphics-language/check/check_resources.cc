@@ -91,6 +91,35 @@ type_id checker::resource_type(check::type_info info)
     return id;
 }
 
+type_id checker::function_type(cc::span<type_id const> parameters, type_id result)
+{
+    auto spelled = cc::string("(");
+    for (auto i = isize(0); i < parameters.size(); ++i)
+        spelled += cc::format("{}{}", i == 0 ? "" : ", ", out.name_of(parameters[i]));
+    spelled += cc::format(") -> {}", out.name_of(result));
+    auto& alike = interned_types[spelled];
+    for (auto const id : alike)
+    {
+        auto const members = out.at(out.at(id).members);
+        auto is_same = out.at(id).kind == type_kind::function && out.at(id).element == result
+                    && members.size() == parameters.size();
+        for (auto i = isize(0); is_same && i < parameters.size(); ++i)
+            is_same = members[i].type == parameters[i];
+        if (is_same)
+            return id;
+    }
+    auto const first = u32(out.members.size());
+    for (auto const p : parameters)
+        out.members.push_back({.type = p});
+    auto const id = type_id(out.types.size());
+    out.types.push_back({.kind = type_kind::function,
+                         .members = {.first = first, .count = u32(parameters.size())},
+                         .element = result,
+                         .spelled = cc::move(spelled)});
+    alike.push_back(id);
+    return id;
+}
+
 void checker::judge_feature(i32 file, source_span where, cc::string_view form, feature needed)
 {
     // CHK-201: granted by a `require` of the file, or of the binding whose members are being compiled

@@ -38,7 +38,10 @@ enum class sgl::check::type_kind : sgl::u8
     image,
     /// A sampler, filtering or `is_comparison`; a resource like a texture, never a value.
     sampler,
-    // Tuples, function types and anonymous struct types come later, each as a kind that is deduplicated by structure.
+    /// `(A, B) -> R`: a function a parameter takes, whose `members` are the parameter types and `element` the result.
+    /// Only a parameter holds one, and a call through it is inlined where the function was handed over (CHK-317).
+    function,
+    // Tuples and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 
 namespace sgl::check
@@ -602,6 +605,9 @@ struct sgl::check::written_argument
     i32 splat_member = -1;
     /// `mut x`: the caller's place, for a `mut` parameter (AST-149, CHK-316).
     bool is_mut = false;
+    /// A function handed to a parameter of function type: a function's name, an arrow lambda, or such a parameter
+    /// handed on (CHK-318); what it stands for is its expression's target.
+    bool is_function = false;
 
     constexpr bool operator==(written_argument const&) const = default;
 };

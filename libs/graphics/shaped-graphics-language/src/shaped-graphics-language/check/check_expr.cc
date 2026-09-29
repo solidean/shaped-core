@@ -17,13 +17,15 @@ void add_argument(call_arguments& a,
                   type_id type,
                   cc::string_view name = {},
                   number_literal number = {},
-                  i32 literal = -1)
+                  i32 literal = -1,
+                  i32 function = -1)
 {
     a.written.push_back(w);
     a.types.push_back(type);
     a.names.push_back(name);
     a.numbers.push_back(number);
     a.literals.push_back(literal);
+    a.functions.push_back(function);
 }
 } // namespace
 
@@ -644,12 +646,43 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             continue;
         }
 
+        // CHK-318: a lambda, or the name of a function, has no type until a parameter of function type meets it
+        if (!a.is_splat && !a.is_mut && value != nullptr && value->is<ast::lambda>())
+        {
+            function_arguments.push_back({.expr = a.value, .is_lambda = true});
+            add_argument(result, {.expr = a.value, .is_function = true}, type_id::none, text_of(file, a.name), {}, -1,
+                         i32(function_arguments.size() - 1));
+            continue;
+        }
+        if (auto const* const n = value != nullptr && !a.is_splat && !a.is_mut ? value->try_as<ast::name>() : nullptr;
+            n != nullptr && scope.find_local(text_of(file, n->where)) == nullptr)
+        {
+            auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+            if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::function)
+            {
+                auto functions = cc::vector<symbol_id>();
+                for (auto const f : *found)
+                    if (out.at(f).kind == symbol_kind::function)
+                        functions.push_back(f);
+                function_arguments.push_back({.expr = a.value, .functions = cc::move(functions)});
+                add_argument(result, {.expr = a.value, .is_function = true}, type_id::none, text_of(file, a.name), {},
+                             -1, i32(function_arguments.size() - 1));
+                continue;
+            }
+        }
+
         handed.push_back(a.value);
         auto const type = check_expr(scope, a.value);
         handed.pop_back();
         if (type == error_type)
         {
             result.is_poisoned = true;
+            continue;
+        }
+        // a parameter of function type handed on to another stands for the function it was handed (CHK-318)
+        if (!a.is_splat && !a.is_mut && out.at(type).kind == type_kind::function)
+        {
+            add_argument(result, {.expr = a.value, .is_function = true}, type, text_of(file, a.name));
             continue;
         }
         if (a.is_mut)
@@ -783,6 +816,8 @@ cc::string checker::call_text(i32 file_of_call, cc::string_view spelling, call_a
         // is named by its text, since its default type is not what failed to match
         if (arguments.literals[i] >= 0)
             text += "a literal";
+        else if (arguments.functions[i] >= 0)
+            text += function_arguments[arguments.functions[i]].is_lambda ? "a lambda" : "a function";
         else if (arguments.numbers[i].is_number && ast::is_valid(arguments.written[i].expr))
             text += text_of(file_of_call, span_of(file_of_call, arguments.written[i].expr));
         else
@@ -844,6 +879,14 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
 
     auto const text = text_of(file, n->where);
+    if (auto const* const local = scope.find_local(text); local != nullptr && !local->is_captured
+                                                          && local->type != error_type && is_valid(local->type)
+                                                          && out.at(local->type).kind == type_kind::function)
+    {
+        // by value: checking the arguments may declare locals, and `locals` then moves
+        auto const through = *local;
+        return check_function_call(scope, id, call, through);
+    }
     if (auto const* const local = scope.find_local(text))
     {
         set_target(file, call.callee, local->where);
@@ -985,6 +1028,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     // CHK-250, CHK-253: the receiver is argument 0, and a number literal there converts like one anywhere else
     arguments.numbers.insert_at(0, number_of(file, member.object));
     arguments.literals.insert_at(0, -1);
+    arguments.functions.insert_at(0, -1);
 
     auto const candidates = candidates_of(file, name, receiver);
     if (candidates.empty())
@@ -1135,6 +1179,115 @@ type_id checker::resolve_overload(function_scope& scope,
     return info.result;
 }
 
+symbol_id checker::function_of_type(cc::span<symbol_id const> candidates, type_id type)
+{
+    if (!is_valid(type) || type == error_type || out.at(type).kind != type_kind::function)
+        return symbol_id::none;
+    auto const wanted = out.at(out.at(type).members);
+    auto found = symbol_id::none;
+    for (auto const f : candidates)
+    {
+        if (out.at(f).state == symbol_state::in_compilation || demand(f, out.at(f).file, {}) != symbol_state::checked)
+            continue;
+        auto const& info = out.functions[out.at(f).info];
+        // an entry point or a builtin is no function a body calls through a parameter
+        if (info.entry_stage != stage::none || is_valid(out.at(f).intrinsic) || info.result != out.at(type).element)
+            continue;
+        auto const parameters = out.at(info.parameters);
+        auto is_same = parameters.size() == wanted.size();
+        for (auto i = isize(0); is_same && i < parameters.size(); ++i)
+            is_same = parameters[i].type == wanted[i].type && !parameters[i].is_mut;
+        if (!is_same)
+            continue;
+        if (is_valid(found))
+            return symbol_id::none;
+        found = f;
+    }
+    return found;
+}
+
+type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id type)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto const where = span_of(file, expr);
+    auto const& l = ast.at(expr).node.as<ast::lambda>();
+    // CHK-318: an arrow lambda with an arrow body; the rest of the lambda family is not built
+    if (l.spelling != ast::lambda_spelling::arrow || l.body.kind != ast::body_kind::arrow || !ast::is_valid(l.body.value))
+    {
+        unsupported(file, where, "a lambda other than `x => value`");
+        return error_type;
+    }
+    if (type == error_type || out.at(type).kind != type_kind::function)
+        return error_type;
+    auto const parameters = cc::vector<member_info>::create_copy_of(out.at(out.at(type).members));
+    auto const result = out.at(type).element;
+    auto const fields = ast.at(l.parameters);
+    auto const locals_before = scope.locals.size();
+    auto is_sound = true;
+    for (auto i = isize(0); i < fields.size(); ++i)
+    {
+        auto const& p = fields[i];
+        if (ast::is_valid(p.type))
+        {
+            auto const written = resolve_value_type(file, p.type, &scope);
+            if (written != error_type && written != parameters[i].type)
+            {
+                report(diagnostic_kind::type_mismatch, file, span_of(file, p.type),
+                       cc::format("this parameter is {}, and the function it stands for takes {}", out.name_of(written),
+                                  out.name_of(parameters[i].type)));
+                is_sound = false;
+            }
+        }
+        auto const index = isize(&p - ast.fields.data());
+        auto const self = target{.kind = target_kind::parameter, .index = i32(index)};
+        judge_shadowing(file, text_of(file, p.name), p.name);
+        scope.locals.push_back(
+            {.name = text_of(file, p.name), .where = self, .type = parameters[i].type, .depth = scope.depth + 1});
+    }
+    auto const value = check_expected(scope, l.body.value, result);
+    scope.locals.resize_down_to(locals_before);
+    if (!is_sound || value == error_type)
+        return error_type;
+    if (value != result)
+    {
+        report(diagnostic_kind::type_mismatch, file, span_of(file, l.body.value),
+               cc::format("this lambda gives {}, and the function it stands for returns {}", out.name_of(value),
+                          out.name_of(result)));
+        return error_type;
+    }
+    set_type(file, expr, type);
+    return type;
+}
+
+type_id checker::check_function_call(function_scope& scope, ast::expr_id id, ast::call const& call, local_name const& local)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, id);
+    set_target(file, call.callee, local.where);
+    auto const arguments = check_arguments(scope, call.arguments, false);
+    if (arguments.is_poisoned)
+        return error_type;
+    auto const type = local.type;
+    auto parameters = cc::vector<parameter>();
+    for (auto const& m : out.at(out.at(type).members))
+        parameters.push_back({.type = m.type});
+    auto const bound = bind_arguments(parameters, arguments);
+    auto is_match = bound.failure == miss_reason::none;
+    for (auto p = isize(0); is_match && p < parameters.size(); ++p)
+        is_match = bound.slots[p] >= 0 && chain_of(file, parameters[p], arguments, bound.slots[p]).has_value();
+    if (!is_match)
+    {
+        report(diagnostic_kind::no_matching_overload, file, where,
+               cc::format("{} is {}, and these arguments do not fit it", local.name, out.name_of(type)));
+        return error_type;
+    }
+    // CHK-319: the call is written where the function was handed over, so its record names no callee
+    record_call(file, id, symbol_id::none, arguments, bound.slots);
+    commit_literals(scope, arguments, parameters, bound.slots);
+    return out.at(type).element;
+}
+
 void checker::note_near_misses(i32 file,
                                ast::expr_id call,
                                cc::span<symbol_id const> candidates,
@@ -1209,6 +1362,20 @@ cc::optional<i32> checker::chain_of(i32 file, parameter const& taking, call_argu
         return 0;
     }
     auto const parameter = taking.type;
+    // CHK-318: a function meets a parameter of function type whose signature it has exactly
+    if (arguments.functions[i] >= 0)
+    {
+        if (!is_valid(parameter) || parameter == error_type || out.at(parameter).kind != type_kind::function)
+            return cc::nullopt;
+        auto const& f = function_arguments[arguments.functions[i]];
+        if (f.is_lambda)
+        {
+            auto const& l = ast_of(file).at(f.expr).node.as<ast::lambda>();
+            return i64(ast_of(file).at(l.parameters).size()) == out.at(parameter).members.count ? cc::optional<i32>(0)
+                                                                                                : cc::nullopt;
+        }
+        return is_valid(function_of_type(f.functions, parameter)) ? cc::optional<i32>(0) : cc::nullopt;
+    }
     if (arguments.literals[i] >= 0)
         return literal_chain(file, parameter, arguments.literals[i]);
     if (arguments.numbers[i].is_number)
@@ -1347,6 +1514,21 @@ void checker::commit_literals(function_scope& scope,
             continue;
         if (arguments.numbers[i].is_number)
             set_type(scope.file, arguments.written[i].expr, copied[p].type);
+        else if (arguments.functions[i] >= 0)
+        {
+            // by value: checking a lambda may push to `function_arguments`
+            auto const f = function_arguments[arguments.functions[i]];
+            auto const where = span_of(scope.file, f.expr);
+            if (f.is_lambda)
+                (void)check_lambda(scope, f.expr, copied[p].type);
+            else if (auto const chosen = function_of_type(f.functions, copied[p].type); is_valid(chosen))
+            {
+                set_target(scope.file, f.expr, {.kind = target_kind::overload, .symbol = chosen});
+                set_type(scope.file, f.expr, copied[p].type);
+                // the function is called wherever the parameter is, and that is inlined into this caller
+                note_program_call(scope, chosen, where);
+            }
+        }
         else if (arguments.literals[i] >= 0)
             (void)resolve_literal(scope, arguments.written[i].expr, copied[p].type, arguments.literals[i]);
     }

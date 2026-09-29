@@ -125,7 +125,25 @@ struct flattener
         local_id local = local_id::none;
         /// A parameter whose argument is a literal: the literal stands wherever the parameter is read.
         flat_expr_id literal = flat_expr_id::none;
+        /// A parameter of function type: a position in `closures`, the function a call of the parameter inlines.
+        i32 closure = -1;
     };
+
+    /// A function handed to a parameter of function type (CHK-318): a function of the program, or a lambda with the
+    /// names it sees where it was written.
+    struct closure
+    {
+        symbol_id function = symbol_id::none;
+        i32 file = 0;
+        ast::expr_id lambda = ast::expr_id::none;
+        cc::vector<bound_name> bound;
+        ast::range_of<call_site> chain;
+        /// The function the lambda was written in.
+        symbol_id owner = symbol_id::none;
+    };
+    cc::vector<closure> closures;
+    /// Parallel to what `flatten_written` returned last: the closure a function argument hands over, -1 elsewhere.
+    cc::vector<i32> written_closures;
 
     /// A loop of the source around the statement being written.
     struct loop_target
@@ -709,6 +727,15 @@ struct flattener
         }
 
         auto const record = tables().call_at(id);
+        // CHK-319: a call through a parameter of function type records no callee, and inlines what was handed over
+        if (record >= 0 && !is_valid(c.out.call_records[record].callee) && ast::is_valid(call.callee))
+        {
+            auto const through = tables().target_at(call.callee);
+            for (auto const& b : current()->bound)
+                if (b.where == through && b.closure >= 0)
+                    return flatten_closure_call(id, type, b.closure, c.out.call_records[record]);
+            return fail();
+        }
         if (record < 0 || (where.kind != target_kind::overload && where.kind != target_kind::constructor))
             return fail();
         return flatten_bound_call(id, type, c.out.call_records[record]);
@@ -762,10 +789,11 @@ struct flattener
     flat_expr_id flatten_bound_call(ast::expr_id id, type_id type, call_record const& record)
     {
         auto const values = flatten_written(c.out.at(record.written));
+        auto const handed = written_closures;
         auto const slots = c.out.at(record.slots);
         if (is_inlined(record.callee))
         {
-            auto const inlined = inline_bound(id, record.callee, values, slots);
+            auto const inlined = inline_bound(id, record.callee, values, slots, handed);
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         return target_call(id, type, record.callee, values, slots);
@@ -965,9 +993,17 @@ struct flattener
     cc::vector<flat_expr_id> flatten_written(cc::span<written_argument const> written)
     {
         auto result = cc::vector<flat_expr_id>();
+        auto handed = cc::vector<i32>();
         auto splat = evaluated_once{};
         for (auto const& w : written)
         {
+            handed.push_back(w.is_function ? closure_of(w.expr) : -1);
+            if (w.is_function)
+            {
+                // a function is no value: it is handed over as a closure, and the slot holds nothing
+                result.push_back(flat_expr_id::none);
+                continue;
+            }
             if (w.splat_member < 0)
             {
                 result.push_back(flatten_expr(w.expr));
@@ -990,7 +1026,86 @@ struct flattener
             result.push_back(add_expr(members[w.splat_member].type, w.expr,
                                       flat_member{.object = object, .member = w.splat_member}));
         }
+        written_closures = cc::move(handed);
         return result;
+    }
+
+    /// The closure the function argument `expr` hands over: a lambda, a function's name, or a parameter handed on.
+    i32 closure_of(ast::expr_id expr)
+    {
+        if (ast().at(expr).node.is<ast::lambda>())
+        {
+            closures.push_back({.file = file(),
+                                .lambda = expr,
+                                .bound = current()->bound,
+                                .chain = current()->chain,
+                                .owner = current()->function});
+            return i32(closures.size() - 1);
+        }
+        auto const where = tables().target_at(expr);
+        if (where.kind == target_kind::overload)
+        {
+            closures.push_back({.function = where.symbol});
+            return i32(closures.size() - 1);
+        }
+        for (auto const& b : current()->bound)
+            if (b.where == where && b.closure >= 0)
+                return b.closure;
+        is_failed = true;
+        return -1;
+    }
+
+    /// `f(args)` where `f` is a parameter of function type: the function it was handed, inlined here (CHK-319).
+    flat_expr_id flatten_closure_call(ast::expr_id id, type_id type, i32 handed, call_record const& record)
+    {
+        auto const values = flatten_written(c.out.at(record.written));
+        auto const argument_closures = written_closures;
+        auto const slots = c.out.at(record.slots);
+        // by value: flattening below may push closures, and the vector moves
+        auto const f = closures[handed];
+        if (is_valid(f.function))
+        {
+            auto const inlined = inline_bound(id, f.function, values, slots, argument_closures);
+            return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
+        }
+        auto const& lambda_ast = c.ast_of(f.file);
+        auto const& l = lambda_ast.at(f.lambda).node.as<ast::lambda>();
+        auto const fields = lambda_ast.at(l.parameters);
+        auto bound = f.bound;
+        auto const lambda_type = c.out.files[f.file].type_at(f.lambda);
+        auto const parameter_types = c.out.at(c.out.at(lambda_type).members);
+        for (auto p = isize(0); p < fields.size() && p < slots.size(); ++p)
+        {
+            auto const k = slots[p];
+            auto const field_index = i32(&fields[p] - lambda_ast.fields.data());
+            auto const where = target{.kind = target_kind::parameter, .index = field_index};
+            if (k < 0 || k >= values.size())
+                return fail();
+            if (c.out.at(parameter_types[p].type).kind == type_kind::function)
+            {
+                bound.push_back({.where = where, .closure = argument_closures[k]});
+                continue;
+            }
+            auto const argument = values[k];
+            if (!is_valid(argument))
+                return fail();
+            auto const* const ref = entry.at(argument).node.try_as<flat_local_ref>();
+            if (ref != nullptr && is_substitutable(argument))
+                bound.push_back({.where = where, .local = ref->local});
+            else if (is_substitutable(argument))
+                bound.push_back({.where = where, .literal = argument});
+            else
+            {
+                auto const local = add_local(local_kind::let, c.text_of(f.file, fields[p].name), entry.at(argument).type);
+                add_stmt(entry.at(argument).from, flat_let{.local = local, .value = argument});
+                bound.push_back({.where = where, .local = local});
+            }
+        }
+        frames.push_back(
+            {.function = f.owner, .file = f.file, .result = type, .chain = f.chain, .bound = cc::move(bound)});
+        auto const value = flatten_expr(l.body.value);
+        frames.remove_back();
+        return value;
     }
 
     /// `a < b <= c` is `a < b and b <= c` with `b` evaluated once, and the `and` keeps `c` unevaluated where it must.
@@ -1452,7 +1567,8 @@ struct flattener
     inlined_body inline_bound(ast::expr_id call,
                               symbol_id callee,
                               cc::span<flat_expr_id const> values,
-                              cc::span<i32 const> slots)
+                              cc::span<i32 const> slots,
+                              cc::span<i32 const> handed = {})
     {
         judge_stage(call, callee);
         auto const& s = c.out.at(callee);
@@ -1500,6 +1616,17 @@ struct flattener
         {
             auto const i = filled[k];
             auto const where = target{.kind = target_kind::parameter, .index = i32(parameters[i].field)};
+            // CHK-319: a parameter of function type stands for the closure its argument handed over
+            if (c.out.at(parameters[i].type).kind == type_kind::function)
+            {
+                if (k >= handed.size() || handed[k] < 0)
+                {
+                    is_failed = true;
+                    continue;
+                }
+                bound.push_back({.where = where, .closure = handed[k]});
+                continue;
+            }
             auto const argument = values[k];
             if (!is_valid(argument))
             {
