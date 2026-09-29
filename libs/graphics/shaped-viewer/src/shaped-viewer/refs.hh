@@ -265,8 +265,9 @@ public:
     /// Call this on a teleport, a camera switch, or a jump to a bookmarked pose; ordinary orbiting and flying need it
     /// no more than a scene edit does.
     ///
-    /// It costs nothing but the history: the progressive mean already restarts on any camera change, so a cut that
-    /// does not move the camera does nothing at all.
+    /// It leaves the progressive mean untouched, since that already restarts on any camera change.
+    /// What it drops even when the camera does not move is every slot's denoise history and the motion guide's previous
+    /// camera, so the next move starts SVGF cold.
     /// The request survives until a frame actually traces this view, so cutting a throttled view is not lost.
     /// A view whose layers do not denoise has no history to cut, and the call then does nothing.
     void camera_cut();
