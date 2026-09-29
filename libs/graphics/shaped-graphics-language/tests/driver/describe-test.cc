@@ -634,3 +634,77 @@ TEST("sgl describe - a pipeline with the host's hit groups takes the attribute c
     REQUIRE(d.raytracing_pipelines.size() == 1);
     CHECK(d.raytracing_pipelines[0].max_attribute_size == 32);
 }
+
+TEST("sgl describe - a ray-tracing pipeline's frozen part names its payloads, its records and its sizes")
+{
+    auto const d = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round)\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    REQUIRE(d.ray_sets.size() == 1);
+    auto const& set = d.ray_sets[0];
+    REQUIRE(set.payload_sizes.size() == 1);
+    CHECK(set.payload_sizes[0] == 12);
+    auto text = cc::string();
+    for (auto const& line : d.raytracing_pipelines[0].frozen)
+        text.appendf("{}\n", line);
+    CHECK(text.starts_with(cc::format("rays = rs: primary radiance@{} 12\n", set.payload_shapes[0])));
+    CHECK(text.contains("\nhit groups = round\nhit group round = sphere; primary: shade + -\n"));
+    CHECK(text.contains("\nmax recursion depth = 1\nmax payload size = 12\nmax attribute size = 12\n"));
+    CHECK(text.contains("\nlayout = frame@"));
+}
+
+TEST("sgl describe - a ray-tracing pipeline's layout carries every sampler its shaders reach")
+{
+    auto const d = described(R"(require raytracing_pipeline
+
+sampler unused:
+    filter = .nearest
+
+sampler clamped:
+    address = .clamp_edge
+
+struct operand:
+    x: float
+
+struct radiance:
+    color: float4
+
+rays rs:
+    primary: radiance
+
+binding frame:
+    world: acceleration_structure[.triangles]
+    tex: texture_2d[float4]
+
+@raygen fun start(@launch_id id: int3){frame}:
+    let mut p = radiance(float4(0.0, 0.0, 0.0, 0.0))
+    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), rs.primary, mut p)
+
+@closest_hit fun shade(h: triangle_hit, p: mut radiance){frame}:
+    p.color = frame.tex.sample(float2(0.5, 0.5), clamped, level = 0.0)
+
+@callable fun doubled(v: mut operand):
+    v.x = v.x * 2.0
+
+callables ops = (doubled, .host)
+
+hit_group lit for rs:
+    primary = (closest_hit = shade)
+
+@raytracing pipeline path:
+    rays = rs
+    raygen = start
+    hit_groups = (lit)
+)");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    auto const& p = d.raytracing_pipelines[0];
+    // reached from the closest hit alone, at the index its declaration gives it
+    REQUIRE(p.samplers.size() == 1);
+    CHECK(p.samplers[0] == "clamped");
+    CHECK(cc::sequence{p.frozen}.any([](cc::string const& line) { return line.starts_with("samplers = clamped#1@"); }));
+    // what a host's callable must take, by name and shape
+    REQUIRE(d.callables.size() == 1);
+    CHECK(p.host_callable_parameter == "operand");
+    CHECK(p.host_callable_shape == d.callables[0].parameter_shape);
+    auto const callables = cc::format("callables = doubled, .host operand@{}", p.host_callable_shape);
+    CHECK(cc::sequence{p.frozen}.any([&](cc::string const& line) { return line == callables; }));
+}

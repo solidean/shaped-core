@@ -174,6 +174,8 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const& name : e.samplers)
             list.write(cc::string_view(name));
     }
+    o.write("payload", cc::string_view(e.payload));
+    o.write("payload_shape", cc::string_view(e.payload_shape));
     // One `slot: access` per touched slot, the way a corpus pin spells it.
     auto list = o.write_array("footprint", babel::json::layout::compact);
     for (auto const& slot : e.footprint)
@@ -202,6 +204,12 @@ void write_ray_set(babel::json::object_writer& o, sgl::described_ray_set const& 
     o.write("name", cc::string_view(s.name));
     write_names(o, "rays", s.rays);
     write_names(o, "payloads", s.payloads);
+    {
+        auto list = o.write_array("payload_sizes", babel::json::layout::compact);
+        for (auto const size : s.payload_sizes)
+            list.write(i64(size));
+    }
+    write_names(o, "payload_shapes", s.payload_shapes);
 }
 
 void write_hit_group(babel::json::object_writer& o, sgl::described_hit_group const& g)
@@ -231,12 +239,19 @@ void write_raytracing_pipeline(babel::json::object_writer& o, sgl::described_ray
     write_names(o, "features", p.features);
     write_names(o, "callables", p.callables);
     o.write("host_callables", p.has_host_callables);
+    o.write("host_callable_parameter", cc::string_view(p.host_callable_parameter));
+    o.write("host_callable_shape", cc::string_view(p.host_callable_shape));
+    write_names(o, "samplers", p.samplers);
+    auto frozen = o.write_array("frozen");
+    for (auto const& line : p.frozen)
+        frozen.write(cc::string_view(line));
 }
 
 void write_callables(babel::json::object_writer& o, sgl::described_callables const& c)
 {
     o.write("name", cc::string_view(c.name));
     o.write("parameter", cc::string_view(c.parameter));
+    o.write("parameter_shape", cc::string_view(c.parameter_shape));
     write_names(o, "entries", c.entries);
     o.write("host", c.has_host);
     o.write("offset", i64(c.offset));

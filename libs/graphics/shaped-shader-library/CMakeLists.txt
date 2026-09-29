@@ -152,6 +152,7 @@ if(SC_BUILD_TESTS)
         tests/sgl_compiler-test.cc
         tests/metal_compiler-test.cc
         tests/pipeline-test.cc
+        tests/raytracing_pipeline-test.cc
         tests/binding/binding_groups-test.cc
         tests/binding/wgsl_declarations-test.cc
     )

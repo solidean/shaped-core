@@ -178,6 +178,10 @@ struct sgl::described_entry_point
     cc::vector<check::slot_footprint> footprint;
     /// The file-scope samplers its code reaches, which its pipeline layout carries, in index order.
     cc::vector<cc::string> samplers;
+    /// A ray-tracing stage's payload, or a callable's parameter, and its structural hash as 32 hex digits.
+    /// Both empty for any other stage and for a stage without one.
+    cc::string payload;
+    cc::string payload_shape;
 };
 
 /// One field of a pipeline's description, as the check pass resolved it.
@@ -235,6 +239,9 @@ struct sgl::described_ray_set
     /// Each ray type's name, and the struct its payload is.
     cc::vector<cc::string> rays;
     cc::vector<cc::string> payloads;
+    /// Parallel to `payloads`: the bytes each takes in a trace's payload, and its structural hash as 32 hex digits.
+    cc::vector<i32> payload_sizes;
+    cc::vector<cc::string> payload_shapes;
 };
 
 /// A `hit_group`: one row of a ray-tracing pipeline's table, a record per ray type of its set.
@@ -258,6 +265,8 @@ struct sgl::described_callables
 {
     cc::string name;
     cc::string parameter;
+    /// The parameter's structural hash, as 32 hex digits.
+    cc::string parameter_shape;
     cc::vector<cc::string> entries;
     /// Whether the host appends callables of its own after every listed one of the module.
     bool has_host = false;
@@ -287,6 +296,16 @@ struct sgl::described_raytracing_pipeline
     /// Every callable of the module's tables, in their order, which the pipeline's callable section holds first.
     cc::vector<cc::string> callables;
     bool has_host_callables = false;
+    /// The parameter a host's callable takes, and its structural hash; both empty without `.host` callables.
+    cc::string host_callable_parameter;
+    cc::string host_callable_shape;
+    /// The file-scope samplers any of its shaders reaches, its callables included, in index order.
+    cc::vector<cc::string> samplers;
+    /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
+    /// the ray set with each payload's shape and size, the raygen, the misses, the hit groups and each group's records,
+    /// the callables, the recursion depth, the payload and attribute sizes, the layout, the samplers and the features.
+    /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
+    cc::vector<cc::string> frozen;
 };
 
 struct sgl::module_description
