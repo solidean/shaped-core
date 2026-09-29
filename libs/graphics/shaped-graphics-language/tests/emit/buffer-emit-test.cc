@@ -124,7 +124,7 @@ TEST("sgl emit - an @inline binding takes no group, and stands last")
                                  "    let v = work.values[0] * tuning.scale\n"
                                  "    return {color = float4(v, v, v, 1.0)}\n";
     CHECK(errors_for(wrong_order, target::wgsl)
-          == "unsupported an @inline binding that is not the last of the list: 'tuning'\n");
+          == "unsupported an @inline binding a group of the list follows: 'tuning'\n");
 
     // Workgroup memory is bound by no host, so it may stand after the inline constants or before them.
     constexpr auto with_workgroup = "binding work:\n"

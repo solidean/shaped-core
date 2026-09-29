@@ -259,12 +259,16 @@ described_pipeline describe_pipeline(check::checked_module const& m,
         cc::format("vertex input = {}", check::is_valid(p.vertex_input) ? shaped(p.vertex_input) : cc::string()));
     result.frozen.push_back(
         cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
-    // The samplers are baked into the layout too, each at its index.
+    // The samplers are baked into the layout too, each at its index among all the file's samplers.
     auto baked = cc::string();
+    auto sampler_index = 0;
     for (auto i = isize(0); i < m.symbols.size(); ++i)
+    {
         if (is_reached[i] != 0)
-            baked += cc::format("{}{}@{}", baked.empty() ? "" : ", ", m.symbols[i].name,
+            baked += cc::format("{}{}#{}@{}", baked.empty() ? "" : ", ", m.symbols[i].name, sampler_index,
                                 check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
+        sampler_index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+    }
     result.frozen.push_back(cc::format("samplers = {}", baked));
     // The host's code holds a shader per stage, so a reload that adds or drops one has nothing to build it with.
     auto stages = cc::string();

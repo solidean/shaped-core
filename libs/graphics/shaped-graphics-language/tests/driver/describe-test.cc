@@ -159,7 +159,7 @@ binding work:
 @compute(64) fun main(@thread_id id: int3){c, work}:
     work.values[id.x] = c.scale
 )");
-    CHECK(error.contains("not the last of the list"));
+    CHECK(error.contains("a group of the list follows"));
 }
 
 TEST("sgl describe - a source with errors describes nothing, and says why")
@@ -537,8 +537,13 @@ TEST("sgl describe - a file-scope sampler is described with its index, and each 
                 return line;
         return cc::string();
     };
-    CHECK(frozen(d) == cc::format("samplers = edge@{}", d.samplers[0].shape));
+    CHECK(frozen(d) == cc::format("samplers = edge#0@{}", d.samplers[0].shape));
     auto source = cc::string(k_file_samplers);
     source.replace_all("address = .clamp_edge", "address = .repeat");
     CHECK(frozen(described(source)) != frozen(d));
+
+    // an unused sampler declared above moves the index the layout bakes it at, so the build freezes the index too
+    auto const shifted = described(cc::format("sampler extra:\n    filter = .linear\n\n{}", k_file_samplers));
+    CHECK(frozen(shifted) != frozen(d));
+    CHECK(frozen(shifted) == cc::format("samplers = edge#1@{}", d.samplers[0].shape));
 }

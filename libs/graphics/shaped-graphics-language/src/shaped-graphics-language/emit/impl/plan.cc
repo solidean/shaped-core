@@ -94,7 +94,7 @@ struct validator
                 {
                     reported_order = true;
                     report(error_kind::unsupported, inline_binding.value(),
-                           cc::format("an @inline binding that is not the last of the list: '{}'",
+                           cc::format("an @inline binding a group of the list follows: '{}'",
                                       m.at(inline_binding.value()).name));
                 }
                 // Refused on every target, so an entry point written for one is written for all of them.
