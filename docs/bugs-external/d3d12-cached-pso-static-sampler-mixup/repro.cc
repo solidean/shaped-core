@@ -10,6 +10,7 @@
 //   ... --warp                   on the WARP software adapter instead of the high-performance one
 //
 // Every run prints one line and exits 0 when the pipeline sampled as its root signature says, 1 when it did not.
+// A restore the driver built without the blob exits 3, whatever it sampled, since it shows nothing about the blob.
 // Standalone: D3D12, DXGI and the system shader compiler, nothing else.
 
 #include <d3d12.h>
@@ -18,6 +19,7 @@
 #include <wrl/client.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -318,5 +320,7 @@ int main(int argc, char** argv)
     auto const which = same_twin ? "clamping twin built first" : twin_first ? "repeating twin built first" : "no twin";
     std::printf("%s, restored %s the blob, %d wrong texels\n", which, restored.used_blob ? "from" : "without",
                 mismatches);
+    if (!restored.used_blob)
+        return 3;
     return mismatches == 0 ? 0 : 1;
 }

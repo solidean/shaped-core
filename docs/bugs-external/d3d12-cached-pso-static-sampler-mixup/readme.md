@@ -35,8 +35,8 @@ WARP 10.0.26100.9278       every row above                correct
 ```
 
 The load-bearing parts:
-- **Two processes.** A process that builds the clamping pipeline itself, before or after the twin, restores the blob correctly, so a single-process test cannot show it.
-- **A static sampler.** A pipeline whose root signature carries none restores correctly under the same sequence in shaped-core's own tests.
+- **Two processes.** A process that built the clamping pipeline fresh before restoring its blob restores it correctly, so a single-process test cannot show it.
+- **A static sampler.** Observed in sg rather than shown by this repro: a pipeline whose root signature carries none restored correctly under the same sequence there.
 - **The twin's shader is the same one.** Its root signature differs only in the sampler's address mode.
 
 ## Reproducing it
@@ -46,6 +46,7 @@ uv run run.py
 ```
 
 It builds `repro.cc` with `clang-cl`, runs the sequence on the high-performance adapter and on WARP, and exits 1 when a restore samples wrongly.
+It exits 2 when the run is inconclusive, which includes a restore the driver built without the blob.
 
 ## What shaped-core does about it
 

@@ -12,6 +12,7 @@ Windows only, since the bug is D3D12's.
     uv run run.py
 
 Exits 1 when a restored pipeline samples through the wrong static sampler, 0 when every run samples as it should.
+Exits 2 when the run is inconclusive, which includes a restore the driver built without the blob (repro.cc's exit code 3).
 """
 
 from __future__ import annotations
@@ -64,7 +65,10 @@ def main() -> int:
             same = run(exe, "restore", blob, "same", *adapter)
             after_twin = run(exe, "restore", blob, "twin", *adapter)
             if stored != 0 or alone != 0 or same != 0:
-                print("  inconclusive: a run that should sample correctly did not")
+                print("  inconclusive: a control run did not restore from the blob and sample correctly")
+                return 2
+            if after_twin == 3:
+                print("  inconclusive: the driver built the pipeline after the twin without the blob")
                 return 2
             if after_twin != 0:
                 print("  REPRODUCED: a correct blob, restored after its repeating twin was built, samples by repeat")
