@@ -351,6 +351,7 @@ if(SC_BUILD_TESTS)
         tests/corpus/corpus-test.cc
         tests/check/array-check-test.cc
         tests/check/primitive-stage-check-test.cc
+        tests/check/prelude-profile-test.cc
         tests/check/binding-check-test.cc
         tests/check/texture-check-test.cc
         tests/check/uniformity-check-test.cc
@@ -423,6 +424,8 @@ if(SC_BUILD_TESTS)
         PRIVATE
         shaped-graphics-language
         nexus
+        # what a test loads or writes beside SGL: a Chrome trace today, textures later
+        babel-serializer
     )
 
     # Browser test runner (Emscripten only); no-op natively.
