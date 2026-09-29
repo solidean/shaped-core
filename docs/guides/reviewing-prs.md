@@ -687,6 +687,9 @@ A `land-changes` comment describes commits the reviewer just wrote, and that is 
 The summary is written from what the fix was meant to do, and the commit does slightly less or slightly else.
 One draft said a fix counted "a callee's asserts" when it counted every assert of the run, and said the second of two expectations "always" saw `passed` when that held only if the first was met.
 It also said a doc "no longer" described something that three of its lines still partly did.
+A comment grouped by area drifts a second way: a change lands under the commit its area came from rather than the one that made it.
+Another draft credited a call-stack fix to the metal commit beside it, and credited "88 ms to 2.9 ms" to the last of the two commits that made it.
+**A number that spans commits names every commit it spans.**
 **Read the diff of each commit while writing its bullet, and name every hunk a reader will see.**
 A sort comparator, a `nan` spelling or a nested-test case left out of the comment is a hunk the author cannot account for.
 
