@@ -341,6 +341,8 @@ struct flattener
             return add_expr(x.type, from, *v);
         if (auto const* const m = x.node.try_as<flat_binding_member>())
             return add_expr(x.type, from, *m);
+        if (auto const* const smp = x.node.try_as<flat_file_sampler>())
+            return add_expr(x.type, from, *smp);
         if (auto const* const element = x.node.try_as<flat_element>())
         {
             auto const object = again(element->object, from);
@@ -369,8 +371,8 @@ struct flattener
         return fail();
     }
 
-    /// True for a texture, an image, a sampler or a buffer read from its binding: it is no value a local could hold,
-    /// and it stands wherever it is named, since naming one has no effect.
+    /// True for a texture, an image, a sampler or a buffer read from its binding, and a file-scope sampler: it is no
+    /// value a local could hold, and it stands wherever it is named, since naming one has no effect.
     [[nodiscard]] bool is_resource_member(flat_expr_id id) const
     {
         if (!is_valid(id) || !is_resource(c.out.at(entry.at(id).type).kind))
@@ -378,7 +380,7 @@ struct flattener
         // an element of a binding array, at an index that reads the same wherever it stands
         if (auto const* const element = entry.at(id).node.try_as<flat_element>())
             return entry.at(element->object).node.is<flat_binding_member>() && is_substitutable_index(element->index);
-        return entry.at(id).node.is<flat_binding_member>();
+        return entry.at(id).node.is<flat_binding_member>() || entry.at(id).node.is<flat_file_sampler>();
     }
 
     /// A value that is read more than once and evaluated once, where it stands.
@@ -443,6 +445,9 @@ struct flattener
             if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
                 && c.out.at(where.symbol).state == symbol_state::checked)
                 return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
+            if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::sampler
+                && c.out.at(where.symbol).state == symbol_state::checked)
+                return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
             return fail();
         }
         if (auto const* const m = e.node.try_as<ast::member>())
@@ -876,7 +881,8 @@ struct flattener
     }
 
     /// A sampling call without its sampler calls the record that takes one, with the texture's `@sampler` after the
-    /// coordinate (CHK-279); the check pass has made sure the texture names one.
+    /// coordinate (CHK-279): a member of its binding, or a file-scope sampler.
+    /// The check pass has made sure the texture names one.
     flat_expr_id default_sampled_call(ast::expr_id id, builtin_id with_sampler, cc::span<flat_expr_id const> arguments)
     {
         // the texture, or the binding array it is an element of
@@ -887,8 +893,9 @@ struct flattener
         if (texture == nullptr)
             return fail();
         auto const members = c.out.at(c.out.bindings[c.out.at(texture->binding).info].members);
-        auto const sampler = members[texture->member].default_sampler;
-        if (sampler < 0)
+        auto const& m = members[texture->member];
+        auto const file_sampler = m.default_file_sampler;
+        if (m.default_sampler < 0 && (!is_valid(file_sampler) || c.out.at(file_sampler).state != symbol_state::checked))
             return fail();
         // the call becomes one of the record that takes the sampler, so its arguments match its callee's parameters
         auto const declared = c.symbol_declaring(with_sampler);
@@ -896,8 +903,10 @@ struct flattener
             return fail();
         auto with = cc::vector<flat_expr_id>();
         with.push_back_range(arguments);
-        with.insert_at(
-            2, add_expr(members[sampler].type, id, flat_binding_member{.binding = texture->binding, .member = sampler}));
+        with.insert_at(2, is_valid(file_sampler)
+                              ? add_expr(c.out.at(file_sampler).type, id, flat_file_sampler{.sampler = file_sampler})
+                              : add_expr(members[m.default_sampler].type, id,
+                                         flat_binding_member{.binding = texture->binding, .member = m.default_sampler}));
         auto const& info = c.out.functions[c.out.at(declared).info];
         return add_expr(
             info.result, id,

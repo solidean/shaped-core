@@ -99,7 +99,7 @@ TEST("hash - unordered combine is commutative")
 TEST("hash - finalize")
 {
     CHECK(cc::make_hash_finalized(u64(5)) == cc::hash_finalize(cc::make_hash(u64(5))));
-    CHECK(cc::make_hash_finalized(u64(5)) != 5ull); // identity input gets avalanged
+    CHECK(cc::make_hash_finalized(u64(5)) != 5ull); // identity input gets avalanched
     CHECK(cc::make_hash_finalized(u64(5)) != cc::make_hash_finalized(u64(6)));
     CHECK(cc::hash_finalize(0) == 0ull); // 0 is a fixed point of the multiply/xorshift mixer
 }

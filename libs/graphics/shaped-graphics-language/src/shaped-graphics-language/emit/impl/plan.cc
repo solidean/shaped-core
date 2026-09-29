@@ -78,20 +78,25 @@ struct validator
     void bindings()
     {
         auto inline_count = 0;
-        auto listed = 0;
         auto groups = 0;
+        auto inline_binding = cc::optional<symbol_id>();
+        auto reported_order = false;
         for (auto const id : e.bindings)
         {
-            ++listed;
             auto const& s = m.at(id);
-            // workgroup memory is listed like a group and takes none: no host binds it
+            // workgroup memory is listed like a group and takes none: no host binds it, so it may stand anywhere
             if (m.bindings[s.info].is_workgroup)
-            {
-                --listed;
                 continue;
-            }
             if (!m.bindings[s.info].is_inline)
             {
+                // The inline binding is skipped when numbering, so a group after it would move under the host.
+                if (inline_binding.has_value() && !reported_order)
+                {
+                    reported_order = true;
+                    report(error_kind::unsupported, inline_binding.value(),
+                           cc::format("an @inline binding a group of the list follows: '{}'",
+                                      m.at(inline_binding.value()).name));
+                }
                 // Refused on every target, so an entry point written for one is written for all of them.
                 if (groups++ == k_max_groups)
                     report(error_kind::too_many_groups, id,
@@ -99,15 +104,35 @@ struct validator
                                       k_max_groups, k_max_groups));
                 continue;
             }
-            // Listed and skipped when numbering, so it has to stand last or a group would move under the host.
-            if (listed != e.bindings.size())
-                report(error_kind::unsupported, id,
-                       cc::format("an @inline binding that is not the last of the list: '{}'", s.name));
+            inline_binding = id;
             if (++inline_count == 2)
                 report(error_kind::unsupported, id, cc::format("a second @inline binding: '{}'", s.name));
         }
         for (auto const id : e.bindings)
             validate_binding(m, id, errors);
+    }
+
+    /// EMIT-133: refused on every target, so an entry point written for one is written for all of them.
+    void file_samplers()
+    {
+        auto reported = cc::vector<symbol_id>();
+        for (auto const& x : e.exprs)
+        {
+            auto const* const smp = x.node.try_as<check::flat_file_sampler>();
+            if (smp == nullptr || file_sampler_index(m, smp->sampler) < k_max_file_samplers)
+                continue;
+            auto is_repeat = false;
+            for (auto const r : reported)
+                is_repeat = is_repeat || r == smp->sampler;
+            if (is_repeat)
+                continue;
+            reported.push_back(smp->sampler);
+            report(
+                error_kind::too_many_samplers, smp->sampler,
+                cc::format("'{}' reaches sampler '{}' at index {}, and a stage holds {}; every sampler declared above "
+                           "it counts toward its index, whether reached or not",
+                           e.name, m.at(smp->sampler).name, file_sampler_index(m, smp->sampler), k_max_file_samplers));
+        }
     }
 
     void tree()
@@ -419,6 +444,24 @@ struct planner
         }
     }
 
+    /// EMIT-133: each file-scope sampler the code reaches, once, at the index its declaration order gives it.
+    void file_samplers()
+    {
+        for (auto const& x : p.e.exprs)
+        {
+            auto const* const smp = x.node.try_as<check::flat_file_sampler>();
+            if (smp == nullptr || sampler_of(p, smp->sampler) >= 0)
+                continue;
+            auto const& s = p.m.at(smp->sampler);
+            auto const index = file_sampler_index(p.m, smp->sampler);
+            auto at = isize(0);
+            while (at < p.samplers.size() && p.samplers[at].index < index)
+                ++at;
+            p.samplers.insert_at(
+                at, {.symbol = smp->sampler, .name = spell(s.name), .host_name = s.name, .type = s.type, .index = index});
+        }
+    }
+
     /// What WGSL and MSL need to reach SGL's layout, where their own rule would not (memory_form.hh).
     void memory_forms()
     {
@@ -530,6 +573,22 @@ sgl::i32 sgl::emit::impl::workgroup_of(plan const& p, check::symbol_id binding, 
         if (p.workgroup[i].binding == binding && p.workgroup[i].member == member)
             return i32(i);
     return -1;
+}
+
+sgl::i32 sgl::emit::impl::sampler_of(plan const& p, check::symbol_id symbol)
+{
+    for (auto i = isize(0); i < p.samplers.size(); ++i)
+        if (p.samplers[i].symbol == symbol)
+            return i32(i);
+    return -1;
+}
+
+sgl::i32 sgl::emit::impl::file_sampler_index(check::checked_module const& m, check::symbol_id symbol)
+{
+    auto index = 0;
+    for (auto i = isize(0); i < index_of(symbol); ++i)
+        index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+    return index;
 }
 
 sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i32 member)
@@ -803,6 +862,7 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
     }
     v.bindings();
     v.tree();
+    v.file_samplers();
 }
 
 sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t)
@@ -871,6 +931,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     p.group_blocks();
     p.resources();
     p.workgroup_memory();
+    p.file_samplers();
     p.memory_forms();
     p.struct_offsets();
     // The check pass minted the locals, so a buffer or a block minted above never took one's name.
@@ -881,6 +942,33 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         auto const& local = result.locals[index_of(input.local)];
         result.stage_input_names.push_back(result.names.mint(cc::format("{}_in", local)));
         result.stage_input_bases.push_back(result.names.mint(cc::format("{}_base", local)));
+    }
+    return result;
+}
+
+cc::vector<cc::string> sgl::emit::impl::vertex_semantics(check::checked_module const& m, check::type_info const& t)
+{
+    auto result = cc::vector<cc::string>();
+    for (auto const& member : m.at(t.members))
+    {
+        auto semantic = cc::string(member.name);
+        for (auto& c : semantic.as_mutable_span())
+            if (c >= 'a' && c <= 'z')
+                c = char(c - 'a' + 'A');
+        // HLSL reads a trailing number as the semantic's index, and dx12 refuses a name that ends in one
+        if (!semantic.empty() && semantic.back() >= '0' && semantic.back() <= '9')
+            semantic += '_';
+        // a name that another member took, ignoring case, moves on rather than colliding
+        auto const taken = [&]
+        {
+            for (auto const& other : result)
+                if (other == semantic)
+                    return true;
+            return false;
+        };
+        while (taken())
+            semantic += '_';
+        result.push_back(cc::move(semantic));
     }
     return result;
 }

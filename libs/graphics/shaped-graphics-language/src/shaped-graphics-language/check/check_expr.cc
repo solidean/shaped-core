@@ -433,6 +433,26 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         if (demand(symbol, file, where) == symbol_state::checked)
             return out.at(symbol).type;
         break;
+    case symbol_kind::sampler:
+    {
+        // CHK-314: a file-scope sampler is handed to a builtin, as a sampler member is
+        if (demand(symbol, file, where) != symbol_state::checked)
+            break;
+        auto is_handed = false;
+        for (auto const h : handed)
+            is_handed = is_handed || h == id;
+        if (scope.is_test)
+        {
+            unsupported(file, where, "a file-scope sampler in a test, which samples no texture");
+            break;
+        }
+        if (!is_valid(scope.function) || !is_handed)
+        {
+            unsupported(file, where, "a sampler as a value; hand it to a builtin, as in `t.sample(uv, smp)`");
+            break;
+        }
+        return out.at(symbol).type;
+    }
     case symbol_kind::unsupported:
         break;
     }
@@ -871,6 +891,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
                    cc::format("{} is {}, and a call needs a function or a struct", text,
                               kind == symbol_kind::pipeline   ? "a pipeline"
                               : kind == symbol_kind::constant ? "a const"
+                              : kind == symbol_kind::sampler  ? "a sampler"
                                                               : "an enum"));
         return error_type;
     }

@@ -20,6 +20,10 @@ enum class sg::blend_factor
     one_minus_src_alpha, // DX12 BLEND_INV_SRC_ALPHA  / Vk FACTOR_ONE_MINUS_SRC_ALPHA
     dst_alpha,           // DX12 BLEND_DEST_ALPHA     / Vk FACTOR_DST_ALPHA
     one_minus_dst_alpha, // DX12 BLEND_INV_DEST_ALPHA / Vk FACTOR_ONE_MINUS_DST_ALPHA
+
+    /// The constant a draw sets with `set_blend_constants`: its color in the color equation, its alpha in the alpha one.
+    constant,           // DX12 BLEND_BLEND_FACTOR     / Vk FACTOR_CONSTANT_COLOR
+    one_minus_constant, // DX12 BLEND_INV_BLEND_FACTOR / Vk FACTOR_ONE_MINUS_CONSTANT_COLOR
 };
 
 /// How the weighted source and destination values are combined.

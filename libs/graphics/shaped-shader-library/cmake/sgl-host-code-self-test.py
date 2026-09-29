@@ -247,10 +247,12 @@ MESH = {
     "name": "mesh_vertex",
     "edge": "vertex",
     "members": [
-        {"name": "position", "type": "float3", "location": 0, "stream": "per_vertex", "per_instance": False},
+        {"name": "position", "type": "float3", "location": 0, "stream": "per_vertex", "per_instance": False,
+         "semantic": "POSITION"},
         {"name": "color", "type": "float4", "location": 1, "stream": "per_vertex", "per_instance": False,
-         "format": "rgba8_unorm"},
-        {"name": "material", "type": "uint", "location": 2, "stream": "per_vertex", "per_instance": False},
+         "format": "rgba8_unorm", "semantic": "COLOR"},
+        {"name": "material", "type": "uint", "location": 2, "stream": "per_vertex", "per_instance": False,
+         "semantic": "MATERIAL"},
     ],
 }
 
@@ -305,6 +307,43 @@ def a_pipeline_names_every_stage_in_pipeline_definitions_field_order():
     expect_not_in(".vertex_input", source, "a vertex stage that draws from no vertex buffer")
     header = sgl_host_code.emit_pipelines(entries, {FILE.path: "shadow"})
     expect_in("vs, tc, te, gs and ps, writing depth alone", header, "the stages the doc comment names")
+
+
+# ---- a file-scope sampler -------------------------------------------------------------------------------------------
+
+EDGE = {"name": "edge", "index": 1, "sampler_type": "non_filtering", "shape": "0",
+        "settings": {"min_filter": "nearest", "address_u": "clamp_edge"}}
+EDGE_ROW = ('{.binding = {.name = "edge", .space = slib::bound_samplers_space, .index = 1u, .count = 1u, '
+            ".type = sg::binding_type::sampler, .sampler_type = sg::sampler_binding_type::non_filtering},")
+
+
+@test
+def an_entry_points_layout_holds_the_file_samplers_its_code_reaches():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["shadow"], "samplers": ["edge"]}
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)],
+                                         described_entry_points={(FILE.path, "cs"): entry},
+                                         file_samplers={FILE.path: [EDGE]})
+    header = sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"})
+    expect_in(EDGE_ROW, header, "the sampler's binding, at its index in slib's space")
+    expect_in(".sampler = {.min_filter = sg::sampler_filter::nearest, "
+              ".address_u = sg::sampler_address_mode::clamp_edge}}", header, "the sampler's settings")
+    expect_in("return ctx.cached.acquire_pipeline_layout<shadow>(samplers);", header, "the layout takes them")
+    expect_in("<shaped-shader-library/binding/binding_groups.hh>", " ".join(sgl_host_code.includes(entries)),
+              "slib::bound_samplers_space's header")
+
+
+@test
+def a_pipelines_layout_holds_the_file_samplers_any_stage_reaches():
+    file = SglFile(path="shadow.sgl", samplers=[EDGE])
+    pipeline = {**TESSELLATED, "samplers": ["edge"]}
+    entries = sgl_description.SglEntries(bindings=[(file, GROUP)], pipelines=[(file, pipeline)])
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {file.path: "shadow"}, {})
+    expect_in("sg::bound_sampler const k_shadow_tessellated_samplers[] = {\n    " + EDGE_ROW, source, "the table")
+    expect_in("acquire_pipeline_layout<ns::shadow>(k_shadow_tessellated_samplers);", source, "the layout takes it")
+    # a pipeline that reaches none passes none
+    plain = sgl_host_code.emit_pipelines_impl("pkg", "ns", sgl_description.SglEntries(
+        bindings=[(file, GROUP)], pipelines=[(file, TESSELLATED)]), {file.path: "shadow"}, {})
+    expect_in("acquire_pipeline_layout<ns::shadow>();", plain, "no sampler")
 
 
 # ---- the runner -----------------------------------------------------------------------------------------------------

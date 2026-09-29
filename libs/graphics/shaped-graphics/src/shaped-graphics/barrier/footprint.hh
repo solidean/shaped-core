@@ -87,6 +87,10 @@ public:
 
     [[nodiscard]] bool is_known() const { return _known; }
 
+    /// The layout this footprint was resolved against, whether or not it is known; null for a default-constructed one.
+    /// Compared by address only, to tell whether two pipelines share one layout.
+    [[nodiscard]] pipeline_layout const* layout() const { return _layout; }
+
     /// Slot `binding` of group `group`, which must be known; an untouched slot reads as empty.
     [[nodiscard]] slot_use use_of(int group, isize binding) const;
 
@@ -101,6 +105,7 @@ private:
     };
 
     bool _known = false;
+    pipeline_layout const* _layout = nullptr;
     cc::vector<group_uses> _groups;
 };
 

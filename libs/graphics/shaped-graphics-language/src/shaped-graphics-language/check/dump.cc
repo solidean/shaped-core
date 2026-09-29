@@ -65,6 +65,9 @@ struct dumper
         case symbol_kind::test:
             out += "(test ";
             break;
+        case symbol_kind::sampler:
+            out += "(sampler ";
+            break;
         case symbol_kind::unsupported:
             out += "(unsupported ";
             break;
@@ -192,6 +195,7 @@ struct dumper
                          auto const& binding = m.bindings[m.at(b.binding).info];
                          out.appendf("(binding {} {}", m.at(b.binding).name, m.at(binding.members)[b.member].name);
                      },
+                     [&](flat_file_sampler const& smp) { out.appendf("(sampler {}", m.at(smp.sampler).name); },
                      [&](flat_member const& member)
                      {
                          out += "(member ";

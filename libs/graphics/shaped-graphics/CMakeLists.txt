@@ -14,6 +14,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list/download.cc
     src/shaped-graphics/command_list/copy.cc
     src/shaped-graphics/command_list/compute.cc
+    src/shaped-graphics/command_list/impl/aliasing_scope.cc
     src/shaped-graphics/command_list/raster.cc
     src/shaped-graphics/command_list/raytracing.cc
     src/shaped-graphics/command_list/query.cc
@@ -93,6 +94,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/routine/routine_registry.hh
     src/shaped-graphics/context/pipeline_cache.hh
     src/shaped-graphics/command_list/command_list.hh
+    src/shaped-graphics/command_list/impl/aliasing_scope.hh
     src/shaped-graphics/command_list/upload.hh
     src/shaped-graphics/command_list/download.hh
     src/shaped-graphics/command_list/copy.hh
@@ -387,6 +389,17 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
             tests/barrier/footprint-barrier-test.cc
+            tests/pipeline/pipeline_harness.cc
+            tests/pipeline/depth-stencil-test.cc
+            tests/pipeline/blend-test.cc
+            tests/pipeline/raster-state-test.cc
+            tests/pipeline/draw-params-test.cc
+            tests/pipeline/vertex-input-test.cc
+            tests/pipeline/dispatch-test.cc
+            tests/pipeline/pixel-semantics-test.cc
+            tests/pipeline/sampler-test.cc
+            tests/pipeline/texture-shapes-test.cc
+            tests/pipeline/stages-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -402,6 +415,14 @@ if(SC_BUILD_TESTS)
                 layout.sgl:*
                 sync.sgl:*
                 binding_arrays.sgl:*
+                rects.sgl:*
+                draws.sgl:*
+                vertex_input.sgl:*
+                dispatch.sgl:*
+                pixel_semantics.sgl:*
+                sampling.sgl:*
+                shapes.sgl:*
+                stages.sgl:*
         )
     endif()
 

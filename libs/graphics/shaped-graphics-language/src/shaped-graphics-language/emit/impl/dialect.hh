@@ -75,6 +75,10 @@ public:
                              planned_constants const* block,
                              cc::span<planned_resource const> buffers) const = 0;
 
+    /// One file-scope sampler, a line of its own at the address of the pipeline layout's static samplers (EMIT-133).
+    /// A target that takes it as a parameter of the entry point writes nothing here.
+    virtual void write_file_sampler(cc::string& out, plan const& p, planned_sampler const& s) const = 0;
+
     /// How the target spells a texture, an image or a sampler type, as a helper's parameter declares it.
     [[nodiscard]] virtual cc::string resource_text(plan const& p, check::type_id type) const = 0;
 
@@ -98,7 +102,7 @@ protected:
 void write_enum_constants(cc::string& out, plan const& p, dialect const& d);
 /// The helpers the entry point's builtin calls need, each once, ahead of the function.
 void write_helpers(cc::string& out, plan const& p, dialect const& d);
-/// Every resource of the entry point, handed to the dialect one binding at a time.
+/// Every resource of the entry point, handed to the dialect one binding at a time, and then its file-scope samplers.
 void write_buffers(cc::string& out, plan const& p, dialect const& d);
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.

@@ -8,6 +8,10 @@ namespace
 /// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
 /// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 constexpr auto k_inline_constants_space = 9;
+/// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
+constexpr auto k_bound_samplers_space = 10;
+/// The descriptor set sg keeps for itself on vulkan, `sg::reserved_binding_group`, whose binding 0 no static sampler takes.
+constexpr auto k_reserved_set = 3;
 
 using namespace sgl;
 using namespace sgl::check;
@@ -20,16 +24,6 @@ constexpr cc::string_view k_texture_names[]
        "Texture2DMSArray", "Texture3D",      "TextureCube", "TextureCubeArray"};
 constexpr cc::string_view k_image_names[]
     = {"RWTexture1D", "RWTexture1DArray", "RWTexture2D", "RWTexture2DArray", "", "", "RWTexture3D", "", ""};
-
-/// `position` -> `POSITION`, which is how a dx12 input layout names a vertex attribute.
-cc::string upper_cased(cc::string_view name)
-{
-    auto result = cc::string(name);
-    for (auto& c : result.as_mutable_span())
-        if (c >= 'a' && c <= 'z')
-            c = char(c - 'a' + 'A');
-    return result;
-}
 
 /// Both HLSL targets: one language, and two ways of saying where a thing lives.
 class hlsl_dialect final : public dialect
@@ -67,14 +61,21 @@ public:
     }
 
     /// SPIR-V has no semantics, so vulkan takes the location as an attribute and keeps the semantic HLSL's grammar asks for.
-    cc::string semantic_of(planned_struct const& s, planned_member const& member) const
+    cc::string semantic_of(planned_struct const& s, planned_member const& member, plan const& p) const
     {
         if (member.is_position)
             return "SV_Position";
         switch (s.role)
         {
         case struct_role::vertex_input:
-            return upper_cased(member.source_name);
+        {
+            auto const at = &member - s.members.data();
+            auto const semantics = vertex_semantics(p.m, p.m.at(s.type));
+            for (auto i = isize(0); i < s.member_of.size(); ++i)
+                if (s.member_of[i] == at)
+                    return semantics[i];
+            return "";
+        }
         case struct_role::stage_link:
             return cc::format("SGL{}", member.location);
         case struct_role::patch_constants:
@@ -106,9 +107,23 @@ public:
         return "";
     }
 
+    /// Whether the entry point is a pixel stage writing `@depth(.greater_equal)` or `@depth(.less_equal)`.
+    [[nodiscard]] static bool writes_conservative_depth(plan const& p)
+    {
+        if (p.e.entry_stage != stage::pixel || !check::is_valid(p.e.result))
+            return false;
+        for (auto const& m : p.m.at(p.m.at(p.e.result).members))
+            if (m.output == check::pixel_output::depth_greater_equal || m.output == check::pixel_output::depth_less_equal)
+                return true;
+        return false;
+    }
+
     void write_member(cc::string& out, planned_struct const* owner, planned_member const& member, plan const& p) const
     {
         out += k_indent;
+        // EMIT-130: DXIL takes a conservative depth only from a pixel stage whose position is interpolated at the centroid
+        if (!_is_vulkan && member.is_position && writes_conservative_depth(p))
+            out += "noperspective centroid ";
         auto const has_location = owner != nullptr && member.location >= 0 && owner->role != struct_role::render_targets;
         if (_is_vulkan && has_location)
             out.appendf("[[vk::location({})]] ", member.location);
@@ -133,7 +148,7 @@ public:
         }
         out.appendf("{} {}{}", type_text(p, *this, member.type), member.name, array_dimensions(p, member.type));
         if (owner != nullptr)
-            if (auto const semantic = semantic_of(*owner, member); !semantic.empty())
+            if (auto const semantic = semantic_of(*owner, member, p); !semantic.empty())
                 out.appendf(" : {}", semantic);
         out += ";\n";
     }
@@ -196,6 +211,16 @@ public:
         }
         else
             out.appendf("{} {} : register({}{}, space{});\n", type, name, register_class, slot, group);
+    }
+
+    void write_file_sampler(cc::string& out, plan const& p, planned_sampler const& s) const override
+    {
+        if (_is_vulkan)
+            out.appendf("[[vk::binding({}, {})]] {} {};\n", s.index + 1, k_reserved_set, resource_text(p, s.type),
+                        s.name);
+        else
+            out.appendf("{} {} : register(s{}, space{});\n", resource_text(p, s.type), s.name, s.index,
+                        k_bound_samplers_space);
     }
 
     /// dx12's register class: `u` for what the shader writes, `s` for a sampler, `t` for every other resource.
@@ -354,9 +379,10 @@ public:
         auto const point = type_text(p, *this, patch.element);
         auto const domain = domain_of(p, p.e.result);
         constexpr cc::string_view partitionings[] = {"integer", "fractional_even", "fractional_odd"};
+        // EMIT-134: HLSL names the winding in its domain's own orientation, which mirrors the patch its points weigh
         auto const topology = domain == "isoline" ? cc::string_view("line")
-                            : info.is_clockwise   ? cc::string_view("triangle_cw")
-                                                  : cc::string_view("triangle_ccw");
+                            : info.is_clockwise   ? cc::string_view("triangle_ccw")
+                                                  : cc::string_view("triangle_cw");
         out.appendf("\n[domain(\"{}\")]\n", domain);
         out.appendf("[partitioning(\"{}\")]\n", partitionings[isize(info.partitioning)]);
         out.appendf("[outputtopology(\"{}\")]\n", topology);

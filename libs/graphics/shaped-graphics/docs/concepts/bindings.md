@@ -103,6 +103,19 @@ For buffer and texture kinds they line up exactly: `view_class_of(binding)` and 
 A buffer's access picks its view class, `readonly` or `readwrite`; an image is `view_class::image` whatever its access, since its view carries none.
 That equivalence is what lets a binding validate a bound view with no backend involved, and it is why a binding's kind and access mirror the view's `(view_class, view_shape)` one-to-one.
 
+### A buffer written in a dispatch or a draw is bound no other way there
+
+**With `ctx.set_portability_checks(true)`, a buffer bound through a writable view asserts if any other view reads it in the same dispatch or draw**, whatever the ranges.
+That covers a read-only or constant view in any bound group, and the vertex and index buffers of a draw.
+WebGPU refuses it, so the check refuses it on every backend, for a program that must also run there.
+Two writable views of one buffer are allowed, as WebGPU allows them.
+A binding array is not checked, since WebGPU has none, and neither is a texture.
+
+**The check is off by default**, because it costs every dispatch and draw; sg's own tests turn it on.
+A group records the buffers it binds as it is made, so the setting has to be on before the groups it should cover are created.
+A pipeline over another layout unbinds the groups, and one over the same layout keeps them, as WebGPU keeps them.
+Two draws are never checked against each other: where one needs another's write, the backend splits the render pass between them, and WebGPU's usage scope ends with the pass it splits.
+
 ## Features
 
 **A form some device lacks is refused where it is lacking, and refused alike on every backend.**
@@ -246,7 +259,8 @@ There are two ways in, and *which one* is a layout-time decision:
   Two ways to declare one, usable either or both.
   A **name-matched** `named_sampler` passed to `create_binding_group_layout`, matched to a sampler binding by name and then excluded from the dynamic group.
   Or a **register-bound** `bound_sampler` attached to the `pipeline_layout` directly — its `binding` carries the register and space, so it needs no matching group binding.
-  Only dx12 and webgpu bind one yet; vulkan and metal refuse a layout that carries one ([TODO](../TODO.md)).
+  Its register `n` is where each backend puts it: dx12 `register(sn, space)`, vulkan and webgpu binding `n + 1` of `sg::reserved_binding_group`, and metal the argument table's sampler slot `n`.
+  sg refuses two of them at one register on every backend, whatever their spaces, and a register of `sg::max_bound_samplers` (16) or more.
   A sampler binding declared static this way must not also be supplied per group.
   In dx12 both become `D3D12_STATIC_SAMPLER_DESC`s the pipeline layout bakes into the root signature.
   WebGPU has no static samplers at all: a name-matched one stays a sampler entry in its own group, whose object the backend binds into every group built from that layout.

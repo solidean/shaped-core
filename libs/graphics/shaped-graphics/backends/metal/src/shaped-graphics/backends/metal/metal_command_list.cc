@@ -112,6 +112,7 @@ MTL4::ArgumentTable* metal_command_list::argument_table()
     // Metal allows 31, so the cap is sg's rather than the API's; `k_argument_table_buffer_count` is where that is
     // said, with the static_assert that keeps it true.
     descriptor->setMaxBufferBindCount(NS::UInteger(k_argument_table_buffer_count));
+    descriptor->setMaxSamplerStateBindCount(NS::UInteger(k_argument_table_sampler_count));
     descriptor->setInitializeBindings(true);
     descriptor->setLabel(ns_string("sg command list"));
 
@@ -658,6 +659,7 @@ void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
     auto const& mtl_pipeline = static_cast<metal_compute_pipeline const&>(pipeline);
     _bound_compute = &mtl_pipeline;
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
+    bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
 
     auto* const encoder = compute_encoder();
@@ -742,6 +744,14 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
     auto const size = _bound_compute->workgroup_size();
     compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
                                             MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+}
+
+void metal_command_list::bind_layout_samplers(metal_pipeline_layout const* layout)
+{
+    if (layout == nullptr)
+        return;
+    for (auto const& s : layout->bound_samplers())
+        argument_table()->setSamplerState(s.id, NS::UInteger(s.slot));
 }
 
 void metal_command_list::rebind_inline_constants(metal_pipeline_layout const* layout)
@@ -1336,6 +1346,7 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
 
     _bound_raster = &mtl_pipeline;
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
+    bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
 
     _render_encoder->setRenderPipelineState(mtl_pipeline.state());
@@ -1411,6 +1422,7 @@ void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pip
     // So this only records the pipeline a later dispatch_rays must have been built for.
     _bound_raytracing = static_cast<metal_raytracing_pipeline const*>(&pipeline);
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
+    bind_layout_samplers(static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get());
 }
 

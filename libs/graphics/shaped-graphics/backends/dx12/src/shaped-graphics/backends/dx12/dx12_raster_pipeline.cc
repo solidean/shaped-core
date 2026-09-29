@@ -189,7 +189,8 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     pso.NodeMask = 0;
     pso.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
-    auto const cached = desc.cached_pipeline.span();
+    // See dx12_pipeline_layout::has_static_samplers.
+    auto const cached = layout->has_static_samplers ? cc::span<byte const>() : desc.cached_pipeline.span();
     if (!cached.empty())
     {
         pso.CachedPSO.pCachedBlob = cached.data();
@@ -219,6 +220,9 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
 
 cc::pinned_data<byte const> dx12_raster_pipeline::cached_pipeline_data() const
 {
+    if (layout->has_static_samplers)
+        return {}; // see dx12_pipeline_layout::has_static_samplers
+
     ComPtr<ID3DBlob> blob;
     if (FAILED(pipeline_state->GetCachedBlob(&blob)) || blob->GetBufferSize() == 0)
         return {};

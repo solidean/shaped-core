@@ -1,0 +1,69 @@
+// Rects placed per instance in clip space, each at its own depth and in its own color.
+// The depth and stencil tests draw with them, and sweep the state through the host's `customize`.
+
+@vertex struct rect_corner:
+    at: float2
+    @per_instance rect: float4
+    @per_instance depth: float
+    @per_instance color: float4
+
+struct rect_varyings:
+    @position position: hpos4
+    color: float4
+
+@pixel struct rect_target:
+    color: float4
+
+// `rect` is left, bottom, right, top, and `at` a corner of the unit square.
+@vertex fun rect_vs(v: rect_corner) -> rect_varyings:
+    let x = v.rect.x + (v.rect.z - v.rect.x) * v.at.x
+    let y = v.rect.y + (v.rect.w - v.rect.y) * v.at.y
+    return {
+        position = hpos4(x, y, v.depth, 1.0)
+        color = v.color
+    }
+
+@pixel fun rect_ps(p: rect_varyings) -> rect_target:
+    return {
+        color = p.color
+    }
+
+pipeline depth_tested:
+    vertex = rect_vs
+    pixel = rect_ps
+    cull = .none
+    format = .rgba8_unorm
+    depth_stencil_format = .depth32_float
+    depth_test = true
+    depth_write = true
+
+pipeline stencil_tested:
+    vertex = rect_vs
+    pixel = rect_ps
+    cull = .none
+    format = .rgba8_unorm
+    depth_stencil_format = .depth32_float_stencil8
+    stencil_test = true
+
+// A float target, which blending is swept against: every value the tests choose is exact in half precision.
+pipeline floating:
+    vertex = rect_vs
+    pixel = rect_ps
+    cull = .none
+    format = .rgba16_float
+
+// A pixel stage that writes a buffer, which the aliasing tests bind beside the rects' vertex buffers.
+binding pixel_writes:
+    hits: mut buffer[int]
+
+@pixel fun counting_ps(p: rect_varyings){pixel_writes} -> rect_target:
+    pixel_writes.hits[0] = 1
+    return {
+        color = p.color
+    }
+
+pipeline counting:
+    vertex = rect_vs
+    pixel = counting_ps
+    cull = .none
+    format = .rgba16_float

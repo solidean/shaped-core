@@ -120,6 +120,9 @@ public:
     {
     }
 
+    /// A Metal sampler is a parameter of the entry point, which `write_function_head` writes.
+    void write_file_sampler(cc::string&, plan const&, planned_sampler const&) const override {}
+
     void write_declarations(cc::string& out, plan const& p) const override
     {
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
@@ -165,6 +168,9 @@ public:
             list += cc::format("{}constant {}& {} [[buffer({})]]", list.empty() ? "" : ", ", c.block_name, c.name,
                                k_inline_constants_buffer);
         }
+        // EMIT-133: a static sampler's slot of the argument table is its index, and MSL has one sampler type
+        for (auto const& s : p.samplers)
+            list += cc::format("{}sampler {} [[sampler({})]]", list.empty() ? "" : ", ", s.name, s.index);
         out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
                     type_text(p, *this, p.e.result), p.entry_name, list);
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)

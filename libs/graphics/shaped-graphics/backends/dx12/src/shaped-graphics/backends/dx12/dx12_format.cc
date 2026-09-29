@@ -123,4 +123,36 @@ DXGI_FORMAT to_dxgi_format(sg::pixel_format format)
     CC_ASSERT(false, "unhandled pixel_format in to_dxgi_format");
     return DXGI_FORMAT_UNKNOWN;
 }
+
+DXGI_FORMAT to_dxgi_resource_format(sg::pixel_format format, bool is_sampled)
+{
+    if (!is_sampled)
+        return to_dxgi_format(format);
+    switch (format)
+    {
+    case sg::pixel_format::depth16_unorm:
+        return DXGI_FORMAT_R16_TYPELESS;
+    case sg::pixel_format::depth32_float:
+        return DXGI_FORMAT_R32_TYPELESS;
+    case sg::pixel_format::depth32_float_stencil8:
+        return DXGI_FORMAT_R32G8X24_TYPELESS;
+    default:
+        return to_dxgi_format(format);
+    }
+}
+
+DXGI_FORMAT to_dxgi_shader_view_format(sg::pixel_format format)
+{
+    switch (format)
+    {
+    case sg::pixel_format::depth16_unorm:
+        return DXGI_FORMAT_R16_UNORM;
+    case sg::pixel_format::depth32_float:
+        return DXGI_FORMAT_R32_FLOAT;
+    case sg::pixel_format::depth32_float_stencil8:
+        return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+    default:
+        return to_dxgi_format(format);
+    }
+}
 } // namespace sg::backend::dx12

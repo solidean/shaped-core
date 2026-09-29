@@ -277,6 +277,9 @@ private:
     /// Call it before `_bound_layout` is reassigned; it compares against the old one.
     void rebind_inline_constants(metal_pipeline_layout const* layout);
 
+    /// Sets the layout's bound samplers into the argument table, on every pipeline bind.
+    void bind_layout_samplers(metal_pipeline_layout const* layout);
+
     /// Declare what a draw reads: the bound groups' resources, the vertex buffers, and an indexed draw's index buffer.
     void declare_raster_draw(bool indexed);
 

@@ -78,6 +78,7 @@ void finish_creation(webgpu_context& ctx)
     ctx.set_limits(alignment, {.timestamps = has(WGPUFeatureName_TimestampQuery),
                                .readwrite_image_formats = has(WGPUFeatureName_TextureFormatsTier2),
                                .float32_filtering = has(WGPUFeatureName_Float32Filterable),
+                               .depth32_float_stencil8 = has(WGPUFeatureName_Depth32FloatStencil8),
                                // sg's extended set holds bgra8_unorm, which WebGPU grants with a feature of its own.
                                .extended_image_formats
                                = has(WGPUFeatureName_TextureFormatsTier1) && has(WGPUFeatureName_BGRA8UnormStorage)});

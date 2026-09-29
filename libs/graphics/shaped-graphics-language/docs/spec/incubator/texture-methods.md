@@ -51,7 +51,8 @@ A resource is not a runtime value on any target, so a function taking one is ins
 ## What exists
 
 The whole method set is the spec's now, for every shape: [bindings.md](../bindings.md#sampling) and CHK-279 to CHK-281.
-`@sampler(name)` names a sampler of the texture's own binding, static or dynamic, and a call without a sampler on a texture without one is `missing-sampler`.
+`@sampler(name)` names a sampler of the texture's own binding, static or dynamic, or a file-scope one.
+A call without a sampler on a texture without one is `missing-sampler`.
 
 What stands in for the design above:
 
@@ -62,7 +63,6 @@ What stands in for the design above:
 
 ## Open
 
-* A file-scope sampler as a `@sampler`, once file-scope samplers bind on vulkan and metal (TODO.md).
 * Subscripts, `t[xy]` and `img[xy] = v`, as sugar over `load` and `store`.
 * A gather of an int or a uint texture, which every target has and the prelude does not yet.
 * `level` of a comparison anywhere but 0.0, which some target would need a feature for.

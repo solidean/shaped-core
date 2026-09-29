@@ -159,6 +159,8 @@ binding material:
 
 * **`sampler name:` at file scope** is a static sampler of the pipeline layout, an `sg::bound_sampler`.
   Nobody binds it, so it is not listed anywhere: it joins the layout of every entry point whose inlined body uses it, and no other.
+  Its index in that layout is its position among the file's samplers, so every stage and every entry point states the same one.
+  A stage holds 16, so an entry point reaching one of index 16 or more is `too-many-samplers`, however few it reaches ([EMIT-133](semantics/emitting.md#bindings)).
 * **`sampler name:` inside a binding** is a static sampler of that group's layout, an `sg::named_sampler`.
   It is part of the group, and the host binds nothing for it.
   An `@inline` binding holds constants only, so a sampler in one is a normal error rather than a sampler moved elsewhere.
@@ -208,7 +210,7 @@ A cube and a multisampled texture take none, and neither does a 1D one, which Me
 A gather's component, an offset and a comparison's level are constants, because some target takes each only as written (CHK-280).
 
 **A texture may name the sampler it is sampled with, and a call then leaves it out.**
-`@sampler(name)` on a texture member names a sampler of the same binding, static or dynamic:
+`@sampler(name)` on a texture member names a sampler of the same binding, static or dynamic, or a file-scope sampler:
 
 ```sgl
 binding material:
@@ -223,7 +225,7 @@ let b = material.albedo.sample(uv, other_smp)
 ```
 
 A call that names a sampler takes that one, and a call without one on a texture without `@sampler` is `missing-sampler` (CHK-279).
-A file-scope sampler is not yet one `@sampler` may name.
+A member of the binding hides a file-scope sampler of its name, and a call through a file-scope one reaches it as naming it would ([EMIT-133](semantics/emitting.md#bindings)).
 
 **A depth texture filters only in a comparison**, because WebGPU refuses a filtering sampler on one otherwise.
 So a plain `sample` of a depth texture goes through a `@non_filtering` sampler, as an `@unfilterable` texture does (CHK-281).
@@ -433,6 +435,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
+* A file-scope sampler, handed to a builtin by its name ([CHK-314](semantics/checking.md#bindings)).
 * A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
   The builtins that take one are the texture methods of [Sampling](#sampling), called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
@@ -446,10 +449,11 @@ Three targets write a group, and the fourth declines rather than guessing.
 WGSL gives each resource its own `@group`/`@binding`, and HLSL declares each at file scope with `register(<class>slot, spaceN)` on dx12 and `[[vk::binding(slot, N)]]` on vulkan.
 A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
 MSL declines every group until slib has a compiler that turns its text into a metallib.
+A file-scope sampler stands where sg binds a pipeline layout's static sampler of its index, i ([EMIT-133](semantics/emitting.md#bindings)):
+`register(s<i>, space10)` on dx12, `[[vk::binding(i + 1, 3)]]` on vulkan, `@group(3) @binding(i + 1)` in WGSL, and a `[[sampler(i)]]` parameter in MSL.
 
-`bytes`, `constants[T]` and a file-scope `sampler` all parse and are then reported.
+`bytes` and `constants[T]` both parse and are then reported.
 A struct element type is placed by the storage rule of [the layout rules](semantics/emitting.md#layout).
-A file-scope sampler waits for slib to carry a pipeline layout's static samplers, which it has no spelling for yet.
 That is deliberate.
 The shape is decided, so it is written down here and the AST constructs it.
 A shader using one then gets a diagnostic that names the feature, rather than a parse error that names nothing.

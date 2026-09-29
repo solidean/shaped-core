@@ -245,6 +245,15 @@ struct sgl::check::flat_binding_member
     constexpr bool operator==(flat_binding_member const&) const = default;
 };
 
+/// A file-scope sampler, which is a global of the target at the pipeline layout's address for it (CHK-314).
+struct sgl::check::flat_file_sampler
+{
+    /// Of kind `sampler`.
+    symbol_id sampler = symbol_id::none;
+
+    constexpr bool operator==(flat_file_sampler const&) const = default;
+};
+
 struct sgl::check::flat_member
 {
     flat_expr_id object = flat_expr_id::none;
@@ -347,6 +356,7 @@ struct sgl::check::flat_expr
                 flat_enum_value,
                 flat_local_ref,
                 flat_binding_member,
+                flat_file_sampler,
                 flat_member,
                 flat_buffer_element,
                 flat_element,

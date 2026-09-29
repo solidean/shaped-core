@@ -66,6 +66,8 @@ cc::string_view sgl::emit::to_string(error_kind kind)
         return "layout-conflict";
     case error_kind::padding_forbidden:
         return "padding-forbidden";
+    case error_kind::too_many_samplers:
+        return "too-many-samplers";
     }
     return "";
 }
@@ -172,10 +174,15 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
     for (auto const& buffer : plan.resources)
         result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
+    for (auto const& s : plan.samplers)
+        result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);
     if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none)
     {
-        result.color_targets = i32(m.at(m.at(e.result).members).size());
+        // a depth or a sample mask is an output of its own and no target (EMIT-130)
+        result.color_targets = 0;
+        for (auto const& member : m.at(m.at(e.result).members))
+            result.color_targets += member.output == check::pixel_output::color ? 1 : 0;
         result.target_struct = cc::string(m.name_of(e.result));
     }
     return result;

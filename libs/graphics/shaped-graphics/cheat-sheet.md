@@ -97,7 +97,9 @@ ctx.supports(sg::feature::raytracing)              // bool — THE capability qu
                                                    //   | multisampled_array_textures (false on webgpu: no tex_2d_ms_array binding)
                                                    //   | primitive_index (a pixel shader's SV_PrimitiveID; vulkan needs geometryShader, false on webgpu)
                                                    //   | sample_rate_shading (per-sample pixel shading; vulkan needs sampleRateShading)
-                                                   //   vulkan's geometry, tessellation and sample-rate answers are the device features creation enabled
+                                                   //   | wireframe_fill (fill_mode::wireframe; false on webgpu, vulkan needs fillModeNonSolid)
+                                                   //   | depth32_float_stencil8 (the one stencil format; webgpu needs depth32float-stencil8, vulkan asks per format)
+                                                   //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
@@ -105,6 +107,7 @@ ctx.supported_features()                           // sg::feature_set (cc::flags
 ctx.missing_features(shader)                       // feature_set — what shader.required_features holds that this device lacks; empty when unknown
 sg::to_string(f)  sg::feature_from_string(name)    // "raytracing" <-> feature::raytracing; sg::k_all_features lists them in enum order
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
+ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
                                                    //   FLOORS a portable caller sizes against, not the most the hardware could do
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)
@@ -325,7 +328,7 @@ cmd.raster.bind_group(group_index, binding_group)      // void — bind at slot 
 cmd.raster.bind_vertex_buffers({vbuf->as_vertex_buffer<Vtx>()}, first_slot=0)  // void — also: bind_vertex_buffer(view, slot) / span overload
 cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  // void
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
-cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state
+cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state; blend constants are 0 until set, per rendering scope
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
 cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // void — as on cmd.compute, next draw only
                                                          //   an element is tracked at the stages the code touches its array in (every stage of the op without a footprint)
@@ -592,7 +595,8 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
 // per backend: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set
 //   layout's immutable samplers, metal writes them into the group's argument buffer at their binding index.
-//   A pipeline-level static sampler (a bound_sampler, on no group): dx12 and webgpu bind it; vulkan and metal refuse the pipeline layout.
+//   A pipeline-level static sampler (a bound_sampler, on no group) at register n: dx12 s<n> in its space, vulkan and webgpu
+//   group 3 binding n + 1, metal [[sampler(n)]]. n < sg::max_bound_samplers (16), unique whatever the space, on every backend.
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
@@ -745,6 +749,7 @@ cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its
 cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
+//   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pair)
@@ -765,7 +770,7 @@ sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; 
                                   //   via a sg::vertex_layout_of<V> specialization (static vertex_type_layout get()). vertex_attribute { string semantic; u32 semantic_index; vertex_attribute_format format; isize offset; int slot }
 // state vocab (backend-neutral enums; primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh):
 //   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip,patch_list}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
-//   blend_factor / blend_op / color_channel {r,g,b,a} with color_write_mask = cc::flags<color_channel> and color_write_mask_all  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
+//   blend_factor (incl. constant / one_minus_constant, read from cmd.raster.set_blend_constants per draw) / blend_op / color_channel {r,g,b,a} with color_write_mask = cc::flags<color_channel> and color_write_mask_all  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
 //   depth_stencil_state { depth_test, depth_write, depth_compare, stencil_test, stencil_read_mask, stencil_write_mask, stencil_front, stencil_back }
 //   blend presets: sg::blend_alpha, sg::blend_premultiplied_alpha, sg::blend_additive — opaque is an unset `blend`
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}

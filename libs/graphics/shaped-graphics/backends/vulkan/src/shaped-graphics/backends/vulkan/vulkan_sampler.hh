@@ -41,10 +41,11 @@ private:
 
 namespace sg::backend::vulkan
 {
-/// The VkSamplerCreateInfo an sg sampler describes.
+/// The VkSamplerCreateInfo an sg sampler describes, on `ctx`'s device.
+/// Anisotropy is off where the device lacks samplerAnisotropy, and max_anisotropy is clamped to maxSamplerAnisotropy.
 /// A comparison sampler sets compareEnable.
 /// The others leave compareOp at NEVER, which Vulkan ignores.
-[[nodiscard]] VkSamplerCreateInfo to_vk_sampler_info(sg::sampler const& s);
+[[nodiscard]] VkSamplerCreateInfo to_vk_sampler_info(vulkan_context const& ctx, sg::sampler const& s);
 
 /// The Vulkan comparison function for an sg compare_op.
 /// Shared with depth-stencil state.

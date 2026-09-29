@@ -266,15 +266,9 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
     }
     for (isize i = 0; i < desc.static_samplers.size(); ++i)
     {
+        // sg refused a malformed or colliding one before the backend saw it.
         auto const& s = desc.static_samplers[i];
-        CC_ASSERT(sg::is_sampler(s.binding.type), "a bound_sampler's binding must be a sampler binding");
         auto const binding_index = s.binding.index + 1;
-        for (isize j = 0; j < i; ++j)
-            if (desc.static_samplers[j].binding.index == s.binding.index)
-                return cc::error(
-                    cc::format("pipeline_layout: bound samplers '{}' and '{}' both take register {}, which "
-                               "webgpu places at group 3 binding {}",
-                               desc.static_samplers[j].binding.name, s.binding.name, s.binding.index, binding_index));
         auto entry = layout_entry_of(s.binding, binding_index, default_sampler_binding_type(s.sampler));
         entry.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
         reserved.push_back(entry);

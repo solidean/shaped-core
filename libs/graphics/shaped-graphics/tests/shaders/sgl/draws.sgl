@@ -1,0 +1,48 @@
+// Points placed by a column per vertex and a row per instance, each writing the indices it was drawn with.
+// The draw-parameter tests read those back, so a base a backend dropped shows as a wrong number rather than a missing pixel.
+
+@vertex struct indexed_point:
+    column: float
+    @per_instance row: float
+
+struct drawn_indices:
+    @position position: hpos4
+    @interpolate(.flat) vertex: int
+    @interpolate(.flat) instance: int
+
+@pixel struct index_target:
+    indices: float4
+
+// `column` and `row` are clip-space x and y, at a pixel's centre.
+@vertex fun index_vs(p: indexed_point, @vertex_index v: int, @instance_index i: int) -> drawn_indices:
+    return {
+        position = hpos4(p.column, p.row, 0.5, 1.0)
+        vertex = v
+        instance = i
+    }
+
+@pixel fun index_ps(p: drawn_indices) -> index_target:
+    return {
+        indices = float4(p.vertex as float, p.instance as float, 0.0, 1.0)
+    }
+
+pipeline indexed_points:
+    vertex = index_vs
+    pixel = index_ps
+    topology = .point_list
+    format = .rgba32_float
+
+// The same points, each draw tagged by inline constants the host sets between draws.
+@inline binding draw_tag:
+    tag: float
+
+@pixel fun tagged_ps(p: drawn_indices){draw_tag} -> index_target:
+    return {
+        indices = float4(p.vertex as float, p.instance as float, draw_tag.tag, 1.0)
+    }
+
+pipeline tagged_points:
+    vertex = index_vs
+    pixel = tagged_ps
+    topology = .point_list
+    format = .rgba32_float
