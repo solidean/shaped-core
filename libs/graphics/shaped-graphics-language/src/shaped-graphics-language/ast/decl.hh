@@ -154,11 +154,13 @@ struct sgl::ast::notation_decl
 };
 
 /// `test:` with a block, or `test value`, which is the block of that one line (AST-138).
+/// `test {a, b}:` lists the bindings the test reads, whose values its driver gives (AST-151).
 /// A declaration and no statement: it never runs where it stands, and the check pass runs it on its own.
 struct sgl::ast::test_decl
 {
     /// The `test` keyword, which attributes stand in front of: where a report names the test, and where its extent starts.
     sgl::source_span keyword;
+    range_of<argument> bindings;
     sgl::ast::body body;
 
     constexpr bool operator==(test_decl const&) const = default;

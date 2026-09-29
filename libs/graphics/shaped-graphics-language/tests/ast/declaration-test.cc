@@ -224,6 +224,12 @@ TEST("sgl ast - a test is a declaration whose body is a block, or the one line a
     CHECK(ast_of("test\n") == "(test) !! expected-body @0+4\n");
     CHECK(ast_of("test 1 < 2:\n    3 < 4\n") == "(test => (call:infix < num:1 num:2)) !! too-many-arguments @10+11\n");
 
+    // AST-151: a list in front of the block names the bindings the test reads, and a body after it is a block
+    CHECK(ast_of("test {frame, view}:\n    true\n") == "(test (uses frame view)\n  true)");
+    CHECK(ast_of("test{frame}:\n    true\n") == "(test (uses frame)\n  true)");
+    // the one-line form has no list: a braced object in front of its value is part of that value
+    CHECK(ast_of("test {frame} true\n") == "(test => (call:juxt (object frame=<shorthand>) true))");
+
     // it stands in a struct, an enum and a function body, and not in a binding or another test (AST-139)
     CHECK(ast_of("struct s:\n    x: float\n    test s(1.0).x == 1.0\n")
           == "(struct s\n  (field x : float)\n  (test => (call:infix == (member (call:paren s num:1.0) x) num:1.0)))");

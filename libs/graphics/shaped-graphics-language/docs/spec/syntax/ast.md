@@ -530,12 +530,14 @@ fun update(state: particle):
 | sampler | `sampler name:` and a block of settings | yes | no |
 | pipeline | `pipeline name:` and a block of settings, or `pipeline name = (a, b)` | yes | no |
 | notation | `notation a => b` | yes | yes |
-| test | `test:` and a block, or `test expression` | yes | yes |
+| test | `test:` and a block, `test {bindings}:` and a block, or `test expression` | yes | yes |
 | `let` | see [statements](#let-and-assignment) | no | yes |
 
 * **AST-64** A file holds at most one `module` declaration, and it stands before every other declaration of the file.
 * **AST-65** The type of a constant stands in a type position.
 * **AST-138** `test expression` reads as a `test` whose block holds the one expression statement `expression`; a `test` with both, or with neither, is a normal error.
+* **AST-151** A braced list right after `test` names the bindings it reads, as a function's `{bindings}` does, and the body after it is a block.
+  The one-line form takes no list: in `test {a} value` the braces are an object, part of the value.
 * **AST-139** A `test` stands in a struct and an enum as well, and inside another `test` is `declaration-not-allowed-here`.
   No jump crosses a `test`'s body, so a `return` in it is `jump-without-target`.
 * **AST-145** Each argument of a `require` is one name, and any other argument, or none at all, is `expected-name`.

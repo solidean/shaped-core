@@ -352,13 +352,20 @@ sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equalit
 sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
 sgl::check::is_constant(m, e, id)          // literals, and pure builtins, constructions and members of them alone (CHK-310)
 sgl::check::evaluate_constant(m, e, id)    // -> outcome: `ok` with .result, or `program_error` where a call has no value
+sgl::check::driver_bindings{.groups = {{.name = "frame", .members = {{.name = "exposure", .bytes = b}}}}, .acceleration_pool = p}
+                                           // bound BY NAME (EVAL-94): a value is its scalars, 4 bytes each, NEVER padded;
+                                           // a buffer its elements so; .mutable_bytes for a mut buffer; .acceleration_root
+sgl::check::resolve_inputs(m, e, bound)    // -> cc::result<run_inputs>; left out: zero, empty, root 0 (the empty TLAS)
+sgl::check::write_back(m, o, bound)        // what the run stored, into each .mutable_bytes
 
 #include <shaped-graphics-language/test/run_tests.hh>
 m.tests  m.test_units                      // test_info { symbol, file, where, scope_path, comment, unit } and its flat tree
 sgl::test::run_tests(m, files, {.file = f})  // -> vector<test_result { test, status, failures, checks_run }>; files are the
                                            // module_files m was checked from, since a report quotes the source
-sgl::test::run_test(m, files, t, limits)   // ONE test, m.tests[t]: what a caller that stops between tests runs;
+sgl::test::run_test(m, files, t, limits, bound)  // ONE test, m.tests[t]: what a caller that stops between tests runs;
                                            // a test that expects diagnostics: judged_by_diagnostics; one that did not check: not_run
+{.bindings = bound}                        // test_options: what `test {frame}:` lists gets its values here (CHK-333);
+                                           // bytes that do not fit: invalid_bindings; textures are unsupported-yet
 r.sites                                    // site_mark { file, where, is_assert, passed, failed } per check and assert of its tree
                                            // an assert inlined from a helper names the helper's file
 sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one related note per narrowed part:

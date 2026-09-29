@@ -213,6 +213,14 @@ fun graded(a: float) -> float:
   A run is one invocation, so a barrier waits for nobody and what it stored is all the memory holds.
 * **EVAL-93** An atomic's update names its place first, then evaluates its other arguments, then reads, updates and writes the atomic in one step, giving the value it read.
   A run is one invocation, so no other update ever falls between.
+* **EVAL-94** The bindings of a run are what its driver binds by name, a binding by its name and a member by its own.
+  A value is its scalars in field order, 4 bytes each and never padded, and a buffer its elements one after another, each laid out so.
+  A member the driver leaves out is zero, a buffer it leaves out is empty, and an acceleration member it leaves out is the empty TLAS.
+  A store to a `mut buffer` the driver bound as mutable bytes is written back into them when the run ends.
+  A member name its binding lacks, or bytes that are no whole value or no whole number of elements, fail the test as `invalid-bindings`, and it never runs.
+* **EVAL-95** A trace runs its emulated form, over the acceleration pool the driver binds, laid out as sg's webgpu backend lays it out.
+  `acceleration_root(world)` is the root unit the driver gives that member, and `acceleration_pool_load(u)` is unit `u` of the pool.
+  A run without a pool reads zero at every unit, so every trace misses; a unit past the end of a pool it has is a `program-error`.
 * **EVAL-44** A run is bounded by a fuel count, one unit per statement, per expression node and per iteration, and running out is a status as well.
 
 ## Open

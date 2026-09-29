@@ -27,6 +27,10 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   The way out not taken yet: a `pipeline` numbers only the samplers its stages reach, and emits those stages with its numbers.
   It costs an entry point's text depending on its pipeline, and a stage shared by two pipelines compiling twice.
   A hand-assembled pipeline keeps declaration order.
+- **Textures, images and samplers in a test's bindings.** A test lists values, buffers and acceleration structures, and its driver binds them (CHK-333, EVAL-94).
+  A binding that holds a texture, an image or a sampler is `unsupported-yet` in a test, since the interpreter has no texel to read yet.
+  It needs a texture a driver can bind, `member_data` taking its texels, and the texture builtins' evaluators reading them.
+- **A watertight triangle test in the emulated trace.** Möller–Trumbore misses or doubles a ray through a shared edge ([raytracing-polyfill.md](raytracing-polyfill.md#traversal)).
 - **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, and gathers of integer textures.
 - **Features used in a body.** Only an entry point's signature uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
   A listed binding's member does, and so do a stage input, a member taken per sample and the stage itself (CHK-263).

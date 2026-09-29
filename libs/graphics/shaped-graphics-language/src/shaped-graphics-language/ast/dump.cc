@@ -664,6 +664,12 @@ struct dumper
                 // A test has no name, so nothing stands between the tag and its body.
                 out += "(test";
                 attributes(d.attributes);
+                if (!n.bindings.empty())
+                {
+                    out += " (uses";
+                    dump_arguments(n.bindings, depth);
+                    out += ")";
+                }
                 dump_body(n.body, depth);
             },
             [&](field_decl const& n)

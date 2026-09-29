@@ -532,16 +532,15 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
 
 @internal fun pool_float4(u: uint4) -> float4 => float4.from_bits(u)
 
-/// Where a ray enters the closed box, or past `t_far` where it misses it: the slab test.
-@internal fun box_entry(lo: float3, hi: float3, origin: float3, inverse: float3, t_near: float, t_far: float) -> float:
+/// Whether the ray meets the closed box between `t_near` and `t_far`: the slab test.
+@internal fun is_box_entered(lo: float3, hi: float3, origin: float3, inverse: float3, t_near: float, t_far: float) -> bool:
     let a = (lo - origin) * inverse
     let b = (hi - origin) * inverse
     let near = min(a, b)
     let far = max(a, b)
     let enter = max(max(max(near.x, near.y), near.z), t_near)
     let leave = min(min(min(far.x, far.y), far.z), t_far)
-    if enter <= leave => return enter
-    return t_far + 1.0
+    return enter <= leave
 
 /// The triangle's `(t, u, v, det)` along the ray, and `t < 0` where the ray misses it.
 /// The determinant's sign says which side the ray sees: DXR's front face is clockwise as the ray sees it.
@@ -621,7 +620,7 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         let lo = acceleration_pool_load(region + 1 + 2 * node)
         let hi = acceleration_pool_load(region + 2 + 2 * node)
         let inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
-        if box_entry(pool_float3(lo), pool_float3(hi), o, inverse, r.t_min, best.t) > best.t => continue
+        if not is_box_entered(pool_float3(lo), pool_float3(hi), o, inverse, r.t_min, best.t) => continue
 
         if (hi.w & 2147483648) == 0:
             // an inner node: both children, the right one first so the left is taken next

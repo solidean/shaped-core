@@ -433,6 +433,8 @@ struct checker
     /// Reports `shadows-unshadowable` where a local or a parameter named `name` would hide a `@shadowable(false)` symbol.
     void judge_shadowing(i32 file, cc::string_view name, source_span where);
     void compile_binding(symbol_id id);
+    /// The bindings a `{...}` list names, each checked; an entry that names none is reported and sets `is_failed`.
+    [[nodiscard]] cc::vector<symbol_id> binding_list_of(i32 file, ast::range_of<ast::argument> entries, bool& is_failed);
     void compile_function(symbol_id id);
     /// The synthesized constructor `id`: one parameter per field of its struct, and the struct as its result.
     void compile_constructor(symbol_id id);
