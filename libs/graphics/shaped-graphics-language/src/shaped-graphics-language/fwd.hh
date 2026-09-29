@@ -26,6 +26,8 @@ struct diagnostic;
 struct line_column;
 
 struct text_request;
+struct all_text_request;
+struct entry_text;
 struct tested_source;
 struct emitted_source;
 struct interface_binding;

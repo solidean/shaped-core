@@ -28,6 +28,9 @@ r.value().color_targets  .target_struct    // a pixel entry point's target count
 r.value().footprint                        // check::slot_footprint per TOUCHED slot: host_name, view (constants/read_only/storage), reads, writes
                                            // a member never named is absent — sg skips its barrier; see spec/bindings.md "Footprint"
 r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
+sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = sgl::emit::all_targets()});
+                                           // -> cc::result<cc::vector<entry_text>, cc::string>: every entry point on every target
+                                           // from ONE check; compile_to_text per entry point and target checks that many times
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
 sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target, run_tests
