@@ -37,6 +37,9 @@ struct slib::raytracing_pipeline_definition
     cc::string_view name;
     /// The ray types of its set, which every row of its table spans.
     int ray_count = 1;
+    /// The ray set's name and each ray type's payload, in the set's order, which a host's hit group must match.
+    cc::string_view ray_set;
+    cc::span<cc::string_view const> payloads;
     shader_asset_handle const* raygen = nullptr;
     /// Per ray type, in the set's order.
     cc::span<shader_asset_handle const* const> misses;
@@ -73,4 +76,16 @@ namespace slib
 /// they were handed over.
 /// `table` must come from `table_description`.
 [[nodiscard]] sg::hit_row add_hit_group_row(sg::raytracing_shader_table_description& table, int group);
+
+/// `hit_group <group>` of the SGL `source`, compiled for `ctx`: a hit shader per ray type, in the set's order, which
+/// `describe_raytracing_pipeline` takes among the host's hit groups.
+/// The group must be for the ray set `definition` traces, by its name and by each ray type's payload.
+/// A source that does not compile, a group it lacks or one for another ray set is an async error, never a throw.
+/// `ctx`, `library` and `definition` must outlive the result.
+[[nodiscard]] cc::shared_async<cc::vector<sg::hit_shader>> compile_hit_group(sg::context* ctx,
+                                                                             shader_library const* library,
+                                                                             raytracing_pipeline_definition const* definition,
+                                                                             cc::string source,
+                                                                             cc::string group,
+                                                                             cc::string label = "<generated>");
 } // namespace slib

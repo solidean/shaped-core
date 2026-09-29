@@ -107,3 +107,13 @@ hit_group spheres for path_rays:
     miss.surface = sky
     miss.occlusion = open_sky
     hit_groups = (textured, spheres)
+
+// ---- the same shaders, with every hit group the host's
+
+@raytracing pipeline open_path:
+    rays = path_rays
+    raygen = primary
+    miss.surface = sky
+    miss.occlusion = open_sky
+    hit_groups = (.host)
+    max_recursion_depth = 2

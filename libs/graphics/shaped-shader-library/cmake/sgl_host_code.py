@@ -974,6 +974,8 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
             return f"&{namespace}::{stem}.{entry}" + (".asset" if (file.path, entry) in wrappers else "")
 
         out.append("\nnamespace\n{\n")
+        payloads = ", ".join(f'"{payload}"' for payload in file.ray_set(p["rays"])["payloads"])
+        out.append(f"constexpr cc::string_view k_{key}_payloads[] = {{{payloads}}};\n")
         misses = ", ".join(handle(m) for m in p["misses"])
         out.append(f"slib::shader_asset_handle const* const k_{key}_misses[] = {{{misses}}};\n")
         for group_name in p["hit_groups"]:
@@ -999,6 +1001,8 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
         out.append(f'        .file = "{file.path}",\n')
         out.append(f'        .name = "{p["name"]}",\n')
         out.append("        .ray_count = ray_count,\n")
+        out.append(f'        .ray_set = "{p["rays"]}",\n')
+        out.append(f"        .payloads = k_{key}_payloads,\n")
         out.append(f"        .raygen = {handle(p['raygen'])},\n")
         out.append(f"        .misses = k_{key}_misses,\n")
         if p["hit_groups"]:
