@@ -78,6 +78,7 @@ void webgpu_context::set_limits(isize uniform_offset_alignment, granted_features
     _samplers.initialize(device());
     _streams.initialize(*this, _config.stream_window_bytes);
     _queries.initialize(*this, features.timestamps);
+    _acceleration.initialize(*this);
 }
 
 void webgpu_context::shutdown()
@@ -119,6 +120,7 @@ void webgpu_context::shutdown()
     _epochs.staged = {};
 
     _queries.shutdown();
+    _acceleration.shutdown();
     _constant_pages.shutdown();
     _readbacks.shutdown();
     _upload_ring.shutdown();

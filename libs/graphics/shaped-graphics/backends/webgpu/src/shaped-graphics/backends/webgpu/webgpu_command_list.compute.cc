@@ -19,8 +19,8 @@ void rebind_layout(webgpu_command_list::bound_state& state, webgpu_pipeline_layo
         state.groups.clear();
         for (isize i = 0; i < layout->groups().size(); ++i)
             state.groups.push_back({});
-        state.constants = cc::vector<byte>::create_filled(layout->inline_constants_bytes(), byte(0));
-        state.constants_dirty = layout->inline_constants_bytes() > 0;
+        state.constants = cc::vector<byte>::create_filled(layout->reserved_block_bytes(), byte(0));
+        state.constants_dirty = layout->reserved_block_bytes() > 0;
         state.constants_page = nullptr;
     }
     state.needs_full_apply = true;
@@ -47,6 +47,15 @@ void bind_group_into(webgpu_command_list::bound_state& state,
                pinned.value_or(0), group_index);
     state.groups[group_index] = wg->_group;
     state.needs_full_apply = true;
+
+    // The group's roots join the reserved block, at the group's place among the pipeline's acceleration members.
+    if (!wg->acceleration_roots.empty())
+    {
+        auto const at = state.layout->roots_offset_in_block() + state.layout->acceleration_base(group_index) * 4;
+        cc::memcpy(state.constants.data() + at, wg->acceleration_roots.data(),
+                   size_t(wg->acceleration_roots.size()) * sizeof(u32));
+        state.constants_dirty = true;
+    }
 }
 
 void set_constants_into(webgpu_command_list::bound_state& state, cc::span<byte const> data, cc::optional<isize> offset)
@@ -71,7 +80,7 @@ void set_constants_into(webgpu_command_list::bound_state& state, cc::span<byte c
 
 void webgpu_command_list::place_constants(bound_state& state)
 {
-    if (state.layout == nullptr || state.layout->inline_constants_bytes() == 0)
+    if (state.layout == nullptr || state.layout->reserved_block_bytes() == 0)
         return;
     if (!state.constants_dirty && state.constants_page != nullptr)
         return;
@@ -112,11 +121,11 @@ void webgpu_command_list::apply_compute_state()
     {
         for (auto i = s.groups.size(); i < sg::reserved_binding_group; ++i)
             wgpuComputePassEncoderSetBindGroup(pass, u32(i), s.layout->empty_group(), 0, nullptr);
-        auto const has_constants = s.layout->inline_constants_bytes() > 0;
-        auto const offset = s.constants_offset;
+        u32 offsets[2] = {};
+        auto const offset_count = s.layout->reserved_dynamic_offsets(s.constants_offset, offsets);
         wgpuComputePassEncoderSetBindGroup(pass, u32(sg::reserved_binding_group),
-                                           s.layout->reserved_group_for(s.constants_page), has_constants ? 1 : 0,
-                                           has_constants ? &offset : nullptr);
+                                           s.layout->reserved_group_for(s.constants_page), size_t(offset_count),
+                                           offset_count > 0 ? offsets : nullptr);
     }
     s.needs_full_apply = false;
 }
@@ -171,6 +180,7 @@ void webgpu_command_list::compute_dispatch(int x, int y, int z)
     CC_ASSERTF(x <= max_groups_per_dimension && y <= max_groups_per_dimension && z <= max_groups_per_dimension,
                "dispatch of ({}, {}, {}) groups exceeds webgpu's {} per dimension", x, y, z, max_groups_per_dimension);
     CC_ASSERT(!_in_rendering_scope, "dispatch must not be recorded inside a rendering scope; close the scope first");
+    bring_pool_writes_forward();
     open_compute_pass();
     apply_compute_state();
     wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), u32(x), u32(y), u32(z));

@@ -83,7 +83,7 @@ namespace
                                                              : WGPUSamplerBindingType_Filtering;
         break;
     case sg::binding_type::acceleration_structure:
-        CC_UNREACHABLE("refused before an entry is built");
+        CC_UNREACHABLE("an acceleration structure takes no webgpu layout entry");
     }
     return entry;
 }
@@ -109,11 +109,13 @@ webgpu_binding_group_layout::webgpu_binding_group_layout(webgpu_context& ctx,
                                                          cc::vector<sg::binding> bindings,
                                                          cc::vector<sg::named_sampler> static_samplers,
                                                          cc::vector<WGPUBindGroupLayoutEntry> entries,
-                                                         cc::vector<cc::optional<sg::sampler>> slot_sampler_descs)
+                                                         cc::vector<cc::optional<sg::sampler>> slot_sampler_descs,
+                                                         cc::vector<isize> acceleration_slots)
   : sg::binding_group_layout(hash, cc::move(bindings), cc::move(static_samplers)),
     _ctx(ctx),
     _entries(cc::move(entries)),
-    _slot_sampler_descs(cc::move(slot_sampler_descs))
+    _slot_sampler_descs(cc::move(slot_sampler_descs)),
+    _acceleration_slots(cc::move(acceleration_slots))
 {
 }
 
@@ -131,10 +133,6 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
             return cc::error(cc::format("binding_group_layout: '{}' is an array binding (count {}), and webgpu has no "
                                         "binding arrays (ctx.supports(sg::feature::binding_arrays) is false)",
                                         b.name, b.count));
-        if (b.type == sg::binding_type::acceleration_structure)
-            return cc::error(cc::format("binding_group_layout: '{}' is an acceleration structure, and webgpu has no "
-                                        "ray tracing",
-                                        b.name));
         if (b.type == sg::binding_type::image
             && b.image_format.value_or(sg::pixel_format::undefined) == sg::pixel_format::undefined)
             return cc::error(cc::format("binding_group_layout: image '{}' declares no image_format, which "
@@ -175,10 +173,19 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
 
     auto slot_sampler_descs = cc::vector<cc::optional<sg::sampler>>::create_filled(bindings.size(), cc::nullopt);
     auto entries = cc::vector<WGPUBindGroupLayoutEntry>();
+    auto acceleration_slots = cc::vector<isize>();
     entries.reserve(bindings.size());
     for (isize i = 0; i < bindings.size(); ++i)
     {
         auto const& b = bindings[i];
+        if (b.type == sg::binding_type::acceleration_structure)
+        {
+            auto at = isize(0);
+            while (at < acceleration_slots.size() && bindings[acceleration_slots[at]].index < b.index)
+                ++at;
+            acceleration_slots.insert_at(at, i);
+            continue;
+        }
         auto sampler_type = cc::optional<WGPUSamplerBindingType>();
         if (sg::is_sampler(b.type))
             for (auto const& s : static_samplers)
@@ -193,7 +200,8 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
 
     return webgpu_binding_group_layout_handle(std::make_shared<webgpu_binding_group_layout>(
         ctx, hash, cc::vector<sg::binding>::create_copy_of(bindings),
-        cc::vector<sg::named_sampler>::create_copy_of(static_samplers), cc::move(entries), cc::move(slot_sampler_descs)));
+        cc::vector<sg::named_sampler>::create_copy_of(static_samplers), cc::move(entries), cc::move(slot_sampler_descs),
+        cc::move(acceleration_slots)));
 }
 
 void webgpu_binding_group_layout::materialize() const
@@ -238,13 +246,22 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
     auto layout = std::make_shared<webgpu_pipeline_layout>(ctx, sg::impl::pipeline_layout_hash(desc), desc);
+    auto acceleration_count = isize(0);
     for (auto const& group : desc.groups)
     {
         CC_ASSERT(group != nullptr, "a pipeline layout's group is null");
         auto webgpu_group = std::dynamic_pointer_cast<webgpu_binding_group_layout const>(group);
         CC_ASSERT(webgpu_group != nullptr, "binding group layout is not a webgpu one");
+        layout->_acceleration_bases.push_back(acceleration_count);
+        acceleration_count += webgpu_group->acceleration_slots().size();
         layout->_groups.push_back(cc::move(webgpu_group));
     }
+    if (acceleration_count > max_acceleration_members)
+        return cc::error(cc::format("pipeline_layout: {} acceleration structures, and the webgpu ray-query polyfill "
+                                    "binds "
+                                    "at most {}",
+                                    acceleration_count, max_acceleration_members));
+    layout->_has_acceleration = acceleration_count > 0;
 
     // Group 3: the inline constants at binding 0, the register-bound samplers at their index + 1.
     auto& reserved = layout->_reserved_entries;
@@ -274,6 +291,31 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         reserved.push_back(entry);
         layout->_reserved_samplers.push_back({.binding = binding_index, .desc = s.sampler});
     }
+
+    // The ray-query polyfill's pool and roots, per libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md.
+    if (layout->_has_acceleration)
+    {
+        auto pool = WGPUBindGroupLayoutEntry{};
+        pool.binding = acceleration_pool_binding;
+        pool.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
+        pool.buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+        reserved.push_back(pool);
+
+        auto roots = WGPUBindGroupLayoutEntry{};
+        roots.binding = acceleration_roots_binding;
+        roots.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
+        roots.buffer.type = WGPUBufferBindingType_Uniform;
+        roots.buffer.hasDynamicOffset = WGPU_TRUE;
+        roots.buffer.minBindingSize = u64(acceleration_roots_bytes);
+        reserved.push_back(roots);
+
+        layout->_roots_offset_in_block = layout->_inline_constants_bytes == 0
+                                           ? 0
+                                           : align_up(layout->_inline_constants_bytes, ctx.uniform_offset_alignment());
+        layout->_reserved_block_bytes = layout->_roots_offset_in_block + acceleration_roots_bytes;
+    }
+    else
+        layout->_reserved_block_bytes = layout->_inline_constants_bytes;
 
     layout->_slot_count = reserved.empty() ? int(layout->_groups.size()) : sg::reserved_binding_group + 1;
     return webgpu_pipeline_layout_handle(cc::move(layout));
@@ -336,14 +378,22 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
     CC_ASSERT(has_reserved_group(), "this pipeline layout has no reserved group");
     materialize();
 
-    auto const build = [&](WGPUBuffer buffer)
+    if (_has_acceleration && _reserved_groups_pool_generation != _ctx._acceleration.generation())
+    {
+        (void)_ctx._acceleration.buffer();
+        _reserved_groups.clear();
+        _reserved_group_without_page = {};
+        _reserved_groups_pool_generation = _ctx._acceleration.generation();
+    }
+
+    auto const build = [&](WGPUBuffer page_buffer)
     {
         auto entries = cc::vector<WGPUBindGroupEntry>();
-        if (buffer != nullptr)
+        if (_inline_constants_bytes > 0)
         {
             auto entry = WGPUBindGroupEntry{};
             entry.binding = 0;
-            entry.buffer = buffer;
+            entry.buffer = page_buffer;
             entry.offset = 0;
             entry.size = u64(_inline_constants_bytes);
             entries.push_back(entry);
@@ -355,6 +405,22 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
             entry.sampler = s.sampler;
             entries.push_back(entry);
         }
+        if (_has_acceleration)
+        {
+            auto pool = WGPUBindGroupEntry{};
+            pool.binding = acceleration_pool_binding;
+            pool.buffer = _ctx._acceleration.buffer().get();
+            pool.offset = 0;
+            pool.size = WGPU_WHOLE_SIZE;
+            entries.push_back(pool);
+
+            auto roots = WGPUBindGroupEntry{};
+            roots.binding = acceleration_roots_binding;
+            roots.buffer = page_buffer;
+            roots.offset = 0;
+            roots.size = u64(acceleration_roots_bytes);
+            entries.push_back(roots);
+        }
         auto const desc = WGPUBindGroupDescriptor{
             .nextInChain = nullptr,
             .label = to_wgpu("sg reserved group"),
@@ -365,20 +431,30 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
         return wgpu_bind_group(wgpuDeviceCreateBindGroup(_ctx.device(), &desc));
     };
 
-    if (_inline_constants_bytes == 0)
+    if (_reserved_block_bytes == 0)
     {
         if (!_reserved_group_without_page)
             _reserved_group_without_page = build(nullptr);
         return _reserved_group_without_page.get();
     }
 
-    CC_ASSERT(page != nullptr, "inline constants need a page to bind");
+    CC_ASSERT(page != nullptr, "the reserved block needs a page to bind");
     while (_reserved_groups.size() <= page->index)
         _reserved_groups.push_back({});
     auto& group = _reserved_groups[page->index];
     if (!group)
         group = build(page->buffer.get());
     return group.get();
+}
+
+isize webgpu_pipeline_layout::reserved_dynamic_offsets(u32 block_offset, cc::span<u32> out) const
+{
+    auto count = isize(0);
+    if (_inline_constants_bytes > 0)
+        out[count++] = block_offset;
+    if (_has_acceleration)
+        out[count++] = block_offset + u32(_roots_offset_in_block);
+    return count;
 }
 
 // -- binding group --
@@ -408,6 +484,7 @@ struct resolved_view
     auto entries = cc::vector<WGPUBindGroupEntry>();
     auto texture_views = cc::vector<wgpu_texture_view>();
     auto filled = cc::vector<char>::create_filled(bindings.size(), char(0));
+    group->acceleration_roots = cc::vector<u32>::create_filled(layout->acceleration_slots().size(), u32(0));
 
     // A static sampler binds the layout's own sampler; the caller never supplies one.
     for (isize i = 0; i < bindings.size(); ++i)
@@ -437,6 +514,25 @@ struct resolved_view
         if (!sg::accepts(b, view))
             return cc::error(
                 cc::format("binding_group: the view bound to '{}' does not match its declared kind", rv.name));
+
+        // An acceleration structure is a root in the pool, which the list writes into group 3; it has no entry here.
+        if (auto const* av = sg::try_as_tlas_view(view))
+        {
+            auto root = u32(0);
+            if (av->tlas != nullptr)
+            {
+                auto const* tlas = dynamic_cast<webgpu_tlas const*>(av->tlas.get());
+                CC_ASSERT(tlas != nullptr, "bound tlas is not a webgpu tlas");
+                CC_ASSERT(!tlas->is_expired(), "binding_group names an expired tlas");
+                root = tlas->unit();
+                group->referenced_tlases.push_back(av->tlas);
+            }
+            auto const slots = layout->acceleration_slots();
+            for (isize k = 0; k < slots.size(); ++k)
+                if (slots[k] == rv.slot)
+                    group->acceleration_roots[k] = root;
+            continue;
+        }
 
         auto entry = WGPUBindGroupEntry{};
         entry.binding = b.index;
@@ -473,9 +569,7 @@ struct resolved_view
             group->bound.push_back({.resource = tv->texture.get(), .binding = isize(rv.slot), .bound_as = tv->bound_as});
         }
         else
-            return cc::error(cc::format("binding_group: '{}' binds an acceleration structure, and webgpu has no ray "
-                                        "tracing",
-                                        rv.name));
+            CC_UNREACHABLE("a view is a buffer, a texture or an acceleration structure");
         entries.push_back(entry);
     }
 
