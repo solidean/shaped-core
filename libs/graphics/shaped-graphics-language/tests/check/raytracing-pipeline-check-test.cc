@@ -137,3 +137,30 @@ TEST("sgl check - a miss carries its ray type's payload")
     CHECK(reports("@raytracing pipeline path:\n    raygen = primary\n")
           == "invalid-pipeline user:[pipeline path:] a @raytracing pipeline names its ray set: `rays = <set>`\n");
 }
+
+TEST("sgl check - a procedural group's shaders take what its intersection reports")
+{
+    auto const spheres
+        = cc::string_view("struct sphere_attributes:\n    normal: float3\n"
+                          "struct other_attributes:\n    u: float\n"
+                          "@intersection fun sphere(b: procedural_box) -> report[sphere_attributes]:\n"
+                          "    return report.none()\n"
+                          "@closest_hit fun shade_sphere(h: procedural_hit[sphere_attributes], p: mut radiance):\n"
+                          "    p.color = h.attributes.normal\n"
+                          "@closest_hit fun shade_other(h: procedural_hit[other_attributes], p: mut radiance):\n"
+                          "    p.color = float3(h.attributes.u, 0.0, 0.0)\n");
+    CHECK(reports(cc::string(spheres) + "hit_group round for path_rays:\n    geometry = .procedural\n"
+                  + "    intersection = sphere\n    surface = (closest_hit = shade_sphere)\n")
+          == "");
+    CHECK(reports(cc::string(spheres) + "hit_group round for path_rays:\n    geometry = .procedural\n"
+                  + "    intersection = sphere\n    surface = (closest_hit = shade_other)\n")
+          == "invalid-pipeline user:[hit_group round for path_rays:] shade_other takes "
+             "procedural_hit[other_attributes], and sphere reports sphere_attributes\n");
+    CHECK(reports(cc::string(spheres) + "hit_group mixed_up for path_rays:\n    surface = (closest_hit = shade_sphere)\n")
+          == "invalid-pipeline user:[hit_group mixed_up for path_rays:] shade_sphere takes "
+             "procedural_hit[sphere_attributes], and this group's geometry is triangles\n");
+    // CHK-337: no payload reaches an intersection, and what it reports is a struct
+    CHECK(reports("@intersection fun bad(b: procedural_box, p: mut radiance) -> report[float]:\n"
+                  "    return report.none()\n")
+              .starts_with("invalid-entry-point"));
+}

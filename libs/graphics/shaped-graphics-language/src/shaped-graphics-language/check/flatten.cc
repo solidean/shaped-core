@@ -2356,13 +2356,42 @@ void checker::flatten_entry_point(symbol_id id)
         {
             if (parameter.is_mut)
                 continue;
-            auto const source = parameter.input == stage_input::launch_id     ? cc::string_view("launch_index")
-                              : parameter.input == stage_input::launch_size   ? cc::string_view("launch_dimensions")
-                              : out.name_of(parameter.type) == "ray"          ? cc::string_view("current_ray")
-                              : out.name_of(parameter.type) == "triangle_hit" ? cc::string_view("current_triangle_hit")
-                              : out.name_of(parameter.type) == "triangle_candidate"
-                                  ? cc::string_view("current_triangle_candidate")
-                                  : cc::string_view();
+            // CHK-337: a procedural hit or candidate carries the attributes the target hands the stage
+            auto const& t = out.at(parameter.type);
+            if (is_valid(t.generic))
+            {
+                auto const is_hit = out.at(t.symbol).name == "procedural_hit";
+                auto const* const found
+                    = prelude_names.get_ptr(is_hit ? cc::string_view("current_procedural_hit")
+                                                   : cc::string_view("current_procedural_candidate"));
+                if (found == nullptr || found->empty())
+                {
+                    f.is_failed = true;
+                    continue;
+                }
+                auto const builder = found->front();
+                auto const attributes = f.add_local(local_kind::parameter, "attributes", t.element);
+                f.entry.attributes = attributes;
+                type_id const bindings[] = {out.at(out.functions[out.at(builder).info].type_parameters)[0], t.element};
+                flat_expr_id const arguments[] = {f.local_ref(attributes, ast::expr_id::none)};
+                i32 const slots[] = {0};
+                auto const inlined = f.inline_bound(ast::expr_id::none, builder, arguments, slots, {}, bindings);
+                auto const value = f.add_expr(parameter.type, ast::expr_id::none,
+                                              flat_block{.label = inlined.label, .body = inlined.body});
+                auto const local = f.add_local(local_kind::let, parameter.name, parameter.type);
+                f.add_stmt({.file = s.file, .expr = ast::expr_id::none}, flat_let{.local = local, .value = value});
+                f.current()->bound.push_back(
+                    {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+                continue;
+            }
+            auto const source
+                = parameter.input == stage_input::launch_id           ? cc::string_view("launch_index")
+                : parameter.input == stage_input::launch_size         ? cc::string_view("launch_dimensions")
+                : out.name_of(parameter.type) == "ray"                ? cc::string_view("current_ray")
+                : out.name_of(parameter.type) == "triangle_hit"       ? cc::string_view("current_triangle_hit")
+                : out.name_of(parameter.type) == "triangle_candidate" ? cc::string_view("current_triangle_candidate")
+                : out.name_of(parameter.type) == "procedural_box"     ? cc::string_view("current_procedural_box")
+                                                                      : cc::string_view();
             auto const* const found = prelude_names.get_ptr(source);
             if (source.empty() || found == nullptr || found->empty())
             {

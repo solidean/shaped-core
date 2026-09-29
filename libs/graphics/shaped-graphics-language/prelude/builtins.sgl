@@ -1418,6 +1418,8 @@
 @builtin @stages(.closest_hit, .any_hit) fun hit_is_front_face() -> bool
 @builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_object_to_world_row(row: int) -> float4
 @builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_world_to_object_row(row: int) -> float4
+@builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_origin() -> float3
+@builtin @stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_direction() -> float3
 
 // A ray-tracing stage's trace, which a `trace` naming a ray type of its set lowers to (CHK-329).
 /// Traces a ray through the pipeline's tables, handing the payload over past the signature.

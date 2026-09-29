@@ -14,13 +14,20 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
     auto const& info = out.functions[s.info];
     auto const stage = info.entry_stage;
     auto const parameters = out.at(info.parameters);
-    auto const named = [&](type_id t) { return t == checked_module::error_type ? cc::string_view() : out.name_of(t); };
+    // an instance is named by its template, which is what a stage is handed
+    auto const named = [&](type_id t)
+    {
+        if (t == checked_module::error_type)
+            return cc::string_view();
+        return is_valid(out.at(t).generic) ? cc::string_view(out.at(out.at(t).symbol).name) : out.name_of(t);
+    };
 
     // CHK-327: the stage inputs, each once, each of its type
     auto payloads = 0;
     auto rays = 0;
     auto hits = 0;
     auto candidates = 0;
+    auto boxes = 0;
     for (auto const& p : parameters)
     {
         if (p.input != stage_input::none)
@@ -43,10 +50,12 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
         auto const type = named(p.type);
         if (type == "ray")
             ++rays;
-        else if (type == "triangle_hit")
+        else if (type == "triangle_hit" || type == "procedural_hit")
             ++hits;
-        else if (type == "triangle_candidate")
+        else if (type == "triangle_candidate" || type == "procedural_candidate")
             ++candidates;
+        else if (type == "procedural_box")
+            ++boxes;
         else
             invalid(cc::format("{} is a {}, which no ray-tracing stage is handed", p.name, type));
     }
@@ -55,33 +64,43 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
     switch (stage)
     {
     case stage::raygen:
-        if (payloads + rays + hits + candidates > 0)
+        if (payloads + rays + hits + candidates + boxes > 0)
             invalid("a @raygen fun takes stage inputs alone: it starts rays, and no ray has reached it");
         if (info.result != checked_module::void_type)
             invalid("a @raygen fun returns nothing");
         break;
     case stage::miss:
-        if (payloads != 1 || hits + candidates > 0 || rays > 1)
+        if (payloads != 1 || hits + candidates + boxes > 0 || rays > 1)
             invalid("a @miss fun takes its ray type's payload as `p: mut T`, and the ray it missed with, `r: ray`, if "
                     "it reads it");
         if (info.result != checked_module::void_type)
             invalid("a @miss fun returns nothing: what it gives back it writes to the payload");
         break;
     case stage::closest_hit:
-        if (payloads != 1 || hits != 1 || candidates + rays > 0)
-            invalid("a @closest_hit fun takes the hit, `h: triangle_hit`, and its ray type's payload, `p: mut T`");
+        if (payloads != 1 || hits != 1 || candidates + rays + boxes > 0)
+            invalid("a @closest_hit fun takes the hit, `h: triangle_hit` or `h: procedural_hit[A]`, and its ray type's "
+                    "payload, `p: mut T`");
         if (info.result != checked_module::void_type)
             invalid("a @closest_hit fun returns nothing: what it gives back it writes to the payload");
         break;
     case stage::any_hit:
-        if (payloads != 1 || candidates != 1 || hits + rays > 0)
-            invalid("an @any_hit fun takes the candidate, `c: triangle_candidate`, and its ray type's payload, `p: mut "
-                    "T`");
+        if (payloads != 1 || candidates != 1 || hits + rays + boxes > 0)
+            invalid("an @any_hit fun takes the candidate, `c: triangle_candidate` or `c: procedural_candidate[A]`, and "
+                    "its ray type's payload, `p: mut T`");
         if (result != "hit_decision")
             invalid("an @any_hit fun returns its hit_decision");
         break;
     case stage::intersection:
-        invalid("an @intersection fun is not built yet");
+        // CHK-337: an intersection is handed its box alone, no payload, and what it reports is the attributes a hit
+        // hands on, which every target takes as a struct
+        if (boxes != 1 || payloads + hits + candidates + rays > 0)
+            invalid("an @intersection fun takes the box it decides, `b: procedural_box`, and nothing else: no payload "
+                    "reaches it");
+        if (result != "report")
+            invalid("an @intersection fun returns what it reports, `report[A]`");
+        else if (out.at(out.at(info.result).element).kind != type_kind::structure
+                 || out.builtin_type_of(out.at(info.result).element) != nullptr)
+            invalid("the attributes an @intersection fun reports are a struct of the program");
         break;
     case stage::callable:
         invalid("a @callable fun is not built yet");
@@ -354,6 +373,30 @@ void checker::compile_hit_group(symbol_id id)
                 fail(span_of(file, element.value),
                      cc::format("{} takes {}, and {}.{} carries {}", text_of(file, span_of(file, element.value)),
                                 out.name_of(payload), out.at(set).name, name, out.name_of(rays[ray].type)));
+        }
+    }
+    // CHK-330: a record's shaders are handed what the group's geometry hits, and a procedural group's attributes are
+    // the ones its intersection reports
+    auto const attributes
+        = is_valid(intersection) ? out.at(out.functions[out.at(intersection).info].result).element : type_id::none;
+    for (auto i = isize(0); i < records.size(); ++i)
+    {
+        if (!is_valid(records[i]))
+            continue;
+        for (auto const& q : out.at(out.functions[out.at(records[i]).info].parameters))
+        {
+            if (q.is_mut || q.input != stage_input::none)
+                continue;
+            auto const& t = out.at(q.type);
+            auto const is_procedural_type = is_valid(t.generic);
+            if (is_procedural_type != is_procedural)
+                fail(span_of(file, out.at(id).declaration),
+                     cc::format("{} takes {}, and this group's geometry is {}", out.at(records[i]).name,
+                                out.name_of(q.type), is_procedural ? "procedural" : "triangles"));
+            else if (is_procedural_type && is_valid(attributes) && t.element != attributes)
+                fail(span_of(file, out.at(id).declaration),
+                     cc::format("{} takes {}, and {} reports {}", out.at(records[i]).name, out.name_of(q.type),
+                                out.at(intersection).name, out.name_of(attributes)));
         }
     }
     if (is_procedural && !is_valid(intersection))

@@ -68,9 +68,42 @@ hit_group textured for path_rays:
     surface = (closest_hit = shade, any_hit = cutout)
     occlusion = (any_hit = shadow_cutout)
 
+// ---- a procedural group: box k spans x from 2k to 2k + 2 and y and z from 0 to 2, and holds the sphere at its centre
+
+struct sphere_attributes:
+    normal: vec3
+
+@intersection fun sphere(b: procedural_box) -> report[sphere_attributes]:
+    let centre = float3(2.0 * (b.primitive_index as float) + 1.0, 1.0, 1.0)
+    let o = float3(b.object_ray.origin.x, b.object_ray.origin.y, b.object_ray.origin.z)
+    let d = float3(b.object_ray.direction.x, b.object_ray.direction.y, b.object_ray.direction.z)
+    let oc = o - centre
+    let a = dot(d, d)
+    let half_b = dot(oc, d)
+    let disc = half_b * half_b - a * (dot(oc, oc) - 1.0)
+    if disc < 0.0 => return report.none()
+    let t = (-half_b - sqrt(disc)) / a
+    let p = o + d * t - centre
+    return report(t = t, attributes = sphere_attributes(vec3(p.x, p.y, p.z)))
+
+// the normal's x and y stand where a triangle's barycentrics do
+@closest_hit fun shade_sphere(h: procedural_hit[sphere_attributes], p: mut radiance):
+    p.t = h.t
+    p.u = h.attributes.normal.x
+    p.v = h.attributes.normal.y
+    p.instance_id = h.instance_id
+    p.primitive = h.primitive_index
+    p.is_hit = 1
+
+hit_group spheres for path_rays:
+    geometry = .procedural
+    intersection = sphere
+    surface = (closest_hit = shade_sphere)
+    occlusion = ()
+
 @raytracing pipeline path:
     rays = path_rays
     raygen = primary
     miss.surface = sky
     miss.occlusion = open_sky
-    hit_groups = (textured)
+    hit_groups = (textured, spheres)

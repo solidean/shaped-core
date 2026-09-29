@@ -372,9 +372,16 @@ constexpr stage_read k_stage_reads[] = {
      "ObjectToWorld3x4()[{}]", zero_float4},
     {"@stages(.closest_hit, .any_hit, .intersection) fun hit_world_to_object_row(row: int) -> float4",
      "WorldToObject3x4()[{}]", zero_float4},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_origin() -> float3", "ObjectRayOrigin()",
+     zero_float3},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_direction() -> float3", "ObjectRayDirection()",
+     zero_float3},
 };
 
 constexpr cc::string_view k_stage_reads_hlsl[] = {
+    "ObjectRayOrigin",
+    "ObjectRayDirection",
+    "ReportHit",
     "DispatchRaysIndex",
     "DispatchRaysDimensions",
     "WorldRayOrigin",

@@ -450,7 +450,11 @@ public:
             auto rt = cc::string();
             if (check::is_valid(p.e.input))
                 rt = cc::format("inout {} {}", type_text(p, *this, p.e.input), p.locals[0]);
-            if (p.e.entry_stage == stage::closest_hit || p.e.entry_stage == stage::any_hit)
+            // EMIT-137: a triangle's attributes are its barycentrics, and a procedural primitive's what it reported
+            if (check::is_valid(p.e.attributes))
+                rt += cc::format(", in {} {}", type_text(p, *this, p.e.at(p.e.attributes).type),
+                                 p.locals[index_of(p.e.attributes)]);
+            else if (p.e.entry_stage == stage::closest_hit || p.e.entry_stage == stage::any_hit)
                 rt += ", in BuiltInTriangleIntersectionAttributes sgl_attributes";
             out.appendf("[shader(\"{}\")]\nvoid {}({})\n{{\n", kind, p.entry_name, rt);
             return;

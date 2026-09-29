@@ -248,8 +248,12 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
     }
     for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
         result.max_payload_size = cc::max(result.max_payload_size, payload_bytes(m, ray.type));
-    // a triangle's barycentrics
+    // a triangle's barycentrics, and what each procedural group's intersection reports
     result.max_attribute_size = 8;
+    for (auto const group : m.at(p.hit_groups))
+        if (auto const& g = m.pipelines[m.at(group).info]; check::is_valid(g.intersection))
+            result.max_attribute_size = cc::max(
+                result.max_attribute_size, payload_bytes(m, m.at(m.functions[m.at(g.intersection).info].result).element));
     for (auto const b : m.at(p.layout))
         result.layout.push_back(m.at(b).name);
     result.features = feature_names(features);

@@ -46,6 +46,17 @@ struct writer
     /// How many levels the next line is indented by; the body of the function is level 1.
     int depth = 1;
 
+    /// The name a target writes member `name` of struct `type` with, which the plan may have renamed.
+    [[nodiscard]] cc::string_view member_of(type_id type, cc::string_view name) const
+    {
+        auto const k = p.struct_of_type[index_of(type)];
+        if (k >= 0)
+            for (auto const& m : p.structs[k].members)
+                if (m.source_name == name)
+                    return m.name;
+        return name;
+    }
+
     static void indent(cc::string& text, int levels)
     {
         for (auto i = 0; i < levels; ++i)
@@ -694,86 +705,98 @@ struct writer
 
     void statement(flat_stmt const& s)
     {
-        s.node.visit([&](flat_let const& let) { declare(let.local, let.value, p.e.at(let.local).is_mut); },
-                     [&](flat_var const& var) { declare(var.local, var.value, true); },
-                     [&](flat_assign const& a) { assign(a); },
-                     // `validate` refuses a tree that holds one
-                     [&](flat_print const&) {}, //
-                     [&](flat_eval const& v)
-                     {
-                         // an atomic HLSL writes as statements alone has nothing left to evaluate
-                         if (is_hlsl_atomic(v.value))
-                         {
-                             (void)expr(v.value);
-                             return;
-                         }
-                         // A call that gives nothing is a statement as it stands, in every target.
-                         auto text = cc::string();
-                         if (p.e.at(v.value).type == checked_module::void_type)
-                             text = cc::format("{};", expr(v.value).text);
-                         else
-                             d.write_eval(text, expr(v.value).text);
-                         line(text);
-                     },
-                     [&](flat_if const& i) { branch(i, false); },
-                     // none of the three is in a core tree
-                     [&](flat_block const&) {}, //
-                     [&](flat_leave const&) {}, //
-                     [&](flat_case const&) {},
-                     [&](flat_loop const& l)
-                     {
-                         open(d.is_c_like() ? "while (true)" : "loop");
-                         body(l.body);
-                         close();
-                     },
-                     [&](flat_while const& w) { loop_while(w); },
-                     [&](flat_for const& f)
-                     {
-                         auto const first = expr(f.first).text;
-                         auto const end = wrapped(expr(f.end), level::additive);
-                         auto head = cc::string();
-                         d.write_for_head(head, p.locals[index_of(f.index)], first, end);
-                         open(head);
-                         body(f.body);
-                         close();
-                     },
-                     [&](flat_continue const&) { line("continue;"); },                                                //
-                     [&](flat_discard const&) { line(d.discard_statement()); }, [&](flat_once const& o) { once(o); }, //
-                     [&](flat_break const&) { line("break;"); },                                                      //
-                     [&](flat_switch const& sw) { switch_(sw); },
-                     // a core tree holds none, and the plan refuses one that is not core (EMIT-66)
-                     [&](flat_check const&) {},
-                     [&](flat_return const& r)
-                     {
-                         // A void result was erased by LEGAL-52, and a compute entry point has none either.
-                         if (!is_valid(r.value))
-                         {
-                             line("return;");
-                             return;
-                         }
-                         // EMIT-136: an any hit's decision is the target's call that ends the stage, and a plain return
-                         // accepts the candidate
-                         if (p.e.entry_stage == check::stage::any_hit)
-                         {
-                             auto const decision = p.names.mint("decision");
-                             line(cc::format("const int {} = {};", decision, expr(r.value, true).text));
-                             line(cc::format("if ({} == 1)", decision));
-                             line("    IgnoreHit();");
-                             line(cc::format("if ({} == 2)", decision));
-                             line("    AcceptHitAndEndSearch();");
-                             line("return;");
-                             return;
-                         }
-                         auto const& value = p.e.at(r.value);
-                         if (needs_member_assignment(value))
-                         {
-                             auto const name = p.names.mint("result");
-                             build_struct(value, name);
-                             line(cc::format("return {};", name));
-                             return;
-                         }
-                         line(cc::format("return {};", expr(r.value, true).text));
-                     });
+        s.node.visit(
+            [&](flat_let const& let) { declare(let.local, let.value, p.e.at(let.local).is_mut); },
+            [&](flat_var const& var) { declare(var.local, var.value, true); }, [&](flat_assign const& a) { assign(a); },
+            // `validate` refuses a tree that holds one
+            [&](flat_print const&) {}, //
+            [&](flat_eval const& v)
+            {
+                // an atomic HLSL writes as statements alone has nothing left to evaluate
+                if (is_hlsl_atomic(v.value))
+                {
+                    (void)expr(v.value);
+                    return;
+                }
+                // A call that gives nothing is a statement as it stands, in every target.
+                auto text = cc::string();
+                if (p.e.at(v.value).type == checked_module::void_type)
+                    text = cc::format("{};", expr(v.value).text);
+                else
+                    d.write_eval(text, expr(v.value).text);
+                line(text);
+            },
+            [&](flat_if const& i) { branch(i, false); },
+            // none of the three is in a core tree
+            [&](flat_block const&) {}, //
+            [&](flat_leave const&) {}, //
+            [&](flat_case const&) {},
+            [&](flat_loop const& l)
+            {
+                open(d.is_c_like() ? "while (true)" : "loop");
+                body(l.body);
+                close();
+            },
+            [&](flat_while const& w) { loop_while(w); },
+            [&](flat_for const& f)
+            {
+                auto const first = expr(f.first).text;
+                auto const end = wrapped(expr(f.end), level::additive);
+                auto head = cc::string();
+                d.write_for_head(head, p.locals[index_of(f.index)], first, end);
+                open(head);
+                body(f.body);
+                close();
+            },
+            [&](flat_continue const&) { line("continue;"); },                                                //
+            [&](flat_discard const&) { line(d.discard_statement()); }, [&](flat_once const& o) { once(o); }, //
+            [&](flat_break const&) { line("break;"); },                                                      //
+            [&](flat_switch const& sw) { switch_(sw); },
+            // a core tree holds none, and the plan refuses one that is not core (EMIT-66)
+            [&](flat_check const&) {},
+            [&](flat_return const& r)
+            {
+                // A void result was erased by LEGAL-52, and a compute entry point has none either.
+                if (!is_valid(r.value))
+                {
+                    line("return;");
+                    return;
+                }
+                // EMIT-136: an any hit's decision is the target's call that ends the stage, and a plain return
+                // accepts the candidate
+                if (p.e.entry_stage == check::stage::any_hit)
+                {
+                    auto const decision = p.names.mint("decision");
+                    line(cc::format("const int {} = {};", decision, expr(r.value, true).text));
+                    line(cc::format("if ({} == 1)", decision));
+                    line("    IgnoreHit();");
+                    line(cc::format("if ({} == 2)", decision));
+                    line("    AcceptHitAndEndSearch();");
+                    line("return;");
+                    return;
+                }
+                // EMIT-137: an intersection's report is the target's call, made where it hits
+                if (p.e.entry_stage == check::stage::intersection)
+                {
+                    auto const type = p.e.at(r.value).type;
+                    auto const reported = p.names.mint("reported");
+                    line(cc::format("const {} {} = {};", type_text(p, d, type), reported, expr(r.value, true).text));
+                    line(cc::format("if ({}.{})", reported, member_of(type, "is_hit")));
+                    line(cc::format("    ReportHit({0}.{1}, 0, {0}.{2});", reported, member_of(type, "t"),
+                                    member_of(type, "attributes")));
+                    line("return;");
+                    return;
+                }
+                auto const& value = p.e.at(r.value);
+                if (needs_member_assignment(value))
+                {
+                    auto const name = p.names.mint("result");
+                    build_struct(value, name);
+                    line(cc::format("return {};", name));
+                    return;
+                }
+                line(cc::format("return {};", expr(r.value, true).text));
+            });
     }
 };
 } // namespace

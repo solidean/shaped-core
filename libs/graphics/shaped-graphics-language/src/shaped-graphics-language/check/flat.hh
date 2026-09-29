@@ -683,6 +683,9 @@ struct sgl::check::flat_entry_point
     feature_set features;
     /// The ray types it traces, by their position in their set, each once (CHK-332).
     cc::vector<flat_traced_ray> traced_rays;
+    /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
+    /// for every other entry point.
+    local_id attributes = local_id::none;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -728,6 +731,6 @@ struct sgl::check::flat_entry_point
             && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
             && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
             && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names
-            && is_equal(traced_rays, rhs.traced_rays);
+            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes;
     }
 };
