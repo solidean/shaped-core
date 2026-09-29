@@ -223,8 +223,8 @@ class sr::denoise_history
 {
 public:
     denoise_history() = default;
-    denoise_history(denoise_history&&) noexcept;
-    denoise_history& operator=(denoise_history&&) noexcept;
+    denoise_history(denoise_history&&) noexcept = default;
+    denoise_history& operator=(denoise_history&&) noexcept = default;
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
 
@@ -235,7 +235,7 @@ public:
     /// with no diagnostic.
     /// A caller dropping a history mid-frame drains first; sv drops one only when its view goes, which is after the
     /// store has let the epoch complete.
-    ~denoise_history();
+    ~denoise_history() = default;
 
     /// How many images a member may keep here.
     /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
@@ -264,12 +264,60 @@ private:
     ///
     /// Opaque, with the release function beside it, so this header names no member's type and a history still frees
     /// what it holds without knowing what that is.
-    /// `_prepare` releases it whenever it drops the rest, since the state is built for one extent.
-    void* _vendor_state = nullptr;
-    void (*_release_vendor_state)(void*) = nullptr;
+    ///
+    /// A type of its own rather than two members, so `denoise_history` needs no destructor and no move operations of
+    /// its own: pairing a pointer with the function that frees it is the whole invariant, and it is stated once here
+    /// instead of in three places that must agree.
+    /// `cc::unique_ptr` cannot serve — it takes no upcast, and its node allocator frees by the static type's size
+    /// class, so it cannot own a derived object through a base.
+    class vendor_slot
+    {
+    public:
+        vendor_slot() = default;
 
-    /// Drops `_vendor_state` through `_release_vendor_state`, and forgets both.
-    void _release_vendor();
+        vendor_slot(vendor_slot&& other) noexcept : _state(other._state), _release(other._release)
+        {
+            other._state = nullptr;
+            other._release = nullptr;
+        }
+
+        vendor_slot& operator=(vendor_slot&& other) noexcept
+        {
+            if (this != &other)
+            {
+                reset();
+                _state = other._state;
+                _release = other._release;
+                other._state = nullptr;
+                other._release = nullptr;
+            }
+            return *this;
+        }
+
+        vendor_slot(vendor_slot const&) = delete;
+        vendor_slot& operator=(vendor_slot const&) = delete;
+
+        ~vendor_slot() { reset(); }
+
+        [[nodiscard]] void* get() const { return _state; }
+
+        /// Frees what this holds, then takes `state` to be freed by `release`.
+        /// Both null is the empty slot; `release` must be able to free `state`.
+        void reset(void* state = nullptr, void (*release)(void*) = nullptr)
+        {
+            if (_state != nullptr && _release != nullptr)
+                _release(_state);
+            _state = state;
+            _release = release;
+        }
+
+    private:
+        void* _state = nullptr;
+        void (*_release)(void*) = nullptr;
+    };
+
+    /// `_prepare` resets this whenever it drops the rest, since the state is built for one extent.
+    vendor_slot _vendor;
 
     denoise_method _method = denoise_method::none;
     tg::vec2i _extent = tg::vec2i(0, 0);

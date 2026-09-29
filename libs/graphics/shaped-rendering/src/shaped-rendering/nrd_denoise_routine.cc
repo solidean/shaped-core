@@ -167,9 +167,9 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
                             slot_specular_factor})
         (void)impl::ensure_image(ctx, history._state[slot], extent, sg::pixel_format::rgba16_float);
 
-    if (history._vendor_state == nullptr)
+    if (history._vendor.get() == nullptr)
     {
-        // Owned raw because the history's slot is a `void*` with a release function beside it — the one shape that
+        // Owned raw because the history's slot pairs a `void*` with the function that frees it — the one shape that
         // lets `denoise.hh` free a vendor object whose type it must not name.
         auto* const fresh = new impl::nrd_session();
         if (!fresh->create(ctx, impl::nrd_denoiser::reblur_diffuse_specular, extent))
@@ -178,11 +178,10 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
             return outcome_of(denoise_status::failed);
         }
 
-        history._vendor_state = fresh;
-        history._release_vendor_state = &release_session;
+        history._vendor.reset(fresh, &release_session);
     }
 
-    auto& session = *static_cast<impl::nrd_session*>(history._vendor_state);
+    auto& session = *static_cast<impl::nrd_session*>(history._vendor.get());
 
     // The instance exists well before its pipelines do — NRD's shaders build through the context's cache like ours.
     if (!session.is_ready())
