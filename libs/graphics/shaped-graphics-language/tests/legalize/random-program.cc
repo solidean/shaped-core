@@ -609,22 +609,33 @@ cc::string scope_violation(flat_entry_point const& e)
 
 flat_entry_point sgl_test::random_program(checked_module const& m, u64 seed, program_shape const& shape)
 {
-    auto g = generator{.b = float_function(m), .rng = cc::random(seed), .shape = shape, .nodes_left = shape.max_nodes};
-    g.float_type = g.b.type_named("float");
-    g.int_type = g.b.type_named("int");
-    g.bool_type = g.b.type_named("bool");
-    g.float3_type = g.b.type_named("float3");
-    g.store = store_binding(m);
-    if (is_valid(g.store))
-        g.b.e.bindings.push_back(g.store);
-    g.targets.push_back({.label = g.b.e.root, .value_type = g.float_type});
+    // A shape bounds statements, not the expressions each list starts afresh, so a deep one now and then nests too deep.
+    // The check pass refuses such a program as `nesting-too-deep`, so the next draw of the same stream replaces it.
+    auto rng = cc::random(seed);
+    while (true)
+    {
+        auto g = generator{.b = float_function(m), .rng = cc::move(rng), .shape = shape, .nodes_left = shape.max_nodes};
+        g.float_type = g.b.type_named("float");
+        g.int_type = g.b.type_named("int");
+        g.bool_type = g.b.type_named("bool");
+        g.float3_type = g.b.type_named("float3");
+        g.store = store_binding(m);
+        if (is_valid(g.store))
+            g.b.e.bindings.push_back(g.store);
+        g.targets.push_back({.label = g.b.e.root, .value_type = g.float_type});
 
-    auto body = g.statements(shape.max_depth);
-    // generous again, so that the value the function ends in is as rich as the statements before it
-    g.nodes_left = cc::max(g.nodes_left, 12);
-    body.push_back(g.b.leave(g.b.e.root, g.expr(g.float_type, 2)));
-    g.b.set_body(body);
-    return cc::move(g.b.e);
+        auto body = g.statements(shape.max_depth);
+        // generous again, so that the value the function ends in is as rich as the statements before it
+        g.nodes_left = cc::max(g.nodes_left, 12);
+        body.push_back(g.b.leave(g.b.e.root, g.expr(g.float_type, 2)));
+        g.b.set_body(body);
+
+        auto probe = impl::depth_probe{.e = g.b.e};
+        probe.body(g.b.e.body, 0);
+        if (!probe.found.has_value())
+            return cc::move(g.b.e);
+        rng = cc::move(g.rng);
+    }
 }
 
 cc::string sgl_test::differential_failure(checked_module const& m,

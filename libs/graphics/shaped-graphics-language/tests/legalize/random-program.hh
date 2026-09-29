@@ -29,6 +29,7 @@ namespace sgl_test
 /// The right side of an `and` / `or` prints, and a `while` condition is a block.
 ///
 /// Every loop runs a bounded number of times: a counter nothing else assigns, advanced before anything can `continue`.
+/// No node stands deeper than `k_max_depth`, which is where the check pass refuses a program as `nesting-too-deep`.
 [[nodiscard]] sgl::check::flat_entry_point random_program(sgl::check::checked_module const& m,
                                                           u64 seed,
                                                           program_shape const& shape = {});
