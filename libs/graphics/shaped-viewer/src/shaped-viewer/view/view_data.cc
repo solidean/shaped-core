@@ -48,6 +48,39 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         // The raygen weights a frame by 1 / (n + 1) and half floats carry ~3 decimal digits, so the mean would stop
         // moving a couple of thousand frames in — right where an uncapped estimate is still converging.
         out.push_back({.id = temporal_id::accumulation(u8(i)), .format = sg::pixel_format::rgba32_float});
+
+        if (v.layers[i].settings.denoise.method == sr::denoise_method::none)
+            continue;
+
+        // The guides blend like the accumulator but never need its precision: they converge in a few frames, and a half
+        // float's normal or albedo is far finer than the edge-stop that reads it.
+        // Depth stays a full float, since the denoiser compares depths relative to their own size.
+        // The denoised image is only ever presented, so half is enough there too.
+        out.push_back({.id = temporal_id::normal_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
+        out.push_back({.id = temporal_id::depth_guide(u8(i)), .format = sg::pixel_format::r32_float});
+        out.push_back({.id = temporal_id::albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
+        out.push_back({.id = temporal_id::denoised(u8(i)), .format = sg::pixel_format::rgba16_float});
+
+        // The specular pair, for every member: a split one reads it beside the diffuse albedo, and an unsplit one
+        // demodulates by the sum of the two, since a metal's diffuse albedo is zero.
+        out.push_back({.id = temporal_id::specular_albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
+        out.push_back({.id = temporal_id::roughness_guide(u8(i)), .format = sg::pixel_format::r16_float});
+
+        // A layer that may denoise temporally also keeps this frame's own samples and the motion vectors.
+        // `automatic` may, because it picks a temporal member while the mean is young whenever one is supported.
+        auto const method = v.layers[i].settings.denoise.method;
+        if (method == sr::denoise_method::automatic || sr::is_temporal(method))
+        {
+            out.push_back({.id = temporal_id::frame_samples(u8(i)), .format = sg::pixel_format::rgba16_float});
+            out.push_back({.id = temporal_id::motion_guide(u8(i)), .format = sg::pixel_format::rg32_float});
+
+            // Where the spatial member lands while the hand-off between the two is crossfading.
+            // Declared for the whole life of the layer rather than for the frames the fade spans: a declaration that
+            // came and went would allocate a texture mid-fade, and the first frame of a fade is the one that must not
+            // be a step.
+            if (v.layers[i].settings.temporal_denoise_fade_frames > 0)
+                out.push_back({.id = temporal_id::denoised_crossfade(u8(i)), .format = sg::pixel_format::rgba16_float});
+        }
     }
 
     return out;

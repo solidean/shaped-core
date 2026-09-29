@@ -126,6 +126,32 @@ enum class permutation_state
 }
 } // namespace
 
+cc::shared_async<cc::unit> pathtrace_routine::init_once(sg::routine_init_scope scope)
+{
+    auto& ctx = scope.context();
+    _guide_normal_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _guide_depth_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::r32_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _guide_albedo_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _guide_specular_albedo_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _guide_roughness_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::r16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _frame_output_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _frame_diffuse_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _frame_specular_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _guide_hit_distance_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rg16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    _guide_motion_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rg32_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
+    co_return;
+}
+
 cc::shared_async<cc::unit> pathtrace_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
@@ -314,7 +340,12 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = cc::move(groups_for_layout)});
 
     // Payload is PtPayload from pt_common.hlsli: rng, the medium (extinction, albedo, g), the wavelength channel, the
-    // last-bounce flag, five float3 results, and bsdf_pdf + hit_t = 27 lanes.
+    // last-bounce flag, the split direct pair, seven more float3 results, and roughness + lobe + bsdf_pdf + hit_t
+    // = 38 lanes.
+    //
+    // Every ray pays for the eight the specular guides and the split signal added, since a payload is one compile-time
+    // struct and only the hit shader knows the surface — see libs/graphics/shaped-viewer/docs/TODO.md, which asks for
+    // that cost measured.
     //
     // Depth 2 rather than 1, because the shading moved into the closest-hit: the raygen's trace is the first level and the
     // shadow rays that hit shader casts for next-event estimation are the second.
@@ -335,9 +366,9 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto rpd = sg::raytracing_pipeline_description{
         .layout = pipeline_layout,
         .max_recursion_depth = 2,
-        // PtPayload's 27 four-byte fields (shaders/pt_common.hlsli); a field added there has to be counted here, or
+        // PtPayload's 38 four-byte fields (shaders/pt_common.hlsli); a field added there has to be counted here, or
         // the state object is refused and every trace declines.
-        .max_payload_size = isize(sizeof(u32) * 27),
+        .max_payload_size = isize(sizeof(u32) * 38),
         .max_attribute_size = has_intersection ? isize(sizeof(float) * 3) : isize(sizeof(float) * 2)};
     auto const raygen_h = rpd.add_raygen_shader(*compiled_rg);
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
@@ -449,6 +480,43 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     CC_ASSERT(d.output.raw()->description().format == sg::pixel_format::rgba32_float,
               "pathtrace_routine: the accumulator must be rgba32_float — the blend weight is 1 / (accum_frame + 1)");
     CC_ASSERT(d.instance_table.raw() != nullptr, "pathtrace_routine: no instance table bound");
+    auto const has_guides = d.guide_normal.raw() != nullptr;
+    CC_ASSERT(has_guides == (d.guide_depth.raw() != nullptr) && has_guides == (d.guide_albedo.raw() != nullptr),
+              "pathtrace_routine: the three guides come together or not at all");
+    CC_ASSERT(!has_guides
+                  || (d.guide_normal.width() == d.output.width() && d.guide_normal.height() == d.output.height()
+                      && d.guide_depth.width() == d.output.width() && d.guide_depth.height() == d.output.height()
+                      && d.guide_albedo.width() == d.output.width() && d.guide_albedo.height() == d.output.height()),
+              "pathtrace_routine: the guides must match the accumulator's extent");
+    auto const has_specular_guides = d.guide_specular_albedo.raw() != nullptr;
+    CC_ASSERT(has_specular_guides == (d.guide_roughness.raw() != nullptr),
+              "pathtrace_routine: the specular albedo and roughness guides come together or not at all");
+    CC_ASSERT(!has_specular_guides || has_guides, "pathtrace_routine: the specular guides describe the same image as "
+                                                  "the other three, so they need them");
+    CC_ASSERT(
+        !has_specular_guides
+            || (d.guide_specular_albedo.width() == d.output.width()
+                && d.guide_specular_albedo.height() == d.output.height()
+                && d.guide_roughness.width() == d.output.width() && d.guide_roughness.height() == d.output.height()),
+        "pathtrace_routine: the specular guides must match the accumulator's extent");
+    auto const has_temporal = d.frame_output.raw() != nullptr;
+    CC_ASSERT(has_temporal == (d.guide_motion.raw() != nullptr), "pathtrace_routine: the frame output and the motion "
+                                                                 "guide come together or not at all");
+    CC_ASSERT(!has_temporal
+                  || (d.frame_output.width() == d.output.width() && d.frame_output.height() == d.output.height()
+                      && d.guide_motion.width() == d.output.width() && d.guide_motion.height() == d.output.height()),
+              "pathtrace_routine: the temporal targets must match the accumulator's extent");
+    auto const has_split = d.frame_diffuse.raw() != nullptr;
+    CC_ASSERT(has_split == (d.frame_specular.raw() != nullptr) && has_split == (d.guide_hit_distance.raw() != nullptr),
+              "pathtrace_routine: the split-signal targets come together or not at all");
+    CC_ASSERT(!has_split || has_temporal, "pathtrace_routine: the split signals are this frame's samples, so they need "
+                                          "the temporal targets that define them");
+    CC_ASSERT(!has_split
+                  || (d.frame_diffuse.width() == d.output.width() && d.frame_diffuse.height() == d.output.height()
+                      && d.frame_specular.width() == d.output.width() && d.frame_specular.height() == d.output.height()
+                      && d.guide_hit_distance.width() == d.output.width()
+                      && d.guide_hit_distance.height() == d.output.height()),
+              "pathtrace_routine: the split-signal targets must match the accumulator's extent");
     CC_ASSERT(!d.hit_groups.empty(), "pathtrace_routine: a trace needs at least one hit group to shade with");
 
     auto const* const variant = self->_variant_for(ctx, d);
@@ -468,12 +536,31 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     }
 
     auto const group = ctx.transient.create_binding_group(
-        variant->group_layout, {{.name = "scene", .view = tlas->as_view()},
-                                {.name = "Output", .view = d.output.as_any_image_view()},
-                                {.name = "frame", .view = d.frame.as_constants_buffer()},
-                                {.name = "background", .view = d.background.as_constants_buffer()},
-                                {.name = "Instances", .view = d.instance_table.as_readonly_buffer()},
-                                {.name = "Lights", .view = lights.as_readonly_buffer()}});
+        variant->group_layout,
+        {{.name = "scene", .view = tlas->as_view()},
+         {.name = "Output", .view = d.output.as_any_image_view()},
+         {.name = "frame", .view = d.frame.as_constants_buffer()},
+         {.name = "background", .view = d.background.as_constants_buffer()},
+         {.name = "Instances", .view = d.instance_table.as_readonly_buffer()},
+         {.name = "Lights", .view = lights.as_readonly_buffer()},
+         {.name = "GuideNormal", .view = (has_guides ? d.guide_normal : self->_guide_normal_stand_in).as_any_image_view()},
+         {.name = "GuideDepth", .view = (has_guides ? d.guide_depth : self->_guide_depth_stand_in).as_any_image_view()},
+         {.name = "GuideAlbedo", .view = (has_guides ? d.guide_albedo : self->_guide_albedo_stand_in).as_any_image_view()},
+         {.name = "GuideSpecularAlbedo",
+          .view
+          = (has_specular_guides ? d.guide_specular_albedo : self->_guide_specular_albedo_stand_in).as_any_image_view()},
+         {.name = "GuideRoughness",
+          .view = (has_specular_guides ? d.guide_roughness : self->_guide_roughness_stand_in).as_any_image_view()},
+         {.name = "FrameOutput",
+          .view = (has_temporal ? d.frame_output : self->_frame_output_stand_in).as_any_image_view()},
+         {.name = "GuideMotion",
+          .view = (has_temporal ? d.guide_motion : self->_guide_motion_stand_in).as_any_image_view()},
+         {.name = "FrameDiffuse",
+          .view = (has_split ? d.frame_diffuse : self->_frame_diffuse_stand_in).as_any_image_view()},
+         {.name = "FrameSpecular",
+          .view = (has_split ? d.frame_specular : self->_frame_specular_stand_in).as_any_image_view()},
+         {.name = "GuideHitDistance",
+          .view = (has_split ? d.guide_hit_distance : self->_guide_hit_distance_stand_in).as_any_image_view()}});
 
     cmd.raytracing.bind_pipeline(*variant->pipeline);
     cmd.raytracing.bind_group(0, *group);

@@ -31,6 +31,7 @@ namespace svgf_temporal_bindings
 {
     Texture2D<float4> gColor;  // this frame's noisy radiance; its alpha is the caller's and rides through untouched
     Texture2D<float4> gAlbedo; // diffuse albedo, or a stand-in when k_svgf_has_albedo is clear
+    Texture2D<float4> gSpecularAlbedo; // or a stand-in when k_svgf_has_specular_albedo is clear
     Texture2D<float4> gNormal;
     Texture2D<float4> gDepth;
     Texture2D<float4> gMotion; // this frame's pixel minus last frame's, in pixels
@@ -58,7 +59,7 @@ using namespace svgf_temporal_bindings;
 
     float3 color = gColor.Load(int3(p, 0)).rgb;
     if ((flags & k_svgf_has_albedo) != 0)
-        color /= max(gAlbedo.Load(int3(p, 0)).rgb, k_svgf_albedo_floor);
+        color /= svgf_reflectance(gAlbedo.Load(int3(p, 0)).rgb, gSpecularAlbedo.Load(int3(p, 0)).rgb, flags);
 
     float3 n = gNormal.Load(int3(p, 0)).rgb;
     float d = gDepth.Load(int3(p, 0)).r;

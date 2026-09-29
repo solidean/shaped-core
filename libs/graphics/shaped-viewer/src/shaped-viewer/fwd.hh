@@ -110,6 +110,7 @@ namespace impl
 {
 struct mesh_gpu_slot;        // what placing a mesh produced, remembered on it (scene/mesh.hh)
 struct quadric_set_gpu_slot; // the same for a quadric set (scene/quadric_set.hh)
+struct temporal_slot;        // one resource a view keeps across frames (impl/view_state.hh)
 } // namespace impl
 
 // asset loading (see asset/)

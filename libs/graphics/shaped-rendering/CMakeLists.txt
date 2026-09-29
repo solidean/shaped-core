@@ -14,6 +14,7 @@ add_library(shaped-rendering
     src/shaped-rendering/denoise.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
+    src/shaped-rendering/mix_routine.cc
     src/shaped-rendering/oidn_denoise_routine.cc
     src/shaped-rendering/impl/tza.cc
     src/shaped-rendering/impl/oidn_network.cc
@@ -41,6 +42,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/denoise.hh
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
+    src/shaped-rendering/mix_routine.hh
     src/shaped-rendering/oidn_denoise_routine.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
@@ -147,6 +149,9 @@ sc_add_shader_package(
         svgf_atrous.hlsl:compute:main_cs
         svgf_atrous.hlsl:binding:svgf_atrous_bindings
         svgf_atrous.hlsl:constants:gConstants
+        mix.hlsl:compute:main_cs
+        mix.hlsl:binding:mix_bindings
+        mix.hlsl:constants:gConstants
         nn_conv.hlsl:compute:main_cs
         nn_conv.hlsl:binding:nn_conv_bindings
         nn_conv.hlsl:constants:gConstants
@@ -222,6 +227,7 @@ if(SC_BUILD_TESTS)
             tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
             tests/denoise-test.cc
+            tests/mix-test.cc
             tests/oidn-test.cc
             tests/nn-conv-test.cc
             tests/nn-ops-test.cc

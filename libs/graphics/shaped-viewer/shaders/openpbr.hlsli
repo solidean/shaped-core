@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bsdf_lobe.hlsli"
+
 // The OpenPBR Surface BSDF: the layered model `sv::surface` describes, prepared into lobes and then evaluated or sampled.
 //
 // The layer stack, top to bottom, is fuzz over coat over the base, and the base is the metal BSDF mixed against a dielectric
@@ -475,6 +477,11 @@ struct bsdf_sample
     float3 value;     ///< the BSDF at (wo, direction), cosine NOT folded in
     float pdf;
     bool valid; ///< false when the direction grazed the surface, total internal reflection ended it, or the pdf collapsed
+
+    /// Which lobe drew it — one of the `bsdf_lobe_*` constants above.
+    /// Meaningful only when `valid`: a branch names its lobe before it can fail, so an invalid sample reports whichever
+    /// lobe was being drawn from rather than a fixed value.
+    uint lobe;
 
     /// Which interior the direction crossed into: `medium_none`, `medium_transmission` or `medium_subsurface`.
     ///
@@ -978,12 +985,26 @@ float3 transmission_btdf(bsdf b, float3 wo, float3 wi)
     return interface_transmittance(b, dot_o) * d * g * scale;
 }
 
-/// The full BSDF at (`wo`, `wi`), with the cosine NOT folded in.
+/// The BSDF at (`wo`, `wi`) split into the halves a denoiser filters apart, with the cosine NOT folded in.
+///
+/// `diffuse` is what the diffuse substrate returns plus the subsurface's share of the transmission, and `specular` is
+/// everything else — the fuzz, the coat, the metal and the dielectric specular, plus the glass's share.
+/// Glass is sharp and view-dependent, so filtering it as diffuse would destroy exactly what makes it read as glass.
+/// Subsurface is the opposite: what leaves it has scattered inside, and the diffuse albedo guide counts its colour.
+///
+/// **Their sum is `bsdf_eval`, exactly rather than nearly.**
+/// The base mixes as `lerp(f_spec + f_diffuse, f_metal, metalness)`, which separates into
+/// `lerp(f_spec, f_metal, metalness)` plus `(1 - metalness) * f_diffuse` with nothing left over — so this is the one
+/// implementation and `bsdf_eval` adds the two back together rather than computing anything of its own.
+///
 /// Both directions must be unit and in the local frame; a direction below the surface evaluates to zero.
-float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
+void bsdf_eval_split(bsdf b, float3 wo, float3 wi, out float3 diffuse, out float3 specular)
 {
+    diffuse = float3(0, 0, 0);
+    specular = float3(0, 0, 0);
+
     if (wo.z <= 0.0)
-        return float3(0, 0, 0);
+        return;
 
     // A direction on the far side is a TRANSMISSION, and only the transparent base produces one.
     // Everything layered above it — the coat, the fuzz — reflects, so what reaches here has already crossed both and pays
@@ -994,7 +1015,7 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
         // subsurface one pays nothing here, because everything it costs happens inside.
         float3 tint = b.trans_weight * b.trans_tint + (1.0 - b.trans_weight) * b.sss_weight * float3(1, 1, 1);
         if (all(tint <= float3(0, 0, 0)))
-            return float3(0, 0, 0);
+            return;
 
         float3 f_btdf = transmission_btdf(b, wo, wi);
         float t_coat_x = coat_crossing(b, wo, wi);
@@ -1003,11 +1024,14 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
         // The coat tints what passes through it once, on this branch as on the reflecting one.
         float3 coat_absorption = lerp(float3(1, 1, 1), b.coat_tint, b.coat_weight);
 
-        return f_btdf * tint * t_coat_x * coat_absorption * t_fuzz_x * (1.0 - b.metalness);
+        float3 crossing = f_btdf * t_coat_x * coat_absorption * t_fuzz_x * (1.0 - b.metalness);
+        specular = crossing * b.trans_weight * b.trans_tint;
+        diffuse = crossing * (1.0 - b.trans_weight) * b.sss_weight;
+        return;
     }
 
     if (wi.z <= 0.0)
-        return float3(0, 0, 0);
+        return;
 
     float mu_o = wo.z;
     float mu_i = wi.z;
@@ -1059,7 +1083,10 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
     float3 f_diffuse = (1.0 - b.trans_weight) * (1.0 - b.sss_weight) * b.diffuse_albedo
                      * (oren_nayar(wo, wi, b.diffuse_roughness) / pi) * t_spec;
 
-    float3 f_base = lerp(f_spec + f_diffuse, f_metal, b.metalness);
+    // Split rather than mixed: `lerp(f_spec + f_diffuse, f_metal, m)` is `lerp(f_spec, f_metal, m)` plus
+    // `(1 - m) * f_diffuse`, so the two below add back to exactly what one `lerp` would have produced.
+    float3 f_base_specular = lerp(f_spec, f_metal, b.metalness);
+    float3 f_base_diffuse = (1.0 - b.metalness) * f_diffuse;
 
     // The coat, in its OWN frame: it may carry a normal the base does not, and every cosine its lobe needs is measured
     // against that normal rather than the base's.
@@ -1086,13 +1113,29 @@ float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
         t_coat = coat_transmission(b, wo_c.z) * coat_transmission(b, wi_c.z);
     }
     float3 coat_absorption = lerp(float3(1, 1, 1), b.coat_tint, b.coat_weight);
-    float3 below_coat = f_base * t_coat * coat_absorption * coat_darkening_factor(b);
+
+    // Everything above the base attenuates both halves by the same factor, which is what keeps the split a partition
+    // of the closure rather than two closures that happen to resemble it.
+    float3 through_coat = t_coat * coat_absorption * coat_darkening_factor(b);
 
     // The fuzz sits above everything, and takes its share on both crossings.
     float3 f_fuzz = b.fuzz_weight * b.fuzz_color * sheen_d(h, b.fuzz_alpha) * sheen_v(wo, wi);
     float t_fuzz = fuzz_transmission(b, mu_o) * fuzz_transmission(b, mu_i);
 
-    return f_fuzz + t_fuzz * (f_coat + below_coat);
+    // The fuzz and the coat are rough specular lobes of their own, so they go with the specular half rather than
+    // being folded into whatever sits under them.
+    diffuse = t_fuzz * f_base_diffuse * through_coat;
+    specular = f_fuzz + t_fuzz * (f_coat + f_base_specular * through_coat);
+}
+
+/// The full BSDF at (`wo`, `wi`), with the cosine NOT folded in.
+/// Both directions must be unit and in the local frame; a direction below the surface evaluates to zero.
+float3 bsdf_eval(bsdf b, float3 wo, float3 wi)
+{
+    float3 diffuse;
+    float3 specular;
+    bsdf_eval_split(b, wo, wi, diffuse, specular);
+    return diffuse + specular;
 }
 
 /// How the six lobes split one outgoing direction's sampling budget.
@@ -1211,6 +1254,7 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     r.pdf = 0.0;
     r.valid = false;
     r.medium = medium_none;
+    r.lobe = bsdf_lobe_diffuse;
 
     if (wo.z <= 0.0)
         return r;
@@ -1231,12 +1275,14 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     // downstream can tell the two apart.
     if (pick < p.fuzz)
     {
+        r.lobe = bsdf_lobe_fuzz;
         wi = sample_cosine_local(u.yz);
         if (wi.z <= 0.0)
             return r;
     }
     else if (pick < p.fuzz + p.coat)
     {
+        r.lobe = bsdf_lobe_coat;
         // Drawn in the coat's frame and brought back, so a tilted coat reflects where its own normal says rather than
         // where the base's does.
         float3 wo_c = to_coat(b, wo);
@@ -1252,6 +1298,7 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     }
     else if (pick < p.fuzz + p.coat + p.metal)
     {
+        r.lobe = bsdf_lobe_metal;
         float3 h = ggx_sample_vndf(wo, b.metal_alpha, u.yz);
         wi = reflect(-wo, h);
         if (wi.z <= 0.0)
@@ -1259,6 +1306,7 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     }
     else if (pick < p.fuzz + p.coat + p.metal + p.spec)
     {
+        r.lobe = bsdf_lobe_spec;
         float3 h = ggx_sample_vndf(wo, b.spec_alpha, u.yz);
         wi = reflect(-wo, h);
         if (wi.z <= 0.0)
@@ -1266,12 +1314,15 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     }
     else if (pick < p.fuzz + p.coat + p.metal + p.spec + p.diffuse)
     {
+        r.lobe = bsdf_lobe_diffuse;
         wi = sample_cosine_local(u.yz);
         if (wi.z <= 0.0)
             return r;
     }
     else
     {
+        r.lobe = bsdf_lobe_transmission;
+
         // A refracting base. Which of the two is decided here, in proportion to what each contributes — the direction is
         // the same either way, so the pick costs no extra distribution and changes only the interior reported.
         float w_trans = b.trans_weight * luminance(b.trans_tint);
@@ -1286,10 +1337,11 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
 
         // A thin wall encloses nothing, so passing through one enters no interior at all — and saying so here is what
         // keeps that fact in the closure, which is the only thing that knows it.
+        bool const picked_subsurface = w_sum > 0.0 && within * w_sum >= w_trans;
         if (b.thin_walled != 0.0)
             r.medium = medium_none;
         else
-            r.medium = (w_sum <= 0.0 || within * w_sum < w_trans) ? medium_transmission : medium_subsurface;
+            r.medium = picked_subsurface ? medium_subsurface : medium_transmission;
 
         // Refracted about a visible microfacet, or straight through when the wall is thin.
         float3 h = ggx_sample_vndf(wo, b.spec_alpha, u.yz);
@@ -1327,6 +1379,10 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
             }
             wi = normalize(wi);
         }
+
+        // Named only once it crossed: the reflection above is scored as specular, and keeps the transmission's name.
+        if (r.medium == medium_subsurface)
+            r.lobe = bsdf_lobe_subsurface;
     }
 
     if (wi.z > -1e-6 && wi.z <= 1e-6)

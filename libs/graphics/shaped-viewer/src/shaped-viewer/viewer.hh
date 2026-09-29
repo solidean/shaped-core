@@ -142,6 +142,9 @@ private:
     /// Separate from `resources()` because that one hands out a mutable manager, and asking a count should not.
     [[nodiscard]] isize pending_resource_work() const;
 
+    /// The payloads still streaming in, as a const query — `frame::streaming_resources`'s answer.
+    [[nodiscard]] isize streaming_resources() const;
+
     /// `frame::background_work`'s answer.
     [[nodiscard]] cc::shared_async<cc::unit> background_work();
 
