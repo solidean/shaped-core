@@ -160,6 +160,12 @@ The API admits an output larger than the input, so a vendor member can upscale w
 `sr::optional_guides(m)` is what it uses when present.
 A tracer writes the union for the members it may hand off between, in a few fixed tiers rather than one permutation per combination.
 
+**`albedo` and `specular_albedo` are the two halves of one surface's reflectance.**
+`albedo` is diffuse only, so it is zero on a metal, whose colour is all in `specular_albedo`.
+A member reading split radiance reads the two separately, one per half.
+A member filtering unsplit radiance — à-trous and SVGF — demodulates by their sum, or a textured metal's base colour is filtered as noise.
+OIDN is the follow-up: its own documentation wants a metal's albedo to be its specular colour and glass's to be about 1, and `oidn_network::execute` takes only `albedo` today.
+
 **Settings are one flat struct of knobs named for what they do.**
 Each field in `sr::denoise_settings` says which members read it, and a member ignores the rest, so switching members keeps every knob that still means something.
 A member's own options — the full vendor surface — live on the member, never in the shared struct.

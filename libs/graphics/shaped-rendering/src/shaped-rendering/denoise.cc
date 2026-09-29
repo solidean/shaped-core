@@ -241,9 +241,9 @@ denoise_guide_set optional_guides(denoise_method m)
     switch (m)
     {
     case denoise_method::atrous:
-        return g::albedo | g::normal | g::depth;
+        return g::albedo | g::specular_albedo | g::normal | g::depth;
     case denoise_method::svgf:
-        return g::albedo;
+        return g::albedo | g::specular_albedo;
     case denoise_method::oidn:
         return {};
     case denoise_method::dlss_rr:

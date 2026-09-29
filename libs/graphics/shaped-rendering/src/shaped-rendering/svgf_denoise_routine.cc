@@ -18,6 +18,7 @@ namespace
 constexpr u32 k_has_albedo = 1u << 0;
 constexpr u32 k_reset = 1u << 1;
 constexpr u32 k_remodulate_out = 1u << 2;
+constexpr u32 k_has_specular_albedo = 1u << 3;
 
 // Where each image lives in the history's state slots.
 // The three histories ping-pong on the frame's parity: this call writes slot `base + parity` and reads the other.
@@ -169,7 +170,10 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
 
     auto const has_albedo = is_set(in.guides.albedo);
     auto const albedo = has_albedo ? in.guides.albedo.as_texture_view() : in.color.as_texture_view();
-    auto const albedo_flag = has_albedo ? k_has_albedo : 0u;
+    auto const has_specular_albedo = is_set(in.guides.specular_albedo);
+    auto const specular_albedo
+        = has_specular_albedo ? in.guides.specular_albedo.as_texture_view() : in.color.as_texture_view();
+    auto const albedo_flag = (has_albedo ? k_has_albedo : 0u) | (has_specular_albedo ? k_has_specular_albedo : 0u);
 
     // -- temporal
     {
@@ -178,6 +182,7 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
                                                  shaders::svgf_temporal_bindings{
                                                      .gColor = in.color.as_texture_view(),
                                                      .gAlbedo = albedo,
+                                                     .gSpecularAlbedo = specular_albedo,
                                                      .gNormal = in.guides.normal.as_texture_view(),
                                                      .gDepth = in.guides.depth.as_texture_view(),
                                                      .gMotion = in.guides.motion.as_texture_view(),
@@ -234,6 +239,7 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
                                                      .gSource = source.as_texture_view(),
                                                      .gNormalDepth = s[k_normal_depth + cur].as_texture_view(),
                                                      .gAlbedo = albedo,
+                                                     .gSpecularAlbedo = specular_albedo,
                                                      .gColor = in.color.as_texture_view(),
                                                      .gTarget = target.as_any_image_view(),
                                                  });
