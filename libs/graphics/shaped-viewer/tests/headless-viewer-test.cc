@@ -435,7 +435,8 @@ INVOCABLE_TEST("sv - a frame loop lands its streamed payloads", (sg::context_han
 // This does NOT pin the sweep either, for the reason on the test above — every frame submits a command list and
 // advances an epoch whether or not anything traced, so the wait behaves the same.
 // Throttling the stream to 0.001 and streaming 2048 triangles does not change that.
-INVOCABLE_TEST("sv - a frame loop with nothing to trace still lands its streamed payloads", (sg::context_handle const& ctx_h))
+INVOCABLE_TEST("sv - a frame loop with nothing to trace still lands its streamed payloads",
+               (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
