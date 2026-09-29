@@ -12,7 +12,7 @@
 /// table, so dx12 splits every layout into two and carries a second heap for samplers.
 /// Vulkan puts them in the same set layout, so there is one object here and no split to keep in sync.
 ///
-/// A binding named in the layout's static samplers gets its VkSampler created here and owned for the layout's life,
+/// A binding named in the layout's static samplers gets its VkSampler from the context's sampler cache, which owns it,
 /// and every group built from the layout writes that one sampler's descriptor.
 /// So the sampler state is fixed at layout creation and no caller can supply another — which is what "static" means at
 /// the sg level — reached without `pImmutableSamplers`.
@@ -57,6 +57,7 @@ public:
     VkDescriptorSetLayout _layout = VK_NULL_HANDLE;
 
     /// One entry per binding slot, parallel to `bindings()`: that slot's static sampler, or null where it has none.
+    /// Owned by the context's sampler cache.
     cc::vector<VkSampler> _slot_samplers;
 
     /// How many bytes one group built from this layout occupies in the descriptor heap.

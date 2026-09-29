@@ -24,8 +24,6 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     auto empty_set_layout = VkDescriptorSetLayout(VK_NULL_HANDLE);
     auto const destroy_reserved = [&]
     {
-        for (auto s : bound_samplers)
-            vkDestroySampler(ctx._device, s, nullptr);
         if (reserved_set_layout != VK_NULL_HANDLE)
             vkDestroyDescriptorSetLayout(ctx._device, reserved_set_layout, nullptr);
         if (empty_set_layout != VK_NULL_HANDLE)
@@ -50,12 +48,13 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
                                                 sg::reserved_binding_group, s.binding.index + 1));
                 }
 
-            auto const info = to_vk_sampler_info(s.sampler);
-            auto sampler = VkSampler(VK_NULL_HANDLE);
-            if (VkResult const r = vkCreateSampler(ctx._device, &info, nullptr, &sampler); r != VK_SUCCESS)
+            // The context's cache owns the sampler, and outlives every in-flight use of it.
+            auto const sampler = ctx._samplers.acquire(s.sampler);
+            if (sampler == VK_NULL_HANDLE)
             {
                 destroy_reserved();
-                return vulkan_error(r, "vkCreateSampler (bound sampler) failed");
+                return cc::error(
+                    cc::format("pipeline_layout: could not create the bound sampler for '{}'", s.binding.name));
             }
             bound_samplers.push_back(sampler);
         }
@@ -151,7 +150,6 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
                                                            inline_bytes);
     result->_reserved_set_layout = reserved_set_layout;
     result->_empty_set_layout = empty_set_layout;
-    result->_bound_samplers = cc::move(bound_samplers);
     return vulkan_pipeline_layout_handle(cc::move(result));
 }
 
@@ -162,8 +160,7 @@ void vulkan_pipeline_layout::bind_embedded_samplers(VkCommandBuffer buffer, VkPi
                                                               u32(sg::reserved_binding_group));
 }
 
-// Immediate rather than epoch-deferred, unchanged from what the destructor always did: a layout is consumed at
-// pipeline-creation and descriptor-allocation time, so no in-flight work names it.
+// Immediate rather than epoch-deferred: the layout objects are consumed at pipeline-creation and descriptor-allocation time, so no in-flight work names them.
 void vulkan_pipeline_layout::release_backend_objects()
 {
     if (_layout != VK_NULL_HANDLE)
@@ -172,12 +169,9 @@ void vulkan_pipeline_layout::release_backend_objects()
         vkDestroyDescriptorSetLayout(_ctx._device, _reserved_set_layout, nullptr);
     if (_empty_set_layout != VK_NULL_HANDLE)
         vkDestroyDescriptorSetLayout(_ctx._device, _empty_set_layout, nullptr);
-    for (auto s : _bound_samplers)
-        vkDestroySampler(_ctx._device, s, nullptr);
     _layout = VK_NULL_HANDLE;
     _reserved_set_layout = VK_NULL_HANDLE;
     _empty_set_layout = VK_NULL_HANDLE;
-    _bound_samplers.clear();
 }
 
 vulkan_pipeline_layout::~vulkan_pipeline_layout()
