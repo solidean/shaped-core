@@ -137,8 +137,8 @@ backends/                                       # each subclasses the abstract s
   vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): the whole surface, ray tracing included
   metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): the whole surface, ray tracing included;
                                                 presents windowed and headless; records GPU timestamps
-  webgpu/                         [in progress] sg::backend::webgpu + sg::request_webgpu_context (wasm, emdawnwebgpu): the whole surface but ray tracing;
-                                                never blocks. See backends/webgpu/readme.md
+  webgpu/                         [in progress] sg::backend::webgpu + sg::request_webgpu_context (wasm, emdawnwebgpu): the whole surface but the RT pipeline;
+                                                ray queries are a polyfill; never blocks. See backends/webgpu/readme.md
     tests/                                      shaped-graphics-webgpu-test over hand-written WGSL
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat
@@ -148,7 +148,7 @@ backends/                                       # each subclasses the abstract s
 
 - **Tier 1 (now):** dx12, vulkan.
   Both are real across the surface.
-- **Tier 2:** metal and webgpu are both real; webgpu is the one missing ray tracing.
+- **Tier 2:** metal and webgpu are both real; webgpu is the one missing the ray-tracing pipeline, and its ray queries are a software polyfill.
   metal covers the whole surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting windowed and headless and recording GPU timestamps.
   It refuses below its floor rather than degrading, realizes the epochs on a pair of MTLSharedEvents, and runs the whole tier-1 sweep unconditionally.
   `SC_THREADS=OFF` is refused on Apple targets, because metal takes command-buffer completion on a thread the flag cannot remove.
@@ -270,6 +270,6 @@ See [concepts/epochs.md](concepts/epochs.md).
 4. textures + views                                        [in progress]  resource, creation, views and host↔device copies real on dx12 and vulkan; texel buffer views remain
 5. pipelines + shaders                                     [in progress]  compute + raster bind paths real on dx12 and vulkan, DXC compiler in place
 6. presentation (swapchain/surface) + submission/sync      [done]         dx12 (WARP-tested) and vulkan
-7. tier 2 backends (metal, webgpu)                         [in progress]  metal covers the whole surface; webgpu is real but ray tracing
+7. tier 2 backends (metal, webgpu)                         [in progress]  metal covers the whole surface; webgpu is real but the RT pipeline
 8. legacy backends (opengl, webgl)                         [planned]
 ```

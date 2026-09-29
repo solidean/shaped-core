@@ -1,7 +1,8 @@
 # sg WebGPU backend
 
 `sg::backend::webgpu` implements `sg::context` over WebGPU, on WebAssembly through Emscripten's **emdawnwebgpu** port.
-It covers the whole sg surface except ray tracing.
+It covers the whole sg surface except the ray-tracing pipeline.
+Ray queries are a software polyfill, so `ctx.implementation_of(sg::feature::ray_query)` is `emulated`.
 
 ```cpp
 auto ctx = co_await sg::request_webgpu_context();               // adapter + device, settled from WebGPU's promises
@@ -34,12 +35,25 @@ So `ctx.execution()` is `never_block`, and every internal wait is unreachable.
 | float32 filtering, extended image formats | optional features | granted where the adapter offers them; without one, sg refuses the form on every backend |
 | memory heaps | none | a heap that places nothing: a placed buffer gets its own allocation, silently |
 | binding arrays, staging groups, bindless | none in core | refused; `ctx.supports(sg::feature::binding_arrays)` is false |
-| ray tracing, geometry, tessellation | none | refused; the matching features are false |
+| ray queries | none | a polyfill: every BLAS and TLAS is a region of one storage buffer per context, built by compute kernels and traced by SGL's prelude |
+| ray-tracing pipeline, geometry, tessellation | none | refused; the matching features are false |
 
 Group 3 is sg's reserved group on every backend, which is what lets one pipeline layout fit them all.
 Slots below the caller's groups are filled with empty layouts wherever group 3 exists, since WebGPU numbers groups contiguously.
 
 [docs/wgsl.md](docs/wgsl.md) is what a shader author needs from this table.
+
+## Ray queries
+
+The polyfill's layout is a contract with SGL's traversal, and [raytracing-polyfill.md](../../../shaped-graphics-language/docs/raytracing-polyfill.md) is where it lives.
+What this backend adds to it:
+
+- **The pool** suballocates first-fit in 16-byte units, and a region freed is reused only once its epoch retires.
+  It grows by copying into a larger buffer in a submit of its own, so offsets survive, and a list still open that wrote into the old buffer copies its regions forward itself.
+- **A build** writes the header and the tree's topology from the CPU, then records one kernel dispatch for the primitives, one for the leaves and one per level above them.
+  A build is not allowed inside a rendering scope.
+- **A pipeline layout with an acceleration structure** gets the pool and the roots in group 3, at bindings 17 and 18.
+  The roots sit right after the inline constants in one placed block, so both dynamic offsets point into the same constant page.
 
 ## Transfers
 
@@ -77,6 +91,9 @@ webgpu_stream.hh/.cc               the async and streaming tiers
 webgpu_binding.cc                  group layouts, pipeline layouts with group 3, binding groups
 webgpu_pipeline.hh/.cc             compute and raster pipelines, both build paths
 webgpu_command_list.*              recording: transfers, compute, raster, and pass management
+webgpu_acceleration.hh             the ray-query polyfill's pool, and its BLAS and TLAS
+webgpu_acceleration_pool.cc        the pool's allocator and growth, and the build kernels' WGSL
+webgpu_raytracing.cc               the builds, and the refused ray-tracing pipeline
 webgpu_query.hh/.cc                timestamp queries
 webgpu_swapchain.hh/.cc            headless and web canvas presentation
 tests/                             shaped-graphics-webgpu-test, over hand-written WGSL
