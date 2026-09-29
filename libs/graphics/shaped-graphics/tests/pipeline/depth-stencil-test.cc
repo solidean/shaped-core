@@ -291,12 +291,12 @@ ASYNC_INVOCABLE_TEST("sg - the stencil read mask narrows the comparison and the 
     auto const probe = co_await stencil_pipeline(*ctx, faces({.compare = sg::compare_op::equal}, 0xFF, 0xFF));
     auto const masked_equal
         = sg::stencil_face{.fail = sg::stencil_op::keep, .pass = sg::stencil_op::zero, .compare = sg::compare_op::equal};
-    sg::raster_pipeline_handle const columns[] = {
-        co_await stencil_pipeline(
-            *ctx, faces({.pass = sg::stencil_op::replace, .compare = sg::compare_op::always}, 0xFF, 0x0F)),
-        co_await stencil_pipeline(*ctx, faces(masked_equal, 0x0F, 0xFF)),
-        co_await stencil_pipeline(*ctx, faces(masked_equal, 0xFF, 0xFF)),
-    };
+    // Awaited one statement at a time: MSVC's ARM64 compiler fails internally on a co_await inside an array initializer.
+    auto columns = cc::vector<sg::raster_pipeline_handle>();
+    columns.push_back(co_await stencil_pipeline(
+        *ctx, faces({.pass = sg::stencil_op::replace, .compare = sg::compare_op::always}, 0xFF, 0x0F)));
+    columns.push_back(co_await stencil_pipeline(*ctx, faces(masked_equal, 0x0F, 0xFF)));
+    columns.push_back(co_await stencil_pipeline(*ctx, faces(masked_equal, 0xFF, 0xFF)));
     u32 const references[] = {0x05, 0x00, 0x00};
 
     auto const pixels = co_await sg_test::draw_offscreen(*ctx,
