@@ -24,12 +24,13 @@ cc::vector<cc::string> find_hit_record_mismatches(raytracing_shader_table const&
         auto const aabbs = blas.geometry() == blas_geometry::aabbs;
         auto const stride = isize(blas.hit_record_stride());
 
-        if (ray_count > 1 && stride != ray_count)
+        // With one geometry the stride multiplies nothing, so it cannot disagree between backends.
+        if (blas.geometry_count() > 1 && stride != ray_count)
         {
-            messages.push_back(cc::format("instance {} places a BLAS built with hit_record_stride {}, and the shader "
-                                          "table "
-                                          "traces {} ray types; metal bakes the stride, so build the BLAS with {}",
-                                          i, stride, ray_count, ray_count));
+            messages.push_back(cc::format("instance {} places a BLAS of {} geometries built with hit_record_stride {}, "
+                                          "and the shader table traces {} ray types; metal bakes the stride, so build "
+                                          "the BLAS with {}",
+                                          i, blas.geometry_count(), stride, ray_count, ray_count));
             continue;
         }
 

@@ -200,6 +200,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - builds lay the pool out as the ray-query polyf
     REQUIRE(ctx.supports(sg::feature::ray_query));
     CHECK(ctx.implementation_of(sg::feature::ray_query) == sg::feature_implementation::emulated);
     CHECK(!ctx.supports(sg::feature::raytracing_pipeline));
+    CHECK(ctx.implementation_of(sg::feature::raytracing_pipeline) == sg::feature_implementation::absent);
 
     // Geometry 0: two unindexed triangles under a per-geometry transform.
     float const g0_vertices[] = {0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 2, 1, 0, 1, 2, 1};

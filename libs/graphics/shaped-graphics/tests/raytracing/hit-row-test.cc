@@ -198,6 +198,35 @@ TEST("sg - the hit-record check names a BLAS built for another ray count")
     CHECK(mismatches[0].contains("hit_record_stride 1")).context(mismatches[0]);
 }
 
+TEST("sg - the hit-record check asks a stride only of a BLAS whose geometries it separates")
+{
+    SECTION("one geometry reaches the same records whatever its stride")
+    {
+        auto desc = sg::raytracing_shader_table_description{.pipeline = make_pipeline(), .ray_count = 2};
+        sg::hit_shader_handle const row[2] = {k_triangle, k_triangle};
+        (void)desc.add_hit_row(row);
+        auto const table = cpu_table(desc);
+
+        sg::impl::tlas_instance_record const instance = {.blas = make_blas(sg::blas_geometry::triangles, 1, 1)};
+        auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
+        CHECK(mismatches.empty()).context(mismatches.empty() ? cc::string() : mismatches[0]);
+    }
+
+    SECTION("a table of one ray type still separates two geometries, by 1 on dx12 and by the stride on metal")
+    {
+        auto desc = sg::raytracing_shader_table_description{.pipeline = make_pipeline()};
+        (void)desc.add_hit_shader(k_triangle);
+        (void)desc.add_hit_shader(k_triangle);
+        (void)desc.add_hit_shader(k_triangle);
+        auto const table = cpu_table(desc);
+
+        sg::impl::tlas_instance_record const instance = {.blas = make_blas(sg::blas_geometry::triangles, 2, 2)};
+        auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
+        REQUIRE(mismatches.size() == 1);
+        CHECK(mismatches[0].contains("hit_record_stride 2")).context(mismatches[0]);
+    }
+}
+
 TEST("sg - the hit-record check skips what sg never recorded")
 {
     // A pipeline a backend built outside the context says nothing about its groups, so only the range is checked.

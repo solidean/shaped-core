@@ -70,7 +70,7 @@ public:
     /// Under `context::portability_checks`, every instance of every bound tlas is checked against the hit records it reaches.
     /// Each must exist, and be procedural exactly when the instance's BLAS holds AABBs.
     /// A mismatch logs an error, once per table and tlas in a list, and the dispatch still runs, since hot reload can change a hit group under a running program.
-    /// Only a tlas built and a group created while the checks were on is seen.
+    /// Only a tlas built, and a group or staging group created, while the checks were on is seen.
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height = 1, int depth = 1);
 
     /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch_rays only** — the compute scope's contract, at the raytracing stage.

@@ -247,11 +247,11 @@ private:
     impl::aliasing_scope _raster_aliasing;
 
     // Each shader table and tlas dispatch_rays has checked against each other in this list, so a list logs a mismatch once.
-    // Both outlive the recording: the table through the backend's dispatch and the tlas through the group that binds it.
+    // Held rather than pointed at, so neither address can be reused by another table or tlas while the list records.
     struct checked_trace
     {
-        raytracing_shader_table const* table = nullptr;
-        tlas const* tlas = nullptr;
+        raytracing_shader_table_handle table;
+        tlas_handle tlas;
     };
     cc::vector<checked_trace> _checked_traces;
 };

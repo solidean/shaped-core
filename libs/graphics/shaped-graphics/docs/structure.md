@@ -109,6 +109,7 @@ src/shaped-graphics/
                                                 metal = a compute pipeline per raygen
     raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table, hit rows and ray_count; real on dx12, vulkan and metal;
                                                 its records still sit in a plain buffer
+    impl/hit_record_check.hh/.cc  [done]        what dispatch_rays checks under the portability checks: each record an instance reaches
 
   resource/
     pixel_format.hh               [done]        restrictive texel-format enum + helpers (depth/compressed/block-size)
@@ -233,9 +234,11 @@ sampler              [in progress]  sampler + static/dynamic samplers. A group's
 accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
                                   triangles + procedural AABBs, build_tlas, is_supported), result sized from a
                                   prebuild query with transient scratch, persistent handles across epochs;
-                                  dx12, vulkan and metal real. Deferred: transient variant, refit/update, compaction
+                                  dx12, vulkan and metal real; webgpu real as the ray-query polyfill's own
+                                  structures. Deferred: transient variant, refit/update, compaction
 raytracing pipeline  [in progress]  raytracing_pipeline + shader table + cmd.raytracing.dispatch_rays, and the
-                                  acceleration_structure binding (inline RayQuery); dx12, vulkan and metal real.
+                                  acceleration_structure binding (inline RayQuery); dx12, vulkan and metal real,
+                                  and webgpu's ray query real as a software polyfill.
                                   Deferred: local root signatures, a dedicated shader-table buffer usage, a cached blob
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
                                   per list, one batched inline readback per heap at submit; real on all three

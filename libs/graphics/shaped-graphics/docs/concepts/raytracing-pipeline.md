@@ -22,7 +22,7 @@ And records hold **only a shader identifier** — one global root signature, no 
 Vulkan asks one question for both because DXC writes the `RayQueryKHR` capability into every ray-tracing SPIR-V module, so a device with the pipeline and no ray query could load none of them.
 [writing-a-backend](../writing-a-backend.md) records how that was found.
 
-**`ctx.implementation_of(feature)` says how a context provides a feature it has**: `native`, or `emulated` in software on top of the device.
+**`ctx.implementation_of(feature)` says how a context provides a feature**: `native`, `emulated` in software on top of the device, or `absent` where `supports` says no.
 Only webgpu's `ray_query` is `emulated` today.
 It is a question about cost, for a caller choosing an algorithm; a shader never asks it, since both run the same source.
 `cmd.raytracing.is_supported()` is true where either feature is, which is where acceleration structures build.
@@ -85,12 +85,15 @@ It is a triangle group that accepts every hit and runs nothing, which is what a 
 
 A triangle BLAS must not reach a procedural hit group and a procedural BLAS must, and no backend checks it for you.
 With `ctx.portability_checks()` on, `dispatch_rays` walks every instance of every bound TLAS and checks each record it reaches.
-Each must exist and match the BLAS's kind, and for a table of more than one ray type the BLAS must have been built with that stride.
+Each must exist and match the BLAS's kind, and a BLAS of more than one geometry must have been built with the table's ray count as its stride.
+The check assumes each trace's geometry multiplier is that ray count, which an SGL-generated table's traces are.
+A hand-written shader passing another multiplier, such as `TraceRay(…, ray_type, 0, …)` sharing one record across geometries, keeps the checks off.
 A mismatch **logs an error rather than asserting**, since the hit groups come from shaders that hot reload can change under a running program.
 It is logged once per table and TLAS in a command list, and the dispatch still runs.
 
 The check reads only what sg recorded on the CPU side, and records it only while the checks are on.
 A TLAS keeps its instances' BLAS, offset and mask, and a binding group the TLASes it binds, so both must be made after the checks were turned on.
+A staging group records the TLASes it is set to once it was made with the checks on, and hands them to each snapshot.
 A BLAS always keeps its kind and stride, and a pipeline its hit groups' kinds, because they cost nothing per operation.
 
 ## "Shader table", not "SBT" — and why it holds only an identifier

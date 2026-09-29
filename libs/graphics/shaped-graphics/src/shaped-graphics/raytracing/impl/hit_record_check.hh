@@ -10,7 +10,11 @@ namespace sg::impl
 ///
 /// Instance i with BLAS b reaches record `hit_group_offset + g * b.hit_record_stride() + r` for each geometry g of b and each ray type r below `table.ray_count()`.
 /// Each such record must exist, and must be procedural exactly when b holds AABBs.
-/// A table whose ray count is above 1 also expects every BLAS to have been built with that stride, since metal bakes it.
+/// A BLAS of more than one geometry must also have been built with the table's ray count as its stride, since metal bakes it.
+///
+/// **The check assumes every trace's geometry multiplier is the table's ray count**, which a generated table's traces are.
+/// Hand-written shaders need not agree: `TraceRay(…, ray_type, 0, …)` shares one record across geometries, legal on dx12
+/// and vulkan, and the check would report records that shader never reaches — so such a table keeps the checks off.
 ///
 /// An instance whose mask is 0 is never hit and is skipped.
 /// What sg never recorded is not checked: a tlas built while `context::portability_checks` was off has no instances to look at,
