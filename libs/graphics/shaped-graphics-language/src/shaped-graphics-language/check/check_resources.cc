@@ -412,14 +412,29 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
         if (callee == nullptr || callee->with_default_sampler == builtin_id::none || &a != &arguments[0])
             continue;
         // CHK-279: the texture's @sampler stands in for the sampler the call leaves out
-        if (m.default_sampler < 0)
+        if (m.default_sampler < 0 && !is_valid(m.default_file_sampler))
         {
             report(diagnostic_kind::missing_sampler, file, call,
                    cc::format("{} names no @sampler, so a call that samples it names a sampler: `{}.{}(…, smp)`",
                               members.back().path, m.name, callee->name));
             return;
         }
-        auto const& smp = all[m.default_sampler];
+        // CHK-314: a file-scope sampler filters as a binding's static sampler does
+        auto smp = member_info();
+        auto smp_path = cc::string();
+        if (is_valid(m.default_file_sampler))
+        {
+            auto const& s = out.at(m.default_file_sampler);
+            if (s.state != symbol_state::checked)
+                return;
+            smp = {.name = s.name, .type = s.type, .static_sampler = s.info};
+            smp_path = s.name;
+        }
+        else
+        {
+            smp = all[m.default_sampler];
+            smp_path = cc::format("{}.{}", out.at(where.symbol).name, smp.name);
+        }
         auto const wants_comparison
             = out.builtin_function(callee->with_default_sampler)->parameters[2] == "comparison_sampler";
         if (smp.type != checked_module::error_type && out.at(smp.type).is_comparison != wants_comparison)
@@ -429,7 +444,7 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
                               wants_comparison ? "comparison_sampler" : "sampler", members.back().path, smp.name));
             return;
         }
-        members.push_back({.member = smp, .path = cc::format("{}.{}", out.at(where.symbol).name, smp.name)});
+        members.push_back({.member = cc::move(smp), .path = cc::move(smp_path)});
     }
 
     // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.

@@ -524,11 +524,12 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   An index the uniformity pass cannot prove uniform is `nonuniform i`, or it is `non-uniform-index`; a needless mark is a warning (CHK-300).
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
-- **`@sampler(name)` on a texture member names a sampler of the same binding** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
+- **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
+  A member of that name hides a file-scope sampler of it.
   A call without a sampler on a texture without one is `missing-sampler`.
 - **A `sampler name:` at file scope is a static sampler of the pipeline layout** (CHK-314), handed to a builtin by its name: `tex.sample(uv, name)`.
   It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133).
-  `@sampler` cannot name one yet.
+  An entry point reaching one at position 16 or later is `too-many-samplers`, and unreached samplers declared above it count.
 - **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.

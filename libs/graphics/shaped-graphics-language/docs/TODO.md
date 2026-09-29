@@ -22,7 +22,12 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   A target that terminates gets the emulation the design settled: a flag, guarded stores, and the real discard at the end.
 - **Texture methods in MSL.** Every method has an MSL spelling, pinned by the registry's tests, which no emitted entry point reaches until MSL takes a group.
   The first corpus shader that binds a texture on Metal is where each one meets a Metal compiler.
-- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, a file-scope `@sampler`, and gathers of integer textures.
+- **Compact file-sampler numbering per `pipeline` declaration.** A file-scope sampler's index is its position among all the file's samplers (EMIT-133).
+  So a file past 16 is `too-many-samplers` even where each stage reaches few.
+  The way out not taken yet: a `pipeline` numbers only the samplers its stages reach, and emits those stages with its numbers.
+  It costs an entry point's text depending on its pipeline, and a stage shared by two pipelines compiling twice.
+  A hand-assembled pipeline keeps declaration order.
+- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, and gathers of integer textures.
 - **Features used in a body.** Only an entry point's signature uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
   A listed binding's member does, and so do a stage input, a member taken per sample and the stage itself (CHK-263).
   The first builtin that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.

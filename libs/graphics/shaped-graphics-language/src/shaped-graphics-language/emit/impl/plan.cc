@@ -112,6 +112,29 @@ struct validator
             validate_binding(m, id, errors);
     }
 
+    /// EMIT-133: refused on every target, so an entry point written for one is written for all of them.
+    void file_samplers()
+    {
+        auto reported = cc::vector<symbol_id>();
+        for (auto const& x : e.exprs)
+        {
+            auto const* const smp = x.node.try_as<check::flat_file_sampler>();
+            if (smp == nullptr || file_sampler_index(m, smp->sampler) < k_max_file_samplers)
+                continue;
+            auto is_repeat = false;
+            for (auto const r : reported)
+                is_repeat = is_repeat || r == smp->sampler;
+            if (is_repeat)
+                continue;
+            reported.push_back(smp->sampler);
+            report(
+                error_kind::too_many_samplers, smp->sampler,
+                cc::format("'{}' reaches sampler '{}' at index {}, and a stage holds {}; every sampler declared above "
+                           "it counts toward its index, whether reached or not",
+                           e.name, m.at(smp->sampler).name, file_sampler_index(m, smp->sampler), k_max_file_samplers));
+        }
+    }
+
     void tree()
     {
         if (auto const violation = find_core_violation(m, e); violation.has_value())
@@ -839,6 +862,7 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
     }
     v.bindings();
     v.tree();
+    v.file_samplers();
 }
 
 sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t)

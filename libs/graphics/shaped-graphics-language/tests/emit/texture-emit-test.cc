@@ -593,6 +593,54 @@ TEST("sgl emit - an entry point declares only the file-scope samplers its code r
     CHECK(!plain.text.contains("@group(3)"));
 }
 
+TEST("sgl emit - a texture's @sampler naming a file-scope sampler reaches it, so the entry point declares it")
+{
+    constexpr auto source = "sampler unused:\n"
+                            "    filter = .linear\n"
+                            "\n"
+                            "sampler edge:\n"
+                            "    filter = .nearest\n"
+                            "\n"
+                            "binding set:\n"
+                            "    @sampler(edge) src: texture_2d[float4]\n"
+                            "    dst: out image_2d[.rgba8_unorm]\n"
+                            "\n"
+                            "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+                            "    set.dst.store(int2(id.x, id.y), set.src.sample(float2(0.5, 0.5), level = 0.0))\n";
+    auto const dx12 = emit_source(source, 0, target::hlsl_dx12);
+    CHECK(sgl::emit::dump_errors(dx12) == "");
+    CHECK(dx12.text.contains("SamplerState edge : register(s1, space10);\n"));
+    CHECK(dx12.text.contains("set_src.SampleLevel(edge, float2(0.5, 0.5), 0.0)"));
+    CHECK(!dx12.text.contains("unused"));
+    CHECK((dx12.bound_names.back() == sgl::emit::bound_name{.emitted = "edge", .host = "edge"}));
+    CHECK(text_of(source, target::wgsl).contains("@group(3) @binding(2) var edge: sampler;\n"));
+}
+
+TEST("sgl emit - a file-scope sampler reached at index 16 or more is too-many-samplers on every target")
+{
+    // seventeen samplers, of which only the last is reached: the sixteen above it still count toward its index
+    auto samplers = cc::string();
+    for (auto i = 0; i < 17; ++i)
+        samplers.appendf("sampler s{}:\n    filter = .linear\n\n", i);
+    auto const source_using = [&](cc::string_view name)
+    {
+        return cc::format("{}binding set:\n"
+                          "    src: texture_2d[float4]\n"
+                          "    dst: out image_2d[.rgba8_unorm]\n"
+                          "\n"
+                          "@compute(8, 8) fun cs(@thread_id id: int3){{set}}:\n"
+                          "    set.dst.store(int2(id.x, id.y), set.src.sample(float2(0.5, 0.5), {}, level = 0.0))\n",
+                          samplers, name);
+    };
+    for (auto const t : sgl::emit::all_targets())
+    {
+        CHECK(sgl::emit::dump_errors(emit_source(source_using("s16"), 0, t))
+                  .contains("too-many-samplers 'cs' reaches sampler 's16' at index 16, and a stage holds 16; every "
+                            "sampler declared above it counts toward its index, whether reached or not"));
+        CHECK(!sgl::emit::dump_errors(emit_source(source_using("s15"), 0, t)).contains("too-many-samplers"));
+    }
+}
+
 TEST("sgl emit - a file-scope sampler named as a word the target reserves is renamed there, and bound by its own name")
 {
     constexpr auto reserved

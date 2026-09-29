@@ -294,6 +294,9 @@ struct sgl::check::member_info
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
     /// one reads (CHK-279); -1 without one.
     i32 default_sampler = -1;
+    /// `@sampler(name)` on a texture that names a file-scope sampler rather than a member (CHK-279); none otherwise.
+    /// At most one of it and `default_sampler` is set.
+    symbol_id default_file_sampler = symbol_id::none;
 
     bool operator==(member_info const&) const = default;
 };

@@ -299,8 +299,9 @@ fun shade(k: float) -> float:
   A `sampler` member filters unless it is `@non_filtering`, and a static sampler filters unless every filter is `.nearest`.
 * **CHK-211** `max_anisotropy` is an `int` literal from 1 to 16, and anything else is `invalid-attribute-arguments`.
 * **CHK-212** A static sampler whose `max_anisotropy` is above 1 has every filter `.linear` once its settings are applied, or it is `invalid-attribute-arguments`.
-* **CHK-279** `@sampler(name)` stands on a texture member and names a sampler member of the same binding, static or dynamic.
-  On any other member it is `wrong-kind-of-name`; a name the binding has no member of is `unknown-member`, and one that is no sampler `wrong-kind-of-name`.
+* **CHK-279** `@sampler(name)` stands on a texture member and names a sampler member of the same binding, static or dynamic, or a file-scope sampler (CHK-314).
+  A member of the binding hides a file-scope name.
+  On any other member it is `wrong-kind-of-name`; a name neither the binding nor the file has is `unknown-member`, and one that is no sampler `wrong-kind-of-name`.
   A texture method called without its sampler takes the texture's `@sampler`, which is `missing-sampler` where the texture has none,
   and `type-mismatch` where it is not the kind the call takes: a `comparison_sampler` for a comparison, and a `sampler` otherwise.
 * **CHK-280** A texture method's `offset` and `component` are constants: a literal, an enum case, a `const`, or a construction of those.
@@ -309,7 +310,8 @@ fun shade(k: float) -> float:
   A comparison takes a `comparison_sampler`, which is none of the samplers this counts.
 * **CHK-314** A `sampler name:` at file scope is a symbol whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
   Its settings and its attributes are judged as CHK-204 judges a binding's static sampler.
-  It is used by its name, handed to a builtin as CHK-206 says, and it filters as a static sampler does for CHK-210 and CHK-281.
+  It is used by its name, handed to a builtin as CHK-206 says, or through a texture's `@sampler` (CHK-279).
+  Either way it filters as a static sampler does for CHK-210 and CHK-281.
   Its name anywhere else is `unsupported-yet`, and so is its name in a test, which samples no texture.
 
 ```sgl

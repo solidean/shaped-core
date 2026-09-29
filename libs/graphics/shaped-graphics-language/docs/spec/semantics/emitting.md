@@ -210,6 +210,9 @@ A binding that is not `@inline` is a group.
   It stands where sg binds a pipeline layout's static sampler of index i: `register(s<i>, space10)` in `hlsl-dx12`, and `[[vk::binding(i + 1, 3)]]` in `hlsl-vulkan`.
   WGSL writes it as `@group(3) @binding(i + 1)`, since binding 0 of sg's own group is the inline constants', and MSL as the entry point's parameter `sampler name [[sampler(i)]]`.
   Its type is EMIT-99's, and its settings reach the layout from `sgl describe` as a group's static sampler's do.
+  An entry point that reaches one of index 16 or more is `too-many-samplers` on every target, since Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` hold 16.
+  Every sampler declared above it counts toward that index, reached or not, so the limit is on the file and not on what one stage uses.
+  So a library file holding more than 16 samplers splits into several, or whatever reaches its seventeenth is refused.
 
 | SGL | HLSL | WGSL |
 |---|---|---|
@@ -378,6 +381,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 | `malformed-tree` | a flat tree the check pass does not produce |
 | `not-core` | EMIT-66 |
 | `too-many-groups` | EMIT-105 |
+| `too-many-samplers` | EMIT-133 |
 | `target-lacks-feature` | EMIT-109 |
 
 ## Open

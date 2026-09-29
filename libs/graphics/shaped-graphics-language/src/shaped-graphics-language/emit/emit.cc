@@ -66,6 +66,8 @@ cc::string_view sgl::emit::to_string(error_kind kind)
         return "layout-conflict";
     case error_kind::padding_forbidden:
         return "padding-forbidden";
+    case error_kind::too_many_samplers:
+        return "too-many-samplers";
     }
     return "";
 }

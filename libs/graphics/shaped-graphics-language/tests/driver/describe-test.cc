@@ -547,3 +547,19 @@ TEST("sgl describe - a file-scope sampler is described with its index, and each 
     CHECK(frozen(shifted) != frozen(d));
     CHECK(frozen(shifted) == cc::format("samplers = edge#1@{}", d.samplers[0].shape));
 }
+
+TEST("sgl describe - a file-scope sampler a texture's @sampler names is one its entry point and pipeline hold")
+{
+    auto source = cc::string(k_file_samplers);
+    source.replace_all("    albedo: texture_2d[float4]\n", "    @sampler(edge)\n    albedo: texture_2d[float4]\n");
+    source.replace_all("material.albedo.sample(p.uv, edge)", "material.albedo.sample(p.uv)");
+    auto const d = described(source);
+
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].samplers.empty());
+    REQUIRE(d.entry_points[1].samplers.size() == 1);
+    CHECK(d.entry_points[1].samplers[0] == "edge");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].samplers.size() == 1);
+    CHECK(d.pipelines[0].samplers[0] == "edge");
+}

@@ -44,11 +44,43 @@ TEST("sgl check - a texture's @sampler names a sampler of its own binding, which
     CHECK(missing.contains("work.t names no @sampler"));
 
     CHECK(reports_for(listing("    @sampler(q) t: texture_2d[float4]\n    s: sampler\n", sample))
-              .contains("the binding has no member q"));
+              .contains("neither the binding nor its file has a sampler q"));
     CHECK(reports_for(listing("    @sampler(u) t: texture_2d[float4]\n    u: texture_2d[float]\n", sample))
               .contains("u is no sampler"));
     CHECK(reports_for(listing("    @sampler(s) b: buffer[float]\n    s: sampler\n")).contains("only a texture is sampled"));
     CHECK(reports_for(listing("    @sampler t: texture_2d[float4]\n    s: sampler\n")).contains("@sampler takes one name"));
+}
+
+TEST("sgl check - a texture's @sampler names a file-scope sampler when its binding has no member of that name")
+{
+    auto const with_file = [](cc::string_view samplers, cc::string_view members, cc::string_view body)
+    { return reports_for(cc::format("{}\n{}", samplers, listing(members, body))); };
+    constexpr auto linear = "sampler e:\n    filter = .linear\n";
+    constexpr auto compare = "sampler e:\n    compare = .less\n";
+    constexpr auto sample = "    let c = work.t.sample(uv)\n";
+
+    CHECK(with_file(linear, "    @sampler(e) t: texture_2d[float4]\n", sample) == "");
+    // a member of the binding hides the file's sampler of its name, which would be the wrong kind here
+    CHECK(with_file(compare, "    @sampler(e) t: texture_2d[float4]\n    e: sampler\n", sample) == "");
+
+    CHECK(with_file(linear, "    @sampler(e) d: texture_2d_depth\n",
+                    "    let c = work.d.sample_compare(uv, reference = 0.5)\n")
+              .contains("sample_compare takes a comparison_sampler, and the @sampler of work.d is e"));
+    CHECK(with_file(compare, "    @sampler(e) t: texture_2d[float4]\n", sample)
+              .contains("sample takes a sampler, and the @sampler of work.t is e"));
+    CHECK(with_file(compare, "    @sampler(e) d: texture_2d_depth\n",
+                    "    let c = work.d.sample_compare(uv, reference = 0.5)\n")
+          == "");
+
+    // CHK-314: a file-scope sampler filters as a static one does, whichever way the call reaches it
+    CHECK(with_file(linear, "    @unfilterable @sampler(e) t: texture_2d[float4]\n",
+                    "    let c = work.t.sample(uv, level = 0.0)\n")
+              .contains("work.t is @unfilterable, and e filters"));
+    CHECK(with_file("sampler e:\n    filter = .nearest\n", "    @unfilterable @sampler(e) t: texture_2d[float4]\n",
+                    "    let c = work.t.sample(uv, level = 0.0)\n")
+          == "");
+
+    CHECK(reports_for(listing("    @sampler(main_ps) t: texture_2d[float4]\n", sample)).contains("main_ps is no sampler"));
 }
 
 TEST("sgl check - a default sampler is the kind the call takes, and filters by the same rules as a named one")

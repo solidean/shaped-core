@@ -881,7 +881,8 @@ struct flattener
     }
 
     /// A sampling call without its sampler calls the record that takes one, with the texture's `@sampler` after the
-    /// coordinate (CHK-279); the check pass has made sure the texture names one.
+    /// coordinate (CHK-279): a member of its binding, or a file-scope sampler.
+    /// The check pass has made sure the texture names one.
     flat_expr_id default_sampled_call(ast::expr_id id, builtin_id with_sampler, cc::span<flat_expr_id const> arguments)
     {
         // the texture, or the binding array it is an element of
@@ -892,8 +893,9 @@ struct flattener
         if (texture == nullptr)
             return fail();
         auto const members = c.out.at(c.out.bindings[c.out.at(texture->binding).info].members);
-        auto const sampler = members[texture->member].default_sampler;
-        if (sampler < 0)
+        auto const& m = members[texture->member];
+        auto const file_sampler = m.default_file_sampler;
+        if (m.default_sampler < 0 && (!is_valid(file_sampler) || c.out.at(file_sampler).state != symbol_state::checked))
             return fail();
         // the call becomes one of the record that takes the sampler, so its arguments match its callee's parameters
         auto const declared = c.symbol_declaring(with_sampler);
@@ -901,8 +903,10 @@ struct flattener
             return fail();
         auto with = cc::vector<flat_expr_id>();
         with.push_back_range(arguments);
-        with.insert_at(
-            2, add_expr(members[sampler].type, id, flat_binding_member{.binding = texture->binding, .member = sampler}));
+        with.insert_at(2, is_valid(file_sampler)
+                              ? add_expr(c.out.at(file_sampler).type, id, flat_file_sampler{.sampler = file_sampler})
+                              : add_expr(members[m.default_sampler].type, id,
+                                         flat_binding_member{.binding = texture->binding, .member = m.default_sampler}));
         auto const& info = c.out.functions[c.out.at(declared).info];
         return add_expr(
             info.result, id,

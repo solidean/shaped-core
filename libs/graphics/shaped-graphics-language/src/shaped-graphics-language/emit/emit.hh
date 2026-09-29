@@ -49,6 +49,8 @@ enum class sgl::emit::error_kind : sgl::u8
     layout_conflict,
     /// A gap before a member of a `@no_padding` struct or binding, which the detail places.
     padding_forbidden,
+    /// A file-scope sampler the entry point reaches whose index is past the 16 a stage holds on Metal and WebGPU.
+    too_many_samplers,
 };
 
 struct sgl::emit::error
