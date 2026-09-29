@@ -549,7 +549,7 @@ struct writer
             [&](flat_and const& a) { result = logical("&&", level::logical_and, expr(a.lhs), expr(a.rhs)); },
             [&](flat_or const& o) { result = logical("||", level::logical_or, expr(o.lhs), expr(o.rhs)); },
             // never in a core tree, which is all that reaches a writer
-            [&](flat_block const&) {});
+            [&](flat_block const&) {}, [&](flat_by_target const&) {});
         return result;
     }
 

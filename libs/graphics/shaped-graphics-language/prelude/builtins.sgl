@@ -1392,7 +1392,11 @@
 @builtin fun ray_query_committed_world_to_object_row(q: ray_query, row: int) -> float4
 
 // The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc raytracing-polyfill.md).
-/// The pool unit of the entry point's k-th acceleration member's TLAS.
-@builtin fun acceleration_root_at(k: int) -> uint
+/// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
+@builtin @pure fun acceleration_root(world: acceleration_structure[.triangles]) -> uint
+/// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
+@builtin @pure fun acceleration_root(world: acceleration_structure[.procedural]) -> uint
+/// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
+@builtin @pure fun acceleration_root(world: acceleration_structure[.mixed]) -> uint
 /// One unit of the pool.
 @builtin @pure fun acceleration_pool_load(unit: uint) -> uint4

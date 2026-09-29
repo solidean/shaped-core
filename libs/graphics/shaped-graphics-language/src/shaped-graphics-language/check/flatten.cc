@@ -799,6 +799,8 @@ struct flattener
     /// A call as its record says: the written arguments evaluated in the order written, each filling its parameter.
     flat_expr_id flatten_bound_call(ast::expr_id id, type_id type, call_record const& record)
     {
+        if (is_by_target(record.callee))
+            return flatten_by_target(id, type, record);
         auto const values = flatten_written(c.out.at(record.written));
         auto const handed = written_closures;
         auto const slots = c.out.at(record.slots);
@@ -959,6 +961,39 @@ struct flattener
         auto const* const record = c.out.builtin_function(s.intrinsic);
         if (record != nullptr && record->with_default_sampler != builtin_id::none)
             return default_sampled_call(id, record->with_default_sampler, arguments);
+        if (record != nullptr && record->takes_acceleration_index)
+        {
+            // CHK-325: the position of the member among the entry point's acceleration members, counted in list order
+            auto const* const member = !arguments.empty() && is_valid(arguments[0])
+                                         ? entry.at(arguments[0]).node.try_as<flat_binding_member>()
+                                         : nullptr;
+            if (member == nullptr)
+                return fail();
+            auto k = 0;
+            auto is_found = false;
+            for (auto const binding : entry.bindings)
+            {
+                auto const members = c.out.at(c.out.bindings[c.out.at(binding).info].members);
+                for (auto i = isize(0); i < members.size() && !is_found; ++i)
+                {
+                    if (binding == member->binding && i32(i) == member->member)
+                        is_found = true;
+                    else if (c.out.at(members[i].type).kind == type_kind::acceleration_structure)
+                        ++k;
+                }
+                if (is_found)
+                    break;
+            }
+            if (!is_found)
+                return fail();
+            auto widened = cc::vector<flat_expr_id>::create_copy_of(arguments);
+            widened.push_back(add_expr(int_type(), id, flat_int_literal{.value = k}));
+            return add_expr(info.result, id,
+                            flat_call{.callee = callee,
+                                      .intrinsic = s.intrinsic,
+                                      .is_pure = info.is_pure,
+                                      .arguments = add_list(widened)});
+        }
         return add_expr(info.result, id,
                         flat_call{.callee = callee,
                                   .intrinsic = s.intrinsic,
@@ -1072,6 +1107,53 @@ struct flattener
         auto const values = flatten_written(c.out.at(record.written));
         auto const argument_closures = written_closures;
         auto const slots = c.out.at(record.slots);
+        return call_closure(id, type, handed, values, slots, argument_closures);
+    }
+
+    /// `by_target(native, emulated)` of raytracing.sgl: both lambdas written out, each a block, and one node holding both.
+    [[nodiscard]] bool is_by_target(symbol_id callee) const
+    {
+        auto const& s = c.out.at(callee);
+        return s.name == "by_target" && c.is_prelude_file(s.file);
+    }
+
+    flat_expr_id flatten_by_target(ast::expr_id id, type_id type, call_record const& record)
+    {
+        (void)flatten_written(c.out.at(record.written));
+        auto const handed = written_closures;
+        if (handed.size() != 2 || handed[0] < 0 || handed[1] < 0)
+            return fail();
+        auto const native = closure_block(id, type, handed[0], "native");
+        auto const emulated = closure_block(id, type, handed[1], "emulated");
+        if (!is_valid(native) || !is_valid(emulated))
+            return fail();
+        return add_expr(type, id, flat_by_target{.native = native, .emulated = emulated});
+    }
+
+    /// The closure `handed`, called with nothing, as a block that leaves with its value.
+    flat_expr_id closure_block(ast::expr_id id, type_id type, i32 handed, cc::string_view name)
+    {
+        auto const label = add_label(name);
+        auto const outer = cc::move(block);
+        block = {};
+        auto const value = call_closure(id, type, handed, {}, {}, {});
+        if (is_valid(value))
+            add_stmt({.file = file(), .expr = id}, flat_leave{.target = label, .value = value});
+        auto const body = add_list(block);
+        block = cc::move(outer);
+        if (!is_valid(value))
+            return fail();
+        return add_expr(type, id, flat_block{.label = label, .body = body});
+    }
+
+    /// The closure `handed`, inlined over `values`, which `slots` assigns to its parameters.
+    flat_expr_id call_closure(ast::expr_id id,
+                              type_id type,
+                              i32 handed,
+                              cc::span<flat_expr_id const> values,
+                              cc::span<i32 const> slots,
+                              cc::span<i32 const> argument_closures)
+    {
         // by value: flattening below may push closures, and the vector moves
         auto const f = closures[handed];
         if (is_valid(f.function))
@@ -1654,7 +1736,8 @@ struct flattener
             auto const* const ref = x.node.try_as<flat_local_ref>();
             if (ref != nullptr && is_substitutable(argument))
                 bound.push_back({.where = where, .local = ref->local});
-            else if (is_substitutable(argument))
+            // CHK-324: a resource stands wherever the parameter is named, since no target holds one in a local
+            else if (is_substitutable(argument) || is_resource_member(argument))
                 bound.push_back({.where = where, .literal = argument});
             else
             {

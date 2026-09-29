@@ -316,7 +316,8 @@ written write_polyfill(call_context const& ctx)
 {
     if (ctx.data == 0)
     {
-        auto const k = wrapped(ctx.arguments[0], precedence::multiplicative);
+        // the member itself has no WGSL binding: flatten appended its position, which is all the roots are indexed by
+        auto const k = wrapped(ctx.arguments[ctx.arguments.size() - 1], precedence::multiplicative);
         return {.text = cc::format("sg_acceleration_roots[{0} / 4][{0} % 4]", k)};
     }
     return {.text = cc::format("sg_acceleration_pool[{}]", ctx.arguments[0].text)};
@@ -424,13 +425,15 @@ void sgl::builtins::register_raytracing(registry& r)
 
     r.add_comment("// The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc "
                   "raytracing-polyfill.md).");
-    r.add(function_record{
-        .signature = "fun acceleration_root_at(k: int) -> uint",
-        .doc = "/// The pool unit of the entry point's k-th acceleration member's TLAS.",
-        .evaluate = zero_uint,
-        .write = {.kind = spelling_kind::custom, .custom = write_polyfill, .data = 0, .wgsl_names = k_polyfill_wgsl},
-        .features = check::feature_set(check::feature::ray_query),
-    });
+    for (auto const geometry : {"triangles", "procedural", "mixed"})
+        r.add(function_record{
+            .signature = cc::format("@pure fun acceleration_root(world: acceleration_structure[.{}]) -> uint", geometry),
+            .doc = "/// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.",
+            .evaluate = zero_uint,
+            .write = {.kind = spelling_kind::custom, .custom = write_polyfill, .data = 0, .wgsl_names = k_polyfill_wgsl},
+            .features = check::feature_set(check::feature::ray_query),
+            .takes_acceleration_index = true,
+        });
     r.add(function_record{
         .signature = "@pure fun acceleration_pool_load(unit: uint) -> uint4",
         .doc = "/// One unit of the pool.",

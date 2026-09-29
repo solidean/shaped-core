@@ -647,8 +647,20 @@ flat_entry_point sgl::check::impl::compacted(checked_module const& m, flat_entry
     return cc::move(c.out.e);
 }
 
-flat_entry_point sgl::check::legalize(checked_module const& m, flat_entry_point const& e, legalize_options const& options)
+flat_entry_point sgl::check::legalize(checked_module const& m,
+                                      flat_entry_point const& given,
+                                      legalize_options const& options)
 {
+    // First, each `flat_by_target` becomes the one form this target writes, and the other is left unreachable.
+    auto chosen = given;
+    for (auto& x : chosen.exprs)
+        if (auto const* const both = x.node.try_as<flat_by_target>())
+        {
+            auto const form = options.is_emulated ? both->emulated : both->native;
+            x.node = given.at(form).node;
+        }
+    auto const& e = chosen;
+
     // Compacted even when it is core already: what legalize returns has nothing unreachable in it and nothing shared,
     // which is what lets a pass over its arrays stand for the tree.
     if (is_core(m, e))

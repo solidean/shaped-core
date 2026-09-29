@@ -256,6 +256,7 @@ struct flat_not;
 struct flat_and;
 struct flat_or;
 struct flat_block;
+struct flat_by_target;
 struct flat_expr;
 struct flat_let;
 struct flat_var;

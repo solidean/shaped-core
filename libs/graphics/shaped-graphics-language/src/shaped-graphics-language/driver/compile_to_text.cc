@@ -138,7 +138,8 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
                                     check::stage_name(request.stage)));
 
     // The check pass writes the structured form, and a target prints the core form.
-    auto const legal = check::legalize(m, e);
+    // WebGPU traces through the emulated form of a trace, and every other target through its native query.
+    auto const legal = check::legalize(m, e, {.is_emulated = request.target == emit::target::wgsl});
     auto emitted = emit::emit_entry_point(m, legal, request.target);
     if (!emitted.has_text())
     {

@@ -109,7 +109,8 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m, sgl::isi
         return result;
     }
 
-    return emit_entry_point(m, check::legalize(m, m.entry_points[entry_point]), t);
+    // WebGPU traces through the emulated form of a trace, and every other target through its native query
+    return emit_entry_point(m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl}), t);
 }
 
 sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,
@@ -125,9 +126,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (t == target::wgsl)
     {
         auto const never = check::feature_set(check::feature::binding_arrays)
-                         | check::feature::multisampled_array_textures | check::feature::ray_query
-                         | check::feature::raytracing_pipeline | check::feature::geometry_shader
-                         | check::feature::tessellation_shader;
+                         | check::feature::multisampled_array_textures | check::feature::raytracing_pipeline
+                         | check::feature::geometry_shader | check::feature::tessellation_shader;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,

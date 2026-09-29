@@ -479,6 +479,9 @@ struct machine
         }
         if (auto const* const c = x.node.try_as<flat_call>())
             return call(x, *c, result);
+        // the interpreter has no device, so it runs what a device without the construct would: the emulated form
+        if (auto const* const both = x.node.try_as<flat_by_target>())
+            return eval(both->emulated, result);
         if (auto const* const n = x.node.try_as<flat_not>())
         {
             auto operand = false;

@@ -230,6 +230,13 @@ struct dumper
                      {
                          out.appendf("(block ${}", label_name(e, b.label));
                          dump_body(e, b.body, indent + 4);
+                     },
+                     [&](flat_by_target const& both)
+                     {
+                         out += "(by_target native=";
+                         dump_expr(e, both.native, indent);
+                         out += " emulated=";
+                         dump_expr(e, both.emulated, indent);
                      });
         out.appendf(" : {})", m.name_of(x.type));
     }

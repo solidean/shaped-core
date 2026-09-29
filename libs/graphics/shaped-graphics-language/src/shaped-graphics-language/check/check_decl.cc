@@ -756,7 +756,7 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding"};
+    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -798,7 +798,7 @@ void checker::compile_enum(symbol_id id)
     auto const& ast = ast_of(file);
     auto const& e = ast.at(decl).node.as<ast::enum_decl>();
 
-    cc::string_view const known[] = {"builtin", "shadowable", "bitflags"};
+    cc::string_view const known[] = {"builtin", "shadowable", "bitflags", "internal"};
     judge_attributes(file, ast.at(decl).attributes, known, "an enum");
     // CHK-321: a builtin enum's cases may be bits, whose `|`, `&` and `has` its registry gives; a program's waits
     if (auto const* const flags = find_attribute(file, ast.at(decl).attributes, "bitflags");
@@ -1116,7 +1116,8 @@ void checker::compile_function(symbol_id id)
                                      "tessellation_evaluation",
                                      "stages",
                                      "shadowable",
-                                     "expect"};
+                                     "expect",
+                                     "internal"};
     judge_attributes(file, d.attributes, known, "a function",
                      is_raster_entry ? setting_scope::description : setting_scope::none);
     auto const* const geometry = find_attribute(file, d.attributes, "geometry");
@@ -1207,9 +1208,10 @@ void checker::compile_function(symbol_id id)
         }
         // CHK-302: a geometry stage's stream is a parameter of its entry point, and of no other function
         else if (ast::is_valid(p.type))
-            type = is_builtin          ? resolve_pattern_type(file, p.type)
-                 : geometry != nullptr ? resolve_type(file, p.type)
-                                       : resolve_value_type(file, p.type);
+            // CHK-324: a function of the prelude may take a resource, which inlining substitutes as its argument
+            type = is_builtin                                   ? resolve_pattern_type(file, p.type)
+                 : geometry != nullptr || is_prelude_file(file) ? resolve_type(file, p.type)
+                                                                : resolve_value_type(file, p.type);
         else if (is_receiver)
             type = receiver;
         else

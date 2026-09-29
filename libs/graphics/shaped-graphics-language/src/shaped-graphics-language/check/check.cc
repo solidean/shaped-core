@@ -667,7 +667,15 @@ bool checker::is_all_functions(cc::span<symbol_id const> ids) const
 
 void checker::merge_scopes()
 {
-    names = prelude_names;
+    // CHK-323: an `@internal` symbol of the prelude is the prelude's alone, and no lookup from the program finds it
+    names = {};
+    for (auto const& [name, ids] : prelude_names)
+        for (auto const id : ids)
+            if (!ast::is_valid(out.at(id).declaration)
+                || find_attribute(out.at(id).file, ast_of(out.at(id).file).at(out.at(id).declaration).attributes,
+                                  "internal")
+                       == nullptr)
+                names[name].push_back(id);
     for (auto const& [name, ids] : file_names)
     {
         auto& seen = names[name];

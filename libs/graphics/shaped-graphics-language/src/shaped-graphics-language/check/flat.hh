@@ -342,6 +342,17 @@ struct sgl::check::flat_block
     constexpr bool operator==(flat_block const&) const = default;
 };
 
+/// The two forms of one value, of which a target writes exactly one: the native form where the device has the construct,
+/// the emulated one where sg does it in software (the trace of raytracing.sgl).
+/// Each is a `flat_block` expression. Structured form only: legalize keeps one of the two by `legalize_options`.
+struct sgl::check::flat_by_target
+{
+    flat_expr_id native = flat_expr_id::none;
+    flat_expr_id emulated = flat_expr_id::none;
+
+    constexpr bool operator==(flat_by_target const&) const = default;
+};
+
 struct sgl::check::flat_expr
 {
     type_id type = type_id::none;
@@ -365,7 +376,8 @@ struct sgl::check::flat_expr
                 flat_not,
                 flat_and,
                 flat_or,
-                flat_block>
+                flat_block,
+                flat_by_target>
         node;
 
     bool operator==(flat_expr const&) const = default;

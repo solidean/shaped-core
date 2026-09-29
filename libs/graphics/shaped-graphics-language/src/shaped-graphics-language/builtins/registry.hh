@@ -210,6 +210,9 @@ struct sgl::builtins::function_record
     bool takes_element = false;
     /// What a device needs to run a call of it: an entry point that reaches one needs it too, and declares it (CHK-322).
     check::feature_set features;
+    /// Takes, past its signature, the position of its acceleration-structure argument among the acceleration members
+    /// of the entry point's binding list, which flatten appends as an int: the emulated trace's root (CHK-325).
+    bool takes_acceleration_index = false;
     /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
     /// The call itself writes nothing, and a local it initializes is never copied.
     bool declares_only = false;

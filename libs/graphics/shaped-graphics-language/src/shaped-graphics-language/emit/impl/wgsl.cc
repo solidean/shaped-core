@@ -140,6 +140,9 @@ public:
     void write_resource(cc::string& out, plan const& p, planned_resource const& b) const
     {
         auto const& t = p.m.at(b.type);
+        // the member keeps its slot and takes no binding: the pool and the roots of group 3 stand for it (EMIT-135)
+        if (t.kind == type_kind::acceleration_structure)
+            return;
         auto const address = cc::format("@group({}) @binding({})", b.group, b.slot);
         // WGSL has no static sampler: the layout carries it, and the group binds it (slib's WGSL notes).
         if (t.kind == type_kind::buffer)
@@ -193,6 +196,17 @@ public:
                 out += "enable primitive_index;\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
+        // EMIT-135: the emulated trace reads sg's acceleration pool and the roots of the dispatch's structures, which sg
+        // binds beside the inline constants (the internal doc raytracing-polyfill.md)
+        auto traces = false;
+        for (auto const& x : p.e.exprs)
+            if (auto const* const call = x.node.try_as<flat_call>())
+                if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                    record != nullptr && (record->takes_acceleration_index || record->name == "acceleration_pool_load"))
+                    traces = true;
+        if (traces)
+            out += "@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;\n"
+                   "@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;\n\n";
         for (auto const& s : p.structs)
         {
             out.appendf("struct {} {{\n", s.name);
