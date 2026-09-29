@@ -35,7 +35,7 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
-* **CHK-14** A `type` alias and a file-scope `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
+* **CHK-14** A `type` alias is `unsupported-yet`, and it still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.

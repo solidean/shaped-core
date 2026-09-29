@@ -456,8 +456,10 @@ ASYNC_TEST("slib sgl compiler - a file-scope sampler is stated at the address ea
         REQUIRE(edge != nullptr);
         CHECK(edge->type == sg::binding_type::sampler);
         CHECK(edge->sampler_type == sg::sampler_binding_type::non_filtering);
-        // dx12's own space; vulkan's binding 0 of the reserved set is the inline constants', and slib's WGSL reader
-        // takes the one off again
+        // dx12's own space
+        // WebGPU keeps binding 0 of the reserved group for the inline constants, so a sampler sits one up
+        // slib's WGSL reader takes that one off again
+        // vulkan's inline constants are push constants, and it keeps the same binding i + 1 for parity
         switch (format)
         {
         case sg::shader_format::dxil:

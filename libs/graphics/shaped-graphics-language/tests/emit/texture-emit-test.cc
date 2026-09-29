@@ -561,7 +561,8 @@ TEST("sgl emit - a file-scope sampler is at its declaration's index among the fi
              "    set_dst[xy] = set_src.SampleLevel(edge, uv, 0.0) * set_depth.SampleCmpLevelZero(shadow, uv, 0.5);\n"
              "}\n");
 
-    // vulkan and WebGPU keep binding 0 of sg's own group for the inline constants, so index i is binding i + 1
+    // WebGPU keeps binding 0 of sg's own group for the inline constants, so index i is binding i + 1
+    // vulkan's inline constants are push constants, and it takes the same i + 1 for parity
     CHECK(text_of(k_file_samplers, target::hlsl_vulkan)
               .contains("[[vk::binding(2, 0)]] [[vk::image_format(\"rgba8\")]] RWTexture2D<float4> set_dst;\n"
                         "\n"

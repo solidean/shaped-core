@@ -527,7 +527,8 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **`@sampler(name)` on a texture member names a sampler of the same binding** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
   A call without a sampler on a texture without one is `missing-sampler`.
 - **A `sampler name:` at file scope is a static sampler of the pipeline layout** (CHK-314), handed to a builtin by its name: `tex.sample(uv, name)`.
-  It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133); `@sampler` cannot name one yet.
+  It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133).
+  `@sampler` cannot name one yet.
 - **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
