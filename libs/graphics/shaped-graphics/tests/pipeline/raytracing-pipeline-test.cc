@@ -216,7 +216,7 @@ namespace
 {
 constexpr auto k_runtime_group = R"(require raytracing_pipeline
 
-binding traced:
+binding traced_open:
     world: acceleration_structure[.triangles]
     hits: mut buffer[float4]
     ids: mut buffer[int4]
@@ -237,11 +237,11 @@ rays path_rays:
     surface: radiance
     occlusion: shadow
 
-@closest_hit fun shade(h: triangle_hit, p: mut radiance){traced}:
+@closest_hit fun shade(h: triangle_hit, p: mut radiance){traced_open}:
     let mut s = shadow(false)
     let o = h.ray.origin + h.ray.direction * h.t
     let r = ray(origin = o, direction = vec3(4.0, 0.0, 2.0), t_min = 0.001, t_max = 2.0)
-    trace(traced.world, r, path_rays.occlusion, mut s, flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit)
+    trace(traced_open.world, r, path_rays.occlusion, mut s, flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit)
     p.t = h.t
     p.u = h.barycentrics.y
     p.v = h.barycentrics.z
@@ -273,11 +273,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline takes a hit group the hos
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
 
-    using open_t = shaders::raytracing_pipeline_open_path_t;
+    using open_t = shaders::raytracing_open_open_path_t;
     auto const hit_shaders = co_await slib::compile_hit_group(
         ctx.get(), &sg_test::shader_fixtures(), &open_t::definition(), k_runtime_group, "material", "runtime.sgl");
     REQUIRE(hit_shaders.size() == open_t::ray_count);
-    auto const desc = co_await shaders::raytracing_pipeline.open_path.description(*ctx, hit_shaders);
+    auto const desc = co_await shaders::raytracing_open.open_path.description(*ctx, hit_shaders);
     CHECK(desc.max_recursion_depth == 2u);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
@@ -305,10 +305,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline takes a hit group the hos
     };
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::traced>();
-    auto const group = ctx->transient.create_binding_group(
-        *cmd, layout,
-        shaders::traced{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::traced_open>();
+    auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                           shaders::traced_open{.world = tlas->as_view(),
+                                                                                .hits = hits.as_readwrite_buffer(),
+                                                                                .ids = ids.as_readwrite_buffer()});
     cmd->raytracing.bind_pipeline(*pipeline);
     cmd->raytracing.bind_group(0, *group);
     cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);

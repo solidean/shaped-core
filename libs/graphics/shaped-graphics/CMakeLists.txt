@@ -426,6 +426,7 @@ if(SC_BUILD_TESTS)
                 dispatch.sgl:*
                 raytracing.sgl:*
                 raytracing_pipeline.sgl:*
+                raytracing_open.sgl:*
                 pixel_semantics.sgl:*
                 sampling.sgl:*
                 shapes.sgl:*
