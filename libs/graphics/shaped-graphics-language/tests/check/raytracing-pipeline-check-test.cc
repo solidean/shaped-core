@@ -228,3 +228,75 @@ TEST("sgl check - a callables table holds callables of one parameter, and a call
           == "no-matching-overload user:[ops[id.x](v)] a callable takes one place of operand, handed over as `mut "
              "p`\n");
 }
+
+TEST("sgl check - a pipeline's setting stands once, and hit_groups is a list of groups")
+{
+    auto const path = cc::string("@raytracing pipeline path:\n") + misses;
+    CHECK(reports(path + "    hit_groups = 3\n")
+          == "invalid-pipeline user:[hit_groups = 3] hit_groups is a hit group, `.host`, or a round list of them\n");
+    CHECK(reports(path + "    hit_groups = .textured\n")
+          == "invalid-pipeline user:[.textured] .textured is no hit group\n");
+    CHECK(reports(path + "    hit_groups = (a = textured)\n").starts_with("invalid-pipeline"));
+    CHECK(reports(path + "    raygen = primary\n") == "invalid-pipeline user:[raygen = primary] raygen is set twice\n");
+    CHECK(reports(path + "    rays = path_rays\n") == "invalid-pipeline user:[rays = path_rays] rays is set twice\n");
+    CHECK(reports(path + "    hit_groups = (textured)\n    hit_groups = (textured)\n")
+          == "invalid-pipeline user:[hit_groups = (textured)] hit_groups is set twice\n");
+    CHECK(reports(path + "    hit_groups = (textured, .host)\n    max_recursion_depth = 2\n    max_recursion_depth = 3\n")
+          == "invalid-pipeline user:[max_recursion_depth = 3] max_recursion_depth is set twice\n");
+}
+
+TEST("sgl check - a hit group holds one record per ray type")
+{
+    // CHK-330: two lines for one ray type would merge into a record neither line states
+    CHECK(reports("hit_group twice for path_rays:\n    surface = (closest_hit = shade)\n    surface = (any_hit = "
+                  "cutout)\n")
+          == "invalid-pipeline user:[surface = (any_hit = cutout)] surface is set twice\n");
+    CHECK(reports("hit_group twice for path_rays:\n    geometry = .triangles\n    geometry = .triangles\n")
+          == "invalid-pipeline user:[geometry = .triangles] geometry is set twice\n");
+}
+
+TEST("sgl check - a ray set's member is a payload, which is a struct")
+{
+    // CHK-328: DXC takes no other payload, so the set says so where the type is written
+    CHECK(reports("rays loose:\n    x: float\n")
+          == "invalid-pipeline user:[float] x is a ray type, whose payload is a struct, and this is float\n");
+}
+
+TEST("sgl check - the module's callables share the layout of every ray-tracing pipeline")
+{
+    // CHK-343: every pipeline holds every table, so a callable's list agrees by position with the pipeline's shaders
+    auto const callables = cc::string_view("struct operand:\n    x: float\n"
+                                           "binding other:\n    v: float\n"
+                                           "@callable fun odd(o: mut operand){other}:\n    o.x = other.v\n"
+                                           "callables ops = (odd)\n");
+    CHECK(reports(cc::string(callables) + "@raytracing pipeline path:\n" + misses + "    hit_groups = (textured)\n")
+          == "invalid-pipeline user:[pipeline path:] group 0 is other to one shader and frame to another: the binding "
+             "lists agree by position\n");
+    // without a pipeline, a table's layout is nobody's
+    CHECK(reports(callables) == "");
+}
+
+TEST("sgl check - the attributes a stage names are a struct of the program, of 32 bytes at most")
+{
+    // CHK-342: in a hit group or not, a procedural hit carries what some intersection reported
+    CHECK(reports("struct too_wide:\n    a: float3\n    b: float3\n    c: float3\n"
+                  "@closest_hit fun wide(h: procedural_hit[too_wide], p: mut radiance):\n    p.color = "
+                  "h.attributes.a\n")
+          == "invalid-entry-point user:[wide] the attributes h carries take 36 bytes, and a target holds at most 32\n");
+    CHECK(reports("@intersection fun odd(b: procedural_box) -> report[ray]:\n    return report.none()\n")
+          == "invalid-entry-point user:[odd] the attributes an @intersection fun reports are a struct of the program, "
+             "and ray is none\n");
+}
+
+TEST("sgl check - a test that reaches a pipeline's trace is unsupported")
+{
+    // a test runs no pipeline, and has no tables for the trace to run against
+    auto const r = reports("fun shoot(){frame} -> float:\n"
+                           "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+                           "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), "
+                           "path_rays.surface, mut p)\n"
+                           "    return p.color.x\n"
+                           "test {frame}:\n    shoot() == 0.0\n");
+    CHECK(r.starts_with("unsupported-yet"));
+    CHECK(r.contains("a test that reaches trace_ray, which only the ray-tracing stages run"));
+}

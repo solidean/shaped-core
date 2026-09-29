@@ -809,6 +809,14 @@ void checker::compile_struct(symbol_id id)
     auto const members = compile_members(file, s.members, true, is_pixel, is_vertex);
     if (is_valid(parameter))
         type_parameter_names.remove_back();
+    // CHK-328: a ray type's member is the payload its stages take, which is a struct
+    if (s.is_ray_set)
+        for (auto const& m : out.at(members))
+            if (m.type != checked_module::error_type
+                && (out.at(m.type).kind != type_kind::structure || out.builtin_type_of(m.type) != nullptr))
+                report(diagnostic_kind::invalid_pipeline, file, span_of(file, ast_of(file).at(m.field).type),
+                       cc::format("{} is a ray type, whose payload is a struct, and this is {}", m.name,
+                                  out.name_of(m.type)));
 
     // The type exists only now, so a field that needs its own struct found a cycle and not a type.
     auto const type = type_id(out.types.size());

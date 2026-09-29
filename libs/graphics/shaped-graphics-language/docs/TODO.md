@@ -43,7 +43,7 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **A host's groups make a payload state the widest access.** A payload a `.host` pipeline traces is `read`/`write` for every stage on HLSL (EMIT-137).
   A group compiled apart cannot agree with the module's inferred qualifiers otherwise.
   The way out is compiling the host's groups against the module's inferred qualifiers, which slib would hand to `compile_hit_group`.
-  hlsl.cc still carries a `TODO` and a `#pragma dxc diagnostic ignored "-Wpayload-access-perf"` from before the inference, which only the widest case needs now.
+  hlsl.cc writes `#pragma dxc diagnostic ignored "-Wpayload-access-perf"` into every ray-tracing stage, where only a stage of a widest payload needs it.
 - **Shared source for a host's hit groups.** `slib::compile_hit_group` compiles a group from SGL text the host concatenates with the ray set's declarations.
   That is a stopgap for `use`: the group's file would import the module that declares the set.
 - **A generic struct's type parameter is not in scope in its methods.** `mixed_hit.procedural()` returns through the helper `procedural_of_mixed[A]`, since the method cannot name `A`.

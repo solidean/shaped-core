@@ -105,7 +105,8 @@ fun cutout(c: triangle_candidate) -> hit_decision:
 ```
 
 **A trace needs `ray_query` where the entry point reaches it**, not where a binding merely holds a structure (CHK-322).
-So `require ray_query` stands in the file, in a binding the entry point lists, or in its body, and a vertex stage that reaches no trace runs on a device without it.
+So `require ray_query` stands in the file, in a binding the entry point lists, or in its body.
+A binding's `require` is a floor for every entry point that lists it, traced or not; one in the file or in a body is not, so a vertex stage that reaches no trace runs on a device without it.
 Nothing restricts the stage: a pixel stage traces, and so may a vertex stage, which no GPU test covers yet.
 
 ### Procedural geometry
@@ -295,6 +296,7 @@ hit_group spheres for path_rays:
 The payload size is the largest payload of its set, and the attribute size the largest its groups' intersections report, a triangle's 8 bytes of barycentrics at least.
 
 * **One binding layout serves every shader of the pipeline**, so their binding lists agree by position, as a raster pipeline's stages do, and they list one `@inline` binding at most.
+  The callables of the module's tables are shaders of every pipeline, so theirs agree too.
 * **Each listed group is for the pipeline's set.**
 * **Every trace its shaders make is of a ray type of its set**, since a trace's contribution, multiplier and miss are positions in that set.
 
@@ -349,7 +351,8 @@ callables ops = (doubled, negated, .host)
 ### What a payload states, on HLSL
 
 DXR's payloads are `[raypayload]`, and every field states which shaders read and write it ([EMIT-137](semantics/emitting.md#ray-tracing)).
-SGL infers that per field from what the module's shaders do: a stage reads and writes the fields its payload parameter does, and a caller the fields of the local it traces with.
+SGL infers that per field from what the module's shaders do: a stage reads and writes the fields its payload parameter does.
+A caller reads and writes the fields every local of the payload's type does, in an entry point that traces the type.
 A stage that hands its payload on to a trace or a callable reads and writes all of it, since what the nested shaders write must survive its exit.
 Every shader of one pipeline must state the same qualifiers, and a host's group is compiled apart.
 **So a payload type that a pipeline with `.host` groups traces, or that no pipeline of the module traces, states the widest access instead.**

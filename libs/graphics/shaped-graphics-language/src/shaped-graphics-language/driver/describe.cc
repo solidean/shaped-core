@@ -234,6 +234,8 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
         for (auto const entry : m.at(g.records))
             if (check::is_valid(entry))
                 features |= m.functions[m.at(entry).info].features;
+        if (check::is_valid(g.intersection))
+            features |= m.functions[m.at(g.intersection).info].features;
     }
     for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
         result.max_payload_size = cc::max(result.max_payload_size, m.ray_data_bytes(ray.type));

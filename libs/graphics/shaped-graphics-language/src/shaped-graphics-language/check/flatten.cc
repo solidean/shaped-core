@@ -74,6 +74,8 @@ struct flattener
 {
     checker const& c;
     cc::vector<stage_violation> stage_violations;
+    /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
+    cc::vector<stage_violation> ray_stage_calls;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
@@ -96,7 +98,7 @@ struct flattener
     cc::optional<fusion> fused;
 
     /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
-    /// A test has no stage, so it may reach what any stage may.
+    /// A test has no stage, so it may reach what any stage may, but a builtin only the ray-tracing stages run.
     void judge_stage(ast::expr_id call, symbol_id callee)
     {
         if (auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
@@ -108,6 +110,11 @@ struct flattener
             auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
             if (record != nullptr && record->uses_derivatives)
                 stage_violations.push_back({.file = file(), .call = call, .callee = callee});
+            auto const ray_stages = stage_bit(stage::raygen) | stage_bit(stage::miss) | stage_bit(stage::closest_hit)
+                                  | stage_bit(stage::any_hit) | stage_bit(stage::intersection)
+                                  | stage_bit(stage::callable);
+            if (auto const& s = c.out.at(callee); s.info >= 0 && (c.out.functions[s.info].stages & ~ray_stages) == 0)
+                ray_stage_calls.push_back({.file = file(), .call = call, .callee = callee});
             return;
         }
         if (entry.entry_stage == stage::none)
@@ -2429,9 +2436,13 @@ void checker::flatten_test(i32 index)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
                           out.at(v.callee).name));
+    // a pipeline's trace or callable runs against tables a test has none of
+    for (auto const& v : f.ray_stage_calls)
+        unsupported(v.file, span_of(v.file, v.call),
+                    cc::format("a test that reaches {}, which only the ray-tracing stages run", out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
-    if (f.is_failed || !f.stage_violations.empty())
+    if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty())
         return;
     f.entry.body = f.add_list(f.block);
     judge_constants(f.entry);

@@ -1,5 +1,6 @@
 #include "../emit/emit-test-support.hh"
 
+#include <clean-core/sequence/sequence.hh>
 #include <shaped-graphics-language/driver/describe.hh>
 
 using namespace sgl_test;
@@ -566,7 +567,7 @@ TEST("sgl describe - a file-scope sampler a texture's @sampler names is one its 
 
 namespace
 {
-/// A procedural pipeline whose payload and attributes each hold an enum.
+/// A procedural pipeline whose payload and attributes each hold an enum, and whose intersection alone needs a feature.
 constexpr auto k_procedural_pipeline = cc::string_view(R"(require raytracing_pipeline, extended_image_formats
 
 enum tag:
@@ -621,4 +622,6 @@ TEST("sgl describe - a ray-tracing pipeline's sizes count an enum as a word, as 
     // two floats and an enum, in the payload and in what the intersection reports
     CHECK(p.max_payload_size == 12);
     CHECK(p.max_attribute_size == 12);
+    // the intersection's needs are the pipeline's, though no record names it
+    CHECK(cc::sequence{p.features}.any([](cc::string const& f) { return f == "extended_image_formats"; }));
 }

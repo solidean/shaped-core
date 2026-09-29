@@ -767,9 +767,11 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-327** `@launch_id` and `@launch_size` are stage inputs of every ray-tracing stage, both `int3`: the ray of the launch it runs for, and the launch's size.
 * **CHK-328** A ray-tracing stage's **payload** is its one `mut` parameter, of a struct type: the caller's place, which the stage reads and writes.
   A payload of another type is `invalid-entry-point`.
+  A ray set's member is the payload of its ray type, so one that is no struct is `invalid-pipeline` at its type.
 * **CHK-342** An `@intersection` is handed its box alone, and no payload ([why](why/checking.md#chk-342)).
-  It returns `report[A]`, whose `A` is a struct of the program; a builtin type there is `invalid-entry-point`.
+  It returns `report[A]`, whose `A` is a struct of the program; a builtin type or a struct of the prelude there is `invalid-entry-point`.
   `A` takes at most 32 bytes, a word per scalar and per enum, which is DXR's cap and all metal's ray data holds; a wider one is `invalid-entry-point`.
+  The same holds of the `A` of every `procedural_hit[A]` and `procedural_candidate[A]` a stage takes, in a hit group or not.
   A procedural hit or candidate a closest hit or an any hit takes carries the attributes the target hands the stage.
 
 | stage | takes, besides stage inputs | returns |
@@ -789,6 +791,7 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   `flags`, a `ray_flags`, and `mask`, an `int`, may follow by name, and any other argument is `no-matching-overload`.
   It gives `void`, and is the target's trace with the ray type's position in its set as the ray contribution and the miss index, and the set's size as the multiplier.
   Its builtin is `@stages(.raygen, .closest_hit, .miss)`, so a trace from any other stage is `stage-not-allowed` (CHK-193).
+  A test that reaches one is `unsupported-yet`, since a test runs no pipeline and has no tables to trace through.
 * **CHK-343** `callables name = (…)` is a **callables table**: `@callable` entry points of one parameter type, and `.host` last for the host's ([why](why/checking.md#chk-343)).
   A table lists at least one callable, a block of settings is none, and `.host` anywhere but last is `invalid-pipeline`.
   So is a callable of another parameter type, whose detail names both.
@@ -796,13 +799,14 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-344** `table[i](mut p)` calls the callable at the run-time index `i` of a callables table, an `int`.
   It takes one argument, marked `mut`, or `no-matching-overload`, which is a place of exactly the table's parameter type, or `type-mismatch`.
   It gives `void`, and is the target's call of the callable at the table's place in the module's section plus `i`.
-  Its builtin is `@stages(.raygen, .closest_hit, .miss, .callable)`.
+  Its builtin is `@stages(.raygen, .closest_hit, .miss, .callable)`, and a test that reaches one is `unsupported-yet`, as by CHK-329.
 
 ### Declarations of a pipeline
 
 * **CHK-330** A `hit_group name for set:` is one row of a ray-tracing pipeline's table, for the ray set it names.
   A name that is no ray set is `invalid-pipeline`, and one that names nothing `unknown-name`, in a hit group and in a pipeline's `rays` alike.
   Its settings are `geometry`, `intersection`, and at most one record per ray type of its set, `ray = (closest_hit = f, any_hit = g)`, either left out.
+  Each setting stands once.
   `geometry` is `.triangles`, the default, or `.procedural`; a procedural group names an `@intersection`, and a group that names one is procedural.
   A record's shaders are entry points of the stage their slot names, and each takes the payload of its record's ray type.
   They take what the group's geometry hits, a triangle's or a procedural primitive's, and a procedural group's the `A` its intersection reports.
@@ -810,10 +814,12 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-331** A `@raytracing pipeline` names its shaders in a block of settings, and its short form is `invalid-pipeline` ([why](why/checking.md#chk-331)).
   `rays` names its ray set and `raygen` its `@raygen` entry point, and it has both.
   `miss.<ray>` names the `@miss` of a ray type of the set, which takes that ray type's payload; a ray type may have none, and none has two.
-  `hit_groups` is a hit group, `.host`, or a round list of them, each a group for the pipeline's ray set, with `.host` last.
+  `hit_groups` is a hit group, `.host`, or a round list of them by name alone, each a group for the pipeline's ray set, with `.host` last.
+  Each setting but `miss.<ray>` stands once, and each `miss.<ray>` once per ray type.
   Its raygen, its misses and the closest hits of its listed groups trace ray types of its set alone, since a trace's contribution, multiplier and miss are positions in that set.
   `max_recursion_depth` is an `int` literal from 1 to 31, which a pipeline with `.host` declares and any other does not.
-  Every shader it names lists the same binding at every position its lists share, `@inline` bindings left out, and they list one `@inline` binding at most.
+  Every shader it names, and every callable of the module's tables (CHK-343), lists the same binding at every position their lists share.
+  `@inline` bindings are left out of that, and they list one `@inline` binding at most.
   Any other setting, and breaking any of these, is `invalid-pipeline`.
 * **CHK-332** A pipeline's **trace graph** has an edge from each ray type to every ray type its miss, or its closest hit in a listed group, traces ([why](why/checking.md#chk-332)).
   A cycle in it is `recursive-trace`, and the pipeline fails, whether or not the raygen reaches it: a host's closest hit may trace into it.
@@ -1024,7 +1030,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-333, CHK-338, CHK-339 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
@@ -1056,7 +1062,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342 |
 | `nesting-too-deep` | CHK-268 |
-| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-330, CHK-331, CHK-332, CHK-343 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |

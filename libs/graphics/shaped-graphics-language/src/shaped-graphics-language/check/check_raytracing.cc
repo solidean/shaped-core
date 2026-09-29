@@ -21,6 +21,20 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
             return cc::string_view();
         return is_valid(out.at(t).generic) ? cc::string_view(out.at(out.at(t).symbol).name) : out.name_of(t);
     };
+    // CHK-342: wherever a stage names the attributes, as a report, a procedural hit or a procedural candidate, every
+    // target passes them as a struct and holds 32 bytes of them at most
+    auto const judge_attributes = [&](type_id attributes, cc::string_view what)
+    {
+        if (attributes == checked_module::error_type)
+            return;
+        auto const& a = out.at(attributes);
+        if (a.kind != type_kind::structure || !is_valid(a.symbol) || is_prelude_file(out.at(a.symbol).file))
+            invalid(cc::format("the attributes {} are a struct of the program, and {} is none", what,
+                               out.name_of(attributes)));
+        else if (auto const bytes = out.ray_data_bytes(attributes); bytes > checked_module::max_attribute_bytes)
+            invalid(cc::format("the attributes {} take {} bytes, and a target holds at most {}", what, bytes,
+                               checked_module::max_attribute_bytes));
+    };
 
     // CHK-327: the stage inputs, each once, each of its type
     auto payloads = 0;
@@ -43,7 +57,8 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
         if (p.is_mut)
         {
             ++payloads;
-            if (p.type != checked_module::error_type && out.at(p.type).kind != type_kind::structure)
+            if (p.type != checked_module::error_type
+                && (out.at(p.type).kind != type_kind::structure || out.builtin_type_of(p.type) != nullptr))
                 invalid(cc::format("{} is the payload, which is a struct", p.name));
             continue;
         }
@@ -58,6 +73,8 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
             ++boxes;
         else
             invalid(cc::format("{} is a {}, which no ray-tracing stage is handed", p.name, type));
+        if (type == "procedural_hit" || type == "procedural_candidate")
+            judge_attributes(out.at(p.type).element, cc::format("{} carries", p.name));
     }
 
     auto const result = named(info.result);
@@ -98,14 +115,8 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
                     "reaches it");
         if (result != "report")
             invalid("an @intersection fun returns what it reports, `report[A]`");
-        else if (out.at(out.at(info.result).element).kind != type_kind::structure
-                 || out.builtin_type_of(out.at(info.result).element) != nullptr)
-            invalid("the attributes an @intersection fun reports are a struct of the program");
-        else if (auto const bytes = out.ray_data_bytes(out.at(info.result).element);
-                 bytes > checked_module::max_attribute_bytes)
-            invalid(cc::format("the attributes an @intersection fun reports take {} bytes, and a target holds at most "
-                               "{}",
-                               bytes, checked_module::max_attribute_bytes));
+        else
+            judge_attributes(out.at(info.result).element, "an @intersection fun reports");
         break;
     case stage::callable:
         // CHK-343: a callable is handed its parameter as the caller's place, and nothing a ray brings
@@ -310,6 +321,8 @@ void checker::compile_hit_group(symbol_id id)
     auto records = cc::vector<symbol_id>::create_filled(rays.size() * 2, symbol_id::none);
     auto intersection = symbol_id::none;
     auto is_procedural = false;
+    // CHK-330: one line per setting, and so at most one record per ray type
+    auto seen = cc::vector<cc::string_view>();
 
     for (auto const& s : ast.at(p.settings))
     {
@@ -322,6 +335,12 @@ void checker::compile_hit_group(symbol_id id)
         }
         auto const name = text_of(file, n->where);
         auto const& value = ast.at(s.value).node;
+        if (cc::sequence{seen}.any([&](cc::string_view line) { return line == name; }))
+        {
+            fail(where, cc::format("{} is set twice", name));
+            continue;
+        }
+        seen.push_back(name);
         if (name == "geometry")
         {
             auto const* const dot = value.try_as<ast::leading_dot>();
@@ -447,6 +466,19 @@ void checker::compile_raytracing_pipeline(symbol_id id)
         return fail_symbol();
     }
 
+    // CHK-331: a setting stated twice would leave which line holds to the reader
+    auto seen = cc::vector<cc::string_view>();
+    auto const is_first = [&](cc::string_view setting, source_span where)
+    {
+        if (cc::sequence{seen}.any([&](cc::string_view s) { return s == setting; }))
+        {
+            fail(where, cc::format("{} is set twice", setting));
+            return false;
+        }
+        seen.push_back(setting);
+        return true;
+    };
+
     // the ray set first, which every other line is read against
     auto set = symbol_id::none;
     for (auto const& s : ast.at(p.settings))
@@ -454,6 +486,8 @@ void checker::compile_raytracing_pipeline(symbol_id id)
             n != nullptr && text_of(file, n->where) == "rays")
         {
             auto const* const value = ast.at(s.value).node.try_as<ast::name>();
+            if (!is_first("rays", span_of(file, s.form)))
+                continue;
             if (value == nullptr)
                 fail(span_of(file, s.form), "`rays` names a ray set");
             else
@@ -513,27 +547,37 @@ void checker::compile_raytracing_pipeline(symbol_id id)
             continue;
         if (name == "raygen")
         {
+            if (!is_first(name, where))
+                continue;
             raygen = ray_entry_named(file, s.value, stage::raygen);
             is_failed = is_failed || !is_valid(raygen);
             continue;
         }
         if (name == "hit_groups")
         {
-            auto elements = ast::range_of<ast::argument>();
+            if (!is_first(name, where))
+                continue;
+            // a group, `.host`, or a round list of them
+            auto listed = cc::vector<ast::expr_id>();
             if (auto const* const t = value.try_as<ast::tuple>())
-                elements = t->elements;
-            else if (auto const* const dot = value.try_as<ast::leading_dot>();
-                     dot != nullptr && text_of(file, dot->name) == "host")
             {
-                has_host = true;
+                for (auto const& element : ast.at(t->elements))
+                    if (!element.name.empty() || element.is_splat || element.is_mut)
+                        fail(span_of(file, element.form), "hit_groups lists its groups by name alone");
+                    else
+                        listed.push_back(element.value);
+            }
+            else if (value.is<ast::name>() || value.is<ast::leading_dot>())
+                listed.push_back(s.value);
+            else
+            {
+                fail(where, "hit_groups is a hit group, `.host`, or a round list of them");
                 continue;
             }
-            auto const listed = ast.at(elements);
-            auto const count = value.is<ast::name>() ? 1 : listed.size();
-            groups.clear();
+            auto const count = listed.size();
             for (auto i = isize(0); i < count; ++i)
             {
-                auto const v = value.is<ast::name>() ? s.value : listed[i].value;
+                auto const v = listed[i];
                 auto const& e = ast.at(v).node;
                 if (auto const* const dot = e.try_as<ast::leading_dot>();
                     dot != nullptr && text_of(file, dot->name) == "host")
@@ -576,6 +620,8 @@ void checker::compile_raytracing_pipeline(symbol_id id)
         }
         if (name == "max_recursion_depth")
         {
+            if (!is_first(name, where))
+                continue;
             auto const parsed = parse_literal_integer(text_of(file, span_of(file, s.value)));
             if (!parsed.has_value() || parsed.value() < 1 || parsed.value() > 31)
                 fail(span_of(file, s.value), "max_recursion_depth is an int literal from 1 to 31");
@@ -609,6 +655,17 @@ void checker::compile_raytracing_pipeline(symbol_id id)
         {
             entries.push_back_range(out.at(out.pipelines[out.at(group).info].records));
             entries.push_back(out.pipelines[out.at(group).info].intersection);
+        }
+        // CHK-343: every callables table of the module joins every ray-tracing pipeline
+        for (auto i = isize(0); i < out.symbols.size(); ++i)
+        {
+            auto const table = symbol_id(i);
+            auto const& t = out.at(table);
+            if (t.kind != symbol_kind::pipeline || !ast::is_valid(t.declaration)
+                || !ast_of(t.file).at(t.declaration).node.as<ast::pipeline_decl>().is_callables)
+                continue;
+            if (demand(table, file, span_of(file, decl)) == symbol_state::checked)
+                entries.push_back_range(out.at(out.pipelines[out.at(table).info].records));
         }
         auto lists = cc::vector<cc::vector<symbol_id>>();
         for (auto const entry : entries)
