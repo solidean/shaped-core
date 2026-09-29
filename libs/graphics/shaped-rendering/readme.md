@@ -110,15 +110,16 @@ The render-routine framework is tested in shaped-graphics, where it lives; concr
 uv run dev.py test "sr"                 # everything in shaped-rendering
 uv run dev.py test "sr - "              # the window suite — headless, runs anywhere
 uv run dev.py test "sr::impl"           # the imgui arithmetic — no device needed, runs everywhere
-uv run dev.py test "sr::imgui_routine"  # imgui end to end on a dx12 device
-uv run dev.py test "sr dx12 - hardware" # every GPU test, on the one hardware context they share
+uv run dev.py test "sr::imgui_routine"  # imgui end to end, on every backend this build has
+uv run dev.py test "sr dx12 - hardware" # every GPU test, on the one dx12 hardware context they share
+uv run dev.py test "sr vulkan"          # the same on vulkan; `sr metal` and `sr webgpu` where those are built
 uv run dev.py test "sg - routine"       # the render-routine framework tests (in shaped-graphics)
 ```
 
-The GPU tests — the imgui routine and both mipmap routines — are `INVOCABLE_TEST`s taking an `sg::context_handle`.
-[tests/dx12-entry.cc](tests/dx12-entry.cc) brings up one context per adapter and runs them all against it, following sg's [adapter rules](../shaped-graphics/docs/testing.md#devices-and-adapters).
-The hardware adapter is the default, and WARP runs where there is none or under `--thorough`.
-Each test still selects by its own name, which runs it on both drivers.
+The GPU tests are `INVOCABLE_TEST`s taking an `sg::context_handle`, and [tests/backends/](tests/backends/) holds one entry driver per backend, each running them all on one context of it.
+On dx12 that follows sg's [adapter rules](../shaped-graphics/docs/testing.md#devices-and-adapters): the hardware adapter is the default, and WARP runs where there is none or under `--thorough`.
+Each test still selects by its own name, which runs it on every driver.
+The routines whose shaders are SGL run on every backend; the ones still in HLSL build only where DXC is, which reaches dx12 and vulkan.
 
 The window suite runs on SDL's dummy video driver, so it needs no display.
 What that cannot reach — a real window manager delivering close and resize events, and a real native handle — lives in the manual bucket and needs a display:

@@ -105,7 +105,7 @@ void imgui_routine::render_viewports(sg::context& ctx)
     install_renderer_callbacks();
 
     // Index 0 is the main viewport, whose target, submit and present the caller owns —
-    // it is rendered by the caller's own execute() call, and presenting it twice would be a second present on the same frame.
+    // it is rendered by the caller's own prepare() and execute(), and presenting it twice would be a second present on the same frame.
     auto& platform_io = ImGui::GetPlatformIO();
     for (auto i = 1; i < platform_io.Viewports.Size; ++i)
     {
@@ -120,6 +120,7 @@ void imgui_routine::render_viewports(sg::context& ctx)
         // acquire_backbuffer resizes the chain to the window's current client size, so a viewport the user is dragging the edge of needs nothing further from us.
         auto rt = chain->acquire_backbuffer();
         auto cmd = ctx.create_command_list();
+        auto const frame = prepare(*cmd, viewport->DrawData);
         {
             // A viewport window shows nothing but imgui, so it is cleared unless imgui says it owns the clear itself (a viewport merged into another's swapchain sets that).
             auto const target = (viewport->Flags & ImGuiViewportFlags_NoRendererClear) != 0
@@ -127,7 +128,7 @@ void imgui_routine::render_viewports(sg::context& ctx)
                                   : rt.cleared(tg::vec4f(0.0f, 0.0f, 0.0f, 1.0f));
             auto pass = cmd->raster.render_to({.color_targets = {target}});
             // Declined means imgui's pipeline is not up yet; the viewport shows its clear this frame.
-            (void)execute(pass, viewport->DrawData);
+            (void)execute(pass, frame);
         }
         ctx.submit_command_list_and_present(*chain, cc::move(cmd));
     }
@@ -183,35 +184,46 @@ cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
     co_return;
 }
 
-imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, ImDrawData* draw_data)
+imgui_routine::prepared_frame imgui_routine::prepare(sg::command_list& cmd, ImDrawData* draw_data)
 {
+    CC_ASSERT(draw_data != nullptr, "draw data must not be null — call ImGui::Render() first");
     auto& ctx = cmd.context();
+    auto frame = prepared_frame{.draw_data = draw_data};
 
-    auto const geo
-        = geometry{.vertices = ctx.transient.create_buffer<ImDrawVert>(
-                       isize(draw_data->TotalVtxCount), sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst),
-                   .indices = ctx.transient.create_buffer<u32>(
-                       isize(draw_data->TotalIdxCount), sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst)};
+    // A new texture's bytes go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them at
+    // submit; an update is a copy on this list, because by then the atlas has been sampled and the copy queue cannot
+    // move it out of `shader_texture` for itself.
+    auto textures = impl::imgui_texture_routine::try_acquire_exclusive(cmd);
+    if (textures.is_ready())
+        textures->service_requests(cmd, draw_data);
+
+    if (draw_data->TotalVtxCount == 0 || draw_data->TotalIdxCount == 0)
+        return frame;
+
+    frame.vertices = ctx.transient.create_buffer<ImDrawVert>(
+        isize(draw_data->TotalVtxCount), sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    frame.indices = ctx.transient.create_buffer<u32>(isize(draw_data->TotalIdxCount),
+                                                     sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst);
 
     // imgui keeps one vertex/index buffer per draw list; we concatenate them into one pair, and the draw loop offsets each list's commands accordingly.
     auto vertex_offset = isize(0);
     auto index_offset = isize(0);
     for (auto const* const list : draw_data->CmdLists)
     {
-        cmd.upload.data_to_buffer(geo.vertices, cc::span<ImDrawVert const>(list->VtxBuffer.Data, list->VtxBuffer.Size),
-                                  vertex_offset);
-        cmd.upload.data_to_buffer(geo.indices, cc::span<u32 const>(list->IdxBuffer.Data, list->IdxBuffer.Size),
+        cmd.upload.data_to_buffer(
+            frame.vertices, cc::span<ImDrawVert const>(list->VtxBuffer.Data, list->VtxBuffer.Size), vertex_offset);
+        cmd.upload.data_to_buffer(frame.indices, cc::span<u32 const>(list->IdxBuffer.Data, list->IdxBuffer.Size),
                                   index_offset);
         vertex_offset += isize(list->VtxBuffer.Size);
         index_offset += isize(list->IdxBuffer.Size);
     }
-
-    return geo;
+    return frame;
 }
 
-sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
+sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, prepared_frame const& frame)
 {
-    CC_ASSERT(draw_data != nullptr, "draw data must not be null — call ImGui::Render() first");
+    CC_ASSERT(frame.draw_data != nullptr, "execute draws what prepare returned; call prepare before the scope opens");
+    auto* const draw_data = frame.draw_data;
 
     auto& cmd = scope.command_list();
     CC_ASSERT(!scope.color_formats().empty(), "imgui must be drawn into a scope with a color target");
@@ -225,14 +237,7 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
     if (!self.is_ready())
         return sg::routine_outcome::declined;
     auto& ctx = cmd.context();
-
-    // Textures first, and BEFORE any refusal below: a draw may sample an atlas imgui only just grew, and imgui's own
-    // bookkeeping has to keep up whether or not we can draw this frame.
-    // A new texture's bytes go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them
-    // at submit; an update is recorded straight onto this list, because by then the atlas has been sampled and the
-    // copy queue cannot move it out of `shader_texture` for itself.
     auto textures = self.acquire_exclusive(self->_textures);
-    textures->service_requests(cmd, draw_data);
 
     // Polled rather than waited on: execute runs inside the caller's rendering scope, so nothing here may block, and
     // a throw would leave their command list unsubmitted.
@@ -242,11 +247,9 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
     if (draw_data->TotalVtxCount == 0 || draw_data->TotalIdxCount == 0)
         return sg::routine_outcome::executed; // nothing to draw is not a refusal
 
-    auto const geo = upload_geometry(cmd, draw_data);
-
     scope.bind_pipeline(**pipeline);
-    scope.bind_vertex_buffer(geo.vertices.as_vertex_buffer());
-    scope.bind_index_buffer(geo.indices.as_index_buffer());
+    scope.bind_vertex_buffer(frame.vertices.as_vertex_buffer());
+    scope.bind_index_buffer(frame.indices.as_index_buffer());
     scope.set_viewport({.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(target_size[0]), float(target_size[1]))});
     scope.set_inline_constants(
         impl::compute_ortho_constants(tg::pos2f(draw_data->DisplayPos.x, draw_data->DisplayPos.y),
@@ -319,11 +322,12 @@ void render_imgui(imgui_context& imgui, sg::context& ctx, sg::swapchain& main, t
 
     auto rt = main.acquire_backbuffer();
     auto cmd = ctx.create_command_list();
+    auto const frame = imgui_routine::prepare(*cmd, ImGui::GetDrawData());
     {
         auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(clear_color)}});
         // The frame is presented either way: a cleared target is the honest "nothing drawn yet" while the shaders
         // build, and skipping the present would stall the window instead.
-        (void)imgui_routine::execute(pass, ImGui::GetDrawData());
+        (void)imgui_routine::execute(pass, frame);
     }
     ctx.submit_command_list_and_present(main, cc::move(cmd));
 }

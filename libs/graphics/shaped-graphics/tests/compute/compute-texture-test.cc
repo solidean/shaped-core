@@ -210,6 +210,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
+    // The texture this draw samples was uploaded in this list, so its transition is found at the draw, inside the
+    // scope, and vulkan and webgpu split the scope for it.
+    // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
     auto const& vs = co_await shaders::textures.screen_vs->acquire(*ctx);
     auto const& ps = co_await shaders::textures.textured_ps->acquire(*ctx);
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
@@ -372,6 +377,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pipeline carries the sampler of the file its p
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // The texture this draw samples was uploaded in this list, so its transition is found at the draw, inside the
+    // scope, and vulkan and webgpu split the scope for it.
+    // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::textures.clamped_draw);
 

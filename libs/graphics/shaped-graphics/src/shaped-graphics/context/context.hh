@@ -87,6 +87,14 @@ public:
     [[nodiscard]] bool portability_checks() const { return _portability_checks.load(cc::memory_order_relaxed); }
     void set_portability_checks(bool enabled) { _portability_checks.store(enabled, cc::memory_order_relaxed); }
 
+    /// Whether a rendering scope that a backend has to close and reopen mid-scope says so, as a warning.
+    /// **On by default**: a split stores and reloads every target, which on a tiler is the most expensive thing a frame does by accident.
+    /// vulkan, webgpu and metal split around a copy recorded inside a scope and around a hazard between two of its draws; dx12 never splits.
+    /// A program that splits knowingly turns it off in its backend's creation config; the `render_pass_split_warnings` field is the same in each.
+    /// The `render_pass_splits` stat counts them either way.
+    /// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
+    [[nodiscard]] bool render_pass_split_warnings() const { return _render_pass_split_warnings; }
+
     /// Whether `ctx.create_swapchain` can be given a `headless_extent` on this context.
     ///
     /// A build-and-device fact rather than a preference, and it differs by backend for a real reason: vulkan needs
@@ -337,6 +345,9 @@ protected:
     /// Which stats this backend counts; the rest read zero and say so through `stats::is_counted`.
     /// Every stat unless a backend names fewer, once during creation, before the context is handed out.
     void set_counted_stats(stat_set counted) { _stats.set_counted(counted); }
+
+    /// What the backend's creation config said about render_pass_split_warnings(), once during creation.
+    void set_render_pass_split_warnings(bool enabled) { _render_pass_split_warnings = enabled; }
 
 private:
     /// `settle_due_completions` under its `settling` lock, which is what makes a returning call complete.
@@ -738,6 +749,7 @@ protected:
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     bool _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
+    bool _render_pass_split_warnings = true; // fixed before the context is handed out, so read without a lock
     cc::string _device_loss_reason;
 
     // Built-in pipeline/layout cache reached via ctx.cached.

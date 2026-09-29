@@ -28,8 +28,8 @@ public:
     ~webgpu_command_list() override;
 
     /// Ends whichever pass is open, so the encoder can take a command of its own.
-    /// A rendering scope stays logically open and reopens at its next draw.
-    void end_open_pass();
+    /// A rendering scope stays logically open and reopens at its next draw, which counts the split and names `split_cause`.
+    void end_open_pass(cc::string_view split_cause = "an operation a render pass cannot hold");
 
     /// Finishes the encoder into a command buffer; the list records nothing afterwards.
     [[nodiscard]] wgpu_command_buffer finish();
@@ -117,6 +117,9 @@ public:
 
     // The open rendering scope, kept so a copy in its middle can close and reopen it.
     bool _in_rendering_scope = false;
+
+    // What ended the open scope's pass, named when its next draw reopens it.
+    cc::string_view _split_cause;
     struct color_attachment
     {
         wgpu_texture_view view;

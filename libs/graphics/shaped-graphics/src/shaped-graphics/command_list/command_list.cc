@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/record/log.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
@@ -34,6 +35,18 @@ command_list::command_list(sg::context& ctx, epoch created_in)
     _context(&ctx)
 {
     // The scopes only store the back-reference; they don't touch any not-yet-constructed member.
+}
+
+void command_list::note_render_pass_split(cc::string_view cause)
+{
+    _stats.add(stat::render_pass_splits);
+    if (!context().render_pass_split_warnings())
+        return;
+
+    CC_LOG_WARNING("a rendering scope{}{} was closed and reopened around {}, which costs a store and a reload of every "
+                   "target; record it before the scope opens, or turn this off with the backend config's "
+                   "render_pass_split_warnings = false",
+                   _rendering_target_set.empty() ? "" : " of ", _rendering_target_set, cause);
 }
 } // namespace sg
 

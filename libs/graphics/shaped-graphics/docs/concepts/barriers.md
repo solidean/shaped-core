@@ -98,7 +98,7 @@ What it does not order is two draws of one render pass: a pixel shader writing a
 So the webgpu backend ends the pass before a draw that touches what an earlier draw of the open pass wrote, or writes what one read, and reopens it with its targets loaded.
 A vertex or index fetch is a read like any other, so a draw fetching a buffer an earlier draw of the pass wrote splits too.
 Which draws write is the bound pipeline's footprint; draws that only read split nothing.
-`render_pass_splits` counts every end and reopen in the middle of a rendering scope, whatever forced it — on webgpu a copy recorded inside the scope counts as much as this hazard.
+`render_pass_splits` counts every end and reopen in the middle of a rendering scope, whatever forced it — on webgpu and vulkan a copy recorded inside the scope counts as much as this hazard.
 Vulkan and metal count theirs in the same stat.
 
 ## Minimal barriers: the three-timeline state

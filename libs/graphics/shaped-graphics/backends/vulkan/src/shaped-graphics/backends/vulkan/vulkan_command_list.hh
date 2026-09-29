@@ -155,6 +155,14 @@ public:
     // Body in vulkan_command_list.raster.cc.
     void reopen_rendering();
 
+    // A copy is as illegal inside a dynamic-rendering instance as a barrier (VUID-vkCmdCopyBuffer-renderpass).
+    // sg allows either in a rendering scope, so the instance is suspended: ended, and left ended until a draw needs it.
+    // Several uploads in a row then cost one split rather than one each.
+    // Bodies in vulkan_command_list.raster.cc.
+    void suspend_rendering(cc::string_view cause);
+    void resume_rendering();
+    bool _rendering_suspended = false;
+
     // The graphics bind + input-assembly state, all scoped to the rendering scope that set it up.
     vulkan_pipeline_layout const* _bound_raster_layout = nullptr;
     cc::vector<vulkan_binding_group const*> _bound_raster_groups;

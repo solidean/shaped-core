@@ -64,14 +64,20 @@ skip `render_imgui` and draw it into your own pass:
 
 ```cpp
 auto cmd = ctx.create_command_list();
+auto const frame = sr::imgui_routine::prepare(*cmd, ImGui::GetDrawData());  // textures and geometry, before the scope
 {
     auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
-    sr::imgui_routine::execute(pass, ImGui::GetDrawData());  // reads the target's format + size off the scope
+    sr::imgui_routine::execute(pass, frame);  // reads the target's format + size off the scope
 }
 ctx.submit_command_list(cc::move(cmd));
 ```
 
-`render_imgui` is a thin facade over `execute` + the viewport calls;
+**`prepare` goes before the scope opens.**
+imgui's texture requests and its geometry are copies, and a copy inside a rendering scope closes and reopens the pass on vulkan, webgpu and metal, which sg then warns about.
+`execute` only draws.
+vulkan still splits once per frame for the barrier the first draw needs on that geometry, until sg can state a buffer's access ahead of a scope.
+
+`render_imgui` is a thin facade over `prepare`, `execute` and the viewport calls;
 it owns the main present, which is why the overlay case uses the primitives directly.
 See the multi-viewport section for the two viewport calls it sequences for you.
 
@@ -241,7 +247,7 @@ imgui.update_viewports();                   // opens / moves / closes the OS win
 sr::imgui_routine::render_viewports(*ctx);  // draws and presents each, own swapchain per viewport
 
 auto cmd = ctx->create_command_list();                      // record the main window after, not before
-// ... your scene + imgui_routine::execute(pass, ImGui::GetDrawData()) ...
+// ... your scene, imgui_routine::prepare(*cmd, …) and a pass with imgui_routine::execute(pass, frame) ...
 ctx->submit_command_list_and_present(*sc, cc::move(cmd));   // main window last
 ```
 

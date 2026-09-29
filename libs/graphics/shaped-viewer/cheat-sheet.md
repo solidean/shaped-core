@@ -971,8 +971,9 @@ sv::viewer_renderer::execute(*cmd, def, plan, resources, store, rt.cleared(clear
 ctx.submit_command_list_and_present(*sc, cc::move(cmd));
 
 // a GUI over the frame is a SECOND pass — every trace must precede any pass, so the frame's cannot be shared
+auto const frame = sr::imgui_routine::prepare(*cmd, ImGui::GetDrawData()); // before the scope: imgui's copies
 auto scope = cmd->raster.render_to({.color_targets = {rt.preserved()}});   // preserved() keeps the frame underneath
-sr::imgui_routine::execute(scope, ImGui::GetDrawData());
+sr::imgui_routine::execute(scope, frame);
 ```
 
 ## Rendering internals

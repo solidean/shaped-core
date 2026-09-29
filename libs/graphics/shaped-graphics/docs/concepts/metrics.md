@@ -52,7 +52,7 @@ Only the barriers on the command-list queue are counted, not the transfer queues
 **A render-pass split is not a barrier and is counted separately.**
 It is any rendering scope ended and reopened mid-scope, whatever forced it.
 A fragment shader writing what the next draw reads costs vulkan an ended and reopened rendering, metal a reopened encoder and webgpu a reopened pass.
-A copy recorded inside the scope costs webgpu one too.
+A copy recorded inside the scope costs vulkan and webgpu one too, since neither may copy inside a pass.
 Each is more expensive than a barrier, and invisible in a barrier count.
 
 ## Time blocked on the GPU

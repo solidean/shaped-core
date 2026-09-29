@@ -81,6 +81,9 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a rendering scope clears, draws, and survives 
 {
     auto& ctx = *handle;
 
+    // The copy the test records inside the scope is the split it pins, and every split says so.
+    nx::expect_warning("was closed and reopened around a copy", {.domain = "sg"});
+
     auto target
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
                                             .width = k_extent,

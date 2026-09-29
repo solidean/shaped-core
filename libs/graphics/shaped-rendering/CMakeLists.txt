@@ -212,23 +212,58 @@ if(SC_BUILD_TESTS)
         sc_stage_runtime_dlls(shaped-rendering-test DLLS "$<TARGET_RUNTIME_DLLS:shaped-rendering-test>")
     endif()
 
-    # The GPU tests run on the dx12 contexts tests/dx12-entry.cc brings up, and compile their shaders through DXC, so they need both the dx12 backend and a compiler.
-    # The tests above need neither and run everywhere.
-    if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
+    # The GPU tests run once per backend this build has: tests/backends/ holds one entry driver per backend, each
+    # invoking every sg::context_handle test on one context of it.
+    # The tests above need no device and run everywhere.
+    set(_sr_test_backends "")
+    if(TARGET shaped-graphics-dx12)
+        target_sources(shaped-rendering-test PRIVATE tests/backends/dx12-entry.cc)
+        list(APPEND _sr_test_backends shaped-graphics-dx12)
+    endif()
+    if(TARGET shaped-graphics-vulkan)
+        target_sources(shaped-rendering-test PRIVATE tests/backends/vulkan-entry.cc)
+        list(APPEND _sr_test_backends shaped-graphics-vulkan)
+    endif()
+    if(TARGET shaped-graphics-metal)
+        target_sources(shaped-rendering-test PRIVATE tests/backends/metal-entry.cc)
+        list(APPEND _sr_test_backends shaped-graphics-metal)
+        # main() arms Metal's validation layer, which is read from the environment before the framework initializes.
+        target_compile_definitions(shaped-rendering-test PRIVATE SR_TEST_HAS_METAL)
+    endif()
+    if(TARGET shaped-graphics-webgpu)
+        target_sources(shaped-rendering-test PRIVATE tests/backends/webgpu-entry.cc)
+        list(APPEND _sr_test_backends shaped-graphics-webgpu)
+    endif()
+
+    # The routines whose shaders are SGL, which every backend compiles with no toolchain beyond slib's own.
+    if(_sr_test_backends)
         target_sources(shaped-rendering-test PRIVATE
-            tests/dx12-entry.cc
+            tests/backends/backends.cc
             tests/shader_fixtures.cc
+            tests/blit-routine-test.cc
             tests/imgui-routine-test.cc
-            tests/imgui-manual-test.cc
-            tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
+            tests/nn-resample-test.cc
+        )
+        target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
+    endif()
+
+    # A person looks at this one, through a dx12 window.
+    if(TARGET shaped-graphics-dx12)
+        target_sources(shaped-rendering-test PRIVATE tests/imgui-manual-test.cc)
+    endif()
+
+    # The routines whose shaders are still HLSL need DXC, which reaches dx12 and vulkan and nothing else.
+    # A build with DXC has no other backend, so these never meet a context their shaders cannot reach.
+    if(_sr_test_backends AND SC_HAS_DXC_COMPILER)
+        target_sources(shaped-rendering-test PRIVATE
+            tests/box-filter-mipmap-test.cc
             tests/denoise-test.cc
             tests/oidn-test.cc
             tests/nn-conv-test.cc
             tests/nn-ops-test.cc
             tests/oidn-network-test.cc
         )
-        target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
         # Intel's own filter, as the oracle the OIDN member is measured against, where it was fetched on request.
         # Linked here and nowhere else: the member runs the weights in its own shaders and never calls the library.
@@ -243,9 +278,11 @@ if(SC_BUILD_TESTS)
         else()
             target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
         endif()
+    endif()
 
-        # These import dxcompiler.dll, so the binary does not start without it, and dxil.dll signs what it emits.
-        # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
+    # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.
+    # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
+    if(WIN32 AND SC_HAS_DXC_COMPILER)
         sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
     endif()
 
@@ -255,7 +292,6 @@ if(SC_BUILD_TESTS)
     # SDL is what hands out the CAMetalLayer, so it needs a window backend as well as the metal one.
     if(APPLE AND SC_HAS_SDL3 AND TARGET shaped-graphics-metal)
         target_sources(shaped-rendering-test PRIVATE tests/metal-window-manual-test.cc)
-        target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-metal)
     endif()
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

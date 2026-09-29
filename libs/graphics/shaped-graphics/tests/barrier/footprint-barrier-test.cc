@@ -177,6 +177,11 @@ ASYNC_INVOCABLE_TEST("sg - a draw pays for the buffer its vertex stage reads, an
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
+    // The draw reads what the dispatch before the scope wrote, and that barrier is found only at the draw, so vulkan
+    // and webgpu split the scope for it.
+    // Nothing states a buffer's access before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
     auto const fill = co_await shaders::footprint.fill.acquire_pipeline(*ctx);
     auto const traffic_layout = ctx->cached.acquire_binding_group_layout<shaders::traffic>();
     auto const shift_layout = ctx->cached.acquire_binding_group_layout<shaders::shift>();
@@ -341,6 +346,9 @@ ASYNC_INVOCABLE_TEST("sg - a draw reading what the previous draw's pixel shader 
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
+    // The split this test provokes on purpose warns on every backend but dx12, as many times as that backend splits.
+    nx::allow_warnings("was closed and reopened around", "sg");
+
     auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.marking);
     auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.reading);
     // Zeroed, so a read that raced ahead of the write reads 0 rather than whatever the allocation held.
@@ -389,6 +397,9 @@ ASYNC_INVOCABLE_TEST("sg - a draw that reads and writes what the previous draw w
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
+    // The split this test provokes on purpose warns on every backend but dx12, as many times as that backend splits.
+    nx::allow_warnings("was closed and reopened around", "sg");
+
     auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.marking);
     auto const accumulating = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.accumulating);
     auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.reading);
@@ -420,6 +431,9 @@ ASYNC_INVOCABLE_TEST("sg - a draw writing what the previous draw read through a 
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // The split this test provokes on purpose warns on every backend but dx12, as many times as that backend splits.
+    nx::allow_warnings("was closed and reopened around", "sg");
 
     auto const peeking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.peeking);
     auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.marking);

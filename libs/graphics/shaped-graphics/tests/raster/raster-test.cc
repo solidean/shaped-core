@@ -148,6 +148,77 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline declared in SGL draws what the hand-built 
     }
 }
 
+// A copy recorded inside an open rendering scope, which sg allows and vulkan, webgpu and metal can only do by closing the pass around it.
+// It is how a routine drawing into its caller's scope uploads its own geometry.
+// The second copy rewrites what the first draw already read, so the pass has to close after a draw and reopen keeping it.
+// A closed pass stays closed until the next draw, so the two copies ahead of the first draw cost one split between them.
+ASYNC_INVOCABLE_TEST("sg - a copy inside a rendering scope lands before the draw after it, and keeps what was drawn",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // Every backend but dx12 has to close its pass for the copies, and says so.
+    if (ctx->backend() != sg::backend_kind::dx12)
+        nx::expect_warning("was closed and reopened around a copy", {.domain = "sg"});
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::quads.drawn);
+
+    auto const corner = [](float x, float y) { return shaders::quad::per_vertex{.corner = tg::vec3f(x, y, 0.0f)}; };
+    shaders::quad::per_vertex const quad[] = {
+        corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, -1), corner(0, 1), corner(-1, 1),
+    };
+    shaders::quad::per_instance const left_red[] = {{.offset = tg::vec3f(0, 0, 0), .tint = tg::vec4f(1, 0, 0, 1)}};
+    shaders::quad::per_instance const right_blue[] = {{.offset = tg::vec3f(1, 0, 0), .tint = tg::vec4f(0, 0, 1, 1)}};
+
+    auto const corners = ctx->persistent.create_buffer<shaders::quad::per_vertex>(
+        6, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto const instance = ctx->persistent.create_buffer<shaders::quad::per_instance>(
+        1, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto const image
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = 4,
+                                             .height = 4,
+                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto const before = ctx->metrics.stats();
+    auto cmd = ctx->create_command_list();
+    {
+        auto pass = cmd->raster.render_to(
+            shaders::target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 1, 0, 1))});
+        pass.bind_pipeline(*pipeline);
+        pass.bind_vertex_buffers(shaders::quad::buffers{.per_vertex = corners, .per_instance = instance}.views());
+
+        cmd->upload.data_to_buffer(corners, cc::span<shaders::quad::per_vertex const>(quad));
+        cmd->upload.data_to_buffer(instance, cc::span<shaders::quad::per_instance const>(left_red));
+        pass.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 1}});
+
+        cmd->upload.data_to_buffer(instance, cc::span<shaders::quad::per_instance const>(right_blue));
+        pass.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 1}});
+    }
+    auto const future = cmd->download.bytes_from_texture(image.raw());
+    ctx->submit_command_list(cc::move(cmd));
+    auto const d = ctx->metrics.stats() - before;
+
+    // dx12 copies without leaving the scope, and everyone else splits once per run of copies rather than per copy.
+    sg_test::require_counted(d, sg::stat::render_pass_splits);
+    CHECK(d[sg::stat::render_pass_splits] == (ctx->backend() == sg::backend_kind::dx12 ? 0 : 2));
+
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == 4 * 4 * 4);
+    auto const channel = [&](int x, int y, int c) { return int(pixels[(y * 4 + x) * 4 + c]); };
+    for (auto y = 0; y < 4; ++y)
+    {
+        // The first draw, which a reopen that cleared again would have erased.
+        CHECK(channel(0, y, 0) == 255);
+        CHECK(channel(0, y, 1) == 0);
+        // The second, drawn from the rewritten instance.
+        CHECK(channel(3, y, 2) == 255);
+        CHECK(channel(3, y, 1) == 0);
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a pipeline built for one target set refuses a rendering of another, even where the formats "
                      "agree",
                      (sg::context_handle const& ctx))

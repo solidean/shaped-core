@@ -75,7 +75,7 @@ sg::gpu_timestamp webgpu_command_list::query_record_gpu_timestamp()
     // WORKAROUND: the end of the pass writes into the set's last slot, which nothing reads.
     // emdawnwebgpu passes WGPU_QUERY_SET_INDEX_UNDEFINED to JS as 4294967295 rather than as an absent field, which Dawn tolerates and wgpu refuses as out of bounds.
     // See docs/bugs-external/webgpu-timestamp-write-index-sentinel; with the fix this goes back to the undefined index and every slot is usable.
-    end_open_pass();
+    end_open_pass("a timestamp query");
     auto const writes = WGPUPassTimestampWrites{
         .nextInChain = nullptr,
         .querySet = lease->query_set.get(),

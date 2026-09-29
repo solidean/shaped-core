@@ -784,9 +784,7 @@ bool oidn_network::execute(sg::command_list& cmd,
                                                                           .read_offset_x = read_offset[0],
                                                                           .read_offset_y = read_offset[1],
                                                                           .input_scale = input_scale,
-                                                                          ._pad0 = 0,
-                                                                          ._pad1 = 0,
-                                                                          ._pad2 = 0});
+                                                                          ._pad0 = 0});
             cmd.compute.dispatch_threads(interior[0], interior[1], 1);
         }
 

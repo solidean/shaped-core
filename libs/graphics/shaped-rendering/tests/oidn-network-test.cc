@@ -368,7 +368,9 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
 // What this adds over the tests above is everything between `sr::denoise_routine` and the shaders: that the method
 // resolves, that the guide contract is enforced, that the network lands in the caller's history and is reused, and
 // that a second call on the same history does not rebuild it.
-ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;

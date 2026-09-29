@@ -154,9 +154,10 @@ sr::apply_solidean_default_style(style);     // or into any ImGuiStyle you own
 sr::render_imgui(imgui, *ctx, *sc, tg::vec4f(0.09f, 0.09f, 0.11f, 1.0f));  // clear_color default = opaque black
 
 // or the compositing path — draw imgui into your own pass (over a 3D scene), then drive viewports yourself:
+auto const frame = sr::imgui_routine::prepare(*cmd, ImGui::GetDrawData());  // BEFORE the scope: textures + geometry are copies
 {
     auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
-    sr::imgui_routine::execute(pass, ImGui::GetDrawData());  // format + size read from the scope's target
+    sr::imgui_routine::execute(pass, frame);  // only draws; format + size read from the scope's target
 }
 // multi-viewport only, AFTER the main draw is recorded, BEFORE its present — both required once enabled:
 imgui.update_viewports();                             // open / move / close the OS windows

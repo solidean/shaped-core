@@ -588,9 +588,10 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
                 auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0.02f, 0.02f, 0.03f, 1))}});
                 blitted = sr::blit_routine::execute(pass, images.composed);
             }
+            auto const panel = sr::imgui_routine::prepare(*cmd, ImGui::GetDrawData());
             {
                 auto pass = cmd->raster.render_to({.color_targets = {rt.preserved()}});
-                panelled = sr::imgui_routine::execute(pass, ImGui::GetDrawData());
+                panelled = sr::imgui_routine::execute(pass, panel);
             }
             auto const drew_everything
                 = blitted == sg::routine_outcome::executed && panelled == sg::routine_outcome::executed;

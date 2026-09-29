@@ -47,7 +47,7 @@ struct sr::imgui_context_description
 ///     imgui.begin_frame(*win, delta_time);
 ///     ImGui::ShowDemoWindow();
 ///     imgui.end_frame();
-///     // ... sr::imgui_routine::execute(pass, ImGui::GetDrawData()) inside a rendering scope
+///     // ... sr::imgui_routine::prepare(cmd, ImGui::GetDrawData()), then execute(pass, frame) inside a rendering scope
 ///
 /// Docking is always enabled.
 /// Multi-viewport is opt-in via imgui_context_description::enable_viewports, and then installs itself on the first begin_frame(window&) — see update_viewports.

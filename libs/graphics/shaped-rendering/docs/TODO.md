@@ -63,8 +63,6 @@ Bigger design intent lives in [structure.md](structure.md).
 - imgui viewports: `ImGuiBackendFlags_HasMouseHoveredViewport` is not set, so imgui infers the hovered viewport from the mouse position rather than asking the platform.
   That is wrong when another application's window sits on top of a viewport — SDL would have to report the window under the cursor.
 - imgui: an Alpha8 atlas path (the shader samples `.rgba`, so `TexDesiredFormat` is pinned to RGBA32).
-- The routines ported to SGL reach every backend, and sr's GPU tests still run them on dx12 alone.
-  A webgpu or metal leg for `imgui-routine-test.cc` and the raster mip test is what would show it.
 - The routine library watches `std::shared_ptr<slib::shader_library>`; `add_shader_library` accepts any number, though slib currently allows one alive at a time.
 - Settle the module layout once the first routines land, and grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) accordingly.
 
