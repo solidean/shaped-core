@@ -76,6 +76,10 @@ enum class sg::feature
     /// A raster pipeline may fill triangles as wireframe (`fill_mode::wireframe`).
     /// WebGPU has no wireframe fill at all, and Vulkan gives it only with the `fillModeNonSolid` device feature.
     wireframe_fill,
+
+    /// A texture or a raster pipeline may use `pixel_format::depth32_float_stencil8`, sg's one format with a stencil aspect.
+    /// WebGPU has it only with the optional `depth32float-stencil8` feature, and Vulkan asks the device per format.
+    depth32_float_stencil8,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u16);
@@ -101,8 +105,9 @@ inline constexpr feature k_all_features[] = {
     feature::primitive_index,
     feature::sample_rate_shading,
     feature::wireframe_fill,
+    feature::depth32_float_stencil8,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::wireframe_fill) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::depth32_float_stencil8) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `raytracing`, which is also what SGL's `require` spells it as.
@@ -138,6 +143,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "sample_rate_shading";
     case feature::wireframe_fill:
         return "wireframe_fill";
+    case feature::depth32_float_stencil8:
+        return "depth32_float_stencil8";
     }
     return "";
 }

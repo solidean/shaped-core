@@ -126,6 +126,8 @@ public:
             return _readwrite_image_formats;
         case sg::feature::float32_filtering:
             return _float32_filtering;
+        case sg::feature::depth32_float_stencil8:
+            return _depth32_float_stencil8;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
         case sg::feature::sample_rate_shading:
@@ -443,6 +445,7 @@ public:
         bool timestamps = false;
         bool readwrite_image_formats = false; ///< texture-formats-tier2
         bool float32_filtering = false;       ///< float32-filterable
+        bool depth32_float_stencil8 = false;  ///< depth32float-stencil8
         bool extended_image_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
     };
 
@@ -461,6 +464,7 @@ private:
     isize _uniform_offset_alignment = 256;
     bool _readwrite_image_formats = false; // texture-formats-tier2 was granted
     bool _float32_filtering = false;
+    bool _depth32_float_stencil8 = false;
     bool _extended_image_formats = false;
 
     sg::epoch _current_epoch = sg::epoch::first;

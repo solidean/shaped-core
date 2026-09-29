@@ -131,6 +131,8 @@ ASYNC_INVOCABLE_TEST("sg - each stencil_op leaves its own value, in the slot and
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::depth32_float_stencil8))
+        SKIP("this device has no depth32_float_stencil8, sg's one stencil format");
 
     // A column per (op, start value), a row per (face, slot): 8 × 3 by 2 × 3 pixels.
     // Each pixel is seeded to its start, has one op applied, and is then probed for the value the op should leave.
@@ -256,6 +258,8 @@ ASYNC_INVOCABLE_TEST("sg - the stencil read mask narrows the comparison and the 
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::depth32_float_stencil8))
+        SKIP("this device has no depth32_float_stencil8, sg's one stencil format");
 
     // Every pixel starts at 0xF0, then one pipeline per column:
     //  0: `replace` with 0x05 through write mask 0x0F, which keeps the high nibble: 0xF5;

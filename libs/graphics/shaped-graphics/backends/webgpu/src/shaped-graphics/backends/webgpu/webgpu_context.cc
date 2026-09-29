@@ -68,6 +68,7 @@ void webgpu_context::set_limits(isize uniform_offset_alignment, granted_features
     _uniform_offset_alignment = uniform_offset_alignment;
     _readwrite_image_formats = features.readwrite_image_formats;
     _float32_filtering = features.float32_filtering;
+    _depth32_float_stencil8 = features.depth32_float_stencil8;
     _extended_image_formats = features.extended_image_formats;
     _limits.max_sample_count = 4;
 

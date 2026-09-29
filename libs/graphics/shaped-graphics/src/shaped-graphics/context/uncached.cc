@@ -62,6 +62,10 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
         return cc::string("the pipeline has a geometry stage, and this device lacks sg::feature::geometry_shader");
     if (desc.rasterization.fill == sg::fill_mode::wireframe && !supported.has(sg::feature::wireframe_fill))
         return cc::string("the pipeline fills wireframe, and this device lacks sg::feature::wireframe_fill");
+    if (desc.depth_stencil_format == sg::pixel_format::depth32_float_stencil8
+        && !supported.has(sg::feature::depth32_float_stencil8))
+        return cc::string("the pipeline's depth-stencil format is depth32_float_stencil8, and this device lacks "
+                          "sg::feature::depth32_float_stencil8");
     if (auto conflict = sg::impl::find_binding_conflict(stages); conflict.has_value())
         return conflict;
     if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())

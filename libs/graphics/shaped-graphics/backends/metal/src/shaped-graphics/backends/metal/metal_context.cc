@@ -139,6 +139,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
+    case sg::feature::depth32_float_stencil8:
+        // `MTLPixelFormatDepth32Float_Stencil8` is on every Apple GPU.
+        return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
