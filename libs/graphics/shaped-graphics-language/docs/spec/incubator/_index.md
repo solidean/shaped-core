@@ -41,3 +41,4 @@ Each file has the same shape, so an idea can be picked up cold:
 | [atomics.md](atomics.md) | float, 64-bit, image and vertex-stage atomics and a compare-exchange, each behind the sg feature its missing target needs |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |
 | [testing.md](testing.md) | tests on the GPU against the interpreter, resource values in tests, captured constants and message matching |
+| [compute-throughput.md](compute-throughput.md) | a 16-bit float and matrix fragments as features, which a fast compute kernel such as a denoise network needs |

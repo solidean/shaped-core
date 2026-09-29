@@ -41,7 +41,7 @@ That pairing is the point of the schema.
 Before the manifests, the same constant name meant a git commit in six scripts and an archive digest in three, with sqlite's being SHA3-256 and nothing recording that.
 
 **`source` and `track` are separate.**
-`source` is how we obtain it (`git`, `github-release`, `url`); `track` is how "what is current" is defined (`tags`, `default-branch`, `github-releases`, `sqlite`, `none`).
+`source` is how we obtain it (`git`, `github-release`, `github-files`, `url`); `track` is how "what is current" is defined (`tags`, `default-branch`, `github-releases`, `sqlite`, `none`).
 They diverge more often than you would expect.
 Zydis is a `github-release` we *clone* rather than download, so its digest is a git commit.
 stb, ImPlot and ImGuizmo cut no usable tags, so they are `default-branch`: "newer" means a head some number of commits ahead, not a higher version.
@@ -50,11 +50,39 @@ stb, ImPlot and ImGuizmo cut no usable tags, so they are `default-branch`: "newe
 `vendored` is committed in-tree.
 `fetched` hydrates a gitignored `.install/` on demand, so it can be absent or stale on any given checkout.
 `bundled` arrives inside another upstream in the same directory, as Zycore does inside the Zydis amalgamation.
+`on-request` hydrates exactly as `fetched` does, but no configure step runs its script, so it is normally absent.
+A person fetches it by hand with `uv run extern/<dep>/fetch-<dep>.py`, and whatever needs it SKIPs or reports `unsupported` without it.
+The OIDN library is one: only an oracle test compares against it, and 53 MB is not worth paying on every configure for that.
+
+**`files` lists what a `github-files` upstream fetches**, when the unit wanted is a few files rather than a whole repository or release.
+Each entry is a `path` in the repository at `tag` and the `sha256` of its bytes, and every file is verified on its own.
+`lfs: true` marks a Git LFS-tracked file, which is fetched from `media.githubusercontent.com`; the rest come from `raw.githubusercontent.com`.
+Mixing them up fails in both directions — `raw` serves an LFS file's pointer text, and `media` 404s on an ordinary file.
+`pin_hash` is then the sha256 over the UTF-8 lines `<path> <sha256>`, each newline-terminated, one per entry in declaration order.
+So adding or removing a file changes the pin as surely as changing one does.
+Loading the manifest refuses a `pin_hash` that does not match that list, so every tool that reads the pin sees the same refusal.
+It also requires `path` and `sha256` on every entry, and refuses a `path` that is absolute or climbs out with `..`.
+extern/oidn-weights is the one `github-files` upstream.
 
 **`tag_pattern` filters what counts as a version**, for `track: tags` only.
 Upstreams tag far more than they release, and GitHub's tags endpoint has no useful order, so tags are filtered by this pattern and then sorted numerically.
 The default matches a plain version number.
 Dear ImGui needs `^v\d+(\.\d+)*-docking$`, because we track its docking branch rather than mainline.
+
+**`unavailable_on` names the machines we pin nothing for** — upstream publishes no asset there, or we deliberately skip the one it does.
+It is the field a missing platform must go through rather than a check inside the fetch script.
+On such a host every pin and asset field resolves empty, including a per-OS one the manifest does declare.
+The keys are `windows`, `linux` and `macos`, each also spellable with an architecture — `windows-arm64`, `linux-arm64`, `macos-x64` and their `-x64` / `-arm64` siblings.
+A bare OS key covers every machine that system runs on; an arch-qualified one covers exactly that machine, which is what an upstream shipping x64 Linux but not arm64 Linux needs.
+An unrecognised key is refused at load, because ignoring it would silently mean "available everywhere" — the opposite of what the manifest says.
+
+Declaring it is not optional politeness.
+A missing per-OS key stays a hard error, since that means nobody has looked; `unavailable_on` is how the manifest says somebody did.
+And an upstream left undeclared is fetched anyway, with the archive for another instruction set installing perfectly cleanly.
+CMake then reads `.install/` as "the dependency is here", and the first sign of trouble is the linker refusing it.
+OIDN publishes no asset for windows-arm64 or linux-arm64, and its macos-x64 asset is deliberately unpinned, so it declares all three.
+DXC ships no macOS build and no arm64 Linux one, so it declares those.
+[extern/manifest-self-test.py](../../extern/manifest-self-test.py) pins both against all six hosts, and runs in `check`'s `dev-selftest` gate.
 
 **`license` is an SPDX identifier or expression**, `license_files` are paths relative to the dependency directory, and `used_by` is the one-line answer to "why do we have this".
 An upstream that ships no license file of its own carries the text inline as `license_text` — the SQLite amalgamation is the only one.
@@ -68,6 +96,13 @@ Copy mechanics — `COPY_MAP`, `WIPE`, `STRIP_PREFIX`, `ARCH_MAP`, post-copy rew
 A copy plan is executable, not configuration.
 DXC's members are architecture-templated and ImGuizmo needs a post-copy include fixup, neither of which YAML expresses without becoming a worse programming language.
 The split is that the manifest owns *what we are on*, and the script owns *how it gets here*.
+
+### Skipping a fetch
+
+Every configure runs the fetch script of each `fetched` dependency, and `SC_SKIP_<NAME>=1` in the environment opts out of one:
+`SC_SKIP_DXC`, `SC_SKIP_ZYDIS`, `SC_SKIP_SDL3`, `SC_SKIP_SQLITE` and `SC_SKIP_OIDN_WEIGHTS`.
+Skipping leaves the dependent feature unbuilt or reporting `unsupported`, never a failed configure.
+An `on-request` dependency has no such variable, because nothing fetches it in the first place — `uv run extern/oidn/fetch-oidn.py` is how the OIDN oracle gets its library.
 
 ## `deps list`
 
@@ -176,7 +211,7 @@ It prints each asset's license members and warns about one `LICENSE_SOURCES` doe
 Add `extern/<dep>/` with a `dependency.yml`, a `CMakeLists.txt`, and a vendor or fetch script modeled on the closest existing one.
 `extern/xxhash/` is the model for a vendored git pin, `extern/sdl3/` for an archive fetch.
 Register it in [extern/CMakeLists.txt](../../extern/CMakeLists.txt) with an `SC_USE_VENDORED_<LIB>` option; a fetched one also gates on `EXISTS .install/pin.txt`, so a plain checkout still configures.
-A fetched one needs an `ensure_*` in [tools/dev/lib/pipeline/prereqs.py](../../tools/dev/lib/pipeline/prereqs.py) too.
+A `fetched` one needs an `ensure_*` in [tools/dev/lib/pipeline/prereqs.py](../../tools/dev/lib/pipeline/prereqs.py) too; an `on-request` one must not have one.
 
 If its license is not already on the allowlist, read the terms and add it there with a reason — that is the gate doing its job, not an obstacle to route around.
 
