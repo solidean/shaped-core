@@ -1,5 +1,5 @@
-// What SGL states for every target and only a GPU shows each backend doing: flat interpolation, discard beside a
-// derivative, a written depth and a written sample mask.
+// What SGL states for every target and only a GPU shows each backend doing.
+// Flat interpolation, discard beside a derivative, a written depth and a written sample mask.
 
 @vertex struct tagged_corner:
     position: float2
@@ -32,8 +32,8 @@ pipeline flat_tags:
     format = .rgba32_float
 
 // The pixels of column 0 discard, and their right-hand neighbours then take a derivative across them.
-// x² at pixel centres steps by 2 between columns 0 and 1 and by 6 between 2 and 3, so only a derivative that still
-// saw the discarded pixel's value reads 2.
+// x² at pixel centres steps by 2 between columns 0 and 1 and by 6 between 2 and 3.
+// So only a derivative that still saw the discarded pixel's value reads 2.
 @pixel fun derivative_ps(p: tagged) -> tag_target:
     let x = p.position.x
     if x < 1.0 => discard

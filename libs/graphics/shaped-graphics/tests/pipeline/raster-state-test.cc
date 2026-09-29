@@ -155,8 +155,9 @@ ASYNC_INVOCABLE_TEST("sg - each primitive_topology assembles one vertex list int
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // Four vertices at pixel centres of a 16 × 16 target, in a Z: top-left, top-right, bottom-left, bottom-right.
-    // Every probe below lies strictly inside a triangle or on the middle of a line, away from any vertex and from any
-    // triangle edge a probe of that topology reads, so no rasterization tie-break decides it.
+    // Every probe below lies inside a triangle or on the middle of a line, away from any vertex.
+    // The one on the strip's shared diagonal is covered by exactly one of its two triangles, whatever the tie-break.
+    // So no rasterization rule decides a probe that is checked.
     constexpr int size = 16;
     tg::vec2f const z[] = {
         sg_test::unit_at_pixel(1.5f, 1.5f, size, size),
@@ -167,8 +168,7 @@ ASYNC_INVOCABLE_TEST("sg - each primitive_topology assembles one vertex list int
     sg_test::rect const whole[] = {sg_test::rect_at(0, 0, size, size, size, size, 0.5f, white)};
     auto const batch = sg_test::rect_batch(*ctx, whole, z);
 
-    // The probes: the upper-left triangle's inside, the lower-right triangle's inside, the top line's middle,
-    // the middle of the diagonal from top-right to bottom-left, and the first vertex's own pixel.
+    // The probes: inside the upper-left triangle, inside the lower-right one, the top line's middle, the diagonal's middle, and the first vertex's pixel.
     struct probe
     {
         int x;
@@ -220,8 +220,8 @@ ASYNC_INVOCABLE_TEST("sg - a second scope's target_op keeps, clears or discards 
 
     // The first scope clears to red and draws white over the left half.
     // The second scope opens with the op under test and draws green over column 3 only.
-    // Preserve keeps the white and the red around column 3, clear replaces both by its own color, and discard's
-    // contents are undefined, so only column 3 is read after it.
+    // Preserve keeps the white and the red around column 3, and clear replaces both by its own color.
+    // Discard's contents are undefined, so only column 3 is read after it.
     constexpr int width = 4;
     auto const red = tg::vec4f(1, 0, 0, 1);
     auto const green = tg::vec4f(0, 1, 0, 1);

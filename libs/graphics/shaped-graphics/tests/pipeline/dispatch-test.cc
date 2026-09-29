@@ -14,8 +14,8 @@ using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
 
-// dispatch.sgl's entry points, dispatched and read back: the dispatch shapes, inline constants set per dispatch, and
-// what a binding group's views and lifetimes mean once the GPU runs them.
+// dispatch.sgl's entry points, dispatched and read back: the dispatch shapes and the inline constants set per dispatch.
+// Also what a binding group's views and lifetimes mean once the GPU runs them.
 
 ASYNC_INVOCABLE_TEST("sg - dispatch_threads rounds each axis up to whole workgroups, and inline constants change per "
                      "dispatch",
@@ -281,8 +281,8 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline over the same layout keeps the groups boun
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    // `multiply_three` and `square_product` list the same groups, so they share one layout, and a group bound under the
-    // first is still bound under the second, as WebGPU keeps it.
+    // `multiply_three` and `square_product` list the same groups, so they share one layout.
+    // A group bound under the first is then still bound under the second, as WebGPU keeps it.
     // `shared` is read through group 0 under the first, then written through group 2 under the second.
     constexpr int count = 64;
     auto const multiply = co_await shaders::dispatch.multiply_three.acquire_pipeline(*ctx);
@@ -438,10 +438,10 @@ ASYNC_INVOCABLE_TEST("sg - two groups rebound between dispatches, and one group 
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    // double_values.sgl: `scaled` multiplies `work` by `factor`, and `main` doubles `work`, one layout for `work` in
-    // both, at slot 1 in `scaled` and slot 0 in `main`.
-    // Three dispatches: scaled by 3 through one factor group, scaled by 5 through another rebound in its place,
-    // then doubled by `main` through the same `work` group: 1 × 3 × 5 × 2.
+    // double_values.sgl: `scaled` multiplies `work` by `factor`, and `main` doubles `work`.
+    // One layout serves `work` in both, at slot 1 in `scaled` and slot 0 in `main`.
+    // Three dispatches: scaled by 3 through one factor group, then by 5 through another rebound in its place.
+    // Then doubled by `main` through the same `work` group: 1 × 3 × 5 × 2.
     constexpr int count = 64;
     auto const scaled = co_await shaders::double_values.scaled.acquire_pipeline(*ctx);
     auto const doubled = co_await shaders::double_values.main.acquire_pipeline(*ctx);
@@ -534,8 +534,8 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
     if (!ctx->supports(sg::feature::binding_arrays))
         SKIP("this context has no binding arrays");
 
-    // `lanes` carries the array `lanes.sources`, and a declaration of an array's access asserts where no bound group
-    // carries it — so it is how a draw shows whether the dispatch's group is still bound.
+    // `lanes` carries the array `lanes.sources`, and a declaration of an array's access asserts where no bound group carries it.
+    // So it is how a draw shows whether the dispatch's group is still bound.
     auto const gather = co_await shaders::binding_arrays.gather.acquire_pipeline(*ctx);
     auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::rects.floating);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::lanes>();

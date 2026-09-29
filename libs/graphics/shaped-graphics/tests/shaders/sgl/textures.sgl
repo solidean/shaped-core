@@ -49,8 +49,9 @@ sampler clamped:
     if xy.x < sampled.dst.size().x and xy.y < sampled.dst.size().y:
         sampled.dst.store(xy, sampled.src.sample(uv, clamped, level = 0.0))
 
-// A full-screen quad whose pixel stage samples a texture: `sample` without a `level` picks its level from derivatives,
-// which only a pixel stage has, so it is @stages(.pixel) and a compute entry point may not reach it.
+// A full-screen quad whose pixel stage samples a texture.
+// `sample` without a `level` picks its level from derivatives, which only a pixel stage has.
+// So it is @stages(.pixel), and a compute entry point may not reach it.
 @vertex struct screen_vertex:
     corner: float3
     uv: float2
@@ -79,8 +80,8 @@ binding material:
         color = material.albedo.sample(p.uv, material.nearest)
     }
 
-// The quad again, sampled through the file's sampler at a quarter texel off twice the coordinate, so the outer pixels
-// fall outside the texture and clamp.
+// The quad again, sampled through the file's sampler at a quarter texel off twice the coordinate.
+// So the outer pixels fall outside the texture and clamp.
 @pixel fun clamped_ps(p: textured_input){material} -> textured_target:
     return {
         color = material.albedo.sample(p.uv * 2.0 - float2(0.4375, 0.4375), clamped)

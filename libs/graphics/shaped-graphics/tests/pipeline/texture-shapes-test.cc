@@ -13,8 +13,8 @@ using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
 
-// Every texture view dimension, and every view that binds a slice, a face or a cube as a lower dimension, read at
-// one texel whose red channel names where it sits (shapes.sgl).
+// Every texture view dimension, and every view that binds a slice, a face or a cube as a lower dimension (shapes.sgl).
+// Each is read at one texel whose red channel names where it sits.
 
 namespace
 {

@@ -74,8 +74,7 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, rep
         SKIP("this device has no tessellation stages");
 
     // The patch is the lower-left half of the target, its corners counter-clockwise in clip space.
-    // The evaluation stage writes its domain location as the color, which is each pixel centre's barycentric
-    // coordinates against the three corners.
+    // The evaluation stage writes its domain location as the color: each pixel centre's barycentric coordinates against the three corners.
     auto const p0 = tg::vec2f(-1, -1);
     auto const p1 = tg::vec2f(1, -1);
     auto const p2 = tg::vec2f(-1, 1);
@@ -94,9 +93,8 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, rep
                                                    });
     };
 
-    // Culling back faces with counter-clockwise fronts, the patch whose control stage says counter-clockwise is drawn
-    // whole and the clockwise one culled: the winding a control stage names is the patch's, as the evaluation below
-    // weighs its corners (CHK-304).
+    // Culling back faces with counter-clockwise fronts, the patch whose control stage says counter-clockwise is drawn whole and the clockwise one culled.
+    // So the winding a control stage names is the patch's, as the evaluation below weighs its corners (CHK-304).
     auto const ccw = co_await draw_with(shaders::stages.tessellated_ccw);
     auto const cw = co_await draw_with(shaders::stages.tessellated_cw);
     auto const culled = co_await draw_with(shaders::stages.tessellated_culled);
@@ -134,8 +132,8 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated quad patch covers its quad, reports its
     if (!ctx->supports(sg::feature::tessellation_shader))
         SKIP("this device has no tessellation stages");
 
-    // The patch is the middle half of the target, its corners counter-clockwise from the bottom left, and the
-    // evaluation stage blends them by `uv` along the bottom edge and then upwards.
+    // The patch is the middle half of the target, its corners counter-clockwise from the bottom left.
+    // The evaluation stage blends them by `uv`, along the bottom edge and then upwards.
     shaders::stage_corner const corners[] = {{.position = tg::vec2f(-0.5f, -0.5f)},
                                              {.position = tg::vec2f(0.5f, -0.5f)},
                                              {.position = tg::vec2f(0.5f, 0.5f)},

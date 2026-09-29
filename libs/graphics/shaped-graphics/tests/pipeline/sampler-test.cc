@@ -64,8 +64,8 @@ ASYNC_INVOCABLE_TEST("sg - each sampler address mode, filter and level clamp rea
     auto const clamp = address::clamp_edge;
     auto probes = cc::vector<probe>();
 
-    // Outside 0..1, where repeat, mirror and clamp each land on another texel's centre: u = 1.375 is 0.375, 0.625 and
-    // 1 folded back, and u = -0.375 is 0.625, 0.375 and 0.
+    // Outside 0..1, where repeat, mirror and clamp each land on another texel's centre.
+    // u = 1.375 is 0.375, 0.625 and 1 folded back, and u = -0.375 is 0.625, 0.375 and 0.
     for (auto const [u, expected] :
          {cc::pair{1.375f, tg::vec3f(0.4f, 0.6f, 0.8f)}, cc::pair{-0.375f, tg::vec3f(0.6f, 0.4f, 0.2f)}})
     {

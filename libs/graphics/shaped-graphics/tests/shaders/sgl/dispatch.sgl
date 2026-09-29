@@ -12,8 +12,8 @@ binding grid:
 @workgroup binding tally:
     threads: atomic[int]
 
-// Every thread stamps its thread id, its workgroup and its index within the workgroup, and the dispatch's marker,
-// at the cell of a 16-wide grid its thread id names.
+// Every thread stamps its thread id, its workgroup, its index within the workgroup and the dispatch's marker.
+// It stamps them at the cell of a 16-wide grid its thread id names.
 // Each workgroup also counts its own threads, into the cell of the grid's first column its first thread stamps.
 @compute(4, 2) fun stamp(@thread_id id: int3, @workgroup_id g: int3, @local_thread_index local: int){grid, pass, tally}:
     if local == 0 => tally.threads.store(0)
@@ -24,8 +24,8 @@ binding grid:
     workgroup_barrier()
     if local == 0 => grid.counts[at] = tally.threads.load()
 
-// Elements of int, uint and float4 each keep their type: a shift of a negative int is arithmetic, of a uint above
-// the int range logical, and a float4 is reordered whole.
+// Elements of int, uint and float4 each keep their type.
+// A shift of a negative int is arithmetic, of a uint above the int range logical, and a float4 is reordered whole.
 binding typed:
     ints: mut buffer[int]
     uints: mut buffer[uint]

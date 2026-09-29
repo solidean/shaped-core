@@ -48,8 +48,8 @@ ASYNC_INVOCABLE_TEST("sg - a flat member takes the first vertex of its triangle"
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    // One rect over a 4 × 4 target: the lower-right triangle's vertices are tagged 10, 11 and 12, the upper-left's
-    // 20, 21 and 22, so a backend taking another provoking vertex reads 11, 12, 21 or 22.
+    // One rect over a 4 × 4 target: the lower-right triangle's vertices are tagged 10, 11 and 12, the upper-left's 20, 21 and 22.
+    // So a backend taking another provoking vertex reads 11, 12, 21 or 22.
     // (3, 2) and (0, 1) are off the shared diagonal, each well inside one triangle.
     auto vertices = cc::vector<corner>();
     int const tags[] = {10, 11, 12, 20, 21, 22};
@@ -78,8 +78,8 @@ ASYNC_INVOCABLE_TEST("sg - a discarded pixel still takes part in its quad's deri
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // A 4 × 2 target, two quads wide: column 0 discards, and the rest write ddx(x²) at their centre.
-    // Column 1's derivative spans the discarded column 0, so it reads 2 only where the discarded pixel went on as a
-    // helper; columns 2 and 3 are the control, 6 whatever discard does.
+    // Column 1's derivative spans the discarded column 0, so it reads 2 only where the discarded pixel went on as a helper.
+    // Columns 2 and 3 are the control, 6 whatever discard does.
     auto vertices = cc::vector<corner>();
     push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
     auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
