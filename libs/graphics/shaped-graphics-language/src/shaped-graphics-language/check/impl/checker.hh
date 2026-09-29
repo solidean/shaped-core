@@ -141,6 +141,8 @@ struct function_notes
     bool are_defaults_sound = true;
     /// Stands on a loop of calls, which was reported.
     bool is_recursive = false;
+    /// For an entry point: what its file, the bindings it lists and its body's `require`s declare (CHK-262).
+    feature_set declared_features;
     /// 0 before anybody asked, 1 for a function that inlines whole, 2 for one that does not.
     /// It inlines whole when its body is sound, it is not recursive, and the same holds for every function it calls.
     u8 inlines_whole = 0;

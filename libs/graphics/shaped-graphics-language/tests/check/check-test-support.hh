@@ -64,7 +64,7 @@ struct sgl_test::checked_sources
     sgl::ast::file_ast user_ast;
     sgl::check::checked_module module;
 
-    /// The position of the user file, which a diagnostic and an origin name it by: 1 behind one prelude file, 2 behind the library's.
+    /// The position of the user file, which a diagnostic and an origin name it by: 1 behind one prelude file, 3 behind the library's.
     [[nodiscard]] sgl::i32 user_file() const { return sgl::i32(files.size() - 1); }
     /// The side tables of the user file.
     [[nodiscard]] sgl::check::file_tables const& tables() const { return module.files[user_file()]; }

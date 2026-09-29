@@ -1309,3 +1309,90 @@
 @builtin @stages(.pixel, .compute) fun load(a: atomic[int]) -> int
 /// Stores `v` in one step.
 @builtin @stages(.pixel, .compute) fun store(a: out atomic[int], v: int)
+
+// Ray tracing: what a ray is traced with, and what a trace reads.
+// A shader calls `trace` of raytracing.sgl, never these: each is a step of HLSL's `RayQuery` and MSL's `intersection_query`.
+/// What a trace may skip, cull or decide without asking: DXR's `RAY_FLAG_*` without the prefix.
+@shadowable(false)
+@builtin @bitflags enum ray_flags:
+    none = 0
+    force_opaque = 1
+    force_non_opaque = 2
+    accept_first_hit_and_end_search = 4
+    skip_closest_hit = 8
+    cull_back_facing = 16
+    cull_front_facing = 32
+    cull_opaque = 64
+    cull_non_opaque = 128
+    skip_triangles = 256
+    skip_procedural = 512
+
+@builtin @pure @operator("|") fun combine_ray_flags(a: ray_flags, b: ray_flags) -> ray_flags
+@builtin @pure @operator("&") fun intersect_ray_flags(a: ray_flags, b: ray_flags) -> ray_flags
+/// Whether every flag of `f` is set in `flags`.
+@builtin @pure fun has(flags: ray_flags, f: ray_flags) -> bool
+
+/// One trace in flight, which only raytracing.sgl steps through.
+@shadowable(false)
+@builtin struct ray_query
+
+/// A query nothing traced yet.
+@builtin fun ray_query_begin() -> ray_query
+/// Starts the trace of a ray.
+@builtin fun ray_query_trace(q: ray_query, world: acceleration_structure[.triangles], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+/// Starts the trace of a ray.
+@builtin fun ray_query_trace(q: ray_query, world: acceleration_structure[.procedural], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+/// Starts the trace of a ray.
+@builtin fun ray_query_trace(q: ray_query, world: acceleration_structure[.mixed], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+/// Traverses to the next candidate the shader decides, and false once there is none.
+@builtin fun ray_query_proceed(q: ray_query) -> bool
+/// Whether the candidate is a non-opaque triangle rather than a procedural primitive's box.
+@builtin fun ray_query_candidate_is_triangle(q: ray_query) -> bool
+/// Accepts the candidate triangle.
+@builtin fun ray_query_commit_triangle(q: ray_query)
+/// Ends the traversal, keeping what it committed.
+@builtin fun ray_query_abort(q: ray_query)
+/// 0 for nothing, 1 for a triangle, 2 for a procedural primitive.
+@builtin fun ray_query_committed_kind(q: ray_query) -> int
+/// Of the candidate.
+@builtin fun ray_query_candidate_t(q: ray_query) -> float
+/// Of the committed hit.
+@builtin fun ray_query_committed_t(q: ray_query) -> float
+/// Of the candidate.
+@builtin fun ray_query_candidate_instance_id(q: ray_query) -> int
+/// Of the committed hit.
+@builtin fun ray_query_committed_instance_id(q: ray_query) -> int
+/// Of the candidate.
+@builtin fun ray_query_candidate_instance_index(q: ray_query) -> int
+/// Of the committed hit.
+@builtin fun ray_query_committed_instance_index(q: ray_query) -> int
+/// Of the candidate.
+@builtin fun ray_query_candidate_geometry_index(q: ray_query) -> int
+/// Of the committed hit.
+@builtin fun ray_query_committed_geometry_index(q: ray_query) -> int
+/// Of the candidate.
+@builtin fun ray_query_candidate_primitive_index(q: ray_query) -> int
+/// Of the committed hit.
+@builtin fun ray_query_committed_primitive_index(q: ray_query) -> int
+/// Of the candidate.
+@builtin fun ray_query_candidate_barycentrics(q: ray_query) -> float2
+/// Of the committed hit.
+@builtin fun ray_query_committed_barycentrics(q: ray_query) -> float2
+/// Of the candidate.
+@builtin fun ray_query_candidate_is_front_face(q: ray_query) -> bool
+/// Of the committed hit.
+@builtin fun ray_query_committed_is_front_face(q: ray_query) -> bool
+/// Of the candidate.
+@builtin fun ray_query_candidate_object_to_world_row(q: ray_query, row: int) -> float4
+/// Of the committed hit.
+@builtin fun ray_query_committed_object_to_world_row(q: ray_query, row: int) -> float4
+/// Of the candidate.
+@builtin fun ray_query_candidate_world_to_object_row(q: ray_query, row: int) -> float4
+/// Of the committed hit.
+@builtin fun ray_query_committed_world_to_object_row(q: ray_query, row: int) -> float4
+
+// The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc raytracing-polyfill.md).
+/// The pool unit of the entry point's k-th acceleration member's TLAS.
+@builtin fun acceleration_root_at(k: int) -> uint
+/// One unit of the pool.
+@builtin @pure fun acceleration_pool_load(unit: uint) -> uint4

@@ -15,6 +15,7 @@ cc::span<sgl::prelude_file const> sgl::prelude_files()
     static prelude_file const files[] = {
         {.name = "builtins.sgl", .source = builtins_text},
         {.name = "core.sgl", .source = impl::embedded_core_prelude()},
+        {.name = "raytracing.sgl", .source = impl::embedded_raytracing_prelude()},
     };
     return files;
 }

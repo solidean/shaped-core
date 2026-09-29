@@ -91,6 +91,7 @@ void checker::judge_entry_features(symbol_id id)
     }
     declared |= in_body;
     info.features = needed;
+    notes[s.info].declared_features = declared;
 
     // CHK-264
     auto const where = ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name;

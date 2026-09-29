@@ -798,8 +798,12 @@ void checker::compile_enum(symbol_id id)
     auto const& ast = ast_of(file);
     auto const& e = ast.at(decl).node.as<ast::enum_decl>();
 
-    cc::string_view const known[] = {"builtin", "shadowable"};
+    cc::string_view const known[] = {"builtin", "shadowable", "bitflags"};
     judge_attributes(file, ast.at(decl).attributes, known, "an enum");
+    // CHK-321: a builtin enum's cases may be bits, whose `|`, `&` and `has` its registry gives; a program's waits
+    if (auto const* const flags = find_attribute(file, ast.at(decl).attributes, "bitflags");
+        flags != nullptr && find_attribute(file, ast.at(decl).attributes, "builtin") == nullptr)
+        unsupported(file, flags->name, "@bitflags on an enum of the program");
     // A builtin enum is written as its record says, `bool` as the target's bool, and not as the `int` of its cases.
     if (find_attribute(file, ast.at(decl).attributes, "builtin") != nullptr)
     {

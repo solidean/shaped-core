@@ -7,6 +7,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/builtins/ids.hh>
+#include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
 
 /// Everything the compiler knows about a builtin, in ONE record per builtin.
@@ -207,6 +208,11 @@ struct sgl::builtins::function_record
     /// Takes one argument more than its signature names, of the type its first argument holds: a stream's `emit`,
     /// whose vertex is a struct of the program (CHK-303).
     bool takes_element = false;
+    /// What a device needs to run a call of it: an entry point that reaches one needs it too, and declares it (CHK-322).
+    check::feature_set features;
+    /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
+    /// The call itself writes nothing, and a local it initializes is never copied.
+    bool declares_only = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

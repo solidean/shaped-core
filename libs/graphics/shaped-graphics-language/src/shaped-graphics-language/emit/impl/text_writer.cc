@@ -629,12 +629,18 @@ struct writer
             build_struct(p.e.at(value), name);
             return;
         }
-        auto const text = is_valid(value) ? expr(value, true).text : cc::string();
+        // a value only a local may hold, such as a ray query: declared without an initializer, and never `const`
+        auto const* const call = is_valid(value) ? p.e.at(value).node.try_as<flat_call>() : nullptr;
+        auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
+        auto const declares_only = record != nullptr && record->declares_only;
+        auto const text = is_valid(value) && !declares_only ? expr(value, true).text : cc::string();
         auto declaration = cc::string();
         auto const dimensions = array_dimensions(p, local.type);
-        d.write_local(
-            declaration,
-            {.name = name, .type = type_text(p, d, local.type), .value = text, .dimensions = dimensions, .is_mut = is_mut});
+        d.write_local(declaration, {.name = name,
+                                    .type = type_text(p, d, local.type),
+                                    .value = text,
+                                    .dimensions = dimensions,
+                                    .is_mut = is_mut || declares_only});
         line(declaration);
     }
 

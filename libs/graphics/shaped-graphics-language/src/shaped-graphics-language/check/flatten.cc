@@ -77,11 +77,22 @@ struct flattener
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
     cc::vector<origin> discards;
+    /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
+    struct feature_use
+    {
+        i32 file = 0;
+        ast::expr_id call = ast::expr_id::none;
+        feature_set features;
+    };
+    cc::vector<feature_use> feature_uses;
 
     /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
     /// A test has no stage, so it may reach what any stage may.
     void judge_stage(ast::expr_id call, symbol_id callee)
     {
+        if (auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+            record != nullptr && !record->features.is_empty())
+            feature_uses.push_back({.file = file(), .call = call, .features = record->features});
         // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
         if (is_test)
         {
@@ -2134,28 +2145,57 @@ void checker::flatten_entry_point(symbol_id id)
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
 
-    // CHK-193: known only now, since only the whole inlined body says what an entry point reaches.
-    auto const stage_name = [](stage st)
+    // CHK-322: what the body calls needs a device's feature, which the entry point declares like one of its signature
+    auto used = feature_set();
+    for (auto const& u : f.feature_uses)
+        used |= u.features;
+    auto const declared = notes[s.info].declared_features;
+    for (auto i = isize(0); i < k_feature_count; ++i)
     {
-        return st == stage::vertex ? "vertex" : st == stage::pixel ? "pixel" : "compute";
-    };
+        auto const needed = feature(i);
+        if (!used.has(needed))
+            continue;
+        if (!declared.has(needed))
+        {
+            auto& d = report(diagnostic_kind::feature_not_declared, s.file,
+                             ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                             cc::format("{} needs {}, which neither its file, a binding it lists nor its body requires",
+                                        s.name, name_of(needed)));
+            for (auto const& u : f.feature_uses)
+                if (u.features.has(needed))
+                {
+                    d.notes.push_back(
+                        {.file = u.file, .where = span_of(u.file, u.call), .message = "the call that needs it"});
+                    break;
+                }
+        }
+        // a body's `require` that declares it is used, as one declaring a need of the signature is (CHK-265)
+        for (auto& line : require_lines)
+            if (line.owner == id && line.scope == require_scope::body && line.what == needed)
+            {
+                line.is_used = true;
+                break;
+            }
+    }
+    out.functions[s.info].features |= used;
+    f.entry.features |= used;
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     for (auto const& v : f.stage_violations)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-               cc::format("{} is a {} entry point, and {} is @stages without it", s.name, stage_name(info.entry_stage),
-                          out.at(v.callee).name));
+               cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
+                          check::stage_name(info.entry_stage), out.at(v.callee).name));
     auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
     for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
-        report(
-            diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
-            cc::format("{} is a {} entry point, and only a pixel stage discards", s.name, stage_name(info.entry_stage)));
+        report(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
+               cc::format("{} is a {} entry point, and only a pixel stage discards", s.name,
+                          check::stage_name(info.entry_stage)));
     if ((info.stages & stage_bit(info.entry_stage)) == 0)
         report(diagnostic_kind::stage_not_allowed, s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
-                          stage_name(info.entry_stage)));
+                          check::stage_name(info.entry_stage)));
     // CHK-213: a gap of this pass is reported, so an entry point never vanishes without a word.
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,

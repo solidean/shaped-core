@@ -37,6 +37,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_bit_math.cc
     src/shaped-graphics-language/builtins/register_math.cc
     src/shaped-graphics-language/builtins/register_sync.cc
+    src/shaped-graphics-language/builtins/register_raytracing.cc
     src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
     src/shaped-graphics-language/builtins/register_textures.cc
@@ -97,58 +98,64 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/unannotated_bindings.cc
 )
 
-# The prelude is two files, and only one of them is embedded.
+# The prelude is three files, and two of them are embedded.
 # prelude/builtins.sgl is GENERATED from the C++ builtin registry and committed.
 # The library produces the same text in memory, so it never reads that file.
-# prelude/core.sgl is hand-written SGL, and the library carries its text: a page has no filesystem and a shipped binary no source tree.
+# prelude/core.sgl and prelude/raytracing.sgl are hand-written SGL, and the library carries their text: a page has no filesystem and a shipped binary no source tree.
 # Baked in at configure time, and CMAKE_CONFIGURE_DEPENDS is what makes an edit of the file re-run this.
 #
 # MSVC caps ONE string literal at 16380 bytes, and adjacent literals are joined only after that limit applies.
 # So the text goes out as a run of chunks that end at a newline, which also keeps a UTF-8 sequence in one piece.
-set(_sgl_prelude_source "${CMAKE_CURRENT_SOURCE_DIR}/prelude/core.sgl")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sgl_prelude_source}")
-file(READ "${_sgl_prelude_source}" _sgl_prelude_text)
-
-set(_sgl_prelude_chunk_bytes 8000)
-string(LENGTH "${_sgl_prelude_text}" _sgl_prelude_length)
-set(_sgl_prelude_literals "")
-set(_sgl_prelude_at 0)
-while(_sgl_prelude_at LESS _sgl_prelude_length)
-    math(EXPR _sgl_prelude_remaining "${_sgl_prelude_length} - ${_sgl_prelude_at}")
-    set(_sgl_prelude_take ${_sgl_prelude_chunk_bytes})
-    if(NOT _sgl_prelude_remaining GREATER _sgl_prelude_take)
-        set(_sgl_prelude_take ${_sgl_prelude_remaining})
-    else()
-        string(SUBSTRING "${_sgl_prelude_text}" ${_sgl_prelude_at} ${_sgl_prelude_take} _sgl_prelude_chunk)
-        string(FIND "${_sgl_prelude_chunk}" "\n" _sgl_prelude_newline REVERSE)
-        if(_sgl_prelude_newline GREATER -1)
-            math(EXPR _sgl_prelude_take "${_sgl_prelude_newline} + 1")
+# One hand-written prelude file as C++ string literals, in chunks that each end at a newline, into `out_var`.
+function(_sgl_embed_prelude source out_var)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
+    file(READ "${source}" _text)
+    set(_chunk_bytes 8000)
+    string(LENGTH "${_text}" _length)
+    set(_literals "")
+    set(_at 0)
+    while(_at LESS _length)
+        math(EXPR _remaining "${_length} - ${_at}")
+        set(_take ${_chunk_bytes})
+        if(NOT _remaining GREATER _take)
+            set(_take ${_remaining})
+        else()
+            string(SUBSTRING "${_text}" ${_at} ${_take} _chunk)
+            string(FIND "${_chunk}" "\n" _newline REVERSE)
+            if(_newline GREATER -1)
+                math(EXPR _take "${_newline} + 1")
+            endif()
         endif()
+        string(SUBSTRING "${_text}" ${_at} ${_take} _chunk)
+        string(APPEND _literals "\n    R\"sglprelude(${_chunk})sglprelude\"")
+        math(EXPR _at "${_at} + ${_take}")
+    endwhile()
+    # An empty file is a valid prelude, and no literal at all is not valid C++.
+    if(_literals STREQUAL "")
+        set(_literals " \"\"")
     endif()
+    set(${out_var} "${_literals}" PARENT_SCOPE)
+endfunction()
 
-    string(SUBSTRING "${_sgl_prelude_text}" ${_sgl_prelude_at} ${_sgl_prelude_take} _sgl_prelude_chunk)
-    string(APPEND _sgl_prelude_literals "\n    R\"sglprelude(${_sgl_prelude_chunk})sglprelude\"")
-    math(EXPR _sgl_prelude_at "${_sgl_prelude_at} + ${_sgl_prelude_take}")
-endwhile()
-# An empty core.sgl is a valid prelude, and no literal at all is not valid C++.
-if(_sgl_prelude_literals STREQUAL "")
-    set(_sgl_prelude_literals " \"\"")
-endif()
+_sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/core.sgl" _sgl_prelude_literals)
+_sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/raytracing.sgl" _sgl_raytracing_literals)
 
 # The same file names the prelude's directory, which tells the library's own prelude files from a user's files of the same names.
 # Written only when it differs, so a configure that changes nothing recompiles nothing.
 # Not file(CONFIGURE): SGL spells an attribute `@name`, and two of them on one line would read as a CMake variable.
 set(_sgl_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.generated.cc")
 set(_sgl_prelude_cc
-"// Generated from prelude/core.sgl by shaped-graphics-language's CMakeLists. Do not edit.
+"// Generated from prelude/core.sgl and prelude/raytracing.sgl by shaped-graphics-language's CMakeLists. Do not edit.
 #include <shaped-graphics-language/driver/prelude.hh>
 
 namespace
 {
 constexpr char const* k_prelude =${_sgl_prelude_literals};
+constexpr char const* k_raytracing =${_sgl_raytracing_literals};
 } // namespace
 
 cc::string_view sgl::impl::embedded_core_prelude() { return k_prelude; }
+cc::string_view sgl::impl::embedded_raytracing_prelude() { return k_raytracing; }
 
 cc::string_view sgl::impl::prelude_directory() { return R\"sglprelude(${CMAKE_CURRENT_SOURCE_DIR}/prelude)sglprelude\"; }
 ")
