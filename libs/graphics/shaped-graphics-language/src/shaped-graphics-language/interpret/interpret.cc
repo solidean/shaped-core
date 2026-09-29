@@ -431,7 +431,8 @@ struct machine
         {
             if (!is_known(e, ref->local))
                 return type_error("a local id that names nothing");
-            if (!is_set[index_of(ref->local)])
+            // an undefined() is handed on like any value, and what reads it reads zeroes
+            if (!is_set[index_of(ref->local)] && !e.at(ref->local).is_undefined)
                 return fail(run_status::uninitialized_read, e.at(ref->local).name);
             result = locals[index_of(ref->local)];
             return {};

@@ -749,6 +749,7 @@ struct flattener
         if (where.kind == target_kind::undefined_value)
         {
             auto const local = add_local(local_kind::var, "undefined", type);
+            entry.locals[index_of(local)].is_undefined = true;
             add_stmt({.file = file(), .expr = id}, flat_var{.local = local});
             return local_ref(local, id);
         }

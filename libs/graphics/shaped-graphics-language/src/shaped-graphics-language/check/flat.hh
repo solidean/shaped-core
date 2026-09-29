@@ -171,6 +171,8 @@ struct sgl::check::flat_local
     cc::string name;
     type_id type = type_id::none;
     bool is_mut = false;
+    /// The prelude's `undefined()`: never assigned, and handed on and stored as a value whose content means nothing.
+    bool is_undefined = false;
 
     bool operator==(flat_local const&) const = default;
 };
