@@ -365,8 +365,7 @@ enum class callable_index : u32;
 inline constexpr int max_binding_groups = 3;
 
 /// The group slot sg reserves for its own bindings, above everything a caller may bind.
-/// It is where a backend puts what it has to emulate: inline constants where there are no push constants,
-/// and later ray-tracing emulation and shader-side diagnostics.
+/// It holds what a backend has to emulate or bind outside the caller's groups, such as inline constants where there are no push constants.
 /// Reserved on every backend, whether or not that backend needs it, so one pipeline layout fits them all.
 inline constexpr int reserved_binding_group = max_binding_groups;
 
