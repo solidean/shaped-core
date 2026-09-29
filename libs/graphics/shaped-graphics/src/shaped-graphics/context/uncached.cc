@@ -354,7 +354,10 @@ cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytra
     _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
+    {
         impl::set_footprint(*r.value(), footprint_of(*desc.layout, stages));
+        impl::set_hit_groups(*r.value(), desc.hit_shaders);
+    }
     return r;
 }
 

@@ -110,6 +110,7 @@ struct blas_aabbs;                  // value type — one procedural (AABB) geom
 struct tlas_instance;               // value type — one instance input to build_tlas
 enum class accel_build_flag;        // one build-time trade-off; a set of them is accel_build_flags
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
+enum class blas_geometry : u8;      // what a blas was built from: triangles or AABBs
 
 } // namespace sg
 
@@ -355,6 +356,8 @@ enum class raygen_index : u32;
 enum class miss_index : u32;
 enum class hit_index : u32;
 enum class callable_index : u32;
+/// A run of `ray_count` consecutive hit records in a raytracing_shader_table, one per ray type; its value is the first record's index.
+enum class hit_row : u32;
 
 /// Hard cap on the number of group slots a pipeline_layout may hand a caller.
 /// Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `group_index`.

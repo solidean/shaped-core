@@ -425,12 +425,13 @@ void webgpu_command_list::copy_buffer_region(sg::raw_buffer_handle src,
 // -- ray tracing: refused --
 
 sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg::blas_triangles const>,
-                                                                     sg::accel_build_flags)
+                                                                     sg::accel_build_flags,
+                                                                     int)
 {
     CC_UNREACHABLE("webgpu has no ray tracing; check cmd.raytracing.is_supported()");
 }
 
-sg::blas_handle webgpu_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const>, sg::accel_build_flags)
+sg::blas_handle webgpu_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const>, sg::accel_build_flags, int)
 {
     CC_UNREACHABLE("webgpu has no ray tracing; check cmd.raytracing.is_supported()");
 }

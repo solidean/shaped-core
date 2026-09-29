@@ -12,6 +12,15 @@ void impl::set_footprint(raytracing_pipeline const& pipeline, impl::pipeline_foo
     const_cast<raytracing_pipeline&>(pipeline)._footprint = cc::move(footprint);
 }
 
+void impl::set_hit_groups(raytracing_pipeline const& pipeline, cc::span<hit_shader const> groups)
+{
+    // Only ever called on a pipeline nobody else holds yet, and never on one created const.
+    auto& procedural = const_cast<raytracing_pipeline&>(pipeline)._procedural_hit_groups;
+    procedural.clear();
+    for (auto const& g : groups)
+        procedural.push_back(g.intersection.has_value());
+}
+
 raygen_shader_handle raytracing_pipeline_description::add_raygen_shader(compiled_shader shader)
 {
     CC_ASSERT(shader.stage == shader_stage::raygen, "add_raygen_shader requires a raygen shader");
