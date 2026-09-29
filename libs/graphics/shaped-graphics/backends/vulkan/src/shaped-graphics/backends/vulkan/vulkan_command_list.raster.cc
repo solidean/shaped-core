@@ -164,6 +164,9 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
         raster_set_scissor(info.scissor.value());
     else
         raster_set_scissor(tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(extent_w, extent_h)));
+
+    // The blend constants are 0 until set, per rendering scope, which Vulkan leaves undefined for dynamic state.
+    raster_set_blend_constants(tg::vec4f(0, 0, 0, 0));
 }
 
 void vulkan_command_list::reopen_rendering()
@@ -228,6 +231,7 @@ void vulkan_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeli
 
     // The topology is baked into the pipeline, so unlike dx12 there is no separate IA topology call.
     _bound_raster_layout = rp->layout.get();
+    _bound_raster_layout->bind_embedded_samplers(_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS);
     _bound_raster_groups.clear_resize_to_filled(_bound_raster_layout->_groups.size(), nullptr);
     _bound_raster_footprint = &pipeline.footprint();
     _bound_raster_footprint_owner = &pipeline;

@@ -6,6 +6,7 @@
 #include <shaped-graphics/command_list/compute.hh>
 #include <shaped-graphics/command_list/copy.hh>
 #include <shaped-graphics/command_list/download.hh>
+#include <shaped-graphics/command_list/impl/aliasing_scope.hh>
 #include <shaped-graphics/command_list/query.hh>
 #include <shaped-graphics/command_list/raster.hh>
 #include <shaped-graphics/command_list/raytracing.hh>
@@ -142,6 +143,17 @@ protected:
     void close_rendering();
     void bind_raster_pipeline(raster_pipeline const& pipeline);
 
+    // What every facade calls instead of the bind, dispatch and draw seams.
+    // They keep what is bound, for the portability checks a context may have on (impl::aliasing_scope), and forward.
+    void bind_compute_pipeline(compute_pipeline const& pipeline);
+    void bind_compute_group(int group_index, binding_group const& group);
+    void dispatch(int x, int y, int z);
+    void bind_raster_group(int group_index, binding_group const& group);
+    void bind_raster_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views);
+    void bind_raster_index_buffer(index_buffer_view const& view);
+    void draw(draw_config const& config);
+    void draw_indexed(draw_indexed_config const& config);
+
     // Raster draw recording (reached through cmd.raster / cmd.raster.manual).
     // bind_pipeline sets the graphics PSO + root signature and the IA topology, bind_group binds through
     // that root signature, and the set/bind ops configure IA + dynamic state.
@@ -205,6 +217,22 @@ protected:
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
 
 private:
+    void check_raster_aliasing(bool indexed);
+
     cc::string _rendering_target_set;                       // of the open rendering, or empty
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
+
+    // What is bound, by slot; the backend keeps each bound object alive for the recording, so the pointers stay valid.
+    // A pipeline over another layout unbinds the groups, and one over the same layout keeps them, as webgpu does.
+    // The layouts are compared by address only.
+    pipeline_layout const* _compute_layout = nullptr;
+    pipeline_layout const* _raster_layout = nullptr;
+    binding_group const* _compute_groups[max_binding_groups] = {};
+    binding_group const* _raster_groups[max_binding_groups] = {};
+    raw_buffer const* _vertex_buffers[max_vertex_buffers] = {};
+    raw_buffer const* _index_buffer = nullptr;
+
+    // Of the current dispatch and draw, kept to reuse their storage.
+    impl::aliasing_scope _compute_aliasing;
+    impl::aliasing_scope _raster_aliasing;
 };

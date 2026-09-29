@@ -341,6 +341,8 @@ struct flattener
             return add_expr(x.type, from, *v);
         if (auto const* const m = x.node.try_as<flat_binding_member>())
             return add_expr(x.type, from, *m);
+        if (auto const* const smp = x.node.try_as<flat_file_sampler>())
+            return add_expr(x.type, from, *smp);
         if (auto const* const element = x.node.try_as<flat_element>())
         {
             auto const object = again(element->object, from);
@@ -369,8 +371,8 @@ struct flattener
         return fail();
     }
 
-    /// True for a texture, an image, a sampler or a buffer read from its binding: it is no value a local could hold,
-    /// and it stands wherever it is named, since naming one has no effect.
+    /// True for a texture, an image, a sampler or a buffer read from its binding, and a file-scope sampler: it is no
+    /// value a local could hold, and it stands wherever it is named, since naming one has no effect.
     [[nodiscard]] bool is_resource_member(flat_expr_id id) const
     {
         if (!is_valid(id) || !is_resource(c.out.at(entry.at(id).type).kind))
@@ -378,7 +380,7 @@ struct flattener
         // an element of a binding array, at an index that reads the same wherever it stands
         if (auto const* const element = entry.at(id).node.try_as<flat_element>())
             return entry.at(element->object).node.is<flat_binding_member>() && is_substitutable_index(element->index);
-        return entry.at(id).node.is<flat_binding_member>();
+        return entry.at(id).node.is<flat_binding_member>() || entry.at(id).node.is<flat_file_sampler>();
     }
 
     /// A value that is read more than once and evaluated once, where it stands.
@@ -443,6 +445,9 @@ struct flattener
             if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
                 && c.out.at(where.symbol).state == symbol_state::checked)
                 return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
+            if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::sampler
+                && c.out.at(where.symbol).state == symbol_state::checked)
+                return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
             return fail();
         }
         if (auto const* const m = e.node.try_as<ast::member>())
@@ -876,7 +881,8 @@ struct flattener
     }
 
     /// A sampling call without its sampler calls the record that takes one, with the texture's `@sampler` after the
-    /// coordinate (CHK-279); the check pass has made sure the texture names one.
+    /// coordinate (CHK-279): a member of its binding, or a file-scope sampler.
+    /// The check pass has made sure the texture names one.
     flat_expr_id default_sampled_call(ast::expr_id id, builtin_id with_sampler, cc::span<flat_expr_id const> arguments)
     {
         // the texture, or the binding array it is an element of
@@ -887,8 +893,9 @@ struct flattener
         if (texture == nullptr)
             return fail();
         auto const members = c.out.at(c.out.bindings[c.out.at(texture->binding).info].members);
-        auto const sampler = members[texture->member].default_sampler;
-        if (sampler < 0)
+        auto const& m = members[texture->member];
+        auto const file_sampler = m.default_file_sampler;
+        if (m.default_sampler < 0 && (!is_valid(file_sampler) || c.out.at(file_sampler).state != symbol_state::checked))
             return fail();
         // the call becomes one of the record that takes the sampler, so its arguments match its callee's parameters
         auto const declared = c.symbol_declaring(with_sampler);
@@ -896,8 +903,10 @@ struct flattener
             return fail();
         auto with = cc::vector<flat_expr_id>();
         with.push_back_range(arguments);
-        with.insert_at(
-            2, add_expr(members[sampler].type, id, flat_binding_member{.binding = texture->binding, .member = sampler}));
+        with.insert_at(2, is_valid(file_sampler)
+                              ? add_expr(c.out.at(file_sampler).type, id, flat_file_sampler{.sampler = file_sampler})
+                              : add_expr(members[m.default_sampler].type, id,
+                                         flat_binding_member{.binding = texture->binding, .member = m.default_sampler}));
         auto const& info = c.out.functions[c.out.at(declared).info];
         return add_expr(
             info.result, id,
@@ -1820,54 +1829,6 @@ struct flattener
     static constexpr isize k_max_inline_depth = 256;
 };
 
-/// Finds the first node of a flat tree that stands deeper than `k_max_depth`, counted the way every later walk counts.
-/// It descends at most one level past the limit, so it is safe on any tree the flattener wrote.
-struct depth_probe
-{
-    flat_entry_point const& e;
-    cc::optional<origin> found;
-
-    void expr(flat_expr_id id, int depth)
-    {
-        if (found.has_value() || !is_known(e, id))
-            return;
-        auto const& x = e.at(id);
-        if (depth > k_max_depth)
-        {
-            found = x.from;
-            return;
-        }
-        if (auto const* const b = x.node.try_as<flat_block>())
-            body(b->body, depth + 1);
-        for_each_operand(e, x, [&](flat_expr_id operand) { expr(operand, depth + 1); });
-    }
-
-    void body(ast::range_of<flat_stmt_id> range, int depth)
-    {
-        if (found.has_value() || !is_known(e, range))
-            return;
-        for (auto const id : e.at(range))
-        {
-            if (found.has_value() || !is_known(e, id))
-                continue;
-            auto const& s = e.at(id);
-            if (depth > k_max_depth)
-            {
-                found = s.from;
-                return;
-            }
-            for_each_expr_of(s, [&](flat_expr_id x) { expr(x, depth + 1); });
-            for_each_pattern_of(e, s,
-                                [&](ast::range_of<flat_expr_id> patterns)
-                                {
-                                    if (is_known(e, patterns))
-                                        for (auto const p : e.at(patterns))
-                                            expr(p, depth + 1);
-                                });
-            for_each_body_of(e, s, [&](ast::range_of<flat_stmt_id> inner) { body(inner, depth + 1); });
-        }
-    }
-};
 } // namespace
 
 void checker::flatten_test(i32 index)

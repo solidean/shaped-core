@@ -20,8 +20,14 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   A name a newer one adds fails as `quad` did, naming a header the program's author never wrote, until the block is regenerated.
 - **What `discard` does to a quad's derivatives, per target.** SGL writes `discard;` and MSL `discard_fragment();`, which every target reads as "no effect after this".
   Whether the pixel keeps running as a helper is where they differ, and a sample after a discard in a neighbouring pixel depends on it.
-  The tier-1 foliage test pins it per backend; a target that terminates gets the emulation the design settled: a flag, guarded stores, and the real discard at the end.
-- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, a file-scope `@sampler`, and gathers of integer textures.
+  sg's tier-1 pixel-semantics test pins it on every backend, and dx12 and vulkan keep the pixel as a helper.
+  A target that terminates gets the emulation the design settled: a flag, guarded stores, and the real discard at the end.
+- **Compact file-sampler numbering per `pipeline` declaration.** A file-scope sampler's index is its position among all the file's samplers (EMIT-133).
+  So a file past 16 is `too-many-samplers` even where each stage reaches few.
+  The way out not taken yet: a `pipeline` numbers only the samplers its stages reach, and emits those stages with its numbers.
+  It costs an entry point's text depending on its pipeline, and a stage shared by two pipelines compiling twice.
+  A hand-assembled pipeline keeps declaration order.
+- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, and gathers of integer textures.
 - **Features used in a body.** Only an entry point's signature uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
   A listed binding's member does, and so do a stage input, a member taken per sample and the stage itself (CHK-263).
   The first builtin that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.
@@ -42,9 +48,6 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   WGSL passes no matrix and no array between stages, so both cross as one location per column or element.
 - **The layout double check on dxil.** slib compares what SPIR-V and WGSL place against what SGL states, and reads no DXIL layout: the bytecode carries no reflection container to read it from.
   dx12's packing is SGL's own rule, so this is the target least likely to disagree, and a DXIL arm would need the container kept beside the bytecode.
-- **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, which vulkan and metal do not bind yet (sg's TODO.md).
-  Once they do, it needs an HLSL address outside every group's space, and the generated `acquire_pipeline` to fill `static_samplers`.
-  It will join the pipeline layout of every entry point that uses it, transitively; until it lands, it is `unsupported-yet`, never refused as invalid.
 - **A linter for SGL's own style, starting with `@expect` on its own line.** An `@expect(…)` stands on the line above its `test`, never before it on the same line; every file here follows that.
   It is a rule of `@expect` and not of attributes: `@vertex fun main(…)` on one line reads fine and stays.
   The parser takes both spellings, so only a linter can hold the line.

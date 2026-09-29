@@ -60,6 +60,12 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
                           "sg::feature::tessellation_shader");
     if (desc.geometry_shader.has_value() && !supported.has(sg::feature::geometry_shader))
         return cc::string("the pipeline has a geometry stage, and this device lacks sg::feature::geometry_shader");
+    if (desc.rasterization.fill == sg::fill_mode::wireframe && !supported.has(sg::feature::wireframe_fill))
+        return cc::string("the pipeline fills wireframe, and this device lacks sg::feature::wireframe_fill");
+    if (desc.depth_stencil_format == sg::pixel_format::depth32_float_stencil8
+        && !supported.has(sg::feature::depth32_float_stencil8))
+        return cc::string("the pipeline's depth-stencil format is depth32_float_stencil8, and this device lacks "
+                          "sg::feature::depth32_float_stencil8");
     if (auto conflict = sg::impl::find_binding_conflict(stages); conflict.has_value())
         return conflict;
     if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
@@ -145,6 +151,27 @@ sg::impl::pipeline_footprint footprint_of(sg::raster_pipeline_description const&
     return footprint_of(*desc.layout, stages);
 }
 
+/// Why every backend refuses `desc`'s bound samplers, or none where it takes them.
+/// A register is one slot whatever its space, since only dx12 has spaces to tell two apart.
+cc::optional<cc::string> bound_sampler_refusal(sg::pipeline_layout_description const& desc)
+{
+    for (auto i = isize(0); i < desc.static_samplers.size(); ++i)
+    {
+        auto const& b = desc.static_samplers[i].binding;
+        if (!sg::is_sampler(b.type) || b.count != 1)
+            return cc::format("pipeline_layout: bound sampler '{}' must be a binding of one sampler", b.name);
+        if (int(b.index) >= sg::max_bound_samplers)
+            return cc::format("pipeline_layout: bound sampler '{}' takes register {}, and a pipeline holds {} on every "
+                              "backend",
+                              b.name, b.index, sg::max_bound_samplers);
+        for (auto j = isize(0); j < i; ++j)
+            if (desc.static_samplers[j].binding.index == b.index)
+                return cc::format("pipeline_layout: bound samplers '{}' and '{}' both take register {}",
+                                  desc.static_samplers[j].binding.name, b.name, b.index);
+    }
+    return {};
+}
+
 cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_pipeline_handle> built,
                                                    cc::string target_set,
                                                    sg::raster_target_formats formats,
@@ -212,6 +239,8 @@ pipeline_layout_handle context_uncached_scope::create_pipeline_layout(pipeline_l
 
 cc::result<pipeline_layout_handle> context_uncached_scope::try_create_pipeline_layout(pipeline_layout_description const& desc)
 {
+    if (auto refusal = bound_sampler_refusal(desc); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
     return _ctx.try_create_pipeline_layout(desc, lifetime_scope::persistent);
 }
 

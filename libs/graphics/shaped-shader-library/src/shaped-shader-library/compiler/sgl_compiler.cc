@@ -4,7 +4,7 @@
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics/binding/binding.hh>
-#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::bound_samplers_space
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh> // the pixel formats by name
 
@@ -96,6 +96,9 @@ static_assert(
 }
 
 /// `b` as sg sees it on `format`: dx12 numbers a group as a register space, vulkan and WebGPU as a set.
+/// A file-scope sampler is stated as each target's reflection reports the address sg binds a `bound_sampler` at:
+/// dx12's `s<i>` of `bound_samplers_space`, SPIR-V's binding i + 1 of the reserved set, slib's WGSL reader's index i
+/// of the reserved group, and Metal's sampler slot i.
 [[nodiscard]] sg::binding binding_of(sgl::interface_binding const& b, sg::shader_format format, sg::shader_stage stage)
 {
     auto result = sg::binding{.name = b.name,
@@ -103,7 +106,16 @@ static_assert(
                               .index = u32(b.slot),
                               .count = u32(b.count)};
     auto const is_dx12 = format == sg::shader_format::dxil;
-    if (b.is_inline)
+    if (b.is_file_sampler)
+    {
+        if (is_dx12)
+            result.space = slib::bound_samplers_space;
+        else if (format == sg::shader_format::spirv || format == sg::shader_format::wgsl)
+            result.group_index = u32(sg::reserved_binding_group);
+        if (format == sg::shader_format::spirv)
+            result.index = u32(b.slot + 1);
+    }
+    else if (b.is_inline)
     {
         // dx12 reads the inline block at b0 of slib's reserved space; every other backend places it by its own rule.
         if (is_dx12)

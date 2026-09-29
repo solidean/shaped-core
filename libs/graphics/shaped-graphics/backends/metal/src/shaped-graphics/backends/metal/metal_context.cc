@@ -136,6 +136,12 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::sample_rate_shading:
         // `[[primitive_id]]` and `[[sample_id]]` exist on every Apple GPU this backend's Metal 4 floor admits.
         return true;
+    case sg::feature::wireframe_fill:
+        // `MTLTriangleFillModeLines` is on every Apple GPU.
+        return true;
+    case sg::feature::depth32_float_stencil8:
+        // `MTLPixelFormatDepth32Float_Stencil8` is on every Apple GPU.
+        return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
@@ -930,11 +936,6 @@ cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_gr
 cc::result<sg::pipeline_layout_handle> metal_context::try_create_pipeline_layout(pipeline_layout_description const& desc,
                                                                                  lifetime_scope scope)
 {
-    // Refused rather than accepted: nothing here places the samplers where a shader could read them.
-    // The gap is libs/graphics/shaped-graphics/docs/TODO.md's, and a group's name-matched static sampler is the working form.
-    if (!desc.static_samplers.empty())
-        return cc::error("pipeline_layout: a pipeline-level static sampler (bound_sampler) is not bound by the metal "
-                         "backend yet; declare it a group's static sampler instead");
     return cc::result<sg::pipeline_layout_handle>(create_metal_pipeline_layout(desc, scope));
 }
 

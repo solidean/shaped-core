@@ -361,6 +361,18 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
     return state;
 }
 
+void checker::compile_file_sampler(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const& d = ast_of(file).at(out.at(id).declaration);
+    judge_attributes(file, d.attributes, {}, "a sampler");
+    auto const state = compile_sampler(file, d.node.as<ast::sampler_decl>());
+    auto& s = out.symbols[index_of(id)];
+    s.type = resource_type({.kind = type_kind::sampler, .is_comparison = state.compare >= 0});
+    s.info = i32(out.samplers.size());
+    out.samplers.push_back(state);
+}
+
 void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments)
 {
     auto const record = out.files[file].call_at(id);
@@ -370,7 +382,7 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
     // The members the call samples through: each binding member among its arguments, and a `@sampler` it leaves out.
     struct sampled
     {
-        member_info const* member;
+        member_info member;
         cc::string path;
     };
     auto members = cc::vector<sampled>();
@@ -383,23 +395,46 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
         if (auto const* const element = ast_of(file).at(named).node.try_as<ast::index>())
             named = element->object;
         auto const& where = out.files[file].target_at(named);
+        // CHK-314: a file-scope sampler filters as a binding's static sampler does
+        if (where.kind == target_kind::symbol && out.at(where.symbol).kind == symbol_kind::sampler
+            && out.at(where.symbol).state == symbol_state::checked)
+        {
+            auto const& s = out.at(where.symbol);
+            members.push_back({.member = {.name = s.name, .type = s.type, .static_sampler = s.info}, .path = s.name});
+            continue;
+        }
         if (where.kind != target_kind::binding_member)
             continue;
         auto const& binding = out.bindings[out.at(where.symbol).info];
         auto const all = out.at(binding.members);
         auto const& m = all[where.index];
-        members.push_back({.member = &m, .path = cc::format("{}.{}", out.at(where.symbol).name, m.name)});
+        members.push_back({.member = m, .path = cc::format("{}.{}", out.at(where.symbol).name, m.name)});
         if (callee == nullptr || callee->with_default_sampler == builtin_id::none || &a != &arguments[0])
             continue;
         // CHK-279: the texture's @sampler stands in for the sampler the call leaves out
-        if (m.default_sampler < 0)
+        if (m.default_sampler < 0 && !is_valid(m.default_file_sampler))
         {
             report(diagnostic_kind::missing_sampler, file, call,
                    cc::format("{} names no @sampler, so a call that samples it names a sampler: `{}.{}(…, smp)`",
                               members.back().path, m.name, callee->name));
             return;
         }
-        auto const& smp = all[m.default_sampler];
+        // CHK-314: a file-scope sampler filters as a binding's static sampler does
+        auto smp = member_info();
+        auto smp_path = cc::string();
+        if (is_valid(m.default_file_sampler))
+        {
+            auto const& s = out.at(m.default_file_sampler);
+            if (s.state != symbol_state::checked)
+                return;
+            smp = {.name = s.name, .type = s.type, .static_sampler = s.info};
+            smp_path = s.name;
+        }
+        else
+        {
+            smp = all[m.default_sampler];
+            smp_path = cc::format("{}.{}", out.at(where.symbol).name, smp.name);
+        }
         auto const wants_comparison
             = out.builtin_function(callee->with_default_sampler)->parameters[2] == "comparison_sampler";
         if (smp.type != checked_module::error_type && out.at(smp.type).is_comparison != wants_comparison)
@@ -409,7 +444,7 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
                               wants_comparison ? "comparison_sampler" : "sampler", members.back().path, smp.name));
             return;
         }
-        members.push_back({.member = &smp, .path = cc::format("{}.{}", out.at(where.symbol).name, smp.name)});
+        members.push_back({.member = cc::move(smp), .path = cc::move(smp_path)});
     }
 
     // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
@@ -419,18 +454,18 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
     auto sampler = cc::string();
     for (auto const& [m, path] : members)
     {
-        auto const& t = out.at(m->type);
-        if (t.kind == type_kind::texture && (m->is_unfilterable || t.is_depth))
+        auto const& t = out.at(m.type);
+        if (t.kind == type_kind::texture && (m.is_unfilterable || t.is_depth))
         {
             texture = path;
             is_depth = t.is_depth;
         }
         if (t.kind != type_kind::sampler || t.is_comparison)
             continue;
-        auto const* const fixed = m->static_sampler >= 0 ? &out.samplers[m->static_sampler] : nullptr;
+        auto const* const fixed = m.static_sampler >= 0 ? &out.samplers[m.static_sampler] : nullptr;
         auto const is_linear_anywhere
             = fixed != nullptr && (fixed->min_filter == 1 || fixed->mag_filter == 1 || fixed->mip_filter == 1);
-        if (fixed != nullptr ? is_linear_anywhere : !m->is_non_filtering)
+        if (fixed != nullptr ? is_linear_anywhere : !m.is_non_filtering)
             sampler = path;
     }
     if (!texture.empty() && !sampler.empty())

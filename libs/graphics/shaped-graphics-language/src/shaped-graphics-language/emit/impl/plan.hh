@@ -16,6 +16,10 @@ namespace sgl::emit::impl
 /// sgl does not link sg, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 inline constexpr auto k_max_groups = 3;
 
+/// How many file-scope sampler indices a stage may reach.
+/// Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` both hold 16.
+inline constexpr auto k_max_file_samplers = 16;
+
 /// What a struct is to the entry point, which decides how its members are addressed.
 /// It comes from where the struct stands in the signature, never from the struct's own attribute.
 enum class struct_role : u8
@@ -119,6 +123,19 @@ struct planned_resource
     cc::optional<memory_form> element_form;
 };
 
+/// A file-scope sampler the entry point's code reaches, a static sampler of its pipeline layout (EMIT-133).
+struct planned_sampler
+{
+    check::symbol_id symbol = check::symbol_id::none;
+    /// The global the shader samples through, minted like any other name.
+    cc::string name;
+    /// What the host binds it by, which is the sampler's own name.
+    cc::string host_name;
+    check::type_id type = check::type_id::none;
+    /// Its position among the module's file-scope samplers, which is the same in every entry point and every stage.
+    i32 index = 0;
+};
+
 /// One member of a `@workgroup` binding: memory the workgroup shares, which no host binds.
 struct planned_workgroup
 {
@@ -170,6 +187,8 @@ struct plan
     cc::vector<planned_constants> group_blocks;
     /// The resources the entry point's bindings declare, in group then slot order.
     cc::vector<planned_resource> resources;
+    /// The file-scope samplers its code reaches, in `index` order.
+    cc::vector<planned_sampler> samplers;
     /// The members of its `@workgroup` bindings, in the order listed and then declared.
     cc::vector<planned_workgroup> workgroup;
     /// MSL's: one per group with a constant block or a resource, in group order; empty on every other target.
@@ -189,6 +208,11 @@ struct plan
 [[nodiscard]] i32 workgroup_of(plan const& p, check::symbol_id binding, i32 member);
 /// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
 [[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
+
+/// The position in `samplers` of the file-scope sampler `symbol`, or -1 where the entry point reaches none of it.
+[[nodiscard]] i32 sampler_of(plan const& p, check::symbol_id symbol);
+/// The position of the file-scope sampler `symbol` among the module's, in declaration order: its index in every layout.
+[[nodiscard]] i32 file_sampler_index(check::checked_module const& m, check::symbol_id symbol);
 
 /// The block `binding` is read through: the `@inline` one, or its group's; null for a group with no plain member.
 [[nodiscard]] planned_constants const* block_of(plan const& p, check::symbol_id binding);
@@ -236,6 +260,9 @@ struct stage_input_spelling
 
 /// The buffer a vertex input member is read from (EMIT-92): its `@stream`, else `per_instance` or `per_vertex`.
 [[nodiscard]] cc::string stream_of(check::member_info const& member);
+/// The dx12 semantic of each member of the `@vertex struct` `t`, parallel to its members (EMIT-28).
+/// The emitted text and the host's input layout both take them from here, so the two always name a member alike.
+[[nodiscard]] cc::vector<cc::string> vertex_semantics(check::checked_module const& m, check::type_info const& t);
 
 /// Appends what keeps a struct from standing at one edge of the pipeline in `role`, whichever entry point uses it.
 void validate_edge_struct(check::checked_module const& m, check::type_id type, struct_role role, cc::vector<error>& errors);

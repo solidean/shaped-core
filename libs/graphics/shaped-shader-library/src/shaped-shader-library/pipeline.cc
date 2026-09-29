@@ -340,6 +340,21 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         else
             CC_ASSERTF(part.value > 0, "{}'s {}: {} is stated as no format", d.file, d.name, part.path);
 
+    // A stage the device lacks is refused by its feature before any stage compiles, since a target without the stage
+    // can fail an earlier one first: Metal rejects a vertex stage that feeds tessellation and writes no position.
+    if ((d.tessellation_control != nullptr || d.tessellation_evaluation != nullptr)
+        && !ctx->supports(sg::feature::tessellation_shader))
+        throw sg::pipeline_creation_exception(cc::string(d.name),
+                                              cc::any_error(cc::format("{}'s {}: the pipeline has tessellation stages, "
+                                                                       "and this device "
+                                                                       "lacks sg::feature::tessellation_shader",
+                                                                       d.file, d.name)));
+    if (d.geometry != nullptr && !ctx->supports(sg::feature::geometry_shader))
+        throw sg::pipeline_creation_exception(
+            cc::string(d.name), cc::any_error(cc::format("{}'s {}: the pipeline has a geometry stage, and this device "
+                                                         "lacks sg::feature::geometry_shader",
+                                                         d.file, d.name)));
+
     // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();
     desc.layout = d.acquire_layout(*ctx);

@@ -35,7 +35,7 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
-* **CHK-14** A `type` alias and a file-scope `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
+* **CHK-14** A `type` alias is `unsupported-yet`, and it still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
@@ -299,14 +299,20 @@ fun shade(k: float) -> float:
   A `sampler` member filters unless it is `@non_filtering`, and a static sampler filters unless every filter is `.nearest`.
 * **CHK-211** `max_anisotropy` is an `int` literal from 1 to 16, and anything else is `invalid-attribute-arguments`.
 * **CHK-212** A static sampler whose `max_anisotropy` is above 1 has every filter `.linear` once its settings are applied, or it is `invalid-attribute-arguments`.
-* **CHK-279** `@sampler(name)` stands on a texture member and names a sampler member of the same binding, static or dynamic.
-  On any other member it is `wrong-kind-of-name`; a name the binding has no member of is `unknown-member`, and one that is no sampler `wrong-kind-of-name`.
+* **CHK-279** `@sampler(name)` stands on a texture member and names a sampler member of the same binding, static or dynamic, or a file-scope sampler (CHK-314).
+  A member of the binding hides a file-scope name.
+  On any other member it is `wrong-kind-of-name`; a name neither the binding nor the file has is `unknown-member`, and one that is no sampler `wrong-kind-of-name`.
   A texture method called without its sampler takes the texture's `@sampler`, which is `missing-sampler` where the texture has none,
   and `type-mismatch` where it is not the kind the call takes: a `comparison_sampler` for a comparison, and a `sampler` otherwise.
 * **CHK-280** A texture method's `offset` and `component` are constants: a literal, an enum case, a `const`, or a construction of those.
   An offset's literals are from -8 to 7, and a comparison's `level` is the literal `0.0`; anything else is `invalid-constant-argument`.
 * **CHK-281** A call that samples a depth texture through a sampler that filters is `type-mismatch`, as CHK-210 is for an `@unfilterable` texture.
   A comparison takes a `comparison_sampler`, which is none of the samplers this counts.
+* **CHK-314** A `sampler name:` at file scope is a symbol whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
+  Its settings and its attributes are judged as CHK-204 judges a binding's static sampler.
+  It is used by its name, handed to a builtin as CHK-206 says, or through a texture's `@sampler` (CHK-279).
+  Either way it filters as a static sampler does for CHK-210 and CHK-281.
+  Its name anywhere else is `unsupported-yet`, and so is its name in a test, which samples no texture.
 
 ```sgl
 @inline binding constants:
@@ -678,6 +684,9 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-303** `s.emit(v)` appends the vertex `v`, which converts to `T`, and `s.end_strip()` ends the strip being appended; each is a geometry stage's alone.
 * **CHK-304** `@tessellation_control(partitioning = p, winding = w)` makes an entry point of the tessellation control stage, which needs `tessellation_shader`.
   `p` is `.integer`, `.fractional_even` or `.fractional_odd`, and `w` is `.clockwise` or `.counter_clockwise`.
+  `w` is the patch's winding: the triangles the tessellator makes wind as the corners do, where the evaluation stage weighs the control points in order by the domain location.
+  A triangle patch evaluated as `patch[0] * uvw.x + patch[1] * uvw.y + patch[2] * uvw.z` of counter-clockwise corners is `.counter_clockwise`.
+  So is a quad patch of corners counter-clockwise from its first, blended by `uv.x` from the first to the second and by `uv.y` from that edge to the opposite one.
   Power-of-two partitioning is none of them, since vulkan lacks it.
   Its first parameter is the patch: an array of from 1 to 32 of the struct the vertex stage returns.
   Stage inputs follow it, and it returns a **factors struct**; no other parameter stands.
@@ -841,7 +850,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |

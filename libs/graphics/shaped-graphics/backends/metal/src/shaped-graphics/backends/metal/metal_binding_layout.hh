@@ -48,6 +48,16 @@ public:
 
     [[nodiscard]] sg::pipeline_layout_description const& description() const { return _desc; }
 
+    /// One `bound_sampler`'s state, at the argument-table sampler slot its register names.
+    struct bound_sampler_state
+    {
+        int slot = 0;
+        MTL::ResourceID id = {};
+    };
+
+    /// Each `bound_sampler`, in description order; the states are the context's sampler cache's, so outlive this.
+    [[nodiscard]] cc::span<bound_sampler_state const> bound_samplers() const { return _bound_samplers; }
+
     /// Bytes the inline-constants block occupies, or 0 for a layout that declares none.
     /// Validated at creation, so a non-zero answer is a positive multiple of four.
     [[nodiscard]] isize inline_constants_size() const
@@ -56,5 +66,8 @@ public:
     }
 
 private:
+    friend class metal_context;
+
     sg::pipeline_layout_description _desc;
+    cc::vector<bound_sampler_state> _bound_samplers;
 };

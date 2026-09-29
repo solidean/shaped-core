@@ -513,6 +513,7 @@ struct writer
                 auto const& block = *block_of(p, b.binding);
                 result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
             },
+            [&](flat_file_sampler const& smp) { result = {.text = p.samplers[sampler_of(p, smp.sampler)].name}; },
             [&](flat_buffer_element const& b)
             {
                 auto const buffer = wrapped(expr(b.buffer), level::primary);
@@ -786,6 +787,10 @@ void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect cons
                           cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = last - first}));
         first = last;
     }
+    for (auto const& s : p.samplers)
+        d.write_file_sampler(out, p, s);
+    if (!p.samplers.empty())
+        out += "\n";
 }
 
 cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, check::type_id type)

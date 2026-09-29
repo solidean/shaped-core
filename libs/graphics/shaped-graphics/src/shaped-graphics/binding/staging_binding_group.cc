@@ -182,7 +182,28 @@ cc::result<binding_group_handle> staging_binding_group::try_snapshot()
     CC_RETURN_IF_ERROR(r);
     _snapshot = cc::move(r.value());
     _dirty = false;
+
+    auto uses = cc::vector<impl::buffer_use>();
+    for (auto const& use : _slot_uses)
+        if (use.buffer != nullptr)
+            uses.push_back(use);
+    impl::set_buffer_uses(*_snapshot, cc::move(uses));
     return _snapshot;
+}
+
+void staging_binding_group::record_use(binding_slot slot, cc::span<raw_view const> views)
+{
+    auto const& b = *info_of(slot).declared;
+    if (!_records_buffer_uses || b.count != 1 || views.size() != 1)
+        return;
+    auto const index = isize(u32(slot));
+    if (_slot_uses.size() <= index)
+        _slot_uses.resize_to_defaulted(index + 1);
+    auto const* buffer = try_as_buffer_view(views[0]);
+    _slot_uses[index] = buffer != nullptr ? impl::buffer_use{.buffer = buffer->buffer.get(),
+                                                             .binding = b.name,
+                                                             .writes = buffer->bound_as == view_class::readwrite}
+                                          : impl::buffer_use{};
 }
 
 void staging_binding_group::write_run(binding_slot slot, int first_element, cc::span<raw_view const> views)
@@ -225,6 +246,7 @@ void staging_binding_group::write_run(binding_slot slot, int first_element, cc::
     }
 
     write_view_descriptors(info.first_descriptor + first_element, b, views);
+    record_use(slot, views);
     _dirty = true;
 }
 
@@ -240,6 +262,8 @@ void staging_binding_group::clear_run(binding_slot slot, int first_element, int 
         return;
 
     clear_view_descriptors(info.first_descriptor + first_element, b, count);
+    if (auto const index = isize(u32(slot)); index < _slot_uses.size())
+        _slot_uses[index] = {};
     _dirty = true;
 }
 } // namespace sg

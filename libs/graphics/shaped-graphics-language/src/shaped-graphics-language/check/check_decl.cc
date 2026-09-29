@@ -333,6 +333,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
                        cc::format("{} is a {}, and a type stands here", text,
                                   kind == symbol_kind::function   ? "function"
                                   : kind == symbol_kind::constant ? "const"
+                                  : kind == symbol_kind::sampler  ? "sampler"
                                                                   : "binding"));
         }
     }
@@ -668,7 +669,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 {.member = collected.size() - 1, .attribute = named, .name = name_argument_of(file, named)});
     }
 
-    // CHK-279: a texture names a sampler of its own binding, which its sampling calls take when they name none
+    // CHK-279: a texture names a sampler of its binding or its file, which its sampling calls take when they name none
     for (auto const& n : named_samplers)
     {
         auto& m = collected[n.member];
@@ -691,8 +692,23 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         auto const where = span_of(file, ast_of(file).at(n.attribute->arguments)[0].value);
         if (found < 0)
         {
-            report(diagnostic_kind::unknown_member, file, where,
-                   cc::format("the binding has no member {}, and @sampler names one of its own", n.name));
+            // a member of the binding hides a file-scope name
+            auto const* const seen = names_seen_from(file).get_ptr(n.name);
+            if (seen == nullptr || seen->empty())
+            {
+                report(diagnostic_kind::unknown_member, file, where,
+                       cc::format("neither the binding nor its file has a sampler {}", n.name));
+                continue;
+            }
+            auto const symbol = seen->front();
+            if (out.at(symbol).kind != symbol_kind::sampler)
+            {
+                report(diagnostic_kind::wrong_kind_of_name, file, where, cc::format("{} is no sampler", n.name));
+                continue;
+            }
+            // one that failed is kept, so a call through it is silent rather than `missing-sampler`
+            demand(symbol, file, where);
+            m.default_file_sampler = symbol;
             continue;
         }
         if (collected[found].type != checked_module::error_type

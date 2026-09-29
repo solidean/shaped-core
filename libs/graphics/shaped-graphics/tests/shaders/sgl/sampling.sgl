@@ -1,0 +1,24 @@
+// A texture sampled through a sampler the host binds, at coordinates and levels the host chooses.
+// The host sweeps the sampler, so one entry point pins every address mode, filter and level clamp.
+
+binding probe:
+    source: texture_2d[float4]
+    smp: sampler
+    at: buffer[float4]
+    values: mut buffer[float4]
+
+// `at` is u, v and the level of detail.
+@compute(1) fun sample_at(@thread_id id: int3){probe}:
+    let a = probe.at[id.x]
+    probe.values[id.x] = probe.source.sample(float2(a.x, a.y), probe.smp, level = a.z)
+
+// A depth texture compared against a reference per probe, through a comparison sampler the host sweeps.
+binding compared:
+    depth: texture_2d_depth
+    smp: comparison_sampler
+    references: buffer[float]
+    values: mut buffer[float]
+
+@compute(1) fun compare_at(@thread_id id: int3){compared}:
+    let r = compared.references[id.x]
+    compared.values[id.x] = compared.depth.sample_compare(float2(0.5, 0.5), compared.smp, reference = r, level = 0.0)

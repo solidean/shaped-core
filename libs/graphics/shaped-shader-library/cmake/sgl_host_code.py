@@ -37,6 +37,13 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "bool32": ("slib::gpu_bool", 4, None),
 }
 
+
+def dx12_semantic(member: dict) -> str:
+    """The dx12 semantic of a vertex input member, which `sgl describe` states (EMIT-28).
+    The text SGL emits takes it from the same place, so the input layout and the shader always agree."""
+    return member["semantic"]
+
+
 def memory_structs_of(entries: SglEntries) -> dict[str, int]:
     """Every struct the package places in GPU memory, by name, and its size: each is a host type named as SGL names it."""
     return {s["name"]: s["size"] for _, s in entries.memory_structs}
@@ -81,9 +88,15 @@ def check_names(package: str, entries: SglEntries, taken: dict[str, str]) -> Non
 
 def includes(entries: SglEntries) -> list[str]:
     """The headers the generated SGL types need, beyond what every package header includes."""
+    out = []
+    # A layout's static samplers: an entry point's stated in the header, a pipeline's in the source that includes it.
+    if (any(e.get("samplers") for e in entries.described_entry_points.values())
+            or any(p.get("samplers") for _, p in entries.pipelines)):
+        out += ["<shaped-graphics/binding/pipeline_layout.hh>", "<shaped-graphics/binding/sampler.hh>",
+                "<shaped-shader-library/binding/binding_groups.hh>"]
     if not entries.bindings and not entries.vertex_inputs and not entries.render_targets:
-        return []
-    out = ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
+        return out
+    out += ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
            "<shaped-graphics/binding/binding.hh>", "<shaped-graphics/binding/binding_group.hh>"]
     if entries.vertex_inputs:
         out += ["<shaped-graphics/raster/vertex_input.hh>", "<shaped-graphics/resource/buffer.hh>",
@@ -227,6 +240,21 @@ def sampler_initializer(state: dict) -> str:
             value = repr(float(value))
         fields.append(f".{key} = {pattern.format(value)}")
     return "{" + ", ".join(fields) + "}"
+
+
+def bound_samplers(where: str, samplers: list[dict], names: list[str], indent: str) -> str:
+    """The `sg::bound_sampler` rows of a layout's file-scope samplers, one per line, each at the index SGL gave it."""
+    by_name = {s["name"]: s for s in samplers}
+    out = []
+    for name in names:
+        if name not in by_name:
+            raise HostCodeError(f"{where} names the sampler '{name}', which its file does not describe")
+        s = by_name[name]
+        out.append(f'{indent}{{.binding = {{.name = "{name}", .space = slib::bound_samplers_space, '
+                   f".index = {s['index']}u, .count = 1u, .type = sg::binding_type::sampler, "
+                   f".sampler_type = sg::sampler_binding_type::{s['sampler_type']}}},\n"
+                   f"{indent} .sampler = {sampler_initializer(s['settings'])}}},\n")
+    return "".join(out)
 
 
 def binding_entry(member: dict) -> str:
@@ -500,10 +528,19 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> str:
         out.append("    [[nodiscard]] bool operator==(std::nullptr_t) const { return asset == nullptr; }\n")
         out.append("\n")
         out.append(f"    /// The pipeline layout this entry point's binding list states, with no reflected binding in it.\n")
-        out.append("    /// A raster pipeline whose stages list different groups needs their union instead, spelled with\n")
-        out.append("    /// `ctx.cached.acquire_pipeline_layout<...>()`.\n")
+        out.append("    /// It carries only the file samplers this entry point reaches, so a file used as a library never fills the sampler slots.\n")
+        out.append("    /// A raster pipeline whose stages list different groups needs their union, spelled `ctx.cached.acquire_pipeline_layout<...>()`.\n")
+        out.append("    /// One whose stages reach file samplers is built from the file's SGL `pipeline`, whose layout carries every stage's samplers.\n")
         out.append("    [[nodiscard]] sg::pipeline_layout_handle acquire_layout(sg::context& ctx) const\n    {\n")
-        out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>();\n    }}\n")
+        samplers = described.get("samplers", [])
+        if samplers:
+            # The file-scope samplers its code reaches, which no group holds.
+            rows = bound_samplers(f"'{path}' entry point '{name}'", entries.file_samplers.get(path, []), samplers,
+                                  "            ")
+            out.append(f"        static sg::bound_sampler const samplers[] = {{\n{rows}        }};\n")
+            out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>(samplers);\n    }}\n")
+        else:
+            out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>();\n    }}\n")
         if described["stage"] == "compute":
             out.append("\n")
             out.append("    /// The compute pipeline of this entry point over that layout, which is all a compute pipeline needs.\n")
@@ -562,7 +599,7 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
         out = []
         for m in members:
             cpp = vertex_member_host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m)
-            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{m['name'].upper()}` on dx12\n")
+            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{dx12_semantic(m)}` on dx12\n")
         return "".join(out)
 
     out = [f"\nnamespace {namespace}\n{{\n"]
@@ -617,7 +654,7 @@ def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: 
     out.append("            .attributes = {\n")
     for member in struct["members"]:
         fmt = vertex_format(package, file, name, member)
-        out.append(f'                {{.semantic = "{member["name"].upper()}", '
+        out.append(f'                {{.semantic = "{dx12_semantic(member)}", '
                    f".format = sg::vertex_attribute_format::{fmt}, "
                    f".offset = cc::isize(offsetof({owner(member['stream'])}, {member['name']})), "
                    f".slot = {slot_of[member['stream']]}}},\n")
@@ -812,8 +849,14 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         frozen = ",\n".join(f'    "{line}"' for line in p["frozen"])
         out.append(f"constexpr cc::string_view k_{key}_frozen[] = {{\n{frozen},\n}};\n")
         group_types = ", ".join(f"{namespace}::{g}" for g in groups)
+        samplers = p.get("samplers", [])
+        if samplers:
+            where = f"shader package '{package}': `pipeline {p['name']}` of '{file.path}'"
+            rows = bound_samplers(where, file.samplers, samplers, "    ")
+            out.append(f"sg::bound_sampler const k_{key}_samplers[] = {{\n{rows}}};\n")
         out.append(f"sg::pipeline_layout_handle {key}_layout(sg::context& ctx)\n{{\n")
-        out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>();\n}}\n")
+        passed = f"k_{key}_samplers" if samplers else ""
+        out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>({passed});\n}}\n")
 
         # The build's settings as code, in the order they apply, and then what the host stated.
         out.append(f"void {key}_apply(sg::raster_pipeline_description& d, cc::span<slib::open_part const> open)\n{{\n")

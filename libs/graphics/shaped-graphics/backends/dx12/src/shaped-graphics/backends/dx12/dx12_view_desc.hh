@@ -20,7 +20,6 @@ void create_accel_view(ID3D12Device* device, dx12_tlas const* tlas, D3D12_CPU_DE
 /// Creates the native D3D12 texture view — SRV for readonly, UAV for readwrite — for `view` into the CPU descriptor slot `dst`.
 /// The view's texture must be a dx12_texture.
 /// The SRV/UAV dimension, mip/array/plane range, and 3D W-slice window all come from the view.
-/// depth-as-SRV is unsupported.
 void create_texture_view(ID3D12Device* device, sg::raw_texture_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst);
 
 /// Creates the empty descriptor of `binding` — synthesized from the binding alone: access + shape from its

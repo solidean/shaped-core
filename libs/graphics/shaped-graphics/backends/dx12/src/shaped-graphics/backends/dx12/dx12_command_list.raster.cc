@@ -169,6 +169,9 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
         rect = {0, 0, LONG(extent_w), LONG(extent_h)};
     _list->RSSetScissorRects(1, &rect);
 
+    // The blend constants are 0 until set, per rendering scope, so one scope's never leaks into the next.
+    raster_set_blend_constants(tg::vec4f(0, 0, 0, 0));
+
     _in_render_pass = true;
 }
 

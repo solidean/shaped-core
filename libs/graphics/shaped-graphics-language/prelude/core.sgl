@@ -112,6 +112,8 @@ enum blend_factor:
     one_minus_src_alpha
     dst_alpha
     one_minus_dst_alpha
+    constant
+    one_minus_constant
 
 enum blend_op:
     add

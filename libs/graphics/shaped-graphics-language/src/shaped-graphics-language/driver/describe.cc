@@ -61,6 +61,23 @@ cc::string_view access_name(check::access_mode access)
     return "read";
 }
 
+described_sampler describe_settings(check::sampler_state const& state)
+{
+    return {
+        .min_filter = cc::string(check::k_sampler_filters[state.min_filter]),
+        .mag_filter = cc::string(check::k_sampler_filters[state.mag_filter]),
+        .mip_filter = cc::string(check::k_sampler_filters[state.mip_filter]),
+        .address_u = cc::string(check::k_sampler_addresses[state.address_u]),
+        .address_v = cc::string(check::k_sampler_addresses[state.address_v]),
+        .address_w = cc::string(check::k_sampler_addresses[state.address_w]),
+        .compare = state.compare >= 0 ? cc::string(check::k_compare_ops[state.compare]) : cc::string(),
+        .max_anisotropy = state.max_anisotropy,
+        .min_lod = state.min_lod,
+        .max_lod = state.max_lod,
+        .mip_lod_bias = state.mip_lod_bias,
+    };
+}
+
 described_binding_member describe_resource(check::checked_module const& m,
                                            check::member_info const& member,
                                            i32 slot,
@@ -91,22 +108,7 @@ described_binding_member describe_resource(check::checked_module const& m,
         result.type = cc::string(m.name_of(member.type));
         result.sampler_type = cc::string(sampler_type_of(m, member));
         if (member.static_sampler >= 0)
-        {
-            auto const& state = m.samplers[member.static_sampler];
-            result.static_sampler = described_sampler{
-                .min_filter = cc::string(check::k_sampler_filters[state.min_filter]),
-                .mag_filter = cc::string(check::k_sampler_filters[state.mag_filter]),
-                .mip_filter = cc::string(check::k_sampler_filters[state.mip_filter]),
-                .address_u = cc::string(check::k_sampler_addresses[state.address_u]),
-                .address_v = cc::string(check::k_sampler_addresses[state.address_v]),
-                .address_w = cc::string(check::k_sampler_addresses[state.address_w]),
-                .compare = state.compare >= 0 ? cc::string(check::k_compare_ops[state.compare]) : cc::string(),
-                .max_anisotropy = state.max_anisotropy,
-                .min_lod = state.min_lod,
-                .max_lod = state.max_lod,
-                .mip_lod_bias = state.mip_lod_bias,
-            };
-        }
+            result.static_sampler = describe_settings(m.samplers[member.static_sampler]);
         break;
     }
     return result;
@@ -119,6 +121,8 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
                                    .edge = t.edge,
                                    .shape = check::hex_of(check::structural_hash(m, m.at(t.members)))};
     auto location = 0;
+    auto const semantics = t.edge == check::stage::vertex ? emit_impl::vertex_semantics(m, t) : cc::vector<cc::string>();
+    auto index = isize(0);
     for (auto const& member : m.at(t.members))
         result.members.push_back(
             {.name = member.name,
@@ -130,6 +134,7 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
              .output = member.output == check::pixel_output::sample_mask ? cc::string("sample_mask")
                      : member.output != check::pixel_output::color       ? cc::string("depth")
                                                                          : cc::string(),
+             .semantic = t.edge == check::stage::vertex ? semantics[index++] : cc::string(),
              .is_per_instance = member.is_per_instance});
     return result;
 }
@@ -175,10 +180,15 @@ described_entry_point describe_entry_point(check::checked_module const& m,
             result.bindings.push_back(m.at(id).name);
     result.features = feature_names(e.features);
     result.footprint = check::footprint_of(m, legal);
+    for (auto const id : driver::impl::file_samplers_of(legal))
+        result.samplers.push_back(m.at(id).name);
     return result;
 }
 
-described_pipeline describe_pipeline(check::checked_module const& m, check::pipeline_info const& p)
+/// `legal` holds each entry point of the module legalized, parallel to `m.entry_points`.
+described_pipeline describe_pipeline(check::checked_module const& m,
+                                     check::pipeline_info const& p,
+                                     cc::span<check::flat_entry_point const> legal)
 {
     auto result = described_pipeline{.name = m.at(p.symbol).name};
     auto features = check::feature_set();
@@ -187,6 +197,8 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
         check::symbol_id entry;
         cc::string* name;
     };
+    // Parallel to `m.symbols`: whether a stage reaches it, a file-scope sampler being the only symbol that can.
+    auto is_reached = cc::vector<u8>::create_filled(m.symbols.size(), 0);
     for (auto const s :
          {named_stage{p.vertex, &result.vertex}, named_stage{p.pixel, &result.pixel},
           named_stage{p.geometry, &result.geometry}, named_stage{p.tessellation_control, &result.tessellation_control},
@@ -195,7 +207,15 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
         {
             *s.name = m.at(s.entry).name;
             features |= m.functions[m.at(s.entry).info].features;
+            for (auto i = isize(0); i < m.entry_points.size(); ++i)
+                if (m.entry_points[i].function == s.entry)
+                    for (auto const id : driver::impl::file_samplers_of(legal[i]))
+                        is_reached[index_of(id)] = 1;
         }
+    // One layout serves every stage, so it carries what any of them reaches, in index order.
+    for (auto i = isize(0); i < m.symbols.size(); ++i)
+        if (is_reached[i] != 0)
+            result.samplers.push_back(m.symbols[i].name);
     for (auto const b : m.at(p.layout))
         result.layout.push_back(m.at(b).name);
     if (check::is_valid(p.inline_constants))
@@ -239,6 +259,17 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
         cc::format("vertex input = {}", check::is_valid(p.vertex_input) ? shaped(p.vertex_input) : cc::string()));
     result.frozen.push_back(
         cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
+    // The samplers are baked into the layout too, each at its index among all the file's samplers.
+    auto baked = cc::string();
+    auto sampler_index = 0;
+    for (auto i = isize(0); i < m.symbols.size(); ++i)
+    {
+        if (is_reached[i] != 0)
+            baked += cc::format("{}{}#{}@{}", baked.empty() ? "" : ", ", m.symbols[i].name, sampler_index,
+                                check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
+        sampler_index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+    }
+    result.frozen.push_back(cc::format("samplers = {}", baked));
     // The host's code holds a shader per stage, so a reload that adds or drops one has nothing to build it with.
     auto stages = cc::string();
     for (auto const* name : {&result.vertex, &result.tessellation_control, &result.tessellation_evaluation,
@@ -356,6 +387,32 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
     return result;
 }
 
+sgl::described_file_sampler sgl::driver::impl::describe_file_sampler(check::checked_module const& m, check::symbol_id id)
+{
+    auto const& s = m.at(id);
+    auto const& state = m.samplers[s.info];
+    return {.name = s.name,
+            .index = emit_impl::file_sampler_index(m, id),
+            .sampler_type = cc::string(sampler_type_of(m, {.type = s.type, .static_sampler = s.info})),
+            .settings = describe_settings(state),
+            .shape = check::hex_of(check::structural_hash(state))};
+}
+
+cc::vector<sgl::check::symbol_id> sgl::driver::impl::file_samplers_of(check::flat_entry_point const& legal)
+{
+    auto result = cc::vector<check::symbol_id>();
+    for (auto const& x : legal.exprs)
+        if (auto const* const smp = x.node.try_as<check::flat_file_sampler>(); smp != nullptr)
+        {
+            auto at = isize(0);
+            while (at < result.size() && index_of(result[at]) < index_of(smp->sampler))
+                ++at;
+            if (at == result.size() || result[at] != smp->sampler)
+                result.insert_at(at, smp->sampler);
+        }
+    return result;
+}
+
 cc::result<sgl::module_description, cc::string> sgl::describe(describe_request const& request)
 {
     auto const front = driver::impl::run_front_end(request.source, request.source_name);
@@ -388,6 +445,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
                 described.push_back(id);
             }
         }
+        else if (s.kind == check::symbol_kind::sampler)
+            result.samplers.push_back(driver::impl::describe_file_sampler(m, id));
         else if (s.kind == check::symbol_kind::structure && check::is_valid(s.type))
         {
             auto const& t = m.at(s.type);
@@ -422,18 +481,19 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     }
 
     // What only an entry point can get wrong: its list, its signature and its body.
+    auto legal = cc::vector<check::flat_entry_point>();
     for (auto const& e : m.entry_points)
     {
         auto const before = errors.size();
-        auto const legal = check::legalize(m, e);
-        emit_impl::validate(m, legal, errors);
+        legal.push_back(check::legalize(m, e));
+        emit_impl::validate(m, legal.back(), errors);
         if (errors.size() == before)
-            result.entry_points.push_back(describe_entry_point(m, e, legal));
+            result.entry_points.push_back(describe_entry_point(m, e, legal.back()));
     }
 
     for (auto const& p : m.pipelines)
         if (m.at(p.symbol).file == front.program_file())
-            result.pipelines.push_back(describe_pipeline(m, p));
+            result.pipelines.push_back(describe_pipeline(m, p, legal));
 
     if (!errors.empty())
     {

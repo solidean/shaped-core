@@ -113,6 +113,9 @@ const light_kind_sun: i32 = 2;
 * **EMIT-26** Member order is the address: the **location** of a member is its position among the members that carry no `@position`.
 * **EMIT-27** A member with `@position` is `SV_Position` in HLSL and `@builtin(position)` in WGSL, and it takes no location.
 * **EMIT-28** A member of a vertex input at location i has the dx12 semantic of its name in upper case, `[[vk::location(i)]]` in vulkan, and `@location(i)` in WGSL.
+  A name that ends in a digit gets a `_` after it, `uv1` -> `UV1_`, since HLSL reads a trailing number as the semantic's index.
+  A semantic an earlier member of the struct took, ignoring case, gets a `_` after it until it is its own: `uv1` then `uv1_` is `UV1_` then `UV1__`.
+  `sgl describe` states each member's semantic, which is what the host's input layout names the member by.
 * **EMIT-29** A member of a stage link at location i has the generated semantic `SGLi`, `[[vk::location(i)]]` in vulkan, and `@location(i)` in WGSL.
 * **EMIT-30** A member of a render target struct at location i is `SV_Targeti` in HLSL and `@location(i)` in WGSL.
 * **EMIT-31** A semantic is made from the name as the program writes it, whatever EMIT-18 made of the member.
@@ -134,7 +137,8 @@ const light_kind_sun: i32 = 2;
 | `@geometry` | an array of stage links, and the stream's element as a stage link | none |
 | `@pixel` | stage link | render targets |
 
-* **EMIT-122** `msl` refuses a geometry and a tessellation entry point as `target-lacks-feature`: Metal has neither stage, and tessellates by a compute kernel instead.
+* **EMIT-122** `msl` refuses a geometry and a tessellation entry point as `target-lacks-feature`, naming the stage's feature as EMIT-109 says.
+  Metal has neither stage, and tessellates by a compute kernel instead.
 * **EMIT-123** HLSL writes the stages as dx12 and vulkan both take them:
   * a geometry stage is `[maxvertexcount(N)]` over `void`, taking `triangle T tri[3]` and last `inout TriangleStream<T>`, and `emit` and `end_strip` are `Append` and `RestartStrip`;
   * a control stage is a passthrough hull function that returns `patch[point_index]`, named by its `domain`, `partitioning`, `outputtopology`, `outputcontrolpoints` and `patchconstantfunc`;
@@ -142,6 +146,8 @@ const light_kind_sun: i32 = 2;
   * an evaluation stage is `[domain(…)]` over the function, taking the `const OutputPatch`, the patch constants, and `SV_DomainLocation`;
   * in patch constants, `@edge_factors` is `SV_TessFactor` and `@inside_factors` `SV_InsideTessFactor`;
   * the other members of patch constants take the locations after the control point's, so vulkan's two never collide.
+* **EMIT-134** A control stage's `.counter_clockwise` is HLSL's `triangle_cw` and `.clockwise` its `triangle_ccw`.
+  HLSL names the winding in its domain's own orientation, which mirrors the patch the domain location weighs (CHK-304).
 
 ```hlsl
 struct pixel_input
@@ -157,7 +163,8 @@ struct pixel_input
 * **EMIT-35** The bindings an emitter writes are the ones the entry point's binding list names.
 * **EMIT-36** An `@inline binding` is a struct of its members and one global of that struct, which has the binding's name.
 * **EMIT-37** The global is where `sg` expects inline constants, by the table below.
-* **EMIT-38** A second `@inline` binding is `unsupported`, and so is one that is not the last of the list.
+* **EMIT-38** A second `@inline` binding is `unsupported`, and so is one a group of the list follows.
+  `@workgroup` memory is bound by no host, so it may stand on either side of it.
 * **EMIT-39** A plain member of a binding, and a buffer's element, is a value that can stand in GPU memory, or it is `unsupported`.
   That is a builtin whose record has a size there, or a struct of such values; `bool` has no size, and the detail names `bool32`, which has one.
 * **EMIT-40** Every value in GPU memory is placed by [the layout rules](#layout), and `hlsl-vulkan` states each offset as `[[vk::offset]]` ([why](why/emitting.md#emit-40)).
@@ -200,6 +207,14 @@ A binding that is not `@inline` is a group.
   The class is `b` for the constant buffer, `u` for an image and a `mut` buffer, `s` for a sampler, and `t` for every other resource.
 * **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.
   Only the entry point's list counts: a function that is no entry point takes the groups its caller hands it, which are no addresses of their own.
+* **EMIT-133** A file-scope sampler the entry point's code reaches is one global named as the sampler is, and one the code does not reach is not declared.
+  Its index i is its position among the module's file-scope samplers in declaration order, so every entry point and every stage states the same one.
+  It stands where sg binds a pipeline layout's static sampler of index i: `register(s<i>, space10)` in `hlsl-dx12`, and `[[vk::binding(i + 1, 3)]]` in `hlsl-vulkan`.
+  WGSL writes it as `@group(3) @binding(i + 1)`, since binding 0 of sg's own group is the inline constants', and MSL as the entry point's parameter `sampler name [[sampler(i)]]`.
+  Its type is EMIT-99's, and its settings reach the layout from `sgl describe` as a group's static sampler's do.
+  An entry point that reaches one of index 16 or more is `too-many-samplers` on every target, since Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` hold 16.
+  Every sampler declared above it counts toward that index, reached or not, so the limit is on the file and not on what one stage uses.
+  So a library file holding more than 16 samplers splits into several, or whatever reaches its seventeenth is refused.
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|
@@ -259,6 +274,7 @@ binding affine:
 * **EMIT-130** A `@depth` member is `SV_Depth` in HLSL, `@builtin(frag_depth)` in WGSL and `[[depth(any)]]` in MSL.
   A `@sample_mask` member is `SV_Coverage`, `@builtin(sample_mask)` and `[[sample_mask]]`.
   The conservative forms are `SV_DepthGreaterEqual` / `SV_DepthLessEqual` and `[[depth(greater)]]` / `[[depth(less)]]`; WGSL has none, and drops the promise, which changes no result.
+  On dx12 a pixel stage writing `.greater_equal` or `.less_equal` takes its `@position` as `noperspective centroid`, which DXIL requires of one.
 * **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
 * **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.
@@ -370,6 +386,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 | `malformed-tree` | a flat tree the check pass does not produce |
 | `not-core` | EMIT-66 |
 | `too-many-groups` | EMIT-105 |
+| `too-many-samplers` | EMIT-133 |
 | `target-lacks-feature` | EMIT-109 |
 
 ## Open

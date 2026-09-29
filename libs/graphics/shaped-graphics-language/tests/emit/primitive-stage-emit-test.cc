@@ -59,7 +59,7 @@ TEST("sgl emit - a control stage is a hull passthrough and its patch-constant fu
     CHECK(hlsl.contains("tri_factors tc_patch(InputPatch<control_point, 3> patch)\n"));
     CHECK(hlsl.contains("[domain(\"tri\")]\n"
                         "[partitioning(\"fractional_odd\")]\n"
-                        "[outputtopology(\"triangle_ccw\")]\n"
+                        "[outputtopology(\"triangle_cw\")]\n" // EMIT-134: counter-clockwise, in HLSL's mirror
                         "[outputcontrolpoints(3)]\n"
                         "[patchconstantfunc(\"tc_patch\")]\n"
                         "control_point tc(InputPatch<control_point, 3> patch, uint point_index : "
@@ -91,5 +91,6 @@ TEST("sgl emit - WebGPU and Metal have neither stage, and refuse each by its fea
         auto const msl = sgl::emit::dump_errors(emit_source(k_program, entry, target::msl));
         CHECK(msl.contains("target-lacks-feature"));
         CHECK(msl.contains("which Metal does not have"));
+        CHECK(msl.contains(entry == k_geometry ? "geometry_shader" : "tessellation_shader"));
     }
 }

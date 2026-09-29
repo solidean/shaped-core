@@ -404,6 +404,8 @@ struct checker
     void compile_enum(symbol_id id);
     /// A `const`: its value is a number literal, an enum case or another `const`, and anything else is `unsupported-yet`.
     void compile_const(symbol_id id);
+    /// A file-scope `sampler name:`: its settings, and the sampler type they make (CHK-314).
+    void compile_file_sampler(symbol_id id);
     /// False where `attributes` hold `@shadowable(false)`; a malformed one is reported when its declaration is compiled.
     [[nodiscard]] bool is_shadowable_by(i32 file, ast::range_of<ast::attribute> attributes) const;
     /// Reports `shadows-unshadowable` where a local or a parameter named `name` would hide a `@shadowable(false)` symbol.

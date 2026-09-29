@@ -1,0 +1,61 @@
+// One vertex member per vertex attribute format, each compared in the vertex stage against the value the test feeds it.
+// A point then writes which members decoded as expected, one bit per format, so a format a backend decodes wrongly clears its own bit.
+// The uint members hold values above the int range, so reading one as an int does not match either.
+
+@vertex struct formatted:
+    f1: float
+    f2: float2
+    f3: float3
+    f4: float4
+    i1: int
+    i2: int2
+    i3: int3
+    i4: int4
+    u1: uint
+    u2: uint2
+    u3: uint3
+    u4: uint4
+    @format(.rgba8_unorm) n4: float4
+    @format(.rgba8_uint) b4: uint4
+
+struct format_checks:
+    @position position: hpos4
+    @interpolate(.flat) matched: int
+
+@pixel struct format_target:
+    matched: float4
+
+// 51, 102 and 153 are 0.2, 0.4 and 0.6 as unorm8, which a conversion may round to either neighbouring float.
+fun near(a: float, b: float) -> bool => a - b < 0.001 and b - a < 0.001
+
+@vertex fun formatted_vs(v: formatted) -> format_checks:
+    let mut bits = 0
+    if v.f1 == 1.5 => bits = bits | 1
+    if v.f2.x == 2.5 and v.f2.y == -3.0 => bits = bits | 2
+    if v.f3.x == 4.0 and v.f3.y == 5.5 and v.f3.z == -6.25 => bits = bits | 4
+    if v.f4.x == 7.0 and v.f4.y == 8.5 and v.f4.z == 9.75 and v.f4.w == -10.0 => bits = bits | 8
+    if v.i1 == -7 => bits = bits | 16
+    if v.i2.x == 11 and v.i2.y == -12 => bits = bits | 32
+    if v.i3.x == 13 and v.i3.y == -14 and v.i3.z == 15 => bits = bits | 64
+    if v.i4.x == -16 and v.i4.y == 17 and v.i4.z == -18 and v.i4.w == 19 => bits = bits | 128
+    if v.u1 == 4000000000 => bits = bits | 256
+    if v.u2.x == 2147483650 and v.u2.y == 23 => bits = bits | 512
+    if v.u3.x == 24 and v.u3.y == 3000000000 and v.u3.z == 25 => bits = bits | 1024
+    if v.u4.x == 26 and v.u4.y == 27 and v.u4.z == 4294967295 and v.u4.w == 28 => bits = bits | 2048
+    if near(v.n4.x, 0.2) and near(v.n4.y, 0.4) and near(v.n4.z, 0.6) and v.n4.w == 1.0 => bits = bits | 4096
+    if v.b4.x == 51 and v.b4.y == 102 and v.b4.z == 153 and v.b4.w == 255 => bits = bits | 8192
+    return {
+        position = hpos4(0.0, 0.0, 0.5, 1.0)
+        matched = bits
+    }
+
+@pixel fun formatted_ps(p: format_checks) -> format_target:
+    return {
+        matched = float4(p.matched as float, 0.0, 0.0, 1.0)
+    }
+
+pipeline formats:
+    vertex = formatted_vs
+    pixel = formatted_ps
+    topology = .point_list
+    format = .rgba32_float

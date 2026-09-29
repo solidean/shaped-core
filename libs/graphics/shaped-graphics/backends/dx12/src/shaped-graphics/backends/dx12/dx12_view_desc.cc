@@ -25,7 +25,6 @@ namespace
 // The D3D12 SRV desc for a texture view: dimension + mip/array/plane come straight from the view, a reinterpretation the view chose, not from the texture's shape.
 // Non-array dimensions (Texture2D, cube, …) have no base-slice field in D3D12, so a non-zero first slice promotes to the size-1 array form.
 // Same texels, still declared as the requested dimension in the shader.
-// depth-as-SRV, on a typeless resource, is not supported yet.
 [[nodiscard]] D3D12_SHADER_RESOURCE_VIEW_DESC texture_srv_desc(sg::raw_texture_view const& v, DXGI_FORMAT format)
 {
     D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
@@ -300,7 +299,10 @@ void create_texture_view(ID3D12Device* device, sg::raw_texture_view const& view,
     {
     case sg::view_class::texture:
     {
-        D3D12_SHADER_RESOURCE_VIEW_DESC const desc = texture_srv_desc(view, format);
+        // A depth texture is read through its color twin, since the resource a shader samples is typeless.
+        // So the view names a format even where it leaves it to the texture, which a typeless resource cannot supply.
+        auto const view_format = view.format != sg::pixel_format::undefined ? view.format : view.texture->format();
+        D3D12_SHADER_RESOURCE_VIEW_DESC const desc = texture_srv_desc(view, to_dxgi_shader_view_format(view_format));
         device->CreateShaderResourceView(resource, &desc, dst);
         return;
     }

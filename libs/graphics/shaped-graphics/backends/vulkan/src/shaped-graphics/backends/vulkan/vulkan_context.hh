@@ -139,6 +139,13 @@ public:
         _geometry_shader = features.geometryShader == VK_TRUE;
         _tessellation_shader = features.tessellationShader == VK_TRUE;
         _sample_rate_shading = features.sampleRateShading == VK_TRUE;
+        _wireframe_fill = features.fillModeNonSolid == VK_TRUE;
+        _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
+
+        // A device must have D24S8 or D32S8 as a depth-stencil attachment, and not necessarily the one sg names.
+        auto d32s8 = VkFormatProperties{};
+        vkGetPhysicalDeviceFormatProperties(_physical_device, VK_FORMAT_D32_SFLOAT_S8_UINT, &d32s8);
+        _depth32_float_stencil8 = (d32s8.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
 
         // shaderStorageImageExtendedFormats does not cover bgra8_unorm, whose storage is asked per format.
         auto bgra8 = VkFormatProperties{};
@@ -260,6 +267,10 @@ public:
             return _geometry_shader;
         case sg::feature::sample_rate_shading:
             return _sample_rate_shading;
+        case sg::feature::wireframe_fill:
+            return _wireframe_fill;
+        case sg::feature::depth32_float_stencil8:
+            return _depth32_float_stencil8;
         case sg::feature::float32_filtering:
             return _float32_filtering;
         case sg::feature::extended_image_formats:
@@ -795,6 +806,10 @@ public:
     bool _geometry_shader = false;
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
+    bool _wireframe_fill = false;
+    bool _depth32_float_stencil8 = false;
+    /// Without it every sampler is created with anisotropy off; with it, maxAnisotropy is clamped to the device limit.
+    bool _sampler_anisotropy = false;
 
     // The device's memory types, read once at construction: they never change, and a staging ring allocates far too
     // often to re-query them per allocation.

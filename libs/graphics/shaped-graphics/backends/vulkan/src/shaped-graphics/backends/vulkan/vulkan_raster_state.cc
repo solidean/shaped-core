@@ -85,6 +85,11 @@ VkBlendFactor to_vk_blend_factor(sg::blend_factor f)
         return VK_BLEND_FACTOR_DST_ALPHA;
     case sg::blend_factor::one_minus_dst_alpha:
         return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    // In the alpha equation a constant color factor reads the constant's alpha, as every other backend does.
+    case sg::blend_factor::constant:
+        return VK_BLEND_FACTOR_CONSTANT_COLOR;
+    case sg::blend_factor::one_minus_constant:
+        return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
     }
     CC_UNREACHABLE("unhandled blend_factor");
 }

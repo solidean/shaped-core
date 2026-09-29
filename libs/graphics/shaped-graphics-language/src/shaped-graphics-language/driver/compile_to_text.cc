@@ -84,6 +84,18 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
         }
         ++group;
     }
+    for (auto const id : driver::impl::file_samplers_of(legal))
+    {
+        auto const described = driver::impl::describe_file_sampler(m, id);
+        result.push_back({.name = described.name,
+                          .emitted = emitted_of(described.name),
+                          .kind = described_member_kind::sampler,
+                          .is_file_sampler = true,
+                          .group = -1,
+                          .slot = described.index,
+                          .is_used = true,
+                          .sampler_type = described.sampler_type});
+    }
     return result;
 }
 } // namespace

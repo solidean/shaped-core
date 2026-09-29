@@ -110,7 +110,11 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
-    return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
+    auto const checked = _ctx.portability_checks();
+    auto group = _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
+    if (group.has_value() && checked)
+        impl::record_buffer_uses(*group.value(), views);
+    return group;
 }
 
 binding_group_handle context_persistent_scope::create_binding_group(binding_group_layout_handle layout,
@@ -135,7 +139,12 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
-    return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
+    // Only a slot needs the layout to name its binding, and only where the checks are on.
+    auto const checked = _ctx.portability_checks() ? layout : binding_group_layout_handle();
+    auto group = _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
+    if (group.has_value() && checked != nullptr)
+        impl::record_buffer_uses(*group.value(), *checked, views);
+    return group;
 }
 
 staging_binding_group_handle context_persistent_scope::create_staging_binding_group(binding_group_layout_handle layout)
@@ -153,7 +162,10 @@ cc::result<staging_binding_group_handle> context_persistent_scope::try_create_st
 {
     auto created = _ctx.try_create_staging_binding_group(cc::move(layout), lifetime_scope::persistent);
     if (created.has_value())
+    {
         created.value()->_float32_filtering = _ctx.supports(feature::float32_filtering);
+        created.value()->_records_buffer_uses = _ctx.portability_checks();
+    }
     return created;
 }
 } // namespace sg

@@ -99,6 +99,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         params.push_back(param);
     }
 
+    pl->has_static_samplers = !static_sampler_descs.empty();
+
     D3D12_ROOT_SIGNATURE_DESC desc = {};
     desc.NumParameters = UINT(params.size());
     desc.pParameters = params.empty() ? nullptr : params.data();

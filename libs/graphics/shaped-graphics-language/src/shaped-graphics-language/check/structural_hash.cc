@@ -46,6 +46,14 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
         if (member.static_sampler >= 0)
             fold_sampler(b, m.samplers[member.static_sampler]);
         b.add_pod(member.default_sampler);
+        b.add_bool(is_valid(member.default_file_sampler));
+        if (is_valid(member.default_file_sampler))
+        {
+            auto const& s = m.at(member.default_file_sampler);
+            b.add_string(s.name);
+            if (s.info >= 0)
+                fold_sampler(b, m.samplers[s.info]);
+        }
         fold_type(b, m, member.type);
     }
 }
@@ -112,6 +120,13 @@ cc::hash128 check::structural_hash(checked_module const& m, cc::span<member_info
 {
     auto b = cc::byte_stream_builder();
     fold_members(b, m, members);
+    return cc::hash128::create(b.written_bytes(), 0);
+}
+
+cc::hash128 check::structural_hash(sampler_state const& s)
+{
+    auto b = cc::byte_stream_builder();
+    fold_sampler(b, s);
     return cc::hash128::create(b.written_bytes(), 0);
 }
 

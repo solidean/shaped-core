@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.28)
 project(typed-geometry LANGUAGES CXX)
 
 # typed-geometry is header-dominant but not header-only: it is a normal static library so that
-# concrete (non-template) algorithms can land in .cc files as the library grows. For now a single
-# anchor translation unit keeps the static target well-formed.
+# concrete (non-template) algorithms can land in .cc files next to the header they implement.
 add_library(typed-geometry
     src/typed-geometry/typed-geometry.cc
+    src/typed-geometry/scalar/half_float.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -24,6 +24,9 @@ target_sources(typed-geometry
     src/typed-geometry/scalar/constants.hh
     src/typed-geometry/scalar/scalar.hh
     src/typed-geometry/scalar/angle.hh
+    src/typed-geometry/scalar/half_float.hh
+    src/typed-geometry/scalar/impl/half_float_convert.hh
+    src/typed-geometry/scalar/impl/half_float_ops.hh
     src/typed-geometry/scalar/all.hh
     src/typed-geometry/scalar/fixed_int/impl/core.hh
     src/typed-geometry/scalar/fixed_int/generated/all.hh
@@ -118,10 +121,12 @@ if(SC_BUILD_TESTS)
 
         tests/scalar/scalar-test.cc
         tests/scalar/angle-test.cc
+        tests/scalar/half_float-test.cc
         tests/scalar/fixed_int-test.cc
         tests/scalar/fixed_int-golden.gen.cc
 
         tests/benchmarks/fixed_int-benchmark.cc
+        tests/benchmarks/half_float-benchmark.cc
 
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc

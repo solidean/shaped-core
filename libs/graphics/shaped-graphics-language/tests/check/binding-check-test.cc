@@ -194,6 +194,58 @@ TEST("sgl check - a texture, an image or a sampler is handed to a builtin and is
     CHECK(reports_for(listing(members, "    work.dst.store(int2(0, 0), 1.0)\n")).contains("no-matching-overload"));
 }
 
+TEST("sgl check - a file-scope sampler is handed to a builtin, and filters as a static sampler does (CHK-314)")
+{
+    constexpr auto file_sampler = "sampler edge:\n    filter = .nearest\n    address = .clamp_edge\n\n";
+    auto const with = [&](cc::string_view samplers, cc::string_view members, cc::string_view body)
+    { return reports_for(cc::format("{}{}", samplers, listing(members, body))); };
+    constexpr auto texture = "    t: texture_2d[float4]\n";
+
+    CHECK(with(file_sampler, texture, "    let c = work.t.sample(float2(0.5, 0.5), edge, level = 0.0)\n") == "");
+    CHECK(with(file_sampler, texture, "    let s = edge\n").contains("unsupported-yet user:[edge] a sampler as a value"));
+    // CHK-210: nearest in every filter is a sampler an @unfilterable texture takes, and a linear one is refused
+    constexpr auto unfilterable = "    @unfilterable t: texture_2d[float4]\n";
+    CHECK(with(file_sampler, unfilterable, "    let c = work.t.sample(float2(0.5, 0.5), edge, level = 0.0)\n") == "");
+    CHECK(with("sampler edge:\n    filter = .linear\n\n", unfilterable,
+               "    let c = work.t.sample(float2(0.5, 0.5), edge, level = 0.0)\n")
+              .contains("work.t is @unfilterable, and edge filters"));
+    // `compare` makes it a comparison sampler, which only a comparison takes
+    constexpr auto depth = "    d: texture_2d_depth\n";
+    constexpr auto compared
+        = "    let c = work.d.sample_compare(float2(0.5, 0.5), edge, reference = 0.5, level = 0.0)\n";
+    CHECK(with("sampler edge:\n    compare = .less\n\n", depth, compared) == "");
+    CHECK(with(file_sampler, depth, compared).contains("no-matching-overload"));
+
+    // its settings and attributes are judged as a binding's static sampler's are
+    CHECK(with("sampler edge:\n    border = .black\n\n", "", "").contains("border is no sampler setting"));
+    CHECK(with("@whatever sampler edge:\n    filter = .linear\n\n", "", "").contains("whatever"));
+    // it is a sampler and nothing else
+    CHECK(with(file_sampler, "    x: edge\n", "").contains("edge is a sampler, and a type stands here"));
+    CHECK(with(file_sampler, "", "    let x = edge()\n").contains("edge is a sampler, and a call needs"));
+}
+
+TEST("sgl check - a file-scope sampler's settings are compiled whether or not an entry point uses it")
+{
+    auto const checked
+        = check_sources(read_prelude(), "sampler edge:\n    filter = .nearest\n    address = .clamp_edge\n");
+    CHECK(reports_of(checked) == "");
+    auto found = false;
+    for (auto const& s : checked.module.symbols)
+    {
+        if (s.name != "edge")
+            continue;
+        found = true;
+        CHECK(s.kind == sgl::check::symbol_kind::sampler);
+        REQUIRE(s.info >= 0);
+        auto const& state = checked.module.samplers[s.info];
+        CHECK(state.min_filter == 0);
+        CHECK(state.address_u == 2); // clamp_edge
+        CHECK(state.address_w == 2);
+        CHECK(state.compare == -1);
+    }
+    CHECK(found);
+}
+
 TEST("sgl check - a buffer element is read by subscript and written where the buffer is mut")
 {
     constexpr auto members = "    src: buffer[float]\n    dst: mut buffer[float]\n";

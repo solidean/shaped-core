@@ -324,8 +324,12 @@ auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::pa
 // `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
 // an entry point of a `*`-declared file is a small wrapper: `->acquire(ctx)` as before, plus the layout its list states:
 auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
+//   it also holds the file-scope samplers the entry point reaches, as sg::bound_samplers: s<i> of
+//   slib::bound_samplers_space (10) on dx12, binding i + 1 of sg's reserved group elsewhere, a `pipeline`'s the same.
 auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx); // compute: needs nothing else
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
+// a wrapper's layout holds only the samplers ITS entry point reaches, so a file used as a library never fills the sampler slots:
+//   a raster pipeline whose stages reach file samplers is built from the file's `pipeline`, whose layout holds every stage's.
 // a `pipeline` declaration -> shaders::<file>.<name> (an unnamed `pipeline:` is `.pipeline`), built from ITS stages,
 //   layout, vertex input, targets and settings; the host states only what the declaration left `.host`.
 //   It is an sg::raster_pipeline_source, so ctx.cached acquires it like a description:
