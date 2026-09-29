@@ -326,4 +326,216 @@ ASYNC_INVOCABLE_TEST("sr - NRD keeps a surface's texture rather than filtering i
                                 in_contrast));
     }
 }
+
+// The motion guide, which is the half of this integration that is ours and runs backwards from NRD's in both respects.
+//
+// sv writes pixels, current minus previous; NRD reads UV, previous minus current — `pixelUvPrev = pixelUv + IN_MV.xy *
+// motionVectorScale.xy`. `nrd_session::execute` bridges both inversions on one line, by putting the reciprocal extent
+// AND the sign on `motionVectorScale`, and hands the guide over untouched.
+//
+// A stream of zero motion cannot pin any of that: with every pixel reading its history from its own position, a
+// flipped sign, a missing reciprocal or a motion texture bound to the wrong slot all converge just as well.
+// So this translates a lit region across the image and tells NRD about it — or does not — and compares the two.
+// It is the NRD counterpart of "sr - svgf follows a moving image through its motion vectors", and it measures the same
+// way, because a wrong motion vector does not fail anything: it smears, and a soft image reads as a denoiser working.
+namespace
+{
+/// Bigger than `k_size`: the region has to travel far enough that a history which did not follow it is blending
+/// somewhere else entirely, and still leave both sides of the sweep clear of REBLUR's spatial reach.
+constexpr auto k_motion_size = 128;
+
+/// How far the lit edge moves per frame, in pixels, and how many frames of it are measured.
+/// Eight frames of four pixels sweeps a 32-pixel band, every column of which was on both sides of the edge.
+constexpr auto k_motion_step = 4;
+constexpr auto k_motion_frames = 8;
+
+constexpr auto k_bright = 1.0f;
+constexpr auto k_dark = 0.2f;
+
+/// A constant albedo, so the de-modulation factor is the same at every pixel and cannot itself carry the pattern.
+constexpr auto k_motion_albedo = 0.5f;
+
+/// The lighting at column `x` once the edge has reached `shift`: bright to its left, dark to its right.
+///
+/// The pattern is in the LIGHTING rather than in the albedo, and that is the whole reason this test can exist.
+/// De-modulation divides the albedo out, so a moving albedo leaves REBLUR a uniform signal and nothing to reproject
+/// wrongly; a moving irradiance is what actually reaches it.
+[[nodiscard]] f32 lighting_at(int x, int shift)
+{
+    return x < k_motion_size / 4 + shift ? k_bright : k_dark;
+}
+
+/// Denoises `k_motion_frames` frames of that sweeping edge, telling NRD it moved by `told_step` pixels per frame, and
+/// returns the mean absolute error of the last frame against the truth over the swept band.
+///
+/// `moving` false holds the edge still, which is the floor any run can reach.
+[[nodiscard]] cc::shared_async<f32> sweep_error(sg::context& ctx, bool moving, int told_step)
+{
+    auto const make = [&](sg::pixel_format format)
+    {
+        return ctx.persistent.create_texture_2d({.format = format,
+                                                 .width = k_motion_size,
+                                                 .height = k_motion_size,
+                                                 .usage = sg::texture_usage::readonly_texture
+                                                        | sg::texture_usage::readwrite_texture
+                                                        | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
+    };
+
+    auto const diffuse = make(sg::pixel_format::rgba32_float);
+    auto const specular = make(sg::pixel_format::rgba32_float);
+    auto const normal = make(sg::pixel_format::rgba32_float);
+    auto const roughness = make(sg::pixel_format::rgba32_float);
+    auto const depth = make(sg::pixel_format::rgba32_float);
+    auto const motion = make(sg::pixel_format::rgba32_float);
+    auto const hit_distance = make(sg::pixel_format::rg32_float);
+    auto const albedo_texture = make(sg::pixel_format::rgba32_float);
+    auto const specular_albedo = make(sg::pixel_format::rgba32_float);
+    auto const output = make(sg::pixel_format::rgba32_float);
+
+    auto const fill = [&](sg::command_list& cmd, sg::texture_2d const& t, tg::vec4f v)
+    {
+        auto const pixels = cc::vector<tg::vec4f>::create_filled(k_motion_size * k_motion_size, v);
+        cmd.upload.bytes_to_texture(t.raw(), cc::span<tg::vec4f const>(pixels).as_bytes());
+    };
+
+    auto history = sr::denoise_history();
+
+    auto denoised_frames = 0;
+    for (auto attempt = 0; attempt < 24 && denoised_frames < k_motion_frames; ++attempt)
+    {
+        auto cmd = ctx.create_command_list();
+
+        // The shift counts DENOISED frames rather than attempts: the first calls report pending while the pipelines
+        // build, and a pattern that moved during them would be telling NRD about motion it never saw.
+        auto const shift = moving ? denoised_frames * k_motion_step : 0;
+        {
+            auto pixels = cc::vector<tg::vec4f>();
+            pixels.reserve(k_motion_size * k_motion_size);
+            for (auto y = 0; y < k_motion_size; ++y)
+                for (auto x = 0; x < k_motion_size; ++x)
+                {
+                    auto const lit = k_motion_albedo * lighting_at(x, shift);
+                    pixels.push_back(tg::vec4f(lit, lit, lit, 0));
+                }
+            cmd->upload.bytes_to_texture(diffuse.raw(), cc::span<tg::vec4f const>(pixels).as_bytes());
+        }
+
+        fill(*cmd, albedo_texture, tg::vec4f(k_motion_albedo, k_motion_albedo, k_motion_albedo, 0));
+
+        // No specular at all: a zero F0 floors its factor, so the specular half contributes nothing and what comes out
+        // is the diffuse lobe alone — which is the one whose reprojection this is about.
+        fill(*cmd, specular, tg::vec4f(0, 0, 0, 0));
+        fill(*cmd, specular_albedo, tg::vec4f(0, 0, 0, 0));
+        fill(*cmd, normal, tg::vec4f(0, 0, 1, 0));
+        fill(*cmd, roughness, tg::vec4f(0.5f, 0, 0, 0));
+        fill(*cmd, depth, tg::vec4f(5.0f, 0, 0, 0));
+
+        // Our convention: this frame's pixel minus last frame's, in pixels.
+        // A region that moved +4 in x carries (4, 0).
+        fill(*cmd, motion, tg::vec4f(f32(told_step), 0, 0, 0));
+        {
+            auto const pixels
+                = cc::vector<tg::vec2f>::create_filled(k_motion_size * k_motion_size, tg::vec2f(2.0f, 2.0f));
+            cmd->upload.bytes_to_texture(hit_distance.raw(), cc::span<tg::vec2f const>(pixels).as_bytes());
+        }
+
+        auto const in = sr::denoise_inputs{
+            .color = diffuse,
+            .specular = specular,
+            .guides = {.albedo = albedo_texture,
+                       .specular_albedo = specular_albedo,
+                       .normal = normal,
+                       .roughness = roughness,
+                       .depth = depth,
+                       .motion = motion,
+                       .hit_distance = hit_distance},
+            .output = output,
+        };
+
+        auto const outcome = sr::nrd_denoise_routine::execute(*cmd, in, history);
+        REQUIRE(outcome.status != sr::denoise_status::unsupported);
+        REQUIRE(outcome.status != sr::denoise_status::failed);
+        if (outcome.is_denoised())
+            ++denoised_frames;
+
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        cc::async_backlog const* const backlogs[] = {&ctx.backlog};
+        co_await cc::async_settled(cc::async_backlog::settled(backlogs));
+    }
+
+    REQUIRE(denoised_frames == k_motion_frames).context("NRD never produced enough denoised frames");
+
+    auto cmd = ctx.create_command_list();
+    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    auto const pixels = co_await readback.data();
+    REQUIRE(pixels.size() == k_motion_size * k_motion_size);
+
+    // Measured over the band the edge swept, and only there: outside it every run agrees, so including it would
+    // dilute the difference this test exists to see.
+    auto const final_shift = moving ? (k_motion_frames - 1) * k_motion_step : 0;
+    auto error = 0.0f;
+    auto count = 0;
+    for (auto y = k_motion_size / 4; y < 3 * k_motion_size / 4; ++y)
+        for (auto x = k_motion_size / 4; x < k_motion_size / 4 + k_motion_frames * k_motion_step; ++x)
+        {
+            auto const expected = k_motion_albedo * lighting_at(x, final_shift);
+            error += tg::abs(pixels[y * k_motion_size + x][0] - expected);
+            ++count;
+        }
+    REQUIRE(count > 0);
+    co_return error / f32(count);
+}
+} // namespace
+
+// Three runs of the same sweeping edge: told the truth, told nothing moved, and never moving.
+//
+// The middle one is the control, and the comparison between the first two is the assertion: a history that did not
+// follow the edge is blending the bright side into the dark one across the whole swept band.
+// The third is the floor — what this measurement reads when there is no reprojection to get wrong — and it is what
+// keeps "told the truth" from passing on a run that simply failed to accumulate anything.
+ASYNC_INVOCABLE_TEST("sr - NRD follows a moving image through its motion vectors", (sg::context_handle const& ctx_h))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
+    if (!sr::query_denoise_support(ctx).nrd)
+        SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
+
+    sr::nrd_denoise_routine::prewarm(ctx);
+    (void)co_await ctx.routines.idle_completion();
+
+    auto const with_motion = co_await sweep_error(ctx, true, k_motion_step);
+    auto const without_motion = co_await sweep_error(ctx, true, 0);
+    auto const never_moved = co_await sweep_error(ctx, false, 0);
+
+    // Measured AGAINST THE FLOOR rather than against zero, which is what the numbers made necessary.
+    //
+    // REBLUR blurs a step edge spatially whatever the history does, so most of every figure here is that blur and not
+    // reprojection: measured on this machine, 0.130 / 0.180 / 0.129 for the three runs.
+    // A plain ratio of the first two is therefore about 0.72 however perfectly the motion is followed, and a threshold
+    // under it would be pinning REBLUR's blur radius rather than our motion conversion.
+    // Subtracting the never-moved run removes exactly the part neither run can avoid, and what is left is the
+    // reprojection error alone — 0.0007 against 0.0505, a factor of seventy.
+    auto const gap = without_motion - never_moved;
+
+    // Vacuous otherwise: if telling NRD nothing moved cost nothing, there would be no mechanism under test, and the
+    // check below would pass on any pair of numbers.
+    REQUIRE(gap > 0.2f * never_moved)
+        .context(cc::format("a wrong motion vector cost almost nothing — with {}, without {}, never moved {}",
+                            with_motion, without_motion, never_moved));
+
+    // A quarter of that gap rather than something tighter: the defects this exists to catch — a flipped sign, a
+    // missing reciprocal extent, a motion texture bound to the wrong slot — do not shave the number, they remove
+    // reprojection, so the result lands at or above the told-nothing-moved figure.
+    // The slack is what keeps a float-rounding difference between two drivers from failing a factor-of-seventy result.
+    CHECK(with_motion - never_moved < 0.25f * gap)
+        .context(cc::format("error with motion {}, without {}, never moved {}", with_motion, without_motion, never_moved));
+}
+
 #endif
