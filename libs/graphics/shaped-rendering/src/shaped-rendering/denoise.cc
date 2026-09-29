@@ -205,8 +205,8 @@ denoise_support query_denoise_support(sg::context const& ctx)
         .svgf = buildable(sr::shaders::svgf_temporal.compute.main_cs)
              && buildable(sr::shaders::svgf_variance.compute.main_cs)
              && buildable(sr::shaders::svgf_atrous.compute.main_cs),
-        .nrd = nrd_denoise_routine::is_available(ctx),
         .oidn = oidn_denoise_routine::is_available(ctx),
+        .nrd = nrd_denoise_routine::is_available(ctx),
     };
 }
 
