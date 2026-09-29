@@ -62,3 +62,38 @@ hit_group lit for rs:
     CHECK(text_of_entry(source, "shade", target::hlsl_dx12)
               .contains("    float color : read(caller, closesthit, miss) : write(caller, closesthit, miss);\n"));
 }
+
+TEST("sgl emit - a bitwise operand under another bitwise operator is parenthesized")
+{
+    // DXC refuses `flags & 8 | 512` under `-Wbitwise-op-parentheses`, and WGSL takes no such operand at all
+    auto const source = cc::string_view(R"(require raytracing_pipeline
+
+struct radiance:
+    color: float
+
+rays rs:
+    primary: radiance
+
+binding frame:
+    world: acceleration_structure[.triangles]
+    output: mut buffer[float]
+
+@raygen fun start(@launch_id id: int3){frame}:
+    let mut flags = ray_flags.force_opaque
+    if id.x == 0 => flags = ray_flags.cull_opaque
+    let mut p = radiance(0.0)
+    let kept = (flags & ray_flags.skip_closest_hit) | ray_flags.skip_procedural
+    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), rs.primary, mut p, flags = kept)
+    frame.output[id.x] = p.color
+
+@miss fun sky(p: mut radiance):
+    p.color = 2.0
+
+@raytracing pipeline path:
+    rays = rs
+    raygen = start
+    miss.primary = sky
+)");
+    CHECK(text_of_entry(source, "start", target::hlsl_dx12).contains("const int kept = (flags & 8) | 512;\n"));
+    CHECK(text_of_entry(source, "start", target::msl).contains("const int kept = (flags & 8) | 512;\n"));
+}
