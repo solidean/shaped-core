@@ -897,7 +897,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
             if found.x < r.t_min or found.x > best.t => continue
 
             let instance_flags = instance.z >> 24
-            let is_front = found.w < 0.0
+            // cull mode 1 is front: that instance flips its winding, as every native backend does
+            let is_front = (found.w < 0.0) != (((instance_flags >> 2) & 3) == 1)
             let is_opaque = is_opaque_candidate(c.w == 1, instance_flags, flags)
             if is_culled(is_opaque, is_front, instance_flags, flags) => continue
 
@@ -1160,7 +1161,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
             let found = triangle_entry(pool_float3(a), pool_float3(b), pool_float3(c), o, d)
             if found.x < r.t_min or found.x > best.t => continue
 
-            let is_front = found.w < 0.0
+            // cull mode 1 is front: that instance flips its winding, as every native backend does
+            let is_front = (found.w < 0.0) != (((instance_flags >> 2) & 3) == 1)
             let is_opaque = is_opaque_candidate(c.w == 1, instance_flags, flags)
             if is_culled(is_opaque, is_front, instance_flags, flags) => continue
 

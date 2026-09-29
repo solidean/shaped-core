@@ -175,7 +175,10 @@ void set_buffer_uses(binding_group const& group, cc::vector<buffer_use> uses);
 /// What `record_buffer_uses` or `set_buffer_uses` recorded on `group`, which is empty where neither ran.
 [[nodiscard]] cc::span<buffer_use const> buffer_uses_of(binding_group const& group);
 
-/// The tlases `record_buffer_uses` found bound, which dispatch_rays checks against its shader table.
+/// Records on `group` the tlases it binds, for a group whose views `record_buffer_uses` never sees: a staging group's snapshot.
+void set_tlases(binding_group const& group, cc::vector<tlas_handle> tlases);
+
+/// The tlases `record_buffer_uses` or `set_tlases` recorded, which dispatch_rays checks against its shader table.
 [[nodiscard]] cc::span<tlas_handle const> tlases_of(binding_group const& group);
 } // namespace sg::impl
 
@@ -197,6 +200,7 @@ protected:
 private:
     friend void impl::set_buffer_uses(binding_group const& group, cc::vector<impl::buffer_use> uses);
     friend cc::span<impl::buffer_use const> impl::buffer_uses_of(binding_group const& group);
+    friend void impl::set_tlases(binding_group const& group, cc::vector<tlas_handle> tlases);
     friend cc::span<tlas_handle const> impl::tlases_of(binding_group const& group);
     friend void impl::record_buffer_uses(binding_group const& group, cc::span<named_view const> views);
     friend void impl::record_buffer_uses(binding_group const& group,

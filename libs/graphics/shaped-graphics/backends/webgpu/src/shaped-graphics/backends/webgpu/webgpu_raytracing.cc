@@ -24,6 +24,9 @@ constexpr u32 kernel_group_size = 64;
 /// WebGPU's default maxComputeWorkgroupsPerDimension, which the device is requested with.
 constexpr u32 max_groups_per_dispatch = 65535;
 
+/// The largest minStorageBufferOffsetAlignment WebGPU allows, so a binding offset rounded down to it suits every device.
+constexpr isize storage_offset_alignment = 256;
+
 /// The shape of a BVH2 over a primitive count, with node 0 its root.
 struct tree_layout
 {
@@ -120,6 +123,28 @@ void check_build_flags(sg::accel_build_flags flags)
     return *b;
 }
 
+/// A build input bound as the bytes [first, end) of its buffer rather than whole, so a range in a buffer larger than
+/// maxStorageBufferBindingSize still binds.
+/// The start rounds down to the storage offset alignment, and `lead_in_bytes` is how far: a kernel's offsets are
+/// relative to the bound start, so each one is this lead.
+struct input_range
+{
+    webgpu_command_list::acceleration_kernel_input input;
+    isize lead_in_bytes = 0;
+};
+
+[[nodiscard]] input_range bind_input_range(webgpu_buffer const& buffer, isize first, isize end)
+{
+    CC_ASSERT(0 <= first && first < end, "a build input range holds at least one byte");
+    // A webgpu buffer is allocated in whole words, so a range may end at the word its last byte sits in.
+    CC_ASSERT(end <= cc::align_up(buffer.size_in_bytes(), 4), "a build input reads past the end of its buffer");
+    auto const start = cc::align_down(first, storage_offset_alignment);
+    return {
+        .input = {.buffer = buffer.raw(), .offset = u64(start), .size = u64(cc::align_up(end, 4) - start)},
+        .lead_in_bytes = first - start,
+    };
+}
+
 [[nodiscard]] u32 float_bits(float f)
 {
     return cc::bit_cast<u32>(f);
@@ -165,6 +190,8 @@ void invert_affine(float const (&m)[12], float (&out)[12])
 void webgpu_command_list::bring_pool_writes_forward()
 {
     auto& pool = _ctx._acceleration;
+    if (_pool_writes_generation == pool.generation())
+        return;
     for (auto& write : _pool_writes)
     {
         if (write.generation == pool.generation())
@@ -177,6 +204,7 @@ void webgpu_command_list::bring_pool_writes_forward()
         write.generation = pool.generation();
         write.buffer = current;
     }
+    _pool_writes_generation = pool.generation();
 }
 
 u32 webgpu_command_list::allocate_acceleration_region(isize units)
@@ -213,9 +241,10 @@ void webgpu_command_list::record_acceleration_kernel(acceleration_kernel kernel,
     auto const layout = pool.kernel_layout();
     auto const pool_buffer = pool.buffer().get();
 
-    WGPUBuffer bound_inputs[3] = {pool.unused_input(), pool.unused_input(), pool.unused_input()};
+    auto const unused = acceleration_kernel_input{.buffer = pool.unused_input(), .offset = 0, .size = WGPU_WHOLE_SIZE};
+    acceleration_kernel_input bound_inputs[3] = {unused, unused, unused};
     for (isize i = 0; i < inputs.size(); ++i)
-        if (inputs[i] != nullptr)
+        if (inputs[i].buffer != nullptr)
             bound_inputs[i] = inputs[i];
 
     constexpr auto max_items = max_groups_per_dispatch * kernel_group_size;
@@ -239,7 +268,11 @@ void webgpu_command_list::record_acceleration_kernel(acceleration_kernel kernel,
         entries[0].size = sizeof(args.words);
         entries[1].buffer = pool_buffer;
         for (auto i = 0; i < 3; ++i)
-            entries[2 + i].buffer = bound_inputs[i];
+        {
+            entries[2 + i].buffer = bound_inputs[i].buffer;
+            entries[2 + i].offset = bound_inputs[i].offset;
+            entries[2 + i].size = bound_inputs[i].size;
+        }
         auto const desc = WGPUBindGroupDescriptor{
             .nextInChain = nullptr,
             .label = to_wgpu("sg acceleration build"),
@@ -368,22 +401,34 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
         auto const& g = geometries[geometry];
         auto const count = u32(g.indices != nullptr ? g.index_count / 3 : g.vertex_count / 3);
 
+        // Every index is below vertex_count, so no vertex past the geometry's last one is read.
+        auto const vertices = bind_input_range(
+            require_build_input(g.vertices), g.vertex_offset_in_bytes,
+            g.vertex_offset_in_bytes + (g.vertex_count - 1) * g.vertex_stride_in_bytes + 3 * isize(sizeof(float)));
+        auto indices = input_range{};
+        if (g.indices != nullptr)
+        {
+            auto const index_bytes = g.index_type == sg::index_format::uint16 ? isize(2) : isize(4);
+            indices = bind_input_range(require_build_input(g.indices), g.index_offset_in_bytes,
+                                       g.index_offset_in_bytes + g.index_count * index_bytes);
+        }
+        auto transform = input_range{};
+        if (g.transform != nullptr)
+            transform = bind_input_range(require_build_input(g.transform), g.transform_offset_in_bytes,
+                                         g.transform_offset_in_bytes + 12 * isize(sizeof(float)));
+
         auto args = acceleration_kernel_args{};
         args.words[2] = first_record + 3 * first_triangle;
         args.words[3] = u32(geometry);
-        args.words[4] = u32(g.vertex_offset_in_bytes / 4);
+        args.words[4] = u32(vertices.lead_in_bytes / 4);
         args.words[5] = u32(g.vertex_stride_in_bytes / 4);
         args.words[6] = g.indices == nullptr ? 0u : g.index_type == sg::index_format::uint16 ? 1u : 2u;
-        args.words[7] = u32(g.index_offset_in_bytes);
+        args.words[7] = u32(indices.lead_in_bytes);
         args.words[8] = g.transform != nullptr ? 1u : 0u;
-        args.words[9] = u32(g.transform_offset_in_bytes / 4);
+        args.words[9] = u32(transform.lead_in_bytes / 4);
         args.words[10] = g.is_opaque ? 1u : 0u;
 
-        WGPUBuffer const inputs[3] = {
-            require_build_input(g.vertices).raw(),
-            g.indices != nullptr ? require_build_input(g.indices).raw() : nullptr,
-            g.transform != nullptr ? require_build_input(g.transform).raw() : nullptr,
-        };
+        acceleration_kernel_input const inputs[3] = {vertices.input, indices.input, transform.input};
         record_acceleration_kernel(acceleration_kernel::write_triangles, args, count, inputs);
 
         touch(g.vertices);
@@ -430,14 +475,18 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_aabbs(cc::span<sg::bl
     for (isize geometry = 0; geometry < geometries.size(); ++geometry)
     {
         auto const& g = geometries[geometry];
+        auto const boxes = bind_input_range(
+            require_build_input(g.aabbs), g.aabb_offset_in_bytes,
+            g.aabb_offset_in_bytes + (g.aabb_count - 1) * g.aabb_stride_in_bytes + 6 * isize(sizeof(float)));
+
         auto args = acceleration_kernel_args{};
         args.words[2] = first_record + 2 * first_box;
         args.words[3] = u32(geometry);
-        args.words[4] = u32(g.aabb_offset_in_bytes / 4);
+        args.words[4] = u32(boxes.lead_in_bytes / 4);
         args.words[5] = u32(g.aabb_stride_in_bytes / 4);
         args.words[10] = g.is_opaque ? 1u : 0u;
 
-        WGPUBuffer const inputs[1] = {require_build_input(g.aabbs).raw()};
+        acceleration_kernel_input const inputs[1] = {boxes.input};
         record_acceleration_kernel(acceleration_kernel::write_boxes, args, u32(g.aabb_count), inputs);
         touch(g.aabbs);
         first_box += u32(g.aabb_count);

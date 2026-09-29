@@ -14,6 +14,7 @@
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>         // raster_pipeline_description
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh> // raytracing_pipeline_description
+#include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 
 using namespace cc::primitive_defines;
 
@@ -375,6 +376,9 @@ raytracing_shader_table_handle context_uncached_scope::create_raytracing_shader_
 cc::result<raytracing_shader_table_handle> context_uncached_scope::try_create_raytracing_shader_table(
     raytracing_shader_table_description const& desc)
 {
+    // Here rather than per backend, so a bad count is the same error on every one and never reaches a constructor.
+    if (desc.ray_count < 1)
+        return cc::error(cc::format("raytracing_shader_table: ray_count must be >= 1, and is {}", desc.ray_count));
     return _ctx.try_create_raytracing_shader_table(desc, lifetime_scope::persistent);
 }
 } // namespace sg

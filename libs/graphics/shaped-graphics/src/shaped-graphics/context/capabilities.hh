@@ -167,10 +167,13 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
 }
 } // namespace sg
 
-/// How a context provides a feature it has.
+/// How a context provides a feature, or that it has none.
 /// A caller that picks an algorithm by cost asks this; a shader never does, since both run the same source.
 enum class sg::feature_implementation
 {
+    /// The context lacks the feature: `supports` answers no.
+    absent,
+
     /// The device does it.
     native,
 

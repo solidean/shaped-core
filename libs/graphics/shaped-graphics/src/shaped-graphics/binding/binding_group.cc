@@ -65,6 +65,11 @@ cc::span<impl::buffer_use const> impl::buffer_uses_of(binding_group const& group
     return group._buffer_uses;
 }
 
+void impl::set_tlases(binding_group const& group, cc::vector<tlas_handle> tlases)
+{
+    group._tlases = cc::move(tlases);
+}
+
 cc::span<tlas_handle const> impl::tlases_of(binding_group const& group)
 {
     return group._tlases;

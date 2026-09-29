@@ -326,7 +326,8 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
     for (auto const& inst : instances)
         offsets.push_back(inst.hit_group_offset);
     auto const hit_group_offsets = _metal_context.persistent.create_raw_buffer(
-        isize(offsets.size() * sizeof(u32)), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+        isize(offsets.size() * sizeof(u32)),
+        sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
     upload_bytes_to_buffer(hit_group_offsets, cc::as_bytes(cc::span<u32 const>(offsets)), 0);
 
     auto const result

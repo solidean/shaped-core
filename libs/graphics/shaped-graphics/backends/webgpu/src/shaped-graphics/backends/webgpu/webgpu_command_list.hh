@@ -82,6 +82,10 @@ public:
     /// The acceleration-pool regions this list wrote, with the pool buffer each went into.
     cc::vector<acceleration_pool_write> _pool_writes;
 
+    /// The pool generation every write in `_pool_writes` was last brought forward to, so a list whose pool has not
+    /// grown since skips the walk.
+    u64 _pool_writes_generation = 0;
+
     /// Copies every region this list wrote into an older pool buffer forward into the current one, ending the open pass to do so.
     /// Whatever records against the pool calls it first, and submit calls it last, so no write is lost to a growth.
     void bring_pool_writes_forward();
@@ -92,12 +96,21 @@ public:
         u32 words[16] = {};
     };
 
+    /// One read-only storage input of a build kernel, the part of `buffer` it reads.
+    /// `offset` must be a multiple of 256 and `size` of 4, which is what lets a range start anywhere in a large buffer.
+    struct acceleration_kernel_input
+    {
+        WGPUBuffer buffer = nullptr;
+        u64 offset = 0;
+        u64 size = 0;
+    };
+
     /// Dispatches `kernel` over `item_count` items, splitting past WebGPU's per-dimension group limit.
-    /// `inputs` are read-only storage buffers bound whole at bindings 2 to 4; a null one is left unused.
+    /// `inputs` are bound at bindings 2 to 4; one with a null buffer is left unused.
     void record_acceleration_kernel(acceleration_kernel kernel,
                                     acceleration_kernel_args args,
                                     u32 item_count,
-                                    cc::span<WGPUBuffer const> inputs = {});
+                                    cc::span<acceleration_kernel_input const> inputs = {});
 
     /// The first unit of a new pool region of `units`, with this list's older writes already brought forward.
     [[nodiscard]] u32 allocate_acceleration_region(isize units);

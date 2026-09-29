@@ -68,6 +68,8 @@ cc::string_view sgl::emit::to_string(error_kind kind)
         return "padding-forbidden";
     case error_kind::too_many_samplers:
         return "too-many-samplers";
+    case error_kind::too_many_acceleration_structures:
+        return "too-many-acceleration-structures";
     }
     return "";
 }
@@ -134,6 +136,27 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                          .symbol = e.function,
                                          .detail = cc::format("{} needs {}, which WebGPU does not have", e.name,
                                                               check::k_feature_names[i])});
+
+        // EMIT-135: sg binds the roots as 16 words of one uniform, and the position is the call's last argument
+        constexpr auto max_roots = 16;
+        for (auto const& x : e.exprs)
+        {
+            auto const* const call = x.node.try_as<check::flat_call>();
+            auto const* const record = call == nullptr ? nullptr : m.builtin_function(call->intrinsic);
+            if (record == nullptr || !record->takes_acceleration_index)
+                continue;
+            auto const arguments = e.at(call->arguments);
+            auto const* const k = e.at(arguments[arguments.size() - 1]).node.try_as<check::flat_int_literal>();
+            auto const* const member = e.at(arguments[0]).node.try_as<check::flat_binding_member>();
+            if (k == nullptr || k->value < max_roots)
+                continue;
+            result.errors.push_back({.kind = error_kind::too_many_acceleration_structures,
+                                     .symbol = member != nullptr ? member->binding : e.function,
+                                     .detail = cc::format("{} traces the acceleration member at position {}, and "
+                                                          "WebGPU binds {} roots",
+                                                          e.name, k->value, max_roots)});
+            break;
+        }
         if (!result.errors.empty())
             return result;
     }

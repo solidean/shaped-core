@@ -105,7 +105,7 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
 ctx.supported_features()                           // sg::feature_set (cc::flags<feature>) — every feature supports() says yes to
 ctx.missing_features(shader)                       // feature_set — what shader.required_features holds that this device lacks; empty when unknown
-ctx.implementation_of(f)                           // sg::feature_implementation — native | emulated; supports(f) must be true
+ctx.implementation_of(f)                           // sg::feature_implementation — absent (iff !supports(f)) | native | emulated
                                                    //   emulated = sg does it in software, correct and slower: only webgpu's ray_query today
                                                    //   a question about COST for picking an algorithm; a shader never branches on it
                                                    // ray tracing is TWO features: ray_query (a trace from any stage) and raytracing_pipeline
@@ -860,8 +860,9 @@ cmd.raytracing.bind_pipeline(raytracing_pipeline const&)          // void — se
 cmd.raytracing.bind_group(int group_index, binding_group const&) // void — like compute; bind a tlas here (surfaces accel_read)
 cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — traces w*h*d rays (product <= 2^30)
 //   under ctx.portability_checks(): every instance of every bound tlas is checked against the records it reaches
-//   (exists; procedural iff its blas holds AABBs; stride == ray_count) — LOGS an error once per table+tlas per list, never asserts.
-//   Sees only tlases built and groups created while the checks were on.
+//   (exists; procedural iff its blas holds AABBs; stride == ray_count for a blas of 2+ geometries) — LOGS an error once per table+tlas per list, never asserts.
+//   assumes every trace's multiplier == ray_count; hand-written HLSL passing another (e.g. 0) keeps the checks off
+//   Sees only tlases built and groups (staging groups included) created while the checks were on.
 //   metal: ONE tlas per dispatch (the first bound one's hit-group offsets; a second logs a warning);
 //   an empty closest-hit slot is no function there, so a kernel must not call it (slib fills SGL's)
 // an SGL `@raytracing pipeline` generates all of the above — slib's docs/raytracing-pipelines.md

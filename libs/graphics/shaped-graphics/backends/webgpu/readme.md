@@ -50,12 +50,15 @@ What this backend adds to it:
 
 - **The pool** suballocates first-fit in 16-byte units, and a region freed is reused only once its epoch retires.
   It grows by copying into a larger buffer in a submit of its own, so offsets survive, and a list still open that wrote into the old buffer copies its regions forward itself.
-- **A build** writes the header and the tree's topology from the CPU, then records one kernel dispatch for the primitives, one for the leaves and one per level above them.
+- **A build** writes the header and the tree's topology from the CPU, then records kernel dispatches for everything that reads the inputs.
+  A BLAS records one dispatch per geometry for its primitives; a TLAS records none, since its instances come from the CPU.
+  Then one dispatch for the leaves and one per level above them, each split past 4,194,240 items, the default group limit times the group size.
+  A build input is bound as the range the geometry reads, so it may sit anywhere in a buffer larger than the largest storage binding.
   A build is not allowed inside a rendering scope.
 - **A pipeline layout with an acceleration structure** gets the pool and the roots in group 3, at bindings 17 and 18.
   The pool is `var<storage, read> sg_acceleration_pool: array<vec4u>`, bound whole.
   The roots are `var<uniform> sg_acceleration_roots: array<vec4u, 4>`: each bound structure's first unit, written per dispatch or draw, so a layout binds at most 16 structures.
-  The roots sit right after the inline constants in one placed block, so both dynamic offsets point into the same constant page.
+  The roots sit at the first uniform-offset alignment past the inline constants, in one placed block, so both dynamic offsets point into the same constant page.
   slib's WGSL reader accepts exactly those two declarations there and binds neither through a group.
 - **The pool is at most 128 MiB**, the default largest storage binding, and a build that would outgrow it throws `sg::allocation_exception`.
 - **The tree follows the primitive order**, with no spatial sort, so a triangle soup traces slowly.

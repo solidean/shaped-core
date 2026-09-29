@@ -301,6 +301,7 @@ The pipeline path maps as follows.
   Metal's intersection result names the instance but not the `intersectionFunctionTableOffset` it carried, and a kernel needs that offset to find a closest hit's record.
   So `build_tlas` also uploads one `u32` per instance into `metal_tlas::hit_group_offsets()`.
   `dispatch_rays` binds it at `k_hit_group_offsets_buffer_index`, which is vertex-input slot 0's index, free during a dispatch.
+  A dispatch with no such TLAS binds a context-wide zeroed buffer there instead, since the kernel declares the slot either way.
   A kernel then calls the closest-hit table at `offsets[instance] + geometry * stride + ray type`, which is how SGL's kernels find it.
   **A dispatch traces one TLAS**: it binds the first bound TLAS's offsets, and logs a warning when the bound groups hold more than one.
   This is untested on metal hardware so far; the tier-1 pipeline tests exercise it in CI.

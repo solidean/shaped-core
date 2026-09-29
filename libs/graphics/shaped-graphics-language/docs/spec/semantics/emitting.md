@@ -355,6 +355,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   An entry point whose code reads sg's acceleration pool declares it and the dispatch's roots in sg's reserved group, beside the inline constants:
   `@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;` and `@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;`.
   The root of the entry point's k-th acceleration member (CHK-325) is `sg_acceleration_roots[k / 4][k % 4]`.
+  So WGSL traces the first 16 acceleration members, and a trace of a later one is `too-many-acceleration-structures`.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.
@@ -423,6 +424,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 | `not-core` | EMIT-66 |
 | `too-many-groups` | EMIT-105 |
 | `too-many-samplers` | EMIT-133 |
+| `too-many-acceleration-structures` | EMIT-135 |
 | `target-lacks-feature` | EMIT-109 |
 
 ## Open

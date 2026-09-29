@@ -51,6 +51,8 @@ enum class sgl::emit::error_kind : sgl::u8
     padding_forbidden,
     /// A file-scope sampler the entry point reaches whose index is past the 16 a stage holds on Metal and WebGPU.
     too_many_samplers,
+    /// A WebGPU trace of an acceleration member at position 16 or later, past the 16 roots sg binds.
+    too_many_acceleration_structures,
 };
 
 struct sgl::emit::error

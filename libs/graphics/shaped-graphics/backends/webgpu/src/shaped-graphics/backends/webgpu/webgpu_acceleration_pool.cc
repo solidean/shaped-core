@@ -137,13 +137,15 @@ fn primitive_bounds(j: u32) -> bounds {
     let extent = 0.5 * (hi - lo);
     var world_center = vec3f(0.0);
     var world_extent = vec3f(0.0);
+    var pad = vec3f(0.0);
     for (var row = 0u; row < 3u; row++) {
         let m = bitcast<vec4f>(pool[first + 3u + row]);
         world_center[row] = dot(m.xyz, center) + m.w;
         world_extent[row] = dot(abs(m.xyz), extent);
+        // The transform rounds, and the box must still hold every point of the instance.
+        // The rounding scales with the terms summed rather than with the sum, which cancellation can make small.
+        pad[row] = 1.0e-6 * (dot(abs(m.xyz), abs(center)) + abs(m.w) + world_extent[row]);
     }
-    // The transform rounds, and the box must still hold every point of the instance.
-    let pad = 1.0e-6 * (abs(world_center) + world_extent);
     return bounds(world_center - world_extent - pad, world_center + world_extent + pad);
 }
 

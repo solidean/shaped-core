@@ -378,12 +378,16 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
     CC_ASSERT(has_reserved_group(), "this pipeline layout has no reserved group");
     materialize();
 
-    if (_has_acceleration && _reserved_groups_pool_generation != _ctx._acceleration.generation())
+    if (_has_acceleration)
     {
+        // Before the compare, since the first use creates the pool and so moves its generation.
         (void)_ctx._acceleration.buffer();
-        _reserved_groups.clear();
-        _reserved_group_without_page = {};
-        _reserved_groups_pool_generation = _ctx._acceleration.generation();
+        if (_reserved_groups_pool_generation != _ctx._acceleration.generation())
+        {
+            _reserved_groups.clear();
+            _reserved_group_without_page = {};
+            _reserved_groups_pool_generation = _ctx._acceleration.generation();
+        }
     }
 
     auto const build = [&](WGPUBuffer page_buffer)

@@ -46,10 +46,11 @@ void command_list::check_hit_records(raytracing_shader_table const& table)
         {
             auto seen = false;
             for (auto const& c : _checked_traces)
-                seen = seen || (c.table == &table && c.tlas == tlas.get());
+                seen = seen || (c.table.get() == &table && c.tlas == tlas);
             if (seen)
                 continue;
-            _checked_traces.push_back({.table = &table, .tlas = tlas.get()});
+            // A table no handle owns keys nothing, so it is checked at every dispatch rather than skipped wrongly.
+            _checked_traces.push_back({.table = table.weak_from_this().lock(), .tlas = tlas});
 
             // Logged rather than asserted: the hit groups come from shaders that hot reload can change under a running program.
             auto const mismatches = impl::find_hit_record_mismatches(table, *tlas);

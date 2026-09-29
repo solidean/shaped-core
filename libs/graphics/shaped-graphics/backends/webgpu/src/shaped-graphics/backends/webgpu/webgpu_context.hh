@@ -153,7 +153,7 @@ public:
         return false;
     }
 
-    [[nodiscard]] sg::feature_implementation implementation_of(sg::feature f) const override
+    [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
     {
         return f == sg::feature::ray_query ? sg::feature_implementation::emulated : sg::feature_implementation::native;
     }
