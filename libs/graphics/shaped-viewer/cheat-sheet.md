@@ -683,7 +683,7 @@ m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for t
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
-bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (which dispatch ASSERTS on)
+bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
 bound.declare_raytracing_access(cmd)        // declares EVERY declared table for the next dispatch_rays, empty ones included
 m.bindless_layout()                         // -> the same layout, without taking a snapshot
 m.has_table(table) / m.table_capacity(table)
@@ -775,14 +775,14 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   are dropped — nothing reprojects across a cut.
   It is sticky until a frame traces the view, and it restarts no accumulation of its own.
 - **The specular guides** `temporal_id::specular_albedo_guide` (F0, blended to the base colour by metalness) and `roughness_guide` (the coat's where a coat covers the base).
-  Declared for a named member that reads EITHER of them and for `automatic`; written under the frame block's own `write_specular_guides`, so a diffuse-only member pays for neither.
-  Either rather than both, because NRD requires roughness and never reads a specular albedo.
+  Declared for every member with the other guides: a split member reads them beside the diffuse albedo, and à-trous and SVGF demodulate by the sum of the two, since a metal's diffuse albedo is zero.
   `pt_guides.hlsli` holds all three guide functions apart from the tracer's bindings, which is what lets `bsdf_probe.hlsl` assert on them.
-- **Four more temporal slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
+- **Slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
   A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
+  The tracer writes those two only on the frames the temporal member runs, so a still view past the hand-off pays for neither.
 - **A split-signal member adds three more**: `temporal_id::frame_diffuse`, `frame_specular` and `hit_distance_guide`, all three or none.
   The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
-  Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them — `automatic` declares them everywhere and splits nowhere it would go unread.
+  Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them, and only on the frames it runs.
 - **`sv::matrices_of(camera_gpu, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::denoise_guides` asks for.
   sv rasterizes nothing, so these exist for a denoiser that reprojects in world space; `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
   `denoise_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
@@ -1036,7 +1036,7 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
   `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's closest-hit through `instance_gpu::is_indexed`, per instance.
-  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `sr::gpu_boolean`, so the plain `bool` off the record assigns straight into it.
+  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `slib::gpu_bool`, so the plain `bool` off the record assigns straight into it.
   A test driving that routine directly must set it, or it will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.

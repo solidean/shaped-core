@@ -30,6 +30,7 @@ namespace svgf_atrous_bindings
     Texture2D<float4> gSource; // rgb demodulated colour, a variance
     Texture2D<float4> gNormalDepth;
     Texture2D<float4> gAlbedo; // read only on the last pass, and only when k_svgf_has_albedo is set
+    Texture2D<float4> gSpecularAlbedo; // likewise, and only when k_svgf_has_specular_albedo is set too
     Texture2D<float4> gColor;  // this call's input colour, read only on the last pass, for the alpha it carries
     RWTexture2D<float4> gTarget;
 }
@@ -107,7 +108,7 @@ using namespace svgf_atrous_bindings;
     if ((flags & k_svgf_remodulate_out) != 0)
     {
         if ((flags & k_svgf_has_albedo) != 0)
-            result *= max(gAlbedo.Load(int3(p, 0)).rgb, k_svgf_albedo_floor);
+            result *= svgf_reflectance(gAlbedo.Load(int3(p, 0)).rgb, gSpecularAlbedo.Load(int3(p, 0)).rgb, flags);
         out_alpha = gColor.Load(int3(p, 0)).a;
     }
 

@@ -128,7 +128,7 @@ WGPUBufferUsage to_wgpu_buffer_usage(sg::buffer_usages usage)
         out |= WGPUBufferUsage_Vertex;
     if (usage.has(sg::buffer_usage::index_buffer))
         out |= WGPUBufferUsage_Index;
-    if (usage.has(sg::buffer_usage::uniform_buffer))
+    if (usage.has(sg::buffer_usage::constants_buffer))
         out |= WGPUBufferUsage_Uniform;
     if (usage.has_any(sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer))
         out |= WGPUBufferUsage_Storage;
@@ -144,9 +144,9 @@ WGPUTextureUsage to_wgpu_texture_usage(sg::texture_usages usage)
         out |= WGPUTextureUsage_CopySrc;
     if (usage.has(sg::texture_usage::copy_dst))
         out |= WGPUTextureUsage_CopyDst;
-    if (usage.has(sg::texture_usage::readonly_texture))
+    if (usage.has(sg::texture_usage::texture))
         out |= WGPUTextureUsage_TextureBinding;
-    if (usage.has(sg::texture_usage::readwrite_texture))
+    if (usage.has(sg::texture_usage::image))
         out |= WGPUTextureUsage_StorageBinding;
     if (usage.has_any(sg::texture_usage::render_target | sg::texture_usage::depth_stencil))
         out |= WGPUTextureUsage_RenderAttachment;
@@ -196,13 +196,10 @@ WGPUTextureAspect to_wgpu_copy_aspect(sg::pixel_format format, sg::texture_aspec
     return aspect == sg::texture_aspect::stencil ? WGPUTextureAspect_StencilOnly : WGPUTextureAspect_DepthOnly;
 }
 
-WGPUShaderStage to_wgpu_visibility(sg::shader_stages visibility, sg::binding_type type)
+WGPUShaderStage to_wgpu_visibility(sg::shader_stages visibility, bool writable)
 {
     if (visibility.is_empty())
     {
-        auto const writable = type == sg::binding_type::readwrite_raw_buffer
-                           || type == sg::binding_type::readwrite_structured_buffer
-                           || type == sg::binding_type::readwrite_texture;
         return writable ? WGPUShaderStage_Fragment | WGPUShaderStage_Compute
                         : WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
     }

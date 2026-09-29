@@ -1,0 +1,38 @@
+// void is a type like any other, and its one value is `void`
+
+fun note(x: float):
+    let doubled = x * 2.0
+
+fun unit() -> void => void
+
+// a void result is a value, and every void value is equal to every other
+test:
+    let v = note 1.0
+    v == void and unit() == v
+
+// a void field holds nothing, and a construction still takes its value
+struct tagged:
+    tag: void
+    value: float
+
+test:
+    let t = tagged(void, 2.5)
+    t.value == 2.5 and t.tag == void
+
+// a void parameter, and a return of a void call
+fun pass(v: void) -> void:
+    return note 3.0
+
+test pass(void) == void
+
+// no target holds a void value, so this entry point writes none of them
+struct frag:
+    a: float
+
+@pixel struct target:
+    color: float4
+
+@pixel fun main_ps(p: frag) -> target:
+    let t = tagged(note p.a, p.a)
+    let unused: void = pass void
+    return target(float4(t.value, t.value, t.value, 1.0))

@@ -1,0 +1,2 @@
+# The committed bundle is compared byte for byte against a fresh esbuild run by `dev.py check`, so no checkout may rewrite its line endings.
+dist/extension.js -text

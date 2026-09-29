@@ -92,6 +92,34 @@ evaluator converter_to(value_kind kind)
     }
 }
 
+void bool_to_bool32(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(in[0].as_bool() ? 1u : 0u));
+}
+
+void bool32_to_bool(leaves in, result& out)
+{
+    out.push_back(scalar::of(in[0].as_uint() != 0));
+}
+
+/// `1` where the bool is true and `0` where not, as each target selects.
+written write_bool_to_bool32(call_context const& c)
+{
+    auto const x = builtins::wrapped(c.arguments[0], precedence::comparison);
+    if (c.target == language::wgsl)
+        return {.text = cc::format("select(0u, 1u, {})", c.arguments[0].text)};
+    return {.text = cc::format("({} ? 1u : 0u)", x)};
+}
+
+/// Anything but 0 is true, as a GPU reads a bool from memory.
+written write_bool32_to_bool(call_context const& c)
+{
+    return {.text = cc::format("{} != 0u", builtins::wrapped(c.arguments[0], precedence::additive)),
+            .binds = precedence::comparison};
+}
+
+constexpr cc::string_view k_select[] = {"select"};
+
 cc::string type_name(numeric const& n, i32 width)
 {
     return width == 1 ? cc::string(n.name) : cc::format("{}{}", n.name, width);
@@ -115,7 +143,23 @@ void sgl::builtins::register_conversions(registry& r)
                     .signature = cc::format("@pure @operator(\"as\") fun convert_{}_to_{}(x: {}) -> {}", source, target,
                                             source, target),
                     .evaluate = converter_to(to.kind),
+                    // WGSL folds a constant exactly, and no uint holds a negative int (CHK-312)
+                    .unrepresentable_when_constant
+                    = from.kind == value_kind::scalar_int && to.kind == value_kind::scalar_uint ? impl::negative_as_uint
+                                                                                                : nullptr,
                     .write = {.hlsl = target, .wgsl = wgsl, .msl = target},
                 });
             }
+
+    r.add_comment("// A bool32 is a bool as GPU memory holds one, and `as` is how either becomes the other");
+    r.add(function_record{
+        .signature = "@pure @operator(\"as\") fun convert_bool_to_bool32(x: bool) -> bool32",
+        .evaluate = bool_to_bool32,
+        .write = {.kind = spelling_kind::custom, .custom = write_bool_to_bool32, .wgsl_names = k_select},
+    });
+    r.add(function_record{
+        .signature = "@pure @operator(\"as\") fun convert_bool32_to_bool(x: bool32) -> bool",
+        .evaluate = bool32_to_bool,
+        .write = {.kind = spelling_kind::custom, .custom = write_bool32_to_bool},
+    });
 }

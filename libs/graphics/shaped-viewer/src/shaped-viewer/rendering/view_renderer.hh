@@ -105,15 +105,15 @@ private:
         camera_matrices previous;
     };
 
-    /// One traced layer's denoiser slots.
-    /// A slot is null when the layer does not need it; each field below says under what condition.
+    /// One traced layer's denoiser slots, all null when the layer does not denoise.
+    /// `frame` and `motion` are null unless the layer may denoise temporally.
+    /// `crossfade` is null then too, and at a fade of 0 frames.
+    /// The split trio is null unless the member that resolves on this device reads the two lobes apart.
     struct denoise_slots
     {
         impl::temporal_slot* normal = nullptr;
         impl::temporal_slot* depth = nullptr;
         impl::temporal_slot* albedo = nullptr;
-
-        /// The specular pair, null unless the layer's method may read it.
         impl::temporal_slot* specular_albedo = nullptr;
         impl::temporal_slot* roughness = nullptr;
 
@@ -121,7 +121,7 @@ private:
         impl::temporal_slot* frame = nullptr;
         impl::temporal_slot* motion = nullptr;
 
-        /// Where the spatial member lands while the hand-off crossfades, or null when the layer does not fade.
+        /// Where the spatial member lands while the hand-off crossfades.
         impl::temporal_slot* crossfade = nullptr;
 
         /// This frame's radiance split into its two lobes, with their hit distances — all three or none, and null
@@ -131,6 +131,27 @@ private:
         impl::temporal_slot* hit_distance = nullptr;
     };
 
+    /// Which members denoise a frame, decided before its trace so the trace writes only what they read.
+    struct denoise_schedule
+    {
+        /// The layer's settings as each member runs them: `fresh_samples` set for the temporal one, clear for the
+        /// spatial one.
+        sr::denoise_settings temporal_settings;
+        sr::denoise_settings spatial_settings;
+
+        /// `crossfade_weight` at the mean's frame count after this frame's trace.
+        f32 blend = 1.0f;
+
+        [[nodiscard]] bool runs_temporal() const { return blend < 1.0f; }
+        [[nodiscard]] bool runs_spatial() const { return blend > 0.0f; }
+    };
+
+    /// The schedule for a layer whose mean will hold `accum_frame` frames once this frame's trace lands.
+    [[nodiscard]] static denoise_schedule _schedule_denoise(sg::context const& ctx,
+                                                            render_settings const& settings,
+                                                            denoise_slots const& ds,
+                                                            u32 accum_frame);
+
     /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
     /// at once across the hand-off — and points `presented` at what its parent should sample.
     ///
@@ -138,6 +159,7 @@ private:
     /// space reads instead of the motion guide alone.
     [[nodiscard]] static sr::denoise_status _denoise(sg::command_list& cmd,
                                                      render_settings const& settings,
+                                                     denoise_schedule const& schedule,
                                                      impl::temporal_slot const& accumulator,
                                                      denoise_slots const& ds,
                                                      denoise_cameras const& cameras,

@@ -87,7 +87,8 @@ sr::denoise_history          [done]     caller-owned, move-only, one per image s
 sr::atrous_denoise_routine   [done]     spatial, native; backs off with the input's sample count
 sr::svgf_denoise_routine     [done]     temporal, native; temporal, variance and à-trous passes, history in the caller's
                                         denoise_history; the member that proves the moving-camera path in CI
-oidn                         [planned]  spatial; CPU, and GPU through exportable memory in sg
+sr::oidn_denoise_routine     [done]     spatial, trained; Intel's weights in our own shaders, named only
+                                        (far too slow for `automatic`)
 dlss_rr                      [planned]  needs sg's declared native scope
 fsr_rr                       [planned]  the same seams as dlss_rr
 nrd                          [planned]  waits for a tracer that splits diffuse from specular

@@ -213,11 +213,11 @@ ASYNC_INVOCABLE_TEST("sv - an overlay pass draws over the rendered frame (headle
     auto const rt = output.as_render_target_view();
 
     // Something for the overlay to draw; a real one is imgui's draw data.
-    auto const overlay = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float,
-         .width = 8,
-         .height = 8,
-         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+    auto const overlay
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba16_float,
+                                            .width = 8,
+                                            .height = 8,
+                                            .usage = sg::texture_usage::texture | sg::texture_usage::image});
 
     auto store = sv::view_store{};
 

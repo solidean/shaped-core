@@ -12,10 +12,13 @@ bool vulkan_descriptor_functions::load(VkDevice device)
     get_descriptor = PFN_vkGetDescriptorEXT(fetch("vkGetDescriptorEXT"));
     cmd_bind_descriptor_buffers = PFN_vkCmdBindDescriptorBuffersEXT(fetch("vkCmdBindDescriptorBuffersEXT"));
     cmd_set_descriptor_offsets = PFN_vkCmdSetDescriptorBufferOffsetsEXT(fetch("vkCmdSetDescriptorBufferOffsetsEXT"));
+    cmd_bind_embedded_samplers
+        = PFN_vkCmdBindDescriptorBufferEmbeddedSamplersEXT(fetch("vkCmdBindDescriptorBufferEmbeddedSamplersEXT"));
 
     // All or nothing: a partially-resolved extension is a driver bug, and treating it as present would fail later at
     // a call site with far less context than here.
     return get_layout_size != nullptr && get_binding_offset != nullptr && get_descriptor != nullptr
-        && cmd_bind_descriptor_buffers != nullptr && cmd_set_descriptor_offsets != nullptr;
+        && cmd_bind_descriptor_buffers != nullptr && cmd_set_descriptor_offsets != nullptr
+        && cmd_bind_embedded_samplers != nullptr;
 }
 } // namespace sg::backend::vulkan

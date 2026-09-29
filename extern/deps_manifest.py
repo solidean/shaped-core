@@ -15,8 +15,10 @@ This module is imported, not run, so it carries no PEP 723 block — but it need
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import platform
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
@@ -24,13 +26,20 @@ MANIFEST_NAME = "dependency.yml"
 
 # `source` says how we obtain the upstream; `track` says how "what is current" is defined.
 # They are separate because stb, ImPlot and ImGuizmo are ordinary git clones whose newest version is a branch head, not a tag.
-SOURCES = {"git", "github-release", "url"}
+SOURCES = {"git", "github-release", "github-files", "url"}
 TRACKS = {"tags", "default-branch", "github-releases", "sqlite", "none"}
 DIGEST_ALGOS = {"git-commit", "sha256", "sha3-256"}
+# The keys `unavailable_on` may name a host by.
+# A bare OS key covers every architecture, an arch-qualified one exactly one machine.
+# Both spellings are needed because upstreams routinely ship a release for a platform without shipping it for every machine that platform runs on.
+HOST_OS_KEYS = ("windows", "linux", "macos")
+HOST_ARCH_KEYS = ("x64", "arm64")
+HOST_KEYS = HOST_OS_KEYS + tuple(f"{os_key}-{arch}" for os_key in HOST_OS_KEYS for arch in HOST_ARCH_KEYS)
 # `vendored` is committed in-tree; `fetched` hydrates a gitignored .install/ on demand, so it can be absent or stale on a given checkout.
 # `bundled` arrives inside another upstream in the same directory — Zycore, which the Zydis amalgamation folds in — so it has no install state of its own.
-# `on-request` hydrates the same way `fetched` does and is NEVER run for you: no configure step fetches it, because its
-# license is one a person accepts rather than one the build accepts on their behalf.
+# `on-request` hydrates the same way `fetched` does and is NEVER run for you: no configure step fetches it.
+# Why differs per upstream and belongs in its `notes:` — NRD's license is one a person accepts rather than one the
+# build accepts on their behalf, while OIDN is a test oracle nothing we ship links.
 # So it is normally ABSENT, and everything reading a manifest has to cope with that — a license collector above all.
 INSTALLS = {"vendored", "fetched", "bundled", "on-request"}
 
@@ -56,10 +65,14 @@ class Upstream:
     # For `track: tags`, a regex selecting which tags are versions at all — upstreams tag far more than releases.
     # Empty means the default "looks like a version number" pattern.
     tag_pattern: str = ""
-    # Host keys (`windows` / `linux` / `macos`) this upstream has no release for at all.
+    # Host keys we pin nothing for, because upstream has no release there or we deliberately skip it — see `HOST_KEYS` for the spelling.
     # Distinct from a missing per-OS key, which stays an error: that means nobody has looked, and this means somebody did.
     unavailable_on: list[str] = field(default_factory=list)
     license_files: list[str] = field(default_factory=list)
+
+    # For `source: github-files`: the individual files fetched, each with its own digest.
+    # A whole repository is the wrong unit when what is wanted is three files out of several hundred megabytes.
+    files: list[dict] = field(default_factory=list)
     # Verbatim license text, for an upstream that ships no file of its own — sqlite's amalgamation is the only one.
     license_text: str = ""
     used_by: str = ""
@@ -100,12 +113,12 @@ class Upstream:
 
     @property
     def is_available(self) -> bool:
-        """Whether this upstream has a release for the host at all.
+        """Whether this upstream is pinned for the host at all.
 
         False means the manifest says so deliberately — see `unavailable_on`.
         Such an upstream carries no pin and no asset here, so every field that would name one is empty.
         """
-        return host_os_key() not in self.unavailable_on
+        return not host_is_unavailable(self.unavailable_on)
 
     @property
     def install_dir(self) -> Path:
@@ -131,6 +144,15 @@ class Upstream:
     def license_paths(self) -> list[Path]:
         """`license_files` resolved against the dependency directory."""
         return [self.directory / p for p in self.license_files]
+
+
+def files_pin(files: list[dict]) -> str:
+    """The `pin_hash` of a `github-files` upstream: the sha256 over its UTF-8 `<path> <sha256>` lines, in order.
+
+    Over names plus hashes rather than over the bytes, so adding or removing a file changes the pin as surely as changing one does.
+    """
+    lines = "".join(f"{f['path']} {f['sha256']}\n" for f in files)
+    return hashlib.sha256(lines.encode("utf-8")).hexdigest()
 
 
 def manifest_path(directory: Path) -> Path:
@@ -188,6 +210,47 @@ def host_os_key() -> str:
     return "linux"
 
 
+def host_arch_key() -> str | None:
+    """The architecture half of a host key: `x64`, `arm64`, or None for any other machine.
+
+    Linux spells them `x86_64` and `aarch64` where Windows says `AMD64` and macOS `arm64`.
+    None is not a default to be filled in: an x64 key must never match a riscv64, ppc64le or i686 host, since that host cannot run what an x64 asset holds.
+    """
+    machine = platform.machine().lower()
+    if machine in ("amd64", "x86_64"):
+        return "x64"
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    return None
+
+
+def host_keys() -> list[str]:
+    """Every key `unavailable_on` may name this host by, widest first.
+
+    An upstream that ships nothing for the platform lists the bare OS key.
+    One that ships for some of its machines lists the arch-qualified key instead, and matching against both is what lets either spelling mean what it says.
+    A host of an unrecognised architecture has only the bare OS key.
+    """
+    os_key = host_os_key()
+    arch = host_arch_key()
+    if arch is None:
+        return [os_key]
+    return [os_key, f"{os_key}-{arch}"]
+
+
+def host_is_unavailable(unavailable_on: list[str]) -> bool:
+    """Whether an `unavailable_on` list rules out this host.
+
+    On a host of an unrecognised architecture, naming ANY arch-qualified key for its OS rules it out as well.
+    Such a list says the upstream ships per machine on that OS, and none of those machines is this one.
+    """
+    if any(key in unavailable_on for key in host_keys()):
+        return True
+    if host_arch_key() is None:
+        return any(key.startswith(f"{host_os_key()}-") for key in unavailable_on)
+    return False
+
+
 def _build(path: Path, directory: Path, entry: object) -> Upstream:
     if not isinstance(entry, dict):
         raise ValueError(f"{path}: each `upstreams` entry must be a mapping")
@@ -208,17 +271,28 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
     # Without this an absent key was indistinguishable from an un-ported one, so DXC — which ships no macOS build — took
     # down every consumer of the whole manifest set on a Mac, `deps list` and `deps licenses` included.
     unavailable = [str(x) for x in entry.get("unavailable_on", [])]
-    host_unavailable = suffix in unavailable
+    # An unrecognised key must be refused rather than ignored, since ignoring it silently means "available everywhere" — the opposite of what the manifest says.
+    unknown = [key for key in unavailable if key not in HOST_KEYS]
+    if unknown:
+        raise ValueError(
+            f"{path}: upstream {entry.get('name', '?')!r} lists unknown `unavailable_on` key(s) {unknown} — "
+            f"must be one of {list(HOST_KEYS)}"
+        )
+    host_unavailable = host_is_unavailable(unavailable)
 
+    # An unavailable host resolves every per-OS field to "", even where the OS key is declared.
+    # An arch-qualified `unavailable_on` key would otherwise hand linux-arm64 the x86_64 pin and asset.
     def per_os(key: str, *, required: bool) -> str:
         host_key = f"{key}_{suffix}"
         if host_key in entry:
-            return need(host_key)
-        if any(k.startswith(f"{key}_") for k in entry):
+            value = need(host_key)
+        elif any(k.startswith(f"{key}_") for k in entry):
             if host_unavailable:
                 return ""
             raise ValueError(f"{path}: upstream {entry.get('name', '?')!r} declares per-OS `{key}` but none for {suffix}")
-        return need(key) if required else str(entry.get(key, ""))
+        else:
+            value = need(key) if required else str(entry.get(key, ""))
+        return "" if host_unavailable else value
 
     up = Upstream(
         name=need("name"),
@@ -238,6 +312,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         tag_pattern=entry.get("tag_pattern", ""),
         unavailable_on=unavailable,
         license_files=list(entry.get("license_files", [])),
+        files=[dict(f) for f in entry.get("files", [])],
         license_text=entry.get("license_text", ""),
         used_by=entry.get("used_by", ""),
         notes=entry.get("notes", ""),
@@ -251,7 +326,30 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         raise ValueError(f"{path}: {up.name}: `install` must be one of {sorted(INSTALLS)}, got {up.install!r}")
     if up.digest_algo not in DIGEST_ALGOS:
         raise ValueError(f"{path}: {up.name}: `digest_algo` must be one of {sorted(DIGEST_ALGOS)}, got {up.digest_algo!r}")
+    if up.source == "github-files":
+        _check_files(path, up)
     if not up.license_files and not up.license_text:
         raise ValueError(f"{path}: {up.name}: needs `license_files` or `license_text`")
 
     return up
+
+
+def _check_files(path: Path, up: Upstream) -> None:
+    """Refuses a `github-files` list that is incomplete, escapes `.install/`, or disagrees with `pin_hash`.
+
+    Every staleness check compares `.install/pin.txt` against `pin_hash` alone, so the pin must agree with the list whenever the manifest loads.
+    A file digest bumped without the pin would otherwise leave every checkout on the old file, reported current.
+    """
+    if not up.files:
+        raise ValueError(f"{path}: {up.name}: `source: github-files` needs a `files` list")
+    for entry in up.files:
+        for key in ("path", "sha256"):
+            if not isinstance(entry.get(key), str) or not entry[key]:
+                raise ValueError(f"{path}: {up.name}: every `files` entry needs `{key}`, got {entry}")
+        # Both spellings, so a backslash cannot smuggle a `..` or a drive past the check on either host.
+        spellings = (PurePosixPath(entry["path"]), PureWindowsPath(entry["path"]))
+        if any(p.is_absolute() or p.anchor or ".." in p.parts for p in spellings):
+            raise ValueError(f"{path}: {up.name}: `files` path {entry['path']!r} must stay inside the install")
+    pin = files_pin(up.files)
+    if up.is_available and pin != up.pin_hash:
+        raise ValueError(f"{path}: {up.name}: `pin_hash` is {up.pin_hash}, but the `files` list hashes to {pin}")

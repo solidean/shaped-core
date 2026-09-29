@@ -16,6 +16,10 @@ void assert_valid_subresource(raw_texture_handle const& texture, subresource_ind
 /// `texture` must be non-null and `sub.mip_level` in range; unlike assert_valid_subresource it checks neither the array layer nor the aspect.
 [[nodiscard]] texture_region full_subresource_region(raw_texture_handle const& texture, subresource_index const& sub);
 
+/// The bytes `region` of `texture` takes tightly packed, in whole blocks of its format.
+/// One aspect of a depth-stencil format is counted as the whole texel, since the format names no per-aspect size.
+[[nodiscard]] isize packed_region_bytes(raw_texture_handle const& texture, texture_region const& region);
+
 /// Asserts `region` lies within `texture`'s subresource `sub`: a non-negative offset, and offset+size within the mip extent.
 /// So a 2D or 1D texture's depth axis stays a single slice, at z 0 with size.z 1.
 void assert_texture_region_in_bounds(raw_texture_handle const& texture,

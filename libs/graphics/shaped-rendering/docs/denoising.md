@@ -13,7 +13,7 @@ This is the design, including the parts not built yet.
 |---|---|---|---|
 | `atrous` | spatial | dx12, vulkan (HLSL through DXC); WARP included | done |
 | `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
-| `oidn` | spatial | CPU; NVIDIA, AMD, Intel and Apple GPUs | planned |
+| `oidn` | spatial, trained | dx12, vulkan (HLSL through DXC) | done; named only, not real-time |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
 | `fsr_rr` | temporal, upscales | dx12 | planned |
 | `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
@@ -83,6 +83,118 @@ NRD reads a motion vector as `pixelUvPrev = pixelUv + mv`, so its units are UV a
 `motionVectorScale` carries the reciprocal extent and the sign, so the guide itself is handed over untouched.
 Its matrices, despite what `NRDSettings.h` says in prose, are built column by column from the `float[16]`, which is `tg`'s own convention, so they are copied rather than transposed.
 
+## The OIDN member
+
+**Intel's weights, our inference.**
+OIDN's own GPU devices are CUDA, HIP, SYCL and Metal over vendor GEMM libraries, and would share memory with sg through an OS handle sg cannot export.
+Its CPU device would cost a download and an upload every frame.
+The weights are a separate Apache-2.0 repository, and they describe a small U-Net: sixteen 3x3 convolutions with a bias and a ReLU, four 2x2 max pools, and four nearest upsamples with a skip concat.
+So the member runs that network in five compute shaders of its own, with no vendor SDK and no particular hardware.
+They are HLSL today, so it runs where the other native members do, on dx12 and vulkan.
+
+**It is correct and portable, and far too slow for a frame loop** — roughly 0.2 s per megapixel, which is why `automatic` never picks it.
+Two networks are fetched, both `rt_hdr_alb_nrm`: HDR radiance with an albedo and a normal, the guides the tracer writes.
+The base one is what OIDN's balanced quality runs, and the small one what its fast quality runs: the same topology with every encoder at 32 channels, at half the compute.
+`denoise_settings::quality` picks between them the same way, `fast` running the small one; there is no large network for these guides.
+
+### How it runs
+
+- **The topology is a table and the widths are data.**
+  `impl/oidn_network.cc` lists the layers, and every width is read from the weights file.
+  A weights bump then fails to find a tensor, or fails the shape test in `tza-test.cc`, rather than drifting.
+- **The weights are read once per process** and packed into one buffer as `[ky][kx][i][o]`.
+  The output channel is innermost because it is what varies across a wave, so one weight load touches one or two cache lines.
+- **Every channel count is padded to a multiple of four**, so a convolution reads its source four channels per `float4`.
+  Only three shapes need it: the nine input channels, the three output ones, and the seventy-three `dec_conv1a` concatenates.
+  A padding channel holds a hard zero under a weight of zero, since a NaN left in memory survives a multiply by nothing.
+- **A convolution thread produces a run of eight texels.**
+  Each weight load is spent on all eight, and each loaded input row on all three kernel columns.
+- **Large images run in tiles**, because the network holds twenty-five feature maps at once — the skips stay live across the decoder.
+  Run whole that is 2.7 GiB at 1080p and 10.7 GiB at 4K, which `oidn_network::feature_bytes_for` computes.
+  - A tile computes an 80-pixel border on every side and discards it.
+    80 is where the receptive field ends: tiled and whole agree to a mean below 1e-6 at 80, differ by 1.4e-03 at 64, and by 2.8e-01 with no overlap.
+    OIDN derives its own overlap as `round_up(receptiveField / 2, tileAlignment)`, which puts its base model in the same range.
+  - Every tile's origin is a multiple of sixteen, the grid four pools need, and an edge tile is shifted inward to end where the whole run's padded tensor ends.
+    So a tile sees exactly the input the whole run sees, including the zero padding past the image, as OIDN pads.
+  - An axis that fits under the cap stays one span, whatever the other axis needs.
+  - Within the cap, `oidn_options::max_tile` with a default of 512, `create` picks per axis the tile that computes the fewest pixels rather than the largest.
+    Over 1920x1080 a 512 tile computes more than a 448 one, because its interior divides the image badly.
+  - Raising the cap is the one knob that pays: it buys back overlap for memory, per the table below.
+    OIDN itself never tiles below 768.
+- **Binding groups are built with the network**, since a tile changes push constants and nothing a group names.
+  Only the two that name the caller's own textures are made per call, and never per tile.
+
+### Measured
+
+One 1080p frame on the development machine's dx12 GPU, by tile cap; the default cap of 512 chooses a 480x432 tile.
+
+| cap | time | feature maps |
+|---|---|---|
+| 384 | 500 ms | 197 MiB |
+| 512 | 378 ms | 277 MiB |
+| 640 | 308 ms | 451 MiB |
+| 768 | 276 ms | 602 MiB |
+
+OIDN's own CUDA device filters the same frame in 20.6 ms.
+Its CPU device takes 581 ms, and 327 ms with the small network, so the member is faster than Intel's own portable path.
+All three were timed alike: device-resident buffers, warmed, best of several, with only the filter and its sync on the clock.
+The CPU figure is `uv run dev.py test "OIDN's CPU device timed at 1080p" --manual`, with the library fetched.
+
+- **Cost is flat per computed pixel**, about 80 ms per computed megapixel.
+  So the cap trades memory against the overlap computed twice, and never against quality.
+- **The gap to CUDA is architectural.**
+  OIDN runs cutlass implicit-GEMM convolutions in fp16 on tensor cores, with channels padded to eight, "required by Tensor Core operations".
+  Ours is fp32 SIMT at about 3.2 TFLOP/s of a roughly 20-25 peak.
+  A perfect fp32 kernel would still land near 60 ms; the rest is matrix hardware, which neither the HLSL we compile nor SGL reaches today.
+- **The limit is memory divergence, not issue rate.**
+  Reading four channels per load cut load instructions fourfold and bought 1.4x, because a window's eighteen texels lie far apart and a `float4` costs the same cache line as a `float`.
+  A layout that keeps a window's texels contiguous, as OIDN's CPU device does with CHW, is what would pay next.
+- **Blocking the output channels as well does not pay, under either weight layout.**
+  On a 256x256 tile, 16x1 is 8.0 ms where 16x2 is 10.9 and 8x2 is 9.4.
+  The wave's lanes already share the input, so a second blocking dimension only costs registers.
+- **Half precision would buy memory rather than speed**, since the limit is cache lines rather than bytes, and memory is what buys a larger tile.
+  It is optional on every backend, so it wants a feature level; [TODO.md](TODO.md) has what that takes.
+- **Once the member runs on WebGPU, its default limits will cap the tile before memory does.**
+  `maxStorageBufferBindingSize` defaults to 128 MiB, and the largest binding is one full-resolution map of sixty-four channels.
+  That is 50 MiB at the default cap, 110 MiB at 768 and 137 MiB at 1024, so the cap cannot go far past 768 on a device with default limits.
+- **The small network** runs the playground's 1600x900 frame at 6.0 fps against the base one's 3.7, tracer included, which is 1.6x of the 2x its compute predicts.
+  The table above is the base network's; the small one has no 1080p timing yet.
+- Reproducing the CUDA timing means creating `oidn::DeviceType::CUDA` in `tests/oidn_reference.cc`, with `OpenImageDenoise_device_cuda.dll` from the upstream archive beside the core.
+  The fetch keeps only the CPU device.
+
+### Getting faster
+
+In order of what each buys for what it costs, with what SGL would have to grow for a port to keep up.
+The oracle below is what makes each step cheap to try: a step either keeps the output within its bounds of Intel's, or visibly does not.
+
+1. **Workgroup-memory tiling, implicit-GEMM style.**
+   A workgroup stages the input halo and a slab of weights in shared memory, and each thread computes a block of outputs by channels from registers.
+   It attacks the measured limit, memory divergence, and a well-tuned fp32 kernel lands near 60 ms at 1080p against 378 today.
+   SGL already has both halves it needs: `@workgroup` bindings and `workgroup_barrier()`.
+2. **Fusion**: each max pool folded into the convolution before it, and each upsample and concat into the convolution after it, as OIDN does.
+   It removes eight passes and their round trips through memory.
+3. **Half precision**, behind a feature level, for storage first and arithmetic second; [TODO.md](TODO.md) has what it takes here.
+4. **Winograd F(2x2, 3x3)**, since every layer is 3x3: 2.25x fewer multiplies, less after its transforms, and worth doing only after 1.
+5. **Matrix hardware**, the remaining ~3x to OIDN's own 20.6 ms.
+   Vulkan and Metal expose it today; DirectX's is in preview and WebGPU's experimental, so it waits, and a non-matrix path stays mandatory.
+
+[compute-throughput.md](../../shaped-graphics-language/docs/spec/incubator/compute-throughput.md) records what 3 and 5 ask of SGL.
+
+### Held to Intel's output
+
+`oidn-network-test.cc` runs Intel's own filter over the same input and compares, through `tests/oidn_reference.hh`.
+The library it needs is fetched on request, with `uv run extern/oidn/fetch-oidn.py`, and the comparison skips without it.
+
+The scene spans ten decades of radiance over hemisphere-bump normals, at sizes that are not a multiple of sixteen, and every pixel is compared by relative difference.
+
+- Untiled, over 72x72: a mean relative difference of 8.8e-07 and a worst of 1.2e-05.
+- The small network, untiled over 72x72 against Intel's fast quality: a mean of 1.1e-06 and a worst of 1.2e-05.
+- Tiled, four tiles over 344x344 at a 336 cap, small network against Intel's fast quality: a mean of 1.0e-06 and a worst of 1.6e-05.
+- Padding with the image's edge instead of zeros moves the mean to 2.5e-02, and decoding subnormal weights one exponent off moves it to 4.4e-05.
+  The bounds, 1e-5 on the mean and 2e-4 on the worst, sit about a decade above the measured values and below both mistakes.
+
+It is the only test that can catch a self-consistent mistake: every other one checks a piece against its own definition.
+
 ## The contract
 
 **Reconstruction from day one, named for what it does today.**
@@ -101,6 +213,12 @@ The API admits an output larger than the input, so a vendor member can upscale w
 `sr::required_guides(m)` is what a member cannot run without, and a call missing one reports `unsupported`.
 `sr::optional_guides(m)` is what it uses when present.
 A tracer writes the union for the members it may hand off between, in a few fixed tiers rather than one permutation per combination.
+
+**`albedo` and `specular_albedo` are the two halves of one surface's reflectance.**
+`albedo` is diffuse only, so it is zero on a metal, whose colour is all in `specular_albedo`.
+A member reading split radiance reads the two separately, one per half.
+A member filtering unsplit radiance — à-trous and SVGF — demodulates by their sum, or a textured metal's base colour is filtered as noise.
+OIDN is the follow-up: its own documentation wants a metal's albedo to be its specular colour and glass's to be about 1, and `oidn_network::execute` takes only `albedo` today.
 
 **Settings are one flat struct of knobs named for what they do.**
 Each field in `sr::denoise_settings` says which members read it, and a member ignores the rest, so switching members keeps every knob that still means something.
@@ -122,7 +240,8 @@ Whether a vendor member can honour this is open — it may write its own alpha a
 **Explicit means explicit.**
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
-`dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then the spatial ones for a caller feeding fresh frames; `oidn`, then `atrous` for a caller denoising a converging mean.
+`dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
+`oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 A silent fallback would make a comparison between two named members compare one with itself, which is the failure the framework's three-state readiness exists to prevent.
 
@@ -135,13 +254,9 @@ Instead the front's `init` prewarms every supported member, so prewarming the fr
 `sr::denoise_history` is the images a member keeps between calls for one image stream: a temporal member's history, and the scratch a spatial member ping-pongs through.
 It is move-only, since a copy would fork a history, and the caller holds one per stream.
 
-**It holds textures and nothing else, which is what the next member changes.**
-A vendor member keeps a *feature handle* — an object the SDK creates once for a resolution and a set of options, and that every later call passes back — and that is not an `sg::texture_2d`.
-The successor is one owning pointer to a member-defined state object in place of the fixed array.
-Each member declares its own struct, `_prepare` allocates the one the resolved method wants, and a member reaches its own through a checked cast.
-That is deliberately not built yet.
-It buys nothing for two texture-only members, and the port does not get harder while there are only two.
-The caller's own declaration does not change either way, so it lands with the member that needs it.
+**It holds textures, plus one object of the member's own.**
+State that is not a texture — OIDN's network today, a vendor member's *feature handle* later — sits in a type-erased `std::shared_ptr<void>`, so `denoise.hh` names no member's type.
+`_prepare` drops it with the textures whenever the member or the extent changes, and it may hold only what is safe to drop mid-frame, as sg resources are.
 
 **A temporal history is large.**
 svgf holds eight full-screen images — six `rgba32_float` and the moments pair `rg32_float` — which is about 221 MiB per 1080p stream and 886 MiB at 2160p.
@@ -193,15 +308,14 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
 
 - **The native members need nothing sg does not have.**
 - **The vendor members need a declared native scope in sg**, per backend, dx12 first.
-  Opening it names the resources foreign code will touch and how, so sg emits their barriers.
+  Opening it names the resources foreign code will touch and how, so sg emits their barriers and records the declared states.
   It then hands out the native list and resources.
-  Closing it records the declared states and invalidates the list's cached bindings.
+  Closing it only forgets the list's cached bindings, which the caller rebinds before its next draw or dispatch.
   Without it a vendor SDK would bypass sg's barrier tracking silently.
-- **OIDN on a GPU needs exportable memory and shared fences in sg.**
-  OIDN on the CPU needs neither: download, filter, upload.
+- **OIDN needs nothing sg does not have either**, because the member runs the network rather than the library.
 - **The vendor SDKs are fetched on request, never by default.**
   DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
-  Whether OIDN is fetched by default — its CPU build is the one non-native member CI could run — waits on measuring its size.
+  Intel's OIDN library is on request too, for the oracle test alone; its 2.5 MB of weights, two networks, are a default fetch, since the member runs them.
 
 ## Seeing it
 
@@ -215,6 +329,7 @@ Turning `fresh samples` off switches to the accumulating half, where `samples` c
 
 - The front's policy — what `automatic` picks, that a named member it cannot run writes nothing — runs on WARP through à-trous.
 - à-trous itself: a flat image stays flat, a guide edge does not bleed, and a deep mean is left close to itself.
+- OIDN: every operation against a reference implementation, tiled against whole on aligned, unaligned and one-axis shapes, and the network against Intel's own filter.
 - SVGF itself: a static noisy stream converges, a moving one is followed through its motion vectors, and a depth jump or a reset drops the history rather than ghosting it.
   The moving test is the one that pins reprojection at all.
   It runs the same shifting image twice — once with an honest motion vector, once told nothing moved — and requires the honest one to converge substantially further.

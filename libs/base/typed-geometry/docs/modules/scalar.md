@@ -6,7 +6,7 @@
 
 `scalar/` is the bottom of typed-geometry, and owns everything about the **element type `T`** the geometric types are generic over.
 That is the capability seam (`scalar_traits`), the scalar free functions built on it (`one`, `sqrt`, `abs`, `sin`, `cos`, `sin_cos`, `atan2`, `pow`, `log`, `round`), and constants such as `pi`.
-Scalar-like *newtypes* that are still one number in spirit belong here too — `angle` today.
+Scalar-like *newtypes* that are still one number in spirit belong here too — `angle`, `fixed_int` and `half_float` today.
 It must not depend on `linalg` or anything above it — geometric types are instantiated over scalar types, never the other way around.
 
 ## What belongs here
@@ -96,6 +96,67 @@ Porting `frexp`-shaped code means adjusting the exponent by one, and the differe
 Zero and the non-finites are a **precondition**, not a fallback: `frexp` quietly reports exponent 0 for all three, which turns a bug into plausible-looking data.
 `split_pow2` and `exponent_of` assert instead, and every real caller has already branched on zero for its own reasons.
 Subnormals are normalized rather than reported with a zero exponent — which is the trap a naive read of the exponent field falls into.
+
+### `fixed_int` is modular arithmetic plus explicit widths
+
+`tg::fixed_int<Bits>` / `tg::fixed_uint<Bits>` (spelled `fi32` … `fi256`, `fu32` … `fu256`) exist for exact geometry predicates.
+A predicate's intermediates have bounds known in advance, so what it needs is not a bigint.
+It needs integers of a chosen width, and arithmetic whose result width the caller picks: `tg::mul<fi192>(a, b)` for two `fi128` below `2^80` and `2^90`.
+
+- **Every operator wraps modulo `2^Bits`, and takes one type on both sides.**
+  No width changes silently: the constructor only widens, `x.truncated_to<T>()` narrows, and mixing widths is a compile error.
+  That is what makes `fi192 r = a * b` over `fi128` fail to compile, since it would wrap at 128 bits before widening.
+- **`tg::add` / `sub` / `mul<R>` compute the exact result into `R`, and `R` is a claim.**
+  Unchecked it wraps; `SC_CHECK_WIDE_ARITH` checks it, and `tg::checked_*` always does.
+  The checks are not `CC_ASSERT`s because these calls sit in the hottest predicate loops, where the default dev preset must not pay for them.
+- **An operation on one value is a member, one combining two values is free.**
+  `x.truncated_to<T>()`, `x.shifted_left<T>(n)`, `x.to_f64()` against `tg::mul<R>(a, b)` and `tg::div_floor(a, b)`.
+- **Up to 256 bits the arithmetic is generated, loop-free and branch-free.**
+  `tools/gen-fixed-int.py` picks the `(R, A, B)` triples by the bounds the operands' widths imply and writes one header per result width into `fixed_int/generated/`; its docstring has the rule.
+  Everything else runs the generic bodies in `fixed_int/impl/core.hh`, which are a second, independent formulation the tests hold the generated ones against.
+  Regenerate with `uv run libs/base/typed-geometry/tools/gen-fixed-int.py --write`; `dev.py check` fails when the committed output drifts.
+- **Division truncates, like the builtins, and floor and ceiling are named.**
+  `tg::div_floor<Q>(x, w)` is the case predicates need: a quotient known to fit `Q` (32 bits) comes from one estimate plus one exact remainder rather than a long division.
+  The estimate is a `cc::udiv128` of the top words, measured ~20% faster than an f64 estimate and ~2.7× faster than Knuth D on x64.
+  MSVC ARM64 has no 128 ÷ 64 instruction, so there it is a software division, and still correct.
+- **Float conversions are correctly rounded, with no fast variant.**
+  `to_f64` / `to_f32` round to nearest with ties to even, via a sticky bit over everything below the top 64 bits.
+  That costs ~20% against dropping the sticky bit, measured on fi256, which is too little to be worth a second, subtly different function.
+- **`x.sign()` is the predicate's answer**: -1, 0 or +1 from the OR of the limbs and the sign bit, without a branch or a comparison.
+- **A `fixed_int` is a scalar**, so `vec<3, fi64>` exists — and its operations wrap at the element width, so a dot product over `fi64` is computed in `fi64`.
+  Width-aware `dot` and `cross` belong to a predicate layer on top of this one.
+
+### `half_float` is binary16, correctly rounded
+
+`tg::half_float`, spelled `tg::f16`, is IEEE 754 binary16: a struct over its 16 bits, the same type on every compiler.
+The compilers' `_Float16` is not used as the type, because it does not exist under MSVC and brings C's implicit conversions and excess precision where it does.
+The hardware is still used, inside the conversions.
+
+- **Conversions are explicit both ways**, as every tg constructor is, so `h + 1.0f` does not compile.
+  Widening is exact.
+  Narrowing rounds to nearest with ties to even, overflows to infinity, and turns a NaN into a quiet NaN keeping its sign and the top of its payload.
+  An f64 and an integer narrow directly; through f32 they could round twice.
+- **The conversion is a portable bit-level kernel, with hardware only where the build target already guarantees it.**
+  That is F16C where `__F16C__` is defined (cl.exe: `/arch:AVX2`), and AArch64's native conversion.
+  A run-time CPU check cannot help a single conversion: an F16C body cannot be inlined into a caller compiled for baseline x64.
+  Constant evaluation always takes the portable kernel, so every conversion is `constexpr`.
+  The F16C path was checked bit-identical to the portable kernel over all 2^32 narrowings and all 65,536 widenings.
+- **Arithmetic computes in f32 and rounds once, which is exactly binary16's own arithmetic for `+ - * /` and `sqrt`.**
+  f32 carries 24 bits, and double rounding is harmless from 2p+2 = 24; the tests hold it against an f64 reference.
+  Every operation in a chain rounds.
+  For heavy math the pattern is to widen once, compute in f32 and narrow at the end.
+  An ARM64 target with native half arithmetic uses it, since the results are the same bits.
+  Fused multiply-add does not share the property: via f32 it is not correctly rounded, via f64 it is.
+- **A GPU matches only unfused `+ - *`**, and only where the shader runs with round-to-nearest-even and preserved fp16 subnormals.
+  Division and sqrt are approximate on GPUs, compilers fuse `a * b + c`, and `min16float` need not be binary16.
+- **An operation works on the bits when it is a pure bit operation, or when baseline x64 would otherwise pay a library call.**
+  Negation, `abs`, classification, comparison, `floor`/`ceil`/`round` and the base-two family do; everything that rounds goes through f32.
+  Baseline x64 has no rounding instruction and converts in software, and there the bits win 1.5× on a comparison, 2.2× on `floor` and 2.5× on `scale_by_pow2`.
+  `tests/benchmarks/half_float-benchmark.cc` measures both formulations.
+- **f16 claims every capability family**, the transcendental ones computing in f32's libm with one final rounding — the same kind of error f32's own libm has.
+- **`{}` prints the shortest digits that read back as the same f16**, so `tg::f16(0.1f)` prints `0.1`, and the largest value `65500`.
+  A presentation type (`f`, `e`, `g`) prints the exact value instead.
+- **No span conversion and no vector aliases yet.** Both are niche until a caller needs them; `tg::vec<3, tg::f16>` works as it is.
 
 ## See also
 

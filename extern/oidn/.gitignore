@@ -1,0 +1,3 @@
+# The fetched release; hydrate it with fetch-oidn.py.
+.install/
+.install.staging/

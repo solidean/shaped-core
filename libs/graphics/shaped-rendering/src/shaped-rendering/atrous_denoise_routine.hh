@@ -46,7 +46,7 @@ class sr::atrous_denoise_routine : public sg::render_routine<atrous_denoise_rout
 public:
     /// Filters `in.color` into `in.output`.
     ///
-    /// `in.output` must match `in.color`'s extent — à-trous does not upscale — and carry `readwrite_texture` usage.
+    /// `in.output` must match `in.color`'s extent — à-trous does not upscale — and carry `image` usage.
     /// `pending` while the shader compiles, `failed` after a compile that did not build.
     [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
                                                  denoise_inputs const& in,

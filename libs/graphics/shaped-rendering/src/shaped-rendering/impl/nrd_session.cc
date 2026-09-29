@@ -169,7 +169,7 @@ struct nrd_constants_block
         out.push_back({.name = k_constants_name,
                        .space = instance.constantBufferAndSamplersSpaceIndex,
                        .index = instance.constantBufferRegisterIndex,
-                       .type = sg::binding_type::uniform_buffer});
+                       .type = sg::binding_type::constants_buffer});
 
     for (auto i = u32(0); i < instance.samplersNum; ++i)
         out.push_back({.name = cc::format("s{}", instance.samplersBaseRegisterIndex + i),
@@ -189,7 +189,7 @@ struct nrd_constants_block
             out.push_back({.name = binding_name(storage, index),
                            .space = instance.resourcesSpaceIndex,
                            .index = index,
-                           .type = storage ? sg::binding_type::readwrite_texture : sg::binding_type::readonly_texture,
+                           .type = storage ? sg::binding_type::image : sg::binding_type::texture,
                            .texture_dimension = sg::texture_view_dimension::tex_2d});
         }
     }
@@ -363,7 +363,7 @@ bool nrd_session::create(sg::context& ctx, nrd_denoiser denoiser, tg::vec2i exte
                 {.format = format.value(),
                  .width = cc::max(1, extent[0] / divisor),
                  .height = cc::max(1, extent[1] / divisor),
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture}));
+                 .usage = sg::texture_usage::texture | sg::texture_usage::image}));
         }
         return true;
     };
@@ -535,21 +535,21 @@ bool nrd_session::execute(sg::command_list& cmd, nrd_frame const& frame, nrd_res
             // Built in a branch rather than with a conditional: a readonly and a readwrite view are different types,
             // and `named_view` takes whichever one this binding declared.
             if (storage)
-                views.push_back({.name = binding_name(storage, index), .view = texture->as_readwrite_view()});
+                views.push_back({.name = binding_name(storage, index), .view = texture->as_any_image_view()});
             else
-                views.push_back({.name = binding_name(storage, index), .view = texture->as_readonly_view()});
+                views.push_back({.name = binding_name(storage, index), .view = texture->as_texture_view()});
         }
 
         // NRD's constants are raw bytes it laid out itself, so they travel as an opaque uniform block.
         if (pipeline_desc.hasConstantData && dispatch.constantBufferDataSize > 0)
         {
             auto const constants = ctx.transient.create_buffer<nrd_constants_block>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+                1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
             cmd.upload.bytes_to_buffer(
                 constants.raw(),
                 cc::span<byte const>(static_cast<byte const*>(static_cast<void const*>(dispatch.constantBufferData)),
                                      isize(dispatch.constantBufferDataSize)));
-            views.push_back({.name = k_constants_name, .view = constants.as_uniform_buffer()});
+            views.push_back({.name = k_constants_name, .view = constants.as_constants_buffer()});
         }
 
         auto const group = ctx.transient.create_binding_group(_layouts[dispatch.pipelineIndex], views);

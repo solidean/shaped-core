@@ -25,21 +25,33 @@ r.value().text                             // the emitter's text, unchanged
 r.value().entry_point                      // the name the text declares, which is the one to compile: `main` is `main_` in MSL
 r.value().bound_names                      // { emitted, host } per resource: `work_values` is what the host binds as `work.values`
 r.value().color_targets  .target_struct    // a pixel entry point's target count and `@pixel struct`; -1 and empty otherwise
+r.value().footprint                        // check::slot_footprint per TOUCHED slot: host_name, view (constants/read_only/storage), reads, writes
+                                           // a member never named is absent — sg skips its barrier; see spec/bindings.md "Footprint"
 r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
-sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target
+sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target, run_tests
                                            // the entry point is found by NAME; source_name is never opened
+                                           // run_tests: the source's own tests run, and one that fails is an error
+
+#include <shaped-graphics-language/driver/test_source.hh>
+auto const t = sgl::test_source(text, "colors.sgl");
+                                           // -> tested_source { errors, warnings, test_count, tests_run, tests_passed,
+                                           // tests_expecting_diagnostics, entry_points }; t.is_clean(): nothing to report
 
 #include <shaped-graphics-language/driver/describe.hh>
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
-d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`), block_size
+d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`; a binding array: `count` slots from `slot`), block_size
                                            // texture / image / sampler members also carry the sg enum values of their binding:
-                                           // texture_dimension, sample_type, storage_format + storage_access, sampler_type, static_sampler
+                                           // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
-d.value().entry_points                     // name, stage, workgroup, bindings (the list as written)
-d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths)
+d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint,
+                                           // samplers: the file-scope samplers its code reaches
+d.value().samplers                         // the file-scope samplers: name, index (declaration order), sampler_type, settings, shape
+@expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
+d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths),
+                                           // samplers: the file-scope ones any stage reaches, which its one layout holds
                                            // bindings and structs carry `shape`: check::structural_hash of their members,
                                            // 32 hex digits; the type's own name is not in it. What a hot reload compares.
                                            // types are SGL spellings (`float3`, `mat4`); mapping them to a host is the reader's job
@@ -49,10 +61,38 @@ d.value().pipelines                        // name, stages, layout, vertex_input
 sgl::prelude_files()                       // -> cc::span<prelude_file const> { name, source }, in module order:
                                            // "builtins.sgl": GENERATED in memory from the builtin registry, never read from disk
                                            // "core.sgl": the hand-written prelude/core.sgl as it was when the library was built
+sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file const> { file, ast }: the same files, parsed ONCE per
+                                           // process and shared by every thread; point a module_file at it rather than parsing again
+sgl::prelude_file_of(path)                 // -> i32: which prelude file an ABSOLUTE path or file:// uri is, else -1;
+                                           // only the library's own prelude/ dir counts: shaders/prelude/core.sgl is -1
+                                           // a driver checks such a source IN that file's place, never behind a 2nd prelude
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes
+                                           // lines end at `\n`, `\r\n` and a bare `\r`, as the line tree ends them
 sgl::format_diagnostic(name, source, d, detail = {})   // `a.sgl:2:2: error: unknown-name: foo`; warning / error from d.level
+                                                       // no detail: the kind's summary_of stands in its place
+sgl::format_note(name, source, where, message)         // `a.sgl:3:1: note: declared here`, the line after a diagnostic
+```
+
+What an editor asks — the library answers it, and a language server only translates:
+
+```cpp
+#include <shaped-graphics-language/driver/classify.hh>
+sgl::classify(file, ast, {.module = &m, .file_index = f})
+                                           // -> vector<classified_span { where, cls, is_declaration, is_from_prelude }>
+                                           // every token that has a class, in order, never overlapping; a fused number is ONE span
+                                           // without .module: the syntax and the file's declarations; every USE is `name`
+sgl::token_class                           // keyword control number string comment doc_comment op attribute struct_ enum_ type
+                                           // function method property field binding binding_member enum_case constant pipeline
+                                           // parameter argument local mutable_local self_ name; to_string(c) -> "mutable-local"
+
+#include <shaped-graphics-language/driver/unannotated_bindings.hh>
+sgl::unannotated_bindings(pf, ast, m, f)   // -> vector<unannotated_binding { name, type, is_type_named }>: each `let x = …`
+                                           // that writes no type; is_type_named: `let v = vec3(…)`, where a hint repeats the line
+                                           // left out: a pattern that is no name, a body the check never reached, the error type
+#include <shaped-graphics-language/driver/inferred_results.hh>
+sgl::inferred_results(pf, ast, m, f)       // -> vector<inferred_result { arrow, type, is_writable }>: each `=> value` without `->`
 ```
 
 ## Parsing a file
@@ -156,8 +196,8 @@ Expressions: `invalid_expr` `literal` `name` `self_ref` `wildcard` `leading_dot`
 Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, as `if_branch`es) `for_stmt` `while_stmt`
 `assert_stmt` `print_stmt` `decl_stmt` `expr_stmt`.
 
-Declarations: `invalid_decl` `module_decl` `use_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
-`binding_decl` `sampler_decl` `notation_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
+Declarations: `invalid_decl` `module_decl` `use_decl` `require_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
+`binding_decl` `sampler_decl` `notation_decl` `test_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
 
 ## The builtin registry (the ONE place a builtin lives; [docs/adding-a-builtin.md](docs/adding-a-builtin.md))
 
@@ -176,6 +216,7 @@ sgl::builtins::function_record             // signature (SGL SOURCE TEXT, withou
 sgl::builtins::spelling                    // kind: call (text or .hlsl/.wgsl/.msl rename it; empty = the SGL name), infix, prefix, custom
 sgl::builtins::infix("+")                  // an operator at the level it has in every target
 f.called_in(language::hlsl)                // "lerp" for mix
+f.writes_name(language::hlsl, "asuint")    // true for `x.bits`: its custom writer lists the name in `write.hlsl_names`
 sgl::builtins::evaluator                   // void(span<scalar const> in, vector<scalar>& out): every argument's scalars, back to back;
                                            // the interpreter checks counts and kinds, so ONE evaluator serves a whole family
 sgl::builtins::custom_writer               // written(call_context const&): arguments already written, the target language, the registry
@@ -196,32 +237,41 @@ impl::add_function(r, "mix", {"a", t, "b", t, "t", "float"}, t, eval, {.hlsl = "
 #include <shaped-graphics-language/check/check.hh>
 auto const m = sgl::check::check(prelude_files, {.file = user, .ast = user_ast});   // + a registry; default_registry() without
                                            // -> sgl::check::checked_module; TOTAL; a module_file is two REFERENCES
-                                           // prelude_files: cc::span<module_file const>, parsed from sgl::prelude_files() or a test's own
+                                           // prelude_files: cc::span<module_file const>, from sgl::parsed_prelude() or a test's own
                                            // file i is prelude file i, and the program is the LAST file; never concatenated
                                            // carried: let / let mut, assignment and `op=`, if chains, while, for over `a ..< b`, loop with
                                            // break / break value / continue, and / or / not, comparison chains, int literals, print,
                                            // and calls of the program's own functions, overloads included, which are INLINED
+m.prelude_file_count()                     // -> i32: every file but the last; a symbol of a file below it is the prelude's
 m.symbols                                  // every top-level fun / struct / binding: file, declaration, kind, state, name,
                                            // intrinsic (builtin_id) / intrinsic_type (builtin_type_id), operator_spelling, type, info
 m.builtins                                 // the registry those ids are positions in; m.builtin_type_of(type_id) / m.builtin_function(id)
                                            // -> the record, or null
-m.types  m.members                         // canonical types; types[0] is the error type, types[1] (nothing_type) what a fun without
+m.types  m.members                         // canonical types; types[0] is the error type, types[1] (void_type) what a fun without
                                            // `-> T` returns; fields and binding members
 m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
 m.bindings                                 // binding_info { symbol, is_inline, members }
-m.samplers                                 // sampler_state per `sampler name:` block of a binding; member_info::static_sampler indexes it
+m.samplers                                 // sampler_state per `sampler name:` block; member_info::static_sampler indexes a binding's,
+                                           // and symbol::info a file-scope one's (symbol_kind::sampler, a flat_file_sampler in a tree)
                                            // resource types (texture / image / sampler) are interned like buffers; name_of spells them
-                                           // `out image2d[.rgba8_unorm]`; check/resources.hh holds the shapes and the storage formats
+                                           // `out image_2d[.rgba8_unorm]`; check/resources.hh holds the shapes and the image formats
 m.files[f].type_at(expr_id)                // side table: type_id, none for what nothing checked
 m.files[f].target_at(expr_id)              // side table: { kind, symbol, index } — local / parameter / symbol / overload /
-                                           // constructor / field / binding_member
+                                           // constructor / field / binding_member / enum_case / receiver (`self`)
+m.files[f].call_at(expr_id)                // side table: a position in m.call_records for a call that resolved, -1 otherwise
+m.call_records[i]                          // call_record { callee, written, slots }: the arguments IN THE ORDER WRITTEN, and per
+                                           // parameter which one fills it, -1 for its default; what the flat tree is written from
+m.near_misses                              // near_miss { file, call, candidate, reason, argument, parameter } per candidate of a call
+                                           // that matched nothing: the data a later "did you mean" is written from
 m.entry_points                             // flat_entry_point per SOUND entry point, in the STRUCTURED form; what an emitter reads
                                            // sound means: its body and the body of every function it reaches reported no error
-m.diagnostics                              // located_diagnostic { what, file, detail }, in the order they were found
+m.diagnostics                              // located_diagnostic { what, file, detail, notes }, in the order they were found; a related_note
+                                           // { file, where, message } is a second place a diagnostic points at
 m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of gives "<error>" for the error type
 
 #include <shaped-graphics-language/check/flat.hh>
 e.entry_stage  e.name  e.input  e.result  e.bindings   // stage, the name as written, edge structs, the LISTED bindings
+e.features                                 // check::feature_set: what a device needs for it, from the bindings it lists
 e.locals  e.exprs  e.stmts  e.body         // locals[0] is the parameter; at(id) / at(range) like the AST
 sgl::check::flat_expr                      // { type, from (origin), inlined_through, node }: flat_literal (float), flat_int_literal,
                                            // flat_bool_literal, flat_enum_value, flat_local_ref, flat_binding_member, flat_member,
@@ -273,8 +323,8 @@ b.set_body({…});  b.e                      // a statement joins no list until 
                                            // a span given to a method must not alias the tree (it grows while read)
 
 #include <shaped-graphics-language/legalize/core.hh>
-sgl::check::is_core(e)                     // the definition of the core form
-sgl::check::find_core_violation(e)         // -> cc::optional<core_violation { reason, stmt, expr }>: the FIRST offending node
+sgl::check::is_core(m, e)                  // the definition of the core form
+sgl::check::find_core_violation(m, e)      // -> cc::optional<core_violation { reason, stmt, expr }>: the FIRST offending node
 sgl::check::has_effect(e, expr_id)         // a call that is not pure, or a block
 
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -287,20 +337,44 @@ sgl::check::legalize_options               // { skip_pinning, skip_flag_tests }:
 #include <shaped-graphics-language/interpret/interpret.hh>
 auto const o = sgl::check::interpret(m, e, {.parameter = value, .bindings = {…}}, {.fuel = 1'000'000});
                                            // runs BOTH forms; left to right, each operand once; f32 and wrapping i32
-o.status                                   // ok, out_of_fuel, fell_off_the_end, type_error, uninitialized_read: never asserts
+o.status                                   // ok, out_of_fuel, fell_off_the_end, type_error, uninitialized_read,
+                                           // assertion_failed: never asserts
 o.result  o.trace  o.detail                // value { type, leaves }; trace = every print, and every call with an effect
+o.failures  o.checks_run                   // check_failure { site, values, is_evaluated, loop_values } per false check;
+                                           // {.run_checks = false} skips checks as the core form does, {.max_failures = 8}
+o.sites                                    // site_tally { passed, failed } parallel to e.check_sites, past max_failures too;
+                                           // both zero: the run never reached that check
+{.stop = &flag}                            // run_limits: a raised cc::atomic<bool> ends the run as `stopped`, read every
+                                           // 4096 steps; how an editor abandons a test whose document changed
 o == other                                 // status, result and trace; NOT the detail
 sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
 sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS
 sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
+sgl::check::is_constant(m, e, id)          // literals, and pure builtins, constructions and members of them alone (CHK-310)
+sgl::check::evaluate_constant(m, e, id)    // -> outcome: `ok` with .result, or `program_error` where a call has no value
+
+#include <shaped-graphics-language/test/run_tests.hh>
+m.tests  m.test_units                      // test_info { symbol, file, where, scope_path, comment, unit } and its flat tree
+sgl::test::run_tests(m, files, {.file = f})  // -> vector<test_result { test, status, failures, checks_run }>; files are the
+                                           // module_files m was checked from, since a report quotes the source
+sgl::test::run_test(m, files, t, limits)   // ONE test, m.tests[t]: what a caller that stops between tests runs;
+                                           // a test that expects diagnostics: judged_by_diagnostics; one that did not check: not_run
+r.sites                                    // site_mark { file, where, is_assert, passed, failed } per check and assert of its tree
+                                           // an assert inlined from a helper names the helper's file
+sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one related note per narrowed part:
+                                           // "`s.z > 0.6` is 0.5 > 0.6, with i = 2"
 ```
 
 ## The `sgl` tool (`tools/sgl/`, a nexus binary of COMMANDs; built under `SC_BUILD_TOOLS`)
 
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
+uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
-uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads
+uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads;
+                                                                         # each entry point and pipeline carries its sg `features`
+sgl lsp                                                                  # the language server over stdio; the VS Code extension starts it
+uv run dev.py test sgl                                                   # the language server's tests, carried by the binary (docs/lsp.md)
 uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl
 ```
 
@@ -333,6 +407,7 @@ sgl::emit::is_reserved(t, "target")        // true for wgsl only; msl also reser
 #include <shaped-graphics-language/source/diagnostic.hh>
 sgl::diagnostic            // { kind, level, where }
 sgl::to_string(kind)       // -> the stable kebab-case name: "undelimited-string"
+sgl::summary_of(kind)      // -> one sentence for a reader: "a bracket that is opened and never closed"
 sgl::default_severity_of(kind)   // normal_error / fatal_error / warning
 ```
 
@@ -365,7 +440,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   application, prefix and postfix, fused lists and members.
 - **A form's attributes are not on its groups.** Read them through `first_attribute` / `attribute_count` into `file.form_attributes`.
 - **A range start is a position, not an id.** `line::first_token` and `form::first_attribute` are `u32`, since an empty range starts at nothing.
-- **The AST is name-free.** `build` never looks a name up, so `vec3` is a `name` and `texture2d[rgba8]` an `index` wherever they stand.
+- **The AST is name-free.** `build` never looks a name up, so `vec3` is a `name` and `texture_2d[rgba8]` an `index` wherever they stand.
 - **`build` is total.** What has no reading is an `invalid_*` node that keeps its form, and `ast.diagnostics` says what was expected.
   A `missing`, `error` or postfix form becomes `invalid` WITHOUT a second diagnostic.
 - **An AST name is a `source_span`.** Nothing is interned; read it with `file.text_of(span)`.
@@ -387,16 +462,24 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **The variable of a `for` may carry a type.** `for i : int in r:` fills `for_stmt::type`, and a pattern on the left is still `for-takes-name-in-range`.
   A `return` looks through `case` arms and properties, so `_ => return false` leaves the function around the `case`.
 - **An attribute's arguments are list elements like any other.** `@slider(0, max = 1)` holds a positional and a named `argument`; `@name()` has a `list` and no arguments.
-- **`no-effect` is a warning, and no statement is exempt.** A paren or juxtaposition call, a jump, a `case`, a `loop` and `invalid` have an effect; nothing else does.
+- **`no-effect` is a warning.** A paren or juxtaposition call, a jump, a `case`, a `loop` and `invalid` have an effect; nothing else does.
+  A `test` body is exempt from the AST pass's warning (AST-140): a `bool` line there is a check, which only the check pass can tell.
 - **An anonymous `fun` is a lambda only in expression position.** As a statement it is a function that lost its name and reports `expected-name`.
 - **`type name = …` is a type position**, like the right sides of `:`, `->` and `as`; the AST dump writes it `(type name : …)`.
-- **`true` and `false` are ordinary names** to every phase here.
+- **`true` and `false` are no keywords**: the AST reads them as names, and the check pass as the `@shadowable(false)` consts of `core.sgl`.
+- **`self` and `void` are reserved names**, read as `self_ref` / `void_ref`; a declaration taking one is `reserved-name` (AST-141).
 - **The check pass is one demand-driven pass.** A symbol is untouched, in compilation, checked or failed, and reaching one in compilation is `dependency-cycle`.
   Compiling a function means its signature; bodies are checked after every signature is known.
 - **Every body is checked ONCE, on its own**, so a broken function nobody calls still reports, and one called three times reports once.
   Inlining happens afterwards, from the side tables, and only for an entry point whose every reachable body is sound.
 - **Recursion is `recursive-call`**, once per loop of calls, at the call that closes it: `a -> b -> a`.
 - **Bindings are an effect.** A call needs the callee's `{…}` list inside the caller's, or it is `binding-not-listed` at the call; so an entry point lists what its shader reads.
+- **`require` permits, and use sets the floor.** `require extended_image_formats` in a file, a binding or a body grants the feature, named as `sg::feature` names it.
+  An entry point needs what the bindings it lists use, its stage inputs, a member it takes per sample and its stage.
+  It must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
+  A form used without a grant is `needs-feature`, an unknown name `unknown-feature`, and a body `require` nothing needed is the WARNING `unused-require`; a file's or a binding's never is.
+  WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` or `tessellation_shader` as `target-lacks-feature`.
+  MSL refuses one needing `geometry_shader` or `tessellation_shader` the same way.
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.
   A `loop:` without a `break` never ends; a `while` always may, whatever its condition.
   What follows a jump in its list is the WARNING `unreachable-code`.
@@ -407,11 +490,50 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   So `let length = length v` is fine, and `length w` after it is a call of a local; a type position holding it is `wrong-kind-of-name`.
 - **The program's file may shadow a prelude name** (CHK-188): its `struct vec3` is no duplicate, and its `fun dot` joins the prelude's overloads.
   Where both have a function a call matches, the program's wins (CHK-192), so a prelude release adding its signature breaks nothing.
-  Only two non-functions of one name in one file are `duplicate-declaration`.
+  Only two non-functions of one name in one file are `duplicate-declaration`, a struct beside the functions of its name aside.
 - **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
-- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `const`, `use`,
-  a `for` over anything but `a ..< b`, a `let` without a value, an expression statement that is no call, `assert`.
-- **An arrow body without `-> T` infers its result**, and a BLOCK body without one still returns nothing.
+- **One call model** (CHK-69): a method, a static, a property, an extension and a struct's constructor are all functions.
+  `a.foo(b)` and `foo(a, b)` collect the same candidates: the functions of that name, and those of `a`'s type scope (CHK-247).
+  `a.foo` is a field where there is one; otherwise the target must be a property, and `a.foo()` must not reach one (CHK-256).
+  A member body reads its receiver through `self` ALONE: a bare `radius` is no field (CHK-62), while a field's default reads earlier fields bare.
+- **Arguments bind by position, then by name** (CHK-250); a positional one after a named one only in its own slot, and `.x: T` is named-only.
+  A default is checked ONCE in its function's scope, and evaluated at each call that leaves it out, after every written argument (EVAL-80).
+- **A literal converts where a type is expected** (CHK-81, CHK-253): `(1, 2)` or `{a = 1}` is a call of the struct's name, `1` meets a float.
+  Leaving its default type is one step of a literal's chain; candidates rank by dominance over those chains, then a type-scope function wins (CHK-254).
+  `0xff`, `0b1010` are integer literals like decimal ones (CHK-269); `&`, `|`, `^`, `~`, `<<`, `>>` take int, uint and their vectors, a shift's count keeps its low five bits.
+  `1 / 3` is `literal-needs-type` (CHK-313): `/` and `%` over integer literals alone say nothing of int or float; an integer literal is held in 64 bits and refused only in a type that cannot hold it.
+- **The maths builtins** are records of `register_math.cc`: trig, `exp`/`log`, `pow`, `sqrt`/`inverse_sqrt`, rounding, `sign`, `step`/`smoothstep`.
+  Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
+  The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
+  `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
+- **Stage inputs are parameters** (CHK-271): the stage struct first, then `@vertex_index i: int`, `@is_front_facing f: bool`, `@thread_id id: int3`, ….
+  `flat_entry_point::input` is `none` for a vertex stage without a vertex buffer, and `stage_inputs` holds each input's local; `run_inputs::stage_inputs` gives them values.
+- **Geometry and tessellation stages** (CHK-301 to CHK-307): `@geometry(max_vertices = N)` takes `tri: varyings[3]` first and `stream: mut triangle_stream[varyings]` last.
+  `N` is at most 256, and `N` times the scalars of `varyings` at most 1024.
+  Each stage takes what the stage before hands on first, and its stage inputs after it.
+  `@tessellation_control(partitioning = …, winding = …)` takes the patch and returns a factors struct, and `@tessellation_evaluation` takes both and `@domain_location`.
+  HLSL writes them; WGSL and MSL refuse by the feature, so they are tested in C++ rather than in the corpus, which emits for all four targets.
+- **`T[N]` is a value like a struct** (CHK-285 to CHK-290): copied where passed, `float[3, 5]` is three arrays of five, and `xs.length` is a constant.
+  `T[N].filled(v)` and a square literal `[a, b, c]` build one; `T[]` is a binding member's alone.
+- **`discard` is a jump, and only a `@pixel fun` may reach it** (CHK-277): anywhere else it is `stage-not-allowed` at the `discard`.
+  A path that ends in one needs no value, and the uniformity pass does not count it as an exit (CHK-284).
+- **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
+  Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
+- **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+- **A binding array, `texture_2d[float4][64]`, needs `binding_arrays`** and is read by element alone (CHK-299).
+  An index the uniformity pass cannot prove uniform is `nonuniform i`, or it is `non-uniform-index`; a needless mark is a warning (CHK-300).
+- **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
+  A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
+- **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
+  A member of that name hides a file-scope sampler of it.
+  A call without a sampler on a texture without one is `missing-sampler`.
+- **A `sampler name:` at file scope is a static sampler of the pipeline layout** (CHK-314), handed to a builtin by its name: `tex.sample(uv, name)`.
+  It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133).
+  An entry point reaching one at position 16 or later is `too-many-samplers`, and unreached samplers declared above it count.
+- **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
+  a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
+  an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
+- **An arrow body without `-> T` infers its result**, and a BLOCK body without one returns `void`.
   Its body is checked as part of compiling it, so two such functions that need each other are `dependency-cycle`, not `recursive-call`.
   An overload whose parameters cannot take a call is not demanded by it, so an overload set works from inside one of its inferred members.
 - **A call as a statement is `flat_eval`**: evaluated, its value dropped.
@@ -421,7 +543,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A `@builtin struct` is keyed by its name, a `@builtin fun` by its name AND its parameter types**, against the registry.
   An `@operator` function is found through its operator alone: no lookup sees its name, which is documentation and what a dump shows.
 - **Adding a builtin touches ONE record**, then `uv run dev.py check sgl-prelude --fix` regenerates `prelude/builtins.sgl`.
-  No emitter, interpreter or layout switch exists to extend, and a test adds `fract` to a registry of its own to keep that true.
+  No emitter, interpreter or layout switch exists to extend, and a test adds `sawtooth` to a registry of its own to keep that true.
 - **The user file is the LAST file, not file 1.** Behind the library's prelude it is file 2; a test with one prelude file of its own still has it at 1.
 - **An entry point with any error has no flat tree.** `m.entry_points` holds only what an emitter may read.
 - **The check pass writes the structured form**, and only `once` and a bare `break` never come from it.
@@ -447,8 +569,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   Its resource at `slot` is `register(<class>slot, spaceN)` in dx12, `[[vk::binding(slot, N)]]` in vulkan, `@group(N) @binding(slot)` in WGSL.
   An entry point lists at most three groups besides its `@inline` binding, as sg binds; a fourth is `too-many-groups` on every target.
   MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.
-  Its members must land on the same offsets in HLSL, WGSL and MSL, so `{float; float3}` is `layout-mismatch`.
-  **So is `{float3; float}`**: MSL's `float3` is 16 bytes, so nothing fits into its tail, and `{float3; mat4; float}` is fine.
+- **GPU memory has one layout per address space, the same on every target** (the spec's emitting file, "Layout").
+  A constant block packs as an HLSL constant buffer does, and a buffer's element as a dx12 structured buffer: tight, like a `tg` struct.
+  WGSL and MSL are made to follow by a memory form, where a vector their own rule would place elsewhere is split or packed.
+  A struct in both a block and a buffer is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
+  **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
 - **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.
   `prelude/core.sgl` is the hand-written half, embedded at CONFIGURE time: editing it re-runs CMake, and a test pins the embedded text to the file.

@@ -130,25 +130,25 @@ cc::shared_async<cc::unit> pathtrace_routine::init_once(sg::routine_init_scope s
 {
     auto& ctx = scope.context();
     _guide_normal_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_depth_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::r32_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::r32_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_albedo_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_specular_albedo_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_roughness_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::r16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::r16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _frame_output_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _frame_diffuse_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _frame_specular_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_hit_distance_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rg32_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rg32_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_motion_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rg32_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rg32_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     co_return;
 }
 
@@ -538,35 +538,36 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     auto const group = ctx.transient.create_binding_group(
         variant->group_layout,
         {{.name = "scene", .view = tlas->as_view()},
-         {.name = "Output", .view = d.output.as_readwrite_view()},
-         {.name = "frame", .view = d.frame.as_uniform_buffer()},
-         {.name = "background", .view = d.background.as_uniform_buffer()},
+         {.name = "Output", .view = d.output.as_any_image_view()},
+         {.name = "frame", .view = d.frame.as_constants_buffer()},
+         {.name = "background", .view = d.background.as_constants_buffer()},
          {.name = "Instances", .view = d.instance_table.as_readonly_buffer()},
          {.name = "Lights", .view = lights.as_readonly_buffer()},
-         {.name = "GuideNormal", .view = (has_guides ? d.guide_normal : self->_guide_normal_stand_in).as_readwrite_view()},
-         {.name = "GuideDepth", .view = (has_guides ? d.guide_depth : self->_guide_depth_stand_in).as_readwrite_view()},
-         {.name = "GuideAlbedo", .view = (has_guides ? d.guide_albedo : self->_guide_albedo_stand_in).as_readwrite_view()},
+         {.name = "GuideNormal", .view = (has_guides ? d.guide_normal : self->_guide_normal_stand_in).as_any_image_view()},
+         {.name = "GuideDepth", .view = (has_guides ? d.guide_depth : self->_guide_depth_stand_in).as_any_image_view()},
+         {.name = "GuideAlbedo", .view = (has_guides ? d.guide_albedo : self->_guide_albedo_stand_in).as_any_image_view()},
          {.name = "GuideSpecularAlbedo",
           .view
-          = (has_specular_guides ? d.guide_specular_albedo : self->_guide_specular_albedo_stand_in).as_readwrite_view()},
+          = (has_specular_guides ? d.guide_specular_albedo : self->_guide_specular_albedo_stand_in).as_any_image_view()},
          {.name = "GuideRoughness",
-          .view = (has_specular_guides ? d.guide_roughness : self->_guide_roughness_stand_in).as_readwrite_view()},
+          .view = (has_specular_guides ? d.guide_roughness : self->_guide_roughness_stand_in).as_any_image_view()},
          {.name = "FrameOutput",
-          .view = (has_temporal ? d.frame_output : self->_frame_output_stand_in).as_readwrite_view()},
+          .view = (has_temporal ? d.frame_output : self->_frame_output_stand_in).as_any_image_view()},
          {.name = "GuideMotion",
-          .view = (has_temporal ? d.guide_motion : self->_guide_motion_stand_in).as_readwrite_view()},
+          .view = (has_temporal ? d.guide_motion : self->_guide_motion_stand_in).as_any_image_view()},
          {.name = "FrameDiffuse",
-          .view = (has_split ? d.frame_diffuse : self->_frame_diffuse_stand_in).as_readwrite_view()},
+          .view = (has_split ? d.frame_diffuse : self->_frame_diffuse_stand_in).as_any_image_view()},
          {.name = "FrameSpecular",
-          .view = (has_split ? d.frame_specular : self->_frame_specular_stand_in).as_readwrite_view()},
+          .view = (has_split ? d.frame_specular : self->_frame_specular_stand_in).as_any_image_view()},
          {.name = "GuideHitDistance",
-          .view = (has_split ? d.guide_hit_distance : self->_guide_hit_distance_stand_in).as_readwrite_view()}});
+          .view = (has_split ? d.guide_hit_distance : self->_guide_hit_distance_stand_in).as_any_image_view()}});
 
     cmd.raytracing.bind_pipeline(*variant->pipeline);
     cmd.raytracing.bind_group(0, *group);
     cmd.raytracing.bind_group(1, *d.bindless->group());
 
-    // Every bound array binding must be declared before the dispatch, the empty ones included.
+    // An array the code indexes and nobody declared is logged and barriered whole, so every table is declared, the
+    // empty ones included.
     d.bindless->declare_raytracing_access(cmd);
 
     cmd.raytracing.dispatch_rays(*variant->table, variant->raygen, d.output.width(), d.output.height());

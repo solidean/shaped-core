@@ -483,7 +483,7 @@ TEST("sv - a mesh carries the data its material draws it with")
     CHECK(copy.geometry.positions.data() == m.geometry.positions.data());
 }
 
-TEST("sv - frame_constants_gpu takes a plain bool for its gpu_boolean lane")
+TEST("sv - frame_constants_gpu takes a plain bool for its gpu_bool lane")
 {
     static_assert(sizeof(sv::frame_constants_gpu) == 256);
 

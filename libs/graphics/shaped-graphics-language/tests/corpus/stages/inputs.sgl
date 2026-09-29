@@ -1,0 +1,44 @@
+// the values the GPU hands an invocation: parameters marked with their input, after the stage's one struct
+
+struct varyings:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct target:
+    color: float4
+
+// a full-screen triangle from nothing but the vertex's index: corners at uv 0,0 / 2,0 / 0,2
+fun corner_of(v: int) -> float2 => float2(((v << 1) & 2) as float, (v & 2) as float)
+
+test corner_of(0).x == 0.0 and corner_of(0).y == 0.0
+test corner_of(1).x == 2.0 and corner_of(1).y == 0.0
+test corner_of(2).x == 0.0 and corner_of(2).y == 2.0
+
+// no vertex buffer at all: the vertex stage takes its index alone
+@vertex fun fullscreen_vs(@vertex_index v: int) -> varyings:
+    let uv = corner_of(v)
+    return { position = hpos4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0), uv = uv }
+
+// a vertex buffer, and the instance beside it; the index counts from the draw's first instance on every target
+@vertex struct corner:
+    position: float2
+
+@vertex fun row_vs(c: corner, @instance_index i: int) -> varyings:
+    return { position = hpos4(c.position.x + (i as float) * 0.25, c.position.y, 0.0, 1.0), uv = c.position }
+
+// which face a pixel came from, and which of its samples the primitive covers
+@pixel fun faces_ps(p: varyings, @is_front_facing front: bool, @sample_mask covered: uint) -> target:
+    let samples = count_bits(covered) as float
+    if front => return { color = float4(0.0, 1.0, samples, 1.0) }
+    return { color = float4(1.0, 0.0, samples, 1.0) }
+
+pipeline fullscreen:
+    vertex = fullscreen_vs
+    pixel = faces_ps
+    cull = .none
+    format = .rgba8_unorm
+
+pipeline instanced_row:
+    vertex = row_vs
+    pixel = faces_ps
+    format = .rgba8_unorm

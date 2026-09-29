@@ -42,10 +42,12 @@ constexpr auto k_hazard_count = k_size * k_size;
 /// A group layout holding one binding of `type` named `name`, at index 0.
 [[nodiscard]] cc::result<sg::binding_group_layout_handle> one_binding_layout(mtl::metal_context_handle const& ctx,
                                                                              cc::string_view name,
-                                                                             sg::binding_type type)
+                                                                             sg::binding_type type,
+                                                                             sg::access_mode access
+                                                                             = sg::access_mode::read)
 {
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back({.name = cc::string(name), .space = 0, .index = 0, .count = 1, .type = type});
+    bindings.push_back({.name = cc::string(name), .space = 0, .index = 0, .count = 1, .type = type, .access = access});
 
     auto layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     if (layout.has_error())
@@ -80,7 +82,7 @@ TEST("sg metal - a draw loop over a readonly group emits no barrier")
     // draw has to wait on.
     // Declaring `shader_read | shader_write` for every binding instead made each draw meet the previous draw's
     // unordered write — one barrier per draw, for a loop that never writes anything at all.
-    auto group_layout = one_binding_layout(ctx, "palette", sg::binding_type::readonly_structured_buffer);
+    auto group_layout = one_binding_layout(ctx, "palette", sg::binding_type::buffer);
     REQUIRE(group_layout.has_value());
 
     auto layout_desc = sg::pipeline_layout_description{};
@@ -136,10 +138,13 @@ ASYNC_TEST("sg metal - two dispatches reading one buffer emit no barrier between
     // One `source` read by both dispatches, and a `target` of its own for each, so the only thing either could order
     // against is the shared read.
     auto shader = mtl::test::mesh_kernel("copy_main");
-    shader.bindings.push_back(
-        {.name = "source", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_structured_buffer});
-    shader.bindings.push_back(
-        {.name = "target", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_structured_buffer});
+    shader.bindings.push_back({.name = "source", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::buffer});
+    shader.bindings.push_back({.name = "target",
+                               .space = 0,
+                               .index = 1,
+                               .count = 1,
+                               .type = sg::binding_type::buffer,
+                               .access = sg::access_mode::read_write});
 
     auto group_layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -230,7 +235,7 @@ ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrot
     //
     // **It may pass by timing rather than by ordering**: a 4×4 draw is short enough to finish before the next one
     // starts on an M-series GPU, so a failure here is real and a pass is not proof on its own.
-    auto group_layout = one_binding_layout(ctx, "results", sg::binding_type::readwrite_structured_buffer);
+    auto group_layout = one_binding_layout(ctx, "results", sg::binding_type::buffer, sg::access_mode::read_write);
     REQUIRE(group_layout.has_value());
 
     auto layout_desc = sg::pipeline_layout_description{};
@@ -324,7 +329,7 @@ ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state"
     //
     // Each half is a colour here: the left was drawn before the reopen and must survive it, and the right is drawn
     // after and says the scissor came back.
-    auto group_layout = one_binding_layout(ctx, "results", sg::binding_type::readwrite_structured_buffer);
+    auto group_layout = one_binding_layout(ctx, "results", sg::binding_type::buffer, sg::access_mode::read_write);
     REQUIRE(group_layout.has_value());
 
     auto layout_desc = sg::pipeline_layout_description{};

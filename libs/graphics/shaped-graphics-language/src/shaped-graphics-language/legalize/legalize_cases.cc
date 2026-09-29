@@ -192,8 +192,8 @@ struct case_lowering
                     is_rewritten = true;
                 },
                 [&](flat_let&) {}, [&](flat_var&) {}, [&](flat_assign&) {}, [&](flat_print&) {}, [&](flat_eval&) {},
-                [&](flat_leave&) {}, [&](flat_continue&) {}, [&](flat_break&) {}, [&](flat_case&) {}, [&](flat_if&) {},
-                [&](flat_return&) {});
+                [&](flat_leave&) {}, [&](flat_continue&) {}, [&](flat_discard&) {}, [&](flat_break&) {},
+                [&](flat_case&) {}, [&](flat_if&) {}, [&](flat_return&) {}, [&](flat_check&) {});
             if (!is_rewritten)
             {
                 result.push_back(id);

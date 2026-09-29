@@ -59,11 +59,10 @@ void imgui_texture_registry::create_texture(sg::context& ctx, ImTextureData* tex
                                                      "sr::imgui_context");
     CC_ASSERT(tex->Width > 0 && tex->Height > 0, "imgui requested a degenerate texture");
 
-    auto texture
-        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
-                                            .width = tex->Width,
-                                            .height = tex->Height,
-                                            .usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst});
+    auto texture = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                                     .width = tex->Width,
+                                                     .height = tex->Height,
+                                                     .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
 
     // A freshly built atlas is already tightly packed, so the whole-texture upload needs no repacking —
     // but ctx.upload is fire-and-forget and holds the pin until the copy runs,
@@ -110,7 +109,7 @@ void imgui_texture_registry::update_texture(sg::command_list& cmd, ImTextureData
             = pack_texture_rect(reinterpret_cast<byte const*>(tex->GetPixels()), tex->GetPitch(), tex->BytesPerPixel,
                                 tg::pos2i(int(r.x), int(r.y)), tg::vec2i(int(r.w), int(r.h)));
         // On the caller's list rather than ctx.upload: by now a draw has sampled the atlas, so it is in
-        // `shader_readonly`, and the async copy queue cannot move a layout for itself — it would submit a throwaway
+        // `shader_texture`, and the async copy queue cannot move a layout for itself — it would submit a throwaway
         // list to do it and warn once per texture.
         // The direct queue transitions it through the ordinary declare/flush tracker, and a glyph patch is small
         // enough that the async path buys nothing here.

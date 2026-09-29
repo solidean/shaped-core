@@ -6,6 +6,12 @@ namespace sg
 {
 raytracing_pipeline::~raytracing_pipeline() = default;
 
+void impl::set_footprint(raytracing_pipeline const& pipeline, impl::pipeline_footprint footprint)
+{
+    // Only ever called on a pipeline nobody else holds yet, and never on one created const.
+    const_cast<raytracing_pipeline&>(pipeline)._footprint = cc::move(footprint);
+}
+
 raygen_shader_handle raytracing_pipeline_description::add_raygen_shader(compiled_shader shader)
 {
     CC_ASSERT(shader.stage == shader_stage::raygen, "add_raygen_shader requires a raygen shader");

@@ -51,12 +51,13 @@ TEST("sgl check - a case value is an int literal, and anything else is unsupport
     CHECK(reports_for("enum e:\n    a = 2147483647\n    b = 0\n") == "");
 }
 
-TEST("sgl check - a member of an enum that is no case is unsupported-yet")
+TEST("sgl check - an enum has properties and methods, and a nested declaration is unsupported-yet")
 {
-    CHECK(reports_for("enum e:\n    a\n    is_a => self == .a\n")
-          == "unsupported-yet user:[is_a => self == .a] a property\n");
-    CHECK(reports_for("enum e:\n    a\n    fun first() => e.a\n")
-          == "unsupported-yet user:[fun first() => e.a] a method\n");
+    CHECK(reports_for("enum e:\n    a\n    b\n    is_a => self == e.a\n    fun first() => e.a\n"
+                      "fun f(x: e) -> bool => x.is_a and e.first() == x\n")
+          == "");
+    CHECK(reports_for("enum e:\n    a\n    const k = 1\n")
+          == "unsupported-yet user:[const k = 1] a declaration in an enum\n");
 }
 
 TEST("sgl check - enum.case is a value of the enum, and an unknown case is unknown-member")

@@ -10,6 +10,8 @@
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec.hh>
 
+#include <memory>
+
 /// Denoising — and, once a member supports it, upscaling — behind one call.
 ///
 /// `sr::denoise_routine` is the front: a caller names a method (or `automatic`) and the front forwards to the
@@ -60,7 +62,10 @@ enum class sr::render_scale_preset : sg::u8
 /// One guide buffer a member may read beside the noisy color.
 enum class sr::denoise_guide : sg::u8
 {
-    albedo,          ///< diffuse reflectance at the primary hit
+    /// Diffuse reflectance at the primary hit, so zero on a metal.
+    /// A member reading split radiance reads it and `specular_albedo` separately; one reading unsplit radiance
+    /// demodulates by their sum.
+    albedo,
     specular_albedo, ///< specular reflectance at the primary hit
     normal,          ///< world-space shading normal at the primary hit, in rgb
     roughness,       ///< perceptual roughness at the primary hit, in r
@@ -100,6 +105,7 @@ struct sr::denoise_settings
     /// Every member reads this.
     /// atrous and svgf: the number of wavelet passes (3, 4, 5).
     /// nrd: how long REBLUR's two histories may grow.
+    /// oidn: `fast` runs its small network, the others its base one.
     denoise_quality quality = denoise_quality::balanced;
 
     /// In [0, 1]; higher keeps more detail and removes less noise.
@@ -163,7 +169,7 @@ struct sr::denoise_inputs
 
     denoise_guides guides;
 
-    /// Where the result goes: needs `readwrite_texture` usage, and must not be `color`.
+    /// Where the result goes: needs `image` usage, and must not be `color`.
     /// Its extent is the output extent; any ratio to the input other than 1 must be one `denoise_input_extent` produced.
     ///
     /// Its rgb is the denoised radiance and **its alpha is `color`'s, carried through untouched** — every member
@@ -216,9 +222,7 @@ struct sr::denoise_outcome
 /// Dropping the history of a view nobody is looking at is how a caller gets that back, and is what a caller with many
 /// views should do.
 ///
-/// It holds images and nothing else.
-/// A member needing state that is not a texture — a vendor feature handle, which dlss_rr and fsr_rr both take — is
-/// what replaces the fixed array with a per-member state object; see libs/graphics/shaped-rendering/docs/denoising.md.
+/// It holds images, plus at most one object of the member's own for state that is not a texture.
 class sr::denoise_history
 {
 public:
@@ -245,6 +249,9 @@ public:
     /// The textures are kept and overwritten, since a cut does not change their size.
     void reset() { _reset_requested = true; }
 
+    /// Whether a `reset` is waiting for the next call to consume it.
+    [[nodiscard]] bool is_reset_pending() const { return _reset_requested; }
+
     /// The member that built what this holds, or `none` while empty.
     [[nodiscard]] denoise_method method() const { return _method; }
 
@@ -255,69 +262,18 @@ private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
     friend class nrd_denoise_routine;
+    friend class oidn_denoise_routine;
 
     /// Brings this to `method` at `extent`, dropping everything if either changed.
     /// Returns whether the call starts from no history.
     bool _prepare(denoise_method method, tg::vec2i extent);
 
-    /// A member's own per-stream object — for NRD, the instance and the textures it plans against.
+    /// A member's own per-stream object — for OIDN, the network and its feature maps.
     ///
-    /// Opaque, with the release function beside it, so this header names no member's type and a history still frees
-    /// what it holds without knowing what that is.
-    ///
-    /// A type of its own rather than two members, so `denoise_history` needs no destructor and no move operations of
-    /// its own: pairing a pointer with the function that frees it is the whole invariant, and it is stated once here
-    /// instead of in three places that must agree.
-    /// `cc::unique_ptr` cannot serve — it takes no upcast, and its node allocator frees by the static type's size
-    /// class, so it cannot own a derived object through a base.
-    class vendor_slot
-    {
-    public:
-        vendor_slot() = default;
-
-        vendor_slot(vendor_slot&& other) noexcept : _state(other._state), _release(other._release)
-        {
-            other._state = nullptr;
-            other._release = nullptr;
-        }
-
-        vendor_slot& operator=(vendor_slot&& other) noexcept
-        {
-            if (this != &other)
-            {
-                reset();
-                _state = other._state;
-                _release = other._release;
-                other._state = nullptr;
-                other._release = nullptr;
-            }
-            return *this;
-        }
-
-        vendor_slot(vendor_slot const&) = delete;
-        vendor_slot& operator=(vendor_slot const&) = delete;
-
-        ~vendor_slot() { reset(); }
-
-        [[nodiscard]] void* get() const { return _state; }
-
-        /// Frees what this holds, then takes `state` to be freed by `release`.
-        /// Both null is the empty slot; `release` must be able to free `state`.
-        void reset(void* state = nullptr, void (*release)(void*) = nullptr)
-        {
-            if (_state != nullptr && _release != nullptr)
-                _release(_state);
-            _state = state;
-            _release = release;
-        }
-
-    private:
-        void* _state = nullptr;
-        void (*_release)(void*) = nullptr;
-    };
-
-    /// `_prepare` resets this whenever it drops the rest, since the state is built for one extent.
-    vendor_slot _vendor;
+    /// Type-erased so this header names no member's type; `make_shared` captured the deleter that frees it.
+    /// It must hold only what is safe to drop mid-frame, as sg resources are.
+    /// `_prepare` drops it whenever it drops the rest, since the state is built for one extent.
+    std::shared_ptr<void> _member_state;
 
     denoise_method _method = denoise_method::none;
     tg::vec2i _extent = tg::vec2i(0, 0);

@@ -107,6 +107,10 @@ public:
     /// Releases the backing buffer; the ring is unusable afterwards.
     void shutdown();
 
+    /// Where an overflowing reservation counts its bytes; null counts nothing, which is what a test's bare ring wants.
+    /// Survives `create`, so a resize keeps counting.
+    void count_overflow_into(sg::impl::stat_totals* totals) { _totals = totals; }
+
     // --- test-only escape hatch ----------------------------------------------------------------------
     // The tier-2 tests assert cursor behaviour directly, because the defect this shape exists to prevent is invisible
     // from the outside until bytes are already wrong — see libs/graphics/shaped-graphics/docs/testing.md.
@@ -123,6 +127,7 @@ private:
     MTL::Device* _device = nullptr;
     MTL::Buffer* _buffer = nullptr;
     isize _capacity = 0;
+    sg::impl::stat_totals* _totals = nullptr;
     cc::string _kind;
 
     /// A closed epoch and where its staging ended; its bytes free once that epoch retires and its copies have run.

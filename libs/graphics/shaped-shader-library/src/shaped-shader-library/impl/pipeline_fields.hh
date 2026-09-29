@@ -159,6 +159,8 @@ inline constexpr enum_case cases_blend_factor[] = {
     {"one_minus_src_alpha", int(sg::blend_factor::one_minus_src_alpha)},
     {"dst_alpha", int(sg::blend_factor::dst_alpha)},
     {"one_minus_dst_alpha", int(sg::blend_factor::one_minus_dst_alpha)},
+    {"constant", int(sg::blend_factor::constant)},
+    {"one_minus_constant", int(sg::blend_factor::one_minus_constant)},
 };
 inline constexpr enum_case cases_blend_op[] = {
     {"add", int(sg::blend_op::add)},

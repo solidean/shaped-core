@@ -27,8 +27,8 @@ namespace
 {
 constexpr int k_size = 8;
 
-constexpr auto image_usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture
-                           | sg::texture_usage::copy_dst | sg::texture_usage::copy_src;
+constexpr auto image_usage
+    = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_dst | sg::texture_usage::copy_src;
 
 [[nodiscard]] sg::texture_2d make_image(sg::context& ctx)
 {

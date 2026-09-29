@@ -305,6 +305,7 @@ struct nullopt_t;
 template <class T>
 struct optional;
 
+struct exception;
 struct result_exception;
 struct any_error;
 template <class E>
@@ -429,6 +430,7 @@ struct u128;
 struct i128;
 struct carrying_add_result;
 struct borrowing_sub_result;
+struct udiv128_result;
 
 
 //

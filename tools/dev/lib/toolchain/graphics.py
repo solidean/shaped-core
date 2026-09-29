@@ -23,6 +23,7 @@ import ctypes
 import ctypes.util
 import os
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -266,6 +267,38 @@ def _shader_compiler_check(root: Path) -> tuple[str, bool | None, str]:
     return (label, None, "DXC not fetched — run: uv run extern/dxc/download-dxc.py")
 
 
+def _metal_shader_compiler_check() -> tuple[str, bool | None, str]:
+    """Whether ssc::msl can emit a metallib here, which is a property of the host rather than of the build.
+
+    The library is built on every Apple target and needs no toolchain to exist.
+    Without one it emits MSL source, which the driver compiles when a pipeline is built.
+    So an absent toolchain is a different artifact rather than a failure, and this row says which one a compile produces.
+    """
+    label = "shader compiler (metal)"
+    if platform.system() != "Darwin":
+        return (label, None, "not built - Apple platforms only")
+
+    found = shutil.which("xcrun")
+    if found is None:
+        return (label, None, "no xcrun, so compiles emit MSL source rather than a metallib")
+
+    probe = subprocess.run(
+        ["xcrun", "-sdk", "macosx", "-f", "metal"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0 or not probe.stdout.strip():
+        return (
+            label,
+            None,
+            "Metal toolchain not installed, so compiles emit MSL source - "
+            "run: xcodebuild -downloadComponent MetalToolchain",
+        )
+
+    return (label, True, f"metallib via {probe.stdout.strip()}")
+
+
 def _backend_rollup(
     headers: tuple[str, bool | None, str],
     vk_runtime: tuple[str, bool | None, str],
@@ -322,4 +355,5 @@ def checks(root: Path, cxx: str | None) -> list[tuple[str, bool | None, str]]:
         _surface_check(cxx),
         _window_backend_check(root, cxx),
         _shader_compiler_check(root),
+        _metal_shader_compiler_check(),
     ]

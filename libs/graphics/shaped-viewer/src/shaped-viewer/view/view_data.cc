@@ -61,25 +61,10 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         out.push_back({.id = temporal_id::albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
         out.push_back({.id = temporal_id::denoised(u8(i)), .format = sg::pixel_format::rgba16_float});
 
-        // The specular pair, for a layer whose method may read EITHER of them.
-        // `automatic` counts for the same reason it counts below: what it resolves to depends on the device, and this
-        // declaration is made before any device is consulted.
-        // The guides are what a vendor member cannot run without, so a layer that might pick one has to have written
-        // them by the time it does.
-        //
-        // Either rather than both, because the two are not the same question: NRD requires roughness and never reads a
-        // specular albedo, so a pair gated on the albedo alone leaves it without a guide it cannot run without.
-        // They are still declared together, since one tracer flag writes both.
-        auto const readable = sr::required_guides(v.layers[i].settings.denoise.method)
-                            | sr::optional_guides(v.layers[i].settings.denoise.method);
-        auto const may_read_specular = v.layers[i].settings.denoise.method == sr::denoise_method::automatic
-                                    || readable.has(sr::denoise_guide::specular_albedo)
-                                    || readable.has(sr::denoise_guide::roughness);
-        if (may_read_specular)
-        {
-            out.push_back({.id = temporal_id::specular_albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
-            out.push_back({.id = temporal_id::roughness_guide(u8(i)), .format = sg::pixel_format::r16_float});
-        }
+        // The specular pair, for every member: a split one reads it beside the diffuse albedo, and an unsplit one
+        // demodulates by the sum of the two, since a metal's diffuse albedo is zero.
+        out.push_back({.id = temporal_id::specular_albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
+        out.push_back({.id = temporal_id::roughness_guide(u8(i)), .format = sg::pixel_format::r16_float});
 
         // A layer that may denoise temporally also keeps this frame's own samples and the motion vectors.
         // `automatic` may, because it picks a temporal member while the mean is young whenever one is supported.

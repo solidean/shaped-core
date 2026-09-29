@@ -146,7 +146,8 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx, sr::denoise_method meth
     for (auto f : sv::interactive(ctx, "sv-test/denoise-capture"))
     {
         auto view = f.window().view();
-        view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
+        // Close enough that the box fills the frame: the roughness is judged only where it is not black.
+        view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 2.0});
         f.register_capture("front", [](sv::capture_context const&) {});
 
         auto scene = view.add_scene();

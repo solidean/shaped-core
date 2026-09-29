@@ -42,16 +42,16 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
     desc.DepthOrArraySize = UINT16(slices_or_depth);
 
     desc.MipLevels = UINT16(d.mip_levels);
-    desc.Format = to_dxgi_format(d.format);
+    desc.Format = to_dxgi_resource_format(d.format, d.usage.has(sg::texture_usage::texture));
     desc.SampleDesc.Count = UINT(d.sample_count);
     desc.SampleDesc.Quality = 0;
     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN; // driver-chosen optimal tiling
     // Usage → creation flags.
-    // readonly_texture and copy need no flag, being allowed by default; the writable/attachment usages each add one.
+    // texture and copy need no flag, being allowed by default; the writable/attachment usages each add one.
     // DENY_SHADER_RESOURCE is left off, so a depth/RT texture can also be sampled.
     // can also be sampled.
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    if (d.usage.has(sg::texture_usage::readwrite_texture))
+    if (d.usage.has(sg::texture_usage::image))
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     if (d.usage.has(sg::texture_usage::render_target))
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;

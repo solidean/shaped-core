@@ -44,7 +44,7 @@ sg::texture_2d_description target_description(int width, int height)
     return {.format = sg::pixel_format::rgba16_float,
             .width = width,
             .height = height,
-            .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture};
+            .usage = sg::texture_usage::texture | sg::texture_usage::image};
 }
 
 cc::vector<sg::texture_2d> make_targets(sg::context& ctx, target_source source, int width, int height)
@@ -76,9 +76,9 @@ cc::shared_async<cc::unit> render_frames(sg::context_handle ctx,
         {
             auto const& from = targets[pass];
             auto const& to = targets[(pass + 1) % targets_per_frame];
-            auto const group
-                = ctx->transient.create_binding_group(layout, {{.name = "gSource", .view = from.as_readonly_view()},
-                                                               {.name = "gTarget", .view = to.as_readwrite_view()}});
+            auto const group = ctx->transient.create_binding_group(
+                layout, {{.name = "gSource", .view = from.as_texture_view()},
+                         {.name = "gTarget", .view = to.as_image_view<sg::pixel_format::rgba16_float>()}});
             cmd->compute.bind_group(0, *group);
             cmd->compute.dispatch_threads(width, height);
         }

@@ -85,8 +85,8 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(4) << kind_shift) | u64(layer);
 }
 
-/// The specular reflectance guide for a traced layer, which the vendor members require.
-/// Declared only for a layer whose method may read it, since it costs a texture and the native members ignore it.
+/// The specular reflectance guide for a traced layer.
+/// The vendor members require it, and the native ones demodulate by its sum with the diffuse albedo.
 [[nodiscard]] constexpr u64 specular_albedo_guide(u8 layer)
 {
     return (u64(9) << kind_shift) | u64(layer);
@@ -202,7 +202,8 @@ namespace sv
 [[nodiscard]] bool is_traceable(layer const& l);
 
 /// Every temporal resource `v` needs this frame: the ones it declared, plus one accumulator per traced layer.
-/// A traced layer that denoises adds its three guides and the denoised image.
+/// A traced layer that denoises adds its guides and the denoised image, plus the temporal slots when its method may run
+/// temporally.
 ///
 /// The tracer's accumulator is *derived* rather than baked into the renderer, which is what makes it one temporal
 /// input among others instead of a special case — the plan sizes it and the store keeps it exactly like any other.

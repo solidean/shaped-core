@@ -11,7 +11,7 @@ using namespace cc::primitive_defines;
 // reproduce HLSL's layout rather than C++'s — see libs/graphics/shaped-shader-library/docs/binding-preprocessor.md.
 // Every rule below is a silent wrong number if guessed, so none of them is guessed here.
 //
-// The instrument is `block_size`, which reflection already reports for a uniform_buffer binding, and each case
+// The instrument is `block_size`, which reflection already reports for a constants_buffer binding, and each case
 // is a struct whose total differs between the candidate layouts.
 // One rule per case, so a failure names the rule rather than "the packing changed".
 //
@@ -68,7 +68,7 @@ void main(uint3 tid : SV_DispatchThreadID)
     }
 
     for (auto const& b : result.value().bindings)
-        if (b.type == sg::binding_type::uniform_buffer && b.block_size.has_value())
+        if (b.type == sg::binding_type::constants_buffer && b.block_size.has_value())
             return b.block_size.value();
 
     return -1;
@@ -168,7 +168,7 @@ TEST("portable-hlsl spike - Q14f an array starts a row, and the total rounds up 
 
 TEST("portable-hlsl spike - Q14e a bool is four bytes, not one")
 {
-    // Which is the reason sr::gpu_boolean exists.
+    // Which is the reason slib::gpu_bool exists.
     check_rule("bool is four bytes", "    bool a;\n    float probe;", 16);
 }
 

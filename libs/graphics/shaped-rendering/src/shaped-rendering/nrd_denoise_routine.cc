@@ -6,6 +6,8 @@
 #include <shaped-rendering/impl/nrd_instance.hh>
 #include <shaped-rendering/nrd_denoise_routine.hh>
 
+#include <memory> // std::make_shared, which is what denoise_history::_member_state holds
+
 #if SR_HAS_NRD
 #include <shaped-rendering/impl/nrd_session.hh>
 #include <sr_shaders.hh>
@@ -45,11 +47,6 @@ bool nrd_denoise_routine::is_available(sg::context const& ctx)
 #if SR_HAS_NRD
 namespace
 {
-void release_session(void* p)
-{
-    delete static_cast<impl::nrd_session*>(p);
-}
-
 /// Which `history._state` slot holds what.
 /// NRD reads and writes these every frame, but none of them is history: the temporal state lives inside the instance,
 /// and these only exist per stream so a steady stream allocates nothing.
@@ -93,7 +90,7 @@ cc::shared_async<cc::unit> nrd_denoise_routine::init(sg::routine_init_scope scop
     auto const* const repack_constants = [&]() -> sg::binding const*
     {
         for (auto const& b : repack_compiled->bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
+            if (b.type == sg::binding_type::constants_buffer)
                 return &b;
         return nullptr;
     }();
@@ -167,21 +164,17 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
                             slot_specular_factor})
         (void)impl::ensure_image(ctx, history._state[slot], extent, sg::pixel_format::rgba16_float);
 
-    if (history._vendor.get() == nullptr)
+    if (history._member_state == nullptr)
     {
-        // Owned raw because the history's slot pairs a `void*` with the function that frees it — the one shape that
-        // lets `denoise.hh` free a vendor object whose type it must not name.
-        auto* const fresh = new impl::nrd_session();
+        // `make_shared` captures the deleter, so the history frees an `nrd_session` without `denoise.hh` naming one.
+        auto fresh = std::make_shared<impl::nrd_session>();
         if (!fresh->create(ctx, impl::nrd_denoiser::reblur_diffuse_specular, extent))
-        {
-            delete fresh;
             return outcome_of(denoise_status::failed);
-        }
 
-        history._vendor.reset(fresh, &release_session);
+        history._member_state = cc::move(fresh);
     }
 
-    auto& session = *static_cast<impl::nrd_session*>(history._vendor.get());
+    auto& session = *static_cast<impl::nrd_session*>(history._member_state.get());
 
     // The instance exists well before its pipelines do — NRD's shaders build through the context's cache like ours.
     if (!session.is_ready())
@@ -192,20 +185,20 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
     auto const repack_group = ctx.transient.create_binding_group(
         cmd, self->_repack_layout,
         shaders::nrd_repack_bindings{
-            .gDiffuse = in.color.as_readonly_view(),
-            .gSpecular = in.specular.as_readonly_view(),
-            .gNormal = in.guides.normal.as_readonly_view(),
-            .gRoughness = in.guides.roughness.as_readonly_view(),
-            .gDepth = in.guides.depth.as_readonly_view(),
-            .gHitDistance = in.guides.hit_distance.as_readonly_view(),
-            .gAlbedo = in.guides.albedo.as_readonly_view(),
-            .gSpecularAlbedo = in.guides.specular_albedo.as_readonly_view(),
-            .gNormalRoughness = history._state[slot_normal_roughness].as_readwrite_view(),
-            .gViewZ = history._state[slot_view_z].as_readwrite_view(),
-            .gDiffuseRadianceHitDistance = history._state[slot_diffuse_in].as_readwrite_view(),
-            .gSpecularRadianceHitDistance = history._state[slot_specular_in].as_readwrite_view(),
-            .gDiffuseFactor = history._state[slot_diffuse_factor].as_readwrite_view(),
-            .gSpecularFactor = history._state[slot_specular_factor].as_readwrite_view(),
+            .gDiffuse = in.color.as_texture_view(),
+            .gSpecular = in.specular.as_texture_view(),
+            .gNormal = in.guides.normal.as_texture_view(),
+            .gRoughness = in.guides.roughness.as_texture_view(),
+            .gDepth = in.guides.depth.as_texture_view(),
+            .gHitDistance = in.guides.hit_distance.as_texture_view(),
+            .gAlbedo = in.guides.albedo.as_texture_view(),
+            .gSpecularAlbedo = in.guides.specular_albedo.as_texture_view(),
+            .gNormalRoughness = history._state[slot_normal_roughness].as_any_image_view(),
+            .gViewZ = history._state[slot_view_z].as_any_image_view(),
+            .gDiffuseRadianceHitDistance = history._state[slot_diffuse_in].as_any_image_view(),
+            .gSpecularRadianceHitDistance = history._state[slot_specular_in].as_any_image_view(),
+            .gDiffuseFactor = history._state[slot_diffuse_factor].as_any_image_view(),
+            .gSpecularFactor = history._state[slot_specular_factor].as_any_image_view(),
         });
 
     auto const hit_distance = impl::nrd_hit_distance_parameters();
@@ -260,11 +253,11 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
     auto const resolve_group = ctx.transient.create_binding_group(
         cmd, self->_resolve_layout,
         shaders::nrd_resolve_bindings{
-            .gDiffuseRadianceHitDistance = history._state[slot_diffuse_out].as_readonly_view(),
-            .gSpecularRadianceHitDistance = history._state[slot_specular_out].as_readonly_view(),
-            .gDiffuseFactor = history._state[slot_diffuse_factor].as_readonly_view(),
-            .gSpecularFactor = history._state[slot_specular_factor].as_readonly_view(),
-            .gOutput = in.output.as_readwrite_view(),
+            .gDiffuseRadianceHitDistance = history._state[slot_diffuse_out].as_texture_view(),
+            .gSpecularRadianceHitDistance = history._state[slot_specular_out].as_texture_view(),
+            .gDiffuseFactor = history._state[slot_diffuse_factor].as_texture_view(),
+            .gSpecularFactor = history._state[slot_specular_factor].as_texture_view(),
+            .gOutput = in.output.as_any_image_view(),
         });
 
     cmd.compute.bind_pipeline(*self->_resolve_pipeline);

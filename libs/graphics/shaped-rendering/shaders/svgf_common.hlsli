@@ -6,9 +6,19 @@
 static const uint k_svgf_has_albedo = 1u << 0;
 static const uint k_svgf_reset = 1u << 1;         // the temporal pass ignores the history: a first frame, or a cut
 static const uint k_svgf_remodulate_out = 1u << 2; // this à-trous pass is the last, and multiplies the albedo back in
+static const uint k_svgf_has_specular_albedo = 1u << 3;
 
 // A zero albedo would make demodulation divide by zero; one floor used both ways keeps the round trip exact.
 static const float k_svgf_albedo_floor = 1e-3;
+
+// What colour is demodulated by: the surface's total reflectance, since SVGF filters unsplit radiance and a metal's
+// colour is in the specular half.
+float3 svgf_reflectance(float3 albedo, float3 specular_albedo, uint flags)
+{
+    if ((flags & k_svgf_has_specular_albedo) != 0)
+        albedo += specular_albedo;
+    return max(albedo, k_svgf_albedo_floor);
+}
 
 float svgf_luminance(float3 c)
 {

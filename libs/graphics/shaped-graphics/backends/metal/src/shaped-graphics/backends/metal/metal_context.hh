@@ -61,7 +61,9 @@ struct sg::backend::metal::metal_config
 class sg::backend::metal::metal_context final : public sg::context
 {
     // metal consumes compiled Metal libraries only.
-    static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::metal_lib};
+    // Both of Metal's: a metallib is AIR in a container, and MSL is source the driver compiles at pipeline build.
+    static constexpr sg::shader_format k_accepted_shader_formats[]
+        = {sg::shader_format::metal_lib, sg::shader_format::msl};
 
 public:
     /// Takes ownership of every argument; `create_metal_context` is what assembles them.
@@ -77,6 +79,10 @@ public:
 
     // create_metal_context fills this in once it has picked a device.
     using sg::context::set_adapter_info;
+    using sg::context::set_counted_stats;
+
+    /// The context's stat totals, for the systems that count into them.
+    [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
 
     [[nodiscard]] MTL::Device* device() const { return _device; }
     [[nodiscard]] MTL4::CommandQueue* queue() const { return _queue; }
@@ -206,7 +212,7 @@ public:
     // The sg::context surface.
     [[nodiscard]] sg::epoch current_epoch() const override { return _epochs.current(); }
     [[nodiscard]] sg::epoch completed_epoch() const override { return _epochs.completed(); }
-    void advance_epoch() override;
+    void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override { return _epochs.in_flight_count(); }
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override
     {

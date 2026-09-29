@@ -70,10 +70,10 @@ texture_layout texture_description::resolved_initial_layout() const
         return texture_layout::depth_readwrite;
     if (usage.has(texture_usage::render_target))
         return texture_layout::render_target;
-    if (usage.has(texture_usage::readwrite_texture))
-        return texture_layout::shader_readwrite;
-    if (usage.has(texture_usage::readonly_texture))
-        return texture_layout::shader_readonly;
+    if (usage.has(texture_usage::image))
+        return texture_layout::shader_image;
+    if (usage.has(texture_usage::texture))
+        return texture_layout::shader_texture;
     if (usage.has(texture_usage::copy_dst))
         return texture_layout::copy_dst;
     if (usage.has(texture_usage::copy_src))
@@ -91,8 +91,8 @@ void texture_description::assert_valid() const
     // CreateUnorderedAccessView it does not like by REMOVING THE DEVICE — a failure with no return code, arriving a
     // frame later, nowhere near the description that caused it.
     // A renderable format that cannot carry a UAV is written through a raster pass instead.
-    CC_ASSERT(!usage.has(texture_usage::readwrite_texture) || supports_typed_uav(format),
-              "readwrite_texture usage needs a format that can carry a typed UAV — sRGB, block-compressed and depth "
+    CC_ASSERT(!usage.has(texture_usage::image) || supports_typed_uav(format),
+              "image usage needs a format that can carry a typed UAV — sRGB, block-compressed and depth "
               "formats cannot");
     CC_ASSERT(width >= 1 && height >= 1 && depth >= 1, "texture extents must be >= 1");
     CC_ASSERT(mip_levels >= 1, "texture needs at least one mip level");

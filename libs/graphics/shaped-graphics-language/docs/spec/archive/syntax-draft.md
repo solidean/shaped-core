@@ -131,7 +131,7 @@ TODO: is the name "syntax tree" ok here or should we change it?
 So this is going to feel weird the first time you read it, but basically we try to find a common expression-oriented way to build these syntax trees.
 And it is almost independent from the whole later sgl surface language.
 It is like a common but generic way to read the tokens into a syntax tree.
-It not only increases the syntactic uniformity but also provides a generaic way to limit how much errors can affect.
+It not only increases the syntactic uniformity but also provides a generic way to limit how much errors can affect.
 
 A syntax node can be:
 * a literal
@@ -187,7 +187,7 @@ A syntax node can be:
         * comparisons (< <= == != >= >)
         * logical connectives ("and", "or", "not" -> here any <node> can have "not?" and we treat is tightly bound semantically. BUT any non-last not is a normal error due to potential to misread)
         * assignment "=" and any op ending in "=" (except comparisons) - so this includes compound assignments
-    * this means non-parenthised expressions of the same precedence level stay together here
+    * this means non-parenthesized expressions of the same precedence level stay together here
       this is needed for comparison chains and other nice features
     * note that a linting pass still errors on most mixed-op stuff at the same precedence
       so "a and b or c" is parsed and left-associates semantically, but it gives a normal error

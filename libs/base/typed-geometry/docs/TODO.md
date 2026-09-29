@@ -12,8 +12,23 @@ Add entries as we discover them, and remove them as they land.
 - **Combined `sincos`.**
   `tg::sin_cos` calls `sin` and `cos` separately, where libm's combined `sincos` entry point is cheaper.
   Add it as a `scalar_traits` operation and have `sin_cos` prefer it.
+- **`fixed_int`: what the first cut leaves out.**
+  Mixed signed / unsigned heterogeneous operands, and generated loop-free widening shifts.
+  Generated bit counts and float conversions, both short loops today.
+  The bounded quotient's remainder at the divisor's width, where the divisor's bound allows it.
+
+- **`half_float`: what the first cut leaves out.**
+  bfloat16 and the 8-bit floats are the trigger to generalize `half_float` into a template over the exponent and fraction widths.
+  Until a second format exists, the NaN and infinity rules such a template needs are guesses.
+  An `fma` for f16 has to compute in f64: through f32 it is not correctly rounded.
+  cl.exe on ARM64 has no half type, so it takes the portable conversion there; NEON intrinsics would give it the hardware path.
+  Span conversions using SIMD picked at run time wait for a caller; they need a CPU feature query clean-core does not have.
 
 ## linalg
+
+- **Converting a vector's element type.**
+  A `vec<3, f16>` becomes a `vec<3, f32>` element by element today, and so does every other pair of scalar types.
+  The spelling — a converting constructor on each linalg type, or one generic `tg::convert<To>(from)` — waits for a caller.
 
 - **`tg::rotor<D, T>`.**
   The transform module stores a rotation as an impl-local unit complex number in 2D and a `quat` in 3D.

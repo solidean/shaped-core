@@ -52,6 +52,15 @@ expr_id builder::type_expression(form_id form)
         auto const parts = keyword_parts_of(form);
         if (parts.keywords.size() == 1 && parts.arguments.empty() && !is_valid(parts.block))
             return make_expr(form, name{.where = at(parts.keywords[0]).where});
+        // `sampler[2]` subscripts that name, as `comparison_sampler[2]` does its own
+        if (parts.keywords.size() == 1 && parts.arguments.size() == 1 && !is_valid(parts.block)
+            && is_kind(parts.arguments[0], form_kind::square_list)
+            && at(parts.keywords[0]).where.end() == at(parts.arguments[0]).where.offset)
+        {
+            auto const object = make_expr(parts.keywords[0], name{.where = at(parts.keywords[0]).where});
+            auto const arguments = list_elements(parts.arguments[0]);
+            return make_expr(form, ast::index{.object = object, .arguments = arguments});
+        }
     }
     return expression(form, attribute_mode::keep);
 }
@@ -77,6 +86,8 @@ expr_id builder::expression_node(form_id form)
     case form_kind::identifier:
         if (text_of(form) == "self")
             return make_expr(form, self_ref{});
+        if (text_of(form) == "void")
+            return make_expr(form, void_ref{});
         return make_expr(form, name{.where = f.where});
     case form_kind::wildcard:
         return make_expr(form, wildcard{});
@@ -178,6 +189,9 @@ expr_id builder::curly_list_expression(form_id form)
     if (total > 0 && typed == total)
     {
         auto const fields = fields_of(form, diagnostic_kind::expected_member);
+        for (auto const& f : ast.at(fields))
+            if (f.is_named_only)
+                report(diagnostic_kind::named_only_not_allowed_here, f.form);
         return make_expr(form, struct_type{.fields = fields});
     }
     if (typed > 0)
@@ -474,7 +488,7 @@ expr_id builder::keyword_expression_from(form_id form, keyword_parts const& part
 
     if (keyword == "case")
         return case_expression(form, parts);
-    if (is_value_jump(keyword) || keyword == "continue")
+    if (is_value_jump(keyword) || keyword == "continue" || keyword == "discard")
         return jump_expression(form, parts, keyword);
     if (keyword == "fun" && is_anonymous_fun(parts))
         return fun_lambda_expression(form, form, parts, form_id::none);
@@ -545,7 +559,7 @@ expr_id builder::case_expression(form_id form, keyword_parts const& parts)
 
 expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::string_view keyword)
 {
-    auto const takes_value = keyword != "continue";
+    auto const takes_value = keyword != "continue" && keyword != "discard";
     auto const allowed = takes_value ? isize(1) : isize(0);
     if (parts.arguments.size() > allowed)
         report(diagnostic_kind::too_many_arguments, parts.arguments[allowed]);
@@ -563,6 +577,9 @@ expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::s
 
 expr_id builder::make_jump(form_id form, cc::string_view keyword, expr_id value)
 {
+    // AST-148: a discard always has a target, the invocation, so nothing it stands in is looked for
+    if (keyword == "discard")
+        return make_expr(form, discard_expr{});
     report_jump_target(form, keyword);
     if (keyword == "continue")
         return make_expr(form, continue_expr{});
@@ -582,6 +599,8 @@ void builder::report_jump_target(form_id form, cc::string_view keyword)
         auto const owner = owners[i].owner;
         auto const is_loop = owner == body_owner::value_loop || owner == body_owner::statement_loop;
         auto const is_one_line = owners[i].one_line == form;
+        if (owner == body_owner::test)
+            break;
 
         if (is_loop_jump)
         {

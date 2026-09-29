@@ -26,6 +26,7 @@ tg::homogeneous_transform<DSource, DTarget, T, Flags>           // the one trans
 // concrete typedefs — suffix attaches to a trailing digit, else separated by '_':
 tg::vec3f tg::pos3f tg::comp3f tg::bivec3f tg::mat3f   // f=f32, d=f64, i=i32  (e.g. vec2d, mat4i)
 tg::quat_f tg::quat_d   tg::angle_f tg::angle_d        // quat/angle end in a letter -> '_f'/'_d'
+tg::f16                                                // tg::half_float; no linalg aliases, write tg::vec<3, tg::f16>
 ```
 
 ## vec — displacement / direction
@@ -339,6 +340,54 @@ tg::pi<T>;                                // inline constexpr T  (scalar/constan
 // tg::abs on the most negative integer is UB — that value has no representable magnitude.
 // split_pow2's significand is in [1, 2), NOT C frexp's [0.5, 1): x == significand * 2^exponent, so
 // exponent is floor(log2(|x|)). Porting frexp-shaped code means adjusting the exponent by one.
+```
+
+## fixed_int (wide two's-complement integers)
+
+```cpp
+#include <typed-geometry/scalar/fixed_int/fixed_int.hh>    // the types and their operators
+#include <typed-geometry/scalar/fixed_int/fixed_arith.hh>  // + tg::add/sub/mul<R>, checked_*, the division family
+tg::fi32; tg::fi64; tg::fi128; tg::fi192; tg::fi256;       // tg::fixed_int<Bits>: Bits is 32 or a multiple of 64
+tg::fu32 … tg::fu256;                                      // tg::fixed_uint<Bits>
+x.limbs[i];                                                // u64, least significant first (fi32/fu32: one u32)
+a + b; a * b; a << n; a >> n; a / b; a <=> b;              // same type both sides; wrap modulo 2^Bits
+fi128 x = 5; x + 1;                                        // a builtin converts implicitly when every value fits
+fi192(x); x.widened<fi192>();                              // widen: explicit, lossless
+x.truncated_to<fi64>();                                    // narrow: the low bits
+x.shifted_left<fi192>(n);                                  // widen, then shift
+fu128(x);                                                  // same width, other signedness: reinterpret
+tg::mul<fi192>(a, b);                                      // fi128 x fi128 -> fi192: the exact result into R
+tg::add<fi192>(a, b); tg::sub<R>(a, b);                    //   R is a claim: SC_CHECK_WIDE_ARITH checks it
+tg::checked_mul<R>(a, b);                                  // -> cc::optional<R>; none when it does not fit
+tg::div_trunc / mod_trunc / div_floor / mod_floor / div_ceil(a, b);  // same width; operators are trunc
+tg::div_mod_trunc(a, b); tg::div_mod_floor(a, b);          // -> {quotient, remainder} from one division
+tg::div_floor<fi32>(x, w); tg::div_ceil<fi32>(x, w);       // quotient known to fit fi32: udiv128 estimate + exact fix
+tg::div_floor_ceil<fi32>(x, w);                            // -> {floor, ceil}
+x.to_f64(); x.to_f32(); fi128(2.5);                        // correctly rounded out; truncating in
+x.sign(); x.is_negative();                                 // int -1/0/+1 without a branch; bool
+u.count_leading_zeroes(); u.popcount(); u.bit_width();     // fixed_uint only; s.magnitude_bit_width() for signed
+x.to_string(); cc::format("{:'x}", x);                     // decimal; the full integer format spec
+// fi192 r = a * b over fi128 does not compile: the product would wrap at 128 bits. Write tg::mul<fi192>(a, b).
+// A shift amount must be in [0, Bits); min() / -1 wraps to min(); division by zero asserts.
+// vec<3, fi64> exists, and its dot product is computed (and wraps) in fi64.
+```
+
+## half_float (binary16)
+
+```cpp
+#include <typed-geometry/scalar/half_float.hh>
+tg::f16 h = tg::f16(0.1f);                        // tg::half_float; explicit, rounds to nearest even -> 0.0999755859375
+tg::f16(0.1); tg::f16(3); 0.5_f16;                // from f64 and integers in one rounding; literal in tg::literals
+f32(h); h.to_f32(); h.to_f64();                    // explicit, exact
+tg::f16::make_from_bits(0x3c00); h.bits();         // the raw u16
+h + h; h * h; h /= h; -h;                          // binary16 arithmetic: computed in f32, rounded once (IEEE-exact)
+h == h; h < h; h <=> h;                            // on the bits; -0 == +0, NaN unordered -> std::partial_ordering
+h.is_nan(); h.is_inf(); h.is_finite(); h.is_subnormal(); h.sign_bit();
+tg::floor(h); tg::sqrt(h); tg::sin(a);             // every scalar_traits family; vec<3, tg::f16> works
+tg::f16::max; lowest; min_normal; denorm_min; epsilon; infinity; quiet_nan;   // constexpr, unlike other tg constants
+cc::format("{}", h);                               // shortest digits for f16: "0.1"; `{:.5f}` prints the exact value
+// h + 1.0f does not compile: widen explicitly, f32(h) + 1.0f, or stay in f16, h + tg::f16(1).
+// Each operation rounds, so a long chain in f16 drifts: widen once for heavy math.
 ```
 
 ## Umbrellas

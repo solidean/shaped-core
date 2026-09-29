@@ -33,6 +33,7 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 | `literal` | a number literal, a quoted literal or a hash literal |
 | `name` | an identifier |
 | `self_ref` | the identifier `self` |
+| `void_ref` | the identifier `void` |
 | `wildcard` | `_` |
 | `leading_dot` | a leading-dot form: `.point`, `.0` |
 | `member` | a member access: `a.b` |
@@ -58,6 +59,9 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 
 * **AST-12** A quoted literal keeps its form, and its pieces and interpolations are reached through that form.
 * **AST-13** `self` is a **reserved name**: the identifier `self` reads as `self_ref` wherever it stands, and it is no keyword ([why](why/ast.md#ast-13)).
+* **AST-141** No declaration, field or enum case may be named by a reserved name, and no parameter may be named `void`; each is the normal error `reserved-name`.
+  A parameter named `self` is the receiver of a method, which is what the name is reserved for.
+* **AST-137** `void` is a reserved name too: the identifier `void` reads as `void_ref` wherever it stands, the type in a type position and its value elsewhere ([why](why/ast.md#ast-137)).
 * **AST-14** An applied square group reads as `index`, which is a subscript or type arguments, and its elements are arguments ([why](why/ast.md#ast-14)).
 
 ```sgl
@@ -159,11 +163,12 @@ let v = {1 + 2}
 * **AST-99** The AST reads an `->` as the form tree groups it, and it regroups nothing ([OP-32](operators.md#the-precedence-ladder)).
 * **AST-100** `x : (int) -> int` is an `ascription` whose type is a `function_type`, and `a -> b -> c` is a `function_type` whose result is the `function_type` `b -> c`.
 * **AST-33** A curly group applied to an expression reads as `with_bindings`, which is reserved: the node is kept, and it is a normal error that says the construct is not supported yet.
-* **AST-128** `mut` and `out` in a type position read as `qualified_type`, which records the word and the type it qualifies: `mut buffer[float]`, `out image2d[.rgba8_unorm]`.
+* **AST-128** `mut` and `out` in a type position read as `qualified_type`, which records the word and the type it qualifies: `mut buffer[float]`, `out image_2d[.rgba8_unorm]`.
 * **AST-129** A `qualified_type` says what a shader does with a resource, and [bindings.md](../bindings.md) is what the words mean.
   The AST checks neither the word against the type nor the type against anything.
 * **AST-130** `mut` or `out` outside a type position is read as it is elsewhere, so `mut` keeps AST-45 and `out` in an expression is a normal error.
 * **AST-135** `sampler` alone in a type position reads as the name `sampler`: the keyword denotes the sampler type there, `smp: sampler`.
+  A square group right after it, `sampler[2]`, is an index of that name, as it would be of any other type name.
 
 ```sgl
 type blend = (vec3, vec3) -> vec3
@@ -306,6 +311,7 @@ struct rect:
 ### Jumps
 
 * **AST-40** `return`, `break`, `continue` and `yield` are expressions, the **jumps** ([why](why/ast.md#ast-40)).
+* **AST-148** `discard` is a jump too, which takes no value and always has a target: the invocation it ends.
 * **AST-41** `return` and `break` take at most one value, `yield` takes exactly one, and `continue` takes none; a `yield` without a value is the normal error `expected-expression`.
 * **AST-112** `return` leaves the nearest enclosing `fun`, named or anonymous, through every value block and every loop between ([why](why/ast.md#ast-112)).
 * **AST-113** A `return` in the block of an arrow lambda, or in a `case` arm inside one, is the normal error `return-in-lambda`; it is written `yield`.
@@ -483,6 +489,7 @@ print "total:", total
 * **AST-60** An expression statement has an effect when it is a paren or a juxtaposition `call`, a jump, a `case`, a `loop`, a `with_bindings` or an `invalid`.
 * **AST-61** Any other expression statement is the warning `no-effect`, and it is still read: an infix or a prefix `call`, a name, a literal, a `member`, a `tuple`.
 * **AST-114** The last statement of a block is no exception to AST-61, since a block has no implicit value ([AST-106](#value-blocks-and-yield)).
+* **AST-140** Inside a `test` body, and not inside a function nested in one, AST-61 does not report: a line of type `bool` is a check there, and only the check pass knows a line's type.
 
 ```sgl
 fun update(state: particle):
@@ -510,6 +517,7 @@ fun update(state: particle):
 |---|---|---|---|
 | module | `module name` | yes | no |
 | import | `use module`, `use module as name` | yes | yes |
+| feature requirement | `require feature`, `require a, b`, `require:` and one name per line | yes | yes |
 | function | `fun` and a [signature](#functions) | yes | yes |
 | struct | `struct name:` and a block of [members](#members) | yes | yes |
 | enum | `enum name:` and a block of members | yes | yes |
@@ -520,15 +528,33 @@ fun update(state: particle):
 | sampler | `sampler name:` and a block of settings | yes | no |
 | pipeline | `pipeline name:` and a block of settings, or `pipeline name = (a, b)` | yes | no |
 | notation | `notation a => b` | yes | yes |
+| test | `test:` and a block, or `test expression` | yes | yes |
 | `let` | see [statements](#let-and-assignment) | no | yes |
 
 * **AST-64** A file holds at most one `module` declaration, and it stands before every other declaration of the file.
 * **AST-65** The type of a constant stands in a type position.
+* **AST-138** `test expression` reads as a `test` whose block holds the one expression statement `expression`; a `test` with both, or with neither, is a normal error.
+* **AST-139** A `test` stands in a struct and an enum as well, and inside another `test` is `declaration-not-allowed-here`.
+  No jump crosses a `test`'s body, so a `return` in it is `jump-without-target`.
+* **AST-145** Each argument of a `require` is one name, and any other argument, or none at all, is `expected-name`.
+  `require:` with a block takes one name per line instead, and a `require` with both arguments and a block is `too-many-arguments`.
+  What the names mean is the check pass's ([Features](../semantics/checking.md#features)).
+
+```sgl
+fun square(x: float) -> float => x * x
+
+test square 3.0 == 9.0
+
+test:
+    let x = 10
+    x * x > 50
+```
 
 ```sgl
 module example
 
 use brdf_library as brdf
+require extended_image_formats, raytracing
 notation \phi => φ
 
 type color = vec3
@@ -545,8 +571,14 @@ fun falloff(d: float) -> float:
 ### Functions
 
 * **AST-66** A **signature** is what follows `fun`: a name, then type parameters `[…]`, parameters `(…)` and bindings `{…}`, each fused to what is before it, each at most once, and in this order.
+* **AST-142** The name of a signature may be a type's name, a DOT and a name, `fun ray.inverted`: that function is an **extension**, and the type it names is its **extended type**.
+  Inside a type's block the AST records one as well, and the check pass refuses it as `unsupported-yet` (CHK-237).
 * **AST-67** The parameters are mandatory, and they may be empty: `fun f()` ([why](why/ast.md#ast-67)).
+* **AST-143** An extension without parameters is a property of its extended type, as AST-81 reads one: `fun ray.inverted => …` ([why](why/ast.md#ast-143)).
+  It may carry `-> type` before its body, and type parameters or bindings there are `missing-parameter-list`.
 * **AST-68** A **parameter** is a [field](#members), and a type parameter is a parameter whose type may be left out.
+* **AST-144** A parameter or a field whose name is a leading-dot form, `.level: float`, is **named-only**: the AST records the mark, and the name without its dot.
+  A named-only mark on a binding member, on a member of a `struct_type` or on `self` is the normal error `named-only-not-allowed-here`, and the member is still read.
 * **AST-69** An element of the bindings is a **binding entry**, and the AST keeps it as an expression.
 * **AST-70** After the signature stands an optional `->` with the return type, which is a type position.
 * **AST-71** Then stands at most one body: `=>` and an expression, or a block.
@@ -646,7 +678,7 @@ pipeline shadow = (shadow_vs, shadow_ps)
 
 | source | reads as |
 |---|---|
-| `name: type`, with an optional `= default` | a **field** |
+| `name: type` or `.name: type`, with an optional `= default` | a **field** |
 | `name => expression` | a **property** |
 | `fun` and a signature | a **method** |
 | one bare name, or `name = value`, inside an `enum` | a **case** |
@@ -669,6 +701,7 @@ pipeline shadow = (shadow_vs, shadow_ps)
 
 * **AST-86** A member that its owner does not allow is a normal error, and it is still read.
 * **AST-136** A `sampler` declaration stands at file scope or in a `binding`, and anywhere else is `declaration-not-allowed-here`; in a binding it is a member, the group's static sampler.
+* **AST-146** A `require` stands in a `binding` as well, and in a `struct` or an `enum` is `member-not-allowed-here`.
 * **AST-125** A `struct` line without a block is an **opaque struct**: it has no member that can be named, which a block without members does not say ([why](why/ast.md#ast-125)).
 * **AST-126** The AST accepts an opaque struct wherever a `struct` stands, and a later phase allows it for a small set of `@builtin` types only.
 * **AST-115** A case may carry a value, which is an expression: `red = 1`.
@@ -680,7 +713,7 @@ struct particle:
     velocity: vec3
     age: float = 0.0
     lifetime: float = age + 10.0
-    speed => self.velocity.length
+    speed => self.velocity.length()
     energy =>:
         let v = self.speed
         yield 0.5 * v * v

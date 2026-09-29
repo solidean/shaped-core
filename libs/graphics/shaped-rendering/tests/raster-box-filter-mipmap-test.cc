@@ -9,7 +9,7 @@ using namespace cc::primitive_defines;
 
 // sr::raster_box_filter_mipmap_routine — the mip path for a format no typed UAV covers.
 //
-// The reason it exists is a hard rule rather than a preference: `readwrite_texture` on an sRGB format is refused,
+// The reason it exists is a hard rule rather than a preference: `image` usage on an sRGB format is refused,
 // and D3D12 refuses it by removing the device.
 // So the first thing worth pinning is that an sRGB texture reaches a generated chain at all.
 //
@@ -20,7 +20,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-constexpr auto raster_mip_usage = sg::texture_usage::readonly_texture | sg::texture_usage::render_target
+constexpr auto raster_mip_usage = sg::texture_usage::texture | sg::texture_usage::render_target
                                 | sg::texture_usage::copy_dst | sg::texture_usage::copy_src;
 
 /// `texels` rgba8 entries, every channel set to `value`.

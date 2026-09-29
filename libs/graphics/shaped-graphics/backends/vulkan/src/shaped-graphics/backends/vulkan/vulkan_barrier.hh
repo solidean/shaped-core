@@ -4,6 +4,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
+#include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 
@@ -23,7 +24,7 @@ namespace sg::backend::vulkan
 [[nodiscard]] VkAccessFlags2 vk_access2_from(sg::access_flags access);
 
 /// The image layout an sg texture layout means.
-/// `shader_readwrite` and `general` both map to `VK_IMAGE_LAYOUT_GENERAL` — Vulkan has no separate storage layout.
+/// `shader_image` and `general` both map to `VK_IMAGE_LAYOUT_GENERAL` — Vulkan has no separate storage layout.
 [[nodiscard]] VkImageLayout vk_layout_from(sg::texture_layout layout);
 
 /// The aspect mask a subresource range's aspect span covers.
@@ -43,8 +44,36 @@ namespace sg::backend::vulkan
                                                        sg::pixel_format format,
                                                        sg::access_barrier const& barrier);
 
-/// Records one `vkCmdPipelineBarrier2` for everything staged, or nothing at all when both spans are empty.
+/// Records one `vkCmdPipelineBarrier2` for everything staged, or nothing at all when every span is empty.
 void submit_barriers(VkCommandBuffer cmd,
                      cc::span<VkBufferMemoryBarrier2 const> buffer_barriers,
-                     cc::span<VkImageMemoryBarrier2 const> image_barriers);
+                     cc::span<VkImageMemoryBarrier2 const> image_barriers,
+                     cc::span<VkMemoryBarrier2 const> memory_barriers = {});
+
+/// Folds a buffer barrier into `global`, which then orders everything `b` did and more.
+void merge_into_memory_barrier(VkMemoryBarrier2& global, VkBufferMemoryBarrier2 const& b);
+
+/// A memory barrier that orders nothing yet, for merge_into_memory_barrier to widen.
+[[nodiscard]] VkMemoryBarrier2 make_empty_memory_barrier();
+
+/// Adds the batch `submit_barriers` would record to `sink`'s stats: its records by kind, and one call if it is not empty.
+/// `sink` is a list's sg::impl::stat_counts or the context's sg::impl::stat_totals.
+template <class Sink>
+void count_barriers(Sink& sink,
+                    cc::span<VkBufferMemoryBarrier2 const> buffer_barriers,
+                    cc::span<VkImageMemoryBarrier2 const> image_barriers,
+                    cc::span<VkMemoryBarrier2 const> memory_barriers = {})
+{
+    if (buffer_barriers.empty() && image_barriers.empty() && memory_barriers.empty())
+        return;
+    sink.add(sg::stat::barrier_calls);
+    sink.add(sg::stat::buffer_barriers, buffer_barriers.size());
+    sink.add(sg::stat::texture_barriers, image_barriers.size());
+    sink.add(sg::stat::global_barriers, memory_barriers.size());
+    auto transitions = isize(0);
+    for (auto const& b : image_barriers)
+        if (b.oldLayout != b.newLayout)
+            ++transitions;
+    sink.add(sg::stat::texture_transitions, transitions);
+}
 } // namespace sg::backend::vulkan

@@ -1,0 +1,10 @@
+// A binding array is one binding the host fills with a view per element, indexed by a value each thread picks.
+
+require binding_arrays
+
+binding lanes:
+    sources: buffer[int][3]
+    merged: mut buffer[int]
+
+@compute(64) fun gather(@thread_id id: int3){lanes}:
+    lanes.merged[id.x] = lanes.sources[nonuniform (id.x % 3)][id.x]

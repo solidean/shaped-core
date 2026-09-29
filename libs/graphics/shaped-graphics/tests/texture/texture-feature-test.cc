@@ -8,6 +8,8 @@
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture.hh>
 
+using namespace cc::primitive_defines;
+
 // Each form below is refused where the device lacks its feature and built where it has it, on every backend alike.
 
 namespace
@@ -32,11 +34,11 @@ bool creates(auto&& create)
 }
 } // namespace
 
-INVOCABLE_TEST("sg - a storage format outside the portable set needs extended_storage_formats",
+INVOCABLE_TEST("sg - an image format outside the portable set needs extended_image_formats",
                (sg::context_handle const& ctx))
 {
-    auto const extended = ctx->supports(sg::feature::extended_storage_formats);
-    auto const storage = sg::texture_usage::readwrite_texture;
+    auto const extended = ctx->supports(sg::feature::extended_image_formats);
+    auto const storage = sg::texture_usage::image;
 
     auto const persistent = [&](sg::pixel_format f, sg::texture_usages usage)
     { return creates([&] { return ctx->persistent.create_raw_texture(texture_of(f, usage)); }); };
@@ -45,13 +47,13 @@ INVOCABLE_TEST("sg - a storage format outside the portable set needs extended_st
           == extended);
     CHECK(persistent(sg::pixel_format::rgba8_unorm, storage));
     // Only storage asks: the same format sampled is portable everywhere.
-    CHECK(persistent(sg::pixel_format::r8_unorm, sg::texture_usage::readonly_texture));
+    CHECK(persistent(sg::pixel_format::r8_unorm, sg::texture_usage::texture));
 
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back({.name = "target", .type = sg::binding_type::readwrite_texture});
+    bindings.push_back({.name = "target", .type = sg::binding_type::image, .access = sg::access_mode::read_write});
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
-    bindings[0].storage_format = sg::pixel_format::r8_unorm;
-    bindings[0].storage_access = sg::storage_access::write;
+    bindings[0].image_format = sg::pixel_format::r8_unorm;
+    bindings[0].access = sg::access_mode::write;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
     CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_value() == extended);
 }
@@ -60,13 +62,13 @@ INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_f
                (sg::context_handle const& ctx))
 {
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back({.name = "source", .type = sg::binding_type::readonly_texture});
+    bindings.push_back({.name = "source", .type = sg::binding_type::texture});
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
     bindings[0].sample_type = sg::texture_sample_type::filterable_float;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
     auto const filterable = ctx->uncached.create_binding_group_layout(bindings);
 
-    auto const sampled = sg::texture_usage::readonly_texture;
+    auto const sampled = sg::texture_usage::texture;
     auto const r32
         = sg::texture_2d::from_raw(ctx->persistent.create_raw_texture(texture_of(sg::pixel_format::r32_float, sampled)));
     auto const rgba8 = sg::texture_2d::from_raw(
@@ -74,7 +76,7 @@ INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_f
 
     auto const group_of = [&](sg::binding_group_layout_handle const& layout, sg::texture_2d const& t)
     {
-        auto const views = cc::vector<sg::named_view>{{.name = "source", .view = t.as_readonly_view()}};
+        auto const views = cc::vector<sg::named_view>{{.name = "source", .view = t.as_texture_view()}};
         return creates([&] { return ctx->persistent.create_binding_group(layout, views, {}); });
     };
     CHECK(group_of(filterable, r32) == ctx->supports(sg::feature::float32_filtering));
@@ -85,16 +87,22 @@ INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_f
     CHECK(group_of(ctx->uncached.create_binding_group_layout(bindings), r32));
 }
 
-INVOCABLE_TEST("sg - a pipeline-level static sampler builds where the backend binds it and is refused elsewhere",
+INVOCABLE_TEST("sg - a pipeline-level static sampler builds a layout on every backend, and two at one register do not",
                (sg::context_handle const& ctx))
 {
-    // A known gap, which libs/graphics/shaped-graphics/docs/TODO.md records: vulkan and metal bind no bound_sampler yet.
-    // They refuse one rather than build a pipeline that samples nothing, so closing the gap fails this test on purpose.
-    auto const binds = ctx->backend() == sg::backend_kind::dx12 || ctx->backend() == sg::backend_kind::webgpu;
-    auto const layout = ctx->uncached.try_create_pipeline_layout(sg::pipeline_layout_description{
-        .static_samplers
-        = {sg::bound_sampler{.binding = {.name = "point", .space = 0u, .index = 0, .type = sg::binding_type::sampler},
-                             .sampler = {.min_filter = sg::sampler_filter::nearest}}},
-    });
-    CHECK(layout.has_value() == binds);
+    auto const at = [](cc::string_view name, u32 index)
+    {
+        return sg::bound_sampler{
+            .binding = {.name = name, .space = 0u, .index = index, .type = sg::binding_type::sampler},
+            .sampler = {.min_filter = sg::sampler_filter::nearest}};
+    };
+    CHECK(ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), at("other", 1)}}).has_value());
+    CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), at("clash", 0)}}).has_value());
+    // A register is one slot whatever its space, and a pipeline holds 16 on every backend, as Metal and WebGPU do.
+    auto spaced = at("spaced", 0);
+    spaced.binding.space = 1u;
+    CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), spaced}}).has_value());
+    CHECK(ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("last", sg::max_bound_samplers - 1)}})
+              .has_value());
+    CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("past", sg::max_bound_samplers)}}).has_value());
 }

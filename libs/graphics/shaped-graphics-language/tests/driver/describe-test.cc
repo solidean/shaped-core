@@ -78,10 +78,10 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
     REQUIRE(work.members.size() == 2);
     CHECK(work.members[0].kind == sgl::described_member_kind::buffer);
     CHECK(work.members[0].type == "float");
-    CHECK(!work.members[0].is_mut);
+    CHECK(work.members[0].access == "read");
     CHECK(work.members[0].slot == 0);
     CHECK(work.members[0].host_name == "work.src");
-    CHECK(work.members[1].is_mut);
+    CHECK(work.members[1].access == "read_write");
     CHECK(work.members[1].slot == 1);
     CHECK(work.members[1].host_name == "work.dst");
 
@@ -90,6 +90,43 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
     CHECK(d.entry_points[0].workgroup[0] == 64);
     CHECK(d.entry_points[0].workgroup[1] == 2);
     CHECK(d.entry_points[0].workgroup[2] == 1);
+}
+
+TEST("sgl describe - an entry point and a pipeline name the sg features a device needs for them")
+{
+    // Both stages may use the image format the file requires, and only the pixel stage lists what does.
+    auto const d = described(R"(require extended_image_formats, raytracing
+
+binding narrow:
+    r: out image_2d[.r8_unorm]
+
+@vertex struct vertex_input:
+    pos: pos3
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@vertex fun main_vs(v: vertex_input) -> pixel_input => {position = hpos4(v.pos.x, v.pos.y, v.pos.z, 1.0)}
+
+@pixel fun main_ps(p: pixel_input){narrow} -> target:
+    return {color = float4(1.0, 1.0, 1.0, 1.0)}
+
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    color_targets.color.format = .rgba8_unorm
+)");
+
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].features.empty());
+    REQUIRE(d.entry_points[1].features.size() == 1);
+    CHECK(d.entry_points[1].features[0] == "extended_image_formats");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].features.size() == 1);
+    CHECK(d.pipelines[0].features[0] == "extended_image_formats");
 }
 
 TEST("sgl describe - a group no entry point lists is still described, and still judged")
@@ -122,7 +159,7 @@ binding work:
 @compute(64) fun main(@thread_id id: int3){c, work}:
     work.values[id.x] = c.scale
 )");
-    CHECK(error.contains("not the last of the list"));
+    CHECK(error.contains("a group of the list follows"));
 }
 
 TEST("sgl describe - a source with errors describes nothing, and says why")
@@ -185,6 +222,14 @@ TEST("sgl describe - a vertex input's members say which buffer they come from, a
     CHECK(mesh.members[1].is_per_instance);
     CHECK(mesh.members[2].stream == "normals");
     CHECK(mesh.members[2].location == 2); // a stream moves no location
+
+    // The dx12 semantic the host's input layout names each member by, as the emitted text does (EMIT-28).
+    CHECK(mesh.members[0].semantic == "POSITION");
+    CHECK(split.structs[1].members[0].semantic.empty()); // a render target has none
+    auto const crowded = described(cc::string("@vertex struct crowded:\n    uv1: vec3\n    uv1_: vec3\n\n") + edges);
+    REQUIRE(crowded.structs.size() == 2);
+    CHECK(crowded.structs[0].members[0].semantic == "UV1_");
+    CHECK(crowded.structs[0].members[1].semantic == "UV1__");
 
     // Where a stream means nothing, it is refused rather than ignored.
     CHECK(error_of(R"(@vertex struct v:
@@ -305,8 +350,8 @@ TEST("sgl describe - a group's shape holds every fact of its textures, images an
         REQUIRE(d.bindings.size() == 1);
         return d.bindings[0].shape;
     };
-    auto const t = "t: texture2d[float4]";
-    auto const i = "i: out image2d[.r32_float]";
+    auto const t = "t: texture_2d[float4]";
+    auto const i = "i: out image_2d[.r32_float]";
     auto const s = "s: sampler";
     auto const base = shape_of("set", t, i, s, "linear");
     CHECK(base.size() == 32);
@@ -314,12 +359,12 @@ TEST("sgl describe - a group's shape holds every fact of its textures, images an
     // The binding's name is no part of it, as a struct's is not.
     CHECK(shape_of("other", t, i, s, "linear") == base);
 
-    CHECK(shape_of("set", "t: texture2d[float2]", i, s, "linear") != base);
-    CHECK(shape_of("set", "t: texture2d_array[float4]", i, s, "linear") != base);
-    CHECK(shape_of("set", "t: texture2d_depth", i, s, "linear") != base);
-    CHECK(shape_of("set", "@unfilterable t: texture2d[float4]", i, s, "linear") != base);
-    CHECK(shape_of("set", t, "i: out image2d[.rgba8_unorm]", s, "linear") != base);
-    CHECK(shape_of("set", t, "i: mut image2d[.r32_float]", s, "linear") != base);
+    CHECK(shape_of("set", "t: texture_2d[float2]", i, s, "linear") != base);
+    CHECK(shape_of("set", "t: texture_2d_array[float4]", i, s, "linear") != base);
+    CHECK(shape_of("set", "t: texture_2d_depth", i, s, "linear") != base);
+    CHECK(shape_of("set", "@unfilterable t: texture_2d[float4]", i, s, "linear") != base);
+    CHECK(shape_of("set", t, "i: out image_2d[.rgba8_unorm]", s, "linear") != base);
+    CHECK(shape_of("set", t, "i: mut image_2d[.r32_float]", s, "linear") != base);
     CHECK(shape_of("set", t, i, "s: comparison_sampler", "linear") != base);
     CHECK(shape_of("set", t, i, "@non_filtering s: sampler", "linear") != base);
     CHECK(shape_of("set", t, i, s, "nearest") != base);
@@ -328,13 +373,13 @@ TEST("sgl describe - a group's shape holds every fact of its textures, images an
 TEST("sgl describe - a texture's sample type and a sampler's binding type, as the declaration states them")
 {
     auto const d = described(R"(binding set:
-    f: texture2d[float4]
-    u: texture2d[uint4]
-    n: texture2d[int]
-    z: texture2d_depth
-    @unfilterable r: texture2d[float4]
-    ms: texture2d_ms[float4]
-    strip: texture1d[float]
+    f: texture_2d[float4]
+    u: texture_2d[uint4]
+    n: texture_2d[int]
+    z: texture_2d_depth
+    @unfilterable r: texture_2d[float4]
+    ms: texture_2d_ms[float4]
+    strip: texture_1d[float]
     bound: sampler
     compares: comparison_sampler
     sampler crisp:
@@ -372,7 +417,7 @@ TEST("sgl describe - a texture's sample type and a sampler's binding type, as th
 TEST("sgl describe - an image store is refused in a vertex stage, which core WebGPU gives no writable storage")
 {
     auto const error = error_of(R"(binding tex:
-    dst: out image2d[.rgba8_unorm]
+    dst: out image_2d[.rgba8_unorm]
 
 @vertex struct vin:
     p: pos3
@@ -381,9 +426,140 @@ struct link:
     @position p: hpos4
 
 @vertex fun vs(v: vin){tex} -> link:
-    DEBUG_store(tex.dst, int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))
+    tex.dst.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))
     return { p = hpos4(..v.p, 1.0) }
 )");
     CHECK(error.contains("stage-not-allowed"));
-    CHECK(error.contains("DEBUG_store is @stages without it"));
+    CHECK(error.contains("store is @stages without it"));
+}
+
+TEST("sgl describe - workgroup memory has no host side, so the host is told nothing of it")
+{
+    auto const d = described("@workgroup binding tile:\n"
+                             "    values: float[64]\n"
+                             "\n"
+                             "binding work:\n"
+                             "    sums: mut buffer[float]\n"
+                             "\n"
+                             "@compute(64) fun cs(@local_thread_index li: int){tile, work}:\n"
+                             "    tile.values[li] = 1.0\n"
+                             "    workgroup_barrier()\n"
+                             "    if li == 0 => work.sums[0] = tile.values[63]\n");
+    REQUIRE(d.bindings.size() == 1);
+    CHECK(d.bindings[0].name == "work");
+    REQUIRE(d.entry_points.size() == 1);
+    REQUIRE(d.entry_points[0].bindings.size() == 1);
+    CHECK(d.entry_points[0].bindings[0] == "work");
+}
+
+TEST("sgl describe - a binding array is its element's binding, with a count and as many slots")
+{
+    auto const d = described("require binding_arrays\n"
+                             "\n"
+                             "binding materials:\n"
+                             "    albedo: texture_2d[float4][8]\n"
+                             "    params: buffer[float4][2]\n");
+    REQUIRE(d.bindings.size() == 1);
+    auto const& members = d.bindings[0].members;
+    REQUIRE(members.size() == 2);
+    CHECK(members[0].type == "texture_2d[float4]");
+    CHECK(members[0].slot == 0);
+    CHECK(members[0].count == 8);
+    CHECK(members[1].type == "float4");
+    CHECK(members[1].slot == 8);
+    CHECK(members[1].count == 2);
+}
+
+namespace
+{
+/// Two file-scope samplers, the first reached by the pixel stage alone and the second by nothing.
+constexpr cc::string_view k_file_samplers = "sampler edge:\n"
+                                            "    filter = .nearest\n"
+                                            "    address = .clamp_edge\n"
+                                            "\n"
+                                            "sampler shadow:\n"
+                                            "    compare = .less\n"
+                                            "    max_lod = 4.0\n"
+                                            "\n"
+                                            "binding material:\n"
+                                            "    albedo: texture_2d[float4]\n"
+                                            "\n"
+                                            "struct pixel_input:\n"
+                                            "    @position position: hpos4\n"
+                                            "    uv: float2\n"
+                                            "\n"
+                                            "@pixel struct target:\n"
+                                            "    color: float4\n"
+                                            "\n"
+                                            "@vertex fun vs(@vertex_index i: int){material} -> pixel_input:\n"
+                                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), uv = float2(0.0, 0.0)}\n"
+                                            "\n"
+                                            "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                                            "    return {color = material.albedo.sample(p.uv, edge)}\n"
+                                            "\n"
+                                            "pipeline drawn:\n"
+                                            "    vertex = vs\n"
+                                            "    pixel = ps\n"
+                                            "    format = .rgba8_unorm\n";
+} // namespace
+
+TEST("sgl describe - a file-scope sampler is described with its index, and each layout names the ones it holds")
+{
+    auto const d = described(k_file_samplers);
+
+    REQUIRE(d.samplers.size() == 2);
+    CHECK(d.samplers[0].name == "edge");
+    CHECK(d.samplers[0].index == 0);
+    CHECK(d.samplers[0].sampler_type == "non_filtering");
+    CHECK(d.samplers[0].settings.min_filter == "nearest");
+    CHECK(d.samplers[0].settings.address_v == "clamp_edge");
+    CHECK(d.samplers[1].name == "shadow");
+    CHECK(d.samplers[1].index == 1);
+    CHECK(d.samplers[1].sampler_type == "comparison");
+    CHECK(d.samplers[1].settings.compare == "less");
+    CHECK(d.samplers[1].settings.max_lod == 4.0f);
+    CHECK(d.samplers[0].shape != d.samplers[1].shape);
+
+    // an entry point names only what its own code reaches, and the pipeline what any of its stages does
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].samplers.empty());
+    REQUIRE(d.entry_points[1].samplers.size() == 1);
+    CHECK(d.entry_points[1].samplers[0] == "edge");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].samplers.size() == 1);
+    CHECK(d.pipelines[0].samplers[0] == "edge");
+
+    // a reload that changes a sampler's settings changes the layout, so the build freezes them
+    auto const frozen = [](sgl::module_description const& m)
+    {
+        for (auto const& line : m.pipelines[0].frozen)
+            if (line.starts_with("samplers = "))
+                return line;
+        return cc::string();
+    };
+    CHECK(frozen(d) == cc::format("samplers = edge#0@{}", d.samplers[0].shape));
+    auto source = cc::string(k_file_samplers);
+    source.replace_all("address = .clamp_edge", "address = .repeat");
+    CHECK(frozen(described(source)) != frozen(d));
+
+    // an unused sampler declared above moves the index the layout bakes it at, so the build freezes the index too
+    auto const shifted = described(cc::format("sampler extra:\n    filter = .linear\n\n{}", k_file_samplers));
+    CHECK(frozen(shifted) != frozen(d));
+    CHECK(frozen(shifted) == cc::format("samplers = edge#1@{}", d.samplers[0].shape));
+}
+
+TEST("sgl describe - a file-scope sampler a texture's @sampler names is one its entry point and pipeline hold")
+{
+    auto source = cc::string(k_file_samplers);
+    source.replace_all("    albedo: texture_2d[float4]\n", "    @sampler(edge)\n    albedo: texture_2d[float4]\n");
+    source.replace_all("material.albedo.sample(p.uv, edge)", "material.albedo.sample(p.uv)");
+    auto const d = described(source);
+
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].samplers.empty());
+    REQUIRE(d.entry_points[1].samplers.size() == 1);
+    CHECK(d.entry_points[1].samplers[0] == "edge");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].samplers.size() == 1);
+    CHECK(d.pipelines[0].samplers[0] == "edge");
 }

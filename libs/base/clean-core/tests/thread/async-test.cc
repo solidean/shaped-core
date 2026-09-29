@@ -1181,6 +1181,42 @@ ASYNC_TEST("async - a frame throwing std::exception resolves on the error channe
     CHECK(!outcome.error().is_cancelled());                           // a throw is a failure, never a cancellation
 }
 
+namespace
+{
+struct library_exception : cc::exception // a library's own non-std exception, as sg::exception is
+{
+    using cc::exception::exception;
+};
+} // namespace
+
+ASYNC_TEST("async - a frame throwing a cc::exception keeps its message")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            throw library_exception("library boom");
+            return ctx.success(0); // unreachable
+        });
+
+    auto const outcome = co_await cc::async_as_result(a);
+    REQUIRE(outcome.has_error());
+    CHECK(outcome.error().underlying().to_string().contains("library boom"));
+}
+
+ASYNC_TEST("async - a frame calling or_throw keeps the result's error message")
+{
+    auto a = cc::make_async_lazy<int>(
+        [](async_context<int>& ctx) -> cc::async_step_status
+        {
+            auto const fails = []() -> cc::result<int> { return cc::error("or_throw boom"); };
+            return ctx.success(fails().or_throw());
+        });
+
+    auto const outcome = co_await cc::async_as_result(a);
+    REQUIRE(outcome.has_error());
+    CHECK(outcome.error().underlying().to_string().contains("or_throw boom"));
+}
+
 ASYNC_TEST("async - a frame throwing a non-std value still fails the node")
 {
     auto a = cc::make_async_lazy<int>(

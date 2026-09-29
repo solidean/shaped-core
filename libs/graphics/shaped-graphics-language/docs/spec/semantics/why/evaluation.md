@@ -21,6 +21,12 @@ Left to right is the order the text is read in, so it is the one a reader assume
 Once matters as much as the order: an inlined function names its parameter several times, and an argument with an effect must still run once.
 The price is a pin now and then ([LEGAL-16](../legalization.md#expressions)), and only where an effect makes the order observable.
 
+## EVAL-80
+
+A reader of a call sees its arguments in the order they are written, so their effects happen in that order.
+The defaults come after, as if they were added at the end of the call in their own order, which is the mental model the syntax suggests.
+A default reads only the parameters before it, and every written argument is evaluated before any default, so the defaults never see a parameter without its value.
+
 ## EVAL-24
 
 An effect analysis that changed meaning would make a program's behaviour depend on how clever the compiler is this month.
@@ -69,3 +75,17 @@ That makes "which patterns ran" observable, and a rule that left it open would l
 A chain of `if` evaluates patterns as it reaches them, and a `switch` evaluates none at all.
 The two only agree where a pattern has no effect, which is every pattern a `switch` is allowed to hold — an `int` literal by LEGAL-45.
 So the order the machine promises is the chain's, and the `switch` form is licensed by having nothing to observe rather than by a second rule.
+
+## EVAL-84
+
+WGSL defines an integer division by zero, and HLSL, SPIR-V and MSL leave it to the hardware.
+Defining it everywhere would cost a compare and a select on every division those three write, for a value no correct shader produces.
+A shader is not where performance is given up for nothing, so the value is left undefined, and the machine reports the run instead of inventing one.
+A test that reaches it fails loudly, which is the check a correct program needs; a debug build checking live shaders is the [shader-logging](../../incubator/shader-logging.md) incubator's to add.
+
+## EVAL-88
+
+No two libraries agree on the last bit of `sin`, and no GPU promises to match any of them, so exactness here would be a promise nothing keeps.
+The machine computes each in plain f64 arithmetic of its own rather than with the host's library, so that every host meets the same bits.
+A test's verdict and an editor's marks are compared across machines.
+A test compares a transcendental within a tolerance, which `nearly_equal` in the prelude spells.

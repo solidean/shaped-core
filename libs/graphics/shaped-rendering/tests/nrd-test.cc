@@ -59,8 +59,8 @@ ASYNC_INVOCABLE_TEST("sr - an NRD frame's dispatches build and run", (sg::contex
         return ctx.persistent.create_texture_2d({.format = format,
                                                  .width = extent[0],
                                                  .height = extent[1],
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
+                                                 .usage = sg::texture_usage::texture
+                                                        | sg::texture_usage::image
                                                         | sg::texture_usage::copy_dst});
     };
 
@@ -149,8 +149,8 @@ constexpr auto k_specular_albedo = 0.04f;
         return ctx.persistent.create_texture_2d({.format = format,
                                                  .width = k_size,
                                                  .height = k_size,
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
+                                                 .usage = sg::texture_usage::texture
+                                                        | sg::texture_usage::image
                                                         | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
     };
 
@@ -376,8 +376,8 @@ constexpr auto k_motion_albedo = 0.5f;
         return ctx.persistent.create_texture_2d({.format = format,
                                                  .width = k_motion_size,
                                                  .height = k_motion_size,
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
+                                                 .usage = sg::texture_usage::texture
+                                                        | sg::texture_usage::image
                                                         | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
     };
 
@@ -568,8 +568,8 @@ constexpr auto k_move_dark = 0.1f;
         return ctx.persistent.create_texture_2d({.format = format,
                                                  .width = k_size,
                                                  .height = k_size,
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
+                                                 .usage = sg::texture_usage::texture
+                                                        | sg::texture_usage::image
                                                         | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
     };
 

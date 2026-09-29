@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.28)
 project(typed-geometry LANGUAGES CXX)
 
 # typed-geometry is header-dominant but not header-only: it is a normal static library so that
-# concrete (non-template) algorithms can land in .cc files as the library grows. For now a single
-# anchor translation unit keeps the static target well-formed.
+# concrete (non-template) algorithms can land in .cc files next to the header they implement.
 add_library(typed-geometry
     src/typed-geometry/typed-geometry.cc
+    src/typed-geometry/scalar/half_float.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -24,7 +24,19 @@ target_sources(typed-geometry
     src/typed-geometry/scalar/constants.hh
     src/typed-geometry/scalar/scalar.hh
     src/typed-geometry/scalar/angle.hh
+    src/typed-geometry/scalar/half_float.hh
+    src/typed-geometry/scalar/impl/half_float_convert.hh
+    src/typed-geometry/scalar/impl/half_float_ops.hh
     src/typed-geometry/scalar/all.hh
+    src/typed-geometry/scalar/fixed_int/impl/core.hh
+    src/typed-geometry/scalar/fixed_int/generated/all.hh
+    src/typed-geometry/scalar/fixed_int/generated/w32.hh
+    src/typed-geometry/scalar/fixed_int/generated/w64.hh
+    src/typed-geometry/scalar/fixed_int/generated/w128.hh
+    src/typed-geometry/scalar/fixed_int/generated/w192.hh
+    src/typed-geometry/scalar/fixed_int/generated/w256.hh
+    src/typed-geometry/scalar/fixed_int/fixed_int.hh
+    src/typed-geometry/scalar/fixed_int/fixed_arith.hh
 
     src/typed-geometry/linalg/fwd.hh
     src/typed-geometry/linalg/comp.hh
@@ -82,6 +94,16 @@ target_include_directories(typed-geometry
 # clean-core provides the vocabulary types (i32/f32/isize) and assertions used across the public API.
 target_link_libraries(typed-geometry PUBLIC clean-core)
 
+# The root CMakeLists declares SC_CHECK_WIDE_ARITH; this is only the fallback for a consumer that adds tg alone.
+if(NOT DEFINED SC_CHECK_WIDE_ARITH)
+    set(SC_CHECK_WIDE_ARITH OFF)
+endif()
+# The input define; scalar/fixed_int/fwd.hh turns it into TG_CHECK_WIDE_ARITH (always 0 or 1).
+target_compile_definitions(typed-geometry
+    PUBLIC
+    $<$<BOOL:${SC_CHECK_WIDE_ARITH}>:TG_CHECK_WIDE_ARITH_REQUESTED>
+)
+
 # Enable conforming preprocessor for MSVC
 target_compile_options(typed-geometry
     PUBLIC
@@ -99,6 +121,12 @@ if(SC_BUILD_TESTS)
 
         tests/scalar/scalar-test.cc
         tests/scalar/angle-test.cc
+        tests/scalar/half_float-test.cc
+        tests/scalar/fixed_int-test.cc
+        tests/scalar/fixed_int-golden.gen.cc
+
+        tests/benchmarks/fixed_int-benchmark.cc
+        tests/benchmarks/half_float-benchmark.cc
 
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc

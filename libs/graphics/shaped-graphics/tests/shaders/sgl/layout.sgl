@@ -1,0 +1,42 @@
+// Every value in GPU memory is placed by SGL's own rule, and each target is made to follow it (the spec's layout rules).
+// The host fills these through the structs the package generates, byte for byte, and reads them back the same way.
+
+// A buffer's element packs tight, as a tg struct does: `velocity` sits at 4 and `alive` at 32, 36 bytes in all.
+struct particle:
+    mass: float
+    velocity: float3
+    color: float4
+    alive: bool32
+
+// In a constant block a nested struct starts a row, and what follows packs against its last member.
+struct glow:
+    color: float3
+
+binding step:
+    dt: float
+    push: float3
+    shade: glow
+    after: float
+    items: mut buffer[particle]
+
+@compute(64) fun advance(@thread_id id: int3){step}:
+    let p = step.items[id.x]
+    if p.alive as bool:
+        let velocity = p.velocity + step.push * step.dt
+        let color = p.color * step.shade.color.x
+        step.items[id.x] = particle(p.mass + step.after, velocity, color, false as bool32)
+
+// Tight packing puts `b` at 8, across a 16-byte row, and a buffer of float3 strides by 12.
+struct pair:
+    a: float2
+    b: float3
+
+binding stretch:
+    pairs: mut buffer[pair]
+    dirs: mut buffer[float3]
+
+@compute(64) fun spread(@thread_id id: int3){stretch}:
+    let p = stretch.pairs[id.x]
+    let d = stretch.dirs[id.x]
+    stretch.pairs[id.x] = pair(p.a * 2.0, p.b + d)
+    stretch.dirs[id.x] = d * 3.0

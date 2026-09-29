@@ -20,7 +20,7 @@ class sr::mix_routine : public sg::render_routine<mix_routine>
 public:
     /// Blends `source` into `destination` by `weight`, which must be in [0, 1].
     ///
-    /// The two must have the same extent, `destination` must carry `readwrite_texture` usage, and they must not be
+    /// The two must have the same extent, `destination` must carry `image` usage, and they must not be
     /// the same texture — blending an image into itself is a no-op written the expensive way.
     /// `weight` 0 and 1 are still dispatched rather than skipped: a caller stepping a fade reaches them on the frames
     /// where the answer is one input exactly, and branching here would make those frames differ in cost for nothing.

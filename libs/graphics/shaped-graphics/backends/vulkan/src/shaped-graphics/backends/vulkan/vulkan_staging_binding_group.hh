@@ -52,7 +52,7 @@ private:
         vulkan_buffer_handle buffer;
         vulkan_texture_handle texture;
         sg::subresource_range range;
-        sg::view_class access = sg::view_class::readonly;
+        sg::view_class bound_as = sg::view_class::readonly;
     };
 
     /// Fills every descriptor with its binding's empty value, which the base requires before it hands the group out.

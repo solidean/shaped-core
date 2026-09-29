@@ -179,7 +179,7 @@ cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
     auto const* const constants_binding = [&]() -> sg::binding const*
     {
         for (auto const& b : compiled_vs->bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
+            if (b.type == sg::binding_type::constants_buffer)
                 return &b;
         return nullptr;
     }();
@@ -252,7 +252,7 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
     // bookkeeping has to keep up whether or not we can draw this frame.
     // A new texture's bytes go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them
     // at submit; an update is recorded straight onto this list, because by then the atlas has been sampled and the
-    // copy queue cannot move it out of `shader_readonly` for itself.
+    // copy queue cannot move it out of `shader_texture` for itself.
     auto textures = self.acquire_exclusive(self->_textures);
     textures->service_requests(cmd, draw_data);
 
@@ -314,7 +314,7 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
                 // The layout comes from init rather than from the create: this is the frame path, and
                 // acquiring would hash the declared table and take the pipeline cache's lock per switch.
                 bound_group = ctx.transient.create_binding_group(
-                    cmd, self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
+                    cmd, self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_texture_view()});
                 scope.bind<shaders::imgui_bindings>(*bound_group);
                 bound_texture = dc.GetTexID();
             }

@@ -235,6 +235,12 @@ argument builder::list_element(form_id element, bool is_object, bool allows_attr
             result.name = at(parts.operands[0]).where;
             result.value = expression(parts.operands[1]);
         }
+        else if (is_kind(parts.operands[0], form_kind::leading_dot))
+        {
+            result.name = file.at(at(parts.operands[0]).token).where;
+            result.is_dotted_name = true;
+            result.value = expression(parts.operands[1]);
+        }
         else
             result.value = invalid_expression(element, diagnostic_kind::expected_name);
     }
@@ -276,7 +282,8 @@ bool builder::is_field_like(form_id element, bool needs_type) const
     if (needs_type && !has_type)
         return false;
 
-    if (is_kind(target, form_kind::identifier) || is_kind(target, form_kind::wildcard))
+    if (is_kind(target, form_kind::identifier) || is_kind(target, form_kind::wildcard)
+        || is_kind(target, form_kind::leading_dot))
         return true;
     if (!is_keyword_led(target, "mut"))
         return false;
@@ -312,6 +319,12 @@ field builder::make_field(form_id element, diagnostic_kind on_failure)
         result.is_mut = true;
         target = keyword_parts_of(target).arguments[0];
     }
+    if (is_kind(target, form_kind::leading_dot))
+    {
+        result.is_named_only = true;
+        result.name = file.at(at(target).token).where;
+        return result;
+    }
     result.name = at(target).where;
     return result;
 }
@@ -326,10 +339,35 @@ range_of<field> builder::fields_of(form_id list, diagnostic_kind on_failure)
 
 // ---- entry ----------------------------------------------------------------------------------------------------
 
+void builder::reject_reserved_names()
+{
+    // AST-141: every name a declaration takes, once the whole file is read
+    auto const is_reserved = [&](source_span name, bool allows_self)
+    {
+        auto const text = file.text_of(name);
+        return text == "void" || (!allows_self && text == "self");
+    };
+    for (auto const& d : ast.decls)
+        d.node.visit(
+            [&](auto const& n)
+            {
+                if constexpr (requires { n.name.offset; })
+                {
+                    if (is_reserved(n.name, false))
+                        report(diagnostic_kind::reserved_name, n.name);
+                }
+            });
+    // a parameter may be `self`, the receiver of a method, and is otherwise held like a field
+    for (auto const& f : ast.fields)
+        if (is_reserved(f.name, true))
+            report(diagnostic_kind::reserved_name, f.name);
+}
+
 file_ast sgl::ast::build(parsed_file const& file)
 {
     auto b = builder{.file = file, .ast = {}};
     if (is_valid(file.root_form))
         b.ast.declarations = b.declarations(file.root_form, scope_kind::file);
+    b.reject_reserved_names();
     return cc::move(b.ast);
 }

@@ -43,7 +43,7 @@ INVOCABLE_TEST("sg dx12 - the adapter reports the memory on the board", (dx12::d
 {
     REQUIRE(handle != nullptr);
 
-    auto const& adapter = handle->adapter();
+    auto const& adapter = handle->metrics.adapter();
     REQUIRE(adapter.dedicated_video_memory_bytes.has_value());
 
     // Zero is a real answer for an integrated GPU, so the assertion is only that it is not negative.
@@ -55,7 +55,7 @@ INVOCABLE_TEST("sg dx12 - the memory budget is what this process may use, not wh
 {
     REQUIRE(handle != nullptr);
 
-    auto const memory = handle->query_gpu_memory();
+    auto const memory = handle->metrics.query_gpu_memory();
     if (memory.has_error())
         SKIP("this runtime has no IDXGIAdapter3");
 
@@ -67,7 +67,7 @@ INVOCABLE_TEST("sg dx12 - the memory budget is what this process may use, not wh
 
     // The budget shrinks as other processes take memory, so it never exceeds the board — the two are related but not
     // interchangeable, which is exactly what a dashboard gets wrong.
-    auto const& board = handle->adapter().dedicated_video_memory_bytes;
+    auto const& board = handle->metrics.adapter().dedicated_video_memory_bytes;
     if (board.has_value() && board.value() > 0)
         CHECK(memory.value().budget_bytes <= board.value());
 }
@@ -77,7 +77,7 @@ INVOCABLE_TEST("sg dx12 - GPU busy counters are non-negative and named per engin
 {
     REQUIRE(handle != nullptr);
 
-    auto first = retried([&] { return handle->read_gpu_counters(); });
+    auto first = retried([&] { return handle->metrics.read_gpu_counters(); });
     if (first.has_error())
         SKIP("the GPU Engine performance counters are unavailable here");
 
@@ -92,7 +92,7 @@ INVOCABLE_TEST("sg dx12 - GPU busy counters are non-negative and named per engin
     // A counter is the sum over the processes currently using the engine, so one exiting between the two readings
     // lowers it — which is a fact about the counter rather than a failure, and it is the sampler that reports it.
     // The first reading answered, so the counters exist here and a retried second one must answer too.
-    auto second = retried([&] { return handle->read_gpu_counters(); });
+    auto second = retried([&] { return handle->metrics.read_gpu_counters(); });
     REQUIRE(second.has_value());
 
     for (auto const& e : second.value().engines)
@@ -134,7 +134,7 @@ INVOCABLE_TEST("sg dx12 - the memory query answers coherently on any adapter", (
     REQUIRE(handle != nullptr);
 
     // WARP has no board memory, and the query must say something true rather than crash or invent a budget.
-    if (auto const memory = handle->query_gpu_memory(); memory.has_value())
+    if (auto const memory = handle->metrics.query_gpu_memory(); memory.has_value())
         CHECK(memory.value().current_usage_bytes >= 0);
 }
 
@@ -146,7 +146,7 @@ TEST("sg dx12 - print the GPU metrics", nx::config::manual)
     if (handle == nullptr)
         SKIP("no dx12 adapter on this machine");
 
-    auto const& adapter = handle->adapter();
+    auto const& adapter = handle->metrics.adapter();
     auto const to_mib = [](i64 bytes) { return double(bytes) / (1024.0 * 1024.0); };
 
     cc::println("");
@@ -156,14 +156,14 @@ TEST("sg dx12 - print the GPU metrics", nx::config::manual)
                                                    ? to_mib(adapter.dedicated_video_memory_bytes.value())
                                                    : 0.0);
 
-    if (auto const memory = handle->query_gpu_memory(); memory.has_value())
+    if (auto const memory = handle->metrics.query_gpu_memory(); memory.has_value())
         cc::println("  process budget {:.0f} MiB, using {:.0f} MiB", to_mib(memory.value().budget_bytes),
                     to_mib(memory.value().current_usage_bytes));
     else
         cc::println("  process budget (unavailable: {})", memory.error().to_string());
 
     // The cumulative counters, because 0% on an idle GPU looks identical to counters that are always zero.
-    if (auto const counters = handle->read_gpu_counters(); counters.has_value())
+    if (auto const counters = handle->metrics.read_gpu_counters(); counters.has_value())
         for (auto const& e : counters.value().engines)
             cc::println("  engine {:<10} {:.1f} s busy since boot", e.engine, e.busy_secs);
 

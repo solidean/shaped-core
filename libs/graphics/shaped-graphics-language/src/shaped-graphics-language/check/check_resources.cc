@@ -25,15 +25,15 @@ bool is_sample_element(cc::string_view name)
     return false;
 }
 
-cc::string_view access_prefix(image_access access)
+cc::string_view access_prefix(access_mode access)
 {
     switch (access)
     {
-    case image_access::read:
+    case access_mode::read:
         return "";
-    case image_access::read_write:
+    case access_mode::read_write:
         return "mut ";
-    case image_access::write:
+    case access_mode::write:
         return "out ";
     }
     return "";
@@ -57,9 +57,18 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
             return cc::string(shape.image);
         return t.format < 0
                  ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
-                 : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_storage_formats[t.format].name);
+                 : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_image_formats[t.format].name);
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
+    case type_kind::atomic:
+        return cc::format("{}atomic[{}]", access_prefix(t.access), m.name_of(t.element));
+    case type_kind::stream:
+    {
+        auto const shape = t.count == 1 ? "point_stream" : t.count == 2 ? "line_stream" : "triangle_stream";
+        // a builtin's bare pattern takes every stream of its shape
+        return t.element == type_id::none ? cc::format("{}{}", access_prefix(t.access), shape)
+                                          : cc::format("{}{}[{}]", access_prefix(t.access), shape, m.name_of(t.element));
+    }
     default:
         return {};
     }
@@ -68,20 +77,31 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
 
 type_id checker::resource_type(check::type_info info)
 {
-    info.spelled = spelling_of(info, out);
-    // Interned, as a buffer is: two mentions of `texture2d[float4]` are one type.
-    for (auto i = isize(0); i < out.types.size(); ++i)
-        if (out.types[i] == info)
-            return type_id(i);
+    // an array is spelled by `array_type`, from its element's name
+    if (info.kind != type_kind::array)
+        info.spelled = spelling_of(info, out);
+    // Interned, as a buffer is: two mentions of `texture_2d[float4]` are one type.
+    auto& alike = interned_types[info.spelled];
+    for (auto const id : alike)
+        if (out.at(id) == info)
+            return id;
     auto const id = type_id(out.types.size());
     out.types.push_back(cc::move(info));
+    alike.push_back(id);
     return id;
 }
 
-void checker::judge_feature(i32 file, source_span where, cc::string_view form, cc::string_view feature)
+void checker::judge_feature(i32 file, source_span where, cc::string_view form, feature needed)
 {
+    // CHK-201: granted by a `require` of the file, or of the binding whose members are being compiled
+    if (file_features[file].has(needed) || granted.has(needed))
+    {
+        if (used_features != nullptr)
+            used_features->set(needed);
+        return;
+    }
     report(diagnostic_kind::needs_feature, file, where,
-           cc::format("{} needs {}, which a function cannot opt into yet", form, feature));
+           cc::format("{} needs {}, which `require {}` grants", form, name_of(needed), name_of(needed)));
 }
 
 type_id checker::resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text)
@@ -151,24 +171,25 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
                               out.name_of(element)));
             return checked_module::error_type;
         }
-        if (!texture->feature.empty())
-            judge_feature(file, where, text, texture->feature);
+        // a builtin's signature names the type the user's binding already had to be granted
+        if (texture->shape == texture_shape::d2_ms_array && !is_prelude_file(file))
+            judge_feature(file, where, text, feature::multisampled_array_textures);
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
     // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats.
     // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
     auto const* const dot = ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>();
-    auto const format = dot != nullptr ? find_storage_format(text_of(file, dot->name)) : -1;
+    auto const format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
     if (format < 0)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[0].value),
-               "an image takes one of sg's storage formats as an enum case: `.rgba8_unorm`");
+               "an image takes one of sg's image formats as an enum case: `.rgba8_unorm`");
         return checked_module::error_type;
     }
-    if (!k_storage_formats[format].is_portable)
-        judge_feature(file, where, cc::format("an image of .{}", k_storage_formats[format].name),
-                      "sg::feature::extended_storage_formats");
+    if (!k_image_formats[format].is_portable)
+        judge_feature(file, where, cc::format("an image of .{}", k_image_formats[format].name),
+                      feature::extended_image_formats);
     return resource_type({.kind = type_kind::image, .shape = image->shape, .format = format});
 }
 
@@ -177,6 +198,14 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     auto const where = span_of(file, expr);
     auto const& t = out.at(inner);
     auto const is_write_only = access == ast::type_access::write_only;
+
+    // `mut image_2d[.r32_float][4]` is an array of what the access word says, whichever the word stood before
+    if (t.kind == type_kind::array)
+    {
+        auto const count = t.count;
+        auto const element = qualify_resource(file, expr, t.element, access);
+        return element == checked_module::error_type ? element : array_type(element, count);
+    }
 
     if (t.kind == type_kind::buffer)
     {
@@ -191,17 +220,24 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     if (t.kind == type_kind::image)
     {
         auto qualified = t;
-        qualified.access = is_write_only ? image_access::write : image_access::read_write;
-        if (!is_write_only && !k_storage_formats[t.format].is_readwrite_portable)
-            judge_feature(file, where, cc::format("a `mut` image of .{}", k_storage_formats[t.format].name),
-                          "sg::feature::readwrite_storage_formats");
+        qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
+        if (!is_write_only && !k_image_formats[t.format].is_readwrite_portable)
+            judge_feature(file, where, cc::format("a `mut` image of .{}", k_image_formats[t.format].name),
+                          feature::readwrite_image_formats);
         return resource_type(cc::move(qualified));
     }
     if (t.kind == type_kind::texture)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, where,
-               "a texture is only ever read; a storage texture the shader writes is an image, such as `image2d`");
+               "a texture is only ever read; a storage texture the shader writes is an image, such as `image_2d`");
         return checked_module::error_type;
+    }
+    // a builtin's pattern: `mut atomic[uint]` updates it, `out atomic[uint]` stores to it; a stream is appended to
+    if (t.kind == type_kind::atomic || t.kind == type_kind::stream)
+    {
+        auto qualified = t;
+        qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
+        return resource_type(cc::move(qualified));
     }
     if (is_write_only)
         report(diagnostic_kind::wrong_kind_of_name, file, where, "only an image may be `out`, and this is no image");
@@ -325,23 +361,105 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
     return state;
 }
 
-void checker::judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments)
+void checker::compile_file_sampler(symbol_id id)
 {
-    // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
-    auto texture = cc::string();
-    auto sampler = cc::string();
-    for (auto const& a : ast_of(file).at(arguments))
+    auto const file = out.at(id).file;
+    auto const& d = ast_of(file).at(out.at(id).declaration);
+    judge_attributes(file, d.attributes, {}, "a sampler");
+    auto const state = compile_sampler(file, d.node.as<ast::sampler_decl>());
+    auto& s = out.symbols[index_of(id)];
+    s.type = resource_type({.kind = type_kind::sampler, .is_comparison = state.compare >= 0});
+    s.info = i32(out.samplers.size());
+    out.samplers.push_back(state);
+}
+
+void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments)
+{
+    auto const record = out.files[file].call_at(id);
+    auto const* const callee
+        = record >= 0 ? out.builtin_function(out.at(out.call_records[record].callee).intrinsic) : nullptr;
+
+    // The members the call samples through: each binding member among its arguments, and a `@sampler` it leaves out.
+    struct sampled
     {
-        if (!ast::is_valid(a.value))
+        member_info member;
+        cc::string path;
+    };
+    auto members = cc::vector<sampled>();
+    for (auto const& a : arguments)
+    {
+        if (!ast::is_valid(a.expr) || a.splat_member >= 0)
             continue;
-        auto const& where = out.files[file].target_at(a.value);
+        // an element of a binding array is sampled as its member is
+        auto named = a.expr;
+        if (auto const* const element = ast_of(file).at(named).node.try_as<ast::index>())
+            named = element->object;
+        auto const& where = out.files[file].target_at(named);
+        // CHK-314: a file-scope sampler filters as a binding's static sampler does
+        if (where.kind == target_kind::symbol && out.at(where.symbol).kind == symbol_kind::sampler
+            && out.at(where.symbol).state == symbol_state::checked)
+        {
+            auto const& s = out.at(where.symbol);
+            members.push_back({.member = {.name = s.name, .type = s.type, .static_sampler = s.info}, .path = s.name});
+            continue;
+        }
         if (where.kind != target_kind::binding_member)
             continue;
-        auto const& m = out.at(out.bindings[out.at(where.symbol).info].members)[where.index];
+        auto const& binding = out.bindings[out.at(where.symbol).info];
+        auto const all = out.at(binding.members);
+        auto const& m = all[where.index];
+        members.push_back({.member = m, .path = cc::format("{}.{}", out.at(where.symbol).name, m.name)});
+        if (callee == nullptr || callee->with_default_sampler == builtin_id::none || &a != &arguments[0])
+            continue;
+        // CHK-279: the texture's @sampler stands in for the sampler the call leaves out
+        if (m.default_sampler < 0 && !is_valid(m.default_file_sampler))
+        {
+            report(diagnostic_kind::missing_sampler, file, call,
+                   cc::format("{} names no @sampler, so a call that samples it names a sampler: `{}.{}(…, smp)`",
+                              members.back().path, m.name, callee->name));
+            return;
+        }
+        // CHK-314: a file-scope sampler filters as a binding's static sampler does
+        auto smp = member_info();
+        auto smp_path = cc::string();
+        if (is_valid(m.default_file_sampler))
+        {
+            auto const& s = out.at(m.default_file_sampler);
+            if (s.state != symbol_state::checked)
+                return;
+            smp = {.name = s.name, .type = s.type, .static_sampler = s.info};
+            smp_path = s.name;
+        }
+        else
+        {
+            smp = all[m.default_sampler];
+            smp_path = cc::format("{}.{}", out.at(where.symbol).name, smp.name);
+        }
+        auto const wants_comparison
+            = out.builtin_function(callee->with_default_sampler)->parameters[2] == "comparison_sampler";
+        if (smp.type != checked_module::error_type && out.at(smp.type).is_comparison != wants_comparison)
+        {
+            report(diagnostic_kind::type_mismatch, file, call,
+                   cc::format("{} takes a {}, and the @sampler of {} is {}", callee->name,
+                              wants_comparison ? "comparison_sampler" : "sampler", members.back().path, smp.name));
+            return;
+        }
+        members.push_back({.member = cc::move(smp), .path = cc::move(smp_path)});
+    }
+
+    // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
+    // CHK-281: so is a depth texture, which WebGPU has no filtering of outside a comparison.
+    auto texture = cc::string();
+    auto is_depth = false;
+    auto sampler = cc::string();
+    for (auto const& [m, path] : members)
+    {
         auto const& t = out.at(m.type);
-        auto const path = cc::format("{}.{}", out.at(where.symbol).name, m.name);
-        if (t.kind == type_kind::texture && m.is_unfilterable)
+        if (t.kind == type_kind::texture && (m.is_unfilterable || t.is_depth))
+        {
             texture = path;
+            is_depth = t.is_depth;
+        }
         if (t.kind != type_kind::sampler || t.is_comparison)
             continue;
         auto const* const fixed = m.static_sampler >= 0 ? &out.samplers[m.static_sampler] : nullptr;
@@ -352,14 +470,122 @@ void checker::judge_filtering(i32 file, source_span call, ast::range_of<ast::arg
     }
     if (!texture.empty() && !sampler.empty())
         report(diagnostic_kind::type_mismatch, file, call,
-               cc::format("{} is @unfilterable, and {} filters: sample it through a @non_filtering sampler, or a "
+               cc::format("{} is {}, and {} filters: sample it through a @non_filtering sampler, or a "
                           "static one whose filters are all .nearest",
-                          texture, sampler));
+                          texture, is_depth ? "a depth texture" : "@unfilterable", sampler));
+}
+
+bool checker::is_constant_argument(i32 file, ast::expr_id expr) const
+{
+    if (!ast::is_valid(expr))
+        return false;
+    auto const& node = ast_of(file).at(expr).node;
+    if (node.is<ast::literal>() || node.is<ast::leading_dot>())
+        return true;
+    auto const& tables = out.files[file];
+    auto const& where = tables.target_at(expr);
+    if (where.kind == target_kind::enum_case)
+        return true;
+    if (where.kind == target_kind::symbol && out.at(where.symbol).kind == symbol_kind::constant)
+        return true;
+    // a construction, `int2(1, -1)`: a struct's own, or a builtin named for the type it gives
+    auto const record = tables.call_at(expr);
+    if (record < 0)
+        return false;
+    auto const& r = out.call_records[record];
+    auto const is_construction
+        = where.kind == target_kind::constructor || out.at(r.callee).name == out.name_of(tables.type_at(expr));
+    if (!is_construction)
+        return false;
+    for (auto const& w : out.at(r.written))
+        if (w.splat_member >= 0 || !is_constant_argument(file, w.expr))
+            return false;
+    return true;
+}
+
+void checker::judge_constant_arguments(i32 file, ast::expr_id id)
+{
+    auto const record = out.files[file].call_at(id);
+    if (record < 0)
+        return;
+    auto const& r = out.call_records[record];
+    auto const* const callee = out.builtin_function(out.at(r.callee).intrinsic);
+    if (callee == nullptr)
+        return;
+    auto const written = out.at(r.written);
+    auto const slots = out.at(r.slots);
+    auto is_compare = false;
+    for (auto const& n : callee->named_only)
+        is_compare = is_compare || n == "reference";
+    for (auto p = isize(0); p < slots.size() && p < callee->named_only.size(); ++p)
+    {
+        auto const& name = callee->named_only[p];
+        auto const is_level = is_compare && name == "level";
+        if (slots[p] < 0 || (name != "offset" && name != "component" && !is_level))
+            continue;
+        auto const expr = written[slots[p]].expr;
+        auto const where = span_of(file, expr);
+        if (is_level)
+        {
+            // every target compares at level 0 alone, and only WebGPU names it
+            auto const text = text_of(file, where);
+            if (!ast_of(file).at(expr).node.is<ast::literal>() || (text != "0.0" && text != "0.00"))
+                report(diagnostic_kind::invalid_constant_argument, file, where,
+                       "a comparison samples level 0.0 alone, which the call says as `level = 0.0`");
+            continue;
+        }
+        if (!is_constant_argument(file, expr))
+        {
+            report(diagnostic_kind::invalid_constant_argument, file, where,
+                   name == "offset"
+                       ? cc::string("an offset is a constant from -8 to 7, such as `offset = int2(1, -1)`")
+                       : cc::string("a gather's component is a constant, such as `component = texel_component.y`"));
+            continue;
+        }
+        if (name == "offset")
+            judge_offset_range(file, expr);
+    }
+}
+
+void checker::index_builtin_symbols()
+{
+    if (out.builtins == nullptr)
+        return;
+    symbol_of_builtin.resize_to_filled(out.builtins->functions.size(), symbol_id::none);
+    for (auto i = isize(0); i < out.symbols.size(); ++i)
+        if (auto const intrinsic = out.symbols[i].intrinsic; out.builtins->is_known(intrinsic))
+            symbol_of_builtin[index_of(intrinsic)] = symbol_id(i);
+}
+
+symbol_id checker::symbol_declaring(builtin_id id) const
+{
+    return is_valid(id) && index_of(id) < symbol_of_builtin.size() ? symbol_of_builtin[index_of(id)] : symbol_id::none;
+}
+
+void checker::judge_offset_range(i32 file, ast::expr_id expr)
+{
+    // the literals of the construction; a `const` it names was judged where it was declared, if at all
+    auto const& node = ast_of(file).at(expr).node;
+    if (node.is<ast::literal>())
+    {
+        auto const text = text_of(file, span_of(file, expr));
+        auto const value
+            = classify_number(text) == number_class::plain_integer ? parse_literal_integer(text) : cc::optional<i64>();
+        if (value.has_value() && (value.value() < -8 || value.value() > 7))
+            report(diagnostic_kind::invalid_constant_argument, file, span_of(file, expr),
+                   "an offset reaches from -8 to 7 texels on every target");
+        return;
+    }
+    auto const record = out.files[file].call_at(expr);
+    if (record < 0)
+        return;
+    for (auto const& w : out.at(out.call_records[record].written))
+        judge_offset_range(file, w.expr);
 }
 
 cc::string sgl::check::texel_name_of(i32 format)
 {
-    auto const& f = k_storage_formats[format];
+    auto const& f = k_image_formats[format];
     auto const stem = f.component == value_kind::scalar_float ? "float"
                     : f.component == value_kind::scalar_int   ? "int"
                                                               : "uint";
@@ -378,10 +604,26 @@ type_id checker::resolve_pattern_type(i32 file, ast::expr_id expr)
         if (inner == checked_module::error_type || out.at(inner).kind != type_kind::image || out.at(inner).format >= 0)
             return inner == checked_module::error_type ? inner : qualify_resource(file, expr, inner, q->access);
         auto qualified = out.at(inner);
-        qualified.access = q->access == ast::type_access::write_only ? image_access::write : image_access::read_write;
+        qualified.access = q->access == ast::type_access::write_only ? access_mode::write : access_mode::read_write;
         auto const result = resource_type(cc::move(qualified));
         set_type(file, expr, result);
         return result;
+    }
+
+    // CHK-303: a bare stream takes every stream of its shape, whatever vertex it holds
+    if (auto const* const bare = e.node.try_as<ast::name>())
+    {
+        auto const text = text_of(file, bare->where);
+        auto const vertices = text == "point_stream"    ? 1
+                            : text == "line_stream"     ? 2
+                            : text == "triangle_stream" ? 3
+                                                        : 0;
+        if (vertices > 0)
+        {
+            auto const result = resource_type({.kind = type_kind::stream, .count = vertices});
+            set_type(file, expr, result);
+            return result;
+        }
     }
 
     // CHK-194: a bare shape name takes every texture or image of that shape, whatever it holds and however it is read.
@@ -423,6 +665,12 @@ bool checker::takes(type_id parameter, type_id argument) const
         return true;
     auto const& p = out.at(parameter);
     auto const& a = out.at(argument);
+    // an atomic is always memory the shader may update, whatever the pattern says it does with it
+    if (p.kind == type_kind::atomic && a.kind == type_kind::atomic)
+        return p.element == a.element;
+    // a bare stream pattern takes every stream of its shape
+    if (p.kind == type_kind::stream && a.kind == type_kind::stream)
+        return p.count == a.count && (p.element == type_id::none || p.element == a.element);
     auto const is_bare = p.element == type_id::none && p.format < 0 && !p.is_depth;
     if (is_bare && p.kind == type_kind::texture)
         return a.kind == type_kind::texture && !a.is_depth && a.shape == p.shape;
@@ -435,12 +683,12 @@ bool checker::takes(type_id parameter, type_id argument) const
     // A pattern that reads takes an image the shader may read, one that writes an image it may write.
     switch (p.access)
     {
-    case image_access::read:
-        return a.access != image_access::write;
-    case image_access::write:
-        return a.access != image_access::read;
-    case image_access::read_write:
-        return a.access == image_access::read_write;
+    case access_mode::read:
+        return a.access != access_mode::write;
+    case access_mode::write:
+        return a.access != access_mode::read;
+    case access_mode::read_write:
+        return a.access == access_mode::read_write;
     }
     return false;
 }

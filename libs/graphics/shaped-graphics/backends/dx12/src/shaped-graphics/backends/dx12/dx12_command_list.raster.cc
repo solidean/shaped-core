@@ -169,6 +169,9 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
         rect = {0, 0, LONG(extent_w), LONG(extent_h)};
     _list->RSSetScissorRects(1, &rect);
 
+    // The blend constants are 0 until set, per rendering scope, so one scope's never leaks into the next.
+    raster_set_blend_constants(tg::vec4f(0, 0, 0, 0));
+
     _in_render_pass = true;
 }
 
@@ -200,6 +203,10 @@ void dx12_command_list::raster_end_rendering()
     // The graphics bind + IA state is scoped to the pass it was set up in.
     _bound_raster_layout = nullptr;
     _bound_raster_groups.clear();
+    _bound_raster_footprint = nullptr;
+    _bound_raster_footprint_owner = nullptr;
+    _pending_raster_array_buffer_declares.clear();
+    _pending_raster_array_texture_declares.clear();
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
 }
@@ -222,6 +229,8 @@ void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline
 
     _bound_raster_layout = rp->layout.get();
     _bound_raster_groups.clear_resize_to_filled(_bound_raster_layout->groups.size(), nullptr);
+    _bound_raster_footprint = &pipeline.footprint();
+    _bound_raster_footprint_owner = &pipeline;
 }
 
 void dx12_command_list::raster_bind_group(int group_index, sg::binding_group const& group)
@@ -302,6 +311,26 @@ void dx12_command_list::raster_bind_index_buffer(sg::index_buffer_view const& vi
     _index_view_offset_in_bytes = view.offset_in_bytes;
 }
 
+void dx12_command_list::raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                           cc::span<sg::array_buffer_access const> elements)
+{
+    CC_ASSERT(_in_render_pass, "declare_array_buffer_access requires an open rendering scope");
+    CC_ASSERT(!binding_name.empty(), "declare_array_buffer_access requires a binding name");
+    auto declare = dx12_array_buffer_declare{.name = cc::string(binding_name), .elements = {}};
+    declare.elements.push_back_range(elements);
+    _pending_raster_array_buffer_declares.push_back(cc::move(declare));
+}
+
+void dx12_command_list::raster_declare_array_texture_access(cc::string_view binding_name,
+                                                            cc::span<sg::array_texture_access const> elements)
+{
+    CC_ASSERT(_in_render_pass, "declare_array_texture_access requires an open rendering scope");
+    CC_ASSERT(!binding_name.empty(), "declare_array_texture_access requires a binding name");
+    auto declare = dx12_array_texture_declare{.name = cc::string(binding_name), .elements = {}};
+    declare.elements.push_back_range(elements);
+    _pending_raster_array_texture_declares.push_back(cc::move(declare));
+}
+
 void dx12_command_list::raster_set_viewport(sg::viewport const& vp)
 {
     D3D12_VIEWPORT d = {vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
@@ -347,21 +376,11 @@ void dx12_command_list::raster_set_inline_constants(cc::span<byte const> data, c
 void dx12_command_list::declare_raster_draw_barriers(bool indexed)
 {
     // Bound groups' shader reads/writes (same policy as compute_dispatch), keyed to the graphics stages.
-    for (auto const* bound_group : _bound_raster_groups)
-    {
-        if (bound_group == nullptr)
-            continue;
-        // The raster scope has no declare_array_*_access yet, so an array binding here would go untracked.
-        CC_ASSERT(bound_group->array_bindings.empty(), "array bindings are not supported in raster draws yet");
-        for (auto const& view : bound_group->hazard_views)
-            if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                    sg::shader_access_of(view.access));
-        for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(tv.texture, tv.range,
-                                 sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
-    }
+    // Array bindings are tracked as the caller declared them, at the stages the code touches each in.
+    auto const graphics_stages = sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment;
+    declare_group_accesses(_bound_raster_groups, _bound_raster_footprint, graphics_stages);
+    declare_array_accesses(_bound_raster_groups, _bound_raster_footprint, _bound_raster_footprint_owner, graphics_stages,
+                           _pending_raster_array_buffer_declares, _pending_raster_array_texture_declares);
 
     // The IA vertex fetch reads the bound vertex buffers; an indexed draw also fetches the index buffer.
     for (auto const& vb : _bound_vertex_buffers)

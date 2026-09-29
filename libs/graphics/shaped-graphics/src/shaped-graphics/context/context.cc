@@ -5,6 +5,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
@@ -28,6 +29,11 @@ struct context::completion_signals
 
     // Read without the lock by a drain reaching zero, which must stay cheap with nothing outstanding.
     cc::atomic<bool> has_pending = false;
+
+    // Held from taking the due nodes out to pushing them, so a settle that returns has pushed everything that was due,
+    // what another thread took a moment earlier included; `settlers` is how the cheap check sees one under way.
+    cc::mutex<cc::unit> settling;
+    cc::atomic<int> settlers = 0;
 };
 
 std::unique_ptr<command_list> context::create_command_list()
@@ -58,6 +64,7 @@ cc::optional<submission_token> context::prepare_texture_for_async(raw_texture_ha
                        "list holding one transition was submitted for it. Record cmd.prepare_for_async on a list you "
                        "already submit to avoid the submit");
 
+    _stats.add(stat::async_layout_fixups);
     auto cmd = create_command_list();
     cmd->ensure_layout(texture, required, range);
     return submit_command_list(cc::move(cmd));
@@ -105,6 +112,7 @@ context::context(backend_kind backend, thread_model threading, cc::span<shader_f
     uncached(*this),
     cached(*this),
     routines(*this),
+    metrics(*this),
     _backend(backend),
     _thread_model(threading),
     _pipeline_cache(std::make_unique<pipeline_cache>())
@@ -158,6 +166,22 @@ bool context::accepts_shader_format(shader_format format) const
     return false;
 }
 
+feature_set context::supported_features() const
+{
+    auto result = feature_set();
+    for (auto const f : k_all_features)
+        if (supports(f))
+            result.set(f);
+    return result;
+}
+
+feature_set context::missing_features(compiled_shader const& shader) const
+{
+    if (!shader.required_features.has_value())
+        return {};
+    return shader.required_features.value().without(supported_features());
+}
+
 void context::release_cached_pipelines()
 {
     _pipeline_cache->release_at_shutdown();
@@ -188,6 +212,17 @@ void context::process_completed_epochs()
 {
     retire_completed_epochs();
     settle_due_completions();
+}
+
+void context::advance_epoch()
+{
+    do_advance_epoch();
+    _stats.add(stat::epochs_advanced);
+
+    // Each stat's change over the epoch just closed, as one accumulate per stat.
+    auto const now = _stats.snapshot();
+    impl::record_stats(now - _recorded_stats);
+    _recorded_stats = now;
 }
 
 bool context::try_advance_epoch(int allowed_in_flight)
@@ -278,11 +313,24 @@ void context::rearm_completion_signal(cc::vector<pending_completion> const& pend
 void context::settle_due_completions()
 {
     auto* const signals = _completion_signals.get();
-    if (signals == nullptr || !signals->has_pending.load(cc::memory_order_acquire))
+    if (signals == nullptr
+        || (!signals->has_pending.load(cc::memory_order_acquire) && signals->settlers.load(cc::memory_order_acquire) == 0))
         return;
 
-    // Taken out under the lock and pushed outside it: pushing resumes whoever depended on the node, and a dependent
-    // that reaches back in here would deadlock on a mutex this thread still holds.
+    signals->settlers.fetch_add(1, cc::memory_order_acq_rel);
+    CC_DEFER
+    {
+        signals->settlers.fetch_sub(1, cc::memory_order_acq_rel);
+    };
+    signals->settling.lock([&](cc::unit&) { impl_settle_due_completions(); });
+}
+
+void context::impl_settle_due_completions()
+{
+    auto* const signals = _completion_signals.get();
+
+    // Taken out under the pending lock and pushed outside it, so a push never holds the lock arming takes.
+    // A push only enqueues the node's dependents on a scheduler; none of them runs on this stack.
     auto const lost = is_device_lost();
     auto due = _pending_completions.lock(
         [&](cc::vector<pending_completion>& pending)

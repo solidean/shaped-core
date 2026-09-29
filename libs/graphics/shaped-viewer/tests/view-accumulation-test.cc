@@ -4,6 +4,7 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/denoise.hh>
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -307,6 +308,139 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
     auto const* const slot = rec->temporal.get_ptr(sv::temporal_id::accumulation(0));
     REQUIRE(slot != nullptr);
     CHECK(slot->texture.raw() != nullptr);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A camera cut, down the plan path, on a nested view whose refresh is throttled.
+//
+// The request is sticky: a frame that does not trace the view leaves it standing, and the next frame that does trace
+// consumes it.
+// What it drops is observable on the temporal member's own history, and only on a frame that member does not run —
+// a run would consume the reset in the same frame that made it.
+ASYNC_INVOCABLE_TEST("sv - a camera cut waits for a traced frame and drops the temporal history",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the shaders");
+
+    auto const cloud = sv_test::make_triangle_cloud(32);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
+    resources.wait_for_pending_uploads();
+
+    auto const output_size = tg::vec2i(64, 64);
+    auto const cut_id = sv::view_id::from_string("cut");
+
+    // The temporal member owns the first two accumulated frames and hands over in one step after them, so a third
+    // frame is one it does not run.
+    auto def = sv::viewer_definition{};
+    {
+        auto v = sv::view_data{};
+        v.id = cut_id;
+        v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)};
+        v.refresh = {.rate = 0.0f}; // only when the history says there is nothing to re-present
+        auto& scene = sv::ensure_scene_3d(v);
+        scene.items.push_back(item);
+        scene.settings.denoise.method = sr::denoise_method::automatic;
+        scene.settings.temporal_denoise_frames = 2;
+        scene.settings.temporal_denoise_fade_frames = 0;
+        def.views.push_back(cc::move(v));
+
+        auto const root_node = def.nodes.add_container(sv::invalid_node);
+        auto leaf = sv::layout_leaf{};
+        leaf.views.push_back(sv::view_index(0));
+        def.nodes.add_leaf(root_node, cc::move(leaf));
+
+        auto root = sv::view_data{};
+        root.id = sv::view_id::from_string("root");
+        root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+        def.root_view = sv::view_index(def.views.size());
+        def.views.push_back(cc::move(root));
+    }
+
+    auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                          .width = output_size[0],
+                                                          .height = output_size[1],
+                                                          .usage = sg::texture_usage::render_target});
+
+    auto store = sv::view_store{};
+
+    // An empty history forces the nested view to trace; one saying its image exists and is current throttles it.
+    auto const traced = sv::view_history{};
+    auto throttled = sv::view_history{};
+
+    auto const execute = [&](sg::command_list& cmd, u64 index, sv::view_history const& history)
+    {
+        resources.advance_to(ctx.current_epoch());
+        store.begin_frame(u64(ctx.current_epoch()));
+        auto const plan = sv::build_render_plan(def, output_size, index, history);
+        auto const outcome = sv::viewer_renderer::execute(
+            cmd, def, plan, resources, store, output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        return cc::pair(plan, outcome);
+    };
+
+    // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
+    auto const frame = [&](u64 index, sv::view_history const& history) -> cc::shared_async<sv::render_plan>
+    {
+        auto cmd = ctx.create_command_list();
+        auto [plan, outcome] = execute(*cmd, index, history);
+        CHECK(outcome == sg::routine_outcome::executed);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        co_return plan;
+    };
+
+    // Both denoisers and the tracer warmed first, so every counted frame below is one that dispatched.
+    sr::denoise_routine::prewarm(ctx);
+    (void)co_await ctx.routines.idle_completion();
+    REQUIRE(sv_test::frames_until_executed(ctx, [&](sg::command_list& cmd) { return execute(cmd, 0, traced).second; }));
+    store = sv::view_store{}; // the warm-up's own counts are not what this test is about
+
+    auto const frame_history = [&]() -> sr::denoise_history const&
+    {
+        auto const* const rec = store.peek_ptr(cut_id);
+        CC_ASSERT(rec != nullptr, "the view traced, so it has a record");
+        auto const* const slot = rec->temporal.get_ptr(sv::temporal_id::frame_samples(0));
+        CC_ASSERT(slot != nullptr, "a layer that may denoise temporally declares its frame samples");
+        return slot->denoise;
+    };
+
+    // Two temporal frames, then one past the hand-off.
+    auto const first = co_await frame(1, traced);
+    REQUIRE(first.traces.size() == 1);
+    (void)co_await frame(2, traced);
+    (void)co_await frame(3, traced);
+    REQUIRE(store.accumulated_frames(cut_id) == 3);
+    CHECK(!frame_history().is_reset_pending()); // the temporal runs consumed the reset a new scene asks for
+
+    throttled.entries[cut_id] = {.exists = true, .resolution = first.traces[0].resolution, .last_refresh_frame = 4};
+    store.get_or_create(cut_id).camera_cut_pending = true;
+
+    // A frame that does not trace the view leaves the request standing.
+    auto const skipped = co_await frame(4, throttled);
+    REQUIRE(skipped.traces.size() == 1);
+    CHECK(!skipped.traces[0].refresh);
+    CHECK(store.peek_ptr(cut_id)->camera_cut_pending);
+    CHECK(store.accumulated_frames(cut_id) == 3);
+
+    // The next traced frame consumes it and drops the temporal history, and restarts no accumulation of its own.
+    (void)co_await frame(5, traced);
+    CHECK(!store.peek_ptr(cut_id)->camera_cut_pending);
+    CHECK(frame_history().is_reset_pending());
+    CHECK(store.accumulated_frames(cut_id) == 4);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

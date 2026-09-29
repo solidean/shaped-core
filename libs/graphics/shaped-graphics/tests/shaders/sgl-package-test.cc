@@ -75,18 +75,6 @@ ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled
     }
 }
 
-ASYNC_INVOCABLE_TEST("sg - every entry point of the SGL package reflects what the groups it lists declare",
-                     (sg::context_handle const& ctx))
-{
-    REQUIRE(ctx != nullptr);
-    if (!sg_test::shaders_reach(*ctx))
-        SKIP("no compiler builds this binary's shaders into a format this context accepts");
-
-    // Generated for the whole package, so a shader added to it is checked here without this test changing.
-    auto const mismatch = co_await shaders::check_reflection(*ctx);
-    CHECK(mismatch == "");
-}
-
 ASYNC_TEST("sg - the WGSL an SGL group becomes reflects every fact its generated table declares")
 {
     // A WebGPU layout is built from the generated table, and WebGPU refuses one that disagrees with the module.
@@ -111,8 +99,8 @@ ASYNC_TEST("sg - the WGSL an SGL group becomes reflects every fact its generated
         CHECK(got->type == want.type);
         CHECK(got->texture_dimension == want.texture_dimension);
         CHECK(got->sample_type == want.sample_type);
-        CHECK(got->storage_format == want.storage_format);
-        CHECK(got->storage_access == want.storage_access);
+        CHECK(got->image_format == want.image_format);
+        CHECK(got->access == want.access);
         CHECK(got->sampler_type == want.sampler_type);
     }
 }

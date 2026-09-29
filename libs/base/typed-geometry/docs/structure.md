@@ -84,6 +84,9 @@ scalar/
   constants.hh [done]     tg::pi<T> (more to come)
   scalar.hh    [done]     tg::one/sqrt + trig (sin/cos/tan/sin_cos/sec/csc/cot, asin/acos/atan/atan2)
   angle.hh     [done]     angle<T> domain newtype + _rad_/_deg_ literals
+  half_float.hh [done]    half_float (f16): binary16 with explicit conversions and once-rounded arithmetic + _f16 literal
+  fixed_int/   [done]     fixed_int<Bits> / fixed_uint<Bits> (fi32 … fi256): wrapping two's complement, tg::add/sub/mul<R>, division
+    generated/ [done]     loop-free specializations up to 256 bits, written by tools/gen-fixed-int.py
   all.hh       [done]
   complex.hh   [planned]
   interval.hh  [planned]
@@ -92,7 +95,7 @@ scalar/
   error.hh     [planned]
 ```
 
-[modules/scalar.md](modules/scalar.md) covers the `scalar_traits` seam, which types count as scalars, and the `angle<T>` contract.
+[modules/scalar.md](modules/scalar.md) covers the `scalar_traits` seam, which types count as scalars, the `angle<T>` contract, `fixed_int` and `half_float`.
 
 ## linalg/ [in progress]
 

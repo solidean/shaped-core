@@ -20,7 +20,7 @@ sg::epoch vulkan_context::completed_epoch() const
     return sg::epoch(value < u64(sg::epoch::first) ? first_minus_one : value);
 }
 
-void vulkan_context::advance_epoch()
+void vulkan_context::do_advance_epoch()
 {
     CC_ASSERT(!_is_shut_down, "cannot advance a shut-down context");
     CC_ASSERT(_open_command_lists.load(std::memory_order_relaxed) == 0, "all command lists opened this epoch must be "
@@ -152,7 +152,11 @@ void vulkan_context::block_until_submissions_complete()
             .pSemaphores = &_submission_timeline,
             .pValues = &target,
         };
-        VkResult const wr = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+        auto const wr = [&]
+        {
+            auto const waited = sg::impl::gpu_wait_scope(_stats);
+            return vkWaitSemaphores(_device, &wait, UINT64_MAX);
+        }();
         if (note_device_lost_if_lost(wr, "submission semaphore wait"))
             throw sg::device_lost_exception(device_loss_reason());
     }
@@ -263,7 +267,11 @@ void vulkan_context::wait_for_epoch(sg::epoch e)
                 .pSemaphores = &_epoch_timeline,
                 .pValues = &target,
             };
-            VkResult const wr = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+            auto const wr = [&]
+            {
+                auto const waited = sg::impl::gpu_wait_scope(_stats);
+                return vkWaitSemaphores(_device, &wait, UINT64_MAX);
+            }();
             if (note_device_lost_if_lost(wr, "epoch semaphore wait"))
                 throw sg::device_lost_exception(device_loss_reason());
         }
@@ -288,7 +296,11 @@ void vulkan_context::wait_for_submission_token(sg::submission_token token)
         .pSemaphores = &_submission_timeline,
         .pValues = &target,
     };
-    VkResult const r = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+    auto const r = [&]
+    {
+        auto const waited = sg::impl::gpu_wait_scope(_stats);
+        return vkWaitSemaphores(_device, &wait, UINT64_MAX);
+    }();
     note_device_lost_if_lost(r, "submission semaphore wait");
 }
 

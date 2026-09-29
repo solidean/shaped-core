@@ -252,9 +252,15 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 // Two dependencies rather than one: an initial transition and an entry barrier can name the same
                 // subresource, and two barriers on one subresource in a single dependency have no order between them.
                 if (!initial_barriers.empty())
+                {
+                    count_barriers(_stats, {}, initial_barriers);
                     submit_barriers(cmd->_pre_buffer, {}, initial_barriers);
+                }
                 if (has_entry_barriers)
+                {
+                    count_barriers(_stats, entry_buffer_barriers, entry_image_barriers);
                     submit_barriers(cmd->_pre_buffer, entry_buffer_barriers, entry_image_barriers);
+                }
                 VkResult const pre_end = vkEndCommandBuffer(cmd->_pre_buffer);
                 CC_ASSERT(pre_end == VK_SUCCESS, "vkEndCommandBuffer (entry transitions) failed");
                 submitted_buffers[submitted_count++] = cmd->_pre_buffer;
@@ -343,6 +349,9 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             // Inside the lock, so the actor's queue order matches submission order — which is also the order the
             // readback ring handed out its space.
             _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
+
+            _stats.fold(sg::impl::recorded_stats(*cmd));
+            _stats.add(sg::stat::command_lists_submitted);
             return t;
         });
 
@@ -481,9 +490,21 @@ void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle textu
 
 void vulkan_command_list::flush_barriers()
 {
+    auto global = make_empty_memory_barrier();
+    auto has_global = false;
     for (auto const* buffer : _pending_barrier_buffers)
         if (auto const barrier = buffer->flush_access(_slot); barrier.needed)
-            _pending_buffer_barriers.push_back(make_buffer_barrier(buffer->_buffer, barrier));
+        {
+            auto const vk_barrier = make_buffer_barrier(buffer->_buffer, barrier);
+            if (_global_barrier_buffers.contains(buffer))
+            {
+                merge_into_memory_barrier(global, vk_barrier);
+                has_global = true;
+            }
+            else
+                _pending_buffer_barriers.push_back(vk_barrier);
+        }
+    _global_barrier_buffers.clear();
 
     // A texture flush is per subresource box, so one texture may contribute several barriers.
     for (auto const* texture : _pending_barrier_textures)
@@ -497,11 +518,17 @@ void vulkan_command_list::flush_barriers()
     // A barrier is illegal inside a dynamic-rendering instance, so an open one is closed around it and reopened.
     // Nothing here decides whether that is cheap: a frame that transitions its resources before the scope opens
     // never reaches this, and one that does not pays a tile flush on a tiler.
-    bool const suspend = _in_render_pass && !(_pending_buffer_barriers.empty() && _pending_image_barriers.empty());
+    bool const suspend
+        = _in_render_pass && !(_pending_buffer_barriers.empty() && _pending_image_barriers.empty() && !has_global);
     if (suspend)
+    {
         vkCmdEndRendering(_buffer);
+        _stats.add(sg::stat::render_pass_splits);
+    }
 
-    submit_barriers(_buffer, _pending_buffer_barriers, _pending_image_barriers);
+    auto const globals = has_global ? cc::span<VkMemoryBarrier2 const>(&global, 1) : cc::span<VkMemoryBarrier2 const>();
+    count_barriers(_stats, _pending_buffer_barriers, _pending_image_barriers, globals);
+    submit_barriers(_buffer, _pending_buffer_barriers, _pending_image_barriers, globals);
     _pending_buffer_barriers.clear();
     _pending_image_barriers.clear();
 

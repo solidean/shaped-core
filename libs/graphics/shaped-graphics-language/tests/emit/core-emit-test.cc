@@ -122,7 +122,7 @@ TEST("sgl emit - every core construct is written in every target")
     auto const checked = flat_test_module();
     auto const& m = checked.module;
     auto const e = every_core_construct(m);
-    REQUIRE(is_core(e));
+    REQUIRE(is_core(m, e));
 
     CHECK(function_text(m, e, sgl::emit::target::hlsl_dx12)
           == "target shade(frag p)\n"
@@ -291,7 +291,7 @@ TEST("sgl emit - a structured tree is legalized and then written: a value block 
     CHECK(refused.text.empty());
 
     auto const core = legalize(m, structured);
-    REQUIRE(is_core(core));
+    REQUIRE(is_core(m, core));
     CHECK(dump(interpret(m, core, test_inputs(m))) == dump(interpret(m, structured, test_inputs(m))));
     CHECK(function_text(m, core, sgl::emit::target::wgsl)
           == "@fragment\n"

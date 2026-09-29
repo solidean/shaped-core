@@ -16,6 +16,9 @@ add_library(shaped-rendering
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
     src/shaped-rendering/nrd_denoise_routine.cc
+    src/shaped-rendering/oidn_denoise_routine.cc
+    src/shaped-rendering/impl/tza.cc
+    src/shaped-rendering/impl/oidn_network.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -34,7 +37,6 @@ target_sources(shaped-rendering
     FILES
     src/shaped-rendering/fwd.hh
     src/shaped-rendering/all.hh
-    src/shaped-rendering/gpu_types.hh
     src/shaped-rendering/input.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
@@ -43,6 +45,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
     src/shaped-rendering/nrd_denoise_routine.hh
+    src/shaped-rendering/oidn_denoise_routine.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh
@@ -113,6 +116,14 @@ else()
     target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/nrd_null.cc)
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_NRD=0)
 endif()
+# The trained OIDN weights the member runs, as a path rather than a target: nothing links them, and the member reads
+# the blob at run time.
+# Empty when they were not fetched, which makes the member report `unsupported` rather than fail to build.
+set(SR_OIDN_WEIGHTS_DIR_VALUE "")
+if(OIDN_WEIGHTS_DIR)
+    set(SR_OIDN_WEIGHTS_DIR_VALUE "${OIDN_WEIGHTS_DIR}")
+endif()
+target_compile_definitions(shaped-rendering PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
 
 # sr's own shader package.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
@@ -172,6 +183,21 @@ sc_add_shader_package(
         mix.hlsl:binding:mix_bindings
         mix.hlsl:constants:gConstants
         ${_sr_nrd_shaders}
+        nn_conv.hlsl:compute:main_cs
+        nn_conv.hlsl:binding:nn_conv_bindings
+        nn_conv.hlsl:constants:gConstants
+        nn_input.hlsl:compute:main_cs
+        nn_input.hlsl:binding:nn_input_bindings
+        nn_input.hlsl:constants:gConstants
+        nn_output.hlsl:compute:main_cs
+        nn_output.hlsl:binding:nn_output_bindings
+        nn_output.hlsl:constants:gConstants
+        nn_pool.hlsl:compute:main_cs
+        nn_pool.hlsl:binding:nn_pool_bindings
+        nn_pool.hlsl:constants:gConstants
+        nn_upsample.hlsl:compute:main_cs
+        nn_upsample.hlsl:binding:nn_upsample_bindings
+        nn_upsample.hlsl:constants:gConstants
 )
 
 # Test executable.
@@ -189,8 +215,9 @@ if(SC_BUILD_TESTS)
         tests/imgui-input-test.cc
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
-        tests/gpu-types-test.cc
         tests/shader-package-test.cc
+        tests/tza-test.cc
+        tests/oidn-tiling-test.cc
     )
     sc_nexus_binary(shaped-rendering-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
@@ -233,13 +260,33 @@ if(SC_BUILD_TESTS)
             tests/denoise-test.cc
             tests/mix-test.cc
             tests/nrd-test.cc
+            tests/oidn-test.cc
+            tests/nn-conv-test.cc
+            tests/nn-ops-test.cc
+            tests/oidn-network-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
+
+        # Intel's own filter, as the oracle the OIDN member is measured against, where it was fetched on request.
+        # Linked here and nowhere else: the member runs the weights in its own shaders and never calls the library.
+        # Its facade loads its core and its CPU device module by name out of its own directory, so all of them have to
+        # sit beside the binary rather than only the one the link names.
+        if(TARGET oidn)
+            target_sources(shaped-rendering-test PRIVATE tests/oidn_reference.cc)
+            target_link_libraries(shaped-rendering-test PRIVATE oidn)
+            if(OIDN_RUNTIME_LIBRARIES)
+                sc_stage_runtime_dlls(shaped-rendering-test DLLS ${OIDN_RUNTIME_LIBRARIES} TAG oidn)
+            endif()
+        else()
+            target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
+        endif()
 
         # These import dxcompiler.dll, so the binary does not start without it, and dxil.dll signs what it emits.
         # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
         sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
     endif()
+
+    target_compile_definitions(shaped-rendering-test PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.
     # SDL is what hands out the CAMetalLayer, so it needs a window backend as well as the metal one.
