@@ -3,6 +3,28 @@
 Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
+- **Denoising: both halves run; what is left**, in order — shaped-rendering's [denoising.md](../../shaped-rendering/docs/denoising.md) is the design:
+  - **Measure what the guides' and the split's payload growth costs.**
+    `PtPayload` went from 27 to 38 scalar components: 3 for the diffuse albedo, 4 for the specular pair, and 4 more for the split
+    (`direct_specular` and `lobe`) — on every ray rather than only primary ones.
+  - **The specular guides are declared for `automatic` whatever the device supports**, because `build_render_plan` is a pure function with no context to ask.
+    That is two textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
+  - **A per-frame Halton jitter** while a vendor temporal member runs; SVGF does not need one, DLSS Ray Reconstruction does.
+  - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
+  - **`render_settings::render_scale`**, once a member upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.
+    Inert until then, which is why it is not there yet.
+  - **`render_settings::exposure`**, for the tonemap when it lands; the denoisers already read `denoise.exposure`.
+  - **`view_renderer::execute`** — the single-view entry point — does not denoise; only the plan path does.
+
+- **Nothing tests the pump sweep in `viewer::finish_frame`, and no test shape reached it.**
+  `(void)cc::thread_pump_all()` exists so an unthreaded viewer drives the copy actor on a frame whose epoch wait does not block.
+  Every test loop runs flat out, so the CPU is always `buffer_count` epochs ahead and the wait always blocks.
+  A blocking wait sweeps the registry itself, which makes the sweep redundant in every test and the line removable without a failure.
+  Four shapes were tried and all four passed with the line deleted.
+  The GPU-bound loop, a `refresh_rate`-throttled one, one that stops tracing after the first frame, and that one again with the stream throttled to 0.001 and 2048 triangles in flight.
+  What would reach it is a loop paced so the GPU is never behind — a real display's vsync, or a frame limiter — which no headless test has.
+  The two honest options are a test that paces on a condition rather than a duration, or an injected clock on the frame loop.
+
 - **The frame API blocks.**
   `sv::viewer` is a synchronous pull loop — `is_running()`, `end_frame()`, a draining destructor.
   So it throttles and drains with `cc::async_blocking_get` on sg's completions, behind a `may_block` assert.
@@ -50,8 +72,8 @@ What is left is the interaction on top of it, in dependency order:
   it is what makes flying noisy.
   Reprojecting the history through the previous camera and rejecting per pixel is the classical answer and was tried;
   it cost a G-buffer, a ping-pong pair, a disocclusion heuristic and a per-pixel sample count, and it capped the mean.
-  A spatial filter over a moving frame (A-trous / SVGF) buys the same smoothness without touching the estimator, and
-  is the direction to take this if flying needs to look better.
+  A denoiser buys the same smoothness without touching the estimator, and that is the direction taken: the spatial half
+  exists (`render_settings::denoise`), and the moving-camera half is the denoising entry at the top of this list.
 - **The GPU tests may still be passing vacuously.** `pathtrace_routine`'s init used to drive its shader compiles
   with a throwaway single-threaded scheduler, which could not complete a node the ambient pool already owned — so the
   routine ended up with no pipeline and `execute` silently no-opped.

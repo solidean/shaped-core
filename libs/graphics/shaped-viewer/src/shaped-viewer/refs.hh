@@ -256,6 +256,22 @@ public:
     /// camera round-trips them through a basis, and a straight-down pitch has no unique yaw to recover.
     void initial_fps(fps_state const& pose);
 
+    /// Tells this view that its camera jumped rather than moved, so nothing from the last frame reprojects.
+    ///
+    /// A temporal denoiser carries its history ACROSS camera motion — that is what it is for — and reprojects it
+    /// through the motion guide.
+    /// A cut breaks that: the previous frame shows a different part of the scene, so every reprojection lands on
+    /// unrelated pixels and the history smears across the new image for as long as it takes to age out.
+    /// Call this on a teleport, a camera switch, or a jump to a bookmarked pose; ordinary orbiting and flying need it
+    /// no more than a scene edit does.
+    ///
+    /// It leaves the progressive mean untouched, since that already restarts on any camera change.
+    /// What it drops even when the camera does not move is every slot's denoise history and the motion guide's previous
+    /// camera, so the next move starts SVGF cold.
+    /// The request survives until a frame actually traces this view, so cutting a throttled view is not lost.
+    /// A view whose layers do not denoise has no history to cut, and the call then does nothing.
+    void camera_cut();
+
     /// Pins this view to a fixed pixel resolution instead of taking the rect it lands in.
     void resolution(tg::vec2i r);
 
@@ -317,7 +333,7 @@ public:
     /// An unset `frames` asks only whether this view has finished as far as it can.
     /// False for a view with no traced layer, since nothing there has converged.
     /// What it does NOT see is post-load work a resource still owes, which changes a texture's contents rather than
-    /// its id — `frame::pending_resource_work` is that half.
+    /// its id — `frame::pending_resource_work` and `frame::streaming_resources` are the rest.
     [[nodiscard]] bool is_accumulation_converged(cc::optional<u32> frames = {}) const;
 
     [[nodiscard]] view_id id() const;
@@ -450,6 +466,7 @@ struct sv::view_api
     void initial_orbit(orbit_state const& o) { self().default_view().initial_orbit(o); }
     void initial_fps(fps_state const& pose) { self().default_view().initial_fps(pose); }
     void camera_style(sv::camera_style style) { self().default_view().camera_style(style); }
+    void camera_cut() { self().default_view().camera_cut(); }
     void refresh_rate(float rate) { self().default_view().refresh_rate(rate); }
 
 private:

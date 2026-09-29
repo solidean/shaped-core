@@ -1,6 +1,7 @@
 #pragma once
 
 #include "background.hlsli" // Background + the SH evaluation the miss and the hits use
+#include "bsdf_lobe.hlsli" // sv::bsdf_lobe_* — the raygen classifies a path by the lobe its first bounce took
 #include "camera.hlsli"
 #include "instance.hlsli" // sv::instance — the per-item table the group below declares
 #include "light.hlsli" // sv::light — the per-light record the group below declares
@@ -42,6 +43,17 @@ struct FrameConstants
     uint3 _pad0;
     uint4 path_offset;
     uint4 path_count;
+
+    // denoiser guides: whether to write GuideNormal / GuideDepth, and how many frames they already average
+    // write_temporal: whether to write FrameOutput and GuideMotion, for a temporal denoiser
+    // write_specular_guides: whether to write GuideSpecularAlbedo / GuideRoughness, which only some members read
+    uint write_guides;  uint guide_frame;  uint write_temporal;  uint write_specular_guides;
+
+    // write_split: whether to write FrameDiffuse / FrameSpecular / GuideHitDistance, for a split-signal member
+    uint write_split;  uint _split_pad0;  uint _split_pad1;  uint _split_pad2;
+
+    // The camera the previous frame of this layer was traced from, which motion vectors reproject into.
+    Camera previous_camera;
 };
 
 // Every resource this pipeline's stages share, declared once for all of them.
@@ -77,6 +89,37 @@ namespace pt_bindings
     // Declared after the four above so their addresses are the ones they always were: the pass runs one counter
     // across register classes, so appending is the one edit to a shared group that moves nothing.
     ConstantBuffer<FrameConstants> frame;
+
+    // What a denoiser steers by: the primary hit's facing normal, linear view depth and diffuse albedo, as running means
+    // over the same samples the accumulator averages, with zero where the primary ray escaped.
+    // Written only while `frame.write_guides` is set; otherwise bound to 1x1 stand-ins nothing writes.
+    // Appended after `frame` for the reason given above it.
+    RWTexture2D<float4> GuideNormal;
+    RWTexture2D<float> GuideDepth;
+    RWTexture2D<float4> GuideAlbedo;
+
+    // The specular half of the same story, which the vendor denoisers ask for separately: normal-incidence specular
+    // reflectance, and how sharp the reflection off this surface is.
+    // Together they are what sizes a reflection filter — a mirror must not be blurred like a matte surface.
+    // Written under `frame.write_specular_guides`, which is its own flag: a member that wants only the diffuse albedo
+    // must not pay for these.
+    RWTexture2D<float4> GuideSpecularAlbedo;
+    RWTexture2D<float> GuideRoughness;
+
+    // What a temporal denoiser reads instead of the running mean: this frame's samples alone, and where each pixel's
+    // primary hit sat on the previous frame's screen, as this pixel minus that one.
+    // Written only while `frame.write_temporal` is set; otherwise bound to 1x1 stand-ins nothing writes.
+    RWTexture2D<float4> FrameOutput;
+    RWTexture2D<float2> GuideMotion;
+
+    // This frame's samples again, split the way a split-signal denoiser filters them: the diffuse half and the
+    // specular one, which sum to `FrameOutput` exactly.
+    // Their first secondary hit distances ride together in `GuideHitDistance` — diffuse in r, specular in g — which is
+    // what such a denoiser sizes its reprojection from.
+    // Written only while `frame.write_split` is set.
+    RWTexture2D<float4> FrameDiffuse;
+    RWTexture2D<float4> FrameSpecular;
+    RWTexture2D<float2> GuideHitDistance;
 
     /// Every light the trace samples, grouped by path — mirrors what sv::pt_light_table builds.
     /// Appended last for the same reason `frame` was.
@@ -122,11 +165,26 @@ struct [raypayload] PtPayload
     // and sky by the share it left to a ray that never flew.
     uint last_bounce : read(closesthit) : write(caller);
 
-    float3 direct     : read(caller) : write(closesthit, miss); // next-event estimate at this hit, BSDF folded in
+    // The next-event estimate at this hit, BSDF folded in, split the way `bsdf_eval_split` splits the closure.
+    // Two fields rather than one because only the hit knows which half of its BSDF each contribution came through, and
+    // a split recovered afterwards from a ratio would be a second opinion about a number this already has exactly.
+    float3 direct_diffuse  : read(caller) : write(closesthit, miss);
+    float3 direct_specular : read(caller) : write(closesthit, miss);
     float3 emission   : read(caller) : write(closesthit, miss); // the surface's own emission, or the sky on a miss
     float3 throughput : read(caller) : write(closesthit, miss); // f * cos / pdf for the sampled continuation
     float3 direction  : read(caller) : write(closesthit, miss); // where the path goes next
     float3 normal     : read(caller) : write(closesthit, miss); // shading normal, for the ray offset off the surface
+    float3 albedo     : read(caller) : write(closesthit, miss); // diffuse reflectance here, for the denoiser's guide
+
+    // The specular guides' share of the payload, and the reason it is four lanes rather than none: the guides describe
+    // the PRIMARY hit, and only the hit shader knows the surface.
+    // Every ray pays for them, which is what libs/graphics/shaped-viewer/docs/TODO.md asks to be measured.
+    float3 specular_albedo : read(caller) : write(closesthit, miss); // normal-incidence specular reflectance (F0)
+    float  roughness       : read(caller) : write(closesthit, miss); // perceptual roughness of the sharpest specular lobe
+
+    /// Which lobe the continuation was drawn from — one of `sv::bsdf_lobe_*`.
+    /// The raygen reads it at the PRIMARY hit to decide which signal the rest of the path belongs to.
+    uint lobe : read(caller) : write(closesthit, miss);
 
     float bsdf_pdf : read(caller) : write(closesthit, miss); // pdf of `direction`, for the escaped-environment MIS weight
     float hit_t    : read(caller) : write(closesthit, miss); // < 0 => the ray escaped (miss)

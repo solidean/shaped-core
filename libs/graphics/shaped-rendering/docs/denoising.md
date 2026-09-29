@@ -160,6 +160,12 @@ The API admits an output larger than the input, so a vendor member can upscale w
 `sr::optional_guides(m)` is what it uses when present.
 A tracer writes the union for the members it may hand off between, in a few fixed tiers rather than one permutation per combination.
 
+**`albedo` and `specular_albedo` are the two halves of one surface's reflectance.**
+`albedo` is diffuse only, so it is zero on a metal, whose colour is all in `specular_albedo`.
+A member reading split radiance reads the two separately, one per half.
+A member filtering unsplit radiance — à-trous and SVGF — demodulates by their sum, or a textured metal's base colour is filtered as noise.
+OIDN is the follow-up: its own documentation wants a metal's albedo to be its specular colour and glass's to be about 1, and `oidn_network::execute` takes only `albedo` today.
+
 **Settings are one flat struct of knobs named for what they do.**
 Each field in `sr::denoise_settings` says which members read it, and a member ignores the rest, so switching members keeps every knob that still means something.
 A member's own options — the full vendor surface — live on the member, never in the shared struct.
@@ -231,7 +237,8 @@ The denoiser attaches to it in two halves, and both are built:
 - **Moving camera: a temporal member on fresh samples.**
   While the mean is young, the tracer also writes the frame's own samples and motion vectors, and a temporal member denoises those with its history.
   Once the mean holds enough frames — a per-layer threshold — the caller switches to the spatial half.
-  The switch is a hard cut today; running both for a few frames and crossfading is the planned refinement.
+  The switch is crossfaded rather than cut, because the two produce visibly different images of the same estimate and a jump in an image that is otherwise only getting quieter reads as a glitch.
+  Both members run for the fade's length and `sr::mix_routine` blends one into the other, which is what the fade costs.
   The history survives the still period, since the camera it was taken from is the one it is now leaving.
   So the temporal member keeps a history of its own, apart from the spatial one's, or each would drop the other's on every switch.
 

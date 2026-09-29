@@ -374,6 +374,88 @@ ASYNC_INVOCABLE_TEST("sr - atrous leaves a deep mean almost alone",
     CHECK(moved < 0.2f * rmse_against_clean(noisy));
 }
 
+namespace
+{
+/// A checker of 4-pixel cells, dark and light, as a reflectance.
+[[nodiscard]] f32 checker_value(int x, int y)
+{
+    return ((x / 4 + y / 4) % 2 == 0) ? 0.2f : 0.8f;
+}
+
+/// The mean of the light cells minus the mean of the dark ones, in the red channel.
+[[nodiscard]] f32 checker_contrast(cc::span<tg::vec4f const> pixels)
+{
+    auto light = 0.0f;
+    auto dark = 0.0f;
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+        {
+            if (checker_value(x, y) > 0.5f)
+                light += pixels[y * k_size + x][0];
+            else
+                dark += pixels[y * k_size + x][0];
+        }
+    auto const half = f32(k_size * k_size / 2);
+    return (light - dark) / half;
+}
+} // namespace
+
+// A textured metal: its diffuse albedo is zero and its colour is all in the specular albedo.
+// à-trous filters unsplit radiance, so it must demodulate by the sum of the two; by the diffuse half alone the round trip
+// is a constant scale, and the checker is filtered as noise.
+ASYNC_INVOCABLE_TEST("sr - atrous demodulates by the specular albedo too",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
+    co_await prewarm(ctx);
+
+    // Lit flat at 1, so the radiance is the reflectance.
+    auto checker = cc::vector<tg::vec4f>();
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+        {
+            auto const v = checker_value(x, y);
+            checker.push_back(tg::vec4f(v, v, v, 1));
+        }
+    auto const black = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(0, 0, 0, 1));
+
+    auto const color_tex = make_image(ctx);
+    auto const albedo_tex = make_image(ctx);
+    auto const specular_tex = make_image(ctx);
+    auto const output_tex = make_image(ctx);
+
+    auto cmd = ctx.create_command_list();
+    upload(*cmd, color_tex, checker);
+    upload(*cmd, albedo_tex, black);
+    upload(*cmd, specular_tex, checker);
+
+    // One sample: the edge-stop is at its widest, and a deep sample count would keep the checker whatever the guides.
+    auto history = sr::denoise_history();
+    auto const outcome
+        = sr::denoise_routine::execute(*cmd,
+                                       {
+                                           .color = color_tex,
+                                           .guides = {.albedo = albedo_tex, .specular_albedo = specular_tex},
+                                           .output = output_tex,
+                                           .sample_count = 1,
+                                       },
+                                       history, atrous_settings);
+    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output_tex.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+    auto const pixels = co_await readback.data();
+    REQUIRE(outcome.status == sr::denoise_status::denoised);
+
+    auto output = cc::vector<tg::vec4f>();
+    for (auto i = isize(0); i < pixels.size(); ++i)
+        output.push_back(pixels[i]);
+    CHECK(checker_contrast(output) > 0.95f * checker_contrast(checker));
+}
+
 ASYNC_INVOCABLE_TEST("sr - denoise history restarts on first use and after a reset",
                      (sg::context_handle const& ctx_h),
                      exclusive("sg-reload-generation"))

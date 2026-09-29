@@ -4,6 +4,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/resource/texture.hh>
+#include <shaped-rendering/denoise.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -39,6 +40,17 @@ struct temporal_slot
     u64 declared_hash = 0;
 
     u32 accum_frame = 0;
+
+    /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
+    ///
+    /// Here rather than on a routine because a routine cannot know which layer a call belongs to, and here rather than
+    /// beside the view because it lives and dies with the image it produces.
+    sr::denoise_history denoise;
+
+    /// The camera this slot's layer was last traced from, held only by a `temporal_id::motion_guide` slot.
+    /// The next frame's motion vectors reproject into it.
+    camera_gpu last_camera = {};
+    bool has_last_camera = false;
 };
 
 /// Everything a view keeps across frames, keyed by its view_id — held by `sv::view_store`.
@@ -87,6 +99,12 @@ struct view_state
     /// camera for one frame every time the answer changes.
     bool camera_owned_this_frame = false;
     bool camera_owned_last_frame = false;
+
+    /// Whether the caller declared a camera cut that no frame has traced yet.
+    ///
+    /// Sticky rather than per-frame: a throttled view may be several frames from its next trace, and dropping the
+    /// request in between would leave the very history the cut exists to throw away.
+    bool camera_cut_pending = false;
 
     /// Whether the caller offered this view for dragging, re-asserted every frame like `camera_owned_this_frame`.
     ///

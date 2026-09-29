@@ -46,7 +46,7 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
     auto declined = false;
 
     // Allocate (or resize) every texture the plan names, and touch every view it reaches.
-    auto const res = view_renderer::resolve(cmd, plan, store);
+    auto res = view_renderer::resolve(cmd, plan, store);
     auto const textures = res.textures();
 
     // Every trace first.

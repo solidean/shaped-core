@@ -61,7 +61,10 @@ enum class sr::render_scale_preset : sg::u8
 /// One guide buffer a member may read beside the noisy color.
 enum class sr::denoise_guide : sg::u8
 {
-    albedo,          ///< diffuse reflectance at the primary hit
+    /// Diffuse reflectance at the primary hit, so zero on a metal.
+    /// A member reading split radiance reads it and `specular_albedo` separately; one reading unsplit radiance
+    /// demodulates by their sum.
+    albedo,
     specular_albedo, ///< specular reflectance at the primary hit
     normal,          ///< world-space shading normal at the primary hit, in rgb
     roughness,       ///< perceptual roughness at the primary hit, in r
@@ -225,6 +228,9 @@ public:
     /// Makes the next call start from no history, as on a camera cut.
     /// The textures are kept and overwritten, since a cut does not change their size.
     void reset() { _reset_requested = true; }
+
+    /// Whether a `reset` is waiting for the next call to consume it.
+    [[nodiscard]] bool is_reset_pending() const { return _reset_requested; }
 
     /// The member that built what this holds, or `none` while empty.
     [[nodiscard]] denoise_method method() const { return _method; }

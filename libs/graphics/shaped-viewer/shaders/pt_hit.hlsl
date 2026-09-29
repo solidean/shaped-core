@@ -12,11 +12,16 @@ void PtMiss(inout PtPayload payload)
     // Write every field so the caller can read them all unconditionally; hit_t < 0 signals the escape.
     // The environment radiance along the escaped direction rides back in `emission` — the raygen adds
     // `throughput * emission` on escape, so the SH probe lights the scene exactly like a distant emitter.
-    payload.direct = float3(0, 0, 0);
+    payload.direct_diffuse = float3(0, 0, 0);
+    payload.direct_specular = float3(0, 0, 0);
     payload.emission = background_radiance(pt_bindings::background.sh, normalize(WorldRayDirection()));
     payload.throughput = float3(0, 0, 0);
     payload.direction = float3(0, 0, 0);
     payload.normal = float3(0, 0, 0);
+    payload.albedo = float3(0, 0, 0);
+    payload.specular_albedo = float3(0, 0, 0);
+    payload.roughness = 0.0;
+    payload.lobe = sv::bsdf_lobe_diffuse;
     payload.bsdf_pdf = 0.0;
     payload.hit_t = -1.0;
 }

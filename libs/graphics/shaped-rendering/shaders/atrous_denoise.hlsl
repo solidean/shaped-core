@@ -20,6 +20,7 @@ static const uint k_has_normal = 1u << 1;
 static const uint k_has_depth = 1u << 2;
 static const uint k_demodulate_in = 1u << 3; // this pass reads raw colour and divides the albedo out
 static const uint k_remodulate_out = 1u << 4; // this pass multiplies the albedo back in before writing
+static const uint k_has_specular_albedo = 1u << 5;
 
 // A zero albedo would make demodulation divide by zero, and clamping both directions by the same floor keeps the
 // round trip exact.
@@ -43,6 +44,7 @@ namespace atrous_bindings
 {
     Texture2D<float4> gSource;
     Texture2D<float4> gAlbedo;
+    Texture2D<float4> gSpecularAlbedo;
     Texture2D<float4> gNormal;
     Texture2D<float4> gDepth;
     RWTexture2D<float4> gTarget;
@@ -55,9 +57,13 @@ float luminance(float3 c)
     return dot(c, float3(0.2126, 0.7152, 0.0722));
 }
 
+// The surface's total reflectance: this filters unsplit radiance, so a metal's colour is in the specular half.
 float3 albedo_at(int2 p)
 {
-    return max(gAlbedo.Load(int3(p, 0)).rgb, k_albedo_floor);
+    float3 a = gAlbedo.Load(int3(p, 0)).rgb;
+    if ((gConstants.flags & k_has_specular_albedo) != 0)
+        a += gSpecularAlbedo.Load(int3(p, 0)).rgb;
+    return max(a, k_albedo_floor);
 }
 
 // The source's colour at `p`, in the space this pass filters in: divided by the albedo on the first pass when asked.
