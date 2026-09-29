@@ -86,15 +86,10 @@ public:
 
     [[nodiscard]] metal_accel_storage const& storage() const { return _storage; }
 
-    /// Each instance's `hit_group_offset`, a `u32` by the instance's index, which a ray-tracing kernel reads to find a
-    /// closest hit's record: see `k_hit_group_offsets_buffer_index`.
-    [[nodiscard]] sg::raw_buffer_handle const& hit_group_offsets() const { return _hit_group_offsets; }
-
 private:
     void on_expired() const override { _storage.release(_finalizers); }
 
     metal_accel_storage _storage;
-    sg::raw_buffer_handle _hit_group_offsets;
 };
 
 /// Metal top-level acceleration structure, the same shape as metal_blas.
@@ -126,8 +121,13 @@ public:
 
     [[nodiscard]] metal_accel_storage const& storage() const { return _storage; }
 
+    /// Each instance's `hit_group_offset`, a `u32` by the instance's index, which a ray-tracing kernel reads to find a
+    /// closest hit's record: see `k_hit_group_offsets_buffer_index`.
+    [[nodiscard]] sg::raw_buffer_handle const& hit_group_offsets() const { return _hit_group_offsets; }
+
 private:
     void on_expired() const override { _storage.release(_finalizers); }
 
     metal_accel_storage _storage;
+    sg::raw_buffer_handle _hit_group_offsets;
 };

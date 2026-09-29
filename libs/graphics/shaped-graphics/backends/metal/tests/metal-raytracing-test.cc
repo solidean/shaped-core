@@ -153,6 +153,46 @@ ASYNC_TEST("sg metal - a TLAS builds over an instance and keeps its BLAS alive")
     CHECK(mtl_tlas.storage().accel() != nullptr);
 }
 
+ASYNC_TEST("sg metal - a TLAS uploads each instance's hit-group offset for the kernel to read")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    auto const vertices = make_vertex_buffer(ctx);
+
+    auto cmd = ctx->create_command_list();
+    auto const geometry = sg::blas_triangles{.vertices = vertices, .vertex_count = 3};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&geometry, 1));
+    REQUIRE(blas != nullptr);
+
+    sg::tlas_instance const instances[3] = {
+        {.blas = blas, .hit_group_offset = 0},
+        {.blas = blas, .hit_group_offset = 2},
+        {.blas = blas, .hit_group_offset = 4},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(instances));
+    REQUIRE(tlas != nullptr);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // The intersection result carries no record index, so this buffer is all a kernel has to find a closest hit.
+    auto const& offsets = static_cast<mtl::metal_tlas const&>(*tlas).hit_group_offsets();
+    REQUIRE(offsets != nullptr);
+    REQUIRE(offsets->size_in_bytes() == 3 * isize(sizeof(u32)));
+
+    auto read = ctx->create_command_list();
+    auto future = read->download.bytes_from_buffer(offsets, 0, offsets->size_in_bytes());
+    ctx->submit_command_list(cc::move(read));
+    co_await ctx->idle_completion();
+
+    auto const bytes = future.try_get_bytes();
+    REQUIRE(bytes.has_value());
+    auto const* const words = reinterpret_cast<u32 const*>(bytes.value().data());
+    CHECK(words[0] == 0u);
+    CHECK(words[1] == 2u);
+    CHECK(words[2] == 4u);
+}
+
 ASYNC_TEST("sg metal - a binding group encodes a tlas as a resource id")
 {
     auto const ctx = mtl::test::make_context();
