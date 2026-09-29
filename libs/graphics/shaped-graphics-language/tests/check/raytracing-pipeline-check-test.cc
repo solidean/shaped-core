@@ -77,6 +77,35 @@ TEST("sgl check - a trace graph with a cycle has no depth")
              "again\n");
 }
 
+TEST("sgl check - a cycle no trace of the raygen reaches is still a cycle")
+{
+    // the raygen traces `surface` alone, and only a host's closest hit could trace `occlusion` into the loop
+    auto const looping = cc::string_view("@closest_hit fun again(h: triangle_hit, s: mut shadow){frame}:\n"
+                                         "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3("
+                                         "0.0, 1.0, 0.0), t_min = 0.0, t_max = 1.0), path_rays.occlusion, mut s)\n"
+                                         "hit_group looping for path_rays:\n    occlusion = (closest_hit = again)\n");
+    CHECK(reports(cc::string(looping) + "@raytracing pipeline path:\n" + misses
+                  + "    hit_groups = (looping, .host)\n    max_recursion_depth = 2\n")
+          == "recursive-trace user:[pipeline path:] a trace of path_rays.occlusion reaches a shader that traces it "
+             "again\n");
+}
+
+TEST("sgl check - a pipeline's shaders trace ray types of its own set alone")
+{
+    // a trace's contribution, multiplier and miss are positions in one set, and mean nothing in another
+    auto const second = cc::string_view("rays second:\n    only: shadow\n"
+                                        "@closest_hit fun stray(h: triangle_hit, p: mut radiance){frame}:\n"
+                                        "    let mut s = shadow(false)\n"
+                                        "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3("
+                                        "0.0, 1.0, 0.0), t_min = 0.0, t_max = 1.0), second.only, mut s)\n"
+                                        "hit_group astray for path_rays:\n    surface = (closest_hit = stray)\n");
+    CHECK(reports(cc::string(second) + "@raytracing pipeline path:\n" + misses + "    hit_groups = (astray)\n")
+          == "invalid-pipeline user:[pipeline path:] stray traces second.only, and this pipeline's rays are "
+             "path_rays\n");
+    // a group no pipeline lists traces what it likes
+    CHECK(reports(cc::string(second) + "@raytracing pipeline path:\n" + misses + "    hit_groups = (textured)\n") == "");
+}
+
 TEST("sgl check - a trace hands over its ray type's payload as a place")
 {
     auto const trace_with = [](cc::string_view payload)

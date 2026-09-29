@@ -811,11 +811,12 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   `rays` names its ray set and `raygen` its `@raygen` entry point, and it has both.
   `miss.<ray>` names the `@miss` of a ray type of the set, which takes that ray type's payload; a ray type may have none, and none has two.
   `hit_groups` is a hit group, `.host`, or a round list of them, each a group for the pipeline's ray set, with `.host` last.
+  Its raygen, its misses and the closest hits of its listed groups trace ray types of its set alone, since a trace's contribution, multiplier and miss are positions in that set.
   `max_recursion_depth` is an `int` literal from 1 to 31, which a pipeline with `.host` declares and any other does not.
   Every shader it names lists the same binding at every position its lists share, `@inline` bindings left out, and they list one `@inline` binding at most.
   Any other setting, and breaking any of these, is `invalid-pipeline`.
 * **CHK-332** A pipeline's **trace graph** has an edge from each ray type to every ray type its miss, or its closest hit in a listed group, traces ([why](why/checking.md#chk-332)).
-  A cycle in it is `recursive-trace`, and the pipeline fails.
+  A cycle in it is `recursive-trace`, and the pipeline fails, whether or not the raygen reaches it: a host's closest hit may trace into it.
   Its depth is the longest chain from a ray type the raygen traces, and at least 1.
   Without `.host`, the depth is the pipeline's `max_recursion_depth`; with it, a depth past the declared one is `invalid-pipeline`.
 

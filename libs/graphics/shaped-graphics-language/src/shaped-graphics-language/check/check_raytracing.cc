@@ -700,7 +700,38 @@ void checker::judge_trace_graphs()
     {
         if (pipeline.kind != pipeline_kind::raytracing)
             continue;
+        auto const file = out.at(pipeline.symbol).file;
+        auto const where = span_of(file, out.at(pipeline.symbol).declaration);
         auto const count = out.at(out.at(out.at(pipeline.ray_set).type).members).size();
+        // CHK-331: a trace's contribution, multiplier and miss are positions in the pipeline's own set, so a trace of
+        // another set's ray type would run against this set's records with the wrong payload
+        auto is_foreign = false;
+        auto const judge_sets = [&](symbol_id entry)
+        {
+            if (!is_valid(entry))
+                return;
+            for (auto const& t : traced_by(entry))
+                if (t.set != pipeline.ray_set)
+                {
+                    report(diagnostic_kind::invalid_pipeline, file, where,
+                           cc::format("{} traces {}.{}, and this pipeline's rays are {}", out.at(entry).name,
+                                      out.at(t.set).name, out.at(out.at(out.at(t.set).type).members)[t.ray].name,
+                                      out.at(pipeline.ray_set).name));
+                    is_foreign = true;
+                }
+        };
+        judge_sets(pipeline.raygen);
+        for (auto const miss : out.at(pipeline.misses))
+            judge_sets(miss);
+        for (auto const group : out.at(pipeline.hit_groups))
+            for (auto r = isize(0); r < count; ++r)
+                judge_sets(out.at(out.pipelines[out.at(group).info].records)[r * 2]);
+        if (is_foreign)
+        {
+            out.symbols[index_of(pipeline.symbol)].state = symbol_state::failed;
+            continue;
+        }
+
         // the ray types a trace of each ray type reaches: its miss, and its closest hit in every listed group
         auto next = cc::vector<cc::vector<i32>>::create_filled(count, {});
         auto const add = [&](isize from, symbol_id entry)
@@ -708,7 +739,7 @@ void checker::judge_trace_graphs()
             if (!is_valid(entry))
                 return;
             for (auto const& t : traced_by(entry))
-                if (t.set == pipeline.ray_set && !cc::sequence{next[from]}.any([&](i32 r) { return r == t.ray; }))
+                if (!cc::sequence{next[from]}.any([&](i32 r) { return r == t.ray; }))
                     next[from].push_back(t.ray);
         };
         for (auto r = isize(0); r < count; ++r)
@@ -736,8 +767,7 @@ void checker::judge_trace_graphs()
             {
                 is_cyclic = true;
                 auto const rays = out.at(out.at(out.at(pipeline.ray_set).type).members);
-                report(diagnostic_kind::recursive_trace, out.at(pipeline.symbol).file,
-                       span_of(out.at(pipeline.symbol).file, out.at(pipeline.symbol).declaration),
+                report(diagnostic_kind::recursive_trace, file, where,
                        cc::format("a trace of {}.{} reaches a shader that traces it again",
                                   out.at(pipeline.ray_set).name, rays[r].name));
                 return;
@@ -750,23 +780,22 @@ void checker::judge_trace_graphs()
             }
             marks[r] = mark::done;
         };
-        auto depth = 0;
-        for (auto const& t : traced_by(pipeline.raygen))
-            if (t.set == pipeline.ray_set)
-            {
-                visit(visit, t.ray);
-                depth = cc::max(depth, longest[t.ray]);
-            }
+        // from every ray type, not only the raygen's: a host's closest hit may trace into a cycle no listed shader
+        // reaches, and the declared depth would not bound it
+        for (auto r = i32(0); r < i32(count); ++r)
+            visit(visit, r);
         if (is_cyclic)
         {
             out.symbols[index_of(pipeline.symbol)].state = symbol_state::failed;
             continue;
         }
+        auto depth = 0;
+        for (auto const& t : traced_by(pipeline.raygen))
+            depth = cc::max(depth, longest[t.ray]);
         if (!pipeline.has_host_hit_groups)
             pipeline.max_recursion_depth = cc::max(depth, 1);
         else if (depth > pipeline.max_recursion_depth)
-            report(diagnostic_kind::invalid_pipeline, out.at(pipeline.symbol).file,
-                   span_of(out.at(pipeline.symbol).file, out.at(pipeline.symbol).declaration),
+            report(diagnostic_kind::invalid_pipeline, file, where,
                    cc::format("its listed shaders trace {} deep, past its max_recursion_depth of {}", depth,
                               pipeline.max_recursion_depth));
     }

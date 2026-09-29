@@ -293,11 +293,13 @@ The payload size is the largest payload of its set, and the attribute size the l
 
 * **One binding layout serves every shader of the pipeline**, so their binding lists agree by position, as a raster pipeline's stages do, and they list one `@inline` binding at most.
 * **Each listed group is for the pipeline's set.**
+* **Every trace its shaders make is of a ray type of its set**, since a trace's contribution, multiplier and miss are positions in that set.
 
 ### The depth is the trace graph's
 
 **Each ray type's trace reaches the ray types its miss and its closest hits trace, and that graph must be acyclic** (CHK-332).
 A trace that reaches a shader tracing it again is `recursive-trace`, since no depth bounds it.
+That holds of a cycle the raygen never reaches too, since a host's closest hit may trace into it.
 The pipeline's depth is the longest chain the raygen starts, and at least 1.
 In the example the raygen traces `surface`, whose closest hit traces `occlusion`: depth 2.
 
