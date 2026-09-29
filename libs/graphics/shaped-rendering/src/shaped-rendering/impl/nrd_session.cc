@@ -359,11 +359,11 @@ bool nrd_session::create(sg::context& ctx, nrd_denoiser denoiser, tg::vec2i exte
             }
 
             auto const divisor = cc::max(u16(1), pool[i].downsampleFactor);
-            out.push_back(ctx.persistent.create_texture_2d(
-                {.format = format.value(),
-                 .width = cc::max(1, extent[0] / divisor),
-                 .height = cc::max(1, extent[1] / divisor),
-                 .usage = sg::texture_usage::texture | sg::texture_usage::image}));
+            out.push_back(
+                ctx.persistent.create_texture_2d({.format = format.value(),
+                                                  .width = cc::max(1, extent[0] / divisor),
+                                                  .height = cc::max(1, extent[1] / divisor),
+                                                  .usage = sg::texture_usage::texture | sg::texture_usage::image}));
         }
         return true;
     };

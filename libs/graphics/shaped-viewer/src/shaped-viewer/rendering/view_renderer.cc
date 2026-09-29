@@ -611,8 +611,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // would let it run against a hit distance that describes something else.
     // Gated on `writes_temporal` like the rest of the temporal signals, so a frame no temporal member will read does
     // not pay to split its radiance.
-    auto const has_split = writes_temporal && ds.frame_diffuse != nullptr && ds.frame_specular != nullptr
-                        && ds.hit_distance != nullptr;
+    auto const has_split
+        = writes_temporal && ds.frame_diffuse != nullptr && ds.frame_specular != nullptr && ds.hit_distance != nullptr;
 
     if (has_temporal)
     {

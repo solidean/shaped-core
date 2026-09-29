@@ -46,11 +46,7 @@ namespace
 /// `oidn` is in neither: at roughly 0.2 s per megapixel it is a reference-quality member, not one a frame loop can
 /// afford, so a caller has to name it.
 constexpr denoise_method temporal_preference[] = {
-    denoise_method::dlss_rr,
-    denoise_method::fsr_rr,
-    denoise_method::nrd,
-    denoise_method::svgf,
-    denoise_method::atrous,
+    denoise_method::dlss_rr, denoise_method::fsr_rr, denoise_method::nrd, denoise_method::svgf, denoise_method::atrous,
 };
 constexpr denoise_method spatial_preference[] = {denoise_method::atrous};
 
