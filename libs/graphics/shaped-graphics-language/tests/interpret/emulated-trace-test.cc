@@ -135,6 +135,8 @@ struct scenes
     u32 boxed = 0;
     u32 mixed = 0;
     u32 ball = 0;
+    u32 flipped = 0;
+    u32 flipped_mixed = 0;
 };
 
 // One box around the unit sphere at (3, 1, 1), which the tests' intersection reports.
@@ -178,6 +180,11 @@ scenes build_scenes()
     // the ball alone
     instance const ball_only[] = {{.blas = ball, .id = 11}};
     s.ball = s.pool.tlas(ball_only, k_ball_box, 2);
+
+    // the pair with cull mode 1, front, which flips its winding: each native backend sets its front-counterclockwise flag
+    instance const flipped[] = {{.blas = opaque, .id = 17, .flags = 1u << 2}};
+    s.flipped = s.pool.tlas(flipped, k_pair_box);
+    s.flipped_mixed = s.pool.tlas(flipped, k_pair_box, 3);
     return s;
 }
 
@@ -195,6 +202,8 @@ sgl::check::driver_bindings bindings_of(scenes const& s)
                 {.name = "broken", .acceleration_root = 100000},
                 {.name = "mixed", .acceleration_root = s.mixed},
                 {.name = "ball", .acceleration_root = s.ball},
+                {.name = "flipped", .acceleration_root = s.flipped},
+                {.name = "flipped_mixed", .acceleration_root = s.flipped_mixed},
             },
         }},
         .acceleration_pool = bytes_of(s.pool.words),
@@ -211,6 +220,8 @@ constexpr cc::string_view k_declarations = "require ray_query\n"
                                            "    broken: acceleration_structure[.triangles]\n"
                                            "    mixed: acceleration_structure[.mixed]\n"
                                            "    ball: acceleration_structure[.procedural]\n"
+                                           "    flipped: acceleration_structure[.triangles]\n"
+                                           "    flipped_mixed: acceleration_structure[.mixed]\n"
                                            "fun is_near(a: float, b: float) -> bool => abs(a - b) < 1.0e-5\n"
                                            "fun along_z(x: float, y: float) -> ray => ray(origin = pos3(x, y, -1.0), "
                                            "direction = vec3(0.0, 0.0, 1.0))\n";
@@ -291,6 +302,20 @@ TEST("sgl emulated trace - the any-hit decision cuts a non-opaque triangle out, 
                       // and a ray forced opaque decides nothing, even through the non-opaque instance
                       "    scenes.cutout.trace(along_z(0.25, 0.25), cut_near, flags = "
                       "ray_flags.force_opaque).primitive_index == 1\n")
+          == "");
+}
+
+TEST("sgl emulated trace - an instance culling front faces flips its winding")
+{
+    // the pair faces the ray, so under cull mode front its triangles are back faces: culling those drops both
+    CHECK(failures_of("test {scenes}:\n"
+                      "    let h = scenes.flipped.trace(along_z(0.25, 0.25))\n"
+                      "    h.is_hit and h.primitive_index == 1 and h.instance_id == 17\n"
+                      "    not h.is_front_face\n"
+                      "    not scenes.flipped.trace(along_z(0.25, 0.25), flags = ray_flags.cull_back_facing).is_hit\n"
+                      "    scenes.flipped.trace(along_z(0.25, 0.25), flags = ray_flags.cull_front_facing).is_hit\n"
+                      // the default mode keeps the winding: the same ray culls the other way round there
+                      "    not scenes.pair.trace(along_z(0.25, 0.25), flags = ray_flags.cull_front_facing).is_hit\n")
           == "");
 }
 
@@ -377,6 +402,19 @@ TEST("sgl emulated trace - a mixed trace hits a triangle, and gives it as a tria
                             "    let t = h.triangle()\n"
                             "    t.is_hit and is_near(t.t, 3.0) and t.primitive_index == 1\n"
                             "    not h.procedural().is_hit\n")
+          == "");
+}
+
+TEST("sgl emulated trace - a mixed trace flips the winding of an instance culling front faces")
+{
+    CHECK(mixed_failures_of("test {scenes}:\n"
+                            "    let h = scenes.flipped_mixed.trace(along_z(0.25, 0.25), ball_report)\n"
+                            "    h.kind == hit_kind.triangle and h.instance_id == 17\n"
+                            "    not h.is_front_face\n"
+                            "    not scenes.flipped_mixed.trace(along_z(0.25, 0.25), ball_report, flags = "
+                            "ray_flags.cull_back_facing).is_hit\n"
+                            "    scenes.flipped_mixed.trace(along_z(0.25, 0.25), ball_report, flags = "
+                            "ray_flags.cull_front_facing).is_hit\n")
           == "");
 }
 

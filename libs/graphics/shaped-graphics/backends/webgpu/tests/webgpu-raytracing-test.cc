@@ -462,7 +462,8 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a grown pool keeps every region, the ones an o
     auto const small_blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&small, 1));
     auto const before = ctx._acceleration.generation();
 
-    // More triangles than the pool has units at all, so building them must grow it while the small one is unsubmitted.
+    // A region of more units than the whole pool holds, so building it must grow the pool while the small one is
+    // unsubmitted.
     auto const big_count = int(ctx._acceleration.capacity_units() / 3) + 100;
     auto big_vertices = cc::vector<float>();
     for (auto t = 0; t < big_count; ++t)
@@ -473,7 +474,11 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a grown pool keeps every region, the ones an o
     CHECK(ctx._acceleration.generation() > before);
 
     // The TLAS reads the small BLAS's root box, which this list wrote into the outgrown buffer.
-    sg::tlas_instance const instances[] = {{.blas = small_blas}, {.blas = big_blas}};
+    // The small instance stands clear of the big one's box, so a root box lost in the growth would show in the TLAS's.
+    sg::tlas_instance const instances[] = {
+        {.blas = small_blas, .transform = {1, 0, 0, 0, 0, 1, 0, 10, 0, 0, 1, 0}},
+        {.blas = big_blas},
+    };
     auto const tlas = cmd->raytracing.build_tlas(instances);
     auto const future = static_cast<webgpu::webgpu_command_list&>(*cmd).download_acceleration_pool();
     ctx.submit_command_list(cc::move(cmd));
@@ -489,6 +494,33 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a grown pool keeps every region, the ones an o
 
     auto const root = pool.node_box(static_cast<webgpu::webgpu_tlas const&>(*tlas).unit(), 0);
     CHECK(contains(root, box{{0, 0, 0}, {float(big_count), 1, 0}}));
+    CHECK(contains(root, box{{0, 10, 0}, {1, 11, 0}}));
+}
+
+ASYNC_INVOCABLE_TEST("sg webgpu - a build input past the storage offset alignment is read from where it starts",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    // The triangle starts at byte 300: the binding starts at 256, and the kernel reads 44 bytes into it.
+    auto vertices = cc::vector<float>::create_filled(75, 99.0f);
+    for (auto const f : {2.0f, 3.0f, 4.0f, 5.0f, 3.0f, 4.0f, 2.0f, 6.0f, 4.0f})
+        vertices.push_back(f);
+    sg::blas_triangles const tri
+        = {.vertices = build_input(ctx, vertices), .vertex_count = 3, .vertex_offset_in_bytes = 300};
+
+    auto cmd = ctx.create_command_list();
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
+    auto const future = static_cast<webgpu::webgpu_command_list&>(*cmd).download_acceleration_pool();
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await future.bytes();
+    auto const pool = pool_reader{.bytes = bytes.span()};
+    auto const region = static_cast<webgpu::webgpu_blas const&>(*blas).unit();
+    auto const first = pool.word(region, 1);
+    CHECK(pool.word(region, 2) == 1u);
+    CHECK((pool.xyz(first).x == 2.0f && pool.xyz(first).y == 3.0f && pool.xyz(first).z == 4.0f));
+    CHECK((pool.xyz(first + 1).x == 5.0f && pool.xyz(first + 1).y == 3.0f));
+    CHECK((pool.xyz(first + 2).x == 2.0f && pool.xyz(first + 2).y == 6.0f));
 }
 
 ASYNC_INVOCABLE_TEST("sg webgpu - a dispatch reads its acceleration roots from group 3, in binding order",
