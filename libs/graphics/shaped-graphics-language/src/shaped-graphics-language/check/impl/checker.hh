@@ -298,6 +298,8 @@ struct checker
     cc::map<cc::string, cc::vector<symbol_id>> names;
     /// `@operator` functions by operator spelling.
     cc::map<cc::string, cc::vector<symbol_id>> operators;
+    /// The prelude's alone, which is all a prelude file sees (CHK-190).
+    cc::map<cc::string, cc::vector<symbol_id>> prelude_operators;
     /// The functions of each struct's and enum's type scope, keyed by the index of the type's symbol, then by name.
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     cc::map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
@@ -352,6 +354,11 @@ struct checker
     {
         return is_prelude_file(file) ? prelude_names : names;
     }
+    /// The `@operator` functions a use of an operator in `file` may choose from, by spelling.
+    [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& operators_seen_from(i32 file) const
+    {
+        return is_prelude_file(file) ? prelude_operators : operators;
+    }
     [[nodiscard]] source_span span_of(i32 file, form_id form) const;
     [[nodiscard]] source_span span_of(i32 file, ast::expr_id expr) const;
     [[nodiscard]] source_span span_of(i32 file, ast::decl_id decl) const;
@@ -383,7 +390,10 @@ struct checker
 
     // ---- declarations (check.cc, check_decl.cc) ---------------------------------------------------------------------
 
-    void run();
+    /// The whole pass, or what remains of it behind `from`, the state a checked prelude left.
+    /// Every step past the declarations runs only over what `from` does not hold, or is a whole-module step that reads
+    /// the prelude's part without changing it: so a program's check behind a checked prelude is the check of both.
+    void run(resume_point from = {});
     void declare_file(i32 file);
     void declare(i32 file, ast::decl_id decl);
     void add_symbol(symbol s, source_span name_where);
@@ -400,12 +410,13 @@ struct checker
     /// The kind of thing `name` is in the type scope of `owner`, from its block and what was added so far; empty for
     /// nothing, else "field", "case", "property" or "function".
     [[nodiscard]] cc::string_view member_kind_of(symbol_id owner, cc::string_view name) const;
-    /// Every `fun T.name`, into the type scope of `T`; run once every file is declared.
-    void attach_extensions();
-    /// Reports each integer literal beyond `int` that no conversion took to a type holding it (CHK-61).
-    void judge_wide_literals();
+    /// Every `fun T.name` from `pending_extensions[first]` on, into the type scope of `T`; run once every file is declared.
+    void attach_extensions(isize first);
+    /// Reports each integer literal from `wide_literals[first]` on that no conversion took to a type holding it (CHK-61).
+    void judge_wide_literals(isize first);
     /// Two functions of one overload set whose parameters agree in type, name and named-only mark (CHK-241).
-    void judge_redeclarations();
+    /// Only the sets that hold a symbol from `first` on, since the others were judged with the prelude.
+    void judge_redeclarations(isize first);
     /// The functions a call of `name` from `file` may choose from, where `first` is its first argument's type:
     /// the functions of that name visible there, and those of the type scope of `first` (CHK-247).
     [[nodiscard]] cc::vector<symbol_id> candidates_of(i32 file, cc::string_view name, type_id first) const;
@@ -417,9 +428,9 @@ struct checker
     {
         return is_prelude_file(file) ? is_prelude_file(out.at(from).file) : !is_internal(from);
     }
-    /// Gives every struct with a block its synthesized constructor, a function of the struct's name (CHK-239).
+    /// Gives every struct from symbol `first` on that has a block its synthesized constructor (CHK-239).
     /// Run once every file is declared, so the symbols declared before keep their ids.
-    void declare_constructors();
+    void declare_constructors(isize first);
 
     /// Compiles the symbol when nobody has, and reports a cycle when somebody is.
     /// The state it returns is `checked` or `failed`, or `in_compilation` for a cycle, which was reported at `where`.
@@ -833,8 +844,9 @@ struct checker
                      call_arguments const& arguments,
                      cc::span<i32 const> slots,
                      cc::span<type_id const> bindings = {});
-    /// The candidates of `spelling` that take exactly `types`, without a report; what the flat tree is written from.
-    [[nodiscard]] symbol_id find_operator(cc::string_view spelling, cc::span<type_id const> types) const;
+    /// The candidates of `spelling` seen from `file` that take exactly `types`, without a report.
+    /// It is what the flat tree is written from.
+    [[nodiscard]] symbol_id find_operator(i32 file, cc::string_view spelling, cc::span<type_id const> types) const;
     [[nodiscard]] call_arguments check_arguments(function_scope& scope,
                                                  ast::range_of<ast::argument> range,
                                                  bool is_constructor);

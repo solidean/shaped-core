@@ -98,7 +98,11 @@ inline checked_sources check_behind(cc::span<sgl::parsed_prelude_file const> sha
     auto prelude = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i + 1 < result.files.size(); ++i)
         prelude.push_back({.file = *result.files[i], .ast = *result.asts[i]});
-    result.module = sgl::check::check(prelude, {.file = *result.files.back(), .ast = *result.asts.back()});
+    auto const user = sgl::check::module_file{.file = *result.files.back(), .ast = *result.asts.back()};
+    // the library's prelude alone in front is what every compile continues from
+    auto const is_library = sources.size() == 1 && shared.data() == sgl::parsed_prelude().data()
+                         && shared.size() == sgl::parsed_prelude().size() && sgl::checked_prelude() != nullptr;
+    result.module = is_library ? sgl::check::check(*sgl::checked_prelude(), user) : sgl::check::check(prelude, user);
 
     result.user = *result.files.back();
     result.user_ast = *result.asts.back();

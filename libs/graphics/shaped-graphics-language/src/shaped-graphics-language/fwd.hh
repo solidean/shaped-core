@@ -317,6 +317,7 @@ struct related_note;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;
+struct checked_prelude;
 } // namespace sgl::check
 
 namespace sgl::test

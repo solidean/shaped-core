@@ -7,6 +7,7 @@
 #include <clean-core/string/uri.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
+#include <shaped-graphics-language/check/check.hh>
 
 cc::span<sgl::prelude_file const> sgl::prelude_files()
 {
@@ -34,6 +35,18 @@ cc::span<sgl::parsed_prelude_file const> sgl::parsed_prelude()
         return out;
     }();
     return parsed;
+}
+
+sgl::check::checked_prelude const* sgl::checked_prelude()
+{
+    static auto const checked = []
+    {
+        auto files = cc::vector<check::module_file>();
+        for (auto const& f : parsed_prelude())
+            files.push_back({.file = f.file, .ast = f.ast});
+        return check::check_prelude(files, builtins::default_registry());
+    }();
+    return checked.has_value() ? &checked.value() : nullptr;
 }
 
 namespace

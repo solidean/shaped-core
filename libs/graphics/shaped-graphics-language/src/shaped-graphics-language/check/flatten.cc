@@ -913,8 +913,8 @@ struct flattener
         if (is_hit < 0 || t < 0 || t_min == nullptr || t_current == nullptr || candidate_of == nullptr)
             return fail();
         type_id const floats[] = {c.prelude_type(builtins::k_float), c.prelude_type(builtins::k_float)};
-        auto const at_least = c.find_operator(">=", floats);
-        auto const at_most = c.find_operator("<=", floats);
+        auto const at_least = c.find_operator(file(), ">=", floats);
+        auto const at_most = c.find_operator(file(), "<=", floats);
         if (!is_valid(at_least) || !is_valid(at_most))
             return fail();
 
@@ -956,7 +956,7 @@ struct flattener
             auto const decision = add_expr(decision_type, id, flat_block{.label = decided.label, .body = decided.body});
             // `ignore` is the decision's case 1, which no report survives
             type_id const ints[] = {decision_type, decision_type};
-            auto const equals = c.find_operator("==", ints);
+            auto const equals = c.find_operator(file(), "==", ints);
             if (!is_valid(equals))
                 return fail();
             flat_expr_id const compared[] = {decision, add_expr(decision_type, id, flat_enum_value{.case_index = 1})};
@@ -993,7 +993,7 @@ struct flattener
         if (base != 0)
         {
             type_id const types[] = {int_type(), int_type()};
-            auto const plus = c.find_operator("+", types);
+            auto const plus = c.find_operator(file(), "+", types);
             if (!is_valid(plus))
                 return fail();
             flat_expr_id const operands[] = {index, add_expr(int_type(), id, flat_int_literal{.value = base})};
@@ -1499,7 +1499,7 @@ struct flattener
 
             type_id const types[] = {entry.at(left.first).type, entry.at(right.first).type};
             auto const spelling = c.text_of(file(), c.file_of(file()).at(operators[i]).where);
-            auto const callee = c.find_operator(spelling, types);
+            auto const callee = c.find_operator(file(), spelling, types);
             if (!is_valid(callee))
                 return fail();
             flat_expr_id const arguments[] = {left.first, right.first};
@@ -1578,7 +1578,7 @@ struct flattener
         if (!is_valid(compared))
             return symbol_id::none;
         type_id const both[] = {compared, compared};
-        return c.find_operator("==", both);
+        return c.find_operator(file(), "==", both);
     }
 
     /// The prelude's `bool`, even where the user file shadows the name.
@@ -1759,7 +1759,7 @@ struct flattener
             nodes[link_node].rhs = i32(nodes.size() - 1);
 
             type_id const types[] = {entry.at(left).type, entry.at(right).type};
-            auto const callee = c.find_operator(spelling, types);
+            auto const callee = c.find_operator(file(), spelling, types);
             if (!is_valid(callee))
             {
                 is_failed = true;
@@ -2141,7 +2141,7 @@ struct flattener
         if (op != "=")
         {
             type_id const types[] = {entry.at(place).type, entry.at(value).type};
-            auto const callee = c.find_operator(op.subview({.offset = 0, .size = op.size() - 1}), types);
+            auto const callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
             if (!is_valid(callee))
             {
                 is_failed = true;

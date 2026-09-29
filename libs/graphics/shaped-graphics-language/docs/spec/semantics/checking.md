@@ -33,6 +33,7 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-192** Where a call matches functions of both scopes, those of the program's file are its only matching candidates ([why](why/checking.md#chk-192)).
   It is applied before CHK-254 ranks them, so two matches in one scope are still ranked.
 * **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
+  An operator is looked up the same way: `a - b` in a prelude file chooses among the prelude's `@operator` functions alone.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
 * **CHK-14** A `type` alias is `unsupported-yet`, and it still owns its name, so a use of it is silent; a `const` is carried by CHK-219.

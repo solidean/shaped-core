@@ -66,6 +66,13 @@ It yields side tables over the untouched AST, which is what an editor asks about
 `check` takes the prelude's files and then the program's, so the program is the LAST file and never "file 1": behind the library's prelude it is file 2.
 A diagnostic, an origin and a side table all name a file that way, and `compile_to_text` is what turns a position back into `builtins.sgl`, `core.sgl` or the source's own name.
 
+**The library's prelude is checked once per process.**
+`sgl::checked_prelude()` is `check::check_prelude` over `parsed_prelude()`: the checker's whole state after the prelude, behind an empty program file.
+Every driver continues from a copy of it with `check::check(checked, program)`, which runs only what the program adds, so every id the program makes comes after the prelude's.
+A prelude that reports anything is never kept, and a custom prelude, or a source that stands in for a prelude file, takes the whole pass.
+It stays one pass because nothing the prelude checks depends on the program: a lookup from a prelude file, operators included, sees the prelude alone.
+`tests/check/checked-prelude-test.cc` compares the two paths over the corpus, the samples and sg's shaders.
+
 **The check pass is a tracer.**
 It carries what its samples need, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
 [semantics/checking.md](spec/semantics/checking.md) says what is carried.

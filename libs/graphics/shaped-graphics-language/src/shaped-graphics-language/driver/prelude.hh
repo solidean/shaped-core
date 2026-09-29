@@ -37,6 +37,11 @@ namespace sgl
 /// Immutable after the first call, so every thread reads the same files.
 [[nodiscard]] cc::span<parsed_prelude_file const> parsed_prelude();
 
+/// `parsed_prelude()` checked against `builtins::default_registry()`, once per process, which every compile behind it continues.
+/// Null where the prelude reports anything, and a compile then checks the prelude with its program to report it.
+/// Immutable after the first call, like `parsed_prelude()`.
+[[nodiscard]] check::checked_prelude const* checked_prelude();
+
 /// The position in `prelude_files()` of the file `path` is, -1 when it is none of them.
 /// Only the library's own prelude directory counts, as the build saw it: a user's `shaders/prelude/core.sgl` is -1.
 /// So `path` must be absolute, a path or a `file://` uri; either separator matches, and on Windows any case.

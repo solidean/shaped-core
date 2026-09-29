@@ -352,6 +352,7 @@ if(SC_BUILD_TESTS)
         tests/check/array-check-test.cc
         tests/check/primitive-stage-check-test.cc
         tests/check/prelude-profile-test.cc
+        tests/check/checked-prelude-test.cc
         tests/check/binding-check-test.cc
         tests/check/texture-check-test.cc
         tests/check/uniformity-check-test.cc

@@ -13,7 +13,7 @@
 #include <clean-core/string/print.hh>
 
 // Where a compile's time goes when the program is small and the prelude is not.
-// Every compile checks the whole prelude, so a program of a few lines costs what the prelude costs.
+// The prelude is checked once per process, before the rounds, so a round is the copy of its state and the program's check.
 // Manual, since it measures rather than asserts: run it on a debug preset, where the corpus tests feel it most.
 //
 //   uv run dev.py test "sgl profile" --manual --preset debug-linux-clang
@@ -39,6 +39,7 @@ TEST("sgl profile - checking a small program behind the prelude, sampled",
      nx::config::allow_logs(cc::rec::level::warning))
 {
     auto const rounds = 100;
+    REQUIRE(sgl::checked_prelude() != nullptr);
 
     cc::rec::recording captured;
     {
@@ -52,17 +53,30 @@ TEST("sgl profile - checking a small program behind the prelude, sampled",
                 auto const checked = sgl_test::check_sources(sgl_test::read_prelude(), small_program);
                 CHECK(checked.module.diagnostics.empty());
             }
+            // what every compile pays whatever its program: the copy of the prelude's state and the whole-module passes
+            for (auto i = 0; i < rounds; ++i)
+            {
+                CC_RECORD_SCOPE("check nothing behind the prelude");
+                auto const checked = sgl_test::check_sources(sgl_test::read_prelude(), "");
+                CHECK(checked.module.diagnostics.empty());
+            }
         }
         cc::rec::flush_blocking();
         cc::rec::unregister_listener(handle);
         captured = capture.take().spliced_samples();
     }
 
-    auto const checks = captured.scopes("check behind the prelude");
-    auto total = 0.0;
-    for (auto const& s : checks)
-        total += s.duration_secs();
-    cc::println("{} checks, {:.2f} ms each", checks.size(), checks.empty() ? 0.0 : total * 1000 / double(checks.size()));
+    auto const report = [&](cc::string_view scope, cc::string_view what)
+    {
+        auto const checks = captured.scopes(scope);
+        auto total = 0.0;
+        for (auto const& s : checks)
+            total += s.duration_secs();
+        cc::println("{} checks{}, {:.2f} ms each", checks.size(), what,
+                    checks.empty() ? 0.0 : total * 1000 / double(checks.size()));
+    };
+    report("check behind the prelude", "");
+    report("check nothing behind the prelude", " of an empty program");
 
     auto const hot = cc::rec::hot_functions(captured);
     if (hot.sample_count > 0)

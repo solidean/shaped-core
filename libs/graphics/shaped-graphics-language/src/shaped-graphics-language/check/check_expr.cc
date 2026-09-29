@@ -268,7 +268,7 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
         return to;
 
     // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
-    auto const* const candidates = operators.get_ptr("as");
+    auto const* const candidates = operators_seen_from(file).get_ptr("as");
     if (candidates != nullptr)
         for (auto const candidate : *candidates)
         {
@@ -904,7 +904,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2 && arguments.types[0] == void_type
             && arguments.types[1] == void_type)
             return type_of_builtin(builtins::k_bool, file, where);
-        auto const* const found = operators.get_ptr(spelling);
+        auto const* const found = operators_seen_from(file).get_ptr(spelling);
         auto const none = cc::span<symbol_id const>();
         return resolve_overload(scope, id, ast::expr_id::none,
                                 found != nullptr ? cc::span<symbol_id const>(*found) : none, arguments,
@@ -1869,10 +1869,11 @@ bound_arguments checker::bind_arguments(cc::span<parameter const> parameters, ca
     return result;
 }
 
-void checker::judge_wide_literals()
+void checker::judge_wide_literals(isize first)
 {
-    for (auto const& w : wide_literals)
+    for (auto i = first; i < wide_literals.size(); ++i)
     {
+        auto const w = wide_literals[i];
         auto const type = out.files[w.file].type_at(w.expr);
         if (!is_valid(type) || type == error_type || holds(number_of(w.file, w.expr), type))
             continue;
@@ -2039,9 +2040,9 @@ bool checker::is_out_of_the_running(i32 file, symbol_id candidate, call_argument
     return !match(file, candidate, arguments).has_value();
 }
 
-symbol_id checker::find_operator(cc::string_view spelling, cc::span<type_id const> types) const
+symbol_id checker::find_operator(i32 file, cc::string_view spelling, cc::span<type_id const> types) const
 {
-    auto const* const found = operators.get_ptr(spelling);
+    auto const* const found = operators_seen_from(file).get_ptr(spelling);
     if (found == nullptr)
         return symbol_id::none;
     auto result = symbol_id::none;
@@ -2076,7 +2077,7 @@ symbol_id checker::resolve_operator(i32 file,
 
     auto is_silent = false;
     auto matches = cc::vector<candidate_match>();
-    if (auto const* const found = operators.get_ptr(spelling))
+    if (auto const* const found = operators_seen_from(file).get_ptr(spelling))
         for (auto const candidate : *found)
         {
             if (is_out_of_the_running(file, candidate, arguments))

@@ -161,7 +161,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
     if (scrutinee != error_type && out.at(scrutinee).kind != type_kind::enumeration)
     {
         type_id const both[] = {scrutinee, scrutinee};
-        if (!is_valid(find_operator("==", both)))
+        if (!is_valid(find_operator(file, "==", both)))
         {
             report(diagnostic_kind::no_matching_overload, file, span_of(file, node.value),
                    cc::format("== is not declared for {}, so no arm can match it", out.name_of(scrutinee)));

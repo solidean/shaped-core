@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
+#include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 
 using namespace sgl;
@@ -24,6 +25,54 @@ checked_module sgl::check::check(cc::span<module_file const> prelude, module_fil
 checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user)
 {
     return check(prelude, user, builtins::default_registry());
+}
+
+sgl::check::checked_prelude::checked_prelude() = default;
+sgl::check::checked_prelude::checked_prelude(checked_prelude&&) noexcept = default;
+sgl::check::checked_prelude& sgl::check::checked_prelude::operator=(checked_prelude&&) noexcept = default;
+sgl::check::checked_prelude::~checked_prelude() = default;
+
+cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file const> prelude,
+                                                        builtins::registry const& builtins)
+{
+    // The program's file stands behind the prelude even when it is empty, since that is what makes a file the prelude's.
+    auto const empty_file = parse("");
+    auto const empty_ast = ast::build(empty_file);
+    auto result = checked_prelude();
+    result._files.push_back_range(prelude);
+    auto files = cc::vector<module_file>();
+    files.push_back_range(prelude);
+    files.push_back({.file = empty_file, .ast = empty_ast});
+
+    result._state = cc::make_unique<checker>(checker{.files = files, .builtins = builtins});
+    auto& c = *result._state;
+    c.out.builtins = &builtins;
+    c.run();
+    if (!c.out.diagnostics.empty())
+        return {};
+    // The empty file's tables are the program's to replace, and nothing may point into the empty file past here.
+    c.files = {};
+    c.out.files.remove_back();
+    c.file_features.remove_back();
+    result._resume = {
+        .files = i32(prelude.size()),
+        .symbols = c.out.symbols.size(),
+        .extensions = c.pending_extensions.size(),
+        .tests = c.out.tests.size(),
+        .wide_literals = c.wide_literals.size(),
+    };
+    return result;
+}
+
+checked_module sgl::check::check(checked_prelude const& prelude, module_file user)
+{
+    auto files = cc::vector<module_file>();
+    files.push_back_range(prelude._files);
+    files.push_back(user);
+    auto c = *prelude._state;
+    c.files = files;
+    c.run(prelude._resume);
+    return cc::move(c.out);
 }
 
 // ---- number literals ------------------------------------------------------------------------------------------------
@@ -293,11 +342,14 @@ void checker::set_target(i32 file, ast::expr_id expr, target where)
 
 // ---- the driver -----------------------------------------------------------------------------------------------------
 
-void checker::run()
+void checker::run(resume_point from)
 {
-    out.types.push_back({.kind = type_kind::error});
-    out.types.push_back({.kind = type_kind::void_});
-    for (auto file = i32(0); file < i32(files.size()); ++file)
+    if (from.files == 0)
+    {
+        out.types.push_back({.kind = type_kind::error});
+        out.types.push_back({.kind = type_kind::void_});
+    }
+    for (auto file = from.files; file < i32(files.size()); ++file)
     {
         auto const count = ast_of(file).exprs.size();
         out.files.push_back({
@@ -308,28 +360,28 @@ void checker::run()
         file_features.push_back({});
     }
 
-    for (auto file = i32(0); file < i32(files.size()); ++file)
+    for (auto file = from.files; file < i32(files.size()); ++file)
         declare_file(file);
-    declare_constructors();
+    declare_constructors(from.symbols);
     merge_scopes();
-    attach_extensions();
+    attach_extensions(from.extensions);
 
     // Source order is only the order of the first demand: whatever a symbol needs is compiled from inside it.
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].state == symbol_state::untouched)
             compile(symbol_id(i));
 
-    judge_redeclarations();
+    judge_redeclarations(from.symbols);
 
     // A default is checked where it is declared, once, and a call binds against the signature alone (CHK-243).
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_defaults(symbol_id(i));
 
     // A call needs a signature only, so each body is checked once, after every signature is known.
     // That is what lets a function call one declared below it.
     // The exception checked its body already: an arrow body without `-> T`, whose signature is not known before.
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_body(symbol_id(i));
 
@@ -338,24 +390,24 @@ void checker::run()
     add_unregistered_tests();
 
     // Last, since a test in a function body is found while that body is checked (CHK-224).
-    for (auto i = isize(0); i < out.tests.size(); ++i)
+    for (auto i = from.tests; i < out.tests.size(); ++i)
         check_test(i32(i));
 
-    judge_wide_literals();
+    judge_wide_literals(from.wide_literals);
     find_recursion();
 
     // Every binding and body is checked by now, so what each entry point needs and declares is known.
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             judge_entry_features(symbol_id(i));
 
     index_builtin_symbols();
     instantiate_generics();
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             flatten_entry_point(symbol_id(i));
     flatten_metal_traversals();
-    for (auto i = isize(0); i < out.tests.size(); ++i)
+    for (auto i = from.tests; i < out.tests.size(); ++i)
         flatten_test(i32(i));
     // after flattening, which finds what a body's calls need (CHK-322)
     report_unused_requires();
@@ -384,6 +436,8 @@ void checker::add_symbol(symbol s, source_span name_where)
     if (!spelling.empty())
     {
         operators[spelling].push_back(id);
+        if (is_prelude_file(file))
+            prelude_operators[spelling].push_back(id);
         return;
     }
 
@@ -487,9 +541,9 @@ void checker::add_member(symbol s, source_span name_where)
     type_scopes[i32(index_of(owner))][name].push_back(id);
 }
 
-void checker::attach_extensions()
+void checker::attach_extensions(isize first)
 {
-    for (auto const& pending : pending_extensions)
+    for (auto const& pending : cc::span<pending_extension const>(pending_extensions).subspan(first))
     {
         auto const file = pending.file;
         auto const& d = ast_of(file).at(pending.declaration).node;
@@ -566,7 +620,7 @@ cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, typ
     return result;
 }
 
-void checker::judge_redeclarations()
+void checker::judge_redeclarations(isize first)
 {
     // Two overloads can clash only when their parameters hash alike, so each meets only the earlier ones that do.
     auto const signature_hash = [&](symbol const& s) -> u64
@@ -578,7 +632,10 @@ void checker::judge_redeclarations()
     };
     auto const judge = [&](cc::span<symbol_id const> set)
     {
-        if (set.size() < 2)
+        auto is_new = false;
+        for (auto const id : set)
+            is_new = is_new || index_of(id) >= first;
+        if (set.size() < 2 || !is_new)
             return;
         auto earlier = cc::map<u64, cc::vector<isize>>();
         for (auto i = isize(0); i < set.size(); ++i)
@@ -637,10 +694,10 @@ bool checker::is_overload_set(cc::span<symbol_id const> ids) const
     return true;
 }
 
-void checker::declare_constructors()
+void checker::declare_constructors(isize first)
 {
     auto const count = out.symbols.size();
-    for (auto i = isize(0); i < count; ++i)
+    for (auto i = first; i < count; ++i)
     {
         auto const s = out.symbols[i];
         if (s.kind != symbol_kind::structure)
