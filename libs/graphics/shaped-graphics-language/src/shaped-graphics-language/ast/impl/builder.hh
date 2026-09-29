@@ -180,6 +180,8 @@ struct builder
 
     /// True for `name`, `_`, `mut name`, and each of them followed by `: type` and then `= default`.
     [[nodiscard]] bool is_field_like(form_id element, bool needs_type) const;
+    /// `mut name: type`, whose keyword takes the whole field as its argument; a field records the mark (CHK-315).
+    [[nodiscard]] bool is_mut_led_field(form_id element) const;
     /// Reports `on_failure` and yields a nameless field around an `invalid` type when `element` is not field-like.
     [[nodiscard]] field make_field(form_id element, diagnostic_kind on_failure);
     /// `mut x` as a list element: the mark of a place handed to a `mut` parameter (AST-149).

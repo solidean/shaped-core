@@ -594,8 +594,11 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **Still `unsupported-yet`:** generic structs of the program, stated type arguments `f[float](x)`, `mut self`, lambdas beyond `x => value`, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
-- **A function value is never a value of any target.** A function type stands on a parameter alone, and a call through it inlines what was handed; a `let f = halve` is `wrong-kind-of-name`.
+- **A function value is never a value of any target.** A function type is a parameter's whole type alone, and a call through it inlines what was handed.
+  A `let f = halve` is `unsupported-yet`, and a function type under `mut`, as an element or as a type argument is `wrong-kind-of-name`.
+- **A mut parameter takes no default** (`default-not-allowed-here`), and a function with one is never a function value.
 - **A type parameter is opaque, and a generic body is checked ONCE over it.** No field, operator or call of `A` but one that takes `A` itself; an entry point is never generic.
+  Its name hides every symbol of that name, so `A(1.0)` inside `fun f[A]` is `wrong-kind-of-name` even where a struct `A` exists.
   Only the prelude declares a generic struct (`report[A]`, `procedural_hit[A]`, `mixed_hit[A]`), and its methods cannot name `A` yet.
 - **Two `trace`s**: with a ray type third, `trace(world, r, set.ray, mut p)`, it is the pipeline's; otherwise it is the prelude's inline trace.
   The inline one needs `ray_query` where the entry point REACHES it (CHK-322), so a stage that never traces runs on a device without it.

@@ -579,6 +579,11 @@ struct dumper
             {
                 open(n.is_opaque ? "struct:opaque" : "struct");
                 name_or_missing(n.name);
+                if (!n.type_parameters.empty())
+                {
+                    out += " ";
+                    dump_fields("type-params", n.type_parameters, depth);
+                }
                 dump_members(n.members, depth);
             },
             [&](enum_decl const& n)

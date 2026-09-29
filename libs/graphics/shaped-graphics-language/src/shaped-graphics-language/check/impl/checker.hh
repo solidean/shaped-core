@@ -597,6 +597,8 @@ struct checker
     feature_set read_require(i32 file, ast::require_decl const& r, require_scope scope, symbol_id owner);
     /// Records which features entry point `id` needs and reports every one it does not declare (CHK-263, CHK-264).
     void judge_entry_features(symbol_id id);
+    /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
+    void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).
     void report_unused_requires();
 
@@ -635,6 +637,14 @@ struct checker
     /// The type parameters in scope, innermost last: a generic function's while its signature and body are checked,
     /// and a generic struct's while its members are.
     cc::vector<cc::pair<cc::string_view, type_id>> type_parameter_names;
+    /// True where `name` is a type parameter in scope, which hides every symbol of its name (CHK-338).
+    [[nodiscard]] bool is_type_parameter_name(cc::string_view name) const
+    {
+        for (auto const& n : type_parameter_names)
+            if (n.first == name)
+                return true;
+        return false;
+    }
     /// What a call stands where a type is expected, which a generic callee's result is deduced from where its
     /// arguments leave a parameter unbound (CHK-340); `none` elsewhere.
     type_id expected_result = type_id::none;

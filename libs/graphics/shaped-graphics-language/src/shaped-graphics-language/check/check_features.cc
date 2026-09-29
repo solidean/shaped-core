@@ -118,6 +118,22 @@ void checker::judge_entry_features(symbol_id id)
     }
 }
 
+void checker::mark_requires_used(cc::span<symbol_id const> functions, feature_set features)
+{
+    for (auto const function : functions)
+        for (auto i = isize(0); i < k_feature_count; ++i)
+        {
+            if (!features.has(feature(i)))
+                continue;
+            for (auto& line : require_lines)
+                if (line.owner == function && line.scope == require_scope::body && line.what == feature(i))
+                {
+                    line.is_used = true;
+                    break;
+                }
+        }
+}
+
 void checker::report_unused_requires()
 {
     for (auto const& line : require_lines)

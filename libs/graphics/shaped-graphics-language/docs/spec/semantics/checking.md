@@ -413,6 +413,7 @@ fun shade(k: float) -> float:
   A parameter left unfilled takes its default.
 * **CHK-317** A **function type** `(A, B) -> R` is the type of a parameter and of nothing else ([why](why/checking.md#chk-317)).
   A local, a field, a member, a result or an element of one is `wrong-kind-of-name`.
+  So is one under a parameter's `mut`, since a function is no place, and one as a type argument, `report[(float) -> float]`.
   Two function types of the same parameter types and result are one type.
 * **CHK-318** A parameter of function type takes a function's name, an arrow lambda `x => value`, or a parameter of the same function type handed on.
   A name takes the one function of its name whose parameters and result are the type's exactly, none of them `mut`; a builtin or an entry point is none.
@@ -423,6 +424,7 @@ fun shade(k: float) -> float:
   A lambda is written out there with the names it saw where it was written, so a function value is never a value of any target.
 * **CHK-316** `mut x` in a call hands over a place, and it fills a mut parameter alone ([why](why/checking.md#chk-316)).
   A mut parameter takes an argument marked `mut` and nothing else, and a marked argument binds to nothing else.
+  So a default on a mut parameter is `default-not-allowed-here`, at the declaration.
   The argument is a place by the rules of an assignment's left side, or `not-assignable`, and its type is the parameter's exactly, so its chain has length 0.
   Its indices are evaluated once, where the call binds it, and the body reads and writes that one place wherever it names the parameter.
 * **CHK-70** A candidate **matches** when it binds, and each argument converts to its parameter's type by a **conversion chain**.
@@ -587,6 +589,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   The prelude's `trace` is how a program reaches one: its steps need `ray_query`.
 * **CHK-264** A feature an entry point needs and does not declare is the normal error `feature-not-declared` at its name, with a note at each listed binding that needs it.
 * **CHK-265** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
+  A `require` in a test's body or a helper's is used where a call that body reaches, inlined, needs the feature (CHK-322).
   A `require` of a file or of a binding is never unused: each declares an intent, whether anything uses the feature or not ([why](why/checking.md#chk-265)).
 
 ```sgl
@@ -963,7 +966,7 @@ fun grade(x: float) -> float:
   So what a function reads is listed by whoever calls it, up to the entry point ([why](why/checking.md#chk-131)).
 * **CHK-132** An entry point has a flat tree when its own body and the body of every function it reaches checked without an error, recursion included.
 * **CHK-133** An inlined call is a block named after its callee, and two inlines of one function share no local: each gets its names from the mint.
-* **CHK-134** `mut self`, a nested function, an anonymous `fun`, and an arrow lambda with a block body are `unsupported-yet`.
+* **CHK-134** `mut self`, a nested function, an anonymous `fun`, an arrow lambda with a block body, and a function name outside an argument, `let f = halve`, are `unsupported-yet`.
   A mut parameter is CHK-315, and a function handed to a parameter of function type CHK-318.
 
 ## Generics
@@ -974,6 +977,7 @@ A call deduces what each parameter stands for, and inlining writes that in its p
 * **CHK-338** `fun f[A, B](…)` declares type parameters, which its signature and its body may name and know nothing of ([why](why/checking.md#chk-338)).
   A value of one is handed on, stored and returned, and nothing else: no field, no operator and no call but one whose parameter is of that type parameter too.
   A type parameter in scope hides every type of its name, and one with a bound, a default or an attribute is `unsupported-yet`.
+  It hides every other symbol of its name too, so its name as a value, as a callee or before a dot is `wrong-kind-of-name`.
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
   A call that states its type arguments, `f[float](x)`, is `unsupported-yet` (CHK-78): a call deduces them.
 * **CHK-339** `struct name[A]:` declares a **generic struct**, over one type parameter its members may name ([why](why/checking.md#chk-339)).
@@ -1027,11 +1031,13 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-333, CHK-338, CHK-339 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-333, CHK-338, CHK-339 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-317, CHK-320, CHK-338, CHK-339 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339 |
+| `unexpected-keyword` | CHK-315 |
+| `default-not-allowed-here` | CHK-316 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |

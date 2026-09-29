@@ -52,10 +52,34 @@ test:
     let y = apply((a, b) => a, 1.0)
     true
 
+// a builtin is no function a parameter takes, however well its signature fits
+@expect(error = "no-matching-overload")
+test:
+    let y = apply(sqrt, 4.0)
+    true
+
+// nor is an entry point, which the GPU calls and no body does
+fun run(f: (int3) -> void):
+    f(int3(0, 0, 0))
+
+@compute(1) fun idle(@thread_id id: int3):
+    return
+
+@expect(error = "no-matching-overload")
+test:
+    run(idle)
+    true
+
 // a function type is the type of a parameter, and of nothing else
 @expect(error = "wrong-kind-of-name")
 test:
     let f: (float) -> float = halve
+    true
+
+// a function name anywhere but as an argument is a function as a value, which is not carried yet
+@expect(error = "unsupported-yet")
+test:
+    let f = halve
     true
 
 // every target writes the inlined function

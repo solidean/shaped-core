@@ -204,12 +204,71 @@ TEST("sgl check - a type parameter is opaque, and a call says what it stands for
     // CHK-338: what a body does with a value of a type parameter is hand it on, store it and return it
     CHECK(reports_for("fun id[T](x: T) -> T => x\n") == "");
     CHECK(reports_for("fun twice[T](x: T) -> T => x + x\n").starts_with("no-matching-overload user:[x + x]"));
-    // CHK-340: a type parameter the arguments leave open is said by where the call stands, or the call is an error
-    CHECK(reports_for("fun pick[T](x: float) -> T => pick(x)\nfun f() -> float => pick(1.0)\n") != "");
+    // CHK-340: a type parameter the arguments leave open is said by where the call stands, or the call is an error.
+    // Only the prelude has a value of an open type to give, `undefined()`, so `pick` stands in a prelude file.
+    auto const builtins = builtins_text();
+    cc::string_view const open_result[]
+        = {builtins, "fun pass[T](x: T) -> T => x\nfun pick[T](x: float) -> T => pass(undefined())\n",
+           "fun f() -> float => pick(1.0)\nfun g():\n    let y = pick(1.0)\n"};
+    CHECK(reports_of(check_files(open_result))
+          == "no-matching-overload user:[pick(1.0)] T of pick is said by nothing: neither an argument nor where the "
+             "call stands\n");
     // an entry point is handed values of known types
     CHECK(reports_for("@compute(1) fun main[T](@thread_id id: int3):\n    return\n")
           == "wrong-kind-of-name user:[main] an entry point is no generic function: the GPU hands it values of known "
              "types\n");
+    // CHK-338: a type parameter hides every symbol of its name, and names no value
+    CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\n")
+          == "wrong-kind-of-name user:[A] A is a type parameter, and a call needs a function or a struct\n");
+    CHECK(reports_for("fun f[A](v: A) -> A:\n    let k = A\n    return v\n")
+          == "wrong-kind-of-name user:[A] A is a type parameter, which names a type and no value\n");
+    CHECK(reports_for("fun f[T: float](x: T) => x\n")
+          == "unsupported-yet user:[T: float] a type parameter with a bound, a default or an attribute\n");
+    CHECK(reports_for("fun f[T = float](x: T) => x\n")
+          == "unsupported-yet user:[T = float] a type parameter with a bound, a default or an attribute\n");
+}
+
+TEST("sgl check - a generic struct is the prelude's, and an instance names one type argument")
+{
+    // CHK-339
+    CHECK(reports_for("struct box[A]:\n    v: A\n") == "unsupported-yet user:[box] a generic struct of the program\n");
+    CHECK(reports_for("fun f(r: report[float, float]) => 1.0\n")
+          == "wrong-kind-of-name user:[report[float, float]] report takes one type argument\n");
+}
+
+TEST("sgl check - a mut parameter is spelled on its type, takes no default, and no entry point has one")
+{
+    // CHK-315
+    CHECK(reports_for("fun f(mut p: float) => p\n") == "unexpected-keyword user:[p] `mut p: T` is spelled `p: mut T`\n");
+    CHECK(reports_for("@compute(1) fun main(@thread_id id: int3, x: mut float):\n    return\n")
+          == "wrong-kind-of-name user:[x] x is a parameter of an entry point, which the GPU fills and no caller hands "
+             "a "
+             "place\n");
+    // CHK-316: only the caller's place fills it
+    CHECK(reports_for("fun bump(p: mut int = 0):\n    p += 1\n")
+          == "default-not-allowed-here user:[0] p is a mut parameter, which only a caller's place fills\n");
+}
+
+TEST("sgl check - a function type is a parameter's whole type, and nothing else's")
+{
+    // CHK-317
+    auto const refused = cc::string("a function type is the type of a parameter, and of nothing else\n");
+    CHECK(reports_for("fun g(f: mut (float) -> float) => 1.0\n")
+          == "wrong-kind-of-name user:[(float) -> float] " + refused);
+    CHECK(reports_for("fun g(fs: ((float) -> float)[2]) => 1.0\n")
+          == "wrong-kind-of-name user:[(float) -> float] " + refused);
+    CHECK(reports_for("fun g(r: report[(float) -> float]) => 1.0\n")
+          == "wrong-kind-of-name user:[(float) -> float] " + refused);
+    CHECK(reports_for("struct s:\n    f: (float) -> float\n") == "wrong-kind-of-name user:[(float) -> float] " + refused);
+    CHECK(reports_for("fun g(x: float) -> (float) -> float => g\n")
+              .starts_with("wrong-kind-of-name user:[(float) -> float] " + refused));
+}
+
+TEST("sgl check - @bitflags is the prelude's")
+{
+    // CHK-321
+    CHECK(reports_for("@bitflags enum e:\n    a = 1\n")
+          == "unsupported-yet user:[bitflags] @bitflags on an enum of the program\n");
 }
 
 TEST("sgl check - @operator hides the function's name, and takes one quoted operator")
