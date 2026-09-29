@@ -377,4 +377,3 @@ The metal pipeline is exercised by CI alone.
 ## Open
 
 * A runtime-chosen ray type, several reports per intersection, and true recursion: the [incubator](incubator/raytracing-futures.md) holds them.
-* Whether the attributes an intersection reports are bounded by SGL, which refuses nothing past DXR's 32 bytes yet.

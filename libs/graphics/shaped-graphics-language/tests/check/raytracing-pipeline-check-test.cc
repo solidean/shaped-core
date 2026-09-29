@@ -163,6 +163,15 @@ TEST("sgl check - a procedural group's shaders take what its intersection report
     CHECK(reports("@intersection fun bad(b: procedural_box, p: mut radiance) -> report[float]:\n"
                   "    return report.none()\n")
               .starts_with("invalid-entry-point"));
+    // CHK-342: DXR's 32 bytes, a word per scalar, bound what an intersection reports
+    CHECK(reports("struct wide:\n    a: float4\n    b: float4\n"
+                  "@intersection fun fits(b: procedural_box) -> report[wide]:\n    return report.none()\n")
+          == "");
+    CHECK(reports("struct too_wide:\n    a: float4\n    b: float4\n    c: float\n"
+                  "@intersection fun spills(b: procedural_box) -> report[too_wide]:\n    return report.none()\n")
+          == "invalid-entry-point user:[spills] the attributes an @intersection fun reports take 36 bytes, and a "
+             "target "
+             "holds at most 32\n");
 }
 
 TEST("sgl check - a callables table holds callables of one parameter, and a call picks one by index")

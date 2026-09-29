@@ -48,7 +48,6 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   That is a stopgap for `use`: the group's file would import the module that declares the set.
 - **A generic struct's type parameter is not in scope in its methods.** `mixed_hit.procedural()` returns through the helper `procedural_of_mixed[A]`, since the method cannot name `A`.
 - **An enum does not convert to `int`.** `h.kind as int` is refused (CHK-150), so storing a `hit_kind` in a buffer takes a `case`; [enum-futures.md](spec/incubator/enum-futures.md) holds the cast.
-- **Attributes past 32 bytes are not refused.** DXR caps what an intersection reports at 32 bytes, and metal's ray data holds two `uint4`; SGL reports no error for a larger `A`.
 - **The matrix zoo, and `tg` types such as `quat`.** A hit's transforms are rows of `float4` because SGL has `mat4` alone; `mat3x4`, `mat3` and a quaternion would let a hit hand them over typed.
 - **A `misplaced-not` inside a `test` body was seen to pass silently**, while writing the ray-tracing tests.
   It does not reproduce in a plain test body: `test:` ending in `not a and b` reports it, as a function body does.

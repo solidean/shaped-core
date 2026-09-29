@@ -769,6 +769,7 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   A payload of another type is `invalid-entry-point`.
 * **CHK-342** An `@intersection` is handed its box alone, and no payload ([why](why/checking.md#chk-342)).
   It returns `report[A]`, whose `A` is a struct of the program; a builtin type there is `invalid-entry-point`.
+  `A` takes at most 32 bytes, a word per scalar, which is DXR's cap and all metal's ray data holds; a wider one is `invalid-entry-point`.
   A procedural hit or candidate a closest hit or an any hit takes carries the attributes the target hands the stage.
 
 | stage | takes, besides stage inputs | returns |
