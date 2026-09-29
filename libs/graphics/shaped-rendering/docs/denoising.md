@@ -37,8 +37,24 @@ So it needs no native scope and no vendor runtime: it runs on whatever adapter d
 **It is dx12-only today, and that is a scope call rather than a property of NRD.**
 The member builds only where a pinned `dxc.exe` compiles NRD's own shaders, which is Windows.
 It embeds DXIL alone, so `nrd_session::create` hands sg `sg::shader_format::dxil` and a vulkan context would refuse the bytecode.
-Two routes widen it, in ascending cost.
-`nrd::PipelineDesc` already carries a `computeShaderSPIRV` beside its DXIL, so vulkan is `NRD_EMBEDS_SPIRV_SHADERS` plus picking the field by backend.
+Two routes widen it, and the cheap-looking one was tried and is not cheap.
+
+**`nrd::PipelineDesc` carries a `computeShaderSPIRV` beside its DXIL, and turning it on is genuinely one line.**
+The DXC `extern/dxc` already pins emits SPIR-V, so `NRD_EMBEDS_SPIRV_SHADERS ON` plus `SHADERMAKE_DXC_VK_PATH` produces 31 SPIR-V blobs with no second compiler and no network.
+What does not follow is a working vulkan arm.
+Built that far and run against a validating vulkan context, two things break, and neither is a line of configuration.
+
+- **NRD uses two register spaces, which are two descriptor sets under Vulkan.**
+  `nrd_session::create` builds one binding group, which is one set, so the constants land outside the layout it declares:
+  `vkCreateComputePipelines(): ... uses descriptor [Set 1, Binding 2, variable "REBLUR_SplitScreenConstants"] but the binding was not declared in the VkPipelineLayoutCreateInfo::pSetLayouts[1]`.
+  dx12 does not care, which is why the DXIL path never noticed.
+- **NRD's shaders want compute derivatives**, and sg's vulkan backend enables no such feature:
+  `SPIR-V Capability ComputeDerivativeGroupQuadsKHR was declared, but ... computeDerivativeGroupQuads` is required.
+  So is the `VK_KHR_compute_shader_derivatives` extension, which is the same gap seen from the instance side.
+
+Both are answerable — a second binding group here, a device feature in sg — and neither is in this change.
+**With validation off the same run passes**, which is worth knowing before anyone reads a green run as support.
+
 Beyond that, NRD ships its shaders as source, and `PipelineDesc::shaderIdentifier` exists so a custom integration can supply its own compiled form.
 An SGL port of them would reach webgpu and metal too.
 What it costs is owning a translation of someone else's tuned numerics, and keeping that translation agreeing with a constant layout NRD still lays out.
