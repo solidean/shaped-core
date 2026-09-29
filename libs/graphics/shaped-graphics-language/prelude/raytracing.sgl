@@ -390,6 +390,8 @@ fun trace(
     .flags: ray_flags = ray_flags.none
     .mask: int = 255
 ) -> triangle_hit:
+    // a structure of triangles holds nothing else, and the target forbids both skip flags together
+    if flags.has(ray_flags.skip_triangles) => return no_triangle_hit(r)
     return by_target(
         () => trace_native(world, r, flags, mask, any_hit)
         () => trace_emulated(acceleration_root(world), r, flags, mask, any_hit)
@@ -414,6 +416,8 @@ fun trace[A](
     .flags: ray_flags = ray_flags.none
     .mask: int = 255
 ) -> procedural_hit[A]:
+    // a structure of boxes holds nothing else, and the target forbids both skip flags together
+    if flags.has(ray_flags.skip_procedural) => return procedural_hit.none(r)
     return by_target(
         () => trace_native_procedural(world, r, flags, mask, intersection, any_hit)
         () => trace_emulated_procedural(acceleration_root(world), r, flags, mask, intersection, any_hit)
@@ -441,6 +445,8 @@ fun trace[A](
     .flags: ray_flags = ray_flags.none
     .mask: int = 255
 ) -> mixed_hit[A]:
+    // skipping both kinds meets nothing, and the target forbids the two flags together
+    if flags.has(ray_flags.skip_triangles | ray_flags.skip_procedural) => return mixed_hit.none(r)
     return by_target(
         () => trace_native_mixed(world, r, flags, mask, any_hit, intersection, procedural_any_hit)
         () => trace_emulated_mixed(acceleration_root(world), r, flags, mask, any_hit, intersection, procedural_any_hit)
@@ -631,6 +637,12 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
             if d == hit_decision.accept_and_end_search => ray_query_abort(q)
     return committed_of(q, r)
 
+/// `flags` without the facing culls, which the target forbids beside `skip_triangles` and which mean nothing for a box.
+@internal fun without_facing(flags: ray_flags) -> ray_flags:
+    let opacity = ray_flags.force_opaque | ray_flags.force_non_opaque | ray_flags.cull_opaque | ray_flags.cull_non_opaque
+    let search = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit
+    return flags & (opacity | search | ray_flags.skip_triangles | ray_flags.skip_procedural)
+
 @internal fun box_of(q: ray_query, r: ray, t_current: float) -> procedural_box:
     let o = ray_query_candidate_object_ray_origin(q)
     let d = ray_query_candidate_object_ray_direction(q)
@@ -695,7 +707,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
 ) -> procedural_hit[A]:
     let q = ray_query_begin()
     // a structure of boxes holds no triangle, and the target skips the triangle path whole
-    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags | ray_flags.skip_triangles, mask)
+    let kept = without_facing(flags)
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, kept | ray_flags.skip_triangles, mask)
     // the query keeps the committed box's distance and ids, and the trace keeps what it reported
     let mut best: procedural_hit[A] = procedural_hit.none(r)
     while ray_query_proceed(q):
@@ -724,7 +737,9 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     procedural_any_hit: (procedural_candidate[A]) -> hit_decision
 ) -> mixed_hit[A]:
     let q = ray_query_begin()
-    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags, mask)
+    let mut given = flags
+    if flags.has(ray_flags.skip_triangles) => given = without_facing(flags)
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, given, mask)
     // the query keeps the committed hit's distance and ids, and the trace keeps what the last committed box reported
     let mut best: procedural_hit[A] = procedural_hit.none(r)
     while ray_query_proceed(q):

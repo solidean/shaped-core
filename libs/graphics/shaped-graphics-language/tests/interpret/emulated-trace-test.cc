@@ -433,3 +433,22 @@ TEST("sgl emulated trace - a mixed trace misses where nothing is, and skips the 
                             "    not scenes.mixed.trace(r, ball_report, mask = 0).is_hit\n")
           == "");
 }
+
+TEST("sgl emulated trace - a trace skipping all its structure holds meets nothing, and a box has no facing")
+{
+    // the target forbids both skip flags together, so neither form traces at all
+    CHECK(mixed_failures_of(
+              "test {scenes}:\n"
+              "    let h = scenes.pair.trace(along_z(0.25, 0.25), flags = ray_flags.skip_triangles)\n"
+              "    h.t == 3.0e38 and not h.is_hit\n"
+              "    not scenes.ball.trace(along_z(2.75, 0.75), ball_report, flags = "
+              "ray_flags.skip_procedural).is_hit\n"
+              "    let both = ray_flags.skip_triangles | ray_flags.skip_procedural\n"
+              "    scenes.mixed.trace(along_z(2.75, 0.75), ball_report, flags = both).kind == hit_kind.none\n"
+              // a box has no facing, so a trace of boxes that culls by it still meets the ball
+              "    scenes.ball.trace(along_z(2.75, 0.75), ball_report, flags = "
+              "ray_flags.cull_back_facing).is_hit\n"
+              "    scenes.mixed.trace(along_z(2.75, 0.75), ball_report, flags = ray_flags.skip_triangles | "
+              "ray_flags.cull_front_facing).kind == hit_kind.procedural\n")
+          == "");
+}
