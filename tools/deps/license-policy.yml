@@ -50,7 +50,6 @@ exceptions:
       LLVM-scale build we will not run in CI.
       It is Windows-only and reaches no other platform's shipping bundle.
 
-# Licenses we will not take, listed so a refusal comes with a reason rather than a silent absence.
   - identifier: LicenseRef-NVIDIA-RTX-SDK
     why: >-
       NVIDIA RTX SDKs License, governing the NRD sources we fetch for sr::nrd_denoise_routine.
@@ -64,6 +63,8 @@ exceptions:
       Section 4e forbids using the SDK so that it becomes subject to an open source license, which is why it links
       PRIVATE behind SR_HAS_NRD and reaches no public header.
       Section 4f excludes life-critical use without a separate agreement, and section 15 carries US export terms.
+
+# Licenses we will not take, listed so a refusal comes with a reason rather than a silent absence.
 denied:
   - identifier: GPL-2.0-only
     why: Copyleft. Linking it into our libraries would impose its terms on every consumer.
