@@ -17,7 +17,15 @@ from pathlib import Path
 from . import clangd, graphics, known_issues, network
 from .llvm_tools import find_tool, resolve_tool
 from ..core.models import Preset
-from ..core.process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
+from ..core.process import (
+    default_emsdk_root,
+    emsdk_env,
+    emsdk_toolchain_file,
+    find_emsdk_root,
+    installed_emsdk_version,
+    msvc_env,
+    pinned_emsdk_version,
+)
 from ..project.presets import PresetError, load_presets, resolve_cache_variable
 
 
@@ -242,19 +250,19 @@ def _coverage_tool_check(
         return (label, False, f"failed to run ({e})")
 
 
-def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, str]]:
+def _emscripten_checks(repo_root: Path, emsdk_path: str | None) -> list[tuple[str, bool | None, str]]:
     """Validate the Emscripten/emsdk toolchain used by the wasm-emscripten-* presets.
 
     Emscripten is an optional (Tier 2) target, so this stays advisory.
-    With nothing signalling intent to use it — no --emsdk-path, no SC_EMSDK_PATH or EMSDK, no emcc on PATH — it reports a single passing "not configured" line.
+    With nothing signalling intent to use it — no --emsdk-path, no SC_EMSDK_PATH or EMSDK, no emcc on PATH, nothing in the default place — it reports a single passing "not configured" line.
     That is so it never fails a native-only developer's doctor run.
-    Once any of those signals is present it validates strictly: emsdk located, emcc runnable, toolchain file present, emsdk's node reachable.
+    Once any of those signals is present it validates strictly: emsdk located, at the pinned version, emcc runnable, toolchain file present, emsdk's node reachable.
     """
     intent = bool(emsdk_path) or bool(os.environ.get("SC_EMSDK_PATH")) \
-        or bool(os.environ.get("EMSDK")) or shutil.which("emcc") is not None
+        or bool(os.environ.get("EMSDK")) or shutil.which("emcc") is not None or default_emsdk_root().is_dir()
     if not intent:
         return [("emscripten", None,
-                 "not configured (optional) - install emsdk and pass --emsdk-path for WASM presets")]
+                 "not configured (optional) - `uv run dev.py install emsdk` for the WASM presets")]
 
     root = find_emsdk_root(emsdk_path)
     if root is None:
@@ -264,16 +272,24 @@ def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, s
 
     checks: list[tuple[str, bool | None, str]] = [("emsdk", True, str(root))]
 
+    pinned = pinned_emsdk_version(repo_root)
+    installed = installed_emsdk_version(root)
+    checks.append(
+        ("emscripten version", installed == pinned,
+         pinned if installed == pinned
+         else f"{installed or 'none'} activated, tools/emsdk.version pins {pinned} - run: uv run dev.py install emsdk")
+    )
+
     toolchain = emsdk_toolchain_file(root)
     checks.append(
         ("emsdk toolchain", toolchain.is_file(),
-         str(toolchain) if toolchain.is_file() else f"missing {toolchain} - run: emsdk install latest")
+         str(toolchain) if toolchain.is_file() else f"missing {toolchain} - run: uv run dev.py install emsdk")
     )
 
     # Resolve emcc and node through the emsdk environment rather than the ambient PATH, so an un-activated but present emsdk still validates green.
     env = emsdk_env(emsdk_path)
     search_path = env.get("PATH") if env else None
-    for tool, hint in (("emcc", "emsdk install/activate latest"), ("node", "bundled with emsdk")):
+    for tool, hint in (("emcc", "uv run dev.py install emsdk"), ("node", "bundled with emsdk")):
         exe = shutil.which(tool, path=search_path)
         if exe is None:
             checks.append((f"emscripten {tool}", False, f"not reachable via emsdk env ({hint})"))
@@ -374,7 +390,7 @@ def doctor(
     checks.append(_coverage_tool_check("llvm-cov", "llvm-cov", "LLVM_COV", cov_build_dir))
 
     # Emscripten/WASM toolchain (optional; advisory unless emsdk is signalled).
-    checks.extend(_emscripten_checks(emsdk_path))
+    checks.extend(_emscripten_checks(root, emsdk_path))
 
     # The graphics environment the sg backends, sr::window and the shader library need — advisory throughout.
     checks.extend(graphics.checks(root, cxx))

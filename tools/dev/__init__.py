@@ -13,9 +13,12 @@ from .lib.core.logs import merge_junit, ninja_built_count
 from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
 from .lib.core.process import (
     configure_mirroring,
+    default_emsdk_root,
     emsdk_env,
     env_for_preset,
     find_emsdk_root,
+    installed_emsdk_version,
+    pinned_emsdk_version,
     response_file,
     run_step,
 )
@@ -166,9 +169,12 @@ __all__ = [
     "toolset_hint",
     "ToolsetError",
     "configure_mirroring",
+    "default_emsdk_root",
     "emsdk_env",
     "env_for_preset",
     "find_emsdk_root",
+    "installed_emsdk_version",
+    "pinned_emsdk_version",
     "response_file",
     "run_step",
     "source_roots",
