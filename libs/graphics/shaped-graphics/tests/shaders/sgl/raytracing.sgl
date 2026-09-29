@@ -32,6 +32,43 @@ fun store(id: int3, h: triangle_hit){scene}:
 @compute(8, 8) fun trace_cells_opaque(@thread_id id: int3){scene}:
     store(id, scene.world.trace(cell_ray(id), flags = ray_flags.force_opaque))
 
+// ---- the same scene, traced by a pixel stage ------------------------------------------------------------------------
+//
+// One pixel of an 8 × 8 target per cell: pixel (x, y), row 0 at the top, traces the ray `cell_ray` gives cell (x, y).
+
+binding pixel_scene:
+    world: acceleration_structure[.triangles]
+
+@vertex struct traced_corner:
+    position: float2
+
+struct traced_varyings:
+    @position position: hpos4
+
+@pixel struct traced_target:
+    value: float4
+
+@vertex fun traced_vs(v: traced_corner) -> traced_varyings:
+    return {
+        position = hpos4(v.position.x, v.position.y, 0.5, 1.0)
+    }
+
+// t and the barycentrics' u and v, and last the instance's id plus 100 for primitive 1, or -1 for a miss
+@pixel fun trace_pixel_ps(p: traced_varyings){pixel_scene} -> traced_target:
+    let cell = int3(p.position.x as int, p.position.y as int, 0)
+    let h = pixel_scene.world.trace(cell_ray(cell), cutout)
+    let mut tag = -1.0
+    if h.is_hit => tag = (h.instance_id + 100 * h.primitive_index) as float
+    return {
+        value = float4(h.t, h.barycentrics.y, h.barycentrics.z, tag)
+    }
+
+pipeline traced_pixels:
+    vertex = traced_vs
+    pixel = trace_pixel_ps
+    cull = .none
+    format = .rgba32_float
+
 // ---- procedural geometry: a unit sphere in each box --------------------------------------------------------------
 //
 // Box k spans x from 2k to 2k + 2 and y and z from 0 to 2, and holds the sphere of radius 1 at its centre.
@@ -83,3 +120,51 @@ fun store_sphere(id: int3, h: procedural_hit[sphere_attributes]){sphere_scene}:
 // every sphere, deciding nothing
 @compute(8, 8) fun trace_spheres_all(@thread_id id: int3){sphere_scene}:
     store_sphere(id, sphere_scene.world.trace(sphere_ray(id), b => sphere_report(b)))
+
+// ---- both kinds in one structure ------------------------------------------------------------------------------------
+//
+// The square of two triangles at z = 0 over x from 0 to 4, and the spheres' two boxes moved to x = 4.
+// Behind the spheres, the square again, moved to x = 4 and z = 3.
+
+binding mixed_scene:
+    world: acceleration_structure[.mixed]
+    hits: mut buffer[float4]
+    ids: mut buffer[int4]
+
+// One ray per cell of an 8 × 8 grid over [0, 8] × [0, 4], along +z from z = -1.
+// 0.3 of a cell off in x keeps every ray off the triangles' shared diagonal.
+fun mixed_ray(id: int3) -> ray => ray(
+    origin = pos3((id.x as float) + 0.3, 0.5 * (id.y as float) + 0.25, -1.0)
+    direction = vec3(0.0, 0.0, 1.0)
+)
+
+// A triangle writes its barycentrics after t, and a sphere its normal.
+// The ids lead with the kind: 1 a triangle, 2 a sphere.
+fun store_mixed(id: int3, h: mixed_hit[sphere_attributes]){mixed_scene}:
+    let at = id.x + id.y * 8
+    let mut kind = 0
+    let mut v = float4(h.t, 0.0, 0.0, 0.0)
+    if h.kind == hit_kind.triangle:
+        kind = 1
+        let t = h.triangle()
+        v = float4(t.t, t.barycentrics.y, t.barycentrics.z, 0.0)
+    if h.kind == hit_kind.procedural:
+        kind = 2
+        let n = h.procedural().attributes.normal
+        v = float4(h.t, n.x, n.y, n.z)
+    mixed_scene.hits[at] = v
+    mixed_scene.ids[at] = int4(kind, h.instance_id, h.primitive_index, h.instance_index)
+
+// triangle 1 and sphere 1 of every instance are cut out, each by its own kind's decision
+@compute(8, 8) fun trace_mixed(@thread_id id: int3){mixed_scene}:
+    let h = mixed_scene.world.trace(
+        mixed_ray(id)
+        any_hit = cutout
+        intersection = sphere_report
+        procedural_any_hit = cutout_sphere
+    )
+    store_mixed(id, h)
+
+// the same rays, deciding nothing
+@compute(8, 8) fun trace_mixed_all(@thread_id id: int3){mixed_scene}:
+    store_mixed(id, mixed_scene.world.trace(mixed_ray(id), sphere_report))
