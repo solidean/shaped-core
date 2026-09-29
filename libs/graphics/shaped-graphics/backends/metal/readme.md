@@ -290,8 +290,9 @@ The pipeline path maps as follows.
   MSL's `visible_function_table<T>` is typed by the function signature, so one table cannot hold miss, closest-hit and callable functions.
   Their signatures differ, and the compiler rejects calling one table two ways.
   Each of sg's index spaces therefore gets a table of its own, and `miss_index` / `hit_index` / `callable_index` are used verbatim with no base to add.
-- **The tables reach a kernel through `sg::reserved_binding_group`**, as four members of that group's argument buffer:
+- **The tables reach a kernel through `sg::reserved_binding_group`**, as members of that group's argument buffer:
   `[[id(0)]]` intersection, `[[id(1)]]` miss, `[[id(2)]]` closest-hit, `[[id(3)]]` callable.
+  A table of more than one ray type adds ray type r's intersection table at `[[id(3 + r)]]`, so a one-ray-type kernel keeps the layout it always had.
   The reservation already existed for exactly this, so nothing about what `group_index` means changes.
   A caller still gets groups 0 to 2.
   Ray tracing and shader-side diagnostics now share that group, so those `[[id(n)]]` assignments are one namespace rather than two.
@@ -308,10 +309,17 @@ The pipeline path maps as follows.
   Traversal runs exactly one function per group here, and for a procedural group that is its intersection function — there is nowhere to put an any-hit beside it.
   DXR runs both, so this is a real gap rather than a spelling: fold the any-hit's decision into the intersection function, which is already deciding what the ray hit.
   Accepting the group and dropping the any-hit is what this replaces, and it reports hits DXR would have rejected without saying anything.
-- **Two of DXR's three hit-index contributions map.**
-  The instance contribution is the instance descriptor's `intersectionFunctionTableOffset`, and the geometry contribution is each geometry descriptor's own offset, set to its geometry index.
-  The ray contribution — DXR's per-`TraceRay` term — has no counterpart, because an MSL kernel names the table it calls.
+- **All three of DXR's hit-index contributions map, for a ray type fixed at each call site.**
+  The instance contribution is the instance descriptor's `intersectionFunctionTableOffset`.
+  The geometry contribution is each geometry descriptor's own offset, set to its geometry index times the BLAS's `hit_record_stride`.
+  **The ray contribution is a choice of table.**
+  A shader table of `ray_count` ray types builds that many intersection tables per raygen, and table r's slot s holds the traversal function of hit record s + r.
+  Traversal indexes a table by `hit_group_offset + g * stride`, so tracing ray type r with table r reaches record `hit_group_offset + g * stride + r`.
+  The closest-hit visible table stays indexed by hit record, which the kernel computes from the same three terms.
+  A ray contribution computed at run time has no counterpart, because an MSL kernel names the table it calls.
   [docs/concepts/raytracing-pipeline.md](../../docs/concepts/raytracing-pipeline.md) carries what that costs a ported shader.
+- **A raytracing shader may be MSL source as well as a metallib**, which the driver compiles when the pipeline is built.
+  Every stage goes through the same `library_from_shader` the compute and raster paths use.
 - **Dynamic linking rather than static.**
   `raytracing_pipeline_description` already owns every shader, so static would fit.
   It would also drop the property the handle-to-index split exists for: one pipeline backing several tables with different function sets.
@@ -340,6 +348,7 @@ A hit reports its distance, a miss reports −1, and a payload nothing wrote sta
 | a hit function recurses through its own table to the declared depth | indirect recursion works, four levels deep |
 | a shader table is built from two separate libraries | table entries may come from different shader files |
 | each geometry of a BLAS selects its own hit group | the geometry contribution reaches the intersection table |
+| each ray type traces through its own intersection table | a table of two ray types: the stride a BLAS bakes and the per-ray-type tables together select `offset + g * 2 + r` |
 | a procedural hit group with an any-hit is refused | the pair metal has no traversal slot for is an error, not a dropped shader |
 
 The any-hit test is the pair of the one above it rather than a standalone assertion.

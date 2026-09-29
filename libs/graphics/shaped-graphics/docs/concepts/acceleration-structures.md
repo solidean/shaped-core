@@ -53,6 +53,8 @@ It was computed against DXR and Vulkan RT first, and Metal — checked field by 
   `gl_InstanceCustomIndex`), an **8-bit** visibility `mask`, an optional per-instance opaque override, a
   cull mode (front/back/none), and a **24-bit** `hit_group_offset` (`InstanceContributionToHitGroupIndex`).
   The 24-bit fields assert on overflow.
+- **A BLAS build takes a `hit_record_stride`**, the shader-table records one of its geometries spans.
+  Metal bakes it into each geometry's offset, and dx12 and vulkan ignore it; [raytracing-pipeline](raytracing-pipeline.md#hit-rows-one-record-per-ray-type) says why.
 
 Every constraint here is a portability choice, not a backend limitation to route around.
 
