@@ -98,4 +98,11 @@ INVOCABLE_TEST("sg - a pipeline-level static sampler builds a layout on every ba
     };
     CHECK(ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), at("other", 1)}}).has_value());
     CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), at("clash", 0)}}).has_value());
+    // A register is one slot whatever its space, and a pipeline holds 16 on every backend, as Metal and WebGPU do.
+    auto spaced = at("spaced", 0);
+    spaced.binding.space = 1u;
+    CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), spaced}}).has_value());
+    CHECK(ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("last", sg::max_bound_samplers - 1)}})
+              .has_value());
+    CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("past", sg::max_bound_samplers)}}).has_value());
 }

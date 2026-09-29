@@ -364,6 +364,10 @@ enum class callable_index : u32;
 /// backend they develop against, and only finds on another.
 inline constexpr int max_binding_groups = 3;
 
+/// A `bound_sampler`'s register is below this on every backend.
+/// Metal's argument table has 16 sampler slots, and WebGPU grants 16 samplers per shader stage by default.
+inline constexpr int max_bound_samplers = 16;
+
 /// The group slot sg reserves for its own bindings, above everything a caller may bind.
 /// It holds what a backend has to emulate or bind outside the caller's groups, such as inline constants where there are no push constants.
 /// Reserved on every backend, whether or not that backend needs it, so one pipeline layout fits them all.

@@ -151,6 +151,27 @@ sg::impl::pipeline_footprint footprint_of(sg::raster_pipeline_description const&
     return footprint_of(*desc.layout, stages);
 }
 
+/// Why every backend refuses `desc`'s bound samplers, or none where it takes them.
+/// A register is one slot whatever its space, since only dx12 has spaces to tell two apart.
+cc::optional<cc::string> bound_sampler_refusal(sg::pipeline_layout_description const& desc)
+{
+    for (auto i = isize(0); i < desc.static_samplers.size(); ++i)
+    {
+        auto const& b = desc.static_samplers[i].binding;
+        if (!sg::is_sampler(b.type) || b.count != 1)
+            return cc::format("pipeline_layout: bound sampler '{}' must be a binding of one sampler", b.name);
+        if (int(b.index) >= sg::max_bound_samplers)
+            return cc::format("pipeline_layout: bound sampler '{}' takes register {}, and a pipeline holds {} on every "
+                              "backend",
+                              b.name, b.index, sg::max_bound_samplers);
+        for (auto j = isize(0); j < i; ++j)
+            if (desc.static_samplers[j].binding.index == b.index)
+                return cc::format("pipeline_layout: bound samplers '{}' and '{}' both take register {}",
+                                  desc.static_samplers[j].binding.name, b.name, b.index);
+    }
+    return {};
+}
+
 cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_pipeline_handle> built,
                                                    cc::string target_set,
                                                    sg::raster_target_formats formats,
@@ -218,6 +239,8 @@ pipeline_layout_handle context_uncached_scope::create_pipeline_layout(pipeline_l
 
 cc::result<pipeline_layout_handle> context_uncached_scope::try_create_pipeline_layout(pipeline_layout_description const& desc)
 {
+    if (auto refusal = bound_sampler_refusal(desc); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
     return _ctx.try_create_pipeline_layout(desc, lifetime_scope::persistent);
 }
 

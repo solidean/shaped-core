@@ -35,18 +35,8 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         auto reserved_bindings = cc::vector<VkDescriptorSetLayoutBinding>();
         for (isize i = 0; i < desc.static_samplers.size(); ++i)
         {
+            // sg refused a malformed or colliding one before the backend saw it.
             auto const& s = desc.static_samplers[i];
-            CC_ASSERT(sg::is_sampler(s.binding.type), "a bound_sampler's binding must be a sampler binding");
-            CC_ASSERT(s.binding.count == 1, "a bound_sampler is one sampler");
-            for (isize j = 0; j < i; ++j)
-                if (desc.static_samplers[j].binding.index == s.binding.index)
-                {
-                    destroy_reserved();
-                    return cc::error(cc::format("pipeline_layout: bound samplers '{}' and '{}' both take register {}, "
-                                                "which vulkan places at set {} binding {}",
-                                                desc.static_samplers[j].binding.name, s.binding.name, s.binding.index,
-                                                sg::reserved_binding_group, s.binding.index + 1));
-                }
 
             // The context's cache owns the sampler, and outlives every in-flight use of it.
             auto const sampler = ctx._samplers.acquire(s.sampler);

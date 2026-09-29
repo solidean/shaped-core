@@ -260,7 +260,7 @@ There are two ways in, and *which one* is a layout-time decision:
   A **name-matched** `named_sampler` passed to `create_binding_group_layout`, matched to a sampler binding by name and then excluded from the dynamic group.
   Or a **register-bound** `bound_sampler` attached to the `pipeline_layout` directly — its `binding` carries the register and space, so it needs no matching group binding.
   Its register `n` is where each backend puts it: dx12 `register(sn, space)`, vulkan and webgpu binding `n + 1` of `sg::reserved_binding_group`, and metal the argument table's sampler slot `n`.
-  So two of them at one register are refused everywhere but dx12, where only the space tells them apart.
+  sg refuses two of them at one register on every backend, whatever their spaces, and a register of `sg::max_bound_samplers` (16) or more.
   A sampler binding declared static this way must not also be supplied per group.
   In dx12 both become `D3D12_STATIC_SAMPLER_DESC`s the pipeline layout bakes into the root signature.
   WebGPU has no static samplers at all: a name-matched one stays a sampler entry in its own group, whose object the backend binds into every group built from that layout.

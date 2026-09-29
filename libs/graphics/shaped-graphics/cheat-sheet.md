@@ -596,7 +596,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 // per backend: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set
 //   layout's immutable samplers, metal writes them into the group's argument buffer at their binding index.
 //   A pipeline-level static sampler (a bound_sampler, on no group) at register n: dx12 s<n> in its space, vulkan and webgpu
-//   group 3 binding n + 1, metal [[sampler(n)]].
+//   group 3 binding n + 1, metal [[sampler(n)]]. n < sg::max_bound_samplers (16), unique whatever the space, on every backend.
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)

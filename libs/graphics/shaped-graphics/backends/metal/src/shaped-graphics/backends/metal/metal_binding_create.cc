@@ -80,19 +80,9 @@ cc::result<metal_pipeline_layout_handle> metal_context::create_metal_pipeline_la
     auto bound = cc::vector<metal_pipeline_layout::bound_sampler_state>();
     for (isize i = 0; i < desc.static_samplers.size(); ++i)
     {
+        // sg refused a malformed or colliding one before the backend saw it, and a register is below the table's size.
         auto const& s = desc.static_samplers[i];
-        if (!sg::is_sampler(s.binding.type))
-            return cc::error(cc::format("pipeline_layout: bound sampler '{}' is not a sampler binding", s.binding.name));
-        if (int(s.binding.index) >= k_argument_table_sampler_count)
-            return cc::error(cc::format("pipeline_layout: bound sampler '{}' takes register {}, and metal has {} "
-                                        "sampler slots",
-                                        s.binding.name, s.binding.index, k_argument_table_sampler_count));
-        for (isize j = 0; j < i; ++j)
-            if (desc.static_samplers[j].binding.index == s.binding.index)
-                return cc::error(cc::format("pipeline_layout: bound samplers '{}' and '{}' both take register {}, "
-                                            "which is one metal sampler slot",
-                                            desc.static_samplers[j].binding.name, s.binding.name, s.binding.index));
-
+        static_assert(sg::max_bound_samplers <= k_argument_table_sampler_count);
         auto* const state = _samplers.acquire(_device, s.sampler);
         if (state == nullptr)
             return cc::error(cc::format("pipeline_layout: the device refused bound sampler '{}'", s.binding.name));
