@@ -233,7 +233,7 @@ void webgpu_command_list::write_acceleration_region(u32 unit, isize units, cc::s
 void webgpu_command_list::record_acceleration_kernel(acceleration_kernel kernel,
                                                      acceleration_kernel_args args,
                                                      u32 item_count,
-                                                     cc::span<WGPUBuffer const> inputs)
+                                                     cc::span<acceleration_kernel_input const> inputs)
 {
     CC_ASSERT(inputs.size() <= 3, "a build kernel reads at most three inputs");
     auto& pool = _ctx._acceleration;
