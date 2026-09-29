@@ -593,6 +593,11 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
             if (binding.value().type != sg::binding_type::sampler)
                 return cc::error(cc::format("'{}' of '{}' sits at [[sampler({})]], so it must be a `sampler`",
                                             param.value().name, entry_point, sampler_index));
+            // `array<sampler, N>` reflects with a count of 1, so the type is checked as well as the count.
+            if (binding.value().count != 1 || has_word(param.value().type, "array"))
+                return cc::error(cc::format("'{}' of '{}' sits at [[sampler({})]], so it must be one `sampler`, not an "
+                                            "array",
+                                            param.value().name, entry_point, sampler_index));
 
             binding.value().index = u32(sampler_index);
             binding.value().visibility = stage;

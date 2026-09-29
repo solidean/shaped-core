@@ -171,6 +171,21 @@ TEST("ssc::msl reflect - a sampler slot of the entry point is the layout's stati
     REQUIRE(wrong.has_error());
 }
 
+TEST("ssc::msl reflect - a sampler slot of the entry point holds one sampler, never an array")
+{
+    char const* const sources[] = {
+        "kernel void k(array<sampler, 2> s [[sampler(0)]]) { (void)s; }",
+        "kernel void k(sampler s[2] [[sampler(0)]]) { (void)s; }",
+    };
+
+    for (auto const* const source : sources)
+    {
+        auto r = ssc::msl::impl::reflect(source, "k", sg::shader_stage::compute);
+        REQUIRE(r.has_error());
+        CHECK(r.error().to_string().contains("not an array")).context(r.error().to_string());
+    }
+}
+
 TEST("ssc::msl reflect - a built-in parameter is a value the hardware supplies, never a binding")
 {
     constexpr char const* source = R"(
