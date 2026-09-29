@@ -1,0 +1,33 @@
+// Inline ray queries against a known scene, as every backend traces them: natively, or through webgpu's polyfill.
+require ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+    ids: mut buffer[int4]
+
+// primitive 1 of every instance is cut out, which the any-hit decision alone knows
+fun cutout(c: triangle_candidate) -> hit_decision:
+    if c.primitive_index == 1 => return hit_decision.ignore
+    return hit_decision.accept
+
+// One ray per cell of an 8 × 8 grid, along +z from z = -1, a quarter cell off each cell's centre in x.
+// So no ray passes through an edge two triangles share.
+fun cell_ray(id: int3) -> ray => ray(
+    origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+    direction = vec3(0.0, 0.0, 1.0)
+)
+
+fun store(id: int3, h: triangle_hit){scene}:
+    let at = id.x + id.y * 8
+    let mut is_hit = 0
+    if h.is_hit => is_hit = 1
+    scene.hits[at] = float4(h.t, h.barycentrics.y, h.barycentrics.z, 0.0)
+    scene.ids[at] = int4(is_hit, h.instance_id, h.primitive_index, h.instance_index)
+
+@compute(8, 8) fun trace_cells(@thread_id id: int3){scene}:
+    store(id, scene.world.trace(cell_ray(id), cutout))
+
+// the same rays, deciding nothing: the cut-out triangle is hit as any other
+@compute(8, 8) fun trace_cells_opaque(@thread_id id: int3){scene}:
+    store(id, scene.world.trace(cell_ray(id), flags = ray_flags.force_opaque))

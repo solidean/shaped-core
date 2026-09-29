@@ -403,6 +403,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/sampler-test.cc
             tests/pipeline/texture-shapes-test.cc
             tests/pipeline/stages-test.cc
+            tests/pipeline/ray-query-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -422,6 +423,7 @@ if(SC_BUILD_TESTS)
                 draws.sgl:*
                 vertex_input.sgl:*
                 dispatch.sgl:*
+                raytracing.sgl:*
                 pixel_semantics.sgl:*
                 sampling.sgl:*
                 shapes.sgl:*
