@@ -28,3 +28,12 @@ test:
 @expect(error = "no-matching-overload")
 test:
     first(1, 2.5) == 1
+
+// a function with a mut parameter is no function value, whether the parameter it meets is generic or not
+fun bumped(x: mut int) -> int:
+    x += 1
+    return x
+
+@expect(error = "no-matching-overload")
+test:
+    apply(1, bumped) == 2

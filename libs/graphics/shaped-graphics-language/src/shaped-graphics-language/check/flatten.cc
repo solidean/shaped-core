@@ -86,6 +86,8 @@ struct flattener
         i32 file = 0;
         ast::expr_id call = ast::expr_id::none;
         feature_set features;
+        /// The functions whose bodies the call stands in, the tree's own first, each of which uses what it needs.
+        cc::vector<symbol_id> within;
     };
     cc::vector<feature_use> feature_uses;
     /// CHK-345: an intersection entry point fused with the any hit of one record, which its own `return` runs.
@@ -103,7 +105,13 @@ struct flattener
     {
         if (auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
             record != nullptr && !record->features.is_empty())
-            feature_uses.push_back({.file = file(), .call = call, .features = record->features});
+        {
+            auto within = cc::vector<symbol_id>();
+            for (auto const& fr : frames)
+                within.push_back(fr.function);
+            feature_uses.push_back(
+                {.file = file(), .call = call, .features = record->features, .within = cc::move(within)});
+        }
         // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
         if (is_test)
         {
@@ -2415,6 +2423,9 @@ void checker::flatten_test(i32 index)
     auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
     for (auto const stmt : ast_of(test.file).at(body.statements))
         f.flatten_stmt(stmt);
+    // CHK-265: the test's `require` and a helper's that the test reaches are used by the calls that need them
+    for (auto const& u : f.feature_uses)
+        mark_requires_used(u.within, u.features);
 
     // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
     // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
@@ -2626,14 +2637,10 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                     break;
                 }
         }
-        // a body's `require` that declares it is used, as one declaring a need of the signature is (CHK-265)
-        for (auto& line : require_lines)
-            if (line.owner == id && line.scope == require_scope::body && line.what == needed)
-            {
-                line.is_used = true;
-                break;
-            }
     }
+    // a body's `require` that declares it is used, as one declaring a need of the signature is (CHK-265)
+    for (auto const& u : f.feature_uses)
+        mark_requires_used(u.within, u.features);
     out.functions[s.info].features |= used;
     f.entry.features |= used;
     // CHK-227: once, however many trees inline the function the assert stands in

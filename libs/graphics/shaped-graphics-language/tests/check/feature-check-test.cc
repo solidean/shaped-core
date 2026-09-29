@@ -97,7 +97,7 @@ TEST("sgl check - a require in a body that nothing needs is unused, and one of a
     REQUIRE(declared_only.module.entry_points.size() == 1);
     CHECK(declared_only.module.entry_points[0].features == sgl::check::feature_set(sgl::check::feature::ray_query));
 
-    // Nothing in a body uses a feature yet, so a helper's `require` grants nothing it could reach.
+    // A helper's `require` that no call its body reaches needs is unused.
     constexpr auto helper = "fun helper() -> float:\n"
                             "    require ray_query\n"
                             "    return 1.0\n";

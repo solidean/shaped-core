@@ -586,6 +586,7 @@ fun falloff(d: float) -> float:
 * **AST-143** An extension without parameters is a property of its extended type, as AST-81 reads one: `fun ray.inverted => …` ([why](why/ast.md#ast-143)).
   It may carry `-> type` before its body, and type parameters or bindings there are `missing-parameter-list`.
 * **AST-68** A **parameter** is a [field](#members), and a type parameter is a parameter whose type may be left out.
+  `mut` before a parameter's name is recorded as a mark, with a type or without, and the check pass judges it ([CHK-315](../semantics/checking.md#functions)).
 * **AST-144** A parameter or a field whose name is a leading-dot form, `.level: float`, is **named-only**: the AST records the mark, and the name without its dot.
   A named-only mark on a binding member, on a member of a `struct_type` or on `self` is the normal error `named-only-not-allowed-here`, and the member is still read.
 * **AST-69** An element of the bindings is a **binding entry**, and the AST keeps it as an expression.

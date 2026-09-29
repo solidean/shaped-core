@@ -419,6 +419,12 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         }
         return local->type;
     }
+    if (is_type_parameter_name(text))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               cc::format("{} is a type parameter, which names a type and no value", text));
+        return error_type;
+    }
 
     auto const* const found = names_seen_from(file).get_ptr(text);
     if (found == nullptr || found->empty())
@@ -494,7 +500,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // `constants.view_projection`: a binding is no value, so the object is looked at before it is checked
     auto const* const object_name
         = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
-    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr)
+    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr
+        && !is_type_parameter_name(text_of(file, object_name->where)))
     {
         auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
         if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::binding)
@@ -938,6 +945,15 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         return error_type;
     }
 
+    // CHK-338: a type parameter hides every symbol of its name, a struct's constructor among them
+    if (is_type_parameter_name(text))
+    {
+        (void)check_arguments(scope, call.arguments, false);
+        report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
+               cc::format("{} is a type parameter, and a call needs a function or a struct", text));
+        return error_type;
+    }
+
     // CHK-329: a trace whose third argument names a ray type is a ray-tracing stage's trace
     if (text == "trace")
     {
@@ -1029,7 +1045,8 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     // `T.foo(…)`: the functions of the type scope of `T`, and `T` is no argument (CHK-248)
     auto const* const object_name
         = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
-    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr)
+    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr
+        && !is_type_parameter_name(text_of(file, object_name->where)))
     {
         auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
         auto const kind = found != nullptr && !found->empty() ? out.at(found->front()).kind : symbol_kind::unsupported;
@@ -1478,9 +1495,16 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
                 if (info.entry_stage != stage::none || is_valid(out.at(g).intrinsic)
                     || !out.at(info.type_parameters).empty())
                     continue;
+                // CHK-318: a function value's parameters are none of them `mut`
                 auto types = cc::vector<type_id>();
+                auto has_mut = false;
                 for (auto const& q : out.at(info.parameters))
+                {
                     types.push_back(q.type);
+                    has_mut = has_mut || q.is_mut;
+                }
+                if (has_mut)
+                    continue;
                 auto trial = result.bindings;
                 if (unify(parameters[p].type, function_type(types, info.result), trial))
                 {

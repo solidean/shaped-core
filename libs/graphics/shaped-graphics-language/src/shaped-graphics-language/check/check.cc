@@ -558,7 +558,7 @@ cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, typ
     if (is_prelude_file(out.at(type.symbol).file))
         if (auto const* const declared = prelude_names.get_ptr(name))
             for (auto const id : *declared)
-                if (out.at(id).kind == symbol_kind::function)
+                if (out.at(id).kind == symbol_kind::function && is_visible_from(file, id))
                     add(id);
     return result;
 }
@@ -669,16 +669,20 @@ bool checker::is_all_functions(cc::span<symbol_id const> ids) const
     return result;
 }
 
+bool checker::is_internal(symbol_id id) const
+{
+    auto const& s = out.at(id);
+    return is_prelude_file(s.file) && ast::is_valid(s.declaration)
+        && find_attribute(s.file, ast_of(s.file).at(s.declaration).attributes, "internal") != nullptr;
+}
+
 void checker::merge_scopes()
 {
     // CHK-323: an `@internal` symbol of the prelude is the prelude's alone, and no lookup from the program finds it
     names = {};
     for (auto const& [name, ids] : prelude_names)
         for (auto const id : ids)
-            if (!ast::is_valid(out.at(id).declaration)
-                || find_attribute(out.at(id).file, ast_of(out.at(id).file).at(out.at(id).declaration).attributes,
-                                  "internal")
-                       == nullptr)
+            if (!is_internal(id))
                 names[name].push_back(id);
     for (auto const& [name, ids] : file_names)
     {

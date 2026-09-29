@@ -292,6 +292,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     auto const& e = ast_of(file).at(expr);
     auto const where = span_of(file, expr);
     auto result = checked_module::error_type;
+    // CHK-317: a function type is a parameter's whole type, so no type inside this one may be one
+    auto const is_whole_parameter_type = allows_function_type;
+    allows_function_type = false;
 
     if (!e.attributes.empty())
         unsupported(file, where, "an attribute on a type");
@@ -366,6 +369,10 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             result = applied_resource;
         else if (ast::is_valid(applied->object) && is_type_name(file, applied->object))
             result = resolve_array(file, expr, *applied, scope);
+        // CHK-317: an array of functions, whose element type is no parameter's whole type
+        else if (ast::is_valid(applied->object) && ast_of(file).at(applied->object).node.is<ast::function_type>())
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, applied->object),
+                   "a function type is the type of a parameter, and of nothing else");
         else
             unsupported(file, where, "type arguments");
     }
@@ -374,8 +381,6 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     else if (auto const* const fn = e.node.try_as<ast::function_type>())
     {
         // CHK-317: a parameter's type alone, and its parameters and result are value types
-        auto const outer = allows_function_type;
-        allows_function_type = false;
         auto parameters = cc::vector<type_id>();
         auto is_sound = true;
         for (auto const& p : ast_of(file).at(fn->parameters))
@@ -386,8 +391,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
         }
         auto const r
             = ast::is_valid(fn->result) ? resolve_value_type(file, fn->result, scope) : checked_module::error_type;
-        allows_function_type = outer;
-        if (!outer)
+        if (!is_whole_parameter_type)
             report(diagnostic_kind::wrong_kind_of_name, file, where,
                    "a function type is the type of a parameter, and of nothing else");
         else if (is_sound && r != checked_module::error_type)
@@ -1235,9 +1239,9 @@ void checker::compile_function(symbol_id id)
     {
         if (ast::is_valid(p.type) || ast::is_valid(p.default_value) || !p.attributes.empty())
         {
+            // still declared, so a mention of it is no second diagnostic
             unsupported(file, span_of(file, p.form), "a type parameter with a bound, a default or an attribute");
             is_failed = true;
-            continue;
         }
         auto const parameter = new_type_parameter(text_of(file, p.name), id);
         type_parameters.push_back(parameter);
@@ -1313,6 +1317,8 @@ void checker::compile_function(symbol_id id)
             q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr)
         {
             is_mut_parameter = true;
+            // a function is no place, so a function type is not the whole type here (CHK-317)
+            allows_function_type = false;
             type = resolve_value_type(file, q->type);
             set_type(file, p.type, type);
             // what a stage takes the GPU hands it, and nothing hands an entry point a place
@@ -1322,6 +1328,13 @@ void checker::compile_function(symbol_id id)
                 report(diagnostic_kind::wrong_kind_of_name, file, p.name,
                        cc::format(
                            "{} is a parameter of an entry point, which the GPU fills and no caller hands a place", name));
+                is_failed = true;
+            }
+            // CHK-316: the argument marked `mut` is the one thing that fills it
+            if (ast::is_valid(p.default_value))
+            {
+                report(diagnostic_kind::default_not_allowed_here, file, span_of(file, p.default_value),
+                       cc::format("{} is a mut parameter, which only a caller's place fills", name));
                 is_failed = true;
             }
         }

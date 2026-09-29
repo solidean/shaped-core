@@ -271,8 +271,12 @@ range_of<argument> builder::list_elements(form_id list, bool is_object, bool all
 bool builder::is_field_like(form_id element, bool needs_type) const
 {
     auto target = element;
+    if (is_mut_led_field(target))
+        target = keyword_parts_of(target).arguments[0];
     if (is_binary_run(target, "="))
         target = at(target).first_child;
+    if (is_mut_led_field(target))
+        target = keyword_parts_of(target).arguments[0];
 
     auto has_type = false;
     if (is_kind(target, form_kind::operator_run))
@@ -298,6 +302,14 @@ bool builder::is_field_like(form_id element, bool needs_type) const
         && is_kind(parts.arguments[0], form_kind::identifier);
 }
 
+bool builder::is_mut_led_field(form_id element) const
+{
+    if (!is_mut_argument(element))
+        return false;
+    auto const argument = keyword_parts_of(element).arguments[0];
+    return is_kind(argument, form_kind::operator_run) || is_binary_run(argument, "=");
+}
+
 bool builder::is_mut_argument(form_id element) const
 {
     if (!is_keyword_led(element, "mut"))
@@ -315,12 +327,23 @@ field builder::make_field(form_id element, diagnostic_kind on_failure)
         return result;
     }
 
+    // `mut` leads either the whole field or what stands before its default, as the forms group them
     auto target = element;
+    if (is_mut_led_field(target))
+    {
+        result.is_mut = true;
+        target = keyword_parts_of(target).arguments[0];
+    }
     if (is_binary_run(target, "="))
     {
         auto const parts = run_parts_of(target);
         result.default_value = expression(parts.operands[1]);
         target = parts.operands[0];
+    }
+    if (is_mut_led_field(target))
+    {
+        result.is_mut = true;
+        target = keyword_parts_of(target).arguments[0];
     }
     if (is_kind(target, form_kind::operator_run))
     {
