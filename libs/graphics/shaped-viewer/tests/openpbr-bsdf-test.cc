@@ -747,19 +747,25 @@ ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what the
     metal.specular_color = tg::vec3f(1, 1, 1);
     metal.specular_roughness = 0.3f;
 
+    // A white subsurface with its specular layer off: everything it returns crossed into the interior, and what
+    // scattered there leaves as diffuse light, which is also where the diffuse albedo guide counts its colour.
+    auto subsurface = lambert;
+    subsurface.subsurface_weight = 1.0f;
+    subsurface.subsurface_color = tg::vec3f(1, 1, 1);
+
     auto const wo = tg::vec3f(0.6f, 0, 0.8f);
     auto const case_of = [&](probe_surface const& s, probe_mode mode)
     { return probe_case{.wo = wo, .mode = mode, .samples = 4096, .seed = 11, .s = s}; };
 
     auto const cases = cc::vector<probe_case>{
-        case_of(lambert, probe_mode::albedo_diffuse),
-        case_of(lambert, probe_mode::albedo_specular),
-        case_of(metal, probe_mode::albedo_diffuse),
-        case_of(metal, probe_mode::albedo_specular),
+        case_of(lambert, probe_mode::albedo_diffuse),    case_of(lambert, probe_mode::albedo_specular),
+        case_of(metal, probe_mode::albedo_diffuse),      case_of(metal, probe_mode::albedo_specular),
+        case_of(subsurface, probe_mode::albedo_diffuse), case_of(subsurface, probe_mode::albedo_specular),
+        case_of(subsurface, probe_mode::albedo),
     };
 
     auto const r = co_await run_probe(ctx, cases);
-    REQUIRE(r.size() == 4);
+    REQUIRE(r.size() == 7);
 
     // A lossless white Lambertian reflects all of it, and every bit of that is the diffuse half.
     CHECK(tg::abs(r[0].mean[0] - 1.0f) < 0.02f)
@@ -770,4 +776,13 @@ ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what the
     // And a metal is the mirror image: no diffuse substrate under it, so the diffuse half is empty.
     CHECK(r[2].mean[0] < 0.01f).context(cc::format("a metal's diffuse half reflected {}", r[2].mean[0]));
     CHECK(r[3].mean[0] > 0.8f).context(cc::format("a white metal's specular half reflected only {}", r[3].mean[0]));
+
+    // The subsurface's crossing is all of it, and all of it is the diffuse half.
+    // Against the whole closure rather than 1: a crossing into ior 1.5 compresses radiance by 1/1.5^2, so the
+    // integral over the far side is 0.44 however lossless the interior is.
+    CHECK(r[6].mean[0] > 0.3f).context(cc::format("a white subsurface returned only {}", r[6].mean[0]));
+    CHECK(tg::abs(r[4].mean[0] - r[6].mean[0]) < 0.01f)
+        .context(cc::format("a subsurface's diffuse half carried {} of {}", r[4].mean[0], r[6].mean[0]));
+    CHECK(r[5].mean[0] < 0.01f)
+        .context(cc::format("a subsurface with no specular layer carried {} specularly", r[5].mean[0]));
 }

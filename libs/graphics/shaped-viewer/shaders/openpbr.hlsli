@@ -987,10 +987,10 @@ float3 transmission_btdf(bsdf b, float3 wo, float3 wi)
 
 /// The BSDF at (`wo`, `wi`) split into the halves a denoiser filters apart, with the cosine NOT folded in.
 ///
-/// `diffuse` is what the diffuse substrate returns and `specular` is everything else — the fuzz, the coat, the metal
-/// and the dielectric specular, plus every transmission.
-/// A transmission is sharp and view-dependent, so filtering it as diffuse would destroy exactly what makes it read as
-/// glass; it goes with the specular half and takes its lobe's name for this purpose only.
+/// `diffuse` is what the diffuse substrate returns plus the subsurface's share of the transmission, and `specular` is
+/// everything else — the fuzz, the coat, the metal and the dielectric specular, plus the glass's share.
+/// Glass is sharp and view-dependent, so filtering it as diffuse would destroy exactly what makes it read as glass.
+/// Subsurface is the opposite: what leaves it has scattered inside, and the diffuse albedo guide counts its colour.
 ///
 /// **Their sum is `bsdf_eval`, exactly rather than nearly.**
 /// The base mixes as `lerp(f_spec + f_diffuse, f_metal, metalness)`, which separates into
@@ -1024,7 +1024,9 @@ void bsdf_eval_split(bsdf b, float3 wo, float3 wi, out float3 diffuse, out float
         // The coat tints what passes through it once, on this branch as on the reflecting one.
         float3 coat_absorption = lerp(float3(1, 1, 1), b.coat_tint, b.coat_weight);
 
-        specular = f_btdf * tint * t_coat_x * coat_absorption * t_fuzz_x * (1.0 - b.metalness);
+        float3 crossing = f_btdf * t_coat_x * coat_absorption * t_fuzz_x * (1.0 - b.metalness);
+        specular = crossing * b.trans_weight * b.trans_tint;
+        diffuse = crossing * (1.0 - b.trans_weight) * b.sss_weight;
         return;
     }
 
@@ -1335,10 +1337,11 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
 
         // A thin wall encloses nothing, so passing through one enters no interior at all — and saying so here is what
         // keeps that fact in the closure, which is the only thing that knows it.
+        bool const picked_subsurface = w_sum > 0.0 && within * w_sum >= w_trans;
         if (b.thin_walled != 0.0)
             r.medium = medium_none;
         else
-            r.medium = (w_sum <= 0.0 || within * w_sum < w_trans) ? medium_transmission : medium_subsurface;
+            r.medium = picked_subsurface ? medium_subsurface : medium_transmission;
 
         // Refracted about a visible microfacet, or straight through when the wall is thin.
         float3 h = ggx_sample_vndf(wo, b.spec_alpha, u.yz);
@@ -1376,6 +1379,10 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
             }
             wi = normalize(wi);
         }
+
+        // Named only once it crossed: the reflection above is scored as specular, and keeps the transmission's name.
+        if (r.medium == medium_subsurface)
+            r.lobe = bsdf_lobe_subsurface;
     }
 
     if (wi.z > -1e-6 && wi.z <= 1e-6)
