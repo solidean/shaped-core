@@ -335,6 +335,28 @@ The checking goes elsewhere: the interpreter reports the program error in a `tes
 A construct that is missing on some target is lowered or feature-gated, never left target-dependent; this rule covers only a value no program should produce.
 Price a defined-everywhere option by what every correct program pays for it, not by what it buys the rare incorrect one.
 
+### A check that costs every dispatch or draw is opt-in
+
+A validation that runs per operation on a hot path is never on by default, whatever it protects against.
+A portability check that refuses what WebGPU refuses ran at every dispatch and draw, quadratic in the buffers bound, and the review first offered to move it inside the assert:
+
+```raw
+is the alias test quadratic in number of bindings? and when does it happen? every draw/dispatch? -- if yes then this is way too expensive per op and we need this opt-in for some tests and not in general
+```
+
+It became a setting on the context, off by default and on in sg's own test contexts, and nothing is recorded or scanned while it is off.
+
+### An SGL file is a library, and a design is priced on what it declares
+
+A mechanism that scales with what a file *declares*, rather than with what a pipeline *uses*, is priced against a file holding far more than any one pipeline reaches.
+A review recommended that every stage's layout carry all of its file's samplers, so two stages of one file always agree:
+
+```raw
+A is out for a simple reason: sgl is designed to build libraries and if you add all samplers, it will exhaust everything very quickly
+```
+
+The same reasoning exposed that numbering file samplers in declaration order caps a library at sixteen usable ones, which was recorded as a known limit with the way out written beside it.
+
 ### "No callers in the repo" is not evidence of dead code
 
 A symbol in an exported header is reachable by consumers this tree does not contain; an unused-looking member there wants its *correctness* checked, not its existence questioned.
