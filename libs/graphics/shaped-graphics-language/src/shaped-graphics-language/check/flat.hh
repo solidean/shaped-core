@@ -655,6 +655,15 @@ struct sgl::check::flat_stage_input
 
 /// One entry point as one flat function.
 /// A type, a symbol and a binding are ids into the `checked_module` this value stands in.
+/// A ray type an entry point traces: its set, and its position there.
+struct sgl::check::flat_traced_ray
+{
+    symbol_id set = symbol_id::none;
+    i32 ray = 0;
+
+    constexpr bool operator==(flat_traced_ray const&) const = default;
+};
+
 struct sgl::check::flat_entry_point
 {
     stage entry_stage = stage::none;
@@ -672,6 +681,8 @@ struct sgl::check::flat_entry_point
     i32 workgroup[3] = {1, 1, 1};
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
+    /// The ray types it traces, by their position in their set, each once (CHK-332).
+    cc::vector<flat_traced_ray> traced_rays;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -716,6 +727,7 @@ struct sgl::check::flat_entry_point
             && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
             && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
             && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
-            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names;
+            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names
+            && is_equal(traced_rays, rhs.traced_rays);
     }
 };

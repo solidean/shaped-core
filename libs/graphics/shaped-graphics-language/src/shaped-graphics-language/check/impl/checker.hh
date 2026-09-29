@@ -462,7 +462,8 @@ struct checker
     void judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
     /// The ray set a `rays` declaration made of `symbol`, and its ray types; null for any other symbol.
     [[nodiscard]] bool is_ray_set(symbol_id symbol) const;
-    /// `set.ray` as an expression: the set and the ray's position, or `none` where `expr` names no ray type.
+    /// `set.ray` as an expression: the set and the ray's position, or `none` where `expr` names no ray set.
+    /// A ray set without that ray type is reported, and its position is -1.
     [[nodiscard]] cc::optional<ray_trace> ray_type_of(i32 file, ast::expr_id expr);
     /// `trace(world, r, set.ray, mut payload)`, the trace of a ray-tracing stage (CHK-329).
     type_id check_pipeline_trace(function_scope& scope, ast::expr_id id, ast::call const& call, ray_trace ray);
@@ -597,6 +598,18 @@ struct checker
     // ---- pipelines (check_pipeline.cc) ------------------------------------------------------------------------------
 
     void compile_pipeline(symbol_id id);
+    /// CHK-330: a `hit_group`, one row of a ray-tracing pipeline's table.
+    void compile_hit_group(symbol_id id);
+    /// CHK-331: a `@raytracing pipeline`.
+    void compile_raytracing_pipeline(symbol_id id);
+    /// The entry point of `wanted` that `value` names, or `none` after a report.
+    symbol_id ray_entry_named(i32 file, ast::expr_id value, stage wanted);
+    /// The ray set `name` names, or `none` after a report.
+    symbol_id ray_set_named(i32 file, source_span name);
+    /// The payload an entry point of a ray-tracing stage takes, `none` for a raygen.
+    [[nodiscard]] type_id payload_of(symbol_id entry) const;
+    /// CHK-332: every ray-tracing pipeline's trace graph, once each entry point says what it traces.
+    void judge_trace_graphs();
     /// The prelude's `raster_pipeline_description`, compiled on first use; the error type where the prelude has none.
     [[nodiscard]] type_id pipeline_description_type();
     /// True when `name` alone is one field of the description, or of one target's part when `is_on_target`.

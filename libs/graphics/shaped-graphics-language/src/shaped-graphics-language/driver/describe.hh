@@ -228,6 +228,49 @@ struct sgl::described_pipeline
     cc::vector<cc::string> frozen;
 };
 
+/// A `rays` declaration: a ray-tracing pipeline's ray types, in table order.
+struct sgl::described_ray_set
+{
+    cc::string name;
+    /// Each ray type's name, and the struct its payload is.
+    cc::vector<cc::string> rays;
+    cc::vector<cc::string> payloads;
+};
+
+/// A `hit_group`: one row of a ray-tracing pipeline's table, a record per ray type of its set.
+struct sgl::described_hit_group
+{
+    cc::string name;
+    cc::string ray_set;
+    bool is_procedural = false;
+    /// Empty for a triangle group.
+    cc::string intersection;
+    /// Per ray type, in the set's order; empty where the record has none.
+    cc::vector<cc::string> closest_hits;
+    cc::vector<cc::string> any_hits;
+};
+
+/// A `@raytracing pipeline`: its ray set, its shaders, and what sg's description needs that SGL derives.
+struct sgl::described_raytracing_pipeline
+{
+    cc::string name;
+    cc::string ray_set;
+    cc::string raygen;
+    /// Per ray type, in the set's order; empty for a ray type without a miss.
+    cc::vector<cc::string> misses;
+    /// The listed hit groups, in table order; the host's follow them where `has_host_hit_groups`.
+    cc::vector<cc::string> hit_groups;
+    bool has_host_hit_groups = false;
+    i32 max_recursion_depth = 1;
+    /// In bytes: the largest payload of its set, and the largest attributes a hit reports.
+    i32 max_payload_size = 0;
+    i32 max_attribute_size = 0;
+    /// The binding layout, in group order, and its one `@inline` binding or empty.
+    cc::vector<cc::string> layout;
+    cc::string inline_constants;
+    cc::vector<cc::string> features;
+};
+
 struct sgl::module_description
 {
     /// In source order.
@@ -237,6 +280,9 @@ struct sgl::module_description
     cc::vector<described_memory_struct> memory_structs;
     cc::vector<described_entry_point> entry_points;
     cc::vector<described_pipeline> pipelines;
+    cc::vector<described_ray_set> ray_sets;
+    cc::vector<described_hit_group> hit_groups;
+    cc::vector<described_raytracing_pipeline> raytracing_pipelines;
     /// The file-scope samplers, in index order.
     cc::vector<described_file_sampler> samplers;
 };

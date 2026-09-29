@@ -355,6 +355,7 @@ void checker::run()
     // after flattening, which finds what a body's calls need (CHK-322)
     report_unused_requires();
     judge_footprint_pins();
+    judge_trace_graphs();
 }
 
 void checker::declare_file(i32 file)

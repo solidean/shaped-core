@@ -563,6 +563,8 @@ enum class sgl::check::pipeline_kind : sgl::u8
     raster,
     compute,
     raytracing,
+    /// A `hit_group`: one row of a ray-tracing pipeline's table (CHK-330).
+    hit_group,
 };
 
 /// A `pipeline` declaration that checked: its stages, its layout, and its configuration.
@@ -586,6 +588,22 @@ struct sgl::check::pipeline_info
     type_id target_set = type_id::none;
     /// In the order they apply, each over the ones before it and all over sg's defaults.
     ast::range_of<pipeline_setting> settings;
+
+    /// A ray-tracing pipeline's and a hit group's ray set, a `rays` declaration (CHK-330, CHK-331).
+    symbol_id ray_set = symbol_id::none;
+    symbol_id raygen = symbol_id::none;
+    /// A ray-tracing pipeline's miss per ray type, each `none` for a ray type without one; a range of `binding_lists`.
+    ast::range_of<symbol_id> misses;
+    /// A ray-tracing pipeline's listed hit groups, in table order; a range of `binding_lists`.
+    ast::range_of<symbol_id> hit_groups;
+    /// Whether the host appends hit groups of its own after the listed ones: `.host`, last in `hit_groups`.
+    bool has_host_hit_groups = false;
+    /// Derived from the trace graph where every hit group is listed, and declared as a bound with `.host`.
+    i32 max_recursion_depth = 0;
+    /// A hit group's closest hit and any hit per ray type, two by two, each `none` where it has none.
+    ast::range_of<symbol_id> records;
+    symbol_id intersection = symbol_id::none;
+    bool is_procedural = false;
 
     constexpr bool operator==(pipeline_info const&) const = default;
 };

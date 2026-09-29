@@ -904,7 +904,8 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         auto const arguments = ast.at(call.arguments);
         if (arguments.size() >= 4 && arguments[2].name.empty() && ast::is_valid(arguments[2].value))
             if (auto const ray = ray_type_of(file, arguments[2].value); ray.has_value())
-                return check_pipeline_trace(scope, id, call, ray.value());
+                return ray.value().ray < 0 ? checked_module::error_type
+                                           : check_pipeline_trace(scope, id, call, ray.value());
     }
 
     // CHK-247: the functions of its name, and those of its first argument's type scope, whatever else the name is

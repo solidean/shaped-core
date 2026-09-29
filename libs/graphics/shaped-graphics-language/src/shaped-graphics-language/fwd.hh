@@ -50,6 +50,9 @@ struct described_memory_struct;
 struct described_entry_point;
 struct described_pipeline_setting;
 struct described_pipeline;
+struct described_ray_set;
+struct described_hit_group;
+struct described_raytracing_pipeline;
 struct module_description;
 struct describe_request;
 
@@ -226,6 +229,7 @@ enum class target_kind : u8;
 struct target;
 struct written_argument;
 struct ray_trace;
+struct flat_traced_ray;
 struct call_record;
 enum class miss_reason : u8;
 struct near_miss;

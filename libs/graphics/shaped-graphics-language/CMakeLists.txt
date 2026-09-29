@@ -361,6 +361,7 @@ if(SC_BUILD_TESTS)
         tests/check/feature-check-test.cc
         tests/check/declaration-check-test.cc
         tests/check/pipeline-check-test.cc
+        tests/check/raytracing-pipeline-check-test.cc
         tests/check/enum-check-test.cc
         tests/check/expression-check-test.cc
         tests/check/test-check-test.cc

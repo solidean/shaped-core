@@ -189,6 +189,73 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     return result;
 }
 
+/// The bytes a payload takes in a ray-tracing pipeline: every leaf a 32-bit word, which is how DXR counts it.
+i32 payload_bytes(check::checked_module const& m, check::type_id type)
+{
+    auto const& t = m.at(type);
+    if (auto const* const builtin = m.builtin_type_of(type))
+        return 4 * builtin->leaf_count;
+    if (t.kind == check::type_kind::array)
+        return t.count * payload_bytes(m, t.element);
+    auto result = 0;
+    for (auto const& member : m.at(t.members))
+        result += payload_bytes(m, member.type);
+    return result;
+}
+
+cc::string name_or_empty(check::checked_module const& m, check::symbol_id id)
+{
+    return check::is_valid(id) ? cc::string(m.at(id).name) : cc::string();
+}
+
+described_hit_group describe_hit_group(check::checked_module const& m, check::pipeline_info const& p)
+{
+    auto result = described_hit_group{.name = m.at(p.symbol).name,
+                                      .ray_set = m.at(p.ray_set).name,
+                                      .is_procedural = p.is_procedural,
+                                      .intersection = name_or_empty(m, p.intersection)};
+    auto const records = m.at(p.records);
+    for (auto i = isize(0); i < records.size(); i += 2)
+    {
+        result.closest_hits.push_back(name_or_empty(m, records[i]));
+        result.any_hits.push_back(name_or_empty(m, records[i + 1]));
+    }
+    return result;
+}
+
+described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module const& m, check::pipeline_info const& p)
+{
+    auto result = described_raytracing_pipeline{.name = m.at(p.symbol).name,
+                                                .ray_set = m.at(p.ray_set).name,
+                                                .raygen = m.at(p.raygen).name,
+                                                .has_host_hit_groups = p.has_host_hit_groups,
+                                                .max_recursion_depth = p.max_recursion_depth,
+                                                .inline_constants = name_or_empty(m, p.inline_constants)};
+    auto features = m.functions[m.at(p.raygen).info].features;
+    for (auto const miss : m.at(p.misses))
+    {
+        result.misses.push_back(name_or_empty(m, miss));
+        if (check::is_valid(miss))
+            features |= m.functions[m.at(miss).info].features;
+    }
+    for (auto const group : m.at(p.hit_groups))
+    {
+        auto const& g = m.pipelines[m.at(group).info];
+        result.hit_groups.push_back(m.at(group).name);
+        for (auto const entry : m.at(g.records))
+            if (check::is_valid(entry))
+                features |= m.functions[m.at(entry).info].features;
+    }
+    for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
+        result.max_payload_size = cc::max(result.max_payload_size, payload_bytes(m, ray.type));
+    // a triangle's barycentrics
+    result.max_attribute_size = 8;
+    for (auto const b : m.at(p.layout))
+        result.layout.push_back(m.at(b).name);
+    result.features = feature_names(features);
+    return result;
+}
+
 /// `legal` holds each entry point of the module legalized, parallel to `m.entry_points`.
 described_pipeline describe_pipeline(check::checked_module const& m,
                                      check::pipeline_info const& p,
@@ -496,8 +563,32 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     }
 
     for (auto const& p : m.pipelines)
-        if (m.at(p.symbol).file == front.program_file())
+    {
+        if (m.at(p.symbol).file != front.program_file())
+            continue;
+        if (p.kind == check::pipeline_kind::hit_group)
+            result.hit_groups.push_back(describe_hit_group(m, p));
+        else if (p.kind == check::pipeline_kind::raytracing)
+            result.raytracing_pipelines.push_back(describe_raytracing_pipeline(m, p));
+        else
             result.pipelines.push_back(describe_pipeline(m, p, legal));
+    }
+    // every ray set of the program, a pipeline naming it or not
+    for (auto const& s : m.symbols)
+        if (s.kind == check::symbol_kind::structure && s.file == front.program_file()
+            && s.state == check::symbol_state::checked && ast::is_valid(s.declaration))
+        {
+            auto const* const d = front.asts[s.file]->at(s.declaration).node.try_as<ast::struct_decl>();
+            if (d == nullptr || !d->is_ray_set)
+                continue;
+            auto set = described_ray_set{.name = s.name};
+            for (auto const& ray : m.at(m.at(s.type).members))
+            {
+                set.rays.push_back(ray.name);
+                set.payloads.push_back(m.name_of(ray.type));
+            }
+            result.ray_sets.push_back(cc::move(set));
+        }
 
     if (!errors.empty())
     {

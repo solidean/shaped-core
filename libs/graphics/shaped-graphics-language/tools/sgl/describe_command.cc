@@ -190,6 +190,46 @@ void write_file_sampler(babel::json::object_writer& o, sgl::described_file_sampl
     write_settings(so, s.settings);
 }
 
+void write_names(babel::json::object_writer& o, cc::string_view key, cc::span<cc::string const> names)
+{
+    auto list = o.write_array(key, babel::json::layout::compact);
+    for (auto const& name : names)
+        list.write(cc::string_view(name));
+}
+
+void write_ray_set(babel::json::object_writer& o, sgl::described_ray_set const& s)
+{
+    o.write("name", cc::string_view(s.name));
+    write_names(o, "rays", s.rays);
+    write_names(o, "payloads", s.payloads);
+}
+
+void write_hit_group(babel::json::object_writer& o, sgl::described_hit_group const& g)
+{
+    o.write("name", cc::string_view(g.name));
+    o.write("rays", cc::string_view(g.ray_set));
+    o.write("geometry", g.is_procedural ? "procedural" : "triangles");
+    o.write("intersection", cc::string_view(g.intersection));
+    write_names(o, "closest_hits", g.closest_hits);
+    write_names(o, "any_hits", g.any_hits);
+}
+
+void write_raytracing_pipeline(babel::json::object_writer& o, sgl::described_raytracing_pipeline const& p)
+{
+    o.write("name", cc::string_view(p.name));
+    o.write("rays", cc::string_view(p.ray_set));
+    o.write("raygen", cc::string_view(p.raygen));
+    write_names(o, "misses", p.misses);
+    write_names(o, "hit_groups", p.hit_groups);
+    o.write("host_hit_groups", p.has_host_hit_groups);
+    o.write("max_recursion_depth", i64(p.max_recursion_depth));
+    o.write("max_payload_size", i64(p.max_payload_size));
+    o.write("max_attribute_size", i64(p.max_attribute_size));
+    write_names(o, "layout", p.layout);
+    o.write("inline", cc::string_view(p.inline_constants));
+    write_names(o, "features", p.features);
+}
+
 void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const& p)
 {
     o.write("name", cc::string_view(p.name));
@@ -308,6 +348,30 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
             {
                 auto o = pipelines.write_object();
                 write_pipeline(o, p);
+            }
+        }
+        {
+            auto sets = root.write_array("ray_sets");
+            for (auto const& r : d.ray_sets)
+            {
+                auto o = sets.write_object();
+                write_ray_set(o, r);
+            }
+        }
+        {
+            auto groups = root.write_array("hit_groups");
+            for (auto const& g : d.hit_groups)
+            {
+                auto o = groups.write_object();
+                write_hit_group(o, g);
+            }
+        }
+        {
+            auto pipelines = root.write_array("raytracing_pipelines");
+            for (auto const& p : d.raytracing_pipelines)
+            {
+                auto o = pipelines.write_object();
+                write_raytracing_pipeline(o, p);
             }
         }
         auto samplers = root.write_array("samplers");

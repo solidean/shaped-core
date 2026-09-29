@@ -118,7 +118,7 @@ struct sgl::check::checked_module
     cc::vector<function_info> functions;
     cc::vector<parameter> parameters;
     cc::vector<binding_info> bindings;
-    /// The binding lists of the functions, and the layouts of the pipelines.
+    /// The binding lists of the functions, the layouts of the pipelines, and the shaders of the ray-tracing ones.
     cc::vector<symbol_id> binding_lists;
     /// The static samplers a binding declares, which its members name by `member_info::static_sampler`.
     cc::vector<sampler_state> samplers;

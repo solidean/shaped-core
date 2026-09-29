@@ -868,8 +868,9 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
 
-    // A compute entry point has no pipeline edge at either end, so neither struct is judged as one.
-    if (e.entry_stage != stage::compute)
+    // A compute entry point has no pipeline edge at either end, so neither struct is judged as one, and a ray-tracing
+    // stage's payload is handed over by reference rather than across an edge.
+    if (e.entry_stage != stage::compute && e.entry_stage < stage::raygen)
     {
         // the geometry and the tessellation stages take an array of what crosses, and a geometry stage hands its
         // vertices on through its stream rather than its result

@@ -134,8 +134,10 @@ struct sgl::ast::pipeline_decl
     range_of<argument> stages;
     /// Whether the short form was written, so `pipeline p = ()` is told apart from an empty block.
     bool is_short_form = false;
-    /// `hit_group name:`, one row of a ray-tracing pipeline's table, whose settings name its shaders (AST-150).
+    /// `hit_group name for set:`, one row of a ray-tracing pipeline's table, whose settings name its shaders (AST-150).
     bool is_hit_group = false;
+    /// The ray set a hit group is for; empty for a pipeline.
+    source_span ray_set;
 
     constexpr bool operator==(pipeline_decl const&) const = default;
 };

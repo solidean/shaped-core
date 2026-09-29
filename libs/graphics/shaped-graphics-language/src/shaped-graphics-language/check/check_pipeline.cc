@@ -588,11 +588,10 @@ void checker::compile_pipeline(symbol_id id)
         unsupported(file, a->name, "a @compute pipeline; every compute entry point is its own");
         return fail_symbol();
     }
-    if (auto const* const a = find_attribute(file, d.attributes, "raytracing"))
-    {
-        unsupported(file, a->name, "a @raytracing pipeline");
-        return fail_symbol();
-    }
+    if (p.is_hit_group)
+        return compile_hit_group(id);
+    if (find_attribute(file, d.attributes, "raytracing") != nullptr)
+        return compile_raytracing_pipeline(id);
 
     auto pc = pipeline_compiler{.c = *this, .file = file, .description = pipeline_description_type()};
     if (pc.description == checked_module::error_type)

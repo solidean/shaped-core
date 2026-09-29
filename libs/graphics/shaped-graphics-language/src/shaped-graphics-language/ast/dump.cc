@@ -632,6 +632,8 @@ struct dumper
                 open(n.is_hit_group ? "hit_group" : n.is_short_form ? "pipeline:short" : "pipeline");
                 // No name is valid here, unlike every other declaration's missing one.
                 out += n.name.empty() ? cc::string_view("<unnamed>") : file.text_of(n.name);
+                if (n.is_hit_group)
+                    out.appendf(" for {}", file.text_of(n.ray_set));
                 if (n.is_short_form)
                     dump_arguments(n.stages, depth);
                 for (auto const& s : ast.at(n.settings))
