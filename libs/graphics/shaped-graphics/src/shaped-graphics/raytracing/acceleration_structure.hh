@@ -2,6 +2,7 @@
 
 #include <clean-core/common/flags.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
@@ -89,6 +90,13 @@ enum class sg::instance_cull_mode : sg::u8
     none,  ///< disable triangle culling — sets the cull-disable flag
 };
 
+/// What a BLAS was built from, which fixes the kind of hit group every record it reaches must be.
+enum class sg::blas_geometry : sg::u8
+{
+    triangles, ///< built from blas_triangles; the records it reaches must carry no intersection shader
+    aabbs,     ///< built from blas_aabbs; the records it reaches must carry one
+};
+
 /// One TLAS instance: places a built BLAS into the world.
 /// Holding the blas_handle is the ownership edge, so the referenced BLAS outlives every TLAS that names it.
 struct sg::tlas_instance
@@ -107,6 +115,7 @@ struct sg::tlas_instance
     u32 instance_id = 0;
 
     /// InstanceContributionToHitGroupIndex — the base hit-group index for this instance.
+    /// Geometry g of the BLAS then reads record `hit_group_offset + g * multiplier + ray_type`, and a shader table's `offset_of(row)` is the value for a row.
     /// Must fit in 24 bits.
     u32 hit_group_offset = 0;
 
@@ -119,6 +128,26 @@ struct sg::tlas_instance
     /// A value forces the whole instance opaque or non-opaque — DX12 FORCE_OPAQUE / FORCE_NON_OPAQUE.
     cc::optional<bool> opaque_override = {};
 };
+
+namespace sg::impl
+{
+/// What the hit-record check of `context::portability_checks` needs of one tlas instance.
+struct tlas_instance_record
+{
+    blas_handle blas;
+    u32 hit_group_offset = 0;
+    u8 mask = 0xFF;
+};
+
+/// Records what the build took, as the structure comes back from its backend and before anyone else holds it.
+void set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
+
+/// Records every instance of `tlas`, which only a build under `context::portability_checks` does.
+void set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records);
+
+/// What `set_instance_records` recorded, which is empty where it never ran.
+[[nodiscard]] cc::span<tlas_instance_record const> instance_records_of(tlas const& tlas);
+} // namespace sg::impl
 
 /// A bottom-level acceleration structure: an opaque, driver-built index over one mesh's triangles or procedural primitives.
 /// A vocabulary type with no typed wrapper, held via blas_handle.
@@ -141,6 +170,13 @@ public:
     [[nodiscard]] accel_build_flags build_flags() const { return _build_flags; }
     [[nodiscard]] int geometry_count() const { return _geometry_count; }
     [[nodiscard]] bool allows_update() const { return _build_flags.has(accel_build_flag::allow_update); }
+
+    /// Whether the build took triangles or AABBs.
+    [[nodiscard]] blas_geometry geometry() const { return _geometry; }
+
+    /// The shader-table records one geometry of this BLAS takes, as build_blas was given it.
+    /// It is the ray count of the pipelines that trace it, and only metal bakes it into the structure.
+    [[nodiscard]] int hit_record_stride() const { return _hit_record_stride; }
 
     /// Registers a callback to run once this structure is released and no longer in flight — see raw_buffer.
     void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
@@ -175,6 +211,12 @@ protected:
     int _geometry_count = 0;
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
+
+private:
+    friend void impl::set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
+
+    blas_geometry _geometry = blas_geometry::triangles;
+    int _hit_record_stride = 1;
 };
 
 /// A top-level acceleration structure: an opaque index over a set of instances, each placing a blas with a transform.
@@ -226,4 +268,10 @@ protected:
     cc::vector<blas_handle> _referenced_blases; // the ownership edge: keeps every referenced BLAS alive
     mutable cc::vector<cc::unique_function<void()>> _finalizers;
     mutable std::atomic<bool> _expired = {false};
+
+private:
+    friend void impl::set_instance_records(tlas const& tlas, cc::vector<impl::tlas_instance_record> records);
+    friend cc::span<impl::tlas_instance_record const> impl::instance_records_of(tlas const& tlas);
+
+    cc::vector<impl::tlas_instance_record> _instance_records; // set once, as the tlas is made
 };

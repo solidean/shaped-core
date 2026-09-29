@@ -804,11 +804,15 @@ sg::instance_cull_mode  // back(default) | front | none
 // recording (on a command_list, via the cmd.raytracing scope). Sizes+allocates the persistent result from a
 // prebuild query, records the build with transient scratch, returns a persistent handle. Throws sg::allocation_exception.
 cmd.raytracing.is_supported()                    // bool — backend/device supports ray tracing? gate builds/tests on it
-cmd.raytracing.build_blas(span<blas_triangles const>, flags=fast_trace)  // -> blas_handle
-cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace)  // -> blas_handle  (a blas is triangles OR aabbs)
+cmd.raytracing.build_blas(span<blas_triangles const>, flags=fast_trace, int hit_record_stride=1)  // -> blas_handle
+cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace, int hit_record_stride=1)  // -> blas_handle  (triangles OR aabbs)
+//   hit_record_stride = shader-table records per geometry = the ray count of the pipelines that trace it;
+//   metal bakes it (geometry g's offset = g*stride), dx12/vulkan take the multiplier per TraceRay and ignore it
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
+// blas.geometry()           // -> sg::blas_geometry — triangles | aabbs
+// blas.hit_record_stride()  // -> int, as build_blas was given it
 // NO storage(): a built structure is a buffer on DXR and a resource of its own on Metal, so the base holds no handle to it.
 //   dx12, vulkan and metal all real (dx12 on WARP).
 tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RayQuery, or a full TraceRay pipeline)
@@ -821,6 +825,7 @@ tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAcceleration
 #include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 // each RT shader is its own single-entry lib_6_x compiled_shader (stage raygen/miss/closest_hit/any_hit/intersection/callable)
 sg::hit_shader { optional<compiled_shader> closest_hit, any_hit, intersection; }  // intersection present ⇒ procedural hit group
+                                                   // all three absent ⇒ empty triangle group: accepts every hit, runs nothing
 sg::raytracing_pipeline_description { pipeline_layout_handle layout;              // global root signature (one, no local root sigs)
     vector<compiled_shader> raygen_shaders, miss_shaders, callable_shaders; vector<hit_shader> hit_shaders;
     u32 max_recursion_depth=1; isize max_payload_size=0, max_attribute_size=8; pinned_data cached_pipeline; }
@@ -831,15 +836,23 @@ ctx.uncached.create_raytracing_pipeline(desc)      // -> raytracing_pipeline_han
 ctx.cached.acquire_raytracing_pipeline(desc)       // -> async_raytracing_pipeline  (memoized, async build)
 
 sg::raytracing_shader_table_description { raytracing_pipeline_handle pipeline;
-    vector<raygen_shader_handle> raygen; vector<miss_shader_handle> miss; vector<hit_shader_handle> hit; vector<callable_shader_handle> callable; }
+    vector<raygen_shader_handle> raygen; vector<miss_shader_handle> miss; vector<hit_shader_handle> hit; vector<callable_shader_handle> callable;
+    int ray_count=1; }                             // ray types tracing through it; trace r uses contribution r, multiplier ray_count
 //   phase 2 — place a handle in the table, returns a *_index (what HLSL TraceRay / dispatch_rays address):
 tbl.add_raygen_shader(raygen_shader_handle)  // -> raygen_index         (also add_miss_shader / add_hit_shader / add_callable_shader)
+tbl.add_hit_row(span<hit_shader_handle const>)  // -> sg::hit_row — ray_count consecutive hit records; size must == ray_count
+                                                //   mixes freely with add_hit_shader; a group may repeat within and across rows
 ctx.uncached.create_raytracing_shader_table(tbl)   // -> raytracing_shader_table_handle (persistent, uncached, ties to one pipeline)
+table.offset_of(hit_row)   // -> u32 — the tlas_instance::hit_group_offset for that row; geometry g reads offset + g*ray_count + r
+table.ray_count()  table.hit_records()   // -> int / span<hit_shader_handle const> (the group behind each hit record)
 
 // recording (on a command_list, via cmd.raytracing). Binds through the compute root signature.
 cmd.raytracing.bind_pipeline(raytracing_pipeline const&)          // void — sets the DXR state object + global root signature
 cmd.raytracing.bind_group(int group_index, binding_group const&) // void — like compute; bind a tlas here (surfaces accel_read)
 cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — traces w*h*d rays (product <= 2^30)
+//   under ctx.portability_checks(): every instance of every bound tlas is checked against the records it reaches
+//   (exists; procedural iff its blas holds AABBs; stride == ray_count) — LOGS an error once per table+tlas per list, never asserts.
+//   Sees only tlases built and groups created while the checks were on.
 ```
 
 ## cached layouts + pipelines — the built-in cache  (ctx.cached / pipeline_cache)

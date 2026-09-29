@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
@@ -9,13 +10,20 @@
 /// The shaders of one hit group.
 /// `closest_hit` and `any_hit` run for triangle geometry; `intersection` makes the group procedural, for custom primitives.
 /// Whether `intersection` is present picks the hit-group type: a triangle BLAS must not run a group that has one, and a procedural BLAS must.
-/// A mismatch is undefined behavior the backend may not catch.
+/// A mismatch is undefined behavior the backend may not catch; `context::portability_checks` reports it at dispatch_rays.
+/// All three may be absent: an empty group is a triangle group that accepts every hit and runs nothing.
 struct sg::hit_shader
 {
     cc::optional<compiled_shader> closest_hit;
     cc::optional<compiled_shader> any_hit;
     cc::optional<compiled_shader> intersection;
 };
+
+namespace sg::impl
+{
+/// Records which of `groups` are procedural, as the pipeline comes back from its backend and before anyone else holds it.
+void set_hit_groups(raytracing_pipeline const& pipeline, cc::span<hit_shader const> groups);
+} // namespace sg::impl
 
 /// Everything needed to build a raytracing_pipeline: the pipeline_layout, its global root signature, plus the state object's shaders grouped by category.
 /// Unlike compute_pipeline_description this owns its shaders, since a pipeline combines several, so building one on a worker thread is safe.
@@ -89,6 +97,15 @@ public:
     /// Unknown when any stage's shader carried none, or named a binding the layout does not hold.
     [[nodiscard]] impl::pipeline_footprint const& footprint() const { return _footprint; }
 
+    /// Whether the hit group `handle` names carries an intersection shader, which makes it procedural.
+    /// Unknown for a handle out of range, and for every handle of a pipeline a backend built without going through the context.
+    [[nodiscard]] cc::optional<bool> is_procedural(hit_shader_handle handle) const
+    {
+        if (u32(handle) >= u32(_procedural_hit_groups.size()))
+            return {};
+        return _procedural_hit_groups[isize(u32(handle))];
+    }
+
 protected:
     raytracing_pipeline() = default;
 
@@ -97,6 +114,8 @@ protected:
 
 private:
     friend void impl::set_footprint(raytracing_pipeline const& pipeline, impl::pipeline_footprint footprint);
+    friend void impl::set_hit_groups(raytracing_pipeline const& pipeline, cc::span<hit_shader const> groups);
 
     impl::pipeline_footprint _footprint;
+    cc::vector<bool> _procedural_hit_groups; // by hit_shader_handle
 };

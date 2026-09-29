@@ -134,3 +134,54 @@ ASYNC_INVOCABLE_TEST("sg - acceleration-structure builds validate their inputs",
     // The build input was filled through ctx.upload, whose copy must not outlive the test.
     co_await ctx->idle_completion();
 }
+
+ASYNC_INVOCABLE_TEST("sg - builds record what the dispatch_rays hit-record check reads", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!raytracing_supported(ctx))
+        SKIP("ray tracing not supported on this backend/device");
+
+    auto const verts = make_triangle_vertices(ctx);
+    float const aabb[6] = {0, 0, 0, 1, 1, 1};
+    auto const boxes = ctx->persistent.create_buffer_from_data(aabb, sg::buffer_usage::accel_structure_build_input).raw();
+
+    auto const was_on = ctx->portability_checks();
+    auto cmd = ctx->create_command_list();
+
+    // The kind and the stride are recorded whatever the checks say, since the BLAS itself carries them.
+    auto const tri = sg::blas_triangles{.vertices = verts, .vertex_count = 3};
+    auto const triangles
+        = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1), sg::accel_build_flag::fast_trace, 2);
+    auto const box = sg::blas_aabbs{.aabbs = boxes, .aabb_count = 1};
+    auto const procedural = cmd->raytracing.build_blas(cc::span<sg::blas_aabbs const>(&box, 1));
+    REQUIRE(triangles != nullptr);
+    REQUIRE(procedural != nullptr);
+    CHECK(triangles->geometry() == sg::blas_geometry::triangles);
+    CHECK(triangles->hit_record_stride() == 2);
+    CHECK(procedural->geometry() == sg::blas_geometry::aabbs);
+    CHECK(procedural->hit_record_stride() == 1);
+
+    sg::tlas_instance const instances[2] = {
+        {.blas = triangles, .hit_group_offset = 4},
+        {.blas = procedural, .hit_group_offset = 9, .mask = 0x0F},
+    };
+
+    // A TLAS keeps its instances for the check only while the checks are on.
+    ctx->set_portability_checks(true);
+    auto const checked = cmd->raytracing.build_tlas(instances);
+    ctx->set_portability_checks(false);
+    auto const unchecked = cmd->raytracing.build_tlas(instances);
+    ctx->set_portability_checks(was_on);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const records = sg::impl::instance_records_of(*checked);
+    REQUIRE(records.size() == 2);
+    CHECK(records[0].blas == triangles);
+    CHECK(records[0].hit_group_offset == 4u);
+    CHECK(records[1].blas == procedural);
+    CHECK(records[1].hit_group_offset == 9u);
+    CHECK(records[1].mask == 0x0F);
+    CHECK(sg::impl::instance_records_of(*unchecked).empty());
+
+    co_await ctx->idle_completion();
+}

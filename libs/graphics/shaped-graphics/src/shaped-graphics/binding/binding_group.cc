@@ -19,13 +19,24 @@ void add_use(cc::vector<impl::buffer_use>& out, cc::string_view binding, bound_v
                        .binding = cc::string(binding),
                        .writes = buffer->bound_as == view_class::readwrite});
 }
+
+/// Every non-null tlas `bound` binds, arrays included, since a trace reaches each of them.
+void add_tlases(cc::vector<tlas_handle>& out, bound_view const& bound)
+{
+    for (auto const& v : bound.span())
+        if (auto const* tlas = try_as_tlas_view(v); tlas != nullptr && tlas->tlas != nullptr)
+            out.push_back(tlas->tlas);
+}
 } // namespace
 
 void impl::record_buffer_uses(binding_group const& group, cc::span<named_view const> views)
 {
     auto uses = cc::vector<buffer_use>();
     for (auto const& v : views)
+    {
         add_use(uses, v.name, v.view);
+        add_tlases(group._tlases, v.view);
+    }
     set_buffer_uses(group, cc::move(uses));
 }
 
@@ -36,8 +47,11 @@ void impl::record_buffer_uses(binding_group const& group,
     auto const bindings = layout.bindings();
     auto uses = cc::vector<buffer_use>();
     for (auto const& v : views)
+    {
         if (auto const slot = isize(u32(v.slot)); slot < bindings.size())
             add_use(uses, bindings[slot].name, v.view);
+        add_tlases(group._tlases, v.view);
+    }
     set_buffer_uses(group, cc::move(uses));
 }
 
@@ -49,6 +63,11 @@ void impl::set_buffer_uses(binding_group const& group, cc::vector<buffer_use> us
 cc::span<impl::buffer_use const> impl::buffer_uses_of(binding_group const& group)
 {
     return group._buffer_uses;
+}
+
+cc::span<tlas_handle const> impl::tlases_of(binding_group const& group)
+{
+    return group._tlases;
 }
 
 void impl::drop_static_samplers(binding_group_layout const& layout, cc::vector<named_sampler>& samplers)

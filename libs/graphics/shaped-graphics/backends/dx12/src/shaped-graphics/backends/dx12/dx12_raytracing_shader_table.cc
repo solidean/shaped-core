@@ -86,7 +86,7 @@ cc::result<dx12_raytracing_shader_table_handle> dx12_raytracing_shader_table::cr
     D3D12_GPU_VIRTUAL_ADDRESS const base = dx_buffer->gpu_virtual_address();
 
     // Build through a non-const pointer (the returned handle is shared_ptr<...const>).
-    std::shared_ptr<dx12_raytracing_shader_table> table(new dx12_raytracing_shader_table(desc.pipeline));
+    std::shared_ptr<dx12_raytracing_shader_table> table(new dx12_raytracing_shader_table(desc));
     table->buffer = dx_buffer;
 
     auto const set_range = [base, stride](D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE& range, isize start, isize count)

@@ -316,7 +316,8 @@ void record_tree_boxes(webgpu_command_list& cmd, u32 unit, tree_layout const& tr
 } // namespace
 
 sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
-                                                                     sg::accel_build_flags flags)
+                                                                     sg::accel_build_flags flags,
+                                                                     int /*hit_record_stride*/)
 {
     check_build_flags(flags);
     CC_ASSERT(!geometries.empty(), "build_blas needs at least one geometry");
@@ -399,7 +400,8 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
 }
 
 sg::blas_handle webgpu_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
-                                                                 sg::accel_build_flags flags)
+                                                                 sg::accel_build_flags flags,
+                                                                 int /*hit_record_stride*/)
 {
     check_build_flags(flags);
     CC_ASSERT(!geometries.empty(), "build_blas needs at least one geometry");

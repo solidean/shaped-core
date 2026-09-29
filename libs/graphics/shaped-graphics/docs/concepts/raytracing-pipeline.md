@@ -41,7 +41,34 @@ raytracing_pipeline_description        raytracing_shader_table
   add_raygen_shader(shader)  ─► handle    add_raygen_shader(handle) ─► index
   add_miss_shader(shader)    ─► handle    add_miss_shader(handle)   ─► index
   add_hit_shader(hit_shader) ─► handle    add_hit_shader(handle)    ─► index
+                                          add_hit_row(handles)      ─► hit_row
 ```
+
+## Hit rows: one record per ray type
+
+A shader table's `ray_count` says how many ray types trace through it.
+`add_hit_row` appends `ray_count` consecutive hit records, one per ray type, and returns a `hit_row` whose value is the first record's index.
+`table.offset_of(row)` is what an instance takes as its `hit_group_offset`.
+A trace of ray type r then passes r as its ray contribution and `ray_count` as its geometry multiplier, so geometry g of the instance reads record `hit_group_offset + g * ray_count + r`.
+Rows and single `add_hit_shader` records append to the same list and mix freely, which keeps the handle and index API a hand-written HLSL table uses.
+
+A BLAS takes the same number at build time: `build_blas(..., hit_record_stride)` is the records one of its geometries spans.
+Only metal needs it, because metal bakes the geometry term into the structure; dx12 and vulkan take the multiplier per `TraceRay`.
+
+A hit group with no shaders at all is valid.
+It is a triangle group that accepts every hit and runs nothing, which is what a row holds for a ray type its hit group leaves empty.
+
+## A mismatched hit group is logged at dispatch, under the portability checks
+
+A triangle BLAS must not reach a procedural hit group and a procedural BLAS must, and no backend checks it for you.
+With `ctx.portability_checks()` on, `dispatch_rays` walks every instance of every bound TLAS and checks each record it reaches.
+Each must exist and match the BLAS's kind, and for a table of more than one ray type the BLAS must have been built with that stride.
+A mismatch **logs an error rather than asserting**, since the hit groups come from shaders that hot reload can change under a running program.
+It is logged once per table and TLAS in a command list, and the dispatch still runs.
+
+The check reads only what sg recorded on the CPU side, and records it only while the checks are on.
+A TLAS keeps its instances' BLAS, offset and mask, and a binding group the TLASes it binds, so both must be made after the checks were turned on.
+A BLAS always keeps its kind and stride, and a pipeline its hit groups' kinds, because they cost nothing per operation.
 
 ## "Shader table", not "SBT" — and why it holds only an identifier
 
@@ -76,13 +103,13 @@ So a raygen shader is not something a pipeline dispatches there — it **is** th
 - One sg hit group splits across both kinds: `intersection` and `any_hit` run during traversal and go in the intersection function table, while `closest_hit` is a visible function the kernel calls.
   **Metal runs exactly one function during traversal**, so a *procedural* group may carry an intersection function or an any-hit but not both, and metal refuses the pair rather than dropping one.
   Fold the any-hit's decision into the intersection function, which is where it already decides what the ray hit.
-- **Two of DXR's three hit-index contributions map, and the ray contribution does not.**
+- **All three of DXR's hit-index contributions map, for a ray type fixed at each call site.**
   The instance's `InstanceContributionToHitGroupIndex` is the instance descriptor's `intersectionFunctionTableOffset`.
-  The geometry contribution is each geometry descriptor's own offset, which metal sets to its geometry index.
-  `RayContributionToHitGroupIndex` has no counterpart.
-  That is DXR's per-`TraceRay` term, which lets one scene serve a primary ray and a shadow ray from different records.
-  An MSL kernel names the table it calls, so the equivalent here is a second table or a second raygen.
-  A shader ported from HLSL that varies the ray contribution selects a different function on metal than on dx12.
+  The geometry contribution is each geometry descriptor's own offset, which metal sets to its geometry index times the BLAS's `hit_record_stride`.
+  `RayContributionToHitGroupIndex`, DXR's per-`TraceRay` term, becomes a choice of table: the shader table builds one intersection table per ray type, and table r's slot s holds hit record s + r.
+  A kernel that traces ray type r with table r reaches record `hit_group_offset + g * stride + r`, exactly as DXR does.
+  That closes the gap for pipelines that trace a constant ray type per call site, which is what SGL generates.
+  A ray contribution computed at run time still has no counterpart, so a shader ported from HLSL that varies it dynamically selects a different function on metal than on dx12.
 - `dispatch_rays` selects that raygen's pipeline state, binds the tables through `sg::reserved_binding_group`, and calls `dispatchThreads`.
 - `max_recursion_depth` becomes Metal's `maxCallStackDepth`, which sizes the stack for indirect calls and defaults to 1.
   Recursion itself is supported — a visible function may trace and may call back through a table — so the field is honoured rather than capped.
