@@ -229,6 +229,9 @@ public:
     /// The textures are kept and overwritten, since a cut does not change their size.
     void reset() { _reset_requested = true; }
 
+    /// Whether a `reset` is waiting for the next call to consume it.
+    [[nodiscard]] bool is_reset_pending() const { return _reset_requested; }
+
     /// The member that built what this holds, or `none` while empty.
     [[nodiscard]] denoise_method method() const { return _method; }
 
