@@ -1,6 +1,8 @@
+#include <clean-core/common/assert.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/compute.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
+#include <shaped-graphics/context/context.hh>
 
 namespace sg
 {
@@ -11,6 +13,34 @@ namespace
     return b <= 0 ? a : (a + b - 1) / b;
 }
 } // namespace
+
+void command_list::bind_compute_pipeline(compute_pipeline const& pipeline)
+{
+    if (auto const* layout = pipeline.footprint().layout(); layout == nullptr || layout != _compute_layout)
+    {
+        _compute_layout = layout;
+        for (auto& g : _compute_groups)
+            g = nullptr;
+    }
+    compute_bind_pipeline(pipeline);
+}
+
+void command_list::bind_compute_group(int group_index, binding_group const& group)
+{
+    CC_ASSERT(group_index >= 0 && group_index < max_binding_groups, "binding-group slot out of range");
+    _compute_groups[group_index] = &group;
+    compute_bind_group(group_index, group);
+}
+
+void command_list::dispatch(int x, int y, int z)
+{
+    if (context().portability_checks())
+    {
+        _compute_aliasing.clear();
+        _compute_aliasing.add(_compute_groups, {}, nullptr);
+    }
+    compute_dispatch(x, y, z);
+}
 
 void command_list_compute_scope::bind_pipeline(compute_pipeline const& pipeline)
 {

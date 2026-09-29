@@ -3,7 +3,6 @@
 #include <clean-core/common/utility.hh> // cc::move / cc::forward
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/sampler.hh>
@@ -159,26 +158,22 @@ namespace sg::impl
 
 namespace sg::impl
 {
-/// One buffer a binding group binds, and whether that binding writes it.
+/// One buffer a binding group binds outside a binding array, the binding that binds it, and whether it writes it.
 struct buffer_use
 {
     raw_buffer const* buffer = nullptr;
+    cc::string binding;
     bool writes = false;
 };
 
-/// The buffers `views` bind, one use per bound buffer view.
-[[nodiscard]] cc::vector<buffer_use> buffer_uses_of(cc::span<named_view const> views);
-[[nodiscard]] cc::vector<buffer_use> buffer_uses_of(cc::span<slotted_view const> views);
-
-/// Records on `group` the buffers it binds; called once, as the group comes back from its backend and before any bind.
+/// Records on `group` the buffers `views` bind outside binding arrays, which `context::portability_checks` reads.
+/// Called once, as the group comes back from its backend and before any bind.
+void record_buffer_uses(binding_group const& group, cc::span<named_view const> views);
+void record_buffer_uses(binding_group const& group, binding_group_layout const& layout, cc::span<slotted_view const> views);
 void set_buffer_uses(binding_group const& group, cc::vector<buffer_use> uses);
 
-/// Why one dispatch or draw may not bind `groups` and read `reads`, or empty where it may.
-/// **A buffer one view writes is bound through no other view that reads it**, whatever its range.
-/// WebGPU refuses that within a dispatch or a draw, so sg refuses it on every backend rather than on the one.
-/// Two views that both write one buffer are allowed, as WebGPU allows them.
-[[nodiscard]] cc::optional<cc::string> find_write_aliasing(cc::span<binding_group const* const> groups,
-                                                           cc::span<raw_buffer const* const> reads);
+/// What `record_buffer_uses` or `set_buffer_uses` recorded on `group`, which is empty where neither ran.
+[[nodiscard]] cc::span<buffer_use const> buffer_uses_of(binding_group const& group);
 } // namespace sg::impl
 
 /// A binding_group_layout instantiated with concrete resources bound: each named view is matched to a layout binding, validated, and turned into a backend descriptor.
@@ -193,15 +188,12 @@ class sg::binding_group : public std::enable_shared_from_this<binding_group>
 public:
     virtual ~binding_group();
 
-    /// The buffers this group binds and whether it writes each, which a dispatch or a draw checks for aliasing.
-    /// Empty for a group made where no view was seen, which is then never refused.
-    [[nodiscard]] cc::span<impl::buffer_use const> buffer_uses() const { return _buffer_uses; }
-
 protected:
     binding_group() = default;
 
 private:
     friend void impl::set_buffer_uses(binding_group const& group, cc::vector<impl::buffer_use> uses);
+    friend cc::span<impl::buffer_use const> impl::buffer_uses_of(binding_group const& group);
     /// Set once, as the group is made, which is why a group that is otherwise immutable holds it `mutable`.
     mutable cc::vector<impl::buffer_use> _buffer_uses;
 };

@@ -204,12 +204,14 @@ private:
     binding_group_handle _snapshot;
     bool _dirty = true;
 
-    // The buffer each element last bound and whether it writes it, by slot then element.
-    // Each snapshot records them, for the dispatch and the draw that check them (impl::find_write_aliasing).
-    cc::vector<cc::vector<impl::buffer_use>> _element_uses;
-    void record_uses(binding_slot slot, int first_element, cc::span<raw_view const> views);
+    // The buffer each binding outside a binding array last bound, by slot, which each snapshot hands on.
+    // Kept only where the context's portability checks are on.
+    cc::vector<impl::buffer_use> _slot_uses;
+    void record_use(binding_slot slot, cc::span<raw_view const> views);
 
-    // The device's feature::float32_filtering, stamped by the persistent scope right after the backend creates the group.
+    // Stamped by the persistent scope right after the backend creates the group: the device's
+    // feature::float32_filtering, and whether the context's portability checks are on.
     friend class sg::context_persistent_scope;
     bool _float32_filtering = true;
+    bool _records_buffer_uses = false;
 };

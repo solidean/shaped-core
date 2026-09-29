@@ -51,3 +51,19 @@ pipeline floating:
     pixel = rect_ps
     cull = .none
     format = .rgba16_float
+
+// A pixel stage that writes a buffer, which the aliasing tests bind beside the rects' vertex buffers.
+binding pixel_writes:
+    hits: mut buffer[int]
+
+@pixel fun counting_ps(p: rect_varyings){pixel_writes} -> rect_target:
+    pixel_writes.hits[0] = 1
+    return {
+        color = p.color
+    }
+
+pipeline counting:
+    vertex = rect_vs
+    pixel = counting_ps
+    cull = .none
+    format = .rgba16_float

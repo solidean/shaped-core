@@ -92,6 +92,7 @@ sg::impl::pipeline_footprint sg::impl::pipeline_footprint::resolve(pipeline_layo
                                                                    cc::span<stage_input const> stages)
 {
     auto fp = pipeline_footprint();
+    fp._layout = &layout;
     for (auto const& s : stages)
         if (s.footprint == nullptr || !s.footprint->is_known())
             return fp;

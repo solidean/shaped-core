@@ -10,6 +10,7 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_backlog.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -77,6 +78,14 @@ public:
     /// The numeric bounds a portable caller stays inside.
     /// See sg::device_limits.
     [[nodiscard]] device_limits const& limits() const { return _limits; }
+
+    /// Whether this context refuses what WebGPU refuses and the other backends run, where checking it costs every
+    /// dispatch and draw: a buffer written through one binding and read through another in one dispatch or draw.
+    /// **Off by default**; sg's own tests turn it on, and a program can in its debug builds.
+    /// Set it before creating the binding groups and recording the command lists it should cover.
+    /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+    [[nodiscard]] bool portability_checks() const { return _portability_checks.load(cc::memory_order_relaxed); }
+    void set_portability_checks(bool enabled) { _portability_checks.store(enabled, cc::memory_order_relaxed); }
 
     /// Whether `ctx.create_swapchain` can be given a `headless_extent` on this context.
     ///
@@ -728,6 +737,7 @@ protected:
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     bool _device_lost = false;
+    cc::atomic<bool> _portability_checks = false;
     cc::string _device_loss_reason;
 
     // Built-in pipeline/layout cache reached via ctx.cached.

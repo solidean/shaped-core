@@ -14,6 +14,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list/download.cc
     src/shaped-graphics/command_list/copy.cc
     src/shaped-graphics/command_list/compute.cc
+    src/shaped-graphics/command_list/impl/aliasing_scope.cc
     src/shaped-graphics/command_list/raster.cc
     src/shaped-graphics/command_list/raytracing.cc
     src/shaped-graphics/command_list/query.cc
@@ -93,6 +94,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/routine/routine_registry.hh
     src/shaped-graphics/context/pipeline_cache.hh
     src/shaped-graphics/command_list/command_list.hh
+    src/shaped-graphics/command_list/impl/aliasing_scope.hh
     src/shaped-graphics/command_list/upload.hh
     src/shaped-graphics/command_list/download.hh
     src/shaped-graphics/command_list/copy.hh

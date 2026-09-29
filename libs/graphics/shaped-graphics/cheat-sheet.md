@@ -98,6 +98,7 @@ ctx.supports(sg::feature::raytracing)              // bool — THE capability qu
                                                    //   | primitive_index (a pixel shader's SV_PrimitiveID; vulkan needs geometryShader, false on webgpu)
                                                    //   | sample_rate_shading (per-sample pixel shading; vulkan needs sampleRateShading)
                                                    //   | wireframe_fill (fill_mode::wireframe; false on webgpu, vulkan needs fillModeNonSolid)
+                                                   //   | depth32_float_stencil8 (the one stencil format; webgpu needs depth32float-stencil8, vulkan asks per format)
                                                    //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
@@ -106,6 +107,7 @@ ctx.supported_features()                           // sg::feature_set (cc::flags
 ctx.missing_features(shader)                       // feature_set — what shader.required_features holds that this device lacks; empty when unknown
 sg::to_string(f)  sg::feature_from_string(name)    // "raytracing" <-> feature::raytracing; sg::k_all_features lists them in enum order
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
+ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
                                                    //   FLOORS a portable caller sizes against, not the most the hardware could do
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)

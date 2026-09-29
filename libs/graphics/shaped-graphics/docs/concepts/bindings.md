@@ -105,11 +105,16 @@ That equivalence is what lets a binding validate a bound view with no backend in
 
 ### A buffer written in a dispatch or a draw is bound no other way there
 
-**A dispatch or a draw that binds a buffer through a writable view asserts if any other view there reads that buffer**, whatever the ranges.
+**With `ctx.set_portability_checks(true)`, a buffer bound through a writable view asserts if any other view reads it in the same dispatch or draw**, whatever the ranges.
 That covers a read-only or constant view in any bound group, and the vertex and index buffers of a draw.
-WebGPU refuses it, so sg refuses it on every backend, and a program that runs on one backend runs on the others.
+WebGPU refuses it, so the check refuses it on every backend, for a program that must also run there.
 Two writable views of one buffer are allowed, as WebGPU allows them.
-The command list keeps what each dispatch and draw binds, and each group records the buffers it binds as it is made (`impl::find_write_aliasing`).
+A binding array is not checked, since WebGPU has none, and neither is a texture.
+
+**The check is off by default**, because it costs every dispatch and draw; sg's own tests turn it on.
+A group records the buffers it binds as it is made, so the setting has to be on before the groups it should cover are created.
+A pipeline over another layout unbinds the groups, and one over the same layout keeps them, as WebGPU keeps them.
+Two draws are never checked against each other: where one needs another's write, the backend splits the render pass between them, and WebGPU's usage scope ends with the pass it splits.
 
 ## Features
 

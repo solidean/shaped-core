@@ -39,7 +39,7 @@ Two values that could agree on the chosen inputs get a second quad with inputs t
 
 ## Binding semantics, executed
 
-- **A buffer written and read within one render pass but by different draws** is what WebGPU refuses at pass scope, which sg checks per draw only.
+- **A storage texture written and sampled within one dispatch or draw** is what WebGPU refuses too, and the portability checks see buffers only.
 - A buffer view's size, which SGL cannot observe yet: it has no buffer length, which WGSL's `arrayLength` and HLSL's `GetDimensions` both give.
 - Bound state from one rendering scope to the next, which wants a raster pipeline with a binding array; a dispatch's group not leaking into a draw is executed.
 

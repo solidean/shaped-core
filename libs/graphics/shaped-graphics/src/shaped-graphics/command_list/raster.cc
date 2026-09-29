@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/raster.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
 
 namespace sg
@@ -89,34 +90,13 @@ void command_list::close_rendering()
     _rendering_target_set.clear();
     _rendering_formats = {};
     // A rendering scope binds nothing the next one inherits.
+    _raster_layout = nullptr;
     for (auto& g : _raster_groups)
         g = nullptr;
     for (auto& vb : _vertex_buffers)
         vb = nullptr;
     _index_buffer = nullptr;
     raster_end_rendering();
-}
-
-void command_list::bind_compute_pipeline(compute_pipeline const& pipeline)
-{
-    // Every backend drops its bound groups with a new pipeline, so the tracking here does too.
-    for (auto& g : _compute_groups)
-        g = nullptr;
-    compute_bind_pipeline(pipeline);
-}
-
-void command_list::bind_compute_group(int group_index, binding_group const& group)
-{
-    CC_ASSERT(group_index >= 0 && group_index < max_binding_groups, "binding-group slot out of range");
-    _compute_groups[group_index] = &group;
-    compute_bind_group(group_index, group);
-}
-
-void command_list::dispatch(int x, int y, int z)
-{
-    if (auto const refusal = impl::find_write_aliasing(_compute_groups, {}); refusal.has_value())
-        CC_ASSERTF(false, "{}", refusal.value());
-    compute_dispatch(x, y, z);
 }
 
 void command_list::bind_raster_group(int group_index, binding_group const& group)
@@ -140,14 +120,13 @@ void command_list::bind_raster_index_buffer(index_buffer_view const& view)
     raster_bind_index_buffer(view);
 }
 
-void command_list::check_raster_aliasing(bool indexed) const
+void command_list::check_raster_aliasing(bool indexed)
 {
-    raw_buffer const* reads[max_vertex_buffers + 1] = {};
-    for (auto i = 0; i < max_vertex_buffers; ++i)
-        reads[i] = _vertex_buffers[i];
-    reads[max_vertex_buffers] = indexed ? _index_buffer : nullptr;
-    if (auto const refusal = impl::find_write_aliasing(_raster_groups, reads); refusal.has_value())
-        CC_ASSERTF(false, "{}", refusal.value());
+    if (context().portability_checks())
+    {
+        _raster_aliasing.clear();
+        _raster_aliasing.add(_raster_groups, _vertex_buffers, indexed ? _index_buffer : nullptr);
+    }
 }
 
 void command_list::draw(draw_config const& config)
@@ -190,8 +169,12 @@ void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
                    "this pipeline is built for {} samples, and the open rendering has {}", built.sample_count,
                    open.sample_count);
     }
-    for (auto& g : _raster_groups)
-        g = nullptr;
+    if (auto const* layout = pipeline.footprint().layout(); layout == nullptr || layout != _raster_layout)
+    {
+        _raster_layout = layout;
+        for (auto& g : _raster_groups)
+            g = nullptr;
+    }
     raster_bind_pipeline(pipeline);
 }
 

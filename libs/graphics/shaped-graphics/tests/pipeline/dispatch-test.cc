@@ -242,7 +242,7 @@ ASYNC_INVOCABLE_TEST("sg - one buffer bound for writing and for reading in one d
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // WebGPU refuses a buffer written in a dispatch and bound there another way too, even through disjoint ranges.
-    // sg refuses it itself, on every backend, so a program that works on one backend works on all of them.
+    // With the portability checks on, as they are in these tests, sg refuses it itself on every backend.
     constexpr int quarter = 64;
     auto const pipeline = co_await shaders::dispatch.copy_within.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::within>();
@@ -269,6 +269,129 @@ ASYNC_INVOCABLE_TEST("sg - one buffer bound for writing and for reading in one d
         cmd->compute.bind_group(0, *snapshot);
         CHECK_ASSERTS(cmd->compute.dispatch_threads(quarter));
     }
+    ctx->drop_command_list(cc::move(cmd));
+    co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - a pipeline over the same layout keeps the groups bound, and they are checked with the new "
+                     "ones",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // `multiply_three` and `square_product` list the same groups, so they share one layout, and a group bound under the
+    // first is still bound under the second, as WebGPU keeps it.
+    // `shared` is read through group 0 under the first, then written through group 2 under the second.
+    constexpr int count = 64;
+    auto const multiply = co_await shaders::dispatch.multiply_three.acquire_pipeline(*ctx);
+    auto const square = co_await shaders::dispatch.square_product.acquire_pipeline(*ctx);
+    auto const usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer;
+    auto const shared = sg::buffer<i32>::from_raw(ctx->persistent.create_raw_buffer(count * isize(sizeof(i32)), usage));
+    auto const other = sg::buffer<i32>::from_raw(ctx->persistent.create_raw_buffer(count * isize(sizeof(i32)), usage));
+
+    auto const first
+        = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::first_factor>(),
+                                               shaders::first_factor{.by = shared.as_readonly_buffer()});
+    auto const second
+        = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::second_factor>(),
+                                               shaders::second_factor{.by = shared.as_readonly_buffer()});
+    auto const product_layout = ctx->cached.acquire_binding_group_layout<shaders::product>();
+    auto const write_other
+        = ctx->persistent.create_binding_group(product_layout, shaders::product{.values = other.as_readwrite_buffer()});
+    auto const write_shared
+        = ctx->persistent.create_binding_group(product_layout, shaders::product{.values = shared.as_readwrite_buffer()});
+
+    // No contents, so nothing here executes.
+    auto cmd = ctx->create_command_list();
+    cmd->compute.bind_pipeline(*multiply);
+    cmd->compute.bind_group(0, *first);
+    cmd->compute.bind_group(1, *second);
+    cmd->compute.bind_group(2, *write_other);
+    cmd->compute.dispatch_threads(count);
+    cmd->compute.bind_pipeline(*square);
+    cmd->compute.bind_group(2, *write_shared);
+    CHECK_ASSERTS(cmd->compute.dispatch_threads(count)); // groups 0 and 1 are still bound, and read `shared`
+    ctx->drop_command_list(cc::move(cmd));
+    co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - a draw that writes a buffer and reads it as a vertex buffer is refused, and two draws are "
+                     "not",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // `counting` writes `shared` through a group.
+    // One draw that also reads `shared` as a vertex buffer is refused, as WebGPU refuses it.
+    // A later draw reading it is not: the backend splits the pass between the two, and WebGPU's scope ends there.
+    auto const counting = co_await ctx->cached.acquire_raster_pipeline(shaders::rects.counting);
+    auto const plain = co_await ctx->cached.acquire_raster_pipeline(shaders::rects.floating);
+    auto const shared = ctx->persistent.create_raw_buffer(
+        256, sg::buffer_usage::vertex_buffer | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const hits = sg::buffer<i32>::from_raw(shared);
+    auto const corners = sg::buffer<shaders::rect_corner::per_vertex>::from_raw(shared);
+    sg_test::rect const whole[] = {sg_test::rect_at(0, 0, 1, 1, 1, 1, 0.5f, tg::vec4f(1, 1, 1, 1))};
+    auto const batch = sg_test::rect_batch(*ctx, whole);
+    auto const reads_shared
+        = shaders::rect_corner::buffers{.per_vertex = corners, .per_instance = batch.instances}.views();
+    auto const target = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
+    auto const draw_six
+        = sg::draw_config{.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 1}};
+
+    // No contents, so nothing here executes.
+    auto cmd = ctx->create_command_list();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::pixel_writes>(),
+                                              shaders::pixel_writes{.hits = hits.as_readwrite_buffer()});
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},
+                                     .target_set = shaders::rect_target::name});
+        scope.bind_pipeline(*counting);
+        scope.bind_group(0, *group);
+        scope.bind_vertex_buffers(reads_shared);
+        CHECK_ASSERTS(scope.draw(draw_six));
+        batch.draw(scope, 0); // writes `shared`, and reads only the rects' own buffers
+        scope.bind_pipeline(*plain);
+        scope.bind_vertex_buffers(reads_shared);
+        scope.draw(draw_six);
+    }
+    ctx->drop_command_list(cc::move(cmd));
+    // The rects' own vertex buffers are uploads nothing else waits on.
+    co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - without portability checks one buffer may be written and read in one dispatch",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // The checks cost every dispatch and draw, so they are off unless a context asks for them.
+    // A group made while they are off records nothing, and is never refused.
+    constexpr int quarter = 64;
+    auto const pipeline = co_await shaders::dispatch.copy_within.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::within>();
+    auto const usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer;
+    auto const all
+        = sg::buffer<i32>::from_raw(ctx->persistent.create_raw_buffer(4 * quarter * isize(sizeof(i32)), usage));
+
+    auto const was_on = ctx->portability_checks();
+    ctx->set_portability_checks(false);
+    auto const group = ctx->persistent.create_binding_group(
+        layout, shaders::within{.source = all.as_readonly_buffer({.offset = quarter, .size = quarter}),
+                                .target = all.as_readwrite_buffer({.offset = 2 * quarter, .size = quarter})});
+    auto cmd = ctx->create_command_list();
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(quarter);
+    ctx->set_portability_checks(was_on);
     ctx->drop_command_list(cc::move(cmd));
     co_await ctx->idle_completion();
 }
