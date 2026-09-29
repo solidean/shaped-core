@@ -18,7 +18,8 @@ Each file has the same shape, so an idea can be picked up cold:
 | file | the idea in one line |
 |---|---|
 | [structural-types.md](structural-types.md) | paren literals build structural types, named types are nominal, and what a tuple is once it is a value |
-| [function-model.md](function-model.md) | no recursion and no indirect calls, so every function inlines, nested functions need no captures, and `[]` means deducible |
+| [function-model.md](function-model.md) | no recursion and no indirect calls, so every function inlines, nested functions need no captures, and what generics and lambdas still lack |
+| [raytracing-futures.md](raytracing-futures.md) | recursion, a megakernel pipeline for WebGPU, reordering, micromaps, motion, run-time ray types, and the sum types a mixed hit waits for |
 | [types-as-values.md](types-as-values.md) | everything is a value, and an expression in a type position must reduce to a normal form that reads as a type |
 | [scopes.md](scopes.md) | ordered scopes such as functions, unordered ones such as structs and the root, and nested functions that capture nothing |
 | [binding-effects.md](binding-effects.md) | each `binding` is a binding group, functions list the bindings they use, and a local `binding` rebinds for a library |

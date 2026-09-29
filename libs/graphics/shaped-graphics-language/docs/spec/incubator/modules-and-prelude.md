@@ -51,7 +51,7 @@ A declaration of the file shadows a prelude name, and two overload sets of one n
 
 Until SGL has generics, an overload family cannot be written once, so the registry's C++ loops write the families out: `dot` for every vector that has one.
 That is the reason `core.sgl` is nearly empty today, and it is what generics are expected to reverse.
-The normative half of this is [CHK-138](../semantics/checking.md#the-two-files-of-the-prelude), and [adding-a-builtin.md](../../adding-a-builtin.md) is the walk-through.
+The normative half of this is [CHK-138](../semantics/checking.md#the-files-of-the-prelude), and [adding-a-builtin.md](../../adding-a-builtin.md) is the walk-through.
 
 ## What it touches
 
