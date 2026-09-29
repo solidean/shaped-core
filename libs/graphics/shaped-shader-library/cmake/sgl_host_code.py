@@ -43,6 +43,7 @@ def dx12_semantic(member: dict) -> str:
     The text SGL emits takes it from the same place, so the input layout and the shader always agree."""
     return member["semantic"]
 
+
 def memory_structs_of(entries: SglEntries) -> dict[str, int]:
     """Every struct the package places in GPU memory, by name, and its size: each is a host type named as SGL names it."""
     return {s["name"]: s["size"] for _, s in entries.memory_structs}
@@ -527,8 +528,9 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> str:
         out.append("    [[nodiscard]] bool operator==(std::nullptr_t) const { return asset == nullptr; }\n")
         out.append("\n")
         out.append(f"    /// The pipeline layout this entry point's binding list states, with no reflected binding in it.\n")
-        out.append("    /// A raster pipeline whose stages list different groups needs their union instead, spelled with\n")
-        out.append("    /// `ctx.cached.acquire_pipeline_layout<...>()`.\n")
+        out.append("    /// It carries only the file samplers this entry point reaches, so a file used as a library never fills the sampler slots.\n")
+        out.append("    /// A raster pipeline whose stages list different groups needs their union, spelled `ctx.cached.acquire_pipeline_layout<...>()`.\n")
+        out.append("    /// One whose stages reach file samplers is built from the file's SGL `pipeline`, whose layout carries every stage's samplers.\n")
         out.append("    [[nodiscard]] sg::pipeline_layout_handle acquire_layout(sg::context& ctx) const\n    {\n")
         samplers = described.get("samplers", [])
         if samplers:
