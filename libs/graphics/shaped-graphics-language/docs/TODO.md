@@ -42,8 +42,9 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **Compacting sg's acceleration pool.** A freed region is reused first-fit, and the pool only grows, so a scene that rebuilds often fragments it.
 - **`prelude/raytracing.sgl` is ~1200 lines, and its three emulated traversals repeat one stack walk.** Triangles, boxes and both differ only in what a BLAS leaf does.
   One walk taking the leaf as a function value (CHK-317) would carry all three, once the inliner's output of it is as tight as the copies are.
-- **Metal's pipeline falls short of DXR in three places** (the spec's raytracing file, "Per target"), none tested on hardware here.
+- **Metal's pipeline falls short of DXR in four places** (the spec's raytracing file, "Per target"), none tested on hardware here.
   A hit's instance transforms are the identity, since Metal hands them only under intersection tags sg's tables do not declare yet.
+  A closest hit's object ray is the world ray, for the same reason.
   `accept_and_end_search` acts as `accept` in an intersection function, which can only accept or not.
   A dispatch traces one TLAS: the closest hit's record comes from one buffer of instance offsets, which sg binds at buffer 5.
 - **A host's groups make a payload state the widest access.** A payload a `.host` pipeline traces is `read`/`write` for every stage on HLSL (EMIT-137).

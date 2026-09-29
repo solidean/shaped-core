@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/fwd.hh>
@@ -48,9 +49,14 @@ struct slib::raytracing_pipeline_definition
     cc::string_view name;
     /// The ray types of its set, which every row of its table spans.
     int ray_count = 1;
-    /// The ray set's name and each ray type's payload, in the set's order, which a host's hit group must match.
+    /// The ray set's name, which a host's hit group must be for.
     cc::string_view ray_set;
+    /// Per ray type, in the set's order: its name, its payload's struct, the bytes that payload takes in a trace, and its
+    /// structural hash, all of which a host's hit group must match.
+    cc::span<cc::string_view const> rays;
     cc::span<cc::string_view const> payloads;
+    cc::span<i32 const> payload_sizes;
+    cc::span<cc::string_view const> payload_shapes;
     shader_asset_handle const* raygen = nullptr;
     /// Per ray type, in the set's order.
     cc::span<shader_asset_handle const* const> misses;
@@ -61,6 +67,9 @@ struct slib::raytracing_pipeline_definition
     /// Every callable of the module's tables, in their order, and whether the host appends its own after them.
     cc::span<shader_asset_handle const* const> callables;
     bool has_host_callables = false;
+    /// The parameter a host's callable must take, and its structural hash; both empty without `.host` callables.
+    cc::string_view host_callable_parameter;
+    cc::string_view host_callable_shape;
     u32 max_recursion_depth = 1;
     isize max_payload_size = 0;
     isize max_attribute_size = 8;
@@ -68,6 +77,8 @@ struct slib::raytracing_pipeline_definition
     sg::pipeline_layout_handle (*acquire_layout)(sg::context& ctx) = nullptr;
     /// What a record without a closest hit calls on metal, where an empty table slot is no function; null elsewhere.
     shader_asset_handle const* empty_closest_hit = nullptr;
+    /// The frozen part as the build saw it: `sgl::described_raytracing_pipeline::frozen`, one `key = value` line each.
+    cc::span<cc::string_view const> frozen;
 };
 
 namespace slib
@@ -77,17 +88,27 @@ namespace slib
 /// A part the declaration leaves closed must be empty in `host`.
 /// Cold, like every coroutine here: awaiting it is what starts the compiles.
 /// `ctx` must outlive the result.
+///
+/// A hot reload that moves what the generated code fixes, its frozen part, is not followed.
+/// The description then keeps the module's shaders it was last built with on `ctx`, and the log says what moved.
+/// A source whose frozen part moved before it was ever described on `ctx` has nothing to keep, and fails.
 [[nodiscard]] cc::shared_async<sg::raytracing_pipeline_description> describe_raytracing_pipeline(
     sg::context* ctx,
     raytracing_pipeline_definition const* definition,
     raytracing_host_parts host);
 
+/// What a hot reload moved of `definition`'s frozen part, one `key: was -> is` line each; empty while the source still
+/// states what the build baked.
+/// Without a reload it is empty, and nothing is read.
+[[nodiscard]] cc::string frozen_moved_of(raytracing_pipeline_definition const& definition);
+
 /// A table over `pipeline`, built from `definition`: its raygen, a miss per ray type in the set's order, its ray count,
-/// and every callable, the module's and then `host_callables` of the host's, so an index a shader computes is a record.
+/// and every callable, the module's and then each of `host.callables`, so an index a shader computes is a record.
+/// `host` must be what `pipeline` was described with, and holds callables only where the declaration takes the host's.
 /// Its rows follow with `add_hit_group_row`.
 [[nodiscard]] sg::raytracing_shader_table_description table_description(raytracing_pipeline_definition const& definition,
                                                                         sg::raytracing_pipeline_handle pipeline,
-                                                                        int host_callables = 0);
+                                                                        raytracing_host_parts const& host = {});
 
 /// Appends the row of hit group `group` to `table`: a listed group by its position, then the host's in the order
 /// they were handed over.
@@ -96,7 +117,8 @@ namespace slib
 
 /// `hit_group <group>` of the SGL `source`, compiled for `ctx`: a hit shader per ray type, in the set's order, which
 /// `describe_raytracing_pipeline` takes among the host's hit groups.
-/// The group must be for the ray set `definition` traces, by its name and by each ray type's payload.
+/// The group must be for the ray set `definition` traces: its name, and each ray type's name and payload, the
+/// payload by its struct's name, its size and its shape.
 /// A source that does not compile, a group it lacks or one for another ray set is an async error, never a throw.
 /// `ctx`, `library` and `definition` must outlive the result.
 [[nodiscard]] cc::shared_async<cc::vector<sg::hit_shader>> compile_hit_group(sg::context* ctx,
@@ -107,9 +129,13 @@ namespace slib
                                                                              cc::string label = "<generated>");
 
 /// Callable `entry` of the SGL `source`, compiled for `ctx`, which `describe_raytracing_pipeline` takes among the host's
-/// callables; the same async errors as `compile_hit_group`.
+/// callables.
+/// `definition` must take the host's callables, and `entry` must take their parameter, by its name and its shape.
+/// The same async errors as `compile_hit_group`, and one for a callable `definition` cannot take.
+/// `ctx`, `library` and `definition` must outlive the result.
 [[nodiscard]] cc::shared_async<sg::compiled_shader> compile_callable(sg::context* ctx,
                                                                      shader_library const* library,
+                                                                     raytracing_pipeline_definition const* definition,
                                                                      cc::string source,
                                                                      cc::string entry,
                                                                      cc::string label = "<generated>");

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/to_string.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 namespace
@@ -213,8 +214,38 @@ public:
         out += "};\n\n";
     }
 
-    /// A Metal sampler is a parameter of the entry point, which `write_function_head` writes.
-    void write_file_sampler(cc::string&, plan const&, planned_sampler const&) const override {}
+    /// A Metal sampler is a parameter of a raster or compute entry point, which `write_function_head` writes.
+    /// A ray-tracing stage declares it `constexpr` at file scope instead (EMIT-133).
+    /// Its visible and intersection functions have no sampler slot of the argument table, a struct holding a sampler
+    /// must be passed by value, and an intersection function reads its context out of the ray data.
+    void write_file_sampler(cc::string& out, plan const& p, planned_sampler const& s) const override
+    {
+        if (p.e.entry_stage < stage::raygen)
+            return;
+        auto const& state = p.m.samplers[p.m.at(s.symbol).info];
+        constexpr cc::string_view addresses[] = {"repeat", "mirrored_repeat", "clamp_to_edge"};
+        constexpr cc::string_view filters[] = {"nearest", "linear"};
+        auto settings = cc::format("s_address::{}, t_address::{}, r_address::{}, mag_filter::{}, min_filter::{}, "
+                                   "mip_filter::{}",
+                                   addresses[state.address_u], addresses[state.address_v], addresses[state.address_w],
+                                   filters[state.mag_filter], filters[state.min_filter], filters[state.mip_filter]);
+        if (state.compare >= 0)
+            settings.appendf(", compare_func::{}", check::k_compare_ops[state.compare]);
+        if (state.max_anisotropy > 1)
+            settings.appendf(", max_anisotropy({})", state.max_anisotropy);
+        if (state.min_lod != 0.0f || state.max_lod != check::sampler_state().max_lod)
+            settings.appendf(
+                ", lod_clamp({}, {})", float_text(state.min_lod),
+                state.max_lod == check::sampler_state().max_lod ? cc::string("FLT_MAX") : float_text(state.max_lod));
+        out.appendf("constexpr sampler {}({});\n", s.name, settings);
+    }
+
+    /// A float as MSL reads it, always with a decimal point.
+    [[nodiscard]] static cc::string float_text(f32 value)
+    {
+        auto text = cc::to_string(value);
+        return text.contains('.') || text.contains('e') ? text : text + ".0";
+    }
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
@@ -352,8 +383,6 @@ public:
             parameters.push_back(cc::format("device uint const* sgl_hit_offsets [[buffer({})]]", k_hit_offsets_buffer));
             parameters.push_back("uint3 sgl_launch_id [[thread_position_in_grid]]");
             parameters.push_back("uint3 sgl_launch_size [[threads_per_grid]]");
-            for (auto const& s : p.samplers)
-                parameters.push_back(cc::format("sampler {} [[sampler({})]]", s.name, s.index));
             auto list = cc::string();
             for (auto const& parameter : parameters)
                 list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);

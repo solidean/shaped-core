@@ -194,7 +194,9 @@ cc::result<sg::raytracing_pipeline_handle> metal_context::create_metal_raytracin
     // The units differ from DXR's and the mapping is the conservative direction.
     // DXR counts TraceRay nesting; this counts indirect-call nesting, and a recursive trace ported to Metal spends at
     // least one indirect call per level — the hit function is reached through a visible function table.
-    linking->setMaxCallStackDepth(NS::UInteger(desc.max_recursion_depth));
+    // A callable is one more indirect call below the deepest hit function that calls it.
+    auto const callable_depth = desc.callable_shaders.empty() ? 0 : 1;
+    linking->setMaxCallStackDepth(NS::UInteger(desc.max_recursion_depth + callable_depth));
 
     auto raygen_states = cc::vector<MTL::ComputePipelineState*>();
 

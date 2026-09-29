@@ -336,6 +336,13 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline takes a hit group the hos
 // raytracing_callables.sgl's `apply`: thread i calls callable `i % 3` of `ops`, the module's two and then the host's.
 // The host's squares, compiled at run time from its own SGL.
 
+namespace
+{
+constexpr auto k_squared = "require raytracing_pipeline\n"
+                           "struct operand:\n    x: float\n"
+                           "@callable fun squared(v: mut operand):\n    v.x = v.x * v.x\n";
+} // namespace
+
 ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline calls the module's callables and the host's by index",
                      (sg::context_handle const& ctx))
 {
@@ -347,18 +354,14 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline calls the module's callab
 
     using apply_t = shaders::raytracing_callables_apply_t;
     CHECK(apply_t::first_host_callable == 2);
-    auto const squared
-        = co_await slib::compile_callable(ctx.get(), &sg_test::shader_fixtures(),
-                                          "require raytracing_pipeline\n"
-                                          "struct operand:\n    x: float\n"
-                                          "@callable fun squared(v: mut operand):\n    v.x = v.x * v.x\n",
-                                          "squared", "squared.sgl");
+    auto const squared = co_await slib::compile_callable(ctx.get(), &sg_test::shader_fixtures(), &apply_t::definition(),
+                                                         k_squared, "squared", "squared.sgl");
     auto host = slib::raytracing_host_parts();
     host.callables.push_back(squared);
-    auto const desc = co_await shaders::raytracing_callables.apply.description(*ctx, cc::move(host));
+    auto const desc = co_await shaders::raytracing_callables.apply.description(*ctx, host);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
-    auto const table = ctx->uncached.create_raytracing_shader_table(apply_t::table_description(pipeline, 1));
+    auto const table = ctx->uncached.create_raytracing_shader_table(apply_t::table_description(pipeline, host));
     REQUIRE(table != nullptr);
 
     constexpr auto count = 9;
@@ -382,4 +385,107 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline calls the module's callab
         auto const want = i % 3 == 0 ? 2 * x : i % 3 == 1 ? -x : x * x;
         CHECK(got[i][0] == want).context(cc::format("thread {}", i));
     }
+}
+
+// What the host hands over is checked against the declaration before anything compiles, and every refusal is an async
+// error of the awaited result, never a throw at the call.
+
+namespace
+{
+/// The message `node` failed with, or empty where it did not fail.
+template <class T>
+cc::string error_of(cc::shared_async<T> const& node)
+{
+    return node->has_error() ? node->try_error()->underlying().to_string() : cc::string();
+}
+
+/// `k_runtime_group` with `from` replaced by `to`, once.
+cc::string runtime_group_with(cc::string_view from, cc::string_view to)
+{
+    auto text = cc::string(k_runtime_group);
+    auto const at = text.find(from);
+    REQUIRE(at >= 0);
+    text.replace({.offset = at, .size = from.size()}, to);
+    return text;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - a host's hit group or callable the declaration cannot take is an async error",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    using open_t = shaders::raytracing_open_open_path_t;
+    using apply_t = shaders::raytracing_callables_apply_t;
+    auto const* const library = &sg_test::shader_fixtures();
+    auto const group = [&](cc::string source, cc::string name)
+    { return slib::compile_hit_group(ctx.get(), library, &open_t::definition(), cc::move(source), cc::move(name)); };
+
+    // each is created without a throw, and settles to the error
+    auto const missing = group(k_runtime_group, "velvet");
+    auto const broken = group("hit_group material for path_rays:\n", "material");
+    auto other_set = cc::string(k_runtime_group);
+    (void)other_set.replace_all("path_rays", "other_rays");
+    auto const renamed = group(other_set, "material");
+    auto const swapped = group(runtime_group_with("    surface: radiance\n    occlusion: shadow\n",
+                                                  "    occlusion: shadow\n    surface: radiance\n"),
+                               "material");
+    // the same names, and a payload one field wider than the pipeline's
+    auto const widened
+        = group(runtime_group_with("    is_lit: int\n", "    is_lit: int\n    extra: float\n"), "material");
+    auto const not_open = slib::compile_hit_group(
+        ctx.get(), library, &shaders::raytracing_pipeline_path_t::definition(), k_runtime_group, "material");
+    auto const other_parameter
+        = slib::compile_callable(ctx.get(), library, &apply_t::definition(),
+                                 "require raytracing_pipeline\nstruct operand:\n    x: float\n    y: float\n"
+                                 "@callable fun squared(v: mut operand):\n    v.x = v.x * v.x\n",
+                                 "squared");
+    auto const no_callable = slib::compile_callable(ctx.get(), library, &apply_t::definition(), k_squared, "cubed");
+    auto const closed = slib::compile_callable(ctx.get(), library, &open_t::definition(), k_squared, "squared");
+
+    for (auto const* node : {&missing, &broken, &renamed, &swapped, &widened, &not_open})
+        co_await cc::async_settled(*node);
+    for (auto const* node : {&other_parameter, &no_callable, &closed})
+        co_await cc::async_settled(*node);
+
+    CHECK(error_of(missing).contains("<generated> declares no hit_group velvet"));
+    CHECK(error_of(broken).contains("<generated> does not compile"));
+    CHECK(error_of(renamed).contains("is for the ray set other_rays"));
+    CHECK(error_of(swapped).contains("whose ray types, payloads and payload layouts it must state alike"));
+    CHECK(error_of(widened).contains("whose ray types, payloads and payload layouts it must state alike"));
+    CHECK(error_of(not_open).contains("takes no hit group of the host's"));
+    CHECK(error_of(other_parameter).contains("@callable squared of <generated> takes operand@"));
+    CHECK(error_of(no_callable).contains("<generated> declares no @callable cubed"));
+    CHECK(error_of(closed).contains("takes no callable of the host's"));
+}
+
+TEST("sg - a table asks for as many callables of the host's as the declaration takes")
+{
+    using apply_t = shaders::raytracing_callables_apply_t;
+    using path_t = shaders::raytracing_pipeline_path_t;
+    auto host = slib::raytracing_host_parts();
+    host.callables.push_back({});
+    // the host's callable takes a record after the module's two
+    CHECK(apply_t::table_description({}, host).callable.size() == 3);
+    CHECK(apply_t::table_description({}).callable.size() == 2);
+    // `path` lists every callable, so a table with one of the host's is a caller's mistake
+    CHECK_ASSERTS((void)path_t::table_description({}, host));
+}
+
+namespace
+{
+/// Whether `Pipeline::add_row` takes a `Group` as its hit group.
+template <class Pipeline, class Group>
+concept takes_row = requires(sg::raytracing_shader_table_description& t, Group g) { Pipeline::add_row(t, g); };
+} // namespace
+
+TEST("sg - a generated pipeline's hit group index is its own type")
+{
+    using path_t = shaders::raytracing_pipeline_path_t;
+    using open_t = shaders::raytracing_open_open_path_t;
+    static_assert(takes_row<path_t, path_t::hit_group>);
+    // another pipeline's group, and a bare position, are no hit group of `path`
+    static_assert(!takes_row<path_t, open_t::hit_group>);
+    static_assert(!takes_row<path_t, int>);
+    CHECK(path_t::hit_groups_t::spheres.index == 1);
+    CHECK(open_t::first_host_hit_group.index == 0);
 }

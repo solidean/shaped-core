@@ -395,6 +395,7 @@ if(SC_BUILD_TESTS)
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
         tests/emit/raytracing-emit-test.cc
+        tests/emit/msl-raytracing-emit-test.cc
         tests/emit/layout-emit-test.cc
 
         tests/driver/classify-test.cc
@@ -418,7 +419,9 @@ if(SC_BUILD_TESTS)
         SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
         # the corpus is walked when the test runs, so a new file needs no entry here
         SGL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus"
-        SGL_PRELUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/prelude")
+        SGL_PRELUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/prelude"
+        # sg's metal ray-tracing shaders, whose MSL text is checked here on every box, while only a Mac runs them
+        SGL_SG_SHADERS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/tests/shaders/sgl")
 
     target_link_libraries(shaped-graphics-language-test
         PRIVATE

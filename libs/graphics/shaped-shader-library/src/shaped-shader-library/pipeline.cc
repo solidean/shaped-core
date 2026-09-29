@@ -11,6 +11,7 @@
 #include <shaped-graphics-language/driver/describe.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-shader-library/impl/frozen.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh>
 #include <shaped-shader-library/shader_asset.hh>
 
@@ -253,6 +254,11 @@ live_pipeline& live_of(cc::vector<cc::unique_ptr<live_pipeline>>& all, slib::pip
     return *all.back();
 }
 } // namespace
+
+cc::string slib::impl::frozen_moved(cc::span<cc::string_view const> built, cc::span<cc::string const> now)
+{
+    return moved(built, now);
+}
 
 slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d)
 {

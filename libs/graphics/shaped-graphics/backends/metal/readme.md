@@ -342,6 +342,7 @@ The pipeline path maps as follows.
   **It defaults to 1**, so a backend that ignored the field would under-declare the stack rather than report anything.
   The units differ from DXR's, and the mapping is the conservative direction.
   DXR counts `TraceRay` nesting and this counts indirect-call nesting, and a recursive trace ported here spends at least one indirect call per level.
+  A pipeline with callables declares one level more, since a closest hit calling a callable is one indirect call deeper than the hit itself.
   `sg metal - a hit function recurses through its own table to the declared depth` pins it, recursing four levels through a self-referential visible function table.
   **The one place recursion genuinely cannot go is inside traversal.**
   An intersection or any-hit function cannot even take an `instance_acceleration_structure` parameter, which the compiler refuses by name.
