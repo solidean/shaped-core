@@ -376,9 +376,10 @@ A pipeline there waits for a polyfill, which the [incubator](incubator/raytracin
 * A record without a closest hit calls `sgl_empty_closest_hit`, since an empty table slot is no function.
 * The closest hit's record is found from each instance's hit-group offset, which sg keeps in a buffer of its own at buffer 5.
 
-Metal falls short of DXR in three places, each a [TODO](../TODO.md):
+Metal falls short of DXR in four places, each a [TODO](../TODO.md):
 
 * **A hit's instance transforms are the identity** in a pipeline: Metal hands them only under intersection tags sg's tables do not declare.
+* **A closest hit's `object_ray` is the world ray**, for the same reason, while an intersection's is in object space.
 * **`accept_and_end_search` acts as `accept`** in an intersection function.
 * **One TLAS per dispatch**, whose instance offsets are the one buffer at buffer 5.
 

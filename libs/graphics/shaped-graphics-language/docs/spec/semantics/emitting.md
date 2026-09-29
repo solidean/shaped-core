@@ -43,6 +43,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   That is the function a call is written as, and every name a writer of its own calls, declares or reaches into, which its record lists per target.
 * **EMIT-16** The reserved words of the target are taken in the mint before anything else is minted.
 * **EMIT-17** A struct, a binding or a local whose name is reserved in a target is minted from that name and a trailing underscore, in that target only.
+  Every target reserves each name that starts with `sgl_`, which is where an emitter's own names stand, so `sgl_data` is written `sgl_data_`.
+  An entry point the check pass adds under such a name keeps it (CHK-345).
 * **EMIT-96** Two structs of one name, which the program's file shadowing one of the prelude's gives ([CHK-188](checking.md#symbols)), are written under two names: the one written later is minted.
   The same holds for the cases of two enums of one name.
 * **EMIT-18** A member whose name is reserved gets trailing underscores until it is free among its siblings, in that target only.
@@ -212,6 +214,8 @@ A binding that is not `@inline` is a group.
   Its index i is its position among the module's file-scope samplers in declaration order, so every entry point and every stage states the same one.
   It stands where sg binds a pipeline layout's static sampler of index i: `register(s<i>, space10)` in `hlsl-dx12`, and `[[vk::binding(i + 1, 3)]]` in `hlsl-vulkan`.
   WGSL writes it as `@group(3) @binding(i + 1)`, since binding 0 of sg's own group is the inline constants', and MSL as the entry point's parameter `sampler name [[sampler(i)]]`.
+  A ray-tracing stage's is a `constexpr sampler` of its settings in MSL instead, since a visible or an intersection function has no sampler slot to read.
+  A `mip_lod_bias` other than 0 is `unsupported` there, since a `constexpr sampler` has no bias.
   Its type is EMIT-99's, and its settings reach the layout from `sgl describe` as a group's static sampler's do.
   An entry point that reaches one of index 16 or more is `too-many-samplers` on every target, since Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` hold 16.
   Every sampler declared above it counts toward that index, reached or not, so the limit is on the file and not on what one stage uses.
@@ -322,6 +326,7 @@ The rules above say HLSL and WGSL by name; these say what `msl` writes in the sa
 
 * **EMIT-56** After the comment of EMIT-47, the text is `#include <metal_stdlib>`, `using namespace metal;` and an empty line.
 * **EMIT-57** MSL's reserved words also hold every name the Metal toolchain declares at global scope or in `metal`, its macros included, and `main` ([why](why/emitting.md#emit-57)).
+  They hold the intersection tags `instancing` and `triangle_data` too, which a ray-tracing stage's `using namespace raytracing;` brings in.
 * **EMIT-58** An `@inline binding` is a struct of its members and the parameter `constant T& name [[buffer(4)]]` of the entry point ([why](why/emitting.md#emit-58)).
 * **EMIT-59** The entry point is a `vertex`, `fragment` or `kernel` function, and its SGL parameter carries `[[stage_in]]`.
   MSL has no spelling for a kernel's workgroup, so the text states none, and the shape reaches sg from what SGL states alone.
@@ -378,6 +383,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   * A trace is the kernel's own `intersector`, configured from the ray flags, then the miss or the closest hit through the tables.
     The closest hit's record is the instance's offset plus the geometry index times the multiplier plus the contribution, as DXR finds it.
   * The ray data holds as many words as the largest payload of the set, so every shader of a pipeline agrees on it.
+    The set is the one of the pipeline or the hit group holding the shader, and one it traces only where none holds it.
+    A shader that traces or stands in traversal, held by two whose sets' payloads differ, is `ray-data-conflict`, since one text cannot agree with both.
   * A hit's instance transforms are the identity, since Metal hands them only under intersection tags sg's tables do not declare.
 
 ## Layout
@@ -425,6 +432,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 | `too-many-groups` | EMIT-105 |
 | `too-many-samplers` | EMIT-133 |
 | `too-many-acceleration-structures` | EMIT-135 |
+| `ray-data-conflict` | EMIT-139 |
 | `target-lacks-feature` | EMIT-109 |
 
 ## Open

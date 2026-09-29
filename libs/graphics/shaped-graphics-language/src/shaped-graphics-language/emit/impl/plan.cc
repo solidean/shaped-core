@@ -207,9 +207,10 @@ struct planner
     i32 patch_location_base = 0;
 
     /// A name of the program as this target may spell it: itself, or with a trailing underscore where it is reserved.
+    /// Every target reserves the prefix `sgl_` for what an emitter writes, whose names end in no underscore.
     cc::string spell(cc::string_view name)
     {
-        if (!is_reserved(p.which, name) && !is_called_by_a_builtin(p.m, p.which, name))
+        if (!is_reserved(p.which, name) && !is_called_by_a_builtin(p.m, p.which, name) && !name.starts_with("sgl_"))
             return name;
         return p.names.mint(cc::format("{}_", name));
     }
@@ -969,7 +970,9 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
             p.need(t.kind == type_kind::buffer ? t.element : member.type, struct_role::plain);
         }
     // `spell` is what mints `<name>_` where the target reserves the name or a builtin is called by it.
-    result.entry_name = p.spell(e.name);
+    // An entry point the check pass adds for metal is named `sgl_…` on purpose, and the host asks for it by that name.
+    auto const is_added = check::is_valid(e.function) && m.at(e.function).name != e.name;
+    result.entry_name = is_added ? cc::string(e.name) : p.spell(e.name);
     if (e.entry_stage == stage::tessellation_control)
     {
         result.patch_function = result.names.mint(cc::format("{}_patch", e.name));
@@ -1171,11 +1174,51 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
     return result;
 }
 
+cc::vector<sgl::check::symbol_id> sgl::emit::impl::owning_ray_sets(check::checked_module const& m,
+                                                                   check::flat_entry_point const& e)
+{
+    auto result = cc::vector<check::symbol_id>();
+    auto const is_in = [](cc::span<check::symbol_id const> ids, check::symbol_id id)
+    {
+        for (auto const x : ids)
+            if (x == id)
+                return true;
+        return false;
+    };
+    auto const add = [&](check::symbol_id set)
+    {
+        if (check::is_valid(set) && !is_in(result, set))
+            result.push_back(set);
+    };
+    auto const holds = [&](check::pipeline_info const& p)
+    {
+        switch (p.kind)
+        {
+        case check::pipeline_kind::raytracing:
+            // every callable of the module's tables is in each ray-tracing pipeline's callable section
+            return p.raygen == e.function || is_in(m.at(p.misses), e.function) || e.entry_stage == check::stage::callable;
+        case check::pipeline_kind::hit_group:
+            return p.intersection == e.function || is_in(m.at(p.records), e.function);
+        default:
+            return false;
+        }
+    };
+    for (auto const& p : m.pipelines)
+        if (holds(p))
+            add(p.ray_set);
+    return result;
+}
+
 sgl::check::symbol_id sgl::emit::impl::ray_set_of(check::checked_module const& m, check::flat_entry_point const& e)
 {
+    if (e.entry_stage < check::stage::raygen)
+        return check::symbol_id::none;
+    // the pipeline or the hit group that holds the entry point decides, so every shader linked with it agrees
+    if (auto const owners = owning_ray_sets(m, e); !owners.empty())
+        return owners[0];
     if (!e.traced_rays.empty())
         return e.traced_rays.front().set;
-    if (e.entry_stage < check::stage::raygen || e.entry_stage == check::stage::callable || !check::is_valid(e.input))
+    if (e.entry_stage == check::stage::callable || !check::is_valid(e.input))
         return check::symbol_id::none;
     for (auto const& p : m.pipelines)
     {
