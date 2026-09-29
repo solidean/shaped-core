@@ -62,7 +62,7 @@ What is left:
 
 Once a semantic runs in tier 1 on every backend, its per-backend copies are deleted: clear, draw and store; depth and stencil; vertex input; base vertex; raster inline constants.
 Tier 2 keeps one native-route smoke test per backend — an embedded blob, compute and raster — and the tests of backend internals.
-**Metal's copies stay** until metal runs tier-1 shaders, which the SGL-to-MSL-to-`newLibraryWithSource` path in flight is what brings.
+Metal runs tier-1 shaders too, SGL reaching it as MSL through slib's metal edge, so its copies go under the same rule as the others'.
 
 ## sg follow-ups this plan found
 

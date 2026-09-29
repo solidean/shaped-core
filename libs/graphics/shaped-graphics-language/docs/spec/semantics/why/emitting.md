@@ -64,8 +64,12 @@ Every flat expression is pure, so building a struct ahead of the statement that 
 ## EMIT-57
 
 `using namespace metal;` makes every name of the standard library visible in the global scope, where the program's structs are declared.
-A struct called `filter` or `length` would then be ambiguous at its first use, and the compiler would name a header nobody wrote.
+Metal also declares names there of its own, such as the `quad` it reserves for a type it never defines, and its headers define macros.
+A struct called `filter`, `length` or `quad` would then be ambiguous at its first use, and the compiler would name a header nobody wrote.
+So the list holds all of them, found by declaring each identifier of the toolchain's headers as a struct and as a function.
+[tools/msl-probe](../../../../tools/msl-probe/readme.md) is that probe, and re-running it regenerates the list.
 A local only hides such a name, so reserving it there costs an underscore and nothing else.
+Declaring the program in a namespace of its own was the alternative, and it was declined: it would make MSL's entry points qualified names, and minting is how every other target handles a taken name.
 `main` is no keyword, and MSL refuses a function of that name, so by EMIT-20 an entry point called `main` is `main_` in MSL.
 
 ## EMIT-58
@@ -73,7 +77,7 @@ A local only hides such a name, so reserving it there costs an underscore and no
 MSL has no global resources: whatever a stage reads is a parameter of its entry point.
 The body still reads `constants.view_projection`, since a reference parameter is used like the global the other targets declare.
 sg's metal backend binds group N at buffer index N and keeps four such slots, so 4 is the first index no group can take.
-That backend sets no inline constants yet, so the number is a proposal it has to adopt, and the text is where it is written down.
+The backend binds the inline constants there, as `k_inline_constants_buffer_index`.
 A vertex buffer has no index in the text at all: `[[stage_in]]` reads through the pipeline's vertex descriptor.
 
 ## EMIT-62
@@ -114,7 +118,7 @@ It could build a struct with braces, `pixel_input{a, b, c}`, which drops the mem
 
 An unsuffixed literal is a `double` in C++, and MSL has no `double`, so the question is fair.
 The hand-written MSL in this repo and the MSL SPIRV-Cross generates both write `0.5` for a `float`.
-So the unsuffixed form stays until a Metal compiler says otherwise.
+The Metal compiler takes the unsuffixed form, so it stays.
 A suffix would be the only place where one literal is spelled differently per target.
 
 ## EMIT-74

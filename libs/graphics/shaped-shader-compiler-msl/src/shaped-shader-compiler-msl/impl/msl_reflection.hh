@@ -28,7 +28,8 @@
 ///     binds nothing there
 ///   - `constant T&` and `constant T*` are uniform buffers, `device T*` is a structured buffer, and a `const` pointee
 ///     makes it readonly
-///   - `texture*<...>` is a texture, readwrite when its access is `read_write` or `write`
+///   - `texture*<...>` is a sampled texture, and a storage image when it states `access::read`, `write` or `read_write`
+///   - `depth*<float>` is a sampled texture whose sample type is `depth`
 ///   - `sampler` is a sampler, and an acceleration structure is one of the `raytracing::` handles
 ///   - a member declared `T name[k]` is an array binding of count k, which occupies k consecutive indices
 ///

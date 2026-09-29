@@ -25,14 +25,8 @@ slib::shader_library& shader_fixtures();
 
 /// Whether any registered compiler connects a fixture package's language to a format `ctx` accepts.
 ///
-/// **A metal context reaches none of them today.** The edges are SGL to WGSL and, where DXC exists, to DXIL and
-/// SPIR-V; nothing produces a metallib, so a metal context is offered a format it does not take.
-/// A test that needs a shader asks this first and SKIPs, rather than failing on an acquire that cannot succeed —
-/// which is what the whole shader-using half of the tier-1 sweep did on a Mac with a Metal 4 device.
-///
-/// Derived from the library rather than from a backend name, so the day an SGL to metallib edge is registered these
-/// tests start running with nothing here to update.
-/// libs/graphics/shaped-graphics/docs/TODO.md carries the missing edge.
+/// A test that needs a shader asks this first and SKIPs rather than failing on an acquire that cannot succeed.
+/// Derived from the library rather than from a backend name, so a new edge needs nothing here.
 [[nodiscard]] bool shaders_reach(sg::context const& ctx);
 
 /// SKIPs the test where the backend does not count `stat`, so a zero nobody measured never passes as a zero.

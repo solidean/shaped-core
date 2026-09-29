@@ -80,14 +80,18 @@ TEST("sgl emit - the dispatch id's unsigned twin is minted, so a local of the pr
     CHECK(wgsl.contains("    let id_in: f32 = 2.0;\n"));
 }
 
-TEST("sgl emit - MSL refuses a compute entry point, which it writes as a kernel")
+TEST("sgl emit - MSL writes a compute entry point as a kernel, which states no workgroup")
 {
-    // EMIT-13's exception: the three other targets write it.
-    constexpr auto plain = "@compute(64) fun main(@thread_id id: int3):\n"
-                           "    let x = id.x\n";
-    CHECK(sgl::emit::dump_errors(emit_source(plain, 0, target::msl))
-          == "unsupported a compute entry point, which MSL writes as a kernel\n");
-    CHECK(sgl::emit::dump_errors(emit_source(plain, 0, target::wgsl)) == "");
+    // EMIT-59: MSL has no spelling for the threadgroup shape, so it reaches sg from SGL's own statement alone.
+    auto const msl = text_of(k_double, target::msl);
+    CHECK(!msl.contains("numthreads"));
+    CHECK(msl.contains("kernel void double_values(uint3 id_in [[thread_position_in_grid]], constant work_arguments& "
+                       "work_group [[buffer(0)]])\n"
+                       "{\n"
+                       "    constant auto& work_values = work_group.work_values;\n"
+                       "    const int3 id = int3(id_in);\n"
+                       "    work_values[id.x] = work_values[id.x] * 2.0;\n"
+                       "}\n"));
 }
 
 TEST("sgl emit - a compute entry point that needs legalizing keeps its workgroup and its thread id")

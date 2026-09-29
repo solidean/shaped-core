@@ -422,6 +422,31 @@ struct planner
         }
     }
 
+    /// MSL has no global resources, so each group that declares anything is a struct of its slots and a parameter.
+    void argument_buffers()
+    {
+        if (p.which != emit::target::msl)
+            return;
+        auto group = 0;
+        for (auto const id : p.e.bindings)
+        {
+            auto const& s = p.m.at(id);
+            auto const& b = p.m.bindings[s.info];
+            if (b.is_inline || b.is_workgroup)
+                continue;
+            auto is_declared = false;
+            for (auto const& block : p.group_blocks)
+                is_declared = is_declared || block.group == group;
+            for (auto const& r : p.resources)
+                is_declared = is_declared || r.group == group;
+            if (is_declared)
+                p.argument_buffers.push_back({.group = group,
+                                              .struct_name = p.names.mint(cc::format("{}_arguments", s.name)),
+                                              .parameter = p.names.mint(cc::format("{}_group", s.name))});
+            ++group;
+        }
+    }
+
     /// Every member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`.
     void workgroup_memory()
     {
@@ -930,6 +955,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     p.constants();
     p.group_blocks();
     p.resources();
+    p.argument_buffers();
     p.workgroup_memory();
     p.file_samplers();
     p.memory_forms();

@@ -383,7 +383,7 @@ uv run dev.py check sgl-prelude [--fix]                                  # the g
 ```cpp
 #include <shaped-graphics-language/emit/emit.hh>
 sgl::emit::target                          // hlsl_dx12, hlsl_vulkan, wgsl, msl: a text format PLUS a backend's addressing rules
-                                           // msl is written and pinned, and has met NO Metal compiler yet
+                                           // msl's groups are argument buffers; sg's tier-1 tests run it on a Metal GPU
 sgl::emit::all_targets()                   // -> cc::span<target const>
 auto const r = sgl::emit::emit(m, 0, sgl::emit::target::wgsl);   // -> emitted_text; the isize is a position in m.entry_points
                                            // LEGALIZES that entry point first, since the check pass writes the structured form
@@ -398,7 +398,7 @@ sgl::emit::dump_errors(r)                  // `unsupported a print, which no tar
 
 #include <shaped-graphics-language/emit/reserved_words.hh>
 sgl::emit::reserved_words(t)               // -> cc::span<cc::string_view const>: keywords, predeclared types, the functions the text calls
-sgl::emit::is_reserved(t, "target")        // true for wgsl only; msl also reserves its whole standard library, and `main`
+sgl::emit::is_reserved(t, "target")        // true for wgsl only; msl also reserves every name Metal's headers declare, and `main`
 ```
 
 ## Diagnostics
@@ -565,7 +565,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A name is renamed per target where the target reserves it**: `target` is `target_` in WGSL only, and an entry point named `main` is `main_` in MSL.
   `emitted_text::entry_point` is the name the text declares.
 - **An `@inline binding`** is `register(b0, space9)`, `[[vk::push_constant]]`, `@group(3) @binding(0)`.
-  **Any other binding is a group**, numbered by its place in the entry point's list, and refused in MSL.
+  **Any other binding is a group**, numbered by its place in the entry point's list; MSL passes it as an argument buffer at `[[buffer(group)]]`.
   Its resource at `slot` is `register(<class>slot, spaceN)` in dx12, `[[vk::binding(slot, N)]]` in vulkan, `@group(N) @binding(slot)` in WGSL.
   An entry point lists at most three groups besides its `@inline` binding, as sg binds; a fourth is `too-many-groups` on every target.
   MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.

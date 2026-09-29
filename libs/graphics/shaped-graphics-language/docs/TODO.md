@@ -16,12 +16,12 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   It is meant to extend the type it names where that block alone sees it, as when implementing a method.
 - **Literal folding.** `1 / 3` over integer literals alone is refused (CHK-313), and so is an operator over them that only a float takes (CHK-257).
   Folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in their place.
+- **Re-run [tools/msl-probe](../tools/msl-probe/readme.md) when the Metal toolchain is bumped.** MSL's generated reserved words are taken from one toolchain's headers, which grow every release.
+  A name a newer one adds fails as `quad` did, naming a header the program's author never wrote, until the block is regenerated.
 - **What `discard` does to a quad's derivatives, per target.** SGL writes `discard;` and MSL `discard_fragment();`, which every target reads as "no effect after this".
   Whether the pixel keeps running as a helper is where they differ, and a sample after a discard in a neighbouring pixel depends on it.
   sg's tier-1 pixel-semantics test pins it on every backend, and dx12 and vulkan keep the pixel as a helper.
   A target that terminates gets the emulation the design settled: a flag, guarded stores, and the real discard at the end.
-- **Texture methods in MSL.** Every method has an MSL spelling, pinned by the registry's tests, which no emitted entry point reaches until MSL takes a group.
-  The first corpus shader that binds a texture on Metal is where each one meets a Metal compiler.
 - **Compact file-sampler numbering per `pipeline` declaration.** A file-scope sampler's index is its position among all the file's samplers (EMIT-133).
   So a file past 16 is `too-many-samplers` even where each stage reaches few.
   The way out not taken yet: a `pipeline` numbers only the samplers its stages reach, and emits those stages with its numbers.

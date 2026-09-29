@@ -14,7 +14,7 @@ cc::string emit_cube(isize index, target t)
 } // namespace
 
 // The six texts below are the twins of examples/graphics/rotating-cube/shaders/cube.hlsl, cube_vs.wgsl and cube_fs.wgsl.
-// The two MSL texts have no twin and have met no Metal compiler: they pin what is written, not that it compiles.
+// The two MSL texts have no checked-in twin.
 // Each is pinned whole: an emitter's output is read by people, so a changed blank line is a change worth seeing.
 
 TEST("sgl emit - the cube's vertex stage as HLSL for dx12")

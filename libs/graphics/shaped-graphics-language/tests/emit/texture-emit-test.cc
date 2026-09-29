@@ -114,11 +114,34 @@ TEST("sgl emit - each texture shape and depth is its target's own type, and 1D i
     CHECK(hlsl.contains("Texture2D<float> set_d : register(t3, space0);\n"));
     CHECK(hlsl.contains("RWTexture3D<float4> set_e : register(u4, space0);\n"));
     CHECK(hlsl.contains("SamplerComparisonState set_f : register(s5, space0);\n"));
+
+    // MSL's texture takes the scalar it holds, an image states its access, and a comparison sampler is a sampler.
+    auto const msl = text_of(shapes, target::msl);
+    CHECK(msl.contains("    texture1d<float> set_a [[id(0)]];\n"));
+    CHECK(msl.contains("    texture2d_array<uint> set_b [[id(1)]];\n"));
+    CHECK(msl.contains("    texturecube<float> set_c [[id(2)]];\n"));
+    CHECK(msl.contains("    depth2d<float> set_d [[id(3)]];\n"));
+    CHECK(msl.contains("    texture3d<float, access::read> set_e [[id(4)]];\n"));
+    CHECK(msl.contains("    sampler set_f [[id(5)]];\n"));
 }
 
-TEST("sgl emit - MSL declines a group of textures as it declines one of buffers")
+TEST("sgl emit - MSL passes a group of textures as one argument buffer, its static sampler a slot like any other")
 {
-    CHECK(sgl::emit::dump_errors(emit_source(k_blur, 0, target::msl)).contains("unsupported"));
+    // EMIT-89: the slots are the other targets' registers, and the body reads each through a local of its global's name.
+    auto const msl = text_of(k_blur, target::msl);
+    CHECK(msl.contains("struct post_arguments\n"
+                       "{\n"
+                       "    constant post_data* post [[id(0)]];\n"
+                       "    texture2d<float> post_src [[id(1)]];\n"
+                       "    texture2d<float, access::write> post_dst [[id(2)]];\n"
+                       "    texture2d<float, access::read_write> post_acc [[id(3)]];\n"
+                       "    sampler post_bilinear [[id(4)]];\n"
+                       "};\n"));
+    CHECK(msl.contains("kernel void blur(uint3 id_in [[thread_position_in_grid]], constant post_arguments& post_group "
+                       "[[buffer(0)]])\n"));
+    CHECK(msl.contains("    constant auto& post = *post_group.post;\n"));
+    CHECK(msl.contains("    constant auto& post_src = post_group.post_src;\n"));
+    CHECK(msl.contains("    constant auto& post_bilinear = post_group.post_bilinear;\n"));
 }
 
 TEST("sgl emit - a pixel stage samples with the level its derivatives pick")

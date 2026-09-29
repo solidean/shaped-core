@@ -372,24 +372,30 @@ HLSL cannot say `unfilterable` at all, which costs nothing, since dx12 and vulka
 Building the layout by reflecting the WGSL instead was declined: that text is written from the same declaration, so reading it back is `sgl describe` with a parser in between.
 And `texture_2d<f32>` fits a filterable and an unfilterable layout alike, so the reflection could not even recover `@unfilterable`.
 
-**MSL, as it is intended.**
+**MSL.**
 sg's metal backend makes a group one argument buffer at `[[buffer(group)]]`, whose member `[[id(n)]]` is slot `n` of the group.
-A texture or sampler slot holds a resource id, so a group reads in MSL as:
+A texture or sampler slot holds a resource id, so a group reads in MSL as (EMIT-89):
 
 ```cpp
-struct post_bindings
+struct post_arguments
 {
     constant post_data* post [[id(0)]];
-    texture2d<float, access::sample> src [[id(1)]];
-    texture2d<float, access::write> dst [[id(2)]];
-    sampler bilinear [[id(3)]];
+    texture2d<float> post_src [[id(1)]];
+    texture2d<float, access::write> post_dst [[id(2)]];
+    sampler post_bilinear [[id(3)]];
 };
-kernel void main0(constant post_bindings& post_group [[buffer(0)]], uint3 id_in [[thread_position_in_grid]])
+
+kernel void blur(uint3 id_in [[thread_position_in_grid]], constant post_arguments& post_group [[buffer(0)]])
+{
+    constant auto& post = *post_group.post;
+    constant auto& post_src = post_group.post_src;
+    ...
 ```
 
-Every call is inlined, so resources are parameters of the entry point alone.
+Every call is inlined, so resources are parameters of the entry point alone, and the locals at its top give the body the names the other targets' globals have.
 An image's access maps one-to-one onto `access::read`, `access::write` and `access::read_write`, and a depth texture is `depth2d<float>`.
-A file-scope static sampler can be a `constexpr sampler` in the text.
+A group's static sampler is a slot like any other, which the backend fills from the layout.
+A file-scope static sampler is a `[[sampler(i)]]` parameter of the entry point, filled from the pipeline layout ([EMIT-133](semantics/emitting.md#bindings)).
 
 ## Footprint
 
@@ -445,10 +451,10 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
-Three targets write a group, and the fourth declines rather than guessing.
+Every target writes a group.
 WGSL gives each resource its own `@group`/`@binding`, and HLSL declares each at file scope with `register(<class>slot, spaceN)` on dx12 and `[[vk::binding(slot, N)]]` on vulkan.
+MSL writes the group as one argument buffer whose member `[[id(slot)]]` is each slot, as [MSL](#how-a-group-reaches-sg) below shows and EMIT-89 states.
 A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
-MSL declines every group until slib has a compiler that turns its text into a metallib.
 A file-scope sampler stands where sg binds a pipeline layout's static sampler of its index, i ([EMIT-133](semantics/emitting.md#bindings)):
 `register(s<i>, space10)` on dx12, `[[vk::binding(i + 1, 3)]]` on vulkan, `@group(3) @binding(i + 1)` in WGSL, and a `[[sampler(i)]]` parameter in MSL.
 

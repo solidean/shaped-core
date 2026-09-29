@@ -13,6 +13,10 @@
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #endif
 
+#if SLIB_HAS_METAL
+#include <shaped-shader-library/compiler/metal_compiler.hh>
+#endif
+
 #if SG_TEST_HAS_HLSL_SHADERS
 #include <sg_test_shaders.hh>
 #endif
@@ -37,6 +41,10 @@ void add_compilers(slib::shader_library& lib)
         lib.add_compiler(slib::create_sgl_compiler(cc::move(dxil.value())));
     if (auto spirv = slib::create_dxc_spirv_compiler(); spirv.has_value())
         lib.add_compiler(slib::create_sgl_compiler(cc::move(spirv.value())));
+#endif
+
+#if SLIB_HAS_METAL
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));
 #endif
 }
 
