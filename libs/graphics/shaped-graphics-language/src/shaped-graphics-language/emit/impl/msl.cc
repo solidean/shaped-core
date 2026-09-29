@@ -144,6 +144,8 @@ public:
                               scalar_of(builtin_spelling(p, texel_name_of(t.format))), k_accesses[isize(t.access)]);
         case type_kind::sampler:
             return "sampler";
+        case type_kind::acceleration_structure:
+            return "instance_acceleration_structure";
         default:
             return {};
         }

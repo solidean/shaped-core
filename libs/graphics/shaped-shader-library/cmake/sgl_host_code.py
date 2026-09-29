@@ -165,6 +165,9 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
             view = f"sg::image_view_{view_shape(member)}<sg::pixel_format::{member['image_format']}>"
             out.append(f"    {array(view)} {member['name']}; ///< `{member['type']}`\n")
             continue
+        if member["kind"] == "acceleration_structure":
+            out.append(f"    sg::tlas_view {member['name']}; ///< `{member['type']}`\n")
+            continue
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.
             if "static_sampler" not in member:
@@ -269,6 +272,8 @@ def binding_entry(member: dict) -> str:
         return head + (f".type = sg::binding_type::texture, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
                        f".sample_type = sg::texture_sample_type::{member['sample_type']}}}")
+    if kind == "acceleration_structure":
+        return head + ".type = sg::binding_type::acceleration_structure}"
     if kind == "image":
         return head + (f".type = sg::binding_type::image, .access = sg::access_mode::{member['access']}, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
@@ -280,7 +285,7 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     name = binding["name"]
     qualified = f"{namespace}::{name}"
     resources = [m for m in binding["members"] if m["kind"] != "constant"]
-    views = [m for m in resources if m["kind"] in ("buffer", "texture", "image")]
+    views = [m for m in resources if m["kind"] in ("buffer", "texture", "image", "acceleration_structure")]
     statics = [m for m in resources if m["kind"] == "sampler" and "static_sampler" in m]
     dynamic = [m for m in resources if m["kind"] == "sampler" and "static_sampler" not in m]
     out = [f"\n// `binding {name}` of {file.path}: the table the shader's resources were numbered from.\n"]

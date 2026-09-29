@@ -152,6 +152,9 @@ static_assert(
         result.type = sg::binding_type::sampler;
         result.sampler_type = sampler_type_of(b.sampler_type);
         break;
+    case sgl::described_member_kind::acceleration_structure:
+        result.type = sg::binding_type::acceleration_structure;
+        break;
     }
     result.visibility.set(stage);
     return result;

@@ -103,6 +103,10 @@ described_binding_member describe_resource(check::checked_module const& m,
         result.image_format = cc::string(check::k_image_formats[t.format].name);
         result.access = cc::string(access_name(t.access));
         break;
+    case check::type_kind::acceleration_structure:
+        result.kind = described_member_kind::acceleration_structure;
+        result.type = cc::string(m.name_of(member.type));
+        break;
     default:
         result.kind = described_member_kind::sampler;
         result.type = cc::string(m.name_of(member.type));

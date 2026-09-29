@@ -248,6 +248,8 @@ public:
             return cc::format("{}<{}>", k_image_names[isize(t.shape)], builtin_spelling(p, texel_name_of(t.format)));
         case type_kind::sampler:
             return t.is_comparison ? "SamplerComparisonState" : "SamplerState";
+        case type_kind::acceleration_structure:
+            return "RaytracingAccelerationStructure";
         default:
             return {};
         }

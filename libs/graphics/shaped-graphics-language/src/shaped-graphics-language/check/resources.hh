@@ -84,6 +84,9 @@ inline constexpr auto k_float = value_kind::scalar_float;
 inline constexpr auto k_sint = value_kind::scalar_int;
 inline constexpr auto k_uint = value_kind::scalar_uint;
 
+/// The geometry an `acceleration_structure` holds, which its type argument names (CHK-320).
+inline constexpr cc::string_view k_geometry_kinds[] = {"triangles", "procedural", "mixed"};
+
 inline constexpr image_format_info k_image_formats[] = {
     {"r8_unorm", "r8unorm", "r8", 1, k_float, false, false},
     {"r8_snorm", "r8snorm", "r8snorm", 1, k_float, false, false},

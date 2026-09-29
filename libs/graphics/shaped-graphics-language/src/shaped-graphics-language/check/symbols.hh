@@ -38,6 +38,9 @@ enum class sgl::check::type_kind : sgl::u8
     image,
     /// A sampler, filtering or `is_comparison`; a resource like a texture, never a value.
     sampler,
+    /// `acceleration_structure[.triangles]`: what a trace runs against, a TLAS the host binds (CHK-320).
+    /// `format` is its geometry, a position in `k_geometry_kinds`; a resource, never a value.
+    acceleration_structure,
     /// `(A, B) -> R`: a function a parameter takes, whose `members` are the parameter types and `element` the result.
     /// Only a parameter holds one, and a call through it is inlined where the function was handed over (CHK-317).
     function,
@@ -49,7 +52,8 @@ namespace sgl::check
 /// True for a kind that stands in a binding and is never a value: a buffer, a texture, an image or a sampler.
 [[nodiscard]] constexpr bool is_resource(type_kind k)
 {
-    return k == type_kind::buffer || k == type_kind::texture || k == type_kind::image || k == type_kind::sampler;
+    return k == type_kind::buffer || k == type_kind::texture || k == type_kind::image || k == type_kind::sampler
+        || k == type_kind::acceleration_structure;
 }
 } // namespace sgl::check
 

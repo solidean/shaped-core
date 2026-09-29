@@ -36,6 +36,8 @@ cc::string_view kind_name(sgl::described_member_kind k)
         return "image";
     case sgl::described_member_kind::sampler:
         return "sampler";
+    case sgl::described_member_kind::acceleration_structure:
+        return "acceleration_structure";
     }
     return "constant";
 }

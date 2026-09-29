@@ -524,6 +524,8 @@ struct checker
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
     /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
     [[nodiscard]] type_id resource_type(type_info info);
+    /// `acceleration_structure[.geometry]` (CHK-320).
+    [[nodiscard]] type_id resolve_acceleration_structure(i32 file, ast::expr_id expr, ast::index const& node);
     /// `(parameters) -> result`, interned: two mentions of one signature share an id (CHK-317).
     [[nodiscard]] type_id function_type(cc::span<type_id const> parameters, type_id result);
     /// Of `candidates`, the function whose signature is exactly `type`'s; `none` where no single one is.

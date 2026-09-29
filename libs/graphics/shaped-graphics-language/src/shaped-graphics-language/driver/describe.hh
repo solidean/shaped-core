@@ -27,6 +27,8 @@ enum class sgl::described_member_kind : sgl::u8
     image,
     /// A sampler: one the host binds, or a static one of the group, which carries `sampler_state`.
     sampler,
+    /// `acceleration_structure[.geometry]`: the TLAS a trace runs against, which the host binds as a `tlas_view`.
+    acceleration_structure,
 };
 
 /// A static sampler's settings, named as `sg::sampler`'s fields and enum values name them.
