@@ -70,102 +70,138 @@ ASYNC_INVOCABLE_TEST("sg - dispatch_threads rounds each axis up to whole workgro
         }
 }
 
-ASYNC_INVOCABLE_TEST("sg - int, uint and float4 buffer elements keep their types, through persistent, transient and "
-                     "staging groups alike",
+namespace
+{
+// `typed_step` shifts each int and uint right by one and reverses and doubles each float4.
+// A shift of -8 is arithmetic on an int and gives -4; 0x80000010 is shifted logically as a uint.
+constexpr int typed_count = 64;
+
+struct typed_buffers
+{
+    sg::buffer<i32> ints;
+    sg::buffer<u32> uints;
+    sg::buffer<tg::vec4f> vectors;
+
+    static typed_buffers create(sg::context& ctx)
+    {
+        auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+        return {
+            .ints = ctx.persistent.create_buffer_from_data(cc::vector<i32>::create_filled(typed_count, -8), usage),
+            .uints
+            = ctx.persistent.create_buffer_from_data(cc::vector<u32>::create_filled(typed_count, 0x80000010u), usage),
+            .vectors = ctx.persistent.create_buffer_from_data(
+                cc::vector<tg::vec4f>::create_filled(typed_count, tg::vec4f(1, 2, 3, 4)), usage),
+        };
+    }
+
+    shaders::typed views() const
+    {
+        return {.ints = ints.as_readwrite_buffer(),
+                .uints = uints.as_readwrite_buffer(),
+                .vectors = vectors.as_readwrite_buffer()};
+    }
+};
+
+struct typed_download
+{
+    sg::data_future<i32> ints;
+    sg::data_future<u32> uints;
+    sg::data_future<tg::vec4f> vectors;
+
+    static typed_download of(sg::command_list& cmd, typed_buffers const& b)
+    {
+        return {.ints = cmd.download.data_from_buffer(b.ints),
+                .uints = cmd.download.data_from_buffer(b.uints),
+                .vectors = cmd.download.data_from_buffer(b.vectors)};
+    }
+};
+
+void check_typed(cc::pinned_data<i32 const> const& ints,
+                 cc::pinned_data<u32 const> const& uints,
+                 cc::pinned_data<tg::vec4f const> const& vectors,
+                 char const* kind)
+{
+    REQUIRE(ints.size() == typed_count);
+    REQUIRE(uints.size() == typed_count);
+    REQUIRE(vectors.size() == typed_count);
+    for (auto i = 0; i < typed_count; ++i)
+    {
+        CHECK(ints[i] == -4).context(cc::format("{} group, element {}", kind, i));
+        CHECK(uints[i] == 0x40000008u).context(cc::format("{} group, element {}", kind, i));
+        CHECK(vectors[i] == tg::vec4f(8, 6, 4, 2)).context(cc::format("{} group, element {}", kind, i));
+    }
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - int, uint and float4 buffer elements keep their types, through persistent and transient "
+                     "groups alike",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    // A shift of -8 is arithmetic on an int and gives -4; 0x80000010 is shifted logically as a uint.
-    // A float4 comes back reversed and doubled.
-    constexpr int count = 64;
     auto const pipeline = co_await shaders::dispatch.typed_step.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::typed>();
-    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
-
-    struct buffers
-    {
-        sg::buffer<i32> ints;
-        sg::buffer<u32> uints;
-        sg::buffer<tg::vec4f> vectors;
-    };
-    auto const make = [&]
-    {
-        return buffers{
-            .ints = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_filled(count, -8), usage),
-            .uints = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_filled(count, 0x80000010u), usage),
-            .vectors = ctx->persistent.create_buffer_from_data(
-                cc::vector<tg::vec4f>::create_filled(count, tg::vec4f(1, 2, 3, 4)), usage),
-        };
-    };
-    auto const views = [](buffers const& b)
-    {
-        return shaders::typed{.ints = b.ints.as_readwrite_buffer(),
-                              .uints = b.uints.as_readwrite_buffer(),
-                              .vectors = b.vectors.as_readwrite_buffer()};
-    };
-    buffers const all[] = {make(), make(), make()};
+    auto const for_persistent = typed_buffers::create(*ctx);
+    auto const for_transient = typed_buffers::create(*ctx);
 
     auto cmd = ctx->create_command_list();
-    auto const persistent = ctx->persistent.create_binding_group(layout, views(all[0]));
-    auto const transient = ctx->transient.create_binding_group(*cmd, layout, views(all[1]));
-    auto groups = cc::vector<sg::binding_group const*>{persistent.get(), transient.get()};
-    // A staging group is set binding by binding, by the name the generated struct gives each member.
-    // WebGPU has none, since it has no binding arrays either.
-    auto const has_staging = ctx->supports(sg::feature::binding_arrays);
-    auto snapshot = sg::binding_group_handle();
-    if (has_staging)
-    {
-        auto staging = ctx->persistent.create_staging_binding_group(layout);
-        staging->set_binding("typed.ints", all[2].ints.as_readwrite_buffer());
-        staging->set_binding("typed.uints", all[2].uints.as_readwrite_buffer());
-        staging->set_binding("typed.vectors", all[2].vectors.as_readwrite_buffer());
-        snapshot = staging->snapshot();
-        groups.push_back(snapshot.get());
-    }
+    auto const persistent = ctx->persistent.create_binding_group(layout, for_persistent.views());
+    auto const transient = ctx->transient.create_binding_group(*cmd, layout, for_transient.views());
     cmd->compute.bind_pipeline(*pipeline);
-    for (auto const* group : groups)
-    {
-        cmd->compute.bind_group(0, *group);
-        cmd->compute.dispatch_threads(count);
-    }
-    auto futures = cc::vector<sg::data_future<i32>>();
-    auto ufutures = cc::vector<sg::data_future<u32>>();
-    auto vfutures = cc::vector<sg::data_future<tg::vec4f>>();
-    for (auto const& b : all)
-    {
-        futures.push_back(cmd->download.data_from_buffer(b.ints));
-        ufutures.push_back(cmd->download.data_from_buffer(b.uints));
-        vfutures.push_back(cmd->download.data_from_buffer(b.vectors));
-    }
+    cmd->compute.bind_group(0, *persistent);
+    cmd->compute.dispatch_threads(typed_count);
+    cmd->compute.bind_group(0, *transient);
+    cmd->compute.dispatch_threads(typed_count);
+    auto const persistent_back = typed_download::of(*cmd, for_persistent);
+    auto const transient_back = typed_download::of(*cmd, for_transient);
     ctx->submit_command_list(cc::move(cmd));
 
-    constexpr char const* kinds[] = {"persistent", "transient", "staging"};
-    for (auto k = 0; k < (has_staging ? 3 : 2); ++k)
-    {
-        auto const ints = co_await futures[k].data();
-        auto const uints = co_await ufutures[k].data();
-        auto const vectors = co_await vfutures[k].data();
-        for (auto i = 0; i < count; ++i)
-        {
-            CHECK(ints[i] == -4).context(cc::format("{} group, element {}", kinds[k], i));
-            CHECK(uints[i] == 0x40000008u).context(cc::format("{} group, element {}", kinds[k], i));
-            CHECK(vectors[i] == tg::vec4f(8, 6, 4, 2)).context(cc::format("{} group, element {}", kinds[k], i));
-        }
-    }
+    check_typed(co_await persistent_back.ints.data(), co_await persistent_back.uints.data(),
+                co_await persistent_back.vectors.data(), "persistent");
+    check_typed(co_await transient_back.ints.data(), co_await transient_back.uints.data(),
+                co_await transient_back.vectors.data(), "transient");
 }
 
-ASYNC_INVOCABLE_TEST("sg - a buffer view's offset is where the shader's index 0 lands, and its size is where it ends",
+ASYNC_INVOCABLE_TEST("sg - int, uint and float4 buffer elements keep their types through a staging group",
                      (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this context has no binding arrays, and so no staging groups");
+
+    auto const pipeline = co_await shaders::dispatch.typed_step.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::typed>();
+    auto const buffers = typed_buffers::create(*ctx);
+
+    // A staging group is set binding by binding, by the name the generated struct gives each member.
+    auto staging = ctx->persistent.create_staging_binding_group(layout);
+    staging->set_binding("typed.ints", buffers.ints.as_readwrite_buffer());
+    staging->set_binding("typed.uints", buffers.uints.as_readwrite_buffer());
+    staging->set_binding("typed.vectors", buffers.vectors.as_readwrite_buffer());
+    auto const snapshot = staging->snapshot();
+
+    auto cmd = ctx->create_command_list();
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *snapshot);
+    cmd->compute.dispatch_threads(typed_count);
+    auto const back = typed_download::of(*cmd, buffers);
+    ctx->submit_command_list(cc::move(cmd));
+
+    check_typed(co_await back.ints.data(), co_await back.uints.data(), co_await back.vectors.data(), "staging");
+}
+
+ASYNC_INVOCABLE_TEST("sg - a buffer view's offset is where the shader's index 0 lands", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // The source is quarter 1 of one buffer and the target quarter 2 of another, each of 4 × 64 ints.
-    // Quarters 0 and 3 are bystanders a view that ignored its offset or its size would reach.
+    // The rest of the target must stay untouched, and quarter 0 is where a view that ignored its offset would write.
     // 64 ints are 256 bytes, which is the strictest storage-offset alignment any backend asks for.
     constexpr int quarter = 64;
     auto const pipeline = co_await shaders::dispatch.copy_within.acquire_pipeline(*ctx);
@@ -271,7 +307,8 @@ ASYNC_INVOCABLE_TEST("sg - two views that both write one buffer are allowed in o
         CHECK(got[i] == 4u).context(cc::format("element {}", i));
 }
 
-ASYNC_INVOCABLE_TEST("sg - two groups rebound between dispatches, and one group shared by two pipelines of one layout",
+ASYNC_INVOCABLE_TEST("sg - two groups rebound between dispatches, and one group shared by two pipelines at different "
+                     "slots",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

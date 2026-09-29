@@ -37,10 +37,6 @@ Two values that could agree on the chosen inputs get a second quad with inputs t
 
 - **The sampler fields no explicit-level probe reaches**: `address_w`, which only a 3D texture reads, and `max_anisotropy` and `mip_lod_bias`, which want a pixel stage's derivatives.
 
-**Default and `--thorough`.**
-Each test runs every value by default when it is one draw per value into one target.
-A combinatorial sweep — every blend factor against every op — narrows to a covering subset under `!nx::is_thorough()`.
-
 ## Binding semantics, executed
 
 - **A buffer written and read within one render pass but by different draws** is what WebGPU refuses at pass scope, which sg checks per draw only.
@@ -61,7 +57,6 @@ What metal still has to be shown doing:
 What is left:
 
 - **The partitioning** reaches no pixel the test reads, since a fixed integer factor tiles the same area under all three.
-- **A pipeline without the feature is refused** naming it, which only a device lacking the stage shows; the test skips on dx12 and vulkan.
 
 ## What moves out of tier 2
 
@@ -74,6 +69,7 @@ Tier 2 keeps one native-route smoke test per backend — an embedded blob, compu
 - **A point list needs its point size written on vulkan without `VK_KHR_maintenance5`, and on metal.**
   sg enables maintenance5 wherever the device has it, which makes an unwritten size 1.0; SGL writes none.
   DXC refuses `[[vk::builtin("PointSize")]]` on an `out` parameter, so SGL would write it as a member of the vertex stage's output struct.
+  Until SGL writes one, the point-list tests assume `VK_KHR_maintenance5` on vulkan: `draw-params-test.cc`, `vertex-input-test.cc` and the `point_list` row of `raster-state-test.cc`.
 - **`vertex_attribute_format`** has 32-bit components and two 8-bit formats; half floats, 16-bit integers and normalized values, `snorm8x4` and `unorm10_10_10_2` are missing.
   SGL's `@format` takes each case once sg has it (CHK-275).
 - **`workgroup_count`** is no stage input of SGL at all, since no backend gives it to a shader; hidden inline constants written per dispatch would.

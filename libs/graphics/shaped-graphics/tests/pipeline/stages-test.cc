@@ -257,7 +257,7 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id a
         }
 }
 
-ASYNC_INVOCABLE_TEST("sg - a pipeline with a stage the device lacks is refused by that stage's feature",
+ASYNC_INVOCABLE_TEST("sg - a pipeline with a geometry stage the device lacks is refused naming geometry_shader",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -270,4 +270,36 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline with a stage the device lacks is refused b
     co_await cc::async_settled(built);
     REQUIRE(built->has_error());
     CHECK(built->try_error()->underlying().to_string().contains("geometry_shader"));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a pipeline with tessellation stages the device lacks is refused naming tessellation_shader",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (ctx->supports(sg::feature::tessellation_shader))
+        SKIP("this device has tessellation stages, so nothing is refused");
+
+    auto const built = ctx->cached.acquire_raster_pipeline(shaders::stages.tessellated_ccw);
+    co_await cc::async_settled(built);
+    REQUIRE(built->has_error());
+    CHECK(built->try_error()->underlying().to_string().contains("tessellation_shader"));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a wireframe pipeline on a device without wireframe fill is refused naming wireframe_fill",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (ctx->supports(sg::feature::wireframe_fill))
+        SKIP("this device has wireframe fill, so nothing is refused");
+
+    auto const built
+        = ctx->cached.acquire_raster_pipeline(shaders::rects.floating, {}, [](sg::raster_pipeline_description& d)
+                                              { d.rasterization.fill = sg::fill_mode::wireframe; });
+    co_await cc::async_settled(built);
+    REQUIRE(built->has_error());
+    CHECK(built->try_error()->underlying().to_string().contains("wireframe_fill"));
 }

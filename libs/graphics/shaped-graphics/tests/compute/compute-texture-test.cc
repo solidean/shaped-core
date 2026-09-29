@@ -10,6 +10,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture.hh>
+#include <shaped-shader-library/binding/binding_groups.hh>
 
 using namespace cc::primitive_defines;
 
@@ -333,19 +334,19 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // One shader under two layouts that differ only in their bound sampler's address mode.
-    // A dx12 driver restored a correct blob of the clamping pipeline as the repeating twin, in a process that had built
-    // the twin first, which the file-sampler test above met depending on the order tests ran in.
-    // One process cannot build that blob without building the clamping pipeline first, which hides the fault.
-    // So what is pinned is the rule that avoids it: on dx12 such a pipeline neither hands out nor takes a blob.
+    // On dx12 such a pipeline neither hands out nor takes a blob, for docs/bugs-external/d3d12-cached-pso-static-sampler-mixup/.
     auto const& shader = co_await shaders::textures.copy_clamped->acquire(*ctx);
     auto const layout_with = [&](sg::sampler_address_mode address)
     {
-        sg::bound_sampler const samplers[]
-            = {{.binding = {.name = "clamped", .space = 10u, .index = 0, .count = 1, .type = sg::binding_type::sampler},
-                .sampler = {.min_filter = sg::sampler_filter::nearest,
-                            .mag_filter = sg::sampler_filter::nearest,
-                            .address_u = address,
-                            .address_v = address}}};
+        sg::bound_sampler const samplers[] = {{.binding = {.name = "clamped",
+                                                           .space = slib::bound_samplers_space,
+                                                           .index = 0,
+                                                           .count = 1,
+                                                           .type = sg::binding_type::sampler},
+                                               .sampler = {.min_filter = sg::sampler_filter::nearest,
+                                                           .mag_filter = sg::sampler_filter::nearest,
+                                                           .address_u = address,
+                                                           .address_v = address}}};
         return ctx->cached.acquire_pipeline_layout<shaders::sampled>(samplers);
     };
     auto const clamping = layout_with(sg::sampler_address_mode::clamp_edge);

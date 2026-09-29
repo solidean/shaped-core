@@ -97,7 +97,7 @@ namespace sg_test
 /// Creates the described targets, records `record` into one command list, submits it, and reads every color target back.
 /// `record` opens its own rendering scopes, so a test may draw into the targets more than once.
 /// It runs before this returns, so it may capture by reference.
-/// The targets are persistent and dropped once read.
+/// The targets are persistent, and released once the command list is submitted.
 [[nodiscard]] cc::shared_async<offscreen_pixels> draw_offscreen_passes(
     sg::context& ctx,
     offscreen desc,
@@ -116,7 +116,4 @@ namespace sg_test
 {
     return clip_rect(x, y, x + 1, y + 1, width, height);
 }
-
-/// An IEEE half's bits as a float.
-[[nodiscard]] float half_to_float(u16 bits);
 } // namespace sg_test

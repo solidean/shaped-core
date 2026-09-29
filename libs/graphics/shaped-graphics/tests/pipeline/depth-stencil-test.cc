@@ -202,7 +202,8 @@ ASYNC_INVOCABLE_TEST("sg - each stencil_op leaves its own value, in the slot and
                     [&, back, s, op](sg::raster_pipeline_description& d)
                     {
                         // The rects wind counter-clockwise, so declaring clockwise the front makes them back faces.
-                        // The face not under test turns every value to 0, which no expectation below leaves alone.
+                        // The face not under test turns every value to 0.
+                        // So a face mix-up shows in every column whose expected value is not 0.
                         auto const unused = sg::stencil_face{.fail = sg::stencil_op::zero,
                                                              .depth_fail = sg::stencil_op::zero,
                                                              .pass = sg::stencil_op::zero};

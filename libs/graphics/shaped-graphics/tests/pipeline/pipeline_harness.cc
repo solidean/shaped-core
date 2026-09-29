@@ -5,6 +5,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/texture.hh>
+#include <typed-geometry/scalar/half_float.hh>
 
 using namespace cc::primitive_defines;
 
@@ -130,7 +131,8 @@ tg::vec4f target_pixels::rgba_float(int x, int y) const
     case sg::pixel_format::rgba16_float:
     {
         auto const t = at<texel<u16>>(x, y);
-        return tg::vec4f(half_to_float(t.v[0]), half_to_float(t.v[1]), half_to_float(t.v[2]), half_to_float(t.v[3]));
+        auto const f = [](u16 bits) { return tg::f16::make_from_bits(bits).to_f32(); };
+        return tg::vec4f(f(t.v[0]), f(t.v[1]), f(t.v[2]), f(t.v[3]));
     }
     default:
         CC_UNREACHABLE("rgba_float reads float targets only");
@@ -142,31 +144,5 @@ tg::vec4f clip_rect(int x0, int y0, int x1, int y1, int width, int height)
     auto const x = [&](int px) { return -1.0f + 2.0f * float(px) / float(width); };
     auto const y = [&](int py) { return 1.0f - 2.0f * float(py) / float(height); };
     return tg::vec4f(x(x0), y(y1), x(x1), y(y0));
-}
-
-float half_to_float(u16 bits)
-{
-    auto const sign = u32(bits & 0x8000) << 16;
-    auto exponent = u32(bits >> 10) & 0x1f;
-    auto mantissa = u32(bits) & 0x3ff;
-    auto out = sign;
-    if (exponent == 31)
-        out |= 0x7f800000 | (mantissa << 13);
-    else if (exponent != 0)
-        out |= ((exponent + 112) << 23) | (mantissa << 13);
-    else if (mantissa != 0)
-    {
-        // A subnormal half is a normal float: shift the mantissa up until its leading one is implicit.
-        exponent = 113;
-        while ((mantissa & 0x400) == 0)
-        {
-            mantissa <<= 1;
-            --exponent;
-        }
-        out |= (exponent << 23) | ((mantissa & 0x3ff) << 13);
-    }
-    auto result = 0.0f;
-    cc::memcpy(&result, &out, sizeof(result));
-    return result;
 }
 } // namespace sg_test

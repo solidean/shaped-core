@@ -107,7 +107,7 @@ ASYNC_INVOCABLE_TEST("sg - an indexed draw adds its vertex offset to 16- and 32-
     auto const grid = point_grid(*ctx);
 
     // Row 0: 16-bit indices 0, 2, 4 from the second index pair on, offset by 5, reach columns 5, 7 and 9.
-    // (A 16-bit draw starts at an even index: an odd one is refused on metal, which command_list's alignment test pins.)
+    // (A 16-bit draw starts at an even index, since sg refuses an odd one on every backend.)
     // Row 1: 32-bit indices 1, 3, 6 from an odd first index, offset by 2, reach columns 3, 5 and 8.
     // Index 15 is a decoy either draw reaches only by ignoring its first index.
     u16 const short_indices[] = {15, 15, 0, 2, 4};
