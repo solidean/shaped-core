@@ -294,6 +294,7 @@ hit_group spheres for path_rays:
 
 **What a pipeline could state wrongly it does not state**: its payload size, its attribute size and its depth are derived.
 The payload size is the largest payload of its set, and the attribute size the largest its groups' intersections report, a triangle's 8 bytes of barycentrics at least.
+With `.host`, the attribute size is the 32-byte cap, since a host's group may be procedural and report up to it.
 
 * **One binding layout serves every shader of the pipeline**, so their binding lists agree by position, as a raster pipeline's stages do, and they list one `@inline` binding at most.
   The callables of the module's tables are shaders of every pipeline, so theirs agree too.

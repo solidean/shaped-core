@@ -245,6 +245,9 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
         if (auto const& g = m.pipelines[m.at(group).info]; check::is_valid(g.intersection))
             result.max_attribute_size = cc::max(
                 result.max_attribute_size, m.ray_data_bytes(m.at(m.functions[m.at(g.intersection).info].result).element));
+    // a host's group may be procedural, and what it reports is compiled apart, so only the cap bounds it
+    if (p.has_host_hit_groups)
+        result.max_attribute_size = check::checked_module::max_attribute_bytes;
     for (auto const b : m.at(p.layout))
         result.layout.push_back(m.at(b).name);
     // CHK-343: every table of the module, packed in declaration order

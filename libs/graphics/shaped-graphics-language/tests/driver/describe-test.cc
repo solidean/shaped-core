@@ -625,3 +625,12 @@ TEST("sgl describe - a ray-tracing pipeline's sizes count an enum as a word, as 
     // the intersection's needs are the pipeline's, though no record names it
     CHECK(cc::sequence{p.features}.any([](cc::string const& f) { return f == "extended_image_formats"; }));
 }
+
+TEST("sgl describe - a pipeline with the host's hit groups takes the attribute cap")
+{
+    // a host group may be procedural, and what it reports is compiled apart from this file
+    auto const d
+        = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round, .host)\n    max_recursion_depth = 1\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    CHECK(d.raytracing_pipelines[0].max_attribute_size == 32);
+}
