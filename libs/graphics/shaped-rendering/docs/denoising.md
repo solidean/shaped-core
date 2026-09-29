@@ -15,8 +15,8 @@ This is the design, including the parts not built yet.
 | `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
 | `oidn` | spatial | CPU; NVIDIA, AMD, Intel and Apple GPUs | planned |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
-| `fsr_rr` | temporal, split-signal | dx12 | planned — see below |
-| `nrd` | temporal, split-signal | every sg backend, WARP included | done, sources fetched on request |
+| `fsr_rr` | temporal, upscales | dx12 | planned |
+| `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**
 The temporal ones work from about one sample per pixel, but only if every pixel's motion is known.
@@ -28,11 +28,20 @@ The vendor products that denoise are Ray Reconstruction and Ray Regeneration, an
 **The native members are what CI tests, and `nrd` joins them.**
 à-trous and SVGF are our own HLSL, so they run on WARP, and the front's policy is tested through them.
 
-**NRD is a planner rather than a renderer, which is why it runs everywhere.**
+**NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
 It compiles nothing at run time, owns no device memory and records nothing.
 What it answers is "which compute dispatches would denoise this frame, against which resources, with which constants", and sr executes that answer through sg.
-So it needs no native scope and no vendor runtime, and it is the only split-signal member that can be tested without the hardware that shipped it.
-That makes it the reference the `fsr_rr` member will be judged against, since the two want the same guides.
+So it needs no native scope and no vendor runtime: it runs on whatever adapter dx12 gives it, WARP included, which is what lets it be tested without the hardware that shipped it.
+`fsr_rr` is expected to want the same split signal once it exists, which is why NRD is the reference it will be judged against.
+
+**It is dx12-only today, and that is a scope call rather than a property of NRD.**
+The member builds only where a pinned `dxc.exe` compiles NRD's own shaders, which is Windows.
+It embeds DXIL alone, so `nrd_session::create` hands sg `sg::shader_format::dxil` and a vulkan context would refuse the bytecode.
+Two routes widen it, in ascending cost.
+`nrd::PipelineDesc` already carries a `computeShaderSPIRV` beside its DXIL, so vulkan is `NRD_EMBEDS_SPIRV_SHADERS` plus picking the field by backend.
+Beyond that, NRD ships its shaders as source, and `PipelineDesc::shaderIdentifier` exists so a custom integration can supply its own compiled form.
+An SGL port of them would reach webgpu and metal too.
+What it costs is owning a translation of someone else's tuned numerics, and keeping that translation agreeing with a constant layout NRD still lays out.
 
 **Its encodings are exact formulas, not conventions, and we never reimplement them.**
 NRD does not take a normal, a roughness and a hit distance as such.
