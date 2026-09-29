@@ -105,7 +105,8 @@ private:
         camera_matrices previous;
     };
 
-    /// One traced layer's denoiser slots; the last two are null unless the layer may denoise temporally.
+    /// One traced layer's denoiser slots.
+    /// A slot is null when the layer does not need it; each field below says under what condition.
     struct denoise_slots
     {
         impl::temporal_slot* normal = nullptr;

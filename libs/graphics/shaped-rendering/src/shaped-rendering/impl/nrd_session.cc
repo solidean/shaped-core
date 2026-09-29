@@ -133,7 +133,7 @@ constexpr char const* k_constants_name = "nrd_constants";
 /// dispatch — `create` asserts NRD's own maximum fits.
 struct nrd_constants_block
 {
-    tg::vec4f words[64];
+    tg::vec4f words[64] = {};
 };
 
 /// The samplers NRD declares, as sg static samplers.
@@ -199,7 +199,6 @@ struct nrd_constants_block
 
 nrd_session::nrd_session(nrd_session&& other) noexcept
   : _instance(other._instance),
-    _ctx(other._ctx),
     _extent(other._extent),
     _pipelines(cc::move(other._pipelines)),
     _layouts(cc::move(other._layouts)),
@@ -207,7 +206,6 @@ nrd_session::nrd_session(nrd_session&& other) noexcept
     _transient(cc::move(other._transient))
 {
     other._instance = nullptr;
-    other._ctx = nullptr;
 }
 
 nrd_session& nrd_session::operator=(nrd_session&& other) noexcept
@@ -217,14 +215,12 @@ nrd_session& nrd_session::operator=(nrd_session&& other) noexcept
 
     _destroy();
     _instance = other._instance;
-    _ctx = other._ctx;
     _extent = other._extent;
     _pipelines = cc::move(other._pipelines);
     _layouts = cc::move(other._layouts);
     _permanent = cc::move(other._permanent);
     _transient = cc::move(other._transient);
     other._instance = nullptr;
-    other._ctx = nullptr;
     return *this;
 }
 
@@ -261,7 +257,6 @@ f32 nrd_sky_view_z()
 bool nrd_session::create(sg::context& ctx, nrd_denoiser denoiser, tg::vec2i extent)
 {
     _destroy();
-    _ctx = &ctx;
     _extent = extent;
 
     // The encodings are a BUILD-time choice of NRD's, and the repack shader and the texture it writes both assume one.

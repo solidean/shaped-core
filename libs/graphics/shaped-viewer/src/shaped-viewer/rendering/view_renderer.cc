@@ -556,17 +556,19 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Resolved against the device here rather than taken from the slots existing: `automatic` DECLARES them, because
     // that declaration is made before any device is consulted, and on a machine whose best member ignores them the
     // tracer would otherwise split every frame's radiance for nobody.
-    auto const split_slot_of = [&](u64 id)
+    //
+    // Asked once rather than per slot: the three travel together, and `resolve_denoise_method` re-probes every
+    // member's shaders on `automatic`.
+    auto const splitting = [&]
     {
         if (!denoising)
-            return static_cast<impl::temporal_slot*>(nullptr);
+            return false;
         // The split signals are this frame's own samples, so it is the temporal member's answer that decides.
         auto fresh = l.settings.denoise;
         fresh.fresh_samples = true;
-        auto const resolved = sr::resolve_denoise_method(ctx, fresh);
-        return sr::required_guides(resolved).has(sr::denoise_guide::split_diffuse_specular) ? rec.temporal.get_ptr(id)
-                                                                                            : nullptr;
-    };
+        return sr::required_guides(sr::resolve_denoise_method(ctx, fresh)).has(sr::denoise_guide::split_diffuse_specular);
+    }();
+    auto const split_slot_of = [&](u64 id) { return splitting ? rec.temporal.get_ptr(id) : nullptr; };
     auto const ds = denoise_slots{
         .normal = slot_of(temporal_id::normal_guide(tr.layer)),
         .depth = slot_of(temporal_id::depth_guide(tr.layer)),

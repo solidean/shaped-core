@@ -37,16 +37,16 @@ struct sv::camera_matrices
     tg::mat4f view_to_clip = tg::mat4f::identity;
 };
 
+namespace sv
+{
 /// The matrices `cam`'s pinhole basis amounts to, with an infinite far plane.
 ///
 /// Derived from the SAME basis `camera_ray_offset` and `camera_project` form their rays from, so all three describe
 /// one pinhole: `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's
 /// diagonal, and `forward` is its third view axis.
 /// A camera whose basis is degenerate — a zero `right_scaled` or `forward` — yields identities rather than NaNs.
-namespace sv
-{
 [[nodiscard]] camera_matrices matrices_of(camera_gpu const& cam, f32 near_plane);
-}
+} // namespace sv
 
 /// A perspective projection: vertical field of view, aspect ratio (width / height), and near plane.
 ///

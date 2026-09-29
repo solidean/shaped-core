@@ -126,7 +126,6 @@ private:
     /// The opaque `nrd::Instance*`; this header names no NRD type, for the reason `nrd_instance.hh` gives.
     void* _instance = nullptr;
 
-    sg::context* _ctx = nullptr;
     tg::vec2i _extent = tg::vec2i(0, 0);
 
     /// One compute pipeline per `nrd::PipelineDesc`, in NRD's own order — `DispatchDesc::pipelineIndex` indexes this.
