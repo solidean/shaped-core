@@ -108,6 +108,8 @@ The WGSL emitter lowers a `trace` to it, and the interpreter runs the same sourc
 A test's driver binds a pool and each acceleration member's root (EVAL-95), and `tests/interpret/emulated-trace-test.cc` writes its pools by hand from this page.
 
 * Two levels with one stack: a TLAS leaf pushes its instances' BLAS roots, with the ray moved into object space.
+* A BLAS leaf is read as its region's header `w` says, triangles or boxes, so a mixed TLAS needs no marker of its own.
+  The TLAS header's kinds are not read yet.
 * **Triangles are not tested watertight yet**: Möller–Trumbore with a determinant cutoff, so a ray through an edge two triangles share may hit both or neither.
   A watertight test is what hardware promises, and until the traversal has one, a test of it keeps its rays off shared edges.
 * A candidate the any-hit decision must see is a non-opaque triangle or any box, with the instance's forced opacity and the ray flags applied first.
