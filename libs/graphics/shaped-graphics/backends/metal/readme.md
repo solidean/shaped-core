@@ -88,6 +88,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
   MTL4's render encoder has no `setVertexBuffer`, and Metal has no root constants and no push constants — so both arrive the way a binding group does, as an address in the one `MTL4ArgumentTable`.
   That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
   Groups at 0 to 2, sg's reserved group at 3, inline constants at 4, and vertex-input slot `n` at 5 + `n`.
+  `dispatch_rays` borrows 5, `k_hit_group_offsets_buffer_index`, for the traced TLAS's hit-group offsets, since a kernel draws no vertices.
   An `[[attribute(n)]]` index is the attribute's position in `vertex_input_layout::attributes`, which is the workaround the vulkan backend already states for its SPIR-V locations.
   Both are a workaround for the same missing field: sg names a vertex input by an HLSL semantic, and neither MSL nor SPIR-V has one.
   **Nothing below checks any of it.**
@@ -296,6 +297,16 @@ The pipeline path maps as follows.
   The reservation already existed for exactly this, so nothing about what `group_index` means changes.
   A caller still gets groups 0 to 2.
   Ray tracing and shader-side diagnostics now share that group, so those `[[id(n)]]` assignments are one namespace rather than two.
+- **A TLAS carries its instances' hit-group offsets, and `dispatch_rays` binds them at MSL buffer 5.**
+  Metal's intersection result names the instance but not the `intersectionFunctionTableOffset` it carried, and a kernel needs that offset to find a closest hit's record.
+  So `build_tlas` also uploads one `u32` per instance into `metal_tlas::hit_group_offsets()`.
+  `dispatch_rays` binds it at `k_hit_group_offsets_buffer_index`, which is vertex-input slot 0's index, free during a dispatch.
+  A kernel then calls the closest-hit table at `offsets[instance] + geometry * stride + ray type`, which is how SGL's kernels find it.
+  **A dispatch traces one TLAS**: it binds the first bound TLAS's offsets, and logs a warning when the bound groups hold more than one.
+  This is untested on metal hardware so far; the tier-1 pipeline tests exercise it in CI.
+- **An empty closest-hit slot holds no function**, and a kernel must not call one.
+  A group without a closest hit leaves its slot empty, which is valid for the table and not callable.
+  SGL's kernels call every record's closest hit, so slib fills the empty slots with `sgl_empty_closest_hit` for them.
 - **One table set per raygen**, because a function handle is minted from a specific pipeline state and this pipeline has one state per raygen shader.
 - **One `MTL::Library` per registered shader**, so a table may draw its entries from as many separate shader files as it has entries.
   That is the realistic shape rather than a nicety: `sg::compiled_shader` is single-entry, so a real shader pipeline hands the backend one blob per shader.
@@ -309,6 +320,7 @@ The pipeline path maps as follows.
   Traversal runs exactly one function per group here, and for a procedural group that is its intersection function — there is nowhere to put an any-hit beside it.
   DXR runs both, so this is a real gap rather than a spelling: fold the any-hit's decision into the intersection function, which is already deciding what the ray hit.
   Accepting the group and dropping the any-hit is what this replaces, and it reports hits DXR would have rejected without saying anything.
+  An SGL pipeline never meets the refusal: SGL writes each procedural record's intersection and any-hit as one fused traversal function, and slib registers that in their place.
 - **All three of DXR's hit-index contributions map, for a ray type fixed at each call site.**
   The instance contribution is the instance descriptor's `intersectionFunctionTableOffset`.
   The geometry contribution is each geometry descriptor's own offset, set to its geometry index times the BLAS's `hit_record_stride`.

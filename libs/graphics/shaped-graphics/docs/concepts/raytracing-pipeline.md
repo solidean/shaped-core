@@ -1,13 +1,36 @@
 # Concept: raytracing pipeline + shader table
 
-Inline ray tracing (`RayQuery`) traces against a `tlas` bound as a shader resource inside an ordinary
-compute dispatch — see [acceleration-structures](acceleration-structures.md). The **full DXR path** is
-different: a dedicated `raytracing_pipeline` (a state object of raygen / miss / hit / callable shaders) is
-dispatched through a `raytracing_shader_table` with `cmd.raytracing.dispatch_rays`, and the GPU's
-fixed-function traversal invokes the right shader per ray.
+sg has two ways to trace a ray, and they are two features rather than one.
+**A ray query** (`sg::feature::ray_query`) traces from inside an ordinary stage, against a `tlas` bound as a shader resource — see [acceleration-structures](acceleration-structures.md).
+**The ray-tracing pipeline** (`sg::feature::raytracing_pipeline`) is the full DXR path.
+A dedicated `raytracing_pipeline` of raygen / miss / hit / callable shaders is dispatched through a `raytracing_shader_table` with `cmd.raytracing.dispatch_rays`.
+Traversal then invokes the right shader per ray.
 
-Two ideas shape the design: a **two-phase handle → index model** connects the pipeline and the table, and
-records hold **only a shader identifier** — one global root signature, no per-record data.
+Two ideas shape the pipeline's design.
+A **two-phase handle → index model** connects the pipeline and the table.
+And records hold **only a shader identifier** — one global root signature, no per-record data.
+
+## Two features, because webgpu has one of them
+
+| backend | `ray_query` | `raytracing_pipeline` |
+|---|---|---|
+| dx12 | `D3D12_RAYTRACING_TIER_1_1` | `D3D12_RAYTRACING_TIER_1_0` |
+| vulkan | one probe answers both | one probe answers both |
+| metal | every device above the Metal 4 floor | every device above the Metal 4 floor |
+| webgpu | **emulated**: a software polyfill | no |
+
+Vulkan asks one question for both because DXC writes the `RayQueryKHR` capability into every ray-tracing SPIR-V module, so a device with the pipeline and no ray query could load none of them.
+[writing-a-backend](../writing-a-backend.md) records how that was found.
+
+**`ctx.implementation_of(feature)` says how a context provides a feature it has**: `native`, or `emulated` in software on top of the device.
+Only webgpu's `ray_query` is `emulated` today.
+It is a question about cost, for a caller choosing an algorithm; a shader never asks it, since both run the same source.
+`cmd.raytracing.is_supported()` is true where either feature is, which is where acceleration structures build.
+
+The webgpu polyfill keeps every BLAS and TLAS in one storage buffer per context and traverses it from SGL's prelude.
+[backends/webgpu/readme.md](../../backends/webgpu/readme.md#ray-queries) is what the backend does.
+SGL's [raytracing-polyfill.md](../../../shaped-graphics-language/docs/raytracing-polyfill.md) is the layout both sides agree on.
+There is no pipeline polyfill: a path tracer on webgpu is written against ray queries.
 
 ## The pipeline mirrors compute_pipeline, but is a state object
 
@@ -110,16 +133,30 @@ So a raygen shader is not something a pipeline dispatches there — it **is** th
   A kernel that traces ray type r with table r reaches record `hit_group_offset + g * stride + r`, exactly as DXR does.
   That closes the gap for pipelines that trace a constant ray type per call site, which is what SGL generates.
   A ray contribution computed at run time still has no counterpart, so a shader ported from HLSL that varies it dynamically selects a different function on metal than on dx12.
+- **The kernel finds a closest hit's record itself, and needs each instance's `hit_group_offset` to do it.**
+  Traversal applies the offset to the intersection table, but Metal's intersection result names the instance and not the offset it carried.
+  So a metal TLAS keeps its instances' offsets in a buffer of its own, and `dispatch_rays` binds it where the kernel reads `offsets[instance] + g * stride + r`.
+  **One TLAS per dispatch follows from that**: the buffer bound is the first bound TLAS's, and a dispatch binding two logs a warning.
+- **An empty closest-hit slot is a valid table entry and not a function**, so a kernel may not call it.
+  DXR skips a record without a closest hit; a kernel that calls every record's closest hit unconditionally needs something in each slot.
+  slib fills them for an SGL pipeline, as [its ray-tracing doc](../../../shaped-shader-library/docs/raytracing-pipelines.md#what-metal-needs-and-slib-supplies) says.
 - `dispatch_rays` selects that raygen's pipeline state, binds the tables through `sg::reserved_binding_group`, and calls `dispatchThreads`.
 - `max_recursion_depth` becomes Metal's `maxCallStackDepth`, which sizes the stack for indirect calls and defaults to 1.
   Recursion itself is supported — a visible function may trace and may call back through a table — so the field is honoured rather than capped.
   What cannot recurse is traversal: an intersection or any-hit function cannot take an acceleration structure at all.
 
-[backends/metal/readme.md](../../backends/metal/readme.md) carries the `[[id(n)]]` assignments and the rest.
+[backends/metal/readme.md](../../backends/metal/readme.md) carries the `[[id(n)]]` assignments, the buffer index, and the rest.
+
+## An SGL pipeline states all of this for you
+
+A `@raytracing pipeline` declaration in SGL knows its ray types, its hit groups and its callables, so slib generates a type that registers the shaders and places the records in one fixed order.
+The host then writes no handle or index by hand: it takes `ray_count`, a row per hit group and each row's offset from the generated type.
+[slib's raytracing-pipelines.md](../../../shaped-shader-library/docs/raytracing-pipelines.md) is that side.
 
 ## See also
 
 - [acceleration-structures](acceleration-structures.md) — building the `blas`/`tlas` a trace runs against.
 - [bindings](bindings.md) — the `acceleration_structure` binding and the group/layout bind path.
 - [caches](caches.md) — the async, content-addressed pipeline cache the RT pipeline slots into.
+- [slib's raytracing-pipelines](../../../shaped-shader-library/docs/raytracing-pipelines.md) — the pipeline and table an SGL declaration generates.
 - [cheat-sheet](../../cheat-sheet.md) — the RT pipeline + shader table + `dispatch_rays` API at a glance.

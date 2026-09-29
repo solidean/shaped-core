@@ -354,6 +354,45 @@ cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = de
 //   The inner compiler adds only bytecode; its reflection is compared on every compile, and a mismatch logs an error.
 ```
 
+### an SGL ray-tracing pipeline  (docs/raytracing-pipelines.md)
+
+```cpp
+// package entry: `rt.sgl:*`, or `rt.sgl:raytracing_pipeline:path` (its binding list's groups must be generated too)
+// `@raytracing pipeline path` of rt.sgl -> type shaders::rt_path_t, instance shaders::rt.path
+using path_t = shaders::rt_path_t;
+path_t::ray_count                              // constexpr int — ray types of its `rays` set; ALSO build_blas's hit_record_stride
+path_t::hit_groups_t::textured                 // constexpr int — a listed group's position, for add_row
+path_t::first_host_hit_group                   // only when `hit_groups = (…, .host)`: the host's first group's position
+path_t::first_host_callable                    // only when a callables list ends in `.host`: the index a shader calls it by
+auto const desc = co_await shaders::rt.path.description(ctx);         // shared_async<raytracing_pipeline_description>, cold
+auto const pipeline = co_await ctx.cached.acquire_raytracing_pipeline(desc);
+auto table_desc = path_t::table_description(pipeline);                // raygen, a miss per ray type, every callable
+auto const row = path_t::add_row(table_desc, path_t::hit_groups_t::textured);  // -> sg::hit_row, ray_count records
+auto const table = ctx.uncached.create_raytracing_shader_table(table_desc);
+cmd.raytracing.build_blas(tris, sg::accel_build_flag::fast_trace, path_t::ray_count);  // metal bakes the stride
+// tlas_instance{.hit_group_offset = table->offset_of(row)}; dispatch_rays(*table, sg::raygen_index(0), w, h)
+path_t::definition()                           // slib::raytracing_pipeline_definition — what everything above reads
+
+// registration order (every index a constant): raygen 0 | miss r = ray type r | hit g*ray_count + r (listed groups,
+//   then the host's) | callables: the module's in declaration order, then the host's
+// geometry i of an instance on ray type r reaches record offset_of(row) + i*ray_count + r, on every backend
+
+#include <shaped-shader-library/raytracing_pipeline.hh>
+// what the declaration leaves `.host`, compiled from SGL at run time, handed over in slib::raytracing_host_parts:
+auto hits = co_await slib::compile_hit_group(&ctx, &library, &open_t::definition(), source, "material", "label.sgl");
+//   -> vector<sg::hit_shader>, ray_count of them; the group must be for the pipeline's ray set (name + every payload)
+//   a bad source / missing group / other ray set = an ASYNC error (sg::pipeline_creation_exception), not a throw at the call
+auto sq = co_await slib::compile_callable(&ctx, &library, source, "squared", "label.sgl");  // -> sg::compiled_shader
+auto desc2 = co_await shaders::rt.open_path.description(ctx, {.hit_groups = hits, .callables = {sq}});
+open_t::table_description(pipeline, 1);        // host_callables: the table needs a record for each of the host's
+open_t::add_row(table_desc, open_t::first_host_hit_group);
+// a part the declaration left closed must stay empty in `host` (asserts)
+// metal: a procedural record's intersection + any hit become ONE fused traversal function, and an empty closest-hit
+//   slot gets sgl_empty_closest_hit — description() and compile_hit_group() both do it; nothing changes for the host
+// refused at generation: a ray type without a miss; a binding list naming a group that was not generated
+// webgpu has no pipeline: gate on ctx.supports(sg::feature::raytracing_pipeline)
+```
+
 ## include resolution
 
 ```

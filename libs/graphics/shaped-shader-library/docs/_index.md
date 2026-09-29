@@ -14,6 +14,8 @@ It is the front door — sg's vocabulary, this library's packages and reload, an
   The compile flags have landed; the DXC behaviour the rest rests on is pinned by a test.
 - [binding-preprocessor](binding-preprocessor.md) — the HLSL-aware rewriting pass that owns binding addresses, and the typed C++ symbols it makes possible.
   The answer to the binding half of portable HLSL; every phase has landed, and the doc is the design behind it.
+- [raytracing-pipelines](raytracing-pipelines.md) — the type an SGL `@raytracing pipeline` generates, the order it registers shaders in, and hit groups and callables the host compiles at run time.
+  Also what metal needs of a pipeline, which slib supplies.
 - [coding-guidelines](coding-guidelines.md) — the rules this library rests on that the code cannot enforce itself.
   Short, and worth reading before changing anything here.
 
