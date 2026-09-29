@@ -373,14 +373,19 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
-// A frame loop makes streaming progress even when nothing ever blocks on it.
+// A frame loop lands its streamed payloads rather than ending on a frame count.
 //
-// Without threads a semantic thread runs only while somebody sweeps the pump registry, and the epoch wait a frame
-// ends on sweeps only while it actually blocks — which at a steady frame rate it usually does not.
-// A viewer that never blocks then never runs the copy actor: the mesh handed to `ctx.stream` stays in flight for the
-// life of the process, the scene traces its placeholder box, and a caller waiting for residency waits forever.
-// With threads the actor has a thread of its own and this passes whatever the loop does, so the singlethreaded leg
-// of `check` is the one that fails when the sweep goes.
+// What this pins is that residency is reached at all: five payloads go in flight and the loop ends on
+// `streaming_resources() == 0`.
+//
+// It does NOT pin the `cc::thread_pump_all()` sweep in `viewer::finish_frame` — it passes under
+// `singlethreaded-clang` with that line removed.
+// The reason is structural: a frame ends on `epochs_in_flight_completion(buffer_count)`, which blocks only once the
+// CPU is that many epochs ahead of the GPU, and a test loop running flat out always is.
+// A blocking wait sweeps the pump registry itself, so it does the copy actor's turn and the sweep is redundant here.
+// The case the sweep exists for is a loop paced slowly enough that the GPU is never behind — a real display's vsync,
+// or a frame limiter — and no test reaches it yet.
+// libs/graphics/shaped-viewer/docs/TODO.md carries it.
 INVOCABLE_TEST("sv - a frame loop lands its streamed payloads", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
@@ -417,5 +422,57 @@ INVOCABLE_TEST("sv - a frame loop lands its streamed payloads", (sg::context_han
         REQUIRE(frames < 600);
     }
 
+    CHECK(resident).context(cc::format("the payloads were still in flight after {} frames", frames));
+}
+
+// The same drain, on a loop that stops tracing while its payloads are still in flight.
+//
+// The mesh is placed on the first frame only, so every later frame has an empty scene and nothing to trace, and the
+// transfers must still land.
+// That is worth pinning on its own: a viewer whose content goes away mid-stream is a real shape, and the resource
+// managers keep settling entries that no scene references any more.
+//
+// This does NOT pin the sweep either, for the reason on the test above — every frame submits a command list and
+// advances an epoch whether or not anything traced, so the wait behaves the same.
+// Throttling the stream to 0.001 and streaming 2048 triangles does not change that.
+INVOCABLE_TEST("sv - a frame loop with nothing to trace still lands its streamed payloads", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto v_r = sv::viewer::try_create(ctx, "sv-test/streaming-idle", {.width = 64, .height = 48, .headless = true});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    // Throttled hard, so the payload cannot land inside the one frame that traces it.
+    // A cornell box at the default ratio settles during that frame's own epoch wait, which is what hid the failure.
+    ctx.stream.set_upload_ratio(0.001f);
+
+    // Placed on the FIRST frame only: the acquire is what hands the payloads to `ctx.stream`, and after that frame
+    // the scene is empty again, so every later frame has nothing to trace while the transfers are still in flight.
+    // Creating the mesh is not enough — nothing streams until a manager acquires it.
+    auto const cloud = sv_test::make_triangle_cloud(2048);
+    auto const mesh = sv_test::as_mesh("cloud", cloud.positions, cloud.materials);
+
+    auto streamed_at_peak = isize(0);
+    auto resident = false;
+    auto frames = 0;
+    for (auto f : viewer.frames())
+    {
+        if (frames == 0)
+            f.window().view().add_scene().add_mesh(mesh);
+
+        streamed_at_peak = cc::max(streamed_at_peak, f.streaming_resources());
+
+        resident = f.streaming_resources() == 0 && f.pending_resource_work() == 0;
+        if (resident)
+            viewer.request_close();
+
+        ++frames;
+        REQUIRE(frames < 600);
+    }
+
+    // Without this the test would pass on a viewer that never streamed anything at all, which is the way a test of
+    // "it drains" quietly stops testing anything.
+    CHECK(streamed_at_peak > 0).context("nothing was ever in flight, so this test would pass with the sweep removed");
     CHECK(resident).context(cc::format("the payloads were still in flight after {} frames", frames));
 }

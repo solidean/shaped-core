@@ -16,6 +16,15 @@ Bigger design intent lives in [structure.md](structure.md).
   - **`render_settings::exposure`**, for the tonemap when it lands; the denoisers already read `denoise.exposure`.
   - **`view_renderer::execute`** — the single-view entry point — does not denoise; only the plan path does.
 
+- **Nothing tests the pump sweep in `viewer::finish_frame`, and no test shape reached it.**
+  `(void)cc::thread_pump_all()` exists so an unthreaded viewer drives the copy actor on a frame whose epoch wait does not block.
+  Every test loop runs flat out, so the CPU is always `buffer_count` epochs ahead and the wait always blocks.
+  A blocking wait sweeps the registry itself, which makes the sweep redundant in every test and the line removable without a failure.
+  Four shapes were tried and all four passed with the line deleted.
+  The GPU-bound loop, a `refresh_rate`-throttled one, one that stops tracing after the first frame, and that one again with the stream throttled to 0.001 and 2048 triangles in flight.
+  What would reach it is a loop paced so the GPU is never behind — a real display's vsync, or a frame limiter — which no headless test has.
+  The two honest options are a test that paces on a condition rather than a duration, or an injected clock on the frame loop.
+
 - **The frame API blocks.**
   `sv::viewer` is a synchronous pull loop — `is_running()`, `end_frame()`, a draining destructor.
   So it throttles and drains with `cc::async_blocking_get` on sg's completions, behind a `may_block` assert.
