@@ -74,7 +74,7 @@ struct oracle_error
 /// The oracles' bounds on the relative difference, about a decade above what this machine returns.
 ///
 /// Measured over the scene above, every pixel: a mean of 8.8e-07 and a worst of 1.2e-05 for the base network,
-/// 1.1e-06 and 1.2e-05 for the small one, and 9.1e-07 and 1.6e-05 tiled.
+/// 1.1e-06 and 1.2e-05 for the small one, and 1.0e-06 and 1.6e-05 for the small one tiled 2x2.
 /// Two mistakes they have to see, measured: padding the tensor by repeating the image's edge instead of with zeros
 /// moves the mean to 2.5e-02 and the worst to 0.78, and decoding subnormal fp16 weights one exponent too high moves
 /// them to 4.4e-05 and 6.7e-04.
@@ -582,17 +582,25 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
     struct tiling_case
     {
         tg::vec2i extent = tg::vec2i(0, 0);
-        tg::vec2i tiles = tg::vec2i(0, 0); // what a 288 cap must choose
+        int cap = 0;
+        tg::vec2i tiles = tg::vec2i(0, 0); // what `cap` must choose
+        sr::oidn_network_size size = sr::oidn_network_size::base;
     };
 
-    // The unaligned shape runs by default, since it is the one that reaches both the grid and the padding.
-    // The aligned square and the one-axis shape are slow on a software rasterizer, so they run in a thorough pass.
+    // The default case is the cheapest shape that still reaches both the 16-pixel grid and the zero padding.
+    // 344 is not a multiple of sixteen, and a 336 cap tiles it 2x2 with the last tile shifted inward to origin 16,
+    // where clamping to the image instead would put it at 8.
+    // It runs the small network, since what is checked is where tiles sit rather than which weights run.
+    // Every GPU test here runs on WARP in CI, where each has to finish inside the watchdog's 90 s; the larger shapes
+    // run in a thorough pass.
     auto cases = cc::vector<tiling_case>();
-    cases.push_back({.extent = tg::vec2i(400, 392), .tiles = tg::vec2i(4, 4)});
+    cases.push_back(
+        {.extent = tg::vec2i(344, 344), .cap = 336, .tiles = tg::vec2i(2, 2), .size = sr::oidn_network_size::small});
     if (nx::is_thorough())
     {
-        cases.push_back({.extent = tg::vec2i(384, 384), .tiles = tg::vec2i(3, 3)});
-        cases.push_back({.extent = tg::vec2i(608, 200), .tiles = tg::vec2i(5, 1)});
+        cases.push_back({.extent = tg::vec2i(400, 392), .cap = 288, .tiles = tg::vec2i(4, 4)});
+        cases.push_back({.extent = tg::vec2i(384, 384), .cap = 288, .tiles = tg::vec2i(3, 3)});
+        cases.push_back({.extent = tg::vec2i(608, 200), .cap = 288, .tiles = tg::vec2i(5, 1)});
     }
 
     for (auto const& tc : cases)
@@ -636,14 +644,15 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
                 normal_pixels.push_back(tg::vec4f(0, 0, 1, 0));
             }
 
-        // The whole run takes a cap no axis exceeds; the tiled one takes 288 on every shape.
+        // The whole run takes a cap no axis exceeds; the tiled one takes the case's.
+        auto const overlap = sr::impl::oidn_network::k_tile_overlap;
         auto whole = sr::impl::oidn_network();
-        REQUIRE(whole.create(ctx, tc.extent, 1024));
+        REQUIRE(whole.create(ctx, tc.extent, 1024, overlap, tc.size));
         CHECK(whole.tile_counts() == tg::vec2i(1, 1)).context(label);
         CHECK(whole.tile_overlap() == 0).context(label);
 
         auto tiled = sr::impl::oidn_network();
-        REQUIRE(tiled.create(ctx, tc.extent, 288));
+        REQUIRE(tiled.create(ctx, tc.extent, tc.cap, overlap, tc.size));
         CHECK(tiled.tile_counts() == tc.tiles)
             .context(cc::format("{} chose {}x{} tiles", label, tiled.tile_counts()[0], tiled.tile_counts()[1]));
         CHECK(tiled.tile_overlap() == sr::impl::oidn_network::k_tile_overlap).context(label);
@@ -733,7 +742,10 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
     REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
 
     // Not a multiple of sixteen either, so the last tile row and column sit next to the padding.
-    constexpr auto k_size = 392;
+    // The small network against Intel's fast quality, at 2x2 tiles, so it fits WARP's budget in CI; the untiled
+    // oracle holds both networks to Intel already.
+    constexpr auto k_size = 344;
+    constexpr auto k_network = sr::oidn_network_size::small;
     auto const extent = tg::vec2i(k_size, k_size);
 
     auto const scene = make_oracle_scene(k_size);
@@ -742,7 +754,7 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
     auto const& normal3 = scene.normal;
 
     auto reference = cc::vector<tg::vec3f>::create_filled(size_t(k_size * k_size), tg::vec3f(0, 0, 0));
-    REQUIRE(sr_test::oidn_filter_reference(color3, albedo3, normal3, extent, reference));
+    REQUIRE(sr_test::oidn_filter_reference(color3, albedo3, normal3, extent, reference, k_network));
 
     auto const make = [&]
     {
@@ -767,11 +779,11 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
         return out;
     };
 
-    // 288 forces a genuinely tiled run: it chooses a 272 tensor whose interior is the 112 left after 80 on each side,
-    // so a 392 image takes four tiles per axis.
+    // A 336 cap forces a genuinely tiled run: its interior is the 176 left after 80 on each side, so a 344 image
+    // takes two tiles per axis.
     auto network = sr::impl::oidn_network();
-    REQUIRE(network.create(ctx, extent, 288));
-    REQUIRE(network.tile_counts() == tg::vec2i(4, 4))
+    REQUIRE(network.create(ctx, extent, 336, sr::impl::oidn_network::k_tile_overlap, k_network));
+    REQUIRE(network.tile_counts() == tg::vec2i(2, 2))
         .context(cc::format("tiled {}x{}", network.tile_counts()[0], network.tile_counts()[1]));
     REQUIRE(network.prepare());
 

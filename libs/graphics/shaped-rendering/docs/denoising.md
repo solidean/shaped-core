@@ -135,7 +135,7 @@ The scene spans ten decades of radiance over hemisphere-bump normals, at sizes t
 
 - Untiled, over 72x72: a mean relative difference of 8.8e-07 and a worst of 1.2e-05.
 - The small network, untiled over 72x72 against Intel's fast quality: a mean of 1.1e-06 and a worst of 1.2e-05.
-- Tiled, sixteen tiles over 392x392 at a 288 cap: a mean of 9.1e-07 and a worst of 1.6e-05.
+- Tiled, four tiles over 344x344 at a 336 cap, small network against Intel's fast quality: a mean of 1.0e-06 and a worst of 1.6e-05.
 - Padding with the image's edge instead of zeros moves the mean to 2.5e-02, and decoding subnormal weights one exponent off moves it to 4.4e-05.
   The bounds, 1e-5 on the mean and 2e-4 on the worst, sit about a decade above the measured values and below both mistakes.
 
