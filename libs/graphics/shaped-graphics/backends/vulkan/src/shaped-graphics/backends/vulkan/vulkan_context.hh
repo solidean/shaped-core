@@ -140,6 +140,7 @@ public:
         _tessellation_shader = features.tessellationShader == VK_TRUE;
         _sample_rate_shading = features.sampleRateShading == VK_TRUE;
         _wireframe_fill = features.fillModeNonSolid == VK_TRUE;
+        _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
 
         // shaderStorageImageExtendedFormats does not cover bgra8_unorm, whose storage is asked per format.
         auto bgra8 = VkFormatProperties{};
@@ -799,6 +800,8 @@ public:
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
     bool _wireframe_fill = false;
+    /// Without it every sampler is created with anisotropy off; with it, maxAnisotropy is clamped to the device limit.
+    bool _sampler_anisotropy = false;
 
     // The device's memory types, read once at construction: they never change, and a staging ring allocates far too
     // often to re-query them per allocation.

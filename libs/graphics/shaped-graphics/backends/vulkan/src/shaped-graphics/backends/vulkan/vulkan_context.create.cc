@@ -707,6 +707,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // sg::feature::extended_image_formats reports it together with bgra8_unorm's per-format storage support.
     // So are the geometry and tessellation stages, per-sample shading and wireframe fill, which sg::feature reports the same way:
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
+    // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
     auto core_features = VkPhysicalDeviceFeatures2{
@@ -717,6 +718,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .tessellationShader = supported.tessellationShader,
                      .sampleRateShading = supported.sampleRateShading,
                      .fillModeNonSolid = supported.fillModeNonSolid,
+                     .samplerAnisotropy = supported.samplerAnisotropy,
                      .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats},
     };
