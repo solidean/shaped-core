@@ -412,6 +412,8 @@ TEST("log rule - NX_ALLOW_LOGS reaches a record logged under no test", no_schedu
 {
     if (!has_recorder())
         SKIP("the run has no recorder (--no-recording)");
+    if (CC_HAS_THREADS == 0)
+        SKIP("needs a second thread");
 
     // A bare std::thread carries no test context, so what it logs has no owner — the shape a driver callback takes
     // when it fires on a thread the runtime owns, after the test that provoked it has ended.
