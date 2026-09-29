@@ -563,3 +563,62 @@ TEST("sgl describe - a file-scope sampler a texture's @sampler names is one its 
     REQUIRE(d.pipelines[0].samplers.size() == 1);
     CHECK(d.pipelines[0].samplers[0] == "edge");
 }
+
+namespace
+{
+/// A procedural pipeline whose payload and attributes each hold an enum.
+constexpr auto k_procedural_pipeline = cc::string_view(R"(require raytracing_pipeline, extended_image_formats
+
+enum tag:
+    plain
+    glossy
+
+struct radiance:
+    v0: float
+    color: float
+    kind: tag
+
+struct sphere_attributes:
+    u: float
+    v: float
+    kind: tag
+
+rays rs:
+    primary: radiance
+
+binding frame:
+    world: acceleration_structure[.procedural]
+
+binding narrow:
+    r: out image_2d[.r8_unorm]
+
+@raygen fun start(@launch_id id: int3){frame}:
+    let mut p = radiance(0.0, 0.0, tag.plain)
+    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), rs.primary, mut p)
+
+@intersection fun sphere(b: procedural_box){frame, narrow} -> report[sphere_attributes]:
+    return report.none()
+
+@closest_hit fun shade(h: procedural_hit[sphere_attributes], p: mut radiance):
+    p.color = h.attributes.u
+
+hit_group round for rs:
+    geometry = .procedural
+    intersection = sphere
+    primary = (closest_hit = shade)
+
+@raytracing pipeline path:
+    rays = rs
+    raygen = start
+)");
+} // namespace
+
+TEST("sgl describe - a ray-tracing pipeline's sizes count an enum as a word, as the checker's cap does")
+{
+    auto const d = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round)\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    auto const& p = d.raytracing_pipelines[0];
+    // two floats and an enum, in the payload and in what the intersection reports
+    CHECK(p.max_payload_size == 12);
+    CHECK(p.max_attribute_size == 12);
+}

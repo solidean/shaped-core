@@ -347,6 +347,7 @@ callables ops = (doubled, negated, .host)
 
 DXR's payloads are `[raypayload]`, and every field states which shaders read and write it ([EMIT-137](semantics/emitting.md#ray-tracing)).
 SGL infers that per field from what the module's shaders do: a stage reads and writes the fields its payload parameter does, and a caller the fields of the local it traces with.
+A stage that hands its payload on to a trace or a callable reads and writes all of it, since what the nested shaders write must survive its exit.
 Every shader of one pipeline must state the same qualifiers, and a host's group is compiled apart.
 **So a payload type that a pipeline with `.host` groups traces, or that no pipeline of the module traces, states the widest access instead.**
 

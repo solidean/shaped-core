@@ -221,6 +221,26 @@ struct sgl::check::checked_module
         return builtins != nullptr && builtins->is_known(id) ? &builtins->at(id) : nullptr;
     }
 
+    /// DXR's cap on the attributes a procedural hit carries, which metal's two `uint4` of ray data match (CHK-342).
+    static constexpr i32 max_attribute_bytes = 32;
+
+    /// The bytes a payload or a hit's attributes take in a ray-tracing pipeline: a 32-bit word per scalar and per enum.
+    /// The checker's attribute cap and `describe`'s sizes for sg both read this, so the two cannot disagree.
+    [[nodiscard]] i32 ray_data_bytes(type_id id) const
+    {
+        if (auto const* const builtin = builtin_type_of(id))
+            return 4 * builtin->leaf_count;
+        auto const& t = at(id);
+        if (t.kind == type_kind::enumeration)
+            return 4;
+        if (t.kind == type_kind::array)
+            return t.count * ray_data_bytes(t.element);
+        auto result = 0;
+        for (auto const& member : at(t.members))
+            result += ray_data_bytes(member.type);
+        return result;
+    }
+
     /// The name a type is written with; `<error>` for the error type.
     /// A resource, or a binding array of one: what takes slots of its group rather than a place in its constant block.
     [[nodiscard]] bool takes_slots(type_id id) const

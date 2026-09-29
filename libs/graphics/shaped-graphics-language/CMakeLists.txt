@@ -393,6 +393,7 @@ if(SC_BUILD_TESTS)
         tests/emit/compute-emit-test.cc
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
+        tests/emit/raytracing-emit-test.cc
         tests/emit/layout-emit-test.cc
 
         tests/driver/classify-test.cc

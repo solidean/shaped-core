@@ -189,20 +189,6 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     return result;
 }
 
-/// The bytes a payload takes in a ray-tracing pipeline: every leaf a 32-bit word, which is how DXR counts it.
-i32 payload_bytes(check::checked_module const& m, check::type_id type)
-{
-    auto const& t = m.at(type);
-    if (auto const* const builtin = m.builtin_type_of(type))
-        return 4 * builtin->leaf_count;
-    if (t.kind == check::type_kind::array)
-        return t.count * payload_bytes(m, t.element);
-    auto result = 0;
-    for (auto const& member : m.at(t.members))
-        result += payload_bytes(m, member.type);
-    return result;
-}
-
 cc::string name_or_empty(check::checked_module const& m, check::symbol_id id)
 {
     return check::is_valid(id) ? cc::string(m.at(id).name) : cc::string();
@@ -250,13 +236,13 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
                 features |= m.functions[m.at(entry).info].features;
     }
     for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
-        result.max_payload_size = cc::max(result.max_payload_size, payload_bytes(m, ray.type));
+        result.max_payload_size = cc::max(result.max_payload_size, m.ray_data_bytes(ray.type));
     // a triangle's barycentrics, and what each procedural group's intersection reports
     result.max_attribute_size = 8;
     for (auto const group : m.at(p.hit_groups))
         if (auto const& g = m.pipelines[m.at(group).info]; check::is_valid(g.intersection))
             result.max_attribute_size = cc::max(
-                result.max_attribute_size, payload_bytes(m, m.at(m.functions[m.at(g.intersection).info].result).element));
+                result.max_attribute_size, m.ray_data_bytes(m.at(m.functions[m.at(g.intersection).info].result).element));
     for (auto const b : m.at(p.layout))
         result.layout.push_back(m.at(b).name);
     // CHK-343: every table of the module, packed in declaration order

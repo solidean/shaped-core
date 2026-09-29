@@ -8,28 +8,6 @@ using namespace sgl::check::impl;
 
 // The ray-tracing stages and what their entry points take (the spec's raytracing file).
 
-namespace
-{
-// DXR's cap on what an intersection reports, which metal's two `uint4` of ray data match
-constexpr i32 k_max_attribute_bytes = 32;
-
-// a word per scalar, as a target packs attributes and as `describe` sizes them for sg
-i32 packed_size_of(checked_module const& m, type_id type)
-{
-    if (auto const* const builtin = m.builtin_type_of(type))
-        return 4 * builtin->leaf_count;
-    auto const& t = m.at(type);
-    if (t.kind == type_kind::enumeration)
-        return 4;
-    if (t.kind == type_kind::array)
-        return t.count * packed_size_of(m, t.element);
-    auto result = 0;
-    for (auto const& member : m.at(t.members))
-        result += packed_size_of(m, member.type);
-    return result;
-}
-} // namespace
-
 void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid)
 {
     auto const& s = out.at(id);
@@ -123,10 +101,11 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
         else if (out.at(out.at(info.result).element).kind != type_kind::structure
                  || out.builtin_type_of(out.at(info.result).element) != nullptr)
             invalid("the attributes an @intersection fun reports are a struct of the program");
-        else if (auto const bytes = packed_size_of(out, out.at(info.result).element); bytes > k_max_attribute_bytes)
+        else if (auto const bytes = out.ray_data_bytes(out.at(info.result).element);
+                 bytes > checked_module::max_attribute_bytes)
             invalid(cc::format("the attributes an @intersection fun reports take {} bytes, and a target holds at most "
                                "{}",
-                               bytes, k_max_attribute_bytes));
+                               bytes, checked_module::max_attribute_bytes));
         break;
     case stage::callable:
         // CHK-343: a callable is handed its parameter as the caller's place, and nothing a ray brings

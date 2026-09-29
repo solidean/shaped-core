@@ -361,6 +361,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A trace of a ray type is `TraceRay` over a `RayDesc`, and a callable's call is `CallShader`.
 * **EMIT-137** A payload is a `[raypayload]` struct, and each field states which stages read and write it, `read(caller, closesthit) : write(miss)` ([why](why/emitting.md#emit-137)).
   They are inferred from every entry point of the module: a stage reads and writes what its payload parameter does, and a caller what the local it traces with does.
+  A payload a stage hands on to a trace or a callable is read and written by that stage, since what the nested shaders write must survive its exit.
   A stage that writes a field reads it too, since a write on some paths keeps the rest, and whatever some stage writes the caller reads, and the reverse.
   A payload type that a pipeline with `.host` groups traces, or that no pipeline of the module traces, states the widest access instead.
   An intersection's report is `ReportHit(t, 0, attributes)` where it hits, and a procedural record's shaders take the attributes as a parameter of their own.

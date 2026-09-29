@@ -186,10 +186,17 @@ public:
             {
                 if (auto const* const m = x.node.try_as<check::flat_member>(); m != nullptr && check::is_valid(m->object))
                     is_object[index_of(m->object)] = true;
-                if (auto const* const c = x.node.try_as<check::flat_call>())
-                    if (auto const* const record = p.m.builtin_function(c->intrinsic);
-                        record != nullptr && record->takes_element && !e.at(c->arguments).empty())
-                        is_place[index_of(e.at(c->arguments).back())] = true;
+                auto const* const c = x.node.try_as<check::flat_call>();
+                auto const* const record = c == nullptr ? nullptr : p.m.builtin_function(c->intrinsic);
+                if (record == nullptr || !record->takes_element || e.at(c->arguments).empty())
+                    continue;
+                auto const handed = e.at(c->arguments).back();
+                is_place[index_of(handed)] = true;
+                // a payload handed on to a nested trace or a callable comes back written, whatever the stage itself
+                // does with it: what the nested shaders wrote must survive this stage's exit
+                if (auto const* const ref = e.at(handed).node.try_as<check::flat_local_ref>();
+                    ref != nullptr && slot_of(ref->local) >= 0)
+                    result.reads[slot_of(ref->local)] = result.writes[slot_of(ref->local)] = true;
             }
             for (auto const& st : e.stmts)
             {
