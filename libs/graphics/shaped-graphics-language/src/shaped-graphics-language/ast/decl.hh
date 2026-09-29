@@ -71,7 +71,7 @@ struct sgl::ast::struct_decl
     bool is_opaque = false;
     /// `rays name:`, a ray set: each member a ray type and the payload it carries (AST-150).
     bool is_ray_set = false;
-    /// `struct name[A]:`, a generic struct, which only the prelude declares (CHK-334).
+    /// `struct name[A]:`, a generic struct, which only the prelude declares (CHK-339).
     range_of<field> type_parameters;
 
     constexpr bool operator==(struct_decl const&) const = default;

@@ -6,7 +6,7 @@ using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::check::impl;
 
-// Generic functions and the prelude's generic structs (the spec's checking file, CHK-333 to CHK-336).
+// Generic functions and the prelude's generic structs (the spec's checking file, CHK-338 to CHK-341).
 //
 // A type parameter is opaque where it is declared: a generic body is checked once, over it.
 // A call deduces what each parameter stands for, and inlining writes that in its place, so no emitter meets one.
@@ -224,7 +224,7 @@ bool checker::unify(type_id pattern, type_id actual, cc::vector<type_id>& bindin
 
 void checker::instantiate_generics()
 {
-    // CHK-335: every instance an inlined body will name exists before flattening, which only looks them up.
+    // CHK-340: every instance an inlined body will name exists before flattening, which only looks them up.
     // Starting from each call whose arguments are known, a generic callee's calls are followed with the arguments
     // theirs stand for there; recursion is refused, so this ends.
     auto pending = cc::vector<cc::vector<type_id>>();

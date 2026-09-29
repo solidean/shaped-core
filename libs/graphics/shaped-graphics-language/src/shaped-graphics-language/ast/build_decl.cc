@@ -201,7 +201,7 @@ decl_id builder::member_declaration(form_id line, scope_kind owner)
 
 range_of<field> builder::type_parameters_of(keyword_parts const& parts)
 {
-    // AST-151: `name[A]` is the call form of a square list, whose elements are the type parameters
+    // AST-152: `name[A]` is the call form of a square list, whose elements are the type parameters
     if (parts.arguments.empty() || !is_kind(parts.arguments[0], form_kind::call))
         return {};
     auto const callee = at(parts.arguments[0]).first_child;
@@ -217,7 +217,7 @@ source_span builder::declared_name(form_id keyword_form, keyword_parts const& pa
         report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
     if (!parts.arguments.empty() && is_kind(parts.arguments[0], form_kind::identifier))
         return at(parts.arguments[0]).where;
-    // AST-151: a generic struct's name stands before its type parameters
+    // AST-152: a generic struct's name stands before its type parameters
     if (!parts.arguments.empty() && is_kind(parts.arguments[0], form_kind::call))
     {
         auto const callee = at(parts.arguments[0]).first_child;

@@ -159,7 +159,7 @@ TEST("sgl check - a procedural group's shaders take what its intersection report
     CHECK(reports(cc::string(spheres) + "hit_group mixed_up for path_rays:\n    surface = (closest_hit = shade_sphere)\n")
           == "invalid-pipeline user:[hit_group mixed_up for path_rays:] shade_sphere takes "
              "procedural_hit[sphere_attributes], and this group's geometry is triangles\n");
-    // CHK-337: no payload reaches an intersection, and what it reports is a struct
+    // CHK-342: no payload reaches an intersection, and what it reports is a struct
     CHECK(reports("@intersection fun bad(b: procedural_box, p: mut radiance) -> report[float]:\n"
                   "    return report.none()\n")
               .starts_with("invalid-entry-point"));

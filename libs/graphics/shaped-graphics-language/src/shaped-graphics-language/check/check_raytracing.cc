@@ -91,7 +91,7 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
             invalid("an @any_hit fun returns its hit_decision");
         break;
     case stage::intersection:
-        // CHK-337: an intersection is handed its box alone, no payload, and what it reports is the attributes a hit
+        // CHK-342: an intersection is handed its box alone, no payload, and what it reports is the attributes a hit
         // hands on, which every target takes as a struct
         if (boxes != 1 || payloads + hits + candidates + rays > 0)
             invalid("an @intersection fun takes the box it decides, `b: procedural_box`, and nothing else: no payload "

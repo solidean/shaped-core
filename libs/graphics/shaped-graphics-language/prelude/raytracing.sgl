@@ -743,7 +743,7 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         let lo = acceleration_pool_load(region + 1 + 2 * node)
         let hi = acceleration_pool_load(region + 2 + 2 * node)
         let inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
-        if box_entry(pool_float3(lo), pool_float3(hi), o, inverse, r.t_min, best.t) > best.t => continue
+        if not is_box_entered(pool_float3(lo), pool_float3(hi), o, inverse, r.t_min, best.t) => continue
 
         if (hi.w & 2147483648) == 0:
             if top + 2 <= 64:
@@ -772,7 +772,7 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
             let at = region_header.y + 2 * primitive
             let box_lo = acceleration_pool_load(at)
             let box_hi = acceleration_pool_load(at + 1)
-            if box_entry(pool_float3(box_lo), pool_float3(box_hi), o, inverse, r.t_min, best.t) > best.t => continue
+            if not is_box_entered(pool_float3(box_lo), pool_float3(box_hi), o, inverse, r.t_min, best.t) => continue
 
             let b = procedural_box(
                 best.t

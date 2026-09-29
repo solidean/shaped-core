@@ -35,7 +35,7 @@ void add_argument(call_arguments& a,
 
 void checker::check_body(symbol_id id)
 {
-    // CHK-333: a generic body sees its type parameters, as its signature did
+    // CHK-338: a generic body sees its type parameters, as its signature did
     auto const info = out.at(id).info;
     auto const before = type_parameter_names.size();
     if (info >= 0)
@@ -669,7 +669,7 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             continue;
         }
 
-        // CHK-336: the prelude's `undefined()` has the type of the parameter it meets
+        // CHK-341: the prelude's `undefined()` has the type of the parameter it meets
         if (auto const* const u = !a.is_splat && !a.is_mut && value != nullptr ? value->try_as<ast::call>() : nullptr;
             u != nullptr && is_prelude_file(file) && is_named(file, u->callee, "undefined")
             && ast_of(file).at(u->arguments).empty())
@@ -1206,7 +1206,7 @@ type_id checker::resolve_overload(function_scope& scope,
     auto const info = out.functions[chosen_symbol.info];
     auto bindings = chosen_match.bindings;
     commit_literals(scope, arguments, out.at(info.parameters), chosen_match.slots, bindings);
-    // CHK-335: what the arguments left unbound, where the call stands says
+    // CHK-340: what the arguments left unbound, where the call stands says
     auto const result = deduce_result(scope, id, chosen, bindings);
     if (result == error_type)
         return error_type;
@@ -1275,7 +1275,7 @@ type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id 
     auto const parameters = cc::vector<member_info>::create_copy_of(out.at(out.at(type).members));
     auto const result = out.at(type).element;
     auto const fields = ast.at(l.parameters);
-    // CHK-335: a lambda's parameters are what the call bound, and its result binds what they left; a type parameter
+    // CHK-340: a lambda's parameters are what the call bound, and its result binds what they left; a type parameter
     // of the function it is written in is bound already, to itself
     for (auto const& m : parameters)
     {
@@ -1422,7 +1422,7 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     auto result = candidate_match{.candidate = candidate,
                                   .slots = cc::move(bound.slots),
                                   .chains = cc::vector<i32>::create_filled(arguments.written.size(), 0)};
-    // CHK-335: a parameter whose type names a type parameter binds it to what the argument is, exactly; a function
+    // CHK-340: a parameter whose type names a type parameter binds it to what the argument is, exactly; a function
     // and a literal wait until the rest are bound, since what they meet depends on it
     auto deferred = cc::vector<isize>();
     for (auto p = isize(0); p < parameters.size(); ++p)
@@ -1503,7 +1503,7 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
 
 cc::optional<i32> checker::chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i)
 {
-    // CHK-336: `undefined()` is of whatever type it meets
+    // CHK-341: `undefined()` is of whatever type it meets
     if (arguments.undefineds[i])
         return 0;
     // CHK-316: a place is handed over as it is, so it has the parameter's type exactly, and a mark meets a mut parameter
@@ -1919,7 +1919,7 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         is_listed = is_listed || (scope.is_test && is_workgroup_binding(needed));
         if (!is_listed && scope.is_test)
         {
-            // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-333)
+            // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-338)
             auto& d = report(
                 diagnostic_kind::binding_not_listed, file, where,
                 cc::format("{} needs {}, and the test does not list it", out.at(callee).name, out.at(needed).name));

@@ -298,7 +298,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
 
     auto const* const n = e.node.try_as<ast::name>();
     auto const resource = n != nullptr ? resolve_resource_name(file, expr, text_of(file, n->where)) : type_id::none;
-    // CHK-333: a type parameter in scope hides every type of its name
+    // CHK-338: a type parameter in scope hides every type of its name
     auto parameter = type_id::none;
     for (auto i = type_parameter_names.size(); n != nullptr && i > 0 && !is_valid(parameter); --i)
         if (type_parameter_names[i - 1].first == text_of(file, n->where))
@@ -349,7 +349,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             result = resolve_atomic(file, expr, *applied, scope);
         else if (auto const generic = generic_named(file, applied->object); is_valid(generic))
         {
-            // CHK-334: `report[T]`, an instance of a generic struct of the prelude
+            // CHK-339: `report[T]`, an instance of a generic struct of the prelude
             auto const arguments = ast_of(file).at(applied->arguments);
             if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
                 report(diagnostic_kind::wrong_kind_of_name, file, where,
@@ -790,7 +790,7 @@ void checker::compile_struct(symbol_id id)
     if (is_vertex && is_pixel)
         unsupported(file, s.name, "a struct of two stages");
 
-    // CHK-334: a generic struct is the prelude's, over one type parameter its members may name
+    // CHK-339: a generic struct is the prelude's, over one type parameter its members may name
     auto parameter = type_id::none;
     if (!s.type_parameters.empty())
     {
@@ -1221,7 +1221,7 @@ void checker::compile_function(symbol_id id)
                        is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr
                            || geometry != nullptr || control != nullptr || is_evaluation);
 
-    // CHK-333: a function's type parameters name what its signature and its body may mention and know nothing of
+    // CHK-338: a function's type parameters name what its signature and its body may mention and know nothing of
     auto type_parameters = cc::vector<type_id>();
     for (auto const& p : ast.at(f.type_parameters))
     {

@@ -182,7 +182,7 @@ struct flattener
         cc::vector<loop_target> loops;
         /// The value blocks of the `case` arms being written, innermost last; a `yield` leaves the last.
         cc::vector<label_id> value_blocks;
-        /// What the type parameters of a generic function stand for in this inlining, two by two (CHK-335).
+        /// What the type parameters of a generic function stand for in this inlining, two by two (CHK-340).
         cc::vector<type_id> bindings;
     };
     cc::vector<frame> frames;
@@ -737,7 +737,7 @@ struct flattener
     {
         if (where.kind == target_kind::array_filled)
             return flatten_filled(id, type, call);
-        // CHK-336: `undefined()` is a local declared and never assigned, whose value nobody reads
+        // CHK-341: `undefined()` is a local declared and never assigned, whose value nobody reads
         if (where.kind == target_kind::undefined_value)
         {
             auto const local = add_local(local_kind::var, "undefined", type);
@@ -1782,7 +1782,7 @@ struct flattener
                               cc::span<i32 const> handed = {},
                               cc::span<type_id const> type_arguments = {})
     {
-        // CHK-335: what the callee's type parameters stand for, in the caller's terms made concrete
+        // CHK-340: what the callee's type parameters stand for, in the caller's terms made concrete
         auto bindings = cc::vector<type_id>();
         for (auto i = isize(0); i + 1 < type_arguments.size(); i += 2)
         {
@@ -2359,7 +2359,7 @@ void checker::flatten_entry_point(symbol_id id)
         {
             if (parameter.is_mut)
                 continue;
-            // CHK-337: a procedural hit or candidate carries the attributes the target hands the stage
+            // CHK-342: a procedural hit or candidate carries the attributes the target hands the stage
             auto const& t = out.at(parameter.type);
             if (is_valid(t.generic))
             {
