@@ -123,7 +123,8 @@ win->start_text_input();              // begin text_events + IME for this window
 Full doc: [docs/imgui.md](docs/imgui.md). Vendored docking-branch bundle (Dear ImGui + ImPlot + ImGuizmo); headers include as `<imgui/imgui.h>`, `<imgui/implot.h>`, `<imgui/imguizmo.h>`.
 
 ```cpp
-lib.add_package(sr::shader_package());       // once at startup, or routines acquire nothing
+slib::add_available_compilers(lib);          // every edge this build has, SGL's among them
+sr::add_shader_packages(lib);                // once at startup, or routines acquire nothing
 
 auto imgui = sr::imgui_context::create();    // owns ImGuiContext; docking on, viewports off, Solidean theme on; move-only
 auto imgui = sr::imgui_context::create({.enable_viewports = true});  // opt in — changes coordinates, see below
@@ -274,7 +275,7 @@ sr::blit_routine::prewarm(ctx);          // warm the compile/pipeline ahead of t
 - **No-op if the shaders did not compile** — the same graceful path a broken shader edit takes.
 - **`execute` is fallible, never throwing**: it runs inside the caller's scope, so an exception would leave
   their command list unsubmitted.
-- Its shaders live in `sr_shaders` (`blit.hlsl`) — no separate package to register.
+- Its shaders are `blit.sgl`, in sr's packages — nothing separate to register.
 
 ## Box-filter mipmap routine
 

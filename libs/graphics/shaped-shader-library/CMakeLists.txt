@@ -17,6 +17,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/binding/wgsl_declarations.cc
     src/shaped-shader-library/compiler/wgsl_compiler.cc
     src/shaped-shader-library/compiler/sgl_compiler.cc
+    src/shaped-shader-library/compiler/available_compilers.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
     src/shaped-shader-library/binding/impl/hlsl_sampler_state.cc
     src/shaped-shader-library/binding/impl/hlsl_image_format.cc
@@ -51,6 +52,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/binding/wgsl_declarations.hh
     src/shaped-shader-library/compiler/wgsl_compiler.hh
     src/shaped-shader-library/compiler/sgl_compiler.hh
+    src/shaped-shader-library/compiler/available_compilers.hh
     src/shaped-shader-library/compiler/shader_compiler.hh
     src/shaped-shader-library/shader_package.hh
     src/shaped-shader-library/shader_asset.hh

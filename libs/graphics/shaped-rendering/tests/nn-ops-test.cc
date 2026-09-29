@@ -9,8 +9,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
-#include <shaped-shader-library/shader_library.hh>
+#include <sr_sgl_shaders.hh>
 #include <sr_shaders.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
@@ -25,17 +24,6 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// Gives `lib` a compiler and sr's package, or false when there is none and the caller should skip.
-[[nodiscard]] bool add_sr_shaders(slib::shader_library& lib)
-{
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        return false;
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
-    return true;
-}
-
 /// Builds one compute pipeline into `out`, failing with the compiler's own text rather than a null handle.
 ///
 /// The pipeline travels through a reference rather than the return, because what this has to report is a compiler
@@ -71,6 +59,28 @@ namespace
     out = built;
     co_return;
 }
+
+/// The same for an SGL entry point, whose layout is the one its binding list states rather than one assembled here.
+template <class Entry>
+[[nodiscard]] cc::shared_async<cc::unit> build_sgl(sg::context& ctx,
+                                                   Entry const& entry,
+                                                   cc::string_view name,
+                                                   sg::compute_pipeline_handle& out)
+{
+    auto const shader = entry->acquire(ctx);
+    co_await cc::async_settled(shader);
+    if (shader->has_error())
+        FAIL(cc::format("{} did not compile:\n{}", name, shader->try_error()->underlying().to_string()));
+
+    auto const* const compiled = shader->try_value();
+    REQUIRE(compiled != nullptr);
+
+    auto const built
+        = co_await ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
+    REQUIRE(built != nullptr).context(cc::format("{} did not build a pipeline", name));
+    out = built;
+    co_return;
+}
 } // namespace
 
 // Every operation the network is made of builds.
@@ -96,12 +106,9 @@ ASYNC_INVOCABLE_TEST("sr - every network operation compiles", (sg::context_handl
                    ctx.cached.acquire_binding_group_layout<sr::shaders::nn_output_bindings>(), "nn_output",
                    nn_output_pipeline);
     auto nn_pool_pipeline = sg::compute_pipeline_handle();
-    co_await build(ctx, sr::shaders::nn_pool.compute.main_cs,
-                   ctx.cached.acquire_binding_group_layout<sr::shaders::nn_pool_bindings>(), "nn_pool", nn_pool_pipeline);
+    co_await build_sgl(ctx, sr::sgl_shaders::nn_pool.main_cs, "nn_pool", nn_pool_pipeline);
     auto nn_upsample_pipeline = sg::compute_pipeline_handle();
-    co_await build(ctx, sr::shaders::nn_upsample.compute.main_cs,
-                   ctx.cached.acquire_binding_group_layout<sr::shaders::nn_upsample_bindings>(), "nn_upsample",
-                   nn_upsample_pipeline);
+    co_await build_sgl(ctx, sr::sgl_shaders::nn_upsample.main_cs, "nn_upsample", nn_upsample_pipeline);
 }
 
 // The transfer curve, through both shaders that use it.
@@ -255,12 +262,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they 
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    auto const pool_layout = ctx.cached.acquire_binding_group_layout<sr::shaders::nn_pool_bindings>();
-    auto const up_layout = ctx.cached.acquire_binding_group_layout<sr::shaders::nn_upsample_bindings>();
+    auto const pool_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_pool_features>();
+    auto const up_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_upsample_features>();
     auto pool_pipeline = sg::compute_pipeline_handle();
     auto up_pipeline = sg::compute_pipeline_handle();
-    co_await build(ctx, sr::shaders::nn_pool.compute.main_cs, pool_layout, "nn_pool", pool_pipeline);
-    co_await build(ctx, sr::shaders::nn_upsample.compute.main_cs, up_layout, "nn_upsample", up_pipeline);
+    co_await build_sgl(ctx, sr::sgl_shaders::nn_pool.main_cs, "nn_pool", pool_pipeline);
+    co_await build_sgl(ctx, sr::sgl_shaders::nn_upsample.main_cs, "nn_upsample", up_pipeline);
 
     // A 4x4 map of two channels, every value distinct so a wrong texel is a wrong number.
     constexpr auto src_w = 4;
@@ -294,22 +301,24 @@ ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they 
         sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     cmd->compute.bind_pipeline(*pool_pipeline);
-    cmd->compute.bind<sr::shaders::nn_pool_bindings>(*ctx.transient.create_binding_group(
-        *cmd, pool_layout,
-        sr::shaders::nn_pool_bindings{.gSource = src.as_readonly_buffer(), .gTarget = pooled.as_readwrite_buffer()}));
+    cmd->compute.bind_group(0, *ctx.transient.create_binding_group(
+                                   *cmd, pool_layout,
+                                   sr::sgl_shaders::nn_pool_features{.source = src.as_readonly_buffer(),
+                                                                     .target = pooled.as_readwrite_buffer()}));
     cmd->compute.set_inline_constants(
-        sr::shaders::nn_pool_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels, ._pad = 0});
+        sr::sgl_shaders::nn_pool_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels}.to_block());
     cmd->compute.dispatch_threads(channels, src_w / 2, src_h / 2);
 
     auto const up = ctx.transient.create_buffer<f32>(src_w * src_h * channels,
                                                      sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     cmd->compute.bind_pipeline(*up_pipeline);
-    cmd->compute.bind<sr::shaders::nn_upsample_bindings>(*ctx.transient.create_binding_group(
-        *cmd, up_layout,
-        sr::shaders::nn_upsample_bindings{.gSource = pooled.as_readonly_buffer(), .gTarget = up.as_readwrite_buffer()}));
+    cmd->compute.bind_group(0, *ctx.transient.create_binding_group(
+                                   *cmd, up_layout,
+                                   sr::sgl_shaders::nn_upsample_features{.source = pooled.as_readonly_buffer(),
+                                                                         .target = up.as_readwrite_buffer()}));
     cmd->compute.set_inline_constants(
-        sr::shaders::nn_upsample_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels, ._pad = 0});
+        sr::sgl_shaders::nn_upsample_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels}.to_block());
     cmd->compute.dispatch_threads(channels, src_w / 2, src_h / 2);
 
     auto const pooled_back = sg::data_future<f32>(cmd->download.data_from_buffer(pooled));

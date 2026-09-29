@@ -1,0 +1,37 @@
+// The network's 2x2 max pool, which is how the encoder halves its resolution.
+//
+// Exactly OIDN's: the maximum of the four source texels under each destination one, per channel.
+// The source's width and height must both be even, which the member guarantees by padding the image up to a multiple
+// of sixteen before the first layer — four pools deep.
+//
+// Feature maps are HWC: index (y * width + x) * channels + c.
+
+// the DESTINATION's extent, which is half the source's
+@inline binding nn_pool_constants:
+    width: int
+    height: int
+    channels: int
+
+binding nn_pool_features:
+    source: buffer[float]
+    target: mut buffer[float]
+
+// One thread per destination texel and channel, the channel fastest so a wave writes one contiguous run.
+@compute(64) fun main_cs(@thread_id id: int3){nn_pool_features, nn_pool_constants}:
+    let c = id.x
+    let x = id.y
+    let y = id.z
+    let channels = nn_pool_constants.channels
+    let width = nn_pool_constants.width
+    if c >= channels or x >= width or y >= nn_pool_constants.height => return
+
+    let source_width = width * 2
+    let row0 = ((y * 2) * source_width + x * 2) * channels + c
+    let row1 = ((y * 2 + 1) * source_width + x * 2) * channels + c
+
+    let a = nn_pool_features.source[row0]
+    let b = nn_pool_features.source[row0 + channels]
+    let d = nn_pool_features.source[row1]
+    let e = nn_pool_features.source[row1 + channels]
+
+    nn_pool_features.target[(y * width + x) * channels + c] = max(max(a, b), max(d, e))

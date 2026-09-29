@@ -57,7 +57,7 @@ sr::imgui_context     [done]  owns the ImGui context + the frame bracket; dockin
                               and the platform viewport callbacks, onto sr::window
 sr::imgui_routine     [done]  the render routine: atlas textures, pipelines; one execute()
                               plus render_viewports(): a swapchain per secondary viewport
-sr::shader_package()  [done]  sr's shader package, to register with a slib::shader_library
+sr::add_shader_packages [done] sr's shader packages, SGL and HLSL, added to a slib::shader_library
 imgui multi-viewport  [done]  opt-in via create({.enable_viewports = true}) — it changes what an imgui
                               coordinate means, so it is never turned on behind a caller's back
 ```

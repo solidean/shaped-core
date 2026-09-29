@@ -42,8 +42,8 @@ shaped-code's own additions live in `extern/imgui/shaped/imgui/`, outside `inclu
 
 // Once, at startup: register sr's shaders so its routines have something to compile.
 slib::shader_library lib;
-lib.add_compiler(slib::create_dxc_compiler().value());
-lib.add_package(sr::shader_package());
+slib::add_available_compilers(lib);
+sr::add_shader_packages(lib);
 lib.start_hot_reload();
 
 auto imgui = sr::imgui_context::create();

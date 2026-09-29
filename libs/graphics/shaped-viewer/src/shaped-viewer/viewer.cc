@@ -11,7 +11,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/input.hh>
-#include <shaped-rendering/shaders.hh> // sr::shader_package (blit)
+#include <shaped-rendering/shaders.hh> // sr::add_shader_packages (blit)
 #include <shaped-rendering/window.hh>
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>

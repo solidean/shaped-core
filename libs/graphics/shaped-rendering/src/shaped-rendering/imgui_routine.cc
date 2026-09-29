@@ -16,35 +16,24 @@
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>
 #include <shaped-rendering/window.hh>
-#include <sr_shaders.hh>
+#include <sr_sgl_shaders.hh>
 
-// imgui.hlsl's constant block reaches C++ as a generated mirror, so what the routine sends is checked against
-// the shader rather than against a comment.
-// impl::imgui_ortho_constants stays: the arithmetic wants tg::vec2f, and the mirror is plain floats.
-static_assert(sizeof(sr::impl::imgui_ortho_constants) == sizeof(sr::shaders::imgui_constants),
-              "the ortho constants are not the size imgui.hlsl's block states");
-static_assert(offsetof(sr::shaders::imgui_constants, scale) == 0, "scale moved in imgui.hlsl");
-static_assert(offsetof(sr::shaders::imgui_constants, translate) == sizeof(tg::vec2f), "translate moved in imgui.hlsl");
+// imgui.sgl's constant block reaches C++ as a generated struct, so what the routine sends is checked against the shader.
+// impl::imgui_ortho_constants stays, because the draw math is tested without the generated header.
+static_assert(sizeof(sr::impl::imgui_ortho_constants) == sr::sgl_shaders::imgui_constants::block_size,
+              "the ortho constants are not the size imgui.sgl's block states");
+static_assert(offsetof(sr::sgl_shaders::imgui_constants, scale) == offsetof(sr::impl::imgui_ortho_constants, scale),
+              "scale moved in imgui.sgl");
+static_assert(offsetof(sr::sgl_shaders::imgui_constants, translate)
+                  == offsetof(sr::impl::imgui_ortho_constants, translate),
+              "translate moved in imgui.sgl");
 
-// ImDrawVert is {ImVec2 pos; ImVec2 uv; ImU32 col;} — 20 bytes, matching imgui.hlsl's vs_input.
-// Kept in the .cc: this is the routine's private wiring, not a layout to impose on a consumer that might reasonably want a different one.
-// rgba8_unorm is what decodes the packed ImU32 to [0,1] with no transfer function applied, which is exactly right for imgui's already-sRGB-encoded colors.
-template <>
-struct sg::vertex_layout_of<ImDrawVert>
-{
-    static sg::vertex_type_layout get()
-    {
-        return {
-            .stride = sizeof(ImDrawVert),
-            .attributes = {
-                {.semantic = "POSITION", .format = sg::vertex_attribute_format::vec2f, .offset = offsetof(ImDrawVert, pos)},
-                {.semantic = "TEXCOORD", .format = sg::vertex_attribute_format::vec2f, .offset = offsetof(ImDrawVert, uv)},
-                {.semantic = "COLOR",
-                 .format = sg::vertex_attribute_format::rgba8_unorm,
-                 .offset = offsetof(ImDrawVert, col)},
-            }};
-    }
-};
+// The routine binds imgui's own vertex buffer, so the pipeline reads ImDrawVert through imgui.sgl's `imgui_vertex`.
+static_assert(sizeof(ImDrawVert) == sizeof(sr::sgl_shaders::imgui_vertex), "ImDrawVert is not imgui.sgl's imgui_vertex");
+static_assert(offsetof(ImDrawVert, pos) == offsetof(sr::sgl_shaders::imgui_vertex, position),
+              "imgui_vertex.position moved");
+static_assert(offsetof(ImDrawVert, uv) == offsetof(sr::sgl_shaders::imgui_vertex, uv), "imgui_vertex.uv moved");
+static_assert(offsetof(ImDrawVert, col) == offsetof(sr::sgl_shaders::imgui_vertex, color), "imgui_vertex.color moved");
 
 static_assert(sizeof(ImDrawIdx) == 4,
               "imgui_routine binds a u32 index buffer — see extern/imgui/shaped/imgui/imgui_config.hh");
@@ -153,8 +142,8 @@ cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
     // services textures.
     _textures = depend_on<impl::imgui_texture_routine>(ctx);
 
-    auto const vs = sr::shaders::imgui.vertex.main_vs->acquire(ctx);
-    auto const ps = sr::shaders::imgui.fragment.main_ps->acquire(ctx);
+    auto const vs = sgl_shaders::imgui.main_vs->acquire(ctx);
+    auto const ps = sgl_shaders::imgui.main_ps->acquire(ctx);
 
     co_await cc::async_settled(vs);
     co_await cc::async_settled(ps);
@@ -170,23 +159,12 @@ cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
         co_return;
     }
 
-    // The group is what the shader declared, not what a stage happened to reference, so nothing here consults
-    // reflection and nothing has to keep the sampler's name or its state in step with the HLSL.
-    // The inline constants stay out of it by construction: a push_constants block is not a group member.
-    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::imgui_bindings>();
+    // The group is what the shader declared, so the atlas sampler's state lives in imgui.sgl alone.
+    _group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::imgui_atlas>();
 
-    // The vertex stage's only binding is the 16-byte ortho block, which rides as root constants.
-    auto const* const constants_binding = [&]() -> sg::binding const*
-    {
-        for (auto const& b : compiled_vs->bindings)
-            if (b.type == sg::binding_type::constants_buffer)
-                return &b;
-        return nullptr;
-    }();
-    CC_ASSERT(constants_binding != nullptr, "imgui.hlsl must declare the imgui_constants cbuffer");
-
+    // The vertex stage lists the inline constants and the pixel stage the atlas, so the pipeline takes both.
     auto const pipeline_layout
-        = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}, .inline_constants = *constants_binding});
+        = ctx.cached.acquire_pipeline_layout<sgl_shaders::imgui_atlas, sgl_shaders::imgui_constants>();
 
     // imgui emits both windings so culling is off, and it is drawn in list order so there is no depth test.
     // Alpha blending is imgui's standard straight-alpha equation;
@@ -195,7 +173,7 @@ cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
         sg::raster_pipeline_description{.layout = pipeline_layout,
                                         .vertex_shader = *compiled_vs,
                                         .fragment_shader = *compiled_ps,
-                                        .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
+                                        .vertex_input = sgl_shaders::imgui_vertex::layout(),
                                         .topology = sg::primitive_topology::triangle_list,
                                         .rasterization = {.cull = sg::cull_mode::none},
                                         .color_targets = {{.format = params(), .blend = sg::blend_alpha}}});
@@ -314,8 +292,8 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
                 // The layout comes from init rather than from the create: this is the frame path, and
                 // acquiring would hash the declared table and take the pipeline cache's lock per switch.
                 bound_group = ctx.transient.create_binding_group(
-                    cmd, self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_texture_view()});
-                scope.bind<shaders::imgui_bindings>(*bound_group);
+                    cmd, self->_group_layout, sgl_shaders::imgui_atlas{.texture = texture.value().as_texture_view()});
+                scope.bind_group(0, *bound_group);
                 bound_texture = dc.GetTexID();
             }
 

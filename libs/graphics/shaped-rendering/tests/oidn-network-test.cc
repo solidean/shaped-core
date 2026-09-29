@@ -14,6 +14,7 @@
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <sr_sgl_shaders.hh>
 #include <sr_shaders.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
@@ -129,8 +130,8 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end", (sg::context_ha
     // than on the context's backlog, so polling the latter would wait forever.
     // A member does this through its routine's init; a test has no routine, so it does it here.
     for (auto const& asset : {sr::shaders::nn_conv.compute.main_cs, sr::shaders::nn_input.compute.main_cs,
-                              sr::shaders::nn_output.compute.main_cs, sr::shaders::nn_pool.compute.main_cs,
-                              sr::shaders::nn_upsample.compute.main_cs})
+                              sr::shaders::nn_output.compute.main_cs, sr::sgl_shaders::nn_pool.main_cs.asset,
+                              sr::sgl_shaders::nn_upsample.main_cs.asset})
     {
         auto const shader = asset->acquire(ctx);
         co_await cc::async_settled(shader);
@@ -258,8 +259,8 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     for (auto const& asset : {sr::shaders::nn_conv.compute.main_cs, sr::shaders::nn_input.compute.main_cs,
-                              sr::shaders::nn_output.compute.main_cs, sr::shaders::nn_pool.compute.main_cs,
-                              sr::shaders::nn_upsample.compute.main_cs})
+                              sr::shaders::nn_output.compute.main_cs, sr::sgl_shaders::nn_pool.main_cs.asset,
+                              sr::sgl_shaders::nn_upsample.main_cs.asset})
     {
         auto const shader = asset->acquire(ctx);
         co_await cc::async_settled(shader);

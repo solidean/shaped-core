@@ -107,9 +107,10 @@ if(OIDN_WEIGHTS_DIR)
 endif()
 target_compile_definitions(shaped-rendering PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
 
-# sr's own shader package.
+# sr's own shader packages, one per language: a package has one.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
-# Routines that need shaders add their entry points to this one package.
+# A routine's shaders go in the SGL package, which reaches dx12, vulkan, webgpu and metal from one source.
+# The HLSL package holds the shaders not yet ported; docs/TODO.md says what holds each back.
 #
 # Deliberately not gated on a compiler existing.
 # Package generation needs none — it emits C++ descriptors and embeds the sources;
@@ -117,24 +118,30 @@ target_compile_definitions(shaped-rendering PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OI
 # Without a compiler the routine simply acquires no shader and draws nothing, which is the same graceful path a broken shader edit takes.
 sc_add_shader_package(
     TARGET     shaped-rendering
+    NAME       sr_sgl_shaders
+    NAMESPACE  sr::sgl_shaders
+    SOURCE_DIR shaders
+    LANGUAGE   sgl
+    SHADERS
+        blit.sgl:*
+        imgui.sgl:*
+        raster_box_filter_mipmap.sgl:*
+        nn_pool.sgl:*
+        nn_upsample.sgl:*
+)
+
+sc_add_shader_package(
+    TARGET     shaped-rendering
     NAME       sr_shaders
     NAMESPACE  sr::shaders
     SOURCE_DIR shaders
     LANGUAGE   hlsl
     SHADERS
-        imgui.hlsl:vertex:main_vs
-        imgui.hlsl:fragment:main_ps
-        imgui.hlsl:binding:imgui_bindings
-        imgui.hlsl:constants:gConstants
-        blit.hlsl:vertex:main_vs
-        blit.hlsl:fragment:main_ps
         box_filter_mipmap.hlsl:compute:main_1d_cs
         box_filter_mipmap.hlsl:compute:main_1d_array_cs
         box_filter_mipmap.hlsl:compute:main_2d_cs
         box_filter_mipmap.hlsl:compute:main_2d_array_cs
         box_filter_mipmap.hlsl:compute:main_3d_cs
-        raster_box_filter_mipmap.hlsl:vertex:main_vs
-        raster_box_filter_mipmap.hlsl:fragment:main_ps
         atrous_denoise.hlsl:compute:main_cs
         atrous_denoise.hlsl:binding:atrous_bindings
         atrous_denoise.hlsl:constants:gConstants
@@ -156,12 +163,6 @@ sc_add_shader_package(
         nn_output.hlsl:compute:main_cs
         nn_output.hlsl:binding:nn_output_bindings
         nn_output.hlsl:constants:gConstants
-        nn_pool.hlsl:compute:main_cs
-        nn_pool.hlsl:binding:nn_pool_bindings
-        nn_pool.hlsl:constants:gConstants
-        nn_upsample.hlsl:compute:main_cs
-        nn_upsample.hlsl:binding:nn_upsample_bindings
-        nn_upsample.hlsl:constants:gConstants
 )
 
 # Test executable.

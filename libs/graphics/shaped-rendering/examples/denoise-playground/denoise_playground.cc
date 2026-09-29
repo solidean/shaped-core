@@ -34,7 +34,7 @@
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/window.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
+#include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
@@ -351,23 +351,17 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     }
     auto& ctx = *context.value();
 
-    // Both formats, because the backend decides which one the context accepts: DXIL for dx12, SPIR-V for vulkan.
-    // Registering only one is a build that compiles for every backend and runs on exactly one, which is what this
-    // example did until somebody ran the vulkan arm.
+    // Every edge, because the backend decides which format the context accepts: DXIL for dx12, SPIR-V for vulkan.
+    // The tracer is HLSL, so without DXC there is nothing to show.
     auto lib = slib::shader_library();
-    auto dxil = slib::create_dxc_compiler();
-    auto spirv = slib::create_dxc_spirv_compiler();
-    if (dxil.has_error() && spirv.has_error())
+    slib::add_available_compilers(lib);
+    if (lib.supported_formats(slib::shader_language::hlsl).empty())
     {
-        cc::eprintln("no shader compiler: {}", dxil.error().to_string());
+        cc::eprintln("no shader compiler: DXC did not load");
         co_return;
     }
-    if (dxil.has_value())
-        lib.add_compiler(cc::move(dxil.value()));
-    if (spirv.has_value())
-        lib.add_compiler(cc::move(spirv.value()));
-    lib.add_package(sr::shader_package()); // imgui, blit and the denoise members
-    lib.add_package(shaders::package());   // the tracer
+    sr::add_shader_packages(lib);        // imgui, blit and the denoise members
+    lib.add_package(shaders::package()); // the tracer
 
     // Every supported member starts compiling now rather than on the first call that wants one, so switching the
     // method in the panel does not cost a frame of `pending`.

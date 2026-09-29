@@ -162,6 +162,11 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
 lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
 lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));  // ... and this is how a package reaches metal
 
+#include <shaped-shader-library/compiler/available_compilers.hh>
+slib::add_available_compilers(lib) // every edge this build can make: wgsl, dxil + spirv where DXC is, metal_lib on Apple,
+                                   //   and SGL over each; what a library serving any backend registers instead of the list above
+                                   //   a DXC that fails to create is left out silently; check lib.supported_formats(language)
+
 #include <shaped-shader-library/binding/wgsl_declarations.hh>
 slib::parse_wgsl_declarations(src) // -> cc::result<wgsl_declarations>; { stage; entry_point; workgroup_size; bindings }
                                    //   exactly ONE entry point per module; never looks inside a function body
