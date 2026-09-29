@@ -5,7 +5,7 @@ An SGL `@raytracing pipeline` declaration generates a C++ type that builds the `
 What the declaration leaves `.host` — hit groups, callables — the host compiles from SGL at run time and hands over.
 
 sg's [raytracing-pipeline](../../shaped-graphics/docs/concepts/raytracing-pipeline.md) is the pipeline and table this fills in, rows and all.
-The declaration itself is SGL's, in its [spec](../../shaped-graphics-language/docs/spec/_index.md).
+The declaration itself is SGL's, in its [ray-tracing spec](../../shaped-graphics-language/docs/spec/raytracing.md).
 [raytracing_pipeline.hh](../src/shaped-shader-library/raytracing_pipeline.hh) is the API the generated type calls.
 
 ## One pipeline, end to end

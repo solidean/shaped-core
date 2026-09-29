@@ -416,8 +416,8 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
-        // EMIT-137: a payload states the widest access, which DXC takes for a missed optimization rather than an error
-        // TODO: inferred per field across the pipeline's shaders, as the spec's raytracing file plans
+        // EMIT-137: a payload the host's shaders may touch states the widest access, which DXC takes for a missed
+        // optimization rather than an error
         if (p.e.entry_stage >= stage::raygen)
             out += "#pragma dxc diagnostic ignored \"-Wpayload-access-perf\"\n\n";
         write_enum_constants(out, p, *this);

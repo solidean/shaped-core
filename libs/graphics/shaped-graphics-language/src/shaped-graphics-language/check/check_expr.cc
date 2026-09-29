@@ -1923,7 +1923,7 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         is_listed = is_listed || (scope.is_test && is_workgroup_binding(needed));
         if (!is_listed && scope.is_test)
         {
-            // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-338)
+            // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-333)
             auto& d = report(
                 diagnostic_kind::binding_not_listed, file, where,
                 cc::format("{} needs {}, and the test does not list it", out.at(callee).name, out.at(needed).name));
