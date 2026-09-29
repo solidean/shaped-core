@@ -357,6 +357,7 @@ void checker::run()
     report_unused_requires();
     judge_footprint_pins();
     judge_trace_graphs();
+    judge_callables();
 }
 
 void checker::declare_file(i32 file)

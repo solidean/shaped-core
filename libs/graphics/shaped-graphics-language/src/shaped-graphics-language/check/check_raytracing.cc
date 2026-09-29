@@ -103,7 +103,11 @@ void checker::judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_vie
             invalid("the attributes an @intersection fun reports are a struct of the program");
         break;
     case stage::callable:
-        invalid("a @callable fun is not built yet");
+        // CHK-343: a callable is handed its parameter as the caller's place, and nothing a ray brings
+        if (payloads != 1 || hits + candidates + rays + boxes > 0)
+            invalid("a @callable fun takes the caller's parameter as `p: mut T`, and nothing else");
+        if (info.result != checked_module::void_type)
+            invalid("a @callable fun returns nothing: what it gives back it writes to its parameter");
         break;
     default:
         break;
@@ -740,4 +744,151 @@ void checker::judge_trace_graphs()
                    cc::format("its listed shaders trace {} deep, past its max_recursion_depth of {}", depth,
                               pipeline.max_recursion_depth));
     }
+}
+
+void checker::compile_callables(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const& ast = ast_of(file);
+    auto const& p = ast.at(out.at(id).declaration).node.as<ast::pipeline_decl>();
+    auto const fail_symbol = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto is_failed = false;
+    if (!p.is_short_form)
+    {
+        report(diagnostic_kind::invalid_pipeline, file, span_of(file, out.at(id).declaration),
+               "a callables table lists its callables: `callables name = (f, g)`");
+        return fail_symbol();
+    }
+    auto entries = cc::vector<symbol_id>();
+    auto parameter = type_id::none;
+    auto has_host = false;
+    auto const elements = ast.at(p.stages);
+    for (auto i = isize(0); i < elements.size(); ++i)
+    {
+        auto const& element = elements[i];
+        auto const where = span_of(file, element.form);
+        if (auto const* const dot = ast.at(element.value).node.try_as<ast::leading_dot>();
+            dot != nullptr && text_of(file, dot->name) == "host")
+        {
+            // CHK-343: the host's callables follow the listed ones
+            if (i != elements.size() - 1)
+            {
+                report(diagnostic_kind::invalid_pipeline, file, where, "`.host` stands last among the callables");
+                is_failed = true;
+            }
+            has_host = true;
+            continue;
+        }
+        auto const entry = ray_entry_named(file, element.value, stage::callable);
+        if (!is_valid(entry))
+        {
+            is_failed = true;
+            continue;
+        }
+        auto const taking = payload_of(entry);
+        if (!is_valid(parameter))
+            parameter = taking;
+        else if (taking != parameter)
+        {
+            report(diagnostic_kind::invalid_pipeline, file, where,
+                   cc::format("{} takes {}, and this table's callables take {}", out.at(entry).name,
+                              out.name_of(taking), out.name_of(parameter)));
+            is_failed = true;
+        }
+        entries.push_back(entry);
+    }
+    if (entries.empty() && !is_failed)
+    {
+        report(diagnostic_kind::invalid_pipeline, file, span_of(file, out.at(id).declaration),
+               "a callables table lists at least one callable, which says what its callables take");
+        is_failed = true;
+    }
+    if (is_failed)
+        return fail_symbol();
+    out.symbols[index_of(id)].info = i32(out.pipelines.size());
+    out.pipelines.push_back({
+        .symbol = id,
+        .kind = pipeline_kind::callables,
+        .records = {.first = u32(out.binding_lists.size()), .count = u32(entries.size())},
+        .callable_parameter = parameter,
+        .has_host_callables = has_host,
+    });
+    out.binding_lists.push_back_range(entries);
+}
+
+symbol_id checker::callables_named(i32 file, ast::expr_id expr)
+{
+    auto const* const n = ast::is_valid(expr) ? ast_of(file).at(expr).node.try_as<ast::name>() : nullptr;
+    if (n == nullptr)
+        return symbol_id::none;
+    auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+    if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::pipeline)
+        return symbol_id::none;
+    auto const table = found->front();
+    if (!ast_of(out.at(table).file).at(out.at(table).declaration).node.as<ast::pipeline_decl>().is_callables)
+        return symbol_id::none;
+    return table;
+}
+
+type_id checker::check_callable_call(function_scope& scope,
+                                     ast::expr_id id,
+                                     ast::call const& call,
+                                     ast::index const& index,
+                                     symbol_id table)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto const where = span_of(file, id);
+    set_target(file, index.object, {.kind = target_kind::symbol, .symbol = table});
+    if (demand(table, file, where) != symbol_state::checked)
+        return checked_module::error_type;
+    auto const parameter = out.pipelines[out.at(table).info].callable_parameter;
+    auto is_sound = true;
+    auto const indices = ast.at(index.arguments);
+    if (indices.size() != 1 || !indices[0].name.empty() || indices[0].is_splat)
+    {
+        report(diagnostic_kind::no_matching_overload, file, where, "a callable is picked by one int: `table[i](mut p)`");
+        is_sound = false;
+    }
+    else
+        is_sound = check_expected(scope, indices[0].value, type_of_builtin(builtins::k_int, file, where))
+                != checked_module::error_type;
+    // CHK-344: the parameter is the caller's place, of the type every callable of the table takes
+    auto const arguments = ast.at(call.arguments);
+    if (arguments.size() != 1 || !arguments[0].is_mut || !arguments[0].name.empty())
+    {
+        report(diagnostic_kind::no_matching_overload, file, where,
+               cc::format("a callable takes one place of {}, handed over as `mut p`", out.name_of(parameter)));
+        return checked_module::error_type;
+    }
+    auto const given = check_expr(scope, arguments[0].value);
+    if (given != checked_module::error_type && given != parameter)
+    {
+        report(diagnostic_kind::type_mismatch, file, span_of(file, arguments[0].value),
+               cc::format("{}'s callables take {}, and this is {}", out.at(table).name, out.name_of(parameter),
+                          out.name_of(given)));
+        is_sound = false;
+    }
+    else if (given != checked_module::error_type && !judge_place(scope, arguments[0].value, "a callable's parameter"))
+        is_sound = false;
+    if (!is_sound || given == checked_module::error_type)
+        return checked_module::error_type;
+    out.callable_calls.push_back({.file = file, .call = id, .table = table});
+    return checked_module::void_type;
+}
+
+void checker::judge_callables()
+{
+    // tables pack in declaration order, so a table the host appends to is the last one
+    auto last = symbol_id::none;
+    for (auto const& p : out.pipelines)
+        if (p.kind == pipeline_kind::callables && (!is_valid(last) || index_of(p.symbol) > index_of(last)))
+            last = p.symbol;
+    for (auto const& p : out.pipelines)
+        if (p.kind == pipeline_kind::callables && p.has_host_callables && p.symbol != last)
+            report(diagnostic_kind::invalid_pipeline, out.at(p.symbol).file,
+                   span_of(out.at(p.symbol).file, out.at(p.symbol).declaration),
+                   cc::format("{} takes the host's callables, so it is the module's last callables table: the host's "
+                              "follow every listed one",
+                              out.at(p.symbol).name));
 }

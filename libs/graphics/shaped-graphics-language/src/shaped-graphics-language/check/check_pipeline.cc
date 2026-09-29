@@ -590,6 +590,8 @@ void checker::compile_pipeline(symbol_id id)
     }
     if (p.is_hit_group)
         return compile_hit_group(id);
+    if (p.is_callables)
+        return compile_callables(id);
     if (find_attribute(file, d.attributes, "raytracing") != nullptr)
         return compile_raytracing_pipeline(id);
 

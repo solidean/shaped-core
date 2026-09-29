@@ -164,3 +164,29 @@ TEST("sgl check - a procedural group's shaders take what its intersection report
                   "    return report.none()\n")
               .starts_with("invalid-entry-point"));
 }
+
+TEST("sgl check - a callables table holds callables of one parameter, and a call picks one by index")
+{
+    auto const callables = cc::string_view("struct operand:\n    x: float\n"
+                                           "struct other:\n    y: float\n"
+                                           "@callable fun doubled(v: mut operand):\n    v.x = v.x * 2.0\n"
+                                           "@callable fun zeroed(v: mut other):\n    v.y = 0.0\n");
+    CHECK(reports(cc::string(callables) + "callables ops = (doubled, .host)\n") == "");
+    CHECK(reports(cc::string(callables) + "callables ops = (doubled, zeroed)\n")
+          == "invalid-pipeline user:[zeroed] zeroed takes other, and this table's callables take operand\n");
+    CHECK(reports(cc::string(callables) + "callables ops = (.host, doubled)\n")
+          == "invalid-pipeline user:[.host] `.host` stands last among the callables\n");
+    // CHK-343: the host's callables follow every listed one, so the table they join is the module's last
+    CHECK(reports(cc::string(callables) + "callables ops = (doubled, .host)\ncallables more = (doubled)\n")
+          == "invalid-pipeline user:[callables ops = (doubled, .host)] ops takes the host's callables, so it is the "
+             "module's last callables table: the host's follow every listed one\n");
+    // CHK-344: the call hands over a place of the table's parameter type
+    auto const table = cc::string(callables) + "callables ops = (doubled)\n";
+    CHECK(reports(table + "@raygen fun go(@launch_id id: int3):\n    let mut v = operand(1.0)\n    ops[id.x](mut v)\n")
+          == "");
+    CHECK(reports(table + "@raygen fun go(@launch_id id: int3):\n    let mut w = other(1.0)\n    ops[id.x](mut w)\n")
+          == "type-mismatch user:[w] ops's callables take operand, and this is other\n");
+    CHECK(reports(table + "@raygen fun go(@launch_id id: int3):\n    let v = operand(1.0)\n    ops[id.x](v)\n")
+          == "no-matching-overload user:[ops[id.x](v)] a callable takes one place of operand, handed over as `mut "
+             "p`\n");
+}

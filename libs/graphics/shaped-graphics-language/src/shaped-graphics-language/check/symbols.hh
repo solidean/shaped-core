@@ -575,6 +575,8 @@ enum class sgl::check::pipeline_kind : sgl::u8
     raytracing,
     /// A `hit_group`: one row of a ray-tracing pipeline's table (CHK-330).
     hit_group,
+    /// A `callables` table: callable shaders of one parameter type, which a stage calls by index (CHK-343).
+    callables,
 };
 
 /// A `pipeline` declaration that checked: its stages, its layout, and its configuration.
@@ -614,6 +616,10 @@ struct sgl::check::pipeline_info
     ast::range_of<symbol_id> records;
     symbol_id intersection = symbol_id::none;
     bool is_procedural = false;
+    /// A callables table's parameter type, and whether the host appends callables of its own after the listed ones,
+    /// which are its `records`.
+    type_id callable_parameter = type_id::none;
+    bool has_host_callables = false;
 
     constexpr bool operator==(pipeline_info const&) const = default;
 };
@@ -656,6 +662,16 @@ struct sgl::check::target
     i32 index = -1;
 
     constexpr bool operator==(target const&) const = default;
+};
+
+/// `table[i](mut p)`: a call of callable `i` of a `callables` table (CHK-344).
+struct sgl::check::callable_call
+{
+    i32 file = 0;
+    ast::expr_id call = ast::expr_id::none;
+    symbol_id table = symbol_id::none;
+
+    constexpr bool operator==(callable_call const&) const = default;
 };
 
 /// `trace(world, r, set.ray, mut payload)`: a trace of a ray-tracing pipeline's ray type (CHK-329).

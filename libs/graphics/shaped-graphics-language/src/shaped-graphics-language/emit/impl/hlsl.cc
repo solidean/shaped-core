@@ -242,14 +242,20 @@ public:
         }
         // a stage that writes a field reads it too: a write it makes only on some paths keeps what came in on the others
         for (auto i = 1; i < 4; ++i)
+        {
             result.reads[i] = result.reads[i] || result.writes[i];
+            // what a stage writes the caller reads, since it alone consumes the trace; and what a stage reads the caller
+            // writes, so it arrives defined
+            result.reads[0] = result.reads[0] || result.writes[i];
+            result.writes[0] = result.writes[0] || result.reads[i];
+        }
         return result;
     }
 
     /// Whether `type` is a ray payload of the entry point: the one it is handed, or one it traces with.
     [[nodiscard]] static bool is_payload(plan const& p, check::type_id type)
     {
-        if (p.e.entry_stage >= stage::raygen && type == p.e.input)
+        if (p.e.entry_stage >= stage::raygen && p.e.entry_stage != stage::callable && type == p.e.input)
             return true;
         for (auto const& r : p.e.traced_rays)
             if (p.m.at(p.m.at(p.m.at(r.set).type).members)[r.ray].type == type)

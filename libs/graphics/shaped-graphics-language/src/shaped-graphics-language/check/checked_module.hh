@@ -137,6 +137,8 @@ struct sgl::check::checked_module
     cc::vector<near_miss> near_misses;
     /// Every trace of a ray-tracing pipeline's ray type: the call, and which ray of which set (CHK-329).
     cc::vector<ray_trace> ray_traces;
+    /// Every call of a callable by its table's index (CHK-344).
+    cc::vector<callable_call> callable_calls;
 
     /// One entry per file `check` was given, in that order.
     cc::vector<file_tables> files;
@@ -252,8 +254,8 @@ struct sgl::check::checked_module
             && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
             && is_equal(call_records, rhs.call_records) && is_equal(written_arguments, rhs.written_arguments)
             && is_equal(call_slots, rhs.call_slots) && is_equal(near_misses, rhs.near_misses)
-            && is_equal(ray_traces, rhs.ray_traces) && is_equal(files, rhs.files)
-            && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
+            && is_equal(ray_traces, rhs.ray_traces) && is_equal(callable_calls, rhs.callable_calls)
+            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;
     }

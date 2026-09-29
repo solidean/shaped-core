@@ -768,6 +768,9 @@ struct flattener
         for (auto const& t : c.out.ray_traces)
             if (t.call == id && t.file == file())
                 return flatten_ray_trace(id, call, t);
+        for (auto const& t : c.out.callable_calls)
+            if (t.call == id && t.file == file())
+                return flatten_callable_call(id, call, t);
 
         auto const record = tables().call_at(id);
         // CHK-319: a call through a parameter of function type records no callee, and inlines what was handed over
@@ -862,6 +865,57 @@ struct flattener
             return traced;
         add_stmt(where, flat_eval{.value = traced});
         add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
+        return add_expr(checked_module::void_type, id, flat_construct{});
+    }
+
+    /// CHK-344: `table[i](mut p)` is a call of callable `base + i` of the pipeline's section, where `base` is where the
+    /// module's tables before this one end: they pack in declaration order.
+    flat_expr_id flatten_callable_call(ast::expr_id id, ast::call const& call, callable_call const& t)
+    {
+        auto const where = origin{.file = file(), .expr = id};
+        auto base = 0;
+        for (auto const& p : c.out.pipelines)
+            if (p.kind == pipeline_kind::callables && index_of(p.symbol) < index_of(t.table))
+                base += i32(p.records.count);
+        auto const* const found = c.prelude_names.get_ptr("call_callable");
+        if (found == nullptr || found->empty())
+            return fail();
+        auto const callee = found->front();
+
+        auto const& index_node = ast().at(call.callee).node.as<ast::index>();
+        auto index = flatten_expr(ast().at(index_node.arguments)[0].value);
+        if (!is_valid(index))
+            return fail();
+        if (base != 0)
+        {
+            type_id const types[] = {int_type(), int_type()};
+            auto const plus = c.find_operator("+", types);
+            if (!is_valid(plus))
+                return fail();
+            flat_expr_id const operands[] = {index, add_expr(int_type(), id, flat_int_literal{.value = base})};
+            index = builtin_call(id, plus, operands);
+        }
+
+        auto place = flatten_expr(ast().at(call.arguments)[0].value);
+        if (!is_valid(place))
+            return fail();
+        auto const is_local = entry.at(place).node.is<flat_local_ref>();
+        auto parameter = place;
+        if (!is_local)
+        {
+            place = with_bound_index(place, id);
+            auto const local = add_local(local_kind::var, "parameter", entry.at(place).type);
+            add_stmt(where, flat_var{.local = local});
+            add_stmt(where, flat_assign{.place = add_expr(entry.at(place).type, id, flat_local_ref{.local = local}),
+                                        .value = again(place, id)});
+            parameter = local_ref(local, id);
+        }
+        flat_expr_id const values[] = {index, parameter};
+        auto const called = builtin_call(id, callee, values);
+        if (is_local)
+            return called;
+        add_stmt(where, flat_eval{.value = called});
+        add_stmt(where, flat_assign{.place = again(place, id), .value = again(parameter, id)});
         return add_expr(checked_module::void_type, id, flat_construct{});
     }
 

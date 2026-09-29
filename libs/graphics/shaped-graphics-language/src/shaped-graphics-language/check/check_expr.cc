@@ -904,6 +904,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     auto const* const n = callee.node.try_as<ast::name>();
     if (callee.node.is<ast::member>())
         return check_dot_call(scope, id, call);
+    // CHK-344: `table[i](mut p)`, a callable of a table picked at run time
+    if (auto const* const index = callee.node.try_as<ast::index>())
+        if (auto const table = callables_named(file, index->object); is_valid(table))
+            return check_callable_call(scope, id, call, *index, table);
     if (n == nullptr)
     {
         (void)check_arguments(scope, call.arguments, false);

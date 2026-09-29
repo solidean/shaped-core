@@ -638,6 +638,18 @@ struct checker
 
     /// CHK-330: a `hit_group`, one row of a ray-tracing pipeline's table.
     void compile_hit_group(symbol_id id);
+    /// CHK-343: a `callables` table.
+    void compile_callables(symbol_id id);
+    /// The `callables` table `expr` names, `none` where it names none.
+    symbol_id callables_named(i32 file, ast::expr_id expr);
+    /// CHK-344: `table[i](mut p)`, a call of the callable at `i`.
+    type_id check_callable_call(function_scope& scope,
+                                ast::expr_id id,
+                                ast::call const& call,
+                                ast::index const& index,
+                                symbol_id table);
+    /// CHK-343: at most one table of a module takes the host's callables, and it is declared last.
+    void judge_callables();
     /// CHK-331: a `@raytracing pipeline`.
     void compile_raytracing_pipeline(symbol_id id);
     /// The entry point of `wanted` that `value` names, or `none` after a report.

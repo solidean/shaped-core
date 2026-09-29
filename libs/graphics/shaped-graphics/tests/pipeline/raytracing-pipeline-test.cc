@@ -277,7 +277,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline takes a hit group the hos
     auto const hit_shaders = co_await slib::compile_hit_group(
         ctx.get(), &sg_test::shader_fixtures(), &open_t::definition(), k_runtime_group, "material", "runtime.sgl");
     REQUIRE(hit_shaders.size() == open_t::ray_count);
-    auto const desc = co_await shaders::raytracing_open.open_path.description(*ctx, hit_shaders);
+    auto const desc = co_await shaders::raytracing_open.open_path.description(*ctx, {.hit_groups = hit_shaders});
     CHECK(desc.max_recursion_depth == 2u);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
@@ -331,4 +331,55 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline takes a hit group the hos
                 CHECK(got_ids[at][3] == (want.is_lit ? 1 : 0)).context(where);
             }
         }
+}
+
+// raytracing_callables.sgl's `apply`: thread i calls callable `i % 3` of `ops`, the module's two and then the host's.
+// The host's squares, compiled at run time from its own SGL.
+
+ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline calls the module's callables and the host's by index",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using apply_t = shaders::raytracing_callables_apply_t;
+    CHECK(apply_t::first_host_callable == 2);
+    auto const squared
+        = co_await slib::compile_callable(ctx.get(), &sg_test::shader_fixtures(),
+                                          "require raytracing_pipeline\n"
+                                          "struct operand:\n    x: float\n"
+                                          "@callable fun squared(v: mut operand):\n    v.x = v.x * v.x\n",
+                                          "squared", "squared.sgl");
+    auto host = slib::raytracing_host_parts();
+    host.callables.push_back(squared);
+    auto const desc = co_await shaders::raytracing_callables.apply.description(*ctx, cc::move(host));
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
+    REQUIRE(pipeline != nullptr);
+    auto const table = ctx->uncached.create_raytracing_shader_table(apply_t::table_description(pipeline, 1));
+    REQUIRE(table != nullptr);
+
+    constexpr auto count = 9;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const values = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(count), usage);
+    auto cmd = ctx->create_command_list();
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::operands>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout, shaders::operands{.values = values.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), count);
+    auto const back = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == count);
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const x = float(i + 1);
+        auto const want = i % 3 == 0 ? 2 * x : i % 3 == 1 ? -x : x * x;
+        CHECK(got[i][0] == want).context(cc::format("thread {}", i));
+    }
 }

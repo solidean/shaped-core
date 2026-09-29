@@ -8,8 +8,8 @@ bool builder::is_declaration_keyword(cc::string_view keyword)
 {
     return keyword == "module" || keyword == "use" || keyword == "fun" || keyword == "struct" || keyword == "enum"
         || keyword == "type" || keyword == "const" || keyword == "binding" || keyword == "sampler"
-        || keyword == "pipeline" || keyword == "rays" || keyword == "hit_group" || keyword == "notation"
-        || keyword == "test" || keyword == "require";
+        || keyword == "pipeline" || keyword == "rays" || keyword == "hit_group" || keyword == "callables"
+        || keyword == "notation" || keyword == "test" || keyword == "require";
 }
 
 range_of<decl_id> builder::declarations(form_id block, scope_kind scope)
@@ -57,7 +57,8 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
         if (scope != scope_kind::file && scope != scope_kind::binding_body)
             report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
     }
-    else if ((keyword == "pipeline" || keyword == "rays" || keyword == "hit_group") && scope != scope_kind::file)
+    else if ((keyword == "pipeline" || keyword == "rays" || keyword == "hit_group" || keyword == "callables")
+             && scope != scope_kind::file)
         report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
     // AST-146: a feature is granted to a file, a binding or a body, and a type's members are none of those.
     else if (keyword == "require")
@@ -103,6 +104,14 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
     }
     if (keyword == "hit_group")
         return hit_group_declaration(head, parts);
+    // AST-153: `callables name = (f, g, .host)` is a pipeline's short form, a table rather than stages
+    if (keyword == "callables")
+    {
+        auto const id = pipeline_declaration(head, parts);
+        if (auto* const p = ast.decls[index_of(id)].node.try_as<pipeline_decl>())
+            p->is_callables = true;
+        return id;
+    }
     if (keyword == "test")
         return test_declaration(head, parts);
     return notation_declaration(head, parts);

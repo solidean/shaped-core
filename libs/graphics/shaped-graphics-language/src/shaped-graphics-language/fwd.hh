@@ -53,6 +53,7 @@ struct described_pipeline;
 struct described_ray_set;
 struct described_hit_group;
 struct described_raytracing_pipeline;
+struct described_callables;
 struct module_description;
 struct describe_request;
 
@@ -229,6 +230,7 @@ enum class target_kind : u8;
 struct target;
 struct written_argument;
 struct ray_trace;
+struct callable_call;
 struct flat_traced_ray;
 struct call_record;
 enum class miss_reason : u8;

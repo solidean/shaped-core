@@ -228,6 +228,17 @@ void write_raytracing_pipeline(babel::json::object_writer& o, sgl::described_ray
     write_names(o, "layout", p.layout);
     o.write("inline", cc::string_view(p.inline_constants));
     write_names(o, "features", p.features);
+    write_names(o, "callables", p.callables);
+    o.write("host_callables", p.has_host_callables);
+}
+
+void write_callables(babel::json::object_writer& o, sgl::described_callables const& c)
+{
+    o.write("name", cc::string_view(c.name));
+    o.write("parameter", cc::string_view(c.parameter));
+    write_names(o, "entries", c.entries);
+    o.write("host", c.has_host);
+    o.write("offset", i64(c.offset));
 }
 
 void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const& p)
@@ -372,6 +383,14 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
             {
                 auto o = pipelines.write_object();
                 write_raytracing_pipeline(o, p);
+            }
+        }
+        {
+            auto tables = root.write_array("callables");
+            for (auto const& c : d.callables)
+            {
+                auto o = tables.write_object();
+                write_callables(o, c);
             }
         }
         auto samplers = root.write_array("samplers");

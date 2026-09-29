@@ -256,7 +256,38 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
                 result.max_attribute_size, payload_bytes(m, m.at(m.functions[m.at(g.intersection).info].result).element));
     for (auto const b : m.at(p.layout))
         result.layout.push_back(m.at(b).name);
+    // CHK-343: every table of the module, packed in declaration order
+    auto tables = cc::vector<check::pipeline_info const*>();
+    for (auto const& t : m.pipelines)
+        if (t.kind == check::pipeline_kind::callables)
+            tables.push_back(&t);
+    for (auto i = isize(0); i < tables.size(); ++i)
+        for (auto j = i + 1; j < tables.size(); ++j)
+            if (index_of(tables[j]->symbol) < index_of(tables[i]->symbol))
+                cc::swap(tables[i], tables[j]);
+    for (auto const* const t : tables)
+    {
+        for (auto const entry : m.at(t->records))
+        {
+            result.callables.push_back(m.at(entry).name);
+            features |= m.functions[m.at(entry).info].features;
+        }
+        result.has_host_callables = result.has_host_callables || t->has_host_callables;
+    }
     result.features = feature_names(features);
+    return result;
+}
+
+described_callables describe_callables(check::checked_module const& m, check::pipeline_info const& p)
+{
+    auto result = described_callables{.name = m.at(p.symbol).name,
+                                      .parameter = cc::string(m.name_of(p.callable_parameter)),
+                                      .has_host = p.has_host_callables};
+    for (auto const entry : m.at(p.records))
+        result.entries.push_back(m.at(entry).name);
+    for (auto const& t : m.pipelines)
+        if (t.kind == check::pipeline_kind::callables && index_of(t.symbol) < index_of(p.symbol))
+            result.offset += i32(t.records.count);
     return result;
 }
 
@@ -572,6 +603,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             continue;
         if (p.kind == check::pipeline_kind::hit_group)
             result.hit_groups.push_back(describe_hit_group(m, p));
+        else if (p.kind == check::pipeline_kind::callables)
+            result.callables.push_back(describe_callables(m, p));
         else if (p.kind == check::pipeline_kind::raytracing)
             result.raytracing_pipelines.push_back(describe_raytracing_pipeline(m, p));
         else

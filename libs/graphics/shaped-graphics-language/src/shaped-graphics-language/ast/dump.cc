@@ -629,7 +629,10 @@ struct dumper
             },
             [&](pipeline_decl const& n)
             {
-                open(n.is_hit_group ? "hit_group" : n.is_short_form ? "pipeline:short" : "pipeline");
+                open(n.is_hit_group    ? "hit_group"
+                     : n.is_callables  ? "callables"
+                     : n.is_short_form ? "pipeline:short"
+                                       : "pipeline");
                 // No name is valid here, unlike every other declaration's missing one.
                 out += n.name.empty() ? cc::string_view("<unnamed>") : file.text_of(n.name);
                 if (n.is_hit_group)

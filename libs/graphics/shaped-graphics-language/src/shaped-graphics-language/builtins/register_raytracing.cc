@@ -449,6 +449,16 @@ written write_trace_ray(call_context const& ctx)
 
 constexpr cc::string_view k_trace_ray_hlsl[] = {"RayDesc", "TraceRay"};
 
+/// A call of callable `index` of the pipeline's callable section: (index, parameter).
+written write_call_callable(call_context const& ctx)
+{
+    if (ctx.target != language::hlsl)
+        return {};
+    return {.text = cc::format("CallShader(uint({}), {})", ctx.arguments[0].text, ctx.arguments[1].text)};
+}
+
+constexpr cc::string_view k_call_callable_hlsl[] = {"CallShader"};
+
 spelling query_spelling(query_op op)
 {
     return {.kind = spelling_kind::custom,
@@ -579,6 +589,20 @@ void sgl::builtins::register_raytracing(registry& r)
             .takes_element = true,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
+
+    r.add_comment("// A call of a callable, which `table[i](mut p)` lowers to with the table's place in the section "
+                  "added "
+                  "(CHK-344).");
+    r.add(function_record{
+        .signature = "@stages(.raygen, .closest_hit, .miss, .callable) fun call_callable(index: int)",
+        .doc = "/// Calls the callable at `index` of the pipeline's callable section, handing the parameter over past "
+               "the "
+               "signature.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_call_callable, .hlsl_names = k_call_callable_hlsl},
+        .takes_element = true,
+        .features = check::feature_set(check::feature::raytracing_pipeline),
+    });
 
     r.add_comment("// The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc "
                   "raytracing-polyfill.md).");

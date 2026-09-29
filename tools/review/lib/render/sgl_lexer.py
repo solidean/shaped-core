@@ -16,7 +16,7 @@ from pygments.lexer import Lexer
 from pygments.token import Comment, Error, Keyword, Name, Number, Operator, Punctuation, String, Whitespace
 
 _DECLARATION_KEYWORDS = frozenset({
-    "fun", "let", "mut", "out", "struct", "enum", "binding", "sampler", "pipeline", "rays", "hit_group", "const", "use",
+    "fun", "let", "mut", "out", "struct", "enum", "binding", "sampler", "pipeline", "rays", "hit_group", "callables", "const", "use",
     "module", "type",
     "notation", "test", "assert", "print", "require",
 })
@@ -28,7 +28,7 @@ _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
 _CONSTANTS = frozenset({"true", "false"})
 # A symbol directly after one of these names a function or a type.
 _NAMES_FUNCTION = frozenset({"fun"})
-_NAMES_TYPE = frozenset({"struct", "enum", "binding", "sampler", "pipeline", "rays", "hit_group", "type", "module"})
+_NAMES_TYPE = frozenset({"struct", "enum", "binding", "sampler", "pipeline", "rays", "hit_group", "callables", "type", "module"})
 
 # Everything past ASCII counts as a symbol character for now; the spec will narrow it to identifier ranges.
 _NON_ASCII = "\x80-\U0010ffff"

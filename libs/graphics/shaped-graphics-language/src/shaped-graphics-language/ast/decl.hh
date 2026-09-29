@@ -140,6 +140,8 @@ struct sgl::ast::pipeline_decl
     bool is_hit_group = false;
     /// The ray set a hit group is for; empty for a pipeline.
     source_span ray_set;
+    /// `callables name = (f, g, .host)`, a table of callable shaders whose list is `stages` (AST-153).
+    bool is_callables = false;
 
     constexpr bool operator==(pipeline_decl const&) const = default;
 };

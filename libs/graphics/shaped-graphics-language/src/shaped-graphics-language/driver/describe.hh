@@ -250,6 +250,18 @@ struct sgl::described_hit_group
     cc::vector<cc::string> any_hits;
 };
 
+/// A `callables` table: callable shaders of one parameter type, packed in the module's declaration order.
+struct sgl::described_callables
+{
+    cc::string name;
+    cc::string parameter;
+    cc::vector<cc::string> entries;
+    /// Whether the host appends callables of its own after every listed one of the module.
+    bool has_host = false;
+    /// Where the table starts in the callable section of every ray-tracing pipeline of the module.
+    i32 offset = 0;
+};
+
 /// A `@raytracing pipeline`: its ray set, its shaders, and what sg's description needs that SGL derives.
 struct sgl::described_raytracing_pipeline
 {
@@ -269,6 +281,9 @@ struct sgl::described_raytracing_pipeline
     cc::vector<cc::string> layout;
     cc::string inline_constants;
     cc::vector<cc::string> features;
+    /// Every callable of the module's tables, in their order, which the pipeline's callable section holds first.
+    cc::vector<cc::string> callables;
+    bool has_host_callables = false;
 };
 
 struct sgl::module_description
@@ -283,6 +298,7 @@ struct sgl::module_description
     cc::vector<described_ray_set> ray_sets;
     cc::vector<described_hit_group> hit_groups;
     cc::vector<described_raytracing_pipeline> raytracing_pipelines;
+    cc::vector<described_callables> callables;
     /// The file-scope samplers, in index order.
     cc::vector<described_file_sampler> samplers;
 };
