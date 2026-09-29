@@ -22,6 +22,16 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Closing it is a reserved descriptor set of immutable samplers on vulkan, at `sg::reserved_binding_group` as webgpu has it, and the same argument buffer slot on metal.
   SGL's file-scope `sampler name:` waits on this, and a group's name-matched static sampler is what works everywhere meanwhile.
 
+- **The vulkan backend enables no compute-shader derivatives, which is what stops NRD's SPIR-V running on it.**
+  `sr::nrd_denoise_routine` is dx12-only today, and turning on NRD's embedded SPIR-V is what would widen it.
+  Built that far and run against a validating vulkan context, two things break, and one of them is ours.
+  A shader module carrying `ComputeDerivativeGroupQuadsKHR` is refused for want of `computeDerivativeGroupQuads`.
+  So is the `VK_KHR_compute_shader_derivatives` extension, and the backend asks the device for neither.
+  Closing it is the ordinary optional-feature shape: probe it at device creation, enable it where present, and report it so a caller can ask.
+  The other half belongs to the caller rather than here: NRD declares two register spaces, which are two descriptor sets, and `nrd_session` builds one binding group.
+  So this entry does not close that member on its own.
+  See libs/graphics/shaped-rendering/docs/denoising.md.
+
 - **The metal backend serializes no pipeline blob.**
   `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a
   caller persisting a blob across runs gets nothing to persist and every build is a cold one.
