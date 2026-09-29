@@ -68,7 +68,7 @@ src/shaped-graphics/
     copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (both backends real); texture copies pending
     compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
     raster.hh/.cc                 [done]        cmd.raster: rendering scope, bindings, viewport/scissor state, draws (both backends real)
-    raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (both backends real)
+    raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12, vulkan, metal; webgpu builds only)
     query.hh/.cc                  [done]        cmd.query: record_gpu_timestamp / is_supported (real on all three backends)
 
   compute/
@@ -103,9 +103,12 @@ src/shaped-graphics/
     vertex_input.hh               [in progress] vertex_input_layout / slots / attributes; attributes are still HLSL-semantic-keyed
 
   raytracing/
-    acceleration_structure.hh/.cc [done]        blas / tlas + their build inputs; dx12 = a storage buffer, vulkan = a VkAccelerationStructureKHR over one
-    raytracing_pipeline.hh/.cc    [done]        DXR state object + the shader-handle registration phase; vulkan = ray-tracing shader groups
-    raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table; both backends real; its records still sit in a plain buffer
+    acceleration_structure.hh/.cc [done]        blas / tlas + their build inputs; dx12 = a storage buffer, vulkan = a VkAccelerationStructureKHR over one,
+                                                metal = an MTLAccelerationStructure, webgpu = a region of the polyfill's pool
+    raytracing_pipeline.hh/.cc    [done]        DXR state object + the shader-handle registration phase; vulkan = ray-tracing shader groups;
+                                                metal = a compute pipeline per raygen
+    raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table, hit rows and ray_count; real on dx12, vulkan and metal;
+                                                its records still sit in a plain buffer
 
   resource/
     pixel_format.hh               [done]        restrictive texel-format enum + helpers (depth/compressed/block-size)

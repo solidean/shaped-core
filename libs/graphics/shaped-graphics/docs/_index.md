@@ -57,6 +57,7 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
   opaque driver-built structures whose creation is a recorded `cmd.raytracing` build, the DXR∩Vulkan input vocabulary, and the persistent-vs-transient handle lifetime.
 - [raytracing pipeline](concepts/raytracing-pipeline.md) — the full DXR path:
   a `raytracing_pipeline` (state object) + `raytracing_shader_table` + `cmd.raytracing.dispatch_rays`, the two-phase handle/index model, and why records hold only a shader identifier.
+  Also which backend has `ray_query` and `raytracing_pipeline`, and what metal and webgpu make of them.
 - [raster pipeline](concepts/raster-pipeline.md) — the graphics path:
   a `raster_pipeline` (PSO) with its fixed-function state baked in, why the target formats live in the description,
   and how draws record on the `rendering_scope` handle as well as `cmd.raster` / `cmd.raster.manual`.

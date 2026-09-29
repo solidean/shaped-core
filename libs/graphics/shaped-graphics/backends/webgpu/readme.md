@@ -53,7 +53,16 @@ What this backend adds to it:
 - **A build** writes the header and the tree's topology from the CPU, then records one kernel dispatch for the primitives, one for the leaves and one per level above them.
   A build is not allowed inside a rendering scope.
 - **A pipeline layout with an acceleration structure** gets the pool and the roots in group 3, at bindings 17 and 18.
+  The pool is `var<storage, read> sg_acceleration_pool: array<vec4u>`, bound whole.
+  The roots are `var<uniform> sg_acceleration_roots: array<vec4u, 4>`: each bound structure's first unit, written per dispatch or draw, so a layout binds at most 16 structures.
   The roots sit right after the inline constants in one placed block, so both dynamic offsets point into the same constant page.
+  slib's WGSL reader accepts exactly those two declarations there and binds neither through a group.
+- **The pool is at most 128 MiB**, the default largest storage binding, and a build that would outgrow it throws `sg::allocation_exception`.
+- **The tree follows the primitive order**, with no spatial sort, so a triangle soup traces slowly.
+  [acceleration-structures](../../docs/concepts/acceleration-structures.md#webgpu-implementation-a-software-polyfill) has the rest.
+- **There is no ray-tracing pipeline**, emulated or otherwise: a path tracer here is written against ray queries.
+  `create_raytracing_pipeline` and the shader table fail with an error naming `sg::feature::raytracing_pipeline`.
+- **`webgpu_command_list::download_acceleration_pool()`** reads the whole pool back after the list runs, which is what the backend's tests check the layout with.
 
 ## Transfers
 
