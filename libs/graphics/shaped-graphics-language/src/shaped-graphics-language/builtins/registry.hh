@@ -178,7 +178,8 @@ struct sgl::builtins::type_record
 struct sgl::builtins::function_record
 {
     /// The signature as SGL source, without `@builtin`: `@pure fun mix(a: float3, b: float3, t: float) -> float3`.
-    /// `@pure` and `@operator("…")` stand in this text and nowhere else.
+    /// `@pure`, `@operator("…")`, `@stages(…)` and `@internal` stand in this text and nowhere else.
+    /// `@internal` marks a step only the prelude calls, which no lookup from the program finds (CHK-323).
     cc::string signature;
     /// Zero or more whole `///` lines, without the line break of the last one.
     cc::string doc;

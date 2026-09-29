@@ -409,10 +409,13 @@ struct checker
     /// The functions a call of `name` from `file` may choose from, where `first` is its first argument's type:
     /// the functions of that name visible there, and those of the type scope of `first` (CHK-247).
     [[nodiscard]] cc::vector<symbol_id> candidates_of(i32 file, cc::string_view name, type_id first) const;
+    /// A declaration of the prelude marked `@internal`, which no lookup from the program's file finds (CHK-323).
+    [[nodiscard]] bool is_internal(symbol_id id) const;
     /// True where a lookup from `file` sees a function of `from`: the prelude never sees the program's.
+    /// The program never sees what the prelude keeps internal.
     [[nodiscard]] bool is_visible_from(i32 file, symbol_id from) const
     {
-        return !is_prelude_file(file) || is_prelude_file(out.at(from).file);
+        return is_prelude_file(file) ? is_prelude_file(out.at(from).file) : !is_internal(from);
     }
     /// Gives every struct with a block its synthesized constructor, a function of the struct's name (CHK-239).
     /// Run once every file is declared, so the symbols declared before keep their ids.

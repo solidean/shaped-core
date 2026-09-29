@@ -654,7 +654,7 @@ void sgl::builtins::register_raytracing(registry& r)
     auto const add = [&](cc::string signature, evaluator evaluate, query_op op, cc::string_view doc)
     {
         r.add(function_record{
-            .signature = cc::move(signature),
+            .signature = cc::format("@internal {}", signature),
             .doc = cc::string(doc),
             .evaluate = evaluate,
             .write = query_spelling(op),
@@ -700,7 +700,7 @@ void sgl::builtins::register_raytracing(registry& r)
                   "entry point.");
     for (auto i = u32(0); i < u32(sizeof(k_stage_reads) / sizeof(k_stage_reads[0])); ++i)
         r.add(function_record{
-            .signature = cc::string(k_stage_reads[i].signature),
+            .signature = cc::format("@internal {}", k_stage_reads[i].signature),
             .evaluate = k_stage_reads[i].evaluate,
             .write
             = {.kind = spelling_kind::custom, .custom = write_stage_read, .data = i, .hlsl_names = k_stage_reads_hlsl},
@@ -710,11 +710,11 @@ void sgl::builtins::register_raytracing(registry& r)
     r.add_comment("// A ray-tracing stage's trace, which a `trace` naming a ray type of its set lowers to (CHK-329).");
     for (auto const geometry : {"triangles", "procedural", "mixed"})
         r.add(function_record{
-            .signature
-            = cc::format("@stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.{}], "
-                         "origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, "
-                         "contribution: int, multiplier: int, miss: int)",
-                         geometry),
+            .signature = cc::format(
+                "@internal @stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.{}], "
+                "origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, "
+                "contribution: int, multiplier: int, miss: int)",
+                geometry),
             .doc = "/// Traces a ray through the pipeline's tables, handing the payload over past the signature.",
             .evaluate = nothing,
             .write = {.kind = spelling_kind::custom,
@@ -730,7 +730,7 @@ void sgl::builtins::register_raytracing(registry& r)
                   "added "
                   "(CHK-344).");
     r.add(function_record{
-        .signature = "@stages(.raygen, .closest_hit, .miss, .callable) fun call_callable(index: int)",
+        .signature = "@internal @stages(.raygen, .closest_hit, .miss, .callable) fun call_callable(index: int)",
         .doc = "/// Calls the callable at `index` of the pipeline's callable section, handing the parameter over past "
                "the "
                "signature.",
@@ -744,7 +744,8 @@ void sgl::builtins::register_raytracing(registry& r)
                   "libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md).");
     for (auto const geometry : {"triangles", "procedural", "mixed"})
         r.add(function_record{
-            .signature = cc::format("@pure fun acceleration_root(world: acceleration_structure[.{}]) -> uint", geometry),
+            .signature
+            = cc::format("@internal @pure fun acceleration_root(world: acceleration_structure[.{}]) -> uint", geometry),
             .doc = "/// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.",
             .evaluate = zero_uint,
             .write = {.kind = spelling_kind::custom, .custom = write_polyfill, .data = 0, .wgsl_names = k_polyfill_wgsl},
@@ -752,7 +753,7 @@ void sgl::builtins::register_raytracing(registry& r)
             .takes_acceleration_index = true,
         });
     r.add(function_record{
-        .signature = "@pure fun acceleration_pool_load(unit: uint) -> uint4",
+        .signature = "@internal @pure fun acceleration_pool_load(unit: uint) -> uint4",
         .doc = "/// One unit of the pool.",
         .evaluate = zero_uint4,
         .write = {.kind = spelling_kind::custom, .custom = write_polyfill, .data = 1, .wgsl_names = k_polyfill_wgsl},

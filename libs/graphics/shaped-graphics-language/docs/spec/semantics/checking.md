@@ -261,6 +261,8 @@ fun shade(k: float) -> float:
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 
 * **CHK-323** `@internal` on a declaration of the prelude makes it the prelude's alone: no lookup from the program's file finds it, and the prelude's files still do.
+  That holds for every path a lookup takes: a name, the type scope and declaring scope of a first argument's type (CHK-247), and `T.f(…)` (CHK-248).
+  A builtin step that a function of the prelude wraps is `@internal` too, such as a step of a ray query or of a pipeline's trace.
   On a declaration of the program's file it hides nothing.
 * **CHK-324** A function of the prelude may take a resource, which a function of the program may not (CHK-206).
   Inlining substitutes it: the argument stands wherever the parameter is named, since no target holds a resource in a local.
