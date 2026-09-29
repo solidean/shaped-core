@@ -44,6 +44,10 @@ enum class sgl::check::type_kind : sgl::u8
     /// `(A, B) -> R`: a function a parameter takes, whose `members` are the parameter types and `element` the result.
     /// Only a parameter holds one, and a call through it is inlined where the function was handed over (CHK-317).
     function,
+    /// `A` of `fun f[A](…)` or of a generic prelude struct: a type nothing is known of, which a value of is handed on,
+    /// stored and returned, and nothing else (CHK-333).
+    /// A call deduces what it stands for, and inlining writes that in its place.
+    type_parameter,
     // Tuples and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 
@@ -256,6 +260,10 @@ struct sgl::check::type_info
     bool is_comparison = false;
     /// How a resource type is written, `out image_2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
     cc::string spelled;
+    /// A generic struct of the prelude, `struct report[A]:`, whose `element` is its type parameter (CHK-334).
+    bool is_template = false;
+    /// An instance of one, `report[hit_attributes]`: the template, whose `element` this instance's argument replaces.
+    type_id generic = type_id::none;
 
     bool operator==(type_info const&) const = default;
 };
@@ -490,6 +498,8 @@ struct sgl::check::function_info
     /// For an entry point, the features a device needs to run it: what it uses, never what it merely declares (CHK-263).
     /// Empty for every other function.
     feature_set features;
+    /// `[A, B]`: a type of kind `type_parameter` each, in the order written; a range of `checked_module::type_lists`.
+    ast::range_of<type_id> type_parameters;
 
     constexpr bool operator==(function_info const&) const = default;
 };
@@ -633,6 +643,9 @@ enum class sgl::check::target_kind : sgl::u8
     array_length,
     /// On a call: `T[N].filled(v)`, an array holding `v` in every element (CHK-289).
     array_filled,
+    /// On a call: the prelude's `undefined()`, a value of the type the parameter it meets has, which nobody reads
+    /// (CHK-336).
+    undefined_value,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.
@@ -683,6 +696,9 @@ struct sgl::check::call_record
     ast::range_of<written_argument> written;
     /// One per parameter of `callee`: a position in `written`, or -1 where the parameter takes its default.
     ast::range_of<i32> slots;
+    /// What a generic callee's type parameters stand for at this call, two by two: a parameter, then its argument
+    /// (CHK-335); a range of `checked_module::type_lists`.
+    ast::range_of<type_id> type_arguments;
 
     constexpr bool operator==(call_record const&) const = default;
 };

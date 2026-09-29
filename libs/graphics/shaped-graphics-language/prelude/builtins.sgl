@@ -1354,6 +1354,10 @@
 @builtin fun ray_query_abort(q: ray_query)
 /// 0 for nothing, 1 for a triangle, 2 for a procedural primitive.
 @builtin fun ray_query_committed_kind(q: ray_query) -> int
+/// Accepts the candidate box's primitive, hit at `t`.
+@builtin fun ray_query_commit_procedural(q: ray_query, t: float)
+/// Whether the candidate box's geometry is opaque, after the instance's and the ray's forcing.
+@builtin fun ray_query_candidate_is_opaque_box(q: ray_query) -> bool
 /// Of the candidate.
 @builtin fun ray_query_candidate_t(q: ray_query) -> float
 /// Of the committed hit.
@@ -1390,6 +1394,14 @@
 @builtin fun ray_query_candidate_world_to_object_row(q: ray_query, row: int) -> float4
 /// Of the committed hit.
 @builtin fun ray_query_committed_world_to_object_row(q: ray_query, row: int) -> float4
+/// Of the candidate.
+@builtin fun ray_query_candidate_object_ray_origin(q: ray_query) -> float3
+/// Of the committed hit.
+@builtin fun ray_query_committed_object_ray_origin(q: ray_query) -> float3
+/// Of the candidate.
+@builtin fun ray_query_candidate_object_ray_direction(q: ray_query) -> float3
+/// Of the committed hit.
+@builtin fun ray_query_committed_object_ray_direction(q: ray_query) -> float3
 
 // What a ray-tracing stage reads of its launch, its ray and its hit, which raytracing.sgl hands its entry point.
 @builtin @stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3

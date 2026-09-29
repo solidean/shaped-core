@@ -139,3 +139,107 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace forced opaque asks no any-hit decisio
     auto const pipeline = co_await shaders::raytracing.trace_cells_opaque.acquire_pipeline(*ctx);
     co_await trace_grid(ctx, pipeline, false);
 }
+
+// raytracing.sgl's sphere traces: a procedural BLAS of two boxes, each holding the unit sphere at its centre.
+// Box k spans x from 2k to 2k + 2 and y and z from 0 to 2; one instance, id 30, stands where the boxes were built.
+// Each thread traces one ray along +z from z = -1 through its cell of an 8 × 8 grid over [0, 4]².
+
+namespace
+{
+struct expected_sphere
+{
+    bool is_hit = false;
+    int primitive = 0;
+    float t = 0;
+    tg::vec3f normal;
+};
+
+expected_sphere expected_sphere_at(int x, int y, bool is_cut)
+{
+    auto const px = 0.5f * float(x) + 0.25f;
+    auto const py = 0.5f * float(y) + 0.25f;
+    auto const primitive = px < 2 ? 0 : 1;
+    auto const dx = px - float(2 * primitive + 1);
+    auto const dy = py - 1;
+    auto const distance2 = dx * dx + dy * dy;
+    if (distance2 >= 1 || (primitive == 1 && is_cut))
+        return {};
+    auto const dz = tg::sqrt(1 - distance2);
+    return {.is_hit = true, .primitive = primitive, .t = 2 - dz, .normal = tg::vec3f(dx, dy, -dz)};
+}
+
+cc::shared_async<cc::unit> trace_sphere_grid(sg::context_handle ctx, sg::compute_pipeline_handle pipeline, bool is_cut)
+{
+    float const boxes[] = {0, 0, 0, 2, 2, 2, 2, 0, 0, 4, 2, 2};
+    auto const input = ctx->persistent.create_buffer_from_data(boxes, sg::buffer_usage::accel_structure_build_input);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const aabbs = sg::blas_aabbs{.aabbs = input.raw(), .aabb_count = 2, .is_opaque = false};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_aabbs const>(&aabbs, 1));
+    sg::tlas_instance const instances[] = {{.blas = blas, .instance_id = 30}};
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sphere_scene>();
+    auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                           shaders::sphere_scene{.world = tlas->as_view(),
+                                                                                 .hits = hits.as_readwrite_buffer(),
+                                                                                 .ids = ids.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(grid, grid);
+    auto const hits_back = cmd->download.data_from_buffer(hits);
+    auto const ids_back = cmd->download.data_from_buffer(ids);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_hits = co_await hits_back.data();
+    auto const got_ids = co_await ids_back.data();
+    REQUIRE(got_hits.size() == grid * grid);
+    REQUIRE(got_ids.size() == grid * grid);
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+        {
+            auto const want = expected_sphere_at(x, y, is_cut);
+            auto const at = y * grid + x;
+            auto const where = cc::format("cell ({}, {})", x, y);
+            CHECK(got_ids[at][0] == (want.is_hit ? 1 : 0)).context(where);
+            if (!want.is_hit)
+                continue;
+            CHECK(got_ids[at][1] == 30).context(where);
+            CHECK(got_ids[at][2] == want.primitive).context(where);
+            CHECK(got_ids[at][3] == 0).context(where);
+            CHECK(tg::abs(got_hits[at][0] - want.t) < 1e-4f).context(where);
+            CHECK(tg::abs(got_hits[at][1] - want.normal[0]) < 1e-4f).context(where);
+            CHECK(tg::abs(got_hits[at][2] - want.normal[1]) < 1e-4f).context(where);
+            CHECK(tg::abs(got_hits[at][3] - want.normal[2]) < 1e-4f).context(where);
+        }
+    co_return;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - an inline trace asks the intersection of each box, and the any-hit decision cuts a report "
+                     "out",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::ray_query))
+        SKIP("this device has no ray queries");
+    auto const pipeline = co_await shaders::raytracing.trace_spheres.acquire_pipeline(*ctx);
+    co_await trace_sphere_grid(ctx, pipeline, true);
+}
+
+ASYNC_INVOCABLE_TEST("sg - an inline trace without a decision accepts every report", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::ray_query))
+        SKIP("this device has no ray queries");
+    auto const pipeline = co_await shaders::raytracing.trace_spheres_all.acquire_pipeline(*ctx);
+    co_await trace_sphere_grid(ctx, pipeline, false);
+}

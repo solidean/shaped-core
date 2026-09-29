@@ -65,6 +65,72 @@ struct triangle_hit:
     _to_object_y: float4
     _to_object_z: float4
 
+/// A box of procedural geometry the traversal entered, which an intersection decides by what it reports.
+/// Its `object_ray` is the ray in the instance's object space, where the box and its primitive stand.
+struct procedural_box:
+    /// The nearest hit accepted so far, which a report must not lie beyond.
+    t_current: float
+    ray: ray
+    object_ray: ray
+    instance_id: int
+    instance_index: int
+    geometry_index: int
+    primitive_index: int
+    _to_world_x: float4
+    _to_world_y: float4
+    _to_world_z: float4
+    _to_object_x: float4
+    _to_object_y: float4
+    _to_object_z: float4
+
+/// What an intersection reports of a box: a hit at `t` with its `attributes`, or none (`report.none()`).
+/// At most one per box; a report beyond the box's `t_current` or before the ray's `t_min` is no hit.
+struct report[A]:
+    t: float
+    attributes: A
+    is_hit: bool = true
+
+/// No hit in the box.
+fun report.none() -> report => report(0.0, undefined(), false)
+
+/// A primitive an intersection reported, which the any-hit decision is asked about.
+struct procedural_candidate[A]:
+    t: float
+    ray: ray
+    instance_id: int
+    instance_index: int
+    geometry_index: int
+    primitive_index: int
+    attributes: A
+    _to_world_x: float4
+    _to_world_y: float4
+    _to_world_z: float4
+    _to_object_x: float4
+    _to_object_y: float4
+    _to_object_z: float4
+
+/// The nearest procedural primitive a trace accepted, where `is_hit`; otherwise its `t` is the ray's `t_max`, and its
+/// attributes are undefined.
+struct procedural_hit[A]:
+    is_hit: bool
+    t: float
+    ray: ray
+    instance_id: int
+    instance_index: int
+    geometry_index: int
+    primitive_index: int
+    attributes: A
+    _to_world_x: float4
+    _to_world_y: float4
+    _to_world_z: float4
+    _to_object_x: float4
+    _to_object_y: float4
+    _to_object_z: float4
+
+@internal fun procedural_hit.none(r: ray) -> procedural_hit:
+    let zero = float4(0.0, 0.0, 0.0, 0.0)
+    return procedural_hit(false, r.t_max, r, 0, 0, 0, 0, undefined(), zero, zero, zero, zero, zero, zero)
+
 // ---- the transforms of a hit, typed by what they move ---------------------------------------------------------------
 
 @internal fun apply_rows(x: float4, y: float4, z: float4, p: float3, w: float) -> float3:
@@ -116,6 +182,41 @@ fun triangle_candidate.to_world(self, v: vec3) -> vec3:
     let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z), 0.0)
     return vec3(m.x, m.y, m.z)
 
+/// An object-space point of the hit's instance, in world space.
+fun procedural_hit.to_world(self, p: pos3) -> pos3:
+    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    return pos3(m.x, m.y, m.z)
+
+/// An object-space direction, in world space: the linear part alone.
+fun procedural_hit.to_world(self, v: vec3) -> vec3:
+    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z), 0.0)
+    return vec3(m.x, m.y, m.z)
+
+/// An object-space normal, in world space: by the inverse transpose, so it stays perpendicular to the surface.
+fun procedural_hit.normal_to_world(self, n: vec3) -> vec3:
+    let m = apply_transposed(self._to_object_x, self._to_object_y, self._to_object_z, float3(n.x, n.y, n.z))
+    return vec3(m.x, m.y, m.z)
+
+/// A world-space point, in the hit's object space.
+fun procedural_hit.to_object(self, p: pos3) -> pos3:
+    let m = apply_rows(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z), 1.0)
+    return pos3(m.x, m.y, m.z)
+
+/// A world-space direction, in the hit's object space.
+fun procedural_hit.to_object(self, v: vec3) -> vec3:
+    let m = apply_rows(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z), 0.0)
+    return vec3(m.x, m.y, m.z)
+
+/// An object-space point of the candidate's instance, in world space.
+fun procedural_candidate.to_world(self, p: pos3) -> pos3:
+    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    return pos3(m.x, m.y, m.z)
+
+/// An object-space point of the box's instance, in world space.
+fun procedural_box.to_world(self, p: pos3) -> pos3:
+    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    return pos3(m.x, m.y, m.z)
+
 // ---- the trace ------------------------------------------------------------------------------------------------------
 
 /// Traces `r` against `world`, deciding every non-opaque triangle by `any_hit`, and gives the nearest accepted hit.
@@ -140,6 +241,31 @@ fun trace(
 ) -> triangle_hit:
     return trace(world, r, accept_every_triangle, flags = flags, mask = mask)
 
+/// Traces `r` against boxes of procedural geometry: `intersection` reports what each box holds, `any_hit` decides every
+/// report of a non-opaque one, and the nearest accepted is the hit.
+fun trace[A](
+    world: acceleration_structure[.procedural]
+    r: ray
+    intersection: (procedural_box) -> report[A]
+    any_hit: (procedural_candidate[A]) -> hit_decision
+    .flags: ray_flags = ray_flags.none
+    .mask: int = 255
+) -> procedural_hit[A]:
+    return by_target(
+        () => trace_native_procedural(world, r, flags, mask, intersection, any_hit)
+        () => trace_emulated_procedural(acceleration_root(world), r, flags, mask, intersection, any_hit)
+    )
+
+/// Traces `r` against boxes of procedural geometry, accepting every report.
+fun trace[A](
+    world: acceleration_structure[.procedural]
+    r: ray
+    intersection: (procedural_box) -> report[A]
+    .flags: ray_flags = ray_flags.none
+    .mask: int = 255
+) -> procedural_hit[A]:
+    return trace(world, r, intersection, c => hit_decision.accept, flags = flags, mask = mask)
+
 /// Whether anything lies on `r`: the shadow ray, which stops at the first hit it accepts.
 fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 255) -> bool:
     let h = trace(world, r, flags = ray_flags.accept_first_hit_and_end_search, mask = mask)
@@ -148,7 +274,7 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
 @internal fun accept_every_triangle(c: triangle_candidate) -> hit_decision => hit_decision.accept
 
 /// Which form of a trace a target writes: the native one, or the emulated one where the device has no query.
-@internal fun by_target(native: () -> triangle_hit, emulated: () -> triangle_hit) -> triangle_hit => native()
+@internal fun by_target[H](native: () -> H, emulated: () -> H) -> H => native()
 
 @internal fun no_triangle_hit(r: ray) -> triangle_hit:
     let zero = float4(0.0, 0.0, 0.0, 0.0)
@@ -260,6 +386,89 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
             if d != hit_decision.ignore => ray_query_commit_triangle(q)
             if d == hit_decision.accept_and_end_search => ray_query_abort(q)
     return committed_of(q, r)
+
+@internal fun box_of(q: ray_query, r: ray, t_current: float) -> procedural_box:
+    let o = ray_query_candidate_object_ray_origin(q)
+    let d = ray_query_candidate_object_ray_direction(q)
+    return procedural_box(
+        t_current
+        r
+        ray(origin = pos3(o.x, o.y, o.z), direction = vec3(d.x, d.y, d.z), t_min = r.t_min, t_max = t_current)
+        ray_query_candidate_instance_id(q)
+        ray_query_candidate_instance_index(q)
+        ray_query_candidate_geometry_index(q)
+        ray_query_candidate_primitive_index(q)
+        ray_query_candidate_object_to_world_row(q, 0)
+        ray_query_candidate_object_to_world_row(q, 1)
+        ray_query_candidate_object_to_world_row(q, 2)
+        ray_query_candidate_world_to_object_row(q, 0)
+        ray_query_candidate_world_to_object_row(q, 1)
+        ray_query_candidate_world_to_object_row(q, 2)
+    )
+
+@internal fun candidate_of_box[A](b: procedural_box, reported: report[A]) -> procedural_candidate[A]:
+    return procedural_candidate(
+        reported.t
+        b.ray
+        b.instance_id
+        b.instance_index
+        b.geometry_index
+        b.primitive_index
+        reported.attributes
+        b._to_world_x
+        b._to_world_y
+        b._to_world_z
+        b._to_object_x
+        b._to_object_y
+        b._to_object_z
+    )
+
+@internal fun hit_of_box[A](b: procedural_box, reported: report[A]) -> procedural_hit[A]:
+    return procedural_hit(
+        true
+        reported.t
+        b.ray
+        b.instance_id
+        b.instance_index
+        b.geometry_index
+        b.primitive_index
+        reported.attributes
+        b._to_world_x
+        b._to_world_y
+        b._to_world_z
+        b._to_object_x
+        b._to_object_y
+        b._to_object_z
+    )
+
+@internal fun trace_native_procedural[A](
+    world: acceleration_structure[.procedural]
+    r: ray
+    flags: ray_flags
+    mask: int
+    intersection: (procedural_box) -> report[A]
+    any_hit: (procedural_candidate[A]) -> hit_decision
+) -> procedural_hit[A]:
+    let q = ray_query_begin()
+    // a structure of boxes holds no triangle, and the target skips the triangle path whole
+    ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags | ray_flags.skip_triangles, mask)
+    // the query keeps the committed box's distance and ids, and the trace keeps what it reported
+    let mut best: procedural_hit[A] = procedural_hit.none(r)
+    while ray_query_proceed(q):
+        if not ray_query_candidate_is_triangle(q):
+            let mut t_current = r.t_max
+            if ray_query_committed_kind(q) != 0 => t_current = ray_query_committed_t(q)
+            let b = box_of(q, r, t_current)
+            let reported = intersection(b)
+            if reported.is_hit and reported.t >= r.t_min and reported.t <= t_current:
+                let mut d = hit_decision.accept
+                if not ray_query_candidate_is_opaque_box(q) => d = any_hit(candidate_of_box(b, reported))
+                if d != hit_decision.ignore:
+                    ray_query_commit_procedural(q, reported.t)
+                    best = hit_of_box(b, reported)
+                if d == hit_decision.accept_and_end_search or (d != hit_decision.ignore and flags.has(ray_flags.accept_first_hit_and_end_search)):
+                    ray_query_abort(q)
+    return best
 
 // ---- the emulated form ----------------------------------------------------------------------------------------------
 //
@@ -435,6 +644,109 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 decision = any_hit(candidate)
             if decision == hit_decision.ignore => continue
             best = hit
+            if decision == hit_decision.accept_and_end_search or flags.has(ray_flags.accept_first_hit_and_end_search):
+                is_done = true
+                break
+    return best
+
+@internal fun trace_emulated_procedural[A](
+    root: uint
+    r: ray
+    flags: ray_flags
+    mask: int
+    intersection: (procedural_box) -> report[A]
+    any_hit: (procedural_candidate[A]) -> hit_decision
+) -> procedural_hit[A]:
+    let mut best: procedural_hit[A] = procedural_hit.none(r)
+    let header = acceleration_pool_load(root)
+    if header.x == 0 => return best
+    let origin = float3(r.origin.x, r.origin.y, r.origin.z)
+    let direction = float3(r.direction.x, r.direction.y, r.direction.z)
+
+    let mut nodes = uint[64].filled(0)
+    let mut owners = int[64].filled(-1)
+    let mut top = 1
+    let mut is_done = false
+    while top > 0 and not is_done:
+        top -= 1
+        let owner = owners[top]
+        let node = nodes[top]
+
+        let mut region = root
+        let mut o = origin
+        let mut d = direction
+        let mut instance = uint4(0, 0, 0, 0)
+        let mut instance_unit: uint = 0
+        if owner >= 0:
+            instance_unit = header.y + 7 * (owner as uint)
+            instance = acceleration_pool_load(instance_unit + 6)
+            region = instance.x
+            let x = pool_float4(acceleration_pool_load(instance_unit))
+            let y = pool_float4(acceleration_pool_load(instance_unit + 1))
+            let z = pool_float4(acceleration_pool_load(instance_unit + 2))
+            o = apply_rows(x, y, z, origin, 1.0)
+            d = apply_rows(x, y, z, direction, 0.0)
+
+        let lo = acceleration_pool_load(region + 1 + 2 * node)
+        let hi = acceleration_pool_load(region + 2 + 2 * node)
+        let inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
+        if box_entry(pool_float3(lo), pool_float3(hi), o, inverse, r.t_min, best.t) > best.t => continue
+
+        if (hi.w & 2147483648) == 0:
+            if top + 2 <= 64:
+                nodes[top] = hi.w
+                owners[top] = owner
+                nodes[top + 1] = lo.w
+                owners[top + 1] = owner
+                top += 2
+            continue
+
+        let count = hi.w & 2147483647
+        let region_header = acceleration_pool_load(region)
+        for k in 0 ..< (count as int):
+            let primitive = lo.w + (k as uint)
+            if owner < 0:
+                let entry = acceleration_pool_load(header.y + 7 * primitive + 6)
+                let instance_mask = ((entry.y >> 24) & 255) as int
+                if (instance_mask & mask) != 0 and top < 64:
+                    nodes[top] = 0
+                    owners[top] = primitive as int
+                    top += 1
+                continue
+
+            // a BLAS of triangles holds nothing a procedural trace sees
+            if region_header.w != 1 => continue
+            let at = region_header.y + 2 * primitive
+            let box_lo = acceleration_pool_load(at)
+            let box_hi = acceleration_pool_load(at + 1)
+            if box_entry(pool_float3(box_lo), pool_float3(box_hi), o, inverse, r.t_min, best.t) > best.t => continue
+
+            let b = procedural_box(
+                best.t
+                r
+                ray(origin = pos3(o.x, o.y, o.z), direction = vec3(d.x, d.y, d.z), t_min = r.t_min, t_max = best.t)
+                (instance.y & 16777215) as int
+                instance.w as int
+                (box_hi.w & 2147483647) as int
+                box_lo.w as int
+                pool_float4(acceleration_pool_load(instance_unit + 3))
+                pool_float4(acceleration_pool_load(instance_unit + 4))
+                pool_float4(acceleration_pool_load(instance_unit + 5))
+                pool_float4(acceleration_pool_load(instance_unit))
+                pool_float4(acceleration_pool_load(instance_unit + 1))
+                pool_float4(acceleration_pool_load(instance_unit + 2))
+            )
+            let reported = intersection(b)
+            if reported.t < r.t_min or reported.t > best.t or not reported.is_hit => continue
+
+            let instance_flags = instance.z >> 24
+            let is_opaque = is_opaque_candidate((box_hi.w & 2147483648) != 0, instance_flags, flags)
+            if flags.has(ray_flags.cull_opaque) and is_opaque => continue
+            if flags.has(ray_flags.cull_non_opaque) and not is_opaque => continue
+            let mut decision = hit_decision.accept
+            if not is_opaque => decision = any_hit(candidate_of_box(b, reported))
+            if decision == hit_decision.ignore => continue
+            best = hit_of_box(b, reported)
             if decision == hit_decision.accept_and_end_search or flags.has(ray_flags.accept_first_hit_and_end_search):
                 is_done = true
                 break

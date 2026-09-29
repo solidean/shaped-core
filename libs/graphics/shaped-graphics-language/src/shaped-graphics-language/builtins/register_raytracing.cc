@@ -44,6 +44,12 @@ void zero_float2(cc::span<scalar const>, cc::vector<scalar>& out)
         out.push_back(scalar::of(0.0f));
 }
 
+void zero_float3(cc::span<scalar const>, cc::vector<scalar>& out)
+{
+    for (auto i = 0; i < 3; ++i)
+        out.push_back(scalar::of(0.0f));
+}
+
 void zero_float4(cc::span<scalar const>, cc::vector<scalar>& out)
 {
     for (auto i = 0; i < 4; ++i)
@@ -89,6 +95,8 @@ enum class query_op : u32
     commit_triangle,
     abort,
     committed_kind,
+    commit_procedural,
+    candidate_is_opaque_box,
     // the reads, each once of the candidate and once of the committed hit: `read_base + read * 2 + is_committed`
     read_base = 16,
 };
@@ -104,6 +112,8 @@ enum class query_read : u32
     is_front_face,
     object_to_world_row,
     world_to_object_row,
+    object_ray_origin,
+    object_ray_direction,
 };
 
 struct read_spelling
@@ -137,6 +147,10 @@ constexpr read_spelling k_reads[] = {
      "get_candidate_object_to_world_transform", "get_committed_object_to_world_transform"},
     {"world_to_object_row", "float4", zero_float4, "CandidateWorldToObject3x4", "CommittedWorldToObject3x4",
      "get_candidate_world_to_object_transform", "get_committed_world_to_object_transform"},
+    {"object_ray_origin", "float3", zero_float3, "CandidateObjectRayOrigin", "CommittedObjectRayOrigin",
+     "get_candidate_ray_origin", "get_committed_ray_origin"},
+    {"object_ray_direction", "float3", zero_float3, "CandidateObjectRayDirection", "CommittedObjectRayDirection",
+     "get_candidate_ray_direction", "get_committed_ray_direction"},
 };
 
 constexpr cc::string_view k_query_hlsl[] = {
@@ -167,6 +181,12 @@ constexpr cc::string_view k_query_hlsl[] = {
     "CommittedObjectToWorld3x4",
     "CandidateWorldToObject3x4",
     "CommittedWorldToObject3x4",
+    "CandidateObjectRayOrigin",
+    "CommittedObjectRayOrigin",
+    "CandidateObjectRayDirection",
+    "CommittedObjectRayDirection",
+    "CommitProceduralPrimitiveHit",
+    "CandidateProceduralPrimitiveNonOpaque",
 };
 constexpr cc::string_view k_query_msl[] = {
     "ray_desc",
@@ -201,6 +221,12 @@ constexpr cc::string_view k_query_msl[] = {
     "get_committed_object_to_world_transform",
     "get_candidate_world_to_object_transform",
     "get_committed_world_to_object_transform",
+    "get_candidate_ray_origin",
+    "get_committed_ray_origin",
+    "get_candidate_ray_direction",
+    "get_committed_ray_direction",
+    "commit_bounding_box_intersection",
+    "is_candidate_non_opaque_bounding_box",
 };
 constexpr cc::string_view k_polyfill_wgsl[] = {"sg_acceleration_roots", "sg_acceleration_pool"};
 
@@ -305,6 +331,13 @@ written write_query(call_context const& ctx)
     case query_op::committed_kind:
         return {.text = is_hlsl ? cc::format("int({}.CommittedStatus())", q)
                                 : cc::format("int({}.get_committed_intersection_type())", q)};
+    case query_op::commit_procedural:
+        return {.text = is_hlsl ? cc::format("{}.CommitProceduralPrimitiveHit({})", q, ctx.arguments[1].text)
+                                : cc::format("{}.commit_bounding_box_intersection({})", q, ctx.arguments[1].text)};
+    case query_op::candidate_is_opaque_box:
+        return {.text = is_hlsl ? cc::format("(!{}.CandidateProceduralPrimitiveNonOpaque())", q)
+                                : cc::format("(!{}.is_candidate_non_opaque_bounding_box())", q),
+                .binds = precedence::unary};
     default:
         return {};
     }
@@ -496,6 +529,10 @@ void sgl::builtins::register_raytracing(registry& r)
         "/// Ends the traversal, keeping what it committed.");
     add("fun ray_query_committed_kind(q: ray_query) -> int", zero_int, query_op::committed_kind,
         "/// 0 for nothing, 1 for a triangle, 2 for a procedural primitive.");
+    add("fun ray_query_commit_procedural(q: ray_query, t: float)", nothing, query_op::commit_procedural,
+        "/// Accepts the candidate box's primitive, hit at `t`.");
+    add("fun ray_query_candidate_is_opaque_box(q: ray_query) -> bool", no_bool, query_op::candidate_is_opaque_box,
+        "/// Whether the candidate box's geometry is opaque, after the instance's and the ray's forcing.");
 
     for (auto read = u32(0); read < u32(sizeof(k_reads) / sizeof(k_reads[0])); ++read)
         for (auto const is_committed : {false, true})

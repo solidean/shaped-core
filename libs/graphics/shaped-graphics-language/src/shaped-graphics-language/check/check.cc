@@ -347,6 +347,7 @@ void checker::run()
             judge_entry_features(symbol_id(i));
 
     index_builtin_symbols();
+    instantiate_generics();
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             flatten_entry_point(symbol_id(i));
@@ -867,6 +868,9 @@ void checker::compile(symbol_id id)
     auto* const outer_used = used_features;
     granted = {};
     used_features = nullptr;
+    // a symbol compiled from inside a generic one sees none of its type parameters
+    auto outer_parameters = cc::move(type_parameter_names);
+    type_parameter_names = {};
 
     switch (out.at(id).kind)
     {
@@ -906,6 +910,7 @@ void checker::compile(symbol_id id)
 
     granted = outer_granted;
     used_features = outer_used;
+    type_parameter_names = cc::move(outer_parameters);
     compiling.remove_back();
     if (out.at(id).state == symbol_state::in_compilation)
         out.symbols[index_of(id)].state = symbol_state::checked;

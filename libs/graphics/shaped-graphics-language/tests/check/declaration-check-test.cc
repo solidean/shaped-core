@@ -177,7 +177,8 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
           == "unsupported-yet user:[2.0 * 1.0] a const whose value is no literal, no enum case and no const\n");
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
     CHECK(reports_for("use brdf\n") == "unsupported-yet user:[use brdf] use\n");
-    CHECK(reports_for("fun id[T](x: T) -> T => x\n").starts_with("unsupported-yet user:[id] a generic function\n"));
+    // CHK-334: a generic struct is the prelude's
+    CHECK(reports_for("struct box[T]:\n    value: T\n") == "unsupported-yet user:[box] a generic struct of the program\n");
     CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
           == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
@@ -193,13 +194,22 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("module cube\nstruct a:\n    x: float\n") == "");
 }
 
-TEST("sgl check - a function needs a body unless it is @builtin, and a generic one fails as a whole")
+TEST("sgl check - a function needs a body unless it is @builtin")
 {
     CHECK(reports_for("fun f(x: float) -> float\n") == "expected-body user:[f] f\n");
+}
 
-    auto const checked = check_sources(read_prelude(), "fun id[T](x: float) -> float => x\n");
-    CHECK(symbol_named(checked.module, "id").state == symbol_state::failed);
-    CHECK(sgl::check::dump(checked.module).ends_with("(fun id failed)\n"));
+TEST("sgl check - a type parameter is opaque, and a call says what it stands for")
+{
+    // CHK-333: what a body does with a value of a type parameter is hand it on, store it and return it
+    CHECK(reports_for("fun id[T](x: T) -> T => x\n") == "");
+    CHECK(reports_for("fun twice[T](x: T) -> T => x + x\n").starts_with("no-matching-overload user:[x + x]"));
+    // CHK-335: a type parameter the arguments leave open is said by where the call stands, or the call is an error
+    CHECK(reports_for("fun pick[T](x: float) -> T => pick(x)\nfun f() -> float => pick(1.0)\n") != "");
+    // an entry point is handed values of known types
+    CHECK(reports_for("@compute(1) fun main[T](@thread_id id: int3):\n    return\n")
+          == "wrong-kind-of-name user:[main] an entry point is no generic function: the GPU hands it values of known "
+             "types\n");
 }
 
 TEST("sgl check - @operator hides the function's name, and takes one quoted operator")

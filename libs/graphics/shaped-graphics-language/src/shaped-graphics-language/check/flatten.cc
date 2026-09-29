@@ -152,6 +152,8 @@ struct flattener
         ast::range_of<call_site> chain;
         /// The function the lambda was written in.
         symbol_id owner = symbol_id::none;
+        /// What the type parameters it sees stood for where it was written.
+        cc::vector<type_id> bindings;
     };
     cc::vector<closure> closures;
     /// Parallel to what `flatten_written` returned last: the closure a function argument hands over, -1 elsewhere.
@@ -180,6 +182,8 @@ struct flattener
         cc::vector<loop_target> loops;
         /// The value blocks of the `case` arms being written, innermost last; a `yield` leaves the last.
         cc::vector<label_id> value_blocks;
+        /// What the type parameters of a generic function stand for in this inlining, two by two (CHK-335).
+        cc::vector<type_id> bindings;
     };
     cc::vector<frame> frames;
 
@@ -231,8 +235,23 @@ struct flattener
         return flat_expr_id::none;
     }
 
+    /// `type` as the current frame's bindings make it: a generic body names its type parameters, and the tree never does.
+    [[nodiscard]] type_id concrete(type_id type)
+    {
+        if (frames.empty() || frames.back().bindings.empty())
+            return type;
+        auto const result = c.substitute_existing(type, frames.back().bindings);
+        if (!is_valid(result) || c.is_open(result))
+        {
+            is_failed = true;
+            return type;
+        }
+        return result;
+    }
+
     local_id add_local(local_kind kind, cc::string_view desired, type_id type)
     {
+        type = concrete(type);
         is_failed = is_failed || !c.is_sound(type);
         meets_error = meets_error || holds_error(type);
         // `_` is a name nobody reads, and no name at all in WGSL
@@ -262,6 +281,7 @@ struct flattener
     template <class Node>
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
+        type = concrete(type);
         // A builtin with an effect may give nothing, `store`, and its call is only ever an `eval`'s value.
         auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::void_type;
         is_failed = is_failed || (!c.is_sound(type) && !is_effect_call);
@@ -717,6 +737,13 @@ struct flattener
     {
         if (where.kind == target_kind::array_filled)
             return flatten_filled(id, type, call);
+        // CHK-336: `undefined()` is a local declared and never assigned, whose value nobody reads
+        if (where.kind == target_kind::undefined_value)
+        {
+            auto const local = add_local(local_kind::var, "undefined", type);
+            add_stmt({.file = file(), .expr = id}, flat_var{.local = local});
+            return local_ref(local, id);
+        }
         if (sgl::is_valid(call.op))
         {
             auto const spelling = c.text_of(file(), c.file_of(file()).at(call.op).where);
@@ -892,7 +919,7 @@ struct flattener
         auto const slots = c.out.at(record.slots);
         if (is_inlined(record.callee))
         {
-            auto const inlined = inline_bound(id, record.callee, values, slots, handed);
+            auto const inlined = inline_bound(id, record.callee, values, slots, handed, c.out.at(record.type_arguments));
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         return target_call(id, type, record.callee, values, slots);
@@ -1171,7 +1198,8 @@ struct flattener
                                 .lambda = expr,
                                 .bound = current()->bound,
                                 .chain = current()->chain,
-                                .owner = current()->function});
+                                .owner = current()->function,
+                                .bindings = current()->bindings});
             return i32(closures.size() - 1);
         }
         auto const where = tables().target_at(expr);
@@ -1280,8 +1308,12 @@ struct flattener
                 bound.push_back({.where = where, .local = local});
             }
         }
-        frames.push_back(
-            {.function = f.owner, .file = f.file, .result = type, .chain = f.chain, .bound = cc::move(bound)});
+        frames.push_back({.function = f.owner,
+                          .file = f.file,
+                          .result = type,
+                          .chain = f.chain,
+                          .bound = cc::move(bound),
+                          .bindings = f.bindings});
         auto const value = flatten_expr(l.body.value);
         frames.remove_back();
         return value;
@@ -1747,8 +1779,16 @@ struct flattener
                               symbol_id callee,
                               cc::span<flat_expr_id const> values,
                               cc::span<i32 const> slots,
-                              cc::span<i32 const> handed = {})
+                              cc::span<i32 const> handed = {},
+                              cc::span<type_id const> type_arguments = {})
     {
+        // CHK-335: what the callee's type parameters stand for, in the caller's terms made concrete
+        auto bindings = cc::vector<type_id>();
+        for (auto i = isize(0); i + 1 < type_arguments.size(); i += 2)
+        {
+            bindings.push_back(type_arguments[i]);
+            bindings.push_back(concrete(type_arguments[i + 1]));
+        }
         judge_stage(call, callee);
         auto const& s = c.out.at(callee);
         auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
@@ -1838,7 +1878,8 @@ struct flattener
                           .result = info.result,
                           .return_label = label,
                           .chain = chain_range,
-                          .bound = cc::move(bound)});
+                          .bound = cc::move(bound),
+                          .bindings = cc::move(bindings)});
         // `self`, the first parameter of a method or a property, is the receiver its body and its defaults read
         auto const has_receiver = s.role == function_role::property
                                || (s.role == function_role::method && function->receiver == ast::receiver_kind::self);

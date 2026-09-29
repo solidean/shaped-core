@@ -298,7 +298,14 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
 
     auto const* const n = e.node.try_as<ast::name>();
     auto const resource = n != nullptr ? resolve_resource_name(file, expr, text_of(file, n->where)) : type_id::none;
-    if (e.node.is<ast::void_ref>())
+    // CHK-333: a type parameter in scope hides every type of its name
+    auto parameter = type_id::none;
+    for (auto i = type_parameter_names.size(); n != nullptr && i > 0 && !is_valid(parameter); --i)
+        if (type_parameter_names[i - 1].first == text_of(file, n->where))
+            parameter = type_parameter_names[i - 1].second;
+    if (is_valid(parameter))
+        result = parameter;
+    else if (e.node.is<ast::void_ref>())
         result = checked_module::void_type;
     else if (resource != type_id::none)
         result = resource;
@@ -340,6 +347,17 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             result = resolve_buffer(file, expr, *applied, scope);
         else if (is_named(file, applied->object, "atomic"))
             result = resolve_atomic(file, expr, *applied, scope);
+        else if (auto const generic = generic_named(file, applied->object); is_valid(generic))
+        {
+            // CHK-334: `report[T]`, an instance of a generic struct of the prelude
+            auto const arguments = ast_of(file).at(applied->arguments);
+            if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+                report(diagnostic_kind::wrong_kind_of_name, file, where,
+                       cc::format("{} takes one type argument", out.name_of(generic)));
+            else if (auto const argument = resolve_value_type(file, arguments[0].value, scope);
+                     argument != checked_module::error_type)
+                result = instance_of(generic, argument);
+        }
         else if (is_named(file, applied->object, "point_stream") || is_named(file, applied->object, "line_stream")
                  || is_named(file, applied->object, "triangle_stream"))
             result = resolve_stream(file, expr, *applied, scope);
@@ -772,7 +790,25 @@ void checker::compile_struct(symbol_id id)
     if (is_vertex && is_pixel)
         unsupported(file, s.name, "a struct of two stages");
 
+    // CHK-334: a generic struct is the prelude's, over one type parameter its members may name
+    auto parameter = type_id::none;
+    if (!s.type_parameters.empty())
+    {
+        auto const parameters = ast_of(file).at(s.type_parameters);
+        if (!is_prelude_file(file) || parameters.size() != 1)
+        {
+            unsupported(file, s.name,
+                        !is_prelude_file(file) ? "a generic struct of the program"
+                                               : "a generic struct of more than one type parameter");
+            out.symbols[index_of(id)].state = symbol_state::failed;
+            return;
+        }
+        parameter = new_type_parameter(text_of(file, parameters[0].name), id);
+        type_parameter_names.push_back({text_of(file, parameters[0].name), parameter});
+    }
     auto const members = compile_members(file, s.members, true, is_pixel, is_vertex);
+    if (is_valid(parameter))
+        type_parameter_names.remove_back();
 
     // The type exists only now, so a field that needs its own struct found a cycle and not a type.
     auto const type = type_id(out.types.size());
@@ -784,6 +820,8 @@ void checker::compile_struct(symbol_id id)
         // A struct has no compute edge: a compute entry point has no stage struct at all.
         .edge = stage_of(is_vertex, is_pixel, false, false, false, false),
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
+        .element = parameter,
+        .is_template = is_valid(parameter),
     });
     out.symbols[index_of(id)].type = type;
 }
@@ -1139,9 +1177,26 @@ void checker::compile_function(symbol_id id)
                        is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr
                            || geometry != nullptr || control != nullptr || is_evaluation);
 
-    if (!f.type_parameters.empty())
+    // CHK-333: a function's type parameters name what its signature and its body may mention and know nothing of
+    auto type_parameters = cc::vector<type_id>();
+    for (auto const& p : ast.at(f.type_parameters))
     {
-        unsupported(file, f.name, "a generic function");
+        if (ast::is_valid(p.type) || ast::is_valid(p.default_value) || !p.attributes.empty())
+        {
+            unsupported(file, span_of(file, p.form), "a type parameter with a bound, a default or an attribute");
+            is_failed = true;
+            continue;
+        }
+        auto const parameter = new_type_parameter(text_of(file, p.name), id);
+        type_parameters.push_back(parameter);
+        type_parameter_names.push_back({text_of(file, p.name), parameter});
+    }
+    if (!type_parameters.empty()
+        && (is_raster_entry || ray_stage != stage::none || geometry != nullptr || control != nullptr || is_evaluation
+            || find_attribute(file, d.attributes, "compute") != nullptr))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, f.name,
+               "an entry point is no generic function: the GPU hands it values of known types");
         is_failed = true;
     }
     // CHK-234: `self` is the receiver of a method, a parameter of its type; `mut self` waits for places (CHK-134)
@@ -1289,6 +1344,8 @@ void checker::compile_function(symbol_id id)
         result = checked_module::error_type;
     is_failed = is_failed || (result == checked_module::error_type && !infers_result);
 
+    type_parameter_names.resize_down_to(type_parameter_names.size() - type_parameters.size());
+
     auto const has_body = f.body.kind != ast::body_kind::none;
     if (find_attribute(file, d.attributes, "builtin") != nullptr)
     {
@@ -1351,9 +1408,11 @@ void checker::compile_function(symbol_id id)
         .partitioning = tessellation.partitioning,
         .is_clockwise = tessellation.is_clockwise,
         .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),
+        .type_parameters = {.first = u32(out.type_lists.size()), .count = u32(type_parameters.size())},
     });
     out.parameters.push_back_range(parameters);
     out.binding_lists.push_back_range(bindings);
+    out.type_lists.push_back_range(type_parameters);
     notes.push_back({.infers_result = infers_result});
 
     // The body is part of what a caller needs here, so it is checked now, while the symbol is still in compilation.

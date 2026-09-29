@@ -314,6 +314,8 @@ struct builder
     decl_id const_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id sampler_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id hit_group_declaration(statement_head const& head, keyword_parts const& parts);
+    /// The `[A]` of `struct name[A]:`, empty where the head names no type parameters.
+    [[nodiscard]] range_of<field> type_parameters_of(keyword_parts const& parts);
     decl_id pipeline_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id notation_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id test_declaration(statement_head const& head, keyword_parts const& parts);

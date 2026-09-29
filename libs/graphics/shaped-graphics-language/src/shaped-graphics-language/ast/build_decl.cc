@@ -194,12 +194,32 @@ decl_id builder::member_declaration(form_id line, scope_kind owner)
     return invalid_declaration(line, diagnostic_kind::expected_member);
 }
 
+range_of<field> builder::type_parameters_of(keyword_parts const& parts)
+{
+    // AST-151: `name[A]` is the call form of a square list, whose elements are the type parameters
+    if (parts.arguments.empty() || !is_kind(parts.arguments[0], form_kind::call))
+        return {};
+    auto const callee = at(parts.arguments[0]).first_child;
+    auto const list = is_valid(callee) ? at(callee).next_sibling : form_id::none;
+    if (!is_valid(list) || !is_kind(list, form_kind::square_list) || !is_kind(callee, form_kind::identifier))
+        return {};
+    return fields_of(list, diagnostic_kind::expected_parameter);
+}
+
 source_span builder::declared_name(form_id keyword_form, keyword_parts const& parts)
 {
     if (parts.arguments.size() > 1)
         report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
     if (!parts.arguments.empty() && is_kind(parts.arguments[0], form_kind::identifier))
         return at(parts.arguments[0]).where;
+    // AST-151: a generic struct's name stands before its type parameters
+    if (!parts.arguments.empty() && is_kind(parts.arguments[0], form_kind::call))
+    {
+        auto const callee = at(parts.arguments[0]).first_child;
+        auto const list = is_valid(callee) ? at(callee).next_sibling : form_id::none;
+        if (is_valid(list) && is_kind(list, form_kind::square_list) && is_kind(callee, form_kind::identifier))
+            return at(callee).where;
+    }
     report(diagnostic_kind::expected_name, parts.arguments.empty() ? keyword_form : parts.arguments[0]);
     return {};
 }
@@ -476,7 +496,10 @@ decl_id builder::type_body_declaration(statement_head const& head, keyword_parts
     reject_assignment(head);
     if (body_scope == scope_kind::struct_body)
         return make_decl(head.whole, attributes,
-                         struct_decl{.name = declared, .members = members, .is_opaque = !is_valid(parts.block)});
+                         struct_decl{.name = declared,
+                                     .members = members,
+                                     .is_opaque = !is_valid(parts.block),
+                                     .type_parameters = type_parameters_of(parts)});
     return make_decl(head.whole, attributes, enum_decl{.name = declared, .members = members});
 }
 

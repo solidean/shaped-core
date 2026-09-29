@@ -120,6 +120,8 @@ struct sgl::check::checked_module
     cc::vector<binding_info> bindings;
     /// The binding lists of the functions, the layouts of the pipelines, and the shaders of the ray-tracing ones.
     cc::vector<symbol_id> binding_lists;
+    /// The type parameters of the generic functions, and what each generic call deduced them as.
+    cc::vector<type_id> type_lists;
     /// The static samplers a binding declares, which its members name by `member_info::static_sampler`.
     cc::vector<sampler_state> samplers;
     /// Only the pipelines that checked without an error.
@@ -179,6 +181,7 @@ struct sgl::check::checked_module
     {
         return ast::impl::slice(binding_lists, r);
     }
+    [[nodiscard]] cc::span<type_id const> at(ast::range_of<type_id> r) const { return ast::impl::slice(type_lists, r); }
     [[nodiscard]] cc::span<pipeline_setting const> at(ast::range_of<pipeline_setting> r) const
     {
         return ast::impl::slice(pipeline_settings, r);
@@ -229,6 +232,8 @@ struct sgl::check::checked_module
         auto const& t = at(id);
         if (t.kind == type_kind::void_)
             return "void";
+        if (t.kind == type_kind::structure && is_valid(t.generic))
+            return t.spelled;
         if (t.kind == type_kind::structure || t.kind == type_kind::enumeration)
             return at(t.symbol).name;
         if (!t.spelled.empty())
@@ -242,12 +247,13 @@ struct sgl::check::checked_module
         return is_equal(symbols, rhs.symbols) && is_equal(types, rhs.types) && is_equal(members, rhs.members)
             && is_equal(enum_cases, rhs.enum_cases) && is_equal(functions, rhs.functions)
             && is_equal(parameters, rhs.parameters) && is_equal(bindings, rhs.bindings)
-            && is_equal(binding_lists, rhs.binding_lists) && is_equal(samplers, rhs.samplers)
-            && is_equal(pipelines, rhs.pipelines) && is_equal(pipeline_settings, rhs.pipeline_settings)
-            && is_equal(constants, rhs.constants) && is_equal(call_records, rhs.call_records)
-            && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
-            && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
-            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
+            && is_equal(binding_lists, rhs.binding_lists) && is_equal(type_lists, rhs.type_lists)
+            && is_equal(samplers, rhs.samplers) && is_equal(pipelines, rhs.pipelines)
+            && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
+            && is_equal(call_records, rhs.call_records) && is_equal(written_arguments, rhs.written_arguments)
+            && is_equal(call_slots, rhs.call_slots) && is_equal(near_misses, rhs.near_misses)
+            && is_equal(ray_traces, rhs.ray_traces) && is_equal(files, rhs.files)
+            && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;
     }

@@ -58,6 +58,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stages.cc
     src/shaped-graphics-language/check/check_raytracing.cc
+    src/shaped-graphics-language/check/check_generics.cc
     src/shaped-graphics-language/check/check_stmt.cc
     src/shaped-graphics-language/check/check_test.cc
     src/shaped-graphics-language/check/uniformity.cc

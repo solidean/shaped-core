@@ -196,6 +196,8 @@ struct call_arguments
     /// Parallel to `written`: a function's name or a lambda, as a position in `checker::function_arguments`; -1 for
     /// anything else, including a parameter of function type handed on, which has its type.
     cc::vector<i32> functions;
+    /// Parallel to `written`: the prelude's `undefined()`, which has the type of the parameter it meets (CHK-336).
+    cc::vector<bool> undefineds;
     /// An argument had the error type or was reported, so the call reports nothing about its arguments.
     bool is_poisoned = false;
 };
@@ -214,6 +216,8 @@ struct candidate_match
 {
     symbol_id candidate = symbol_id::none;
     cc::vector<i32> slots;
+    /// What a generic candidate's type parameters were deduced as, two by two (CHK-335).
+    cc::vector<type_id> bindings;
     /// Parallel to the call's written arguments: the length of the chain that converts each to its parameter (CHK-70).
     cc::vector<i32> chains;
 };
@@ -529,6 +533,8 @@ struct checker
     /// Whether `expr` in a type position names a complete type, so that a group applied to it makes an array of it.
     /// Reports nothing, so a caller may still read the group as something else.
     [[nodiscard]] bool is_type_name(i32 file, ast::expr_id expr) const;
+    /// The generic struct of the prelude `expr` names, `none` where it names no such struct (CHK-334).
+    type_id generic_named(i32 file, ast::expr_id expr);
     /// An array's length as written: an int literal or a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
     /// A checked index's value when it is an int literal or names a `const`; none for anything else.
@@ -542,7 +548,11 @@ struct checker
     /// Of `candidates`, the function whose signature is exactly `type`'s; `none` where no single one is.
     [[nodiscard]] symbol_id function_of_type(cc::span<symbol_id const> candidates, type_id type);
     /// A lambda handed to a parameter of function type `type`, checked where it stands (CHK-318).
-    type_id check_lambda(function_scope& scope, ast::expr_id expr, type_id type);
+    /// `bindings`, where given, is what the call bound: a lambda's result binds what it left (CHK-335).
+    type_id check_lambda(function_scope& scope, ast::expr_id expr, type_id type, cc::vector<type_id>* bindings = nullptr);
+    /// A generic callee's result at this call: its parameters bound by the arguments, then by where the call stands.
+    /// The error type after a report where a parameter is left unbound.
+    type_id deduce_result(function_scope const& scope, ast::expr_id id, symbol_id callee, cc::vector<type_id>& bindings);
     /// A call through a parameter of function type (CHK-319).
     type_id check_function_call(function_scope& scope, ast::expr_id id, ast::call const& call, local_name const& local);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
@@ -598,6 +608,32 @@ struct checker
     // ---- pipelines (check_pipeline.cc) ------------------------------------------------------------------------------
 
     void compile_pipeline(symbol_id id);
+    // ---- generics (check_generics.cc) ----
+    /// A fresh type parameter named `name`, of the function or the generic struct `owner` (CHK-333).
+    type_id new_type_parameter(cc::string_view name, symbol_id owner);
+    /// True where `type` names a type parameter at any depth: it stands for different types at different calls.
+    [[nodiscard]] bool is_open(type_id type) const;
+    /// Every type parameter `type` names, each once, into `into`.
+    void collect_type_parameters(type_id type, cc::vector<type_id>& into) const;
+    /// `generic[argument]`, interned; the template itself where `argument` is its own type parameter (CHK-334).
+    type_id instance_of(type_id generic, type_id argument);
+    /// `instance_of` where it exists already, `none` otherwise.
+    [[nodiscard]] type_id existing_instance(type_id generic, type_id argument) const;
+    /// `type` with every parameter `bindings` binds replaced, interning what that makes.
+    type_id substitute(type_id type, cc::span<type_id const> bindings);
+    /// `substitute` over what exists already, which flattening reads; `none` where an instance was never made.
+    [[nodiscard]] type_id substitute_existing(type_id type, cc::span<type_id const> bindings) const;
+    /// Whether `actual` is `pattern` with its open parameters bound, extending `bindings` with what that takes (CHK-335).
+    [[nodiscard]] bool unify(type_id pattern, type_id actual, cc::vector<type_id>& bindings) const;
+    /// Makes every instance a generic call's inlining will name, before any entry point is flattened.
+    void instantiate_generics();
+    /// The type parameters in scope, innermost last: a generic function's while its signature and body are checked,
+    /// and a generic struct's while its members are.
+    cc::vector<cc::pair<cc::string_view, type_id>> type_parameter_names;
+    /// What a call stands where a type is expected, which a generic callee's result is deduced from where its
+    /// arguments leave a parameter unbound (CHK-335); `none` elsewhere.
+    type_id expected_result = type_id::none;
+
     /// CHK-330: a `hit_group`, one row of a ray-tracing pipeline's table.
     void compile_hit_group(symbol_id id);
     /// CHK-331: a `@raytracing pipeline`.
@@ -621,6 +657,7 @@ struct checker
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 
     void check_body(symbol_id id);
+    void check_body_of(symbol_id id);
     /// The defaults of function `id`'s parameters, each in the function's own scope with the parameters before it
     /// visible, and of its parameter's type (CHK-243).
     /// Checked once, after every signature is known, since a default may call what is declared below it.
@@ -752,13 +789,23 @@ struct checker
                          call_arguments const& arguments,
                          cc::span<parameter const> parameters,
                          cc::span<i32 const> slots);
+    void commit_literals(function_scope& scope,
+                         call_arguments const& arguments,
+                         cc::span<parameter const> parameters,
+                         cc::span<i32 const> slots,
+                         cc::vector<type_id>& bindings);
     /// Why each of `candidates` did not match call `call`, kept for a later "did you mean".
     void note_near_misses(i32 file,
                           ast::expr_id call,
                           cc::span<symbol_id const> candidates,
                           call_arguments const& arguments);
     /// Remembers how call `id` fills the parameters of `callee`, which is what the flat tree is written from.
-    void record_call(i32 file, ast::expr_id id, symbol_id callee, call_arguments const& arguments, cc::span<i32 const> slots);
+    void record_call(i32 file,
+                     ast::expr_id id,
+                     symbol_id callee,
+                     call_arguments const& arguments,
+                     cc::span<i32 const> slots,
+                     cc::span<type_id const> bindings = {});
     /// The candidates of `spelling` that take exactly `types`, without a report; what the flat tree is written from.
     [[nodiscard]] symbol_id find_operator(cc::string_view spelling, cc::span<type_id const> types) const;
     [[nodiscard]] call_arguments check_arguments(function_scope& scope,

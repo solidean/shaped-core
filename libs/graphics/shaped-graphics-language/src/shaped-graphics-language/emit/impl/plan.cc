@@ -233,6 +233,10 @@ struct planner
         {
             if (is_reserved(p.which, result))
                 return false;
+            // EMIT-138: a member named like the struct type of another hides the type from it in HLSL and MSL
+            for (auto const& s : siblings)
+                if (is_valid(s.type) && p.m.at(s.type).kind == type_kind::structure && p.m.name_of(s.type) == result)
+                    return false;
             if (result == name)
                 return true;
             for (auto const& s : siblings)
@@ -301,6 +305,17 @@ struct planner
     }
 
     /// Post-order, so a struct stands after every struct it holds, which HLSL needs and WGSL does not mind.
+    /// `report[hit_attributes]` as a name every target takes: `report_hit_attributes`, minted.
+    cc::string instance_name(type_id type)
+    {
+        // a closing bracket is dropped, since every one ends the name or stands before another
+        auto name = cc::string();
+        for (auto const c : p.m.name_of(type))
+            if (c != ']' && c != ' ')
+                name += c == '[' || c == ',' ? '_' : c;
+        return p.names.mint(name);
+    }
+
     void need(type_id type, struct_role role)
     {
         // a binding array is declared with its resource, and has no type of its own to spell
@@ -327,7 +342,7 @@ struct planner
         p.struct_of_type[index_of(type)] = i32(p.structs.size());
         p.structs.push_back({
             .type = type,
-            .name = spell_type(p.m.at(info.symbol).name),
+            .name = is_valid(info.generic) ? instance_name(type) : spell_type(p.m.at(info.symbol).name),
             .role = role,
             .members = members_of(written, role != struct_role::plain,
                                   role == struct_role::patch_constants ? patch_location_base : 0),

@@ -1,4 +1,5 @@
 #include <clean-core/common/utility.hh>
+#include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 
@@ -26,12 +27,25 @@ void add_argument(call_arguments& a,
     a.numbers.push_back(number);
     a.literals.push_back(literal);
     a.functions.push_back(function);
+    a.undefineds.push_back(false);
 }
 } // namespace
 
 // ---- bodies ---------------------------------------------------------------------------------------------------------
 
 void checker::check_body(symbol_id id)
+{
+    // CHK-333: a generic body sees its type parameters, as its signature did
+    auto const info = out.at(id).info;
+    auto const before = type_parameter_names.size();
+    if (info >= 0)
+        for (auto const p : out.at(out.functions[info].type_parameters))
+            type_parameter_names.push_back({out.at(p).spelled, p});
+    check_body_of(id);
+    type_parameter_names.resize_down_to(before);
+}
+
+void checker::check_body_of(symbol_id id)
 {
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
@@ -628,6 +642,15 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
 {
     auto const file = scope.file;
     auto result = call_arguments();
+    // what the call's own result is expected to be says nothing of its arguments
+    auto const outer_expected = expected_result;
+    expected_result = type_id::none;
+    struct restore
+    {
+        type_id& at;
+        type_id value;
+        ~restore() { at = value; }
+    } const restored{.at = expected_result, .value = outer_expected};
 
     for (auto const& a : ast_of(file).at(range))
     {
@@ -643,6 +666,17 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             auto const literal = shape_literal(scope, a.value);
             result.is_poisoned = result.is_poisoned || literals[literal].is_poisoned;
             add_argument(result, {.expr = a.value}, type_id::none, text_of(file, a.name), {}, literal);
+            continue;
+        }
+
+        // CHK-336: the prelude's `undefined()` has the type of the parameter it meets
+        if (auto const* const u = !a.is_splat && !a.is_mut && value != nullptr ? value->try_as<ast::call>() : nullptr;
+            u != nullptr && is_prelude_file(file) && is_named(file, u->callee, "undefined")
+            && ast_of(file).at(u->arguments).empty())
+        {
+            add_argument(result, {.expr = a.value}, type_id::none, text_of(file, a.name));
+            result.undefineds.back() = true;
+            set_target(file, a.value, {.kind = target_kind::undefined_value});
             continue;
         }
 
@@ -816,6 +850,8 @@ cc::string checker::call_text(i32 file_of_call, cc::string_view spelling, call_a
         // is named by its text, since its default type is not what failed to match
         if (arguments.literals[i] >= 0)
             text += "a literal";
+        else if (arguments.undefineds[i])
+            text += "undefined()";
         else if (arguments.functions[i] >= 0)
             text += function_arguments[arguments.functions[i]].is_lambda ? "a lambda" : "a function";
         else if (arguments.numbers[i].is_number && ast::is_valid(arguments.written[i].expr))
@@ -1039,6 +1075,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     arguments.numbers.insert_at(0, number_of(file, member.object));
     arguments.literals.insert_at(0, -1);
     arguments.functions.insert_at(0, -1);
+    arguments.undefineds.insert_at(0, false);
 
     auto const candidates = candidates_of(file, name, receiver);
     if (candidates.empty())
@@ -1165,12 +1202,17 @@ type_id checker::resolve_overload(function_scope& scope,
                         : target{.kind = target_kind::overload, .symbol = chosen};
     set_target(file, id, self);
     set_target(file, callee, self);
-    record_call(file, id, chosen, arguments, chosen_match.slots);
     // by value: resolving a literal argument may compile another function, and `functions` then moves
     auto const info = out.functions[chosen_symbol.info];
-    commit_literals(scope, arguments, out.at(info.parameters), chosen_match.slots);
+    auto bindings = chosen_match.bindings;
+    commit_literals(scope, arguments, out.at(info.parameters), chosen_match.slots, bindings);
+    // CHK-335: what the arguments left unbound, where the call stands says
+    auto const result = deduce_result(scope, id, chosen, bindings);
+    if (result == error_type)
+        return error_type;
+    record_call(file, id, chosen, arguments, chosen_match.slots, bindings);
     if (chosen_symbol.role == function_role::constructor)
-        set_type(file, callee, info.result);
+        set_type(file, callee, result);
     if (is_valid(out.at(chosen).intrinsic))
     {
         // CHK-300: the mark is what an index into a binding array is written with, and on anything else it means nothing
@@ -1181,12 +1223,12 @@ type_id checker::resolve_overload(function_scope& scope,
                    "`nonuniform i` marks an index into a binding array, and stands only as one: `t[nonuniform i]`");
             return error_type;
         }
-        return info.result;
+        return result;
     }
 
     // A construction is written where it stands, and the defaults of its fields with it, so what they call is reached.
     note_program_call(scope, chosen, where);
-    return info.result;
+    return result;
 }
 
 symbol_id checker::function_of_type(cc::span<symbol_id const> candidates, type_id type)
@@ -1216,7 +1258,7 @@ symbol_id checker::function_of_type(cc::span<symbol_id const> candidates, type_i
     return found;
 }
 
-type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id type)
+type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id type, cc::vector<type_id>* bindings)
 {
     auto const file = scope.file;
     auto const& ast = ast_of(file);
@@ -1233,6 +1275,24 @@ type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id 
     auto const parameters = cc::vector<member_info>::create_copy_of(out.at(out.at(type).members));
     auto const result = out.at(type).element;
     auto const fields = ast.at(l.parameters);
+    // CHK-335: a lambda's parameters are what the call bound, and its result binds what they left; a type parameter
+    // of the function it is written in is bound already, to itself
+    for (auto const& m : parameters)
+    {
+        auto named = cc::vector<type_id>();
+        collect_type_parameters(m.type, named);
+        auto is_in_scope = true;
+        for (auto const q : named)
+            is_in_scope
+                = is_in_scope && cc::sequence{type_parameter_names}.any([&](auto const& n) { return n.second == q; });
+        if (!is_in_scope)
+        {
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("this lambda takes {}, which nothing in the call says", out.name_of(m.type)));
+            return error_type;
+        }
+    }
+    auto const deduces = bindings != nullptr && is_open(result);
     auto const locals_before = scope.locals.size();
     auto is_sound = true;
     for (auto i = isize(0); i < fields.size(); ++i)
@@ -1255,10 +1315,23 @@ type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id 
         scope.locals.push_back(
             {.name = text_of(file, p.name), .where = self, .type = parameters[i].type, .depth = scope.depth + 1});
     }
-    auto const value = check_expected(scope, l.body.value, result);
+    auto const value = deduces ? check_expr(scope, l.body.value) : check_expected(scope, l.body.value, result);
     scope.locals.resize_down_to(locals_before);
     if (!is_sound || value == error_type)
         return error_type;
+    if (deduces)
+    {
+        if (!unify(result, value, *bindings))
+        {
+            report(diagnostic_kind::type_mismatch, file, span_of(file, l.body.value),
+                   cc::format("this lambda gives {}, and the function it stands for returns {}", out.name_of(value),
+                              out.name_of(result)));
+            return error_type;
+        }
+        auto const deduced = substitute(type, *bindings);
+        set_type(file, expr, deduced);
+        return deduced;
+    }
     if (value != result)
     {
         report(diagnostic_kind::type_mismatch, file, span_of(file, l.body.value),
@@ -1349,12 +1422,78 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     auto result = candidate_match{.candidate = candidate,
                                   .slots = cc::move(bound.slots),
                                   .chains = cc::vector<i32>::create_filled(arguments.written.size(), 0)};
+    // CHK-335: a parameter whose type names a type parameter binds it to what the argument is, exactly; a function
+    // and a literal wait until the rest are bound, since what they meet depends on it
+    auto deferred = cc::vector<isize>();
     for (auto p = isize(0); p < parameters.size(); ++p)
     {
         auto const i = result.slots[p];
-        if (i < 0)
+        if (i < 0 || arguments.undefineds[i])
             continue;
+        if (is_open(parameters[p].type))
+        {
+            // a number binds the type it was checked as, since nothing asks it for another
+            if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0)
+                deferred.push_back(p);
+            else if (parameters[p].is_mut != arguments.written[i].is_mut
+                     || !unify(parameters[p].type, arguments.types[i], result.bindings))
+                return cc::nullopt;
+            continue;
+        }
         auto const length = chain_of(file, parameters[p], arguments, i);
+        if (!length.has_value())
+            return cc::nullopt;
+        result.chains[i] = length.value();
+    }
+    for (auto const p : deferred)
+    {
+        auto const i = result.slots[p];
+        if (arguments.functions[i] >= 0)
+        {
+            // by value: demanding a candidate may push to `function_arguments`
+            auto const f = function_arguments[arguments.functions[i]];
+            auto const& taking = out.at(parameters[p].type);
+            if (taking.kind != type_kind::function)
+                return cc::nullopt;
+            // a lambda binds what its body gives when it is checked, after the call chose this candidate
+            if (f.is_lambda)
+            {
+                auto const& l = ast_of(file).at(f.expr).node.as<ast::lambda>();
+                if (i64(ast_of(file).at(l.parameters).size()) != taking.members.count)
+                    return cc::nullopt;
+                continue;
+            }
+            auto chosen = cc::vector<type_id>();
+            auto matching = 0;
+            for (auto const g : f.functions)
+            {
+                if (out.at(g).state == symbol_state::in_compilation
+                    || demand(g, out.at(g).file, {}) != symbol_state::checked)
+                    continue;
+                auto const& info = out.functions[out.at(g).info];
+                if (info.entry_stage != stage::none || is_valid(out.at(g).intrinsic)
+                    || !out.at(info.type_parameters).empty())
+                    continue;
+                auto types = cc::vector<type_id>();
+                for (auto const& q : out.at(info.parameters))
+                    types.push_back(q.type);
+                auto trial = result.bindings;
+                if (unify(parameters[p].type, function_type(types, info.result), trial))
+                {
+                    ++matching;
+                    chosen = cc::move(trial);
+                }
+            }
+            if (matching != 1)
+                return cc::nullopt;
+            result.bindings = cc::move(chosen);
+            continue;
+        }
+        auto taking = parameters[p];
+        taking.type = substitute(taking.type, result.bindings);
+        if (is_open(taking.type))
+            return cc::nullopt;
+        auto const length = chain_of(file, taking, arguments, i);
         if (!length.has_value())
             return cc::nullopt;
         result.chains[i] = length.value();
@@ -1364,6 +1503,9 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
 
 cc::optional<i32> checker::chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i)
 {
+    // CHK-336: `undefined()` is of whatever type it meets
+    if (arguments.undefineds[i])
+        return 0;
     // CHK-316: a place is handed over as it is, so it has the parameter's type exactly, and a mark meets a mut parameter
     if (taking.is_mut || arguments.written[i].is_mut)
     {
@@ -1515,33 +1657,54 @@ void checker::commit_literals(function_scope& scope,
                               cc::span<parameter const> parameters,
                               cc::span<i32 const> slots)
 {
+    auto bindings = cc::vector<type_id>();
+    commit_literals(scope, arguments, parameters, slots, bindings);
+}
+
+void checker::commit_literals(function_scope& scope,
+                              call_arguments const& arguments,
+                              cc::span<parameter const> parameters,
+                              cc::span<i32 const> slots,
+                              cc::vector<type_id>& bindings)
+{
     // by value: resolving a literal may compile another function, and `parameters` then moves
-    auto const copied = cc::vector<parameter>::create_copy_of(parameters);
-    for (auto p = isize(0); p < copied.size(); ++p)
-    {
-        auto const i = slots[p];
-        if (i < 0)
-            continue;
-        if (arguments.numbers[i].is_number)
-            set_type(scope.file, arguments.written[i].expr, copied[p].type);
-        else if (arguments.functions[i] >= 0)
+    auto copied = cc::vector<parameter>::create_copy_of(parameters);
+    // a lambda binds what the others left, so it goes last, and every other argument meets its parameter bound
+    for (auto pass = 0; pass < 2; ++pass)
+        for (auto p = isize(0); p < copied.size(); ++p)
         {
-            // by value: checking a lambda may push to `function_arguments`
-            auto const f = function_arguments[arguments.functions[i]];
-            auto const where = span_of(scope.file, f.expr);
-            if (f.is_lambda)
-                (void)check_lambda(scope, f.expr, copied[p].type);
-            else if (auto const chosen = function_of_type(f.functions, copied[p].type); is_valid(chosen))
+            auto const i = slots[p];
+            if (i < 0)
+                continue;
+            auto const is_lambda = arguments.functions[i] >= 0 && function_arguments[arguments.functions[i]].is_lambda;
+            if (is_lambda != (pass == 1))
+                continue;
+            copied[p].type = substitute(copied[p].type, bindings);
+            if (arguments.undefineds[i])
             {
-                set_target(scope.file, f.expr, {.kind = target_kind::overload, .symbol = chosen});
-                set_type(scope.file, f.expr, copied[p].type);
-                // the function is called wherever the parameter is, and that is inlined into this caller
-                note_program_call(scope, chosen, where);
+                set_type(scope.file, arguments.written[i].expr, copied[p].type);
+                continue;
             }
+            if (arguments.numbers[i].is_number)
+                set_type(scope.file, arguments.written[i].expr, copied[p].type);
+            else if (arguments.functions[i] >= 0)
+            {
+                // by value: checking a lambda may push to `function_arguments`
+                auto const f = function_arguments[arguments.functions[i]];
+                auto const where = span_of(scope.file, f.expr);
+                if (f.is_lambda)
+                    (void)check_lambda(scope, f.expr, copied[p].type, &bindings);
+                else if (auto const chosen = function_of_type(f.functions, copied[p].type); is_valid(chosen))
+                {
+                    set_target(scope.file, f.expr, {.kind = target_kind::overload, .symbol = chosen});
+                    set_type(scope.file, f.expr, copied[p].type);
+                    // the function is called wherever the parameter is, and that is inlined into this caller
+                    note_program_call(scope, chosen, where);
+                }
+            }
+            else if (arguments.literals[i] >= 0)
+                (void)resolve_literal(scope, arguments.written[i].expr, copied[p].type, arguments.literals[i]);
         }
-        else if (arguments.literals[i] >= 0)
-            (void)resolve_literal(scope, arguments.written[i].expr, copied[p].type, arguments.literals[i]);
-    }
 }
 
 type_id checker::resolve_literal(function_scope& scope, ast::expr_id expr, type_id to, i32 literal)
@@ -1586,7 +1749,10 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
     }
     if (node.is<ast::array>() && to != error_type && out.at(to).kind == type_kind::array)
         return check_array_literal(scope, expr, to);
+    auto const outer_expected = expected_result;
+    expected_result = to;
     auto const type = check_expr(scope, expr);
+    expected_result = outer_expected;
     if (type == error_type || to == error_type)
         return type;
     // CHK-253: a number literal where one type is expected converts to it where it holds exactly
@@ -1674,11 +1840,55 @@ void checker::judge_wide_literals()
     }
 }
 
+type_id checker::deduce_result(function_scope const& scope, ast::expr_id id, symbol_id callee, cc::vector<type_id>& bindings)
+{
+    auto const info = out.functions[out.at(callee).info];
+    auto needed = cc::vector<type_id>();
+    for (auto const& p : out.at(info.parameters))
+        collect_type_parameters(p.type, needed);
+    collect_type_parameters(info.result, needed);
+    if (needed.empty())
+        return info.result;
+    if (is_valid(expected_result) && expected_result != error_type)
+    {
+        (void)unify(info.result, expected_result, bindings);
+        // a generic body expecting its own type parameter binds it to itself
+        auto expected = cc::vector<type_id>();
+        collect_type_parameters(expected_result, expected);
+        for (auto const q : needed)
+        {
+            auto is_bound = false;
+            for (auto i = isize(0); i + 1 < bindings.size(); i += 2)
+                is_bound = is_bound || bindings[i] == q;
+            if (!is_bound && cc::sequence{expected}.any([&](type_id e) { return e == q; }))
+            {
+                bindings.push_back(q);
+                bindings.push_back(q);
+            }
+        }
+    }
+    for (auto const q : needed)
+    {
+        auto is_bound = false;
+        for (auto i = isize(0); i + 1 < bindings.size(); i += 2)
+            is_bound = is_bound || bindings[i] == q;
+        if (!is_bound)
+        {
+            report(diagnostic_kind::no_matching_overload, scope.file, span_of(scope.file, id),
+                   cc::format("{} of {} is said by nothing: neither an argument nor where the call stands",
+                              out.name_of(q), out.at(callee).name));
+            return error_type;
+        }
+    }
+    return substitute(info.result, bindings);
+}
+
 void checker::record_call(i32 file,
                           ast::expr_id id,
                           symbol_id callee,
                           call_arguments const& arguments,
-                          cc::span<i32 const> slots)
+                          cc::span<i32 const> slots,
+                          cc::span<type_id const> bindings)
 {
     auto const written = ast::range_of<written_argument>{.first = u32(out.written_arguments.size()),
                                                          .count = u32(arguments.written.size())};
@@ -1686,7 +1896,11 @@ void checker::record_call(i32 file,
     auto const slot_range = ast::range_of<i32>{.first = u32(out.call_slots.size()), .count = u32(slots.size())};
     out.call_slots.push_back_range(slots);
     out.files[file].call_of[ast::index_of(id)] = i32(out.call_records.size());
-    out.call_records.push_back({.callee = callee, .written = written, .slots = slot_range});
+    out.call_records.push_back({.callee = callee,
+                                .written = written,
+                                .slots = slot_range,
+                                .type_arguments = {.first = u32(out.type_lists.size()), .count = u32(bindings.size())}});
+    out.type_lists.push_back_range(bindings);
 }
 
 void checker::note_program_call(function_scope const& scope, symbol_id callee, source_span where)
