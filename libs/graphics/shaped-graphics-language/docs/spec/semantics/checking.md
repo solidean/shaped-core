@@ -157,6 +157,7 @@ fun sign(b: bool) -> float:
   Its record makes it the targets' bool: CHK-149 and CHK-150 do not hold for it, since its `==` is the prelude's and `and`, `or` and `not` take it (CHK-116).
 * **CHK-321** `@bitflags` on a `@builtin enum` makes its cases bits, which combine: its registry gives `|`, `&` and `has`, and a value may be several cases or none.
   `ray_flags` is one, with DXR's values.
+  A `case` over one needs a `_` arm (CHK-159), which is where a combined value goes.
   `@bitflags` on an enum of the program is `unsupported-yet` ([enum futures](../incubator/enum-futures.md)).
 
 ```sgl
@@ -909,6 +910,7 @@ fun falloff(d: float, steps: int) -> float:
 * **CHK-157** `a or b` in a pattern is a list of patterns, and the arm matches when any of them does; the `or` of CHK-116 is not involved and its operands are no `bool`s.
 * **CHK-158** A pattern is evaluated only where it is reached, so a pattern behind the one that matched is never evaluated ([evaluation](evaluation.md#case)).
 * **CHK-159** A `case` is **exhaustive** when it carries a `_`, or when its scrutinee is an enum and its patterns are constant cases that together name every case of it.
+  A `@bitflags` enum (CHK-321) is the exception: a value of it may be several cases or none, so only a `_` makes a `case` over it exhaustive.
 * **CHK-160** A `case` that is not exhaustive is the normal error `non-exhaustive-case`; its detail names the cases nobody matched, or says that a `_` is needed ([why](why/checking.md#chk-160)).
 * **CHK-161** Two constant patterns of one `case` that name one case is the normal error `duplicate-case-pattern`, at the later arm.
   Two patterns that are equal expressions are not compared: what they hold is known at run time and not here.
