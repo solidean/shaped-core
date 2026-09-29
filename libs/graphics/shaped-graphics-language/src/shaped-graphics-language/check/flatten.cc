@@ -2210,6 +2210,9 @@ void checker::flatten_test(i32 index)
     f.entry.name = "test";
     f.entry.function = test.symbol;
     f.entry.result = checked_module::void_type;
+    // CHK-333: what the test lists, which its driver binds
+    for (auto const binding : out.at(out.functions[out.at(test.symbol).info].bindings))
+        f.entry.bindings.push_back(binding);
     for (auto const& other : out.symbols)
         if (!other.name.empty())
             f.entry.names.reserve(other.name);

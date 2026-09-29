@@ -1090,6 +1090,50 @@ void checker::compile_binding(symbol_id id)
 
 // ---- functions ------------------------------------------------------------------------------------------------------
 
+cc::vector<symbol_id> checker::binding_list_of(i32 file, ast::range_of<ast::argument> entries, bool& is_failed)
+{
+    auto const& ast = ast_of(file);
+    auto bindings = cc::vector<symbol_id>();
+    for (auto const& entry : ast.at(entries))
+    {
+        auto const where = span_of(file, entry.form);
+        auto const* const n = ast::is_valid(entry.value) ? ast.at(entry.value).node.try_as<ast::name>() : nullptr;
+        if (n == nullptr || !entry.name.empty() || entry.is_splat || !entry.attributes.empty())
+        {
+            // an `invalid` entry was reported by the AST pass
+            if (!ast::is_valid(entry.value) || !ast.at(entry.value).node.is<ast::invalid_expr>())
+                unsupported(file, where, "a binding entry that is not a bare name");
+            is_failed = true;
+            continue;
+        }
+
+        auto const text = text_of(file, n->where);
+        auto const* const found = names_seen_from(file).get_ptr(text);
+        if (found == nullptr || found->empty())
+        {
+            report(diagnostic_kind::unknown_name, file, where, text);
+            is_failed = true;
+            continue;
+        }
+        auto const binding = found->front();
+        set_target(file, entry.value, {.kind = target_kind::symbol, .symbol = binding});
+        if (out.at(binding).kind == symbol_kind::binding)
+        {
+            if (demand(binding, file, where) == symbol_state::checked)
+                bindings.push_back(binding);
+            else
+                is_failed = true;
+        }
+        else
+        {
+            if (out.at(binding).kind != symbol_kind::unsupported)
+                report(diagnostic_kind::wrong_kind_of_name, file, where, cc::format("{} is no binding", text));
+            is_failed = true;
+        }
+    }
+    return bindings;
+}
+
 void checker::compile_function(symbol_id id)
 {
     auto const file = out.at(id).file;
@@ -1241,44 +1285,7 @@ void checker::compile_function(symbol_id id)
                               .is_mut = is_mut_parameter});
     }
 
-    auto bindings = cc::vector<symbol_id>();
-    for (auto const& entry : ast.at(f.bindings))
-    {
-        auto const where = span_of(file, entry.form);
-        auto const* const n = ast::is_valid(entry.value) ? ast.at(entry.value).node.try_as<ast::name>() : nullptr;
-        if (n == nullptr || !entry.name.empty() || entry.is_splat || !entry.attributes.empty())
-        {
-            // an `invalid` entry was reported by the AST pass
-            if (!ast::is_valid(entry.value) || !ast.at(entry.value).node.is<ast::invalid_expr>())
-                unsupported(file, where, "a binding entry that is not a bare name");
-            is_failed = true;
-            continue;
-        }
-
-        auto const text = text_of(file, n->where);
-        auto const* const found = names_seen_from(file).get_ptr(text);
-        if (found == nullptr || found->empty())
-        {
-            report(diagnostic_kind::unknown_name, file, where, text);
-            is_failed = true;
-            continue;
-        }
-        auto const binding = found->front();
-        set_target(file, entry.value, {.kind = target_kind::symbol, .symbol = binding});
-        if (out.at(binding).kind == symbol_kind::binding)
-        {
-            if (demand(binding, file, where) == symbol_state::checked)
-                bindings.push_back(binding);
-            else
-                is_failed = true;
-        }
-        else
-        {
-            if (out.at(binding).kind != symbol_kind::unsupported)
-                report(diagnostic_kind::wrong_kind_of_name, file, where, cc::format("{} is no binding", text));
-            is_failed = true;
-        }
-    }
+    auto bindings = binding_list_of(file, f.bindings, is_failed);
 
     // Without `-> T` a block body returns `void`, and an arrow body returns what its expression is.
     auto result = checked_module::void_type;

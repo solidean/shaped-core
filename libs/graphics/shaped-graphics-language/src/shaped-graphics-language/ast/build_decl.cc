@@ -113,14 +113,19 @@ decl_id builder::test_declaration(statement_head const& head, keyword_parts cons
     auto const attributes = attributes_of(head.whole);
     reject_arrow(head);
     reject_assignment(head);
+
+    // the keyword alone: the keyword form spans its arguments too
+    auto const keyword = parts.keywords.empty() ? head.keyword_form : parts.keywords.front();
+    auto result = test_decl{.keyword = file.at(keyword).where};
+    // AST-151: `test {a, b}:` lists bindings, and the body after a list is a block
+    auto const has_list = !parts.arguments.empty() && is_kind(parts.arguments[0], form_kind::curly_list);
+    if (has_list)
+        result.bindings = list_elements(parts.arguments[0], false, true);
     if (parts.arguments.size() > 1)
         report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
 
     owners.push_back({.owner = body_owner::test});
-    // the keyword alone: the keyword form spans its arguments too
-    auto const keyword = parts.keywords.empty() ? head.keyword_form : parts.keywords.front();
-    auto result = test_decl{.keyword = file.at(keyword).where};
-    if (!parts.arguments.empty())
+    if (!parts.arguments.empty() && !has_list)
     {
         // AST-138: `test value` is the block of that one line, so every rule of a test body is stated once.
         if (is_valid(parts.block))

@@ -334,6 +334,7 @@ let fixed = materials.albedo[materials.slot].sample(p.uv)
 * Nothing is defined before it is stored: no target but WGSL zeroes it, and a shader that relies on either pays for it on every target.
   The interpreter reports a read of what was never stored as a program error (EVAL-92).
 * A test holds workgroup memory of its own run, so it uses a `@workgroup` binding without listing it (CHK-295).
+  Every other binding a test reads it lists, `test {frame}:`, and the driver that runs it gives the values (CHK-333).
 
 ## Atomics
 

@@ -264,6 +264,9 @@ struct machine
         auto const* const record = m.builtin_function(c.intrinsic);
         if (record == nullptr || record->evaluate == nullptr)
             return type_error("a call of something that is no builtin function");
+        // EVAL-95: the emulated trace reads the pool and the roots of the run's inputs, which no evaluator holds
+        if (record->takes_acceleration_index || record->name == "acceleration_pool_load")
+            return acceleration_read(*record, args, result);
 
         // Every argument is the scalars its parameter type says, which is all an evaluator relies on.
         auto in = cc::vector<scalar>();
@@ -297,6 +300,39 @@ struct machine
         // The one way to see WHEN a call with an effect ran: its value joins the trace where the call happened.
         if (!c.is_pure)
             out.trace.push_back(result);
+        return {};
+    }
+
+    /// `acceleration_root(world, k)`, whose `k` flatten appended, or `acceleration_pool_load(unit)`.
+    flow acceleration_read(builtins::function_record const& record, cc::span<value const> args, value& result)
+    {
+        auto const is_root = record.takes_acceleration_index;
+        auto const* const last = args.empty() ? nullptr : &args[args.size() - 1];
+        auto const kind = is_root ? value_kind::scalar_int : value_kind::scalar_uint;
+        if (last == nullptr || last->leaves.size() != 1 || last->leaves[0].kind != kind)
+            return type_error(cc::format("a call of '{}' with arguments of the wrong type", record.name));
+        if (is_root)
+        {
+            auto const k = isize(last->leaves[0].as_int());
+            result.leaves.push_back(
+                scalar::of_uint(k >= 0 && k < inputs.acceleration_roots.size() ? inputs.acceleration_roots[k] : 0));
+            return {};
+        }
+
+        auto const unit = isize(last->leaves[0].as_uint());
+        auto const& pool = inputs.acceleration_pool;
+        if (!pool.empty() && (unit + 1) * 16 > pool.size())
+            return fail(
+                run_status::program_error,
+                cc::format("the unit {} is past the end of an acceleration pool of {} units", unit, pool.size() / 16));
+        for (auto i = 0; i < 4; ++i)
+        {
+            auto word = u32(0);
+            if (!pool.empty())
+                for (auto b = 0; b < 4; ++b)
+                    word |= u32(pool[unit * 16 + i * 4 + b]) << (8 * b);
+            result.leaves.push_back(scalar::of_uint(word));
+        }
         return {};
     }
 
@@ -1125,6 +1161,110 @@ outcome sgl::check::interpret(checked_module const& m,
             stored.push_back(cc::move(run.out.buffers[i]));
     run.out.buffers = cc::move(stored);
     return cc::move(run.out);
+}
+
+namespace
+{
+/// Fills the scalars of `leaves`, whose kinds they keep, from `bytes` as `member_data` lays them out.
+void read_leaves(cc::span<byte const> bytes, cc::span<scalar> leaves)
+{
+    for (auto i = isize(0); i < leaves.size(); ++i)
+    {
+        auto word = u32(0);
+        for (auto b = 0; b < 4; ++b)
+            word |= u32(bytes[i * 4 + b]) << (8 * b);
+        leaves[i].bits = leaves[i].kind == value_kind::boolean ? u32(word != 0) : word;
+    }
+}
+
+member_data const* find_member(driver_bindings const& bound, cc::string_view binding, cc::string_view member)
+{
+    for (auto const& g : bound.groups)
+        if (g.name == binding)
+            for (auto const& d : g.members)
+                if (d.name == member)
+                    return &d;
+    return nullptr;
+}
+} // namespace
+
+cc::result<run_inputs> sgl::check::resolve_inputs(checked_module const& m,
+                                                  flat_entry_point const& e,
+                                                  driver_bindings const& bound)
+{
+    auto inputs = run_inputs{.acceleration_pool = bound.acceleration_pool};
+    for (auto const binding : e.bindings)
+    {
+        auto const& name = m.at(binding).name;
+        auto const members = m.at(m.bindings[m.at(binding).info].members);
+        for (auto const& g : bound.groups)
+            if (g.name == name)
+                for (auto const& d : g.members)
+                {
+                    auto is_known = false;
+                    for (auto const& member : members)
+                        is_known = is_known || member.name == d.name;
+                    if (!is_known)
+                        return cc::error(cc::format("the binding {} has no member {}", name, d.name));
+                }
+
+        auto whole = value();
+        for (auto i = isize(0); i < members.size(); ++i)
+        {
+            auto const& member = members[i];
+            auto const* const d = find_member(bound, name, member.name);
+            auto const bytes = d == nullptr              ? cc::span<byte const>()
+                             : !d->mutable_bytes.empty() ? cc::span<byte const>(d->mutable_bytes.span())
+                                                         : d->bytes.span();
+            auto const& type = m.at(member.type);
+            if (type.kind == type_kind::acceleration_structure)
+            {
+                inputs.acceleration_roots.push_back(d == nullptr ? 0 : d->acceleration_root);
+                continue;
+            }
+            if (type.kind == type_kind::buffer)
+            {
+                auto const element = zero_value(m, type.element);
+                auto const stride = element.leaves.size() * 4;
+                if (stride == 0 || bytes.size() % stride != 0)
+                    return cc::error(cc::format("{}.{} is {} bytes, which is no whole number of {}-byte elements", name,
+                                                member.name, bytes.size(), stride));
+                auto contents = buffer_contents{.binding = binding, .member = i32(i)};
+                for (auto k = isize(0); k < bytes.size() / stride; ++k)
+                    contents.leaves.push_back_range(element.leaves);
+                read_leaves(bytes, contents.leaves);
+                inputs.buffers.push_back(cc::move(contents));
+                continue;
+            }
+
+            auto v = zero_value(m, member.type);
+            if (d != nullptr && bytes.size() != v.leaves.size() * 4)
+                return cc::error(cc::format("{}.{} is {} bytes, and its value is {}", name, member.name, bytes.size(),
+                                            v.leaves.size() * 4));
+            if (d != nullptr)
+                read_leaves(bytes, v.leaves);
+            whole.leaves.push_back_range(v.leaves);
+        }
+        inputs.bindings.push_back(cc::move(whole));
+    }
+    return inputs;
+}
+
+void sgl::check::write_back(checked_module const& m, outcome const& o, driver_bindings const& bound)
+{
+    for (auto const& b : o.buffers)
+    {
+        auto const members = m.at(m.bindings[m.at(b.binding).info].members);
+        if (b.member < 0 || b.member >= members.size())
+            continue;
+        auto const* const d = find_member(bound, m.at(b.binding).name, members[b.member].name);
+        if (d == nullptr || d->mutable_bytes.empty())
+            continue;
+        CC_ASSERT(d->mutable_bytes.size() == b.leaves.size() * 4, "a run never changes the size of a buffer");
+        for (auto i = isize(0); i < b.leaves.size(); ++i)
+            for (auto k = 0; k < 4; ++k)
+                d->mutable_bytes[i * 4 + k] = byte(u8(b.leaves[i].bits >> (8 * k)));
+    }
 }
 
 bool sgl::check::is_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id)

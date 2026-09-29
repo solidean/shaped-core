@@ -502,9 +502,9 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                 is_listed = is_listed || listed == binding;
             // CHK-295: a test's run holds its own workgroup memory, which no host fills
             is_listed = is_listed || (scope.is_test && is_workgroup_binding(binding));
-            // CHK-228: a test lists no binding, and one its function lists is a value of the function's run
+            // CHK-228: a binding the test does not list, and its function does, is a value of the function's run
             auto is_captured = false;
-            if (scope.is_test && is_valid(scope.enclosing) && !is_workgroup_binding(binding))
+            if (scope.is_test && !is_listed && is_valid(scope.enclosing))
                 for (auto const listed : out.at(out.functions[out.at(scope.enclosing).info].bindings))
                     is_captured = is_captured || listed == binding;
             if (is_captured)
@@ -513,7 +513,7 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                                   out.at(scope.enclosing).name));
             else if (!is_listed && scope.is_test)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
-                       cc::format("{} is a binding, and a test lists none", out.at(binding).name));
+                       cc::format("{} is a binding, and the test does not list it", out.at(binding).name));
             else if (!is_listed)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
                        cc::format("{} is not in the binding list of {}", out.at(binding).name,
@@ -1705,15 +1705,15 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         is_listed = is_listed || (scope.is_test && is_workgroup_binding(needed));
         if (!is_listed && scope.is_test)
         {
-            // CHK-228: a test gives a callee its bindings through a local binding, which delegation will carry
+            // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-333)
             auto& d = report(
                 diagnostic_kind::binding_not_listed, file, where,
-                cc::format("{} needs {}, and a test lists no binding", out.at(callee).name, out.at(needed).name));
+                cc::format("{} needs {}, and the test does not list it", out.at(callee).name, out.at(needed).name));
             d.notes.push_back({.file = file,
                                .where = where,
-                               .message = cc::format("a `binding {}:` declared in the test gives {} its values, "
-                                                     "once local bindings are carried",
-                                                     out.at(needed).name, out.at(callee).name)});
+                               .message = cc::format("`test {{{}}}:` lists it, and the driver that runs the test "
+                                                     "gives its values",
+                                                     out.at(needed).name)});
         }
         else if (!is_listed)
             report(diagnostic_kind::binding_not_listed, file, where,

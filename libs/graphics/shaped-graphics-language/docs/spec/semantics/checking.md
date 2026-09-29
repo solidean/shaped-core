@@ -164,7 +164,8 @@ enum light_kind:
 
 ## Tests
 
-* **CHK-224** A `test` is checked as a function of no parameter and no binding that returns `void`, on its own, wherever it stands: at file scope, in a struct or an enum, or in a function body.
+* **CHK-224** A `test` is checked as a function of no parameter that returns `void`, on its own, wherever it stands: at file scope, in a struct or an enum, or in a function body.
+  Its bindings are the ones it lists (CHK-333).
   One in a function body is checked after that body, and it never runs where it stands, so no jump in front of it makes it unreachable.
   Every `test` the source spells is run or fails, and none is ever left out.
   One whose surroundings are never checked, a function whose signature failed or a test inside a test, is checked as one at file scope.
@@ -178,7 +179,11 @@ enum light_kind:
   A condition that writes a buffer, prints, or calls a builtin with an effect is `unsupported-yet`, since no target writes an `assert` (LEGAL-53) and its effect would happen on the interpreter alone.
 * **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
   Those names are still visible, so they hide what the module has of the name; a `const` is no value of a run and may be read.
-  A test lists no binding, so a callee that needs one is `binding-not-listed` by CHK-131, with a note that a local binding in the test will give it.
+  A binding member the test lists is its own and no capture, whatever the function lists.
+  A callee that needs a binding the test does not list is `binding-not-listed` by CHK-131, with a note that listing it gives it.
+* **CHK-333** `test {a, b}:` lists the bindings the test reads, as a function's `{...}` does, and the driver that runs the test gives their values (EVAL-94).
+  A binding it lists holds values, buffers and acceleration structures; a texture, an image or a sampler in one is `unsupported-yet`.
+  A `@workgroup` binding needs no listing (CHK-295).
 * **CHK-229** In the flat tree a check or an `assert` is a `check` statement, whose body leaves every node of the condition in a `var` of its own.
   A node is an `and`, an `or`, a `not`, a comparison, a comparison chain, or a leaf any other expression is; it runs in the order and under the conditions the condition itself would run it.
 * **CHK-230** A test whose body checked clean, and whose every callee inlines whole, has a flat tree of its own, of no stage and without a parameter.
@@ -867,7 +872,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-333 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |
