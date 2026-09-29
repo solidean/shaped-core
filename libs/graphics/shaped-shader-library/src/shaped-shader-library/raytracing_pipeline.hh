@@ -27,6 +27,9 @@ struct slib::hit_group_definition
     /// Per ray type, in the set's order; null where the record has none.
     cc::span<shader_asset_handle const* const> closest_hits;
     cc::span<shader_asset_handle const* const> any_hits;
+    /// Per ray type, what metal runs during traversal in a procedural group's stead: its intersection fused with the
+    /// record's any hit; empty for a triangle group, whose any hit metal runs as it is.
+    cc::span<shader_asset_handle const* const> metal_traversals;
 };
 
 /// What a ray-tracing pipeline leaves to the host: hit groups, `ray_count` hit shaders each, after the listed ones, and
@@ -63,6 +66,8 @@ struct slib::raytracing_pipeline_definition
     isize max_attribute_size = 8;
     /// The layout its shaders' binding lists state, from their generated group types.
     sg::pipeline_layout_handle (*acquire_layout)(sg::context& ctx) = nullptr;
+    /// What a record without a closest hit calls on metal, where an empty table slot is no function; null elsewhere.
+    shader_asset_handle const* empty_closest_hit = nullptr;
 };
 
 namespace slib

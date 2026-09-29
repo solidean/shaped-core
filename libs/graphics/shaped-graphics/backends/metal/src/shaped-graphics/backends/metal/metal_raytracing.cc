@@ -321,8 +321,17 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
     auto update_scratch = isize(0);
     auto* const accel = build_accel_common(descriptor, size, build_scratch, update_scratch);
 
-    auto const result = std::make_shared<metal_tlas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
-                                                     int(instances.size()), cc::move(referenced_blases));
+    // what a ray-tracing kernel reads to find a closest hit's record, which the intersection result does not carry
+    auto offsets = cc::vector<u32>();
+    for (auto const& inst : instances)
+        offsets.push_back(inst.hit_group_offset);
+    auto const hit_group_offsets = _metal_context.persistent.create_raw_buffer(
+        isize(offsets.size() * sizeof(u32)), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    upload_bytes_to_buffer(hit_group_offsets, cc::as_bytes(cc::span<u32 const>(offsets)), 0);
+
+    auto const result
+        = std::make_shared<metal_tlas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
+                                       int(instances.size()), cc::move(referenced_blases), hit_group_offsets);
 
     auto const scratch_raw
         = _metal_context.transient.create_raw_buffer(build_scratch, sg::buffer_usage::readwrite_buffer);

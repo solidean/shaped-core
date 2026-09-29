@@ -33,7 +33,14 @@ cc::shared_async<sg::raytracing_pipeline_description> slib::describe_raytracing_
     desc.max_payload_size = d.max_payload_size;
     desc.max_attribute_size = d.max_attribute_size;
 
-    (void)desc.add_raygen_shader(co_await (*d.raygen)->acquire(*ctx));
+    auto const raygen = co_await (*d.raygen)->acquire(*ctx);
+    // metal runs traversal and closest hits otherwise than DXR does: a procedural group's any hit fused into its
+    // intersection, and a function in every closest-hit slot
+    auto const is_metal = raygen.format == sg::shader_format::msl || raygen.format == sg::shader_format::metal_lib;
+    auto empty_closest_hit = cc::optional<sg::compiled_shader>();
+    if (is_metal && d.empty_closest_hit != nullptr)
+        empty_closest_hit = co_await (*d.empty_closest_hit)->acquire(*ctx);
+    (void)desc.add_raygen_shader(raygen);
     for (auto const* const miss : d.misses)
     {
         CC_ASSERTF(miss != nullptr, "{}'s {}: every ray type has a miss", d.file, d.name);
@@ -49,8 +56,16 @@ cc::shared_async<sg::raytracing_pipeline_description> slib::describe_raytracing_
             auto shader = sg::hit_shader{.intersection = intersection};
             if (auto const* const h = group.closest_hits[r]; h != nullptr)
                 shader.closest_hit = co_await (*h)->acquire(*ctx);
+            else if (is_metal)
+                shader.closest_hit = empty_closest_hit;
             if (auto const* const h = group.any_hits[r]; h != nullptr)
                 shader.any_hit = co_await (*h)->acquire(*ctx);
+            if (is_metal && group.intersection != nullptr && r < group.metal_traversals.size()
+                && group.metal_traversals[r] != nullptr)
+            {
+                shader.intersection = co_await (*group.metal_traversals[r])->acquire(*ctx);
+                shader.any_hit = {};
+            }
             (void)desc.add_hit_shader(cc::move(shader));
         }
     }
@@ -150,6 +165,11 @@ cc::shared_async<cc::vector<sg::hit_shader>> slib::compile_hit_group(sg::context
         throw fail("no registered compiler builds SGL into a format this context accepts");
 
     auto const options = compile_source_options{.language = shader_language::sgl, .label = label};
+    auto const is_metal = format.value() == sg::shader_format::msl || format.value() == sg::shader_format::metal_lib;
+    auto empty_closest_hit = cc::optional<sg::compiled_shader>();
+    if (is_metal)
+        empty_closest_hit = co_await library->compile_source(source, sg::shader_stage::closest_hit,
+                                                             "sgl_empty_closest_hit", format.value(), options);
     auto intersection = cc::optional<sg::compiled_shader>();
     if (!found->intersection.empty())
         intersection = co_await library->compile_source(source, sg::shader_stage::intersection, found->intersection,
@@ -161,9 +181,18 @@ cc::shared_async<cc::vector<sg::hit_shader>> slib::compile_hit_group(sg::context
         if (!found->closest_hits[r].empty())
             shader.closest_hit = co_await library->compile_source(source, sg::shader_stage::closest_hit,
                                                                   found->closest_hits[r], format.value(), options);
+        else if (is_metal)
+            shader.closest_hit = empty_closest_hit;
         if (!found->any_hits[r].empty())
             shader.any_hit = co_await library->compile_source(source, sg::shader_stage::any_hit, found->any_hits[r],
                                                               format.value(), options);
+        // metal runs a procedural group's intersection and any hit as one traversal function
+        if (is_metal && !found->intersection.empty())
+        {
+            shader.intersection = co_await library->compile_source(source, sg::shader_stage::intersection,
+                                                                   found->traversals[r], format.value(), options);
+            shader.any_hit = {};
+        }
         result.push_back(cc::move(shader));
     }
     co_return result;

@@ -212,6 +212,7 @@ void write_hit_group(babel::json::object_writer& o, sgl::described_hit_group con
     o.write("intersection", cc::string_view(g.intersection));
     write_names(o, "closest_hits", g.closest_hits);
     write_names(o, "any_hits", g.any_hits);
+    write_names(o, "traversals", g.traversals);
 }
 
 void write_raytracing_pipeline(babel::json::object_writer& o, sgl::described_raytracing_pipeline const& p)

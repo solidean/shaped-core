@@ -984,12 +984,19 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
             any_hits = ", ".join(handle(e) for e in group["any_hits"])
             out.append(f"slib::shader_asset_handle const* const k_{key}_{group_name}_closest[] = {{{closest}}};\n")
             out.append(f"slib::shader_asset_handle const* const k_{key}_{group_name}_any[] = {{{any_hits}}};\n")
+            # metal runs a procedural group's intersection and any hit as one traversal function per ray type
+            if any(group.get("traversals", [])):
+                traversals = ", ".join(handle(e) for e in group["traversals"])
+                out.append(f"slib::shader_asset_handle const* const k_{key}_{group_name}_traversals[] = {{{traversals}}};\n")
         if p["hit_groups"]:
             out.append(f"slib::hit_group_definition const k_{key}_groups[] = {{\n")
             for group_name in p["hit_groups"]:
                 group = file.hit_group(group_name)
+                traversals = (f", .metal_traversals = k_{key}_{group_name}_traversals"
+                              if any(group.get("traversals", [])) else "")
                 out.append(f'    {{.name = "{group_name}", .intersection = {handle(group["intersection"])}, '
-                           f".closest_hits = k_{key}_{group_name}_closest, .any_hits = k_{key}_{group_name}_any}},\n")
+                           f".closest_hits = k_{key}_{group_name}_closest, .any_hits = k_{key}_{group_name}_any"
+                           f"{traversals}}},\n")
             out.append("};\n")
         group_types = ", ".join(f"{namespace}::{g}" for g in groups)
         out.append(f"sg::pipeline_layout_handle {key}_layout(sg::context& ctx)\n{{\n")
@@ -1020,6 +1027,8 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
         out.append(f"        .max_payload_size = {p['max_payload_size']},\n")
         out.append(f"        .max_attribute_size = {p['max_attribute_size']},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")
+        if file.entry_point("sgl_empty_closest_hit") is not None:
+            out.append(f"        .empty_closest_hit = {handle('sgl_empty_closest_hit')},\n")
         out.append("    };\n    return d;\n}\n")
 
         out.append(f"\ncc::shared_async<sg::raytracing_pipeline_description> {qualified}::description("

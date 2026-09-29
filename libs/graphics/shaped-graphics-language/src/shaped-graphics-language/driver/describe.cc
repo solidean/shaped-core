@@ -215,10 +215,13 @@ described_hit_group describe_hit_group(check::checked_module const& m, check::pi
                                       .is_procedural = p.is_procedural,
                                       .intersection = name_or_empty(m, p.intersection)};
     auto const records = m.at(p.records);
+    auto const rays = m.at(m.at(m.at(p.ray_set).type).members);
     for (auto i = isize(0); i < records.size(); i += 2)
     {
         result.closest_hits.push_back(name_or_empty(m, records[i]));
         result.any_hits.push_back(name_or_empty(m, records[i + 1]));
+        result.traversals.push_back(p.is_procedural ? cc::format("sgl_{}_{}", m.at(p.symbol).name, rays[i / 2].name)
+                                                    : cc::string());
     }
     return result;
 }

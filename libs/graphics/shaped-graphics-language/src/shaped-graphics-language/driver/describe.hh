@@ -248,6 +248,9 @@ struct sgl::described_hit_group
     /// Per ray type, in the set's order; empty where the record has none.
     cc::vector<cc::string> closest_hits;
     cc::vector<cc::string> any_hits;
+    /// Per ray type, a procedural group's traversal function on metal: its intersection and the record's any hit as
+    /// one entry point; empty for a triangle group (CHK-345).
+    cc::vector<cc::string> traversals;
 };
 
 /// A `callables` table: callable shaders of one parameter type, packed in the module's declaration order.
