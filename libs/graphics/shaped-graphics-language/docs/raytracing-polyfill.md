@@ -5,6 +5,7 @@ sg's webgpu backend builds acceleration structures into the layout below, and SG
 **This is an internal contract, not part of the language.**
 A shader that reads the pool other than through `trace` is undefined, and nothing here promises stability across versions.
 Both sides change together, in one commit.
+What a shader writes is the language's, [spec/raytracing.md](spec/raytracing.md), and EMIT-135 is what WGSL declares for it.
 
 ## Binding
 
@@ -112,5 +113,6 @@ A test's driver binds a pool and each acceleration member's root (EVAL-95), and 
   The TLAS header's kinds are not read yet.
 * **Triangles are not tested watertight yet**: Möller–Trumbore with a determinant cutoff, so a ray through an edge two triangles share may hit both or neither.
   A watertight test is what hardware promises, and until the traversal has one, a test of it keeps its rays off shared edges.
-* A candidate the any-hit decision must see is a non-opaque triangle or any box, with the instance's forced opacity and the ray flags applied first.
+* The intersection runs for every box the ray enters.
+  The any-hit decision sees a non-opaque triangle, or the report of a non-opaque box, with the instance's forced opacity and the ray flags applied first.
 * `t` and the barycentrics agree with hardware within a tolerance, never bit for bit.

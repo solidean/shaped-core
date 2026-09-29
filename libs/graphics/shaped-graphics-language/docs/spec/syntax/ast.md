@@ -529,11 +529,16 @@ fun update(state: particle):
 | binding composition | `binding name = other`, `binding name = (a, b)` | yes | yes |
 | sampler | `sampler name:` and a block of settings | yes | no |
 | pipeline | `pipeline name:` and a block of settings, or `pipeline name = (a, b)` | yes | no |
+| ray set | `rays name:` and a block of members | yes | no |
+| hit group | `hit_group name for set:` and a block of settings | yes | no |
+| callables table | `callables name = (a, b)` | yes | no |
 | notation | `notation a => b` | yes | yes |
 | test | `test:` and a block, `test {bindings}:` and a block, or `test expression` | yes | yes |
 | `let` | see [statements](#let-and-assignment) | no | yes |
 
 * **AST-64** A file holds at most one `module` declaration, and it stands before every other declaration of the file.
+* **AST-152** `struct name[A]:` reads as a struct whose name stands before a square list of type parameters, each a field as a function's are (AST-68).
+  The AST records them, and the check pass says who may declare one ([CHK-339](../semantics/checking.md#generics)).
 * **AST-65** The type of a constant stands in a type position.
 * **AST-138** `test expression` reads as a `test` whose block holds the one expression statement `expression`; a `test` with both, or with neither, is a normal error.
 * **AST-151** A braced list right after `test` names the bindings it reads, as a function's `{bindings}` does, and the body after it is a block.
@@ -658,6 +663,28 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
   A block under the list holds settings, as AST-131's block does; the block hangs off the list, the rightmost form of the line (FORM-34).
 * **AST-134** A setting whose left side is neither a name nor a member chain is the normal error `expected-name`, and a line that is no `=` is `expected-member`.
   Both are still read.
+* **AST-150** Ray tracing declares with two keywords of its own ([why](why/ast.md#ast-150)).
+  `rays name:` reads as a struct with a block of members, each a ray type and the payload it carries, marked as a ray set.
+  `hit_group name for set:` reads as a pipeline with a block of settings, marked as a hit group and recording the ray set it names; one without `for` and a name is `expected-name`.
+  Inside a pipeline's block, `rays = set` is a setting whose path is the name `rays`, though `rays` leads a declaration elsewhere.
+* **AST-153** `callables name = (a, b, .host)` reads as a pipeline's short form, marked as a callables table, whose list is its entries.
+
+```sgl
+rays path_rays:
+    surface: radiance
+    occlusion: shadow
+
+hit_group textured for path_rays:
+    surface = (closest_hit = shade, any_hit = cutout)
+
+callables ops = (doubled, negated, .host)
+
+@raytracing pipeline path:
+    rays = path_rays
+    raygen = primary
+    miss.surface = sky
+    hit_groups = (textured)
+```
 
 ```sgl
 pipeline:
