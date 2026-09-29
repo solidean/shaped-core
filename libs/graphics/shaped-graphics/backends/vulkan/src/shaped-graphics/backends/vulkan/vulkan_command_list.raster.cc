@@ -164,6 +164,9 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
         raster_set_scissor(info.scissor.value());
     else
         raster_set_scissor(tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(extent_w, extent_h)));
+
+    // The blend constants are 0 until set, per rendering scope, which Vulkan leaves undefined for dynamic state.
+    raster_set_blend_constants(tg::vec4f(0, 0, 0, 0));
 }
 
 void vulkan_command_list::reopen_rendering()

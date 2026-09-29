@@ -171,6 +171,7 @@ public:
     /// Sets the stencil reference the depth-stencil state's stencil test compares against.
     void set_stencil_reference(u32 reference);
     /// Sets the constant RGBA blend factor that referencing factors use.
+    /// It is 0 in every channel until set, and each rendering scope starts at 0 again.
     void set_blend_constants(tg::vec4f constants);
     /// Writes inline constants into the bound pipeline layout's inline_constants block.
     void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});

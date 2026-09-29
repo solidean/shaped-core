@@ -326,7 +326,7 @@ cmd.raster.bind_group(group_index, binding_group)      // void — bind at slot 
 cmd.raster.bind_vertex_buffers({vbuf->as_vertex_buffer<Vtx>()}, first_slot=0)  // void — also: bind_vertex_buffer(view, slot) / span overload
 cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  // void
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
-cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state
+cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state; blend constants are 0 until set, per rendering scope
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
 cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // void — as on cmd.compute, next draw only
                                                          //   an element is tracked at the stages the code touches its array in (every stage of the op without a footprint)

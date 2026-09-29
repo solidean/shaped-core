@@ -212,3 +212,34 @@ ASYNC_INVOCABLE_TEST("sg - each blend factor, op and write-mask channel leaves i
     for (auto x = 0; x < width; ++x)
         CHECK(pixels[0].rgba_float(x, 0) == cases[x].expected).context(cc::format("blend case {}", x));
 }
+
+ASYNC_INVOCABLE_TEST("sg - a blend constant never set reads as 0", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const state = sg::color_target_state{
+        .format = sg::pixel_format::rgba16_float,
+        .blend = sg::blend_state{.color = {.source = sg::blend_factor::constant, .target = sg::blend_factor::zero},
+                                 .alpha = {.source = sg::blend_factor::constant, .target = sg::blend_factor::zero}},
+    };
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(
+        shaders::rects.floating, {}, [state](sg::raster_pipeline_description& d) { d.color_targets[0] = state; });
+
+    auto const batch = sg_test::rect_batch(*ctx, {sg_test::rect_at(0, 0, 1, 1, 1, 1, 0.5f, source)});
+
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 1,
+                                                          .height = 1,
+                                                          .colors = {sg::pixel_format::rgba16_float},
+                                                          .target_set = shaders::rect_target::name,
+                                                          .clear_color = destination},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             batch.draw(scope, 0);
+                                                         });
+
+    CHECK(pixels[0].rgba_float(0, 0) == tg::vec4f(0, 0, 0, 0));
+}
