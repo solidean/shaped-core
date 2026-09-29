@@ -10,6 +10,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_dred.cc
     src/shaped-graphics/backends/dx12/dx12_epoch.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.cc
+    src/shaped-graphics/backends/dx12/dx12_native_scope.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.queries.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.raster.cc
     src/shaped-graphics/backends/dx12/dx12_barrier.cc
@@ -135,6 +136,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-upload-async-test.cc
         tests/dx12-download-async-test.cc
         tests/dx12-copy-test.cc
+        tests/dx12-native-scope-test.cc
         tests/dx12-compute-test.cc
         tests/dx12-staging-binding-group-test.cc
         tests/dx12-pipeline-cache-test.cc

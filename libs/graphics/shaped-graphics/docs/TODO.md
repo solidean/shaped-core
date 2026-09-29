@@ -3,15 +3,12 @@
 Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
-- **A declared native scope, so foreign code can record onto an sg command list.**
-  Vendor SDKs (DLSS Ray Reconstruction, FSR Ray Regeneration) take the native device, list and resources, and assume the resources are already in the state they need.
-  Nothing public reaches a native handle today, and reaching into a backend's privates would bypass the barrier tracker silently.
-  The shape: `sg::dx12::native_scope::open(cmd, accesses)` names every resource the foreign code touches and how, in the neutral `access_flags` vocabulary, and emits their barriers.
-  It then hands out the native list, device and resources, asserting on one that was not declared.
-  Closing it records the declared states as current and invalidates the list's cached pipeline, heap and root bindings.
-  It is a second member of "access is inferred, never declared (with one exception)", for the same reason the bindless declaration is the first.
-  dx12 first, vulkan when a member needs it; sr's [denoising.md](../../shaped-rendering/docs/denoising.md) is the consumer.
-  Pin it with a test that clears through the scope and checks sg's next inferred barrier.
+- **The native scope is dx12 only.**
+  `dx12_native_scope` is the declared escape hatch foreign code records through (see [barriers](concepts/barriers.md)).
+  Vulkan has no equivalent, so a vendor denoiser can only run on dx12; the vulkan shape is the same declaration plus
+  `vkCmdPipelineBarrier2`, and it wants writing when a member needs it.
+  Two smaller gaps in the dx12 one: it declares whole textures rather than subresource ranges, and a resource the
+  foreign code touches without declaring is caught only by the debug layer.
 - **A barrier-only dx12 submit once landed outside any test.**
   One full `dev.py check` failed `shaped-graphics-test` on debug-nopch with the debug layer's "recorded only Barrier commands" warning, logged under no test owner.
   The message is allowlisted, but only inside a test, so an unowned one fails the run.
