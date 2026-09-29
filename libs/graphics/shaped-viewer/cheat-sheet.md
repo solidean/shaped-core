@@ -49,7 +49,9 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; } — view-wide integration controls (no light/sky: those are on the view)
+sv::render_settings              // { int samples_per_pixel, max_bounces; sr::denoise_settings denoise; } — per-layer integration controls (no light/sky: those are on the view)
+                                 //   denoise defaults to method none; NOTHING in it restarts accumulation (see "Denoising" below)
+                                 //   sv owns denoise.fresh_samples and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
@@ -761,7 +763,32 @@ The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads i
 Every path is traced; a point or a parallel light is a delta and has next-event estimation alone (docs/lights.md).
 The pick probability `1/N` is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced whatever N is.
 A layer with no lights falls back to `layer::fallback_light` — `sv::default_fallback_light()`, a sun — which `scene.fallback_light(cc::nullopt)` turns off.
-That is unlike a Cornell box, whose light rect must match the emitter.
+
+**Denoising.** A layer with `render_settings::denoise` on is denoised right after its trace, and its parent samples the result.
+- **Temporal while the mean is young, spatial after.** For `render_settings::temporal_denoise_frames` (16) frames after a restart, a temporal
+  member (SVGF under `automatic`) denoises this frame's own samples; then à-trous takes over on the mean, backing off with its sample count.
+  A named spatial member (`atrous`) never takes the temporal branch.
+- **The hand-off is crossfaded**, over `render_settings::temporal_denoise_fade_frames` (8) accumulated frames: both members run and
+  `sr::mix_routine` blends one into the other, because the two make visibly different images of the same estimate.
+  The fade adds a `temporal_id::denoised_crossfade` slot; 0 hands over in one frame.
+- **`view_ref::camera_cut()`** says the camera jumped rather than moved, so the temporal history and the motion guide's previous camera
+  are dropped — nothing reprojects across a cut.
+  It is sticky until a frame traces the view, and it restarts no accumulation of its own.
+- **The specular guides** `temporal_id::specular_albedo_guide` (F0, blended to the base colour by metalness) and `roughness_guide` (the coat's where a coat covers the base).
+  Declared for every member with the other guides: a split member reads them beside the diffuse albedo, and à-trous and SVGF demodulate by the sum of the two, since a metal's diffuse albedo is zero.
+  `pt_guides.hlsli` holds all three guide functions apart from the tracer's bindings, which is what lets `bsdf_probe.hlsl` assert on them.
+- **Slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
+  A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
+  The tracer writes those two only on the frames the temporal member runs, so a still view past the hand-off pays for neither.
+- **The split signals are in the tracer, not yet in sv.** `pt_trace_desc::frame_diffuse`, `frame_specular` and `guide_hit_distance`, behind the frame
+  block's `write_split`, are what a split-signal member will read; the two halves sum to `frame_output` exactly.
+  Nothing in `view_renderer` binds them yet, so no temporal slot exists for them — that lands with the first member that reads them.
+- **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
+  The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
+- **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.
+  One that cannot run presents the raw mean and logs once.
+- **Only the plan path denoises.** `view_renderer::execute`, the single-view entry point, still returns the raw accumulator.
+
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
 
@@ -887,6 +914,7 @@ scene.add_light("id", sv::light) -> light_ref               // the id is hashed 
 scene.add_point_light / add_spot_light / add_rect_light / add_directional_light / add_sun_light("id", ...) -> light_ref
 scene.fallback_light(optional<light>)                        // traced when the layer has none; a sun by default, nullopt for none
 scene.background(bg) / .settings(render_settings)
+scene.settings({.samples_per_pixel = 4, .denoise = {.method = sr::denoise_method::automatic}})  // a denoised layer
 mesh_ref.transform(t);  light_ref.light(l);  light_ref.id();  light_ref.candela(800).color(c)   // light_ref takes light's setters
 ```
 

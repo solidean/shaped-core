@@ -43,8 +43,8 @@ public:
     /// How long the run has taken so far, in seconds.
     [[nodiscard]] double elapsed_seconds() const;
 
-    /// Whether the image is finished: every traced view converged, nothing still owing post-load work, and a trace
-    /// that actually dispatched.
+    /// Whether the image is finished: every traced view converged, nothing still streaming in or owing post-load work,
+    /// and a trace that actually dispatched.
     ///
     /// `views_converged` is the caller's fold over every refreshing trace, through
     /// `view_store::is_accumulation_converged` — which is the rule, and which is why this takes an answer rather than

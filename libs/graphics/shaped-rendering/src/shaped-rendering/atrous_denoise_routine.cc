@@ -21,6 +21,7 @@ constexpr u32 k_has_normal = 1u << 1;
 constexpr u32 k_has_depth = 1u << 2;
 constexpr u32 k_demodulate_in = 1u << 3;
 constexpr u32 k_remodulate_out = 1u << 4;
+constexpr u32 k_has_specular_albedo = 1u << 5;
 
 // Where this member's images live in the history's state slots.
 // à-trous keeps no history, so the two scratch slots are all it ever touches — the rest stay empty under it.
@@ -140,6 +141,8 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     auto guide_flags = u32(0);
     if (is_set(in.guides.albedo))
         guide_flags |= k_has_albedo;
+    if (is_set(in.guides.specular_albedo))
+        guide_flags |= k_has_specular_albedo;
     if (is_set(in.guides.normal))
         guide_flags |= k_has_normal;
     if (is_set(in.guides.depth))
@@ -151,6 +154,7 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     auto const stand_in
         = [&](sg::texture_2d const& t) { return is_set(t) ? t.as_texture_view() : in.color.as_texture_view(); };
     auto const albedo = stand_in(in.guides.albedo);
+    auto const specular_albedo = stand_in(in.guides.specular_albedo);
     auto const normal = stand_in(in.guides.normal);
     auto const depth = stand_in(in.guides.depth);
 
@@ -181,6 +185,7 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
                                                               shaders::atrous_bindings{
                                                                   .gSource = source.as_texture_view(),
                                                                   .gAlbedo = albedo,
+                                                                  .gSpecularAlbedo = specular_albedo,
                                                                   .gNormal = normal,
                                                                   .gDepth = depth,
                                                                   .gTarget = target.as_any_image_view(),

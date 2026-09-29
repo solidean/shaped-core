@@ -84,10 +84,17 @@ public:
 
     /// How many resources still owe post-load work — mip generation and its kin, drained under a per-epoch budget.
     ///
-    /// This is the half of "is the image finished" that accumulation cannot see.
+    /// This is the part of "is the image finished" that accumulation cannot see.
     /// Such work changes a texture's contents rather than its id, so it never restarts a view's accumulation:
-    /// a caller waiting for a settled image has to watch this AND `view_ref::accumulated_frames`.
+    /// a caller waiting for a settled image has to watch this, `streaming_resources` AND `view_ref::accumulated_frames`.
     [[nodiscard]] isize pending_resource_work() const;
+
+    /// How many payloads are still streaming in — geometry, attributes, textures.
+    ///
+    /// Until one lands, what uses it is drawn as a stand-in: a placeholder box for a mesh, a flat colour for a texture.
+    /// Landing restarts the accumulation, but an image can converge over the stand-ins before that, so a caller waiting
+    /// for the finished image has to see this reach 0 as well.
+    [[nodiscard]] isize streaming_resources() const;
 
     /// `sv::background_work` for the context this viewer draws on.
     /// What it covers follows the viewer's internals, which is why it says only "done" and never what the work was.

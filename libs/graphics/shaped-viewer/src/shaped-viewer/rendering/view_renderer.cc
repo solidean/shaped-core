@@ -5,6 +5,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/mix_routine.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -316,6 +318,15 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
     return isize(size[0]) * isize(size[1]) * isize(sg::format_block_size(format));
 }
 
+/// Whether `plan` declares the temporal resource `temporal_id` for view `id` this frame.
+[[nodiscard]] bool declares(render_plan const& plan, view_id id, u64 temporal_id)
+{
+    for (auto const& t : plan.temporals)
+        if (t.id == id && t.temporal_id == temporal_id)
+            return true;
+    return false;
+}
+
 /// The slot `store` keeps for `(id, temporal_id)`, its texture created or re-created if the extent moved.
 /// `resized` is what tells a caller its history is gone, since a fresh texture holds nothing to blend into.
 struct ensured_slot
@@ -361,6 +372,10 @@ cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
     // not handed out until the one it traces through is ready, which is what its callers would otherwise have to check
     // for themselves on every frame.
     _pathtrace = depend_on<pathtrace_routine>(ctx);
+
+    // Warmed rather than declared: a layer that never crossfades must not wait on it, and one that does reaches the
+    // fade a good many frames after the first trace — so the compile has long since finished by then.
+    sr::mix_routine::prewarm(ctx);
 
     // This runs again on every reload, which is exactly when an accumulated image stops being comparable to a fresh one.
     ++_shader_generation;
@@ -421,11 +436,22 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
     for (auto i = u32(0); i < plan.traces.size(); ++i)
     {
         auto const& tr = plan.traces[i];
-        auto const* const slot = store.get_or_create(tr.id).temporal.get_ptr(temporal_id::accumulation(tr.layer));
+        auto& rec = store.get_or_create(tr.id);
+        auto const* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
 
         // The loop above allocated it, so a miss means the plan named a trace it declared no accumulator for.
         CC_ASSERT(slot != nullptr, "a plan trace has no accumulator among its view's temporal inputs");
         out.traces[i] = slot->texture;
+
+        // What a parent samples is the denoised image once there is one, which is also what a throttled view re-presents.
+        // Only while this frame still declares it: a layer that stopped denoising leaves the slot behind until the store
+        // reclaims it, and presenting that would show a frozen image.
+        if (declares(plan, tr.id, temporal_id::denoised(tr.layer)))
+        {
+            auto const* const d = rec.temporal.get_ptr(temporal_id::denoised(tr.layer));
+            if (d != nullptr && d->accum_frame > 0)
+                out.traces[i] = d->texture;
+        }
     }
 
     // One budget entry per view, covering everything it holds — the store reclaims a view's textures whole or not at all.
@@ -453,7 +479,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                                          viewer_definition const& def,
                                          render_plan const& plan,
                                          u32 trace_index,
-                                         plan_resources const& res,
+                                         plan_resources& res,
                                          gpu_resource_manager& resources,
                                          view_store& store)
 {
@@ -465,8 +491,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     CC_ASSERT(isize(tr.layer) < v.layers.size(), "a plan trace names a layer the view does not hold");
     auto const& l = v.layers[tr.layer];
 
-    auto const& output = res.traces[trace_index];
-    if (output.raw() == nullptr)
+    if (res.traces[trace_index].raw() == nullptr)
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to trace
 
     // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
@@ -483,7 +508,28 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const bg = background_gpu::from(l.background);
     auto const hash = trace_hash(fc, bg, lights, resolved, tr.resolution, self->_shader_generation);
 
+    // The same, with the camera left out: what a temporal denoiser's history restarts on.
+    // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
+    auto scene_fc = fc;
+    scene_fc.camera = {};
+    auto const scene_hash = trace_hash(scene_fc, bg, lights, resolved, tr.resolution, self->_shader_generation);
+
     auto& rec = store.get_or_create(v.id);
+
+    // A cut teleports the camera, so nothing from the last frame reprojects: the temporal history describes another
+    // part of the scene, and the motion guide would reproject into a camera nothing connects it to.
+    // Every slot of the view at once rather than this layer's, so a view carrying two traced layers cuts as one.
+    if (rec.camera_cut_pending)
+    {
+        for (auto&& [slot_id, s] : rec.temporal)
+        {
+            (void)slot_id;
+            s.denoise.reset();
+            s.has_last_camera = false;
+        }
+        rec.camera_cut_pending = false;
+    }
+
     auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
     if (slot == nullptr)
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate
@@ -499,6 +545,61 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot->accum_frame;
     fc.seed = slot->accum_frame + 1;
+
+    // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
+    // temporal ones only when the layer may denoise temporally.
+    auto const denoising = l.settings.denoise.method != sr::denoise_method::none;
+    auto const slot_of = [&](u64 id) { return denoising ? rec.temporal.get_ptr(id) : nullptr; };
+    auto const ds = denoise_slots{
+        .normal = slot_of(temporal_id::normal_guide(tr.layer)),
+        .depth = slot_of(temporal_id::depth_guide(tr.layer)),
+        .albedo = slot_of(temporal_id::albedo_guide(tr.layer)),
+        .specular_albedo = slot_of(temporal_id::specular_albedo_guide(tr.layer)),
+        .roughness = slot_of(temporal_id::roughness_guide(tr.layer)),
+        .denoised = slot_of(temporal_id::denoised(tr.layer)),
+        .frame = slot_of(temporal_id::frame_samples(tr.layer)),
+        .motion = slot_of(temporal_id::motion_guide(tr.layer)),
+        .crossfade = slot_of(temporal_id::denoised_crossfade(tr.layer)),
+    };
+    // The guides are declared together, so they are all present or all absent.
+    auto const has_guides = ds.normal != nullptr && ds.depth != nullptr && ds.albedo != nullptr
+                         && ds.specular_albedo != nullptr && ds.roughness != nullptr && ds.denoised != nullptr;
+    auto const has_temporal = has_guides && ds.frame != nullptr && ds.motion != nullptr;
+
+    // Set after the hash, like accum_frame, so none of it can restart the accumulation.
+    // The guides count on the normal slot's own frames, since they may have started after the mean did.
+    // They describe the same image, so they restart whenever it does.
+    if (has_guides)
+    {
+        if (slot->accum_frame == 0)
+            ds.normal->accum_frame = 0;
+        fc.write_guides = 1;
+        fc.guide_frame = ds.normal->accum_frame;
+        fc.write_specular_guides = 1;
+    }
+
+    // Decided before the frame block is uploaded, so the tracer writes this frame's own samples and motion only on the
+    // frames the temporal member reads them.
+    // On the mean's count as `_denoise` sees it, after this frame's increment below.
+    auto const schedule
+        = has_guides ? _schedule_denoise(ctx, l.settings, ds, cc::min(slot->accum_frame + 1, accumulation_frame_cap))
+                     : denoise_schedule{};
+    auto const writes_temporal = has_temporal && schedule.runs_temporal();
+
+    if (has_temporal)
+    {
+        // The temporal member's history restarts on a different SCENE, never on camera motion: carrying history across
+        // camera motion is what it exists for, while the mean restarts on every move.
+        if (ds.frame->reset_hash != scene_hash)
+            ds.frame->denoise.reset();
+        ds.frame->reset_hash = scene_hash;
+    }
+
+    if (writes_temporal)
+    {
+        fc.write_temporal = 1;
+        fc.previous_camera = ds.motion->has_last_camera ? ds.motion->last_camera : fc.camera;
+    }
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
         1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
@@ -525,7 +626,14 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         cmd, {.frame = frame,
               .background = background,
               .instances = resolved.instances,
-              .output = output,
+              .output = slot->texture,
+              .guide_normal = has_guides ? ds.normal->texture : sg::texture_2d(),
+              .guide_depth = has_guides ? ds.depth->texture : sg::texture_2d(),
+              .guide_albedo = has_guides ? ds.albedo->texture : sg::texture_2d(),
+              .guide_specular_albedo = has_guides ? ds.specular_albedo->texture : sg::texture_2d(),
+              .guide_roughness = has_guides ? ds.roughness->texture : sg::texture_2d(),
+              .frame_output = writes_temporal ? ds.frame->texture : sg::texture_2d(),
+              .guide_motion = writes_temporal ? ds.motion->texture : sg::texture_2d(),
               .instance_table = instance_table,
               .lights = light_buffer,
               .hit_groups = resolved.hit_groups,
@@ -546,7 +654,151 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     if (slot->accum_frame < accumulation_frame_cap)
         ++slot->accum_frame;
+
+    // Every frame, the temporal member's or not: the first one it runs after a still period reprojects from here.
+    if (has_temporal)
+    {
+        ds.motion->last_camera = fc.camera;
+        ds.motion->has_last_camera = true;
+    }
+
+    if (has_guides)
+    {
+        if (ds.normal->accum_frame < accumulation_frame_cap)
+            ++ds.normal->accum_frame;
+        // A denoiser still compiling declines the frame, as a tracer still compiling does: a capture that saved it
+        // would hold the raw mean where the caller asked for a denoised image.
+        // The trace itself landed, so the accumulation above stands.
+        if (_denoise(cmd, l.settings, schedule, *slot, ds, res.traces[trace_index]) == sr::denoise_status::pending)
+            return sg::routine_outcome::declined;
+    }
     return sg::routine_outcome::executed;
+}
+
+f32 view_renderer::crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fade_frames)
+{
+    if (accum_frame <= temporal_frames)
+        return 0.0f;
+    if (fade_frames == 0)
+        return 1.0f;
+
+    // The first frame past the window is already one frame into the fade, so the curve leaves 0 immediately and the
+    // hand-off has no frame that is neither one thing nor the other.
+    auto const into = accum_frame - temporal_frames;
+    return cc::min(1.0f, f32(into) / f32(fade_frames));
+}
+
+view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context const& ctx,
+                                                                 render_settings const& settings,
+                                                                 denoise_slots const& ds,
+                                                                 u32 accum_frame)
+{
+    // Temporal while the mean is young, on this frame's own samples: a young mean is barely less noisy than one frame,
+    // and a temporal member's history is what makes up the difference.
+    // Once the mean has more frames than that, a spatial member on the mean takes over, which keeps the converged image
+    // unbiased.
+    // `fresh_samples` says which of the two a call carries, and it lives in the settings so that resolving a method and
+    // running it cannot disagree — so each member takes its own settings value rather than a flag per call.
+    auto const with_fresh_samples = [&settings](bool fresh)
+    {
+        auto copy = settings.denoise;
+        copy.fresh_samples = fresh;
+        return copy;
+    };
+    auto schedule = denoise_schedule{
+        .temporal_settings = with_fresh_samples(true),
+        .spatial_settings = with_fresh_samples(false),
+    };
+
+    auto const may_run_temporally = ds.frame != nullptr && ds.motion != nullptr
+                                 && sr::is_temporal(sr::resolve_denoise_method(ctx, schedule.temporal_settings));
+
+    // 0 while the temporal member owns the frame, 1 once the spatial one does, and the fade in between — so the two
+    // members are never both idle.
+    // A layer with no crossfade slot has nowhere to run both at once, so it hands over in one frame whatever it asked for.
+    auto const fade_frames = ds.crossfade != nullptr ? settings.temporal_denoise_fade_frames : 0;
+    if (may_run_temporally)
+        schedule.blend = crossfade_weight(accum_frame, settings.temporal_denoise_frames, fade_frames);
+    return schedule;
+}
+
+sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
+                                           render_settings const& settings,
+                                           denoise_schedule const& schedule,
+                                           impl::temporal_slot const& accumulator,
+                                           denoise_slots const& ds,
+                                           sg::texture_2d& presented)
+{
+    auto& denoised = *ds.denoised;
+    auto const guides = sr::denoise_guides{
+        .albedo = ds.albedo->texture,
+        .specular_albedo = ds.specular_albedo->texture,
+        .normal = ds.normal->texture,
+        .roughness = ds.roughness->texture,
+        .depth = ds.depth->texture,
+    };
+
+    auto const temporal = schedule.runs_temporal();
+    auto const spatial = schedule.runs_spatial();
+
+    // Mid-fade both members run, so the frame carries two denoises.
+    // That is the whole price of the fade, and it is why the window is counted in frames rather than seconds: it is
+    // bounded by the accumulation, which a still view leaves behind within a second of settling.
+    auto outcome = sr::denoise_outcome();
+    if (temporal)
+    {
+        auto temporal_guides = guides;
+        temporal_guides.motion = ds.motion->texture;
+        auto const inputs = sr::denoise_inputs{
+            .color = ds.frame->texture,
+            .guides = temporal_guides,
+            .output = denoised.texture,
+        };
+        // Its own history, not the spatial member's: each would otherwise throw the other's away on every switch, and
+        // the temporal one must survive a still period to be worth anything when the camera moves again.
+        outcome = sr::denoise_routine::execute(cmd, inputs, ds.frame->denoise, schedule.temporal_settings);
+    }
+
+    if (spatial)
+    {
+        // Spatial, on the mean: the denoiser backs off as the sample count grows, so the converged image stays close to
+        // itself.
+        // Into the crossfade slot while the temporal image still holds `denoised`, and straight into `denoised` once it
+        // does not — so the fade costs a texture and the steady state costs nothing.
+        auto const& target = temporal ? ds.crossfade->texture : denoised.texture;
+        auto const inputs = sr::denoise_inputs{
+            .color = accumulator.texture,
+            .guides = guides,
+            .output = target,
+            .sample_count = u32(cc::max(1, settings.samples_per_pixel)) * accumulator.accum_frame,
+        };
+        auto const spatial_outcome
+            = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
+
+        // Mid-fade the frame is only as good as its worse half: a spatial member that declined leaves the crossfade
+        // slot holding an older image, and mixing that in would be a visible jump backwards.
+        if (!temporal || !spatial_outcome.is_denoised())
+            outcome = spatial_outcome;
+        else if (!sr::mix_routine::execute(cmd, denoised.texture, ds.crossfade->texture, schedule.blend))
+            outcome.status = sr::denoise_status::pending; // the mix is still compiling, so the fade cannot be applied
+    }
+
+    // Presented only when this frame produced it.
+    // A denoiser still compiling, or one this machine cannot run, leaves the raw mean on screen rather than a denoised
+    // image of an older one.
+    // `accum_frame` on the denoised slot only means "holds a current image", which is what resolve() presents on a
+    // throttled frame.
+    if (outcome.is_denoised())
+    {
+        denoised.accum_frame = 1;
+        presented = denoised.texture;
+    }
+    else
+    {
+        denoised.accum_frame = 0;
+        presented = accumulator.texture;
+    }
+    return outcome.status;
 }
 
 sg::texture_2d view_renderer::execute(sg::command_list& cmd,
@@ -584,6 +836,11 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const acc = ensure_temporal(ctx, store, v.id, temporal_id::accumulation(layer), v.resolution,
                                      sg::pixel_format::rgba32_float);
     auto& slot = *acc.slot;
+
+    // Nothing here denoises, so there is no history to drop — but the request must not outlive the frame that made it.
+    // Left standing it would be consumed by whichever plan-path frame reaches this view next, cutting on a camera
+    // nobody remembers.
+    store.get_or_create(v.id).camera_cut_pending = false;
 
     if (!self.is_ready())
         return slot.texture; // nothing traced this frame; the caller re-presents what the slot already holds

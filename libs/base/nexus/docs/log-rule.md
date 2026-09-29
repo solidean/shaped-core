@@ -56,7 +56,13 @@ A message to a `cc::threaded_actor` carries its sender's owner too, so what the 
 The trace would not do, because every async scope mints a fresh one.
 
 **A warning or error recorded under no test fails the run**, beside checks that ran outside any test.
-No declaration reaches one: a warning under no test is a defect to fix rather than a case to declare.
+No per-test declaration reaches one: `nx::expect_*` and `nx::allow_*` are scoped to a test, and a record arriving after that test ended is outside it.
+
+**`NX_ALLOW_LOGS` is the exception, because it is a different claim.**
+It says this domain may log these strings anywhere in this binary, and a record landing outside every test is still inside the binary that declared it.
+Without that, a run's verdict turns on which thread did the logging and how busy the machine was.
+An allowlisted D3D12 debug-layer advisory lands inside its test on an idle box and just after it on a loaded one, and only the second fails.
+An **undeclared** warning under no test still fails the run, which is what the rule is for.
 
 A record under an owner no pass claimed — work that outlived its test — is dropped unjudged.
 

@@ -8,6 +8,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread_pump.hh> // cc::thread_pump_all
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/input.hh>
@@ -362,6 +363,11 @@ gpu_resource_manager& viewer::resources()
 isize viewer::pending_resource_work() const
 {
     return _impl->resources.pending_work_count();
+}
+
+isize viewer::streaming_resources() const
+{
+    return _impl->resources.settling_count();
 }
 
 cc::shared_async<cc::unit> viewer::background_work()
@@ -917,6 +923,17 @@ void viewer::finish_frame(frame& f)
     im.current_cmd = nullptr;
     im.current_backbuffer = sg::render_target_view{};
 
+    // Every unthreaded system in the process gets one turn per frame, streaming above all.
+    //
+    // Without threads a semantic thread runs only while somebody sweeps the pump registry, and the epoch wait above
+    // sweeps only while it actually blocks — which at a steady frame rate it usually does not, since the completion
+    // it asks for has already landed.
+    // A viewer that never blocks therefore never runs the copy actor, and a mesh handed to `ctx.stream` stays in
+    // flight forever: the scene traces its placeholder box, `streaming_resources` never reaches zero, and a caller
+    // waiting for residency waits for the life of the process.
+    // With threads this is a no-op beyond the sweep itself.
+    (void)cc::thread_pump_all();
+
     if (im.capture != nullptr)
         advance_capture(plan, traces_ran);
 }
@@ -966,7 +983,11 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate_frames);
     }
 
-    auto const settled = session.is_settled(views_converged, any_traced, im.resources.pending_work_count(), traces_ran);
+    // Payloads still streaming count as owed work too: until they land their meshes are traced as placeholder boxes, and
+    // an image converged over those is a picture of the stand-ins.
+    // Landing does restart the accumulation, but a stream slower than the convergence lets the stand-ins finish first.
+    auto const owed = im.resources.pending_work_count() + im.resources.settling_count();
+    auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran);
     if (!settled && !session.is_out_of_time())
         return;
 

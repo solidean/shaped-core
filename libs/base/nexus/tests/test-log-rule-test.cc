@@ -396,3 +396,30 @@ TEST("log rule - a recorded test that fails only by the rule keeps its recording
     CHECK(passing.count_failed_tests() == 0);
     CHECK(nx::impl::take_test_bucket(cc::rec::trace_id(passing.executions[0].record_trace)).empty());
 }
+
+// A record logged OUTSIDE any test, allowed because the allowance is binary-scoped.
+//
+// This one is judged by the real run rather than by a nested one: `judge_logs` claims unattributed records only in
+// the outermost execution, which a nested `run_one` never is, so the thread below logs into this binary's own verdict.
+// That is also what makes it a regression test with teeth — if a binary allowance stops covering an unattributed
+// record, nexus-test itself fails with "1 warning(s) or error(s) were logged outside any test".
+//
+// The negative half cannot be pinned the same way, since an undeclared record here would fail this binary by
+// design; `run_one` covers undeclared records inside a test instead.
+NX_ALLOW_LOGS(cc::rec::level::warning, "", "log rule probe: allowed outside any test");
+
+TEST("log rule - NX_ALLOW_LOGS reaches a record logged under no test", no_scheduler)
+{
+    if (!has_recorder())
+        SKIP("the run has no recorder (--no-recording)");
+    if (CC_HAS_THREADS == 0)
+        SKIP("needs a second thread");
+
+    // A bare std::thread carries no test context, so what it logs has no owner — the shape a driver callback takes
+    // when it fires on a thread the runtime owns, after the test that provoked it has ended.
+    auto worker = std::thread([] { CC_LOG_WARNING("log rule probe: allowed outside any test"); });
+    worker.join();
+
+    // The assertion is this binary's own verdict: reaching the end of the run without an unattributed failure is it.
+    CHECK(true);
+}

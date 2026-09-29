@@ -3,6 +3,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
+#include <shaped-rendering/fwd.hh> // sr::denoise_status
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
 #include <shaped-viewer/stable_id.hh>
@@ -67,19 +68,83 @@ public:
 
     /// Records the trace at `trace_index` into its own accumulation texture.
     /// Must be called with no rendering scope open, and before anything samples that texture.
+    ///
+    /// A layer that denoises is denoised right after its trace, and `res.traces[trace_index]` then names what a parent
+    /// should sample: the denoised image when this frame produced one, the raw mean otherwise.
+    /// A denoiser still initializing declines the frame, so a capture never saves the raw mean in its place.
     [[nodiscard]] static sg::routine_outcome trace(sg::command_list& cmd,
                                                    viewer_definition const& def,
                                                    render_plan const& plan,
                                                    u32 trace_index,
-                                                   plan_resources const& res,
+                                                   plan_resources& res,
                                                    gpu_resource_manager& resources,
                                                    view_store& store);
+
+    /// How far the hand-off from the temporal denoiser to the spatial one has come, as the weight the spatial image is
+    /// mixed in at: 0 while the temporal member owns the frame, 1 once the spatial one does.
+    ///
+    /// `accum_frame` is the mean's frame count, which is what decides the hand-off — the temporal member earns its keep
+    /// while the mean is young and stops earning it once the mean has converged past what history could add.
+    /// `fade_frames` of 0 hands over in one frame, which is the behaviour to compare a fade against.
+    ///
+    /// Public because it is the policy rather than the mechanism: the mixing is `sr::mix_routine`'s and is tested there,
+    /// while what makes a hand-off invisible is this curve reaching both ends and never stepping.
+    [[nodiscard]] static f32 crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fade_frames);
 
 protected:
     /// No shaders of its own; it warms the path tracer so its compiles start early.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
+    /// One traced layer's denoiser slots, all null when the layer does not denoise.
+    /// `frame` and `motion` are null unless the layer may denoise temporally.
+    /// `crossfade` is null then too, and at a fade of 0 frames.
+    struct denoise_slots
+    {
+        impl::temporal_slot* normal = nullptr;
+        impl::temporal_slot* depth = nullptr;
+        impl::temporal_slot* albedo = nullptr;
+        impl::temporal_slot* specular_albedo = nullptr;
+        impl::temporal_slot* roughness = nullptr;
+
+        impl::temporal_slot* denoised = nullptr;
+        impl::temporal_slot* frame = nullptr;
+        impl::temporal_slot* motion = nullptr;
+
+        /// Where the spatial member lands while the hand-off crossfades.
+        impl::temporal_slot* crossfade = nullptr;
+    };
+
+    /// Which members denoise a frame, decided before its trace so the trace writes only what they read.
+    struct denoise_schedule
+    {
+        /// The layer's settings as each member runs them: `fresh_samples` set for the temporal one, clear for the
+        /// spatial one.
+        sr::denoise_settings temporal_settings;
+        sr::denoise_settings spatial_settings;
+
+        /// `crossfade_weight` at the mean's frame count after this frame's trace.
+        f32 blend = 1.0f;
+
+        [[nodiscard]] bool runs_temporal() const { return blend < 1.0f; }
+        [[nodiscard]] bool runs_spatial() const { return blend > 0.0f; }
+    };
+
+    /// The schedule for a layer whose mean will hold `accum_frame` frames once this frame's trace lands.
+    [[nodiscard]] static denoise_schedule _schedule_denoise(sg::context const& ctx,
+                                                            render_settings const& settings,
+                                                            denoise_slots const& ds,
+                                                            u32 accum_frame);
+
+    /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
+    /// at once across the hand-off — and points `presented` at what its parent should sample.
+    [[nodiscard]] static sr::denoise_status _denoise(sg::command_list& cmd,
+                                                     render_settings const& settings,
+                                                     denoise_schedule const& schedule,
+                                                     impl::temporal_slot const& accumulator,
+                                                     denoise_slots const& ds,
+                                                     sg::texture_2d& presented);
+
     /// Bumped every time the routine initializes, which is once per shader reload.
     ///
     /// Folded into the trace hash, so a reloaded tracer restarts rather than blending a new image into one the old

@@ -99,6 +99,11 @@ enum class probe_mode : u32
     echo = 3,
     medium = 4,
     transmitted = 5,
+    guides_diffuse = 6,
+    guides_specular = 7,
+    guides_roughness = 8,
+    albedo_diffuse = 9,
+    albedo_specular = 10,
 };
 
 /// `sv::probe_case` from shaders/bsdf_probe.hlsl, lane-for-lane.
@@ -615,4 +620,169 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
             }
         }
     }
+}
+
+// The denoiser guides, which are read off the surface rather than estimated from it.
+//
+// They are the one part of the shading a denoiser consumes directly: the albedo it divides out before filtering, the
+// specular reflectance that says what a reflection is worth, and the roughness that sizes the filter over it.
+// A wrong guide does not make an image wrong, it makes a denoised image subtly worse — texture averaged away, or a
+// mirror blurred like a matte surface — which is exactly the failure no rendered comparison catches.
+//
+// `pt_guides.hlsli` holds them apart from the path tracer's bindings so this probe can call the real functions.
+ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are read from",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the probe shader");
+
+    // One case per (surface, guide), so a surface's three guides come back from one dispatch.
+    auto const guide_of = [&](probe_surface const& s, probe_mode mode)
+    {
+        auto c = probe_case{.mode = mode, .samples = 1};
+        c.s = s;
+        return c;
+    };
+
+    auto plain = probe_surface{};
+    plain.base_weight = 1.0f;
+    plain.base_color = tg::vec3f(0.8f, 0.2f, 0.1f);
+    plain.specular_weight = 1.0f;
+    plain.specular_color = tg::vec3f(1, 1, 1);
+    plain.specular_ior = 1.5f;
+    plain.specular_roughness = 0.4f;
+
+    auto metal = plain;
+    metal.base_metalness = 1.0f;
+
+    auto glass = plain;
+    glass.transmission_weight = 1.0f;
+
+    auto coated = plain;
+    coated.coat_weight = 1.0f;
+    coated.coat_roughness = 0.05f;
+
+    auto cases = cc::vector<probe_case>();
+    for (auto const* s : {&plain, &metal, &glass, &coated})
+        for (auto const mode : {probe_mode::guides_diffuse, probe_mode::guides_specular, probe_mode::guides_roughness})
+            cases.push_back(guide_of(*s, mode));
+
+    auto const r = co_await run_probe(ctx, cases);
+    REQUIRE(r.size() == cases.size());
+
+    auto const diffuse = [&](isize surface) { return r[surface * 3 + 0].mean; };
+    auto const specular = [&](isize surface) { return r[surface * 3 + 1].mean; };
+    auto const roughness = [&](isize surface) { return r[surface * 3 + 2].mean[0]; };
+
+    enum : isize
+    {
+        s_plain = 0,
+        s_metal,
+        s_glass,
+        s_coated,
+    };
+
+    // A dielectric's diffuse albedo is its base colour, which is what a denoiser divides out and multiplies back.
+    CHECK(tg::abs(diffuse(s_plain)[0] - 0.8f) < 1e-3f);
+    CHECK(tg::abs(diffuse(s_plain)[1] - 0.2f) < 1e-3f);
+
+    // A metal has no diffuse lobe at all, and neither has glass: dividing a denoised image by either surface's
+    // "albedo" would be dividing by something that reflects nothing.
+    CHECK(diffuse(s_metal)[0] < 1e-3f).context("a metal's diffuse albedo must be zero");
+    CHECK(diffuse(s_glass)[0] < 1e-3f).context("a transmissive surface's diffuse albedo must be zero");
+
+    // The specular guide is the other way round: a metal reflects its base colour, and the dielectric reflects the
+    // few percent its IOR implies.
+    // At ior 1.5 that is ((1.5-1)/(1.5+1))^2 = 0.04.
+    CHECK(tg::abs(specular(s_metal)[0] - 0.8f) < 1e-3f).context("a metal's F0 is its base colour");
+    CHECK(tg::abs(specular(s_metal)[1] - 0.2f) < 1e-3f);
+    CHECK(tg::abs(specular(s_plain)[0] - 0.04f) < 2e-3f).context("a dielectric's F0 comes from its IOR");
+
+    // Roughness is the surface's own, until a coat covers it — the coat is outermost, so its reflection is the sharp
+    // one, and filtering it at the base's roughness would smear the only feature the coat adds.
+    CHECK(tg::abs(roughness(s_plain) - 0.4f) < 1e-3f);
+    CHECK(tg::abs(roughness(s_coated) - 0.05f) < 1e-3f).context("a coat takes over the roughness guide");
+}
+
+// What the diffuse and specular halves of the split each reflect.
+//
+// Comparing their sum against `bsdf_eval` would prove nothing: `bsdf_eval` IS their sum, so the residual is zero
+// however wrong the division is — a first version of this test scaled one half by 0.9 and still passed.
+// So each half is held to physics instead, on surfaces where the right answer is known exactly.
+//
+// This is what a split-signal denoiser rests on.
+// It filters the two apart with different kernels, so a specular lobe leaking into the diffuse half is a sharp
+// reflection filtered as if it were matte — which reads as the denoiser being soft rather than as the split being wrong.
+ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what they should",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the probe shader");
+
+    // A white Lambertian with its specular layer off: everything it reflects is diffuse, and being lossless it
+    // reflects all of it.
+    auto lambert = probe_surface{};
+    lambert.base_weight = 1.0f;
+    lambert.base_color = tg::vec3f(1, 1, 1);
+    lambert.specular_weight = 0.0f;
+
+    // A white metal: no diffuse substrate exists under it at all.
+    auto metal = lambert;
+    metal.base_metalness = 1.0f;
+    metal.specular_weight = 1.0f;
+    metal.specular_color = tg::vec3f(1, 1, 1);
+    metal.specular_roughness = 0.3f;
+
+    // A white subsurface with its specular layer off: everything it returns crossed into the interior, and what
+    // scattered there leaves as diffuse light, which is also where the diffuse albedo guide counts its colour.
+    auto subsurface = lambert;
+    subsurface.subsurface_weight = 1.0f;
+    subsurface.subsurface_color = tg::vec3f(1, 1, 1);
+
+    auto const wo = tg::vec3f(0.6f, 0, 0.8f);
+    auto const case_of = [&](probe_surface const& s, probe_mode mode)
+    { return probe_case{.wo = wo, .mode = mode, .samples = 4096, .seed = 11, .s = s}; };
+
+    auto const cases = cc::vector<probe_case>{
+        case_of(lambert, probe_mode::albedo_diffuse),    case_of(lambert, probe_mode::albedo_specular),
+        case_of(metal, probe_mode::albedo_diffuse),      case_of(metal, probe_mode::albedo_specular),
+        case_of(subsurface, probe_mode::albedo_diffuse), case_of(subsurface, probe_mode::albedo_specular),
+        case_of(subsurface, probe_mode::albedo),
+    };
+
+    auto const r = co_await run_probe(ctx, cases);
+    REQUIRE(r.size() == 7);
+
+    // A lossless white Lambertian reflects all of it, and every bit of that is the diffuse half.
+    CHECK(tg::abs(r[0].mean[0] - 1.0f) < 0.02f)
+        .context(cc::format("a white Lambertian's diffuse half reflected {}", r[0].mean[0]));
+    CHECK(r[1].mean[0] < 0.01f)
+        .context(cc::format("a Lambertian with no specular layer reflected {} specularly", r[1].mean[0]));
+
+    // And a metal is the mirror image: no diffuse substrate under it, so the diffuse half is empty.
+    CHECK(r[2].mean[0] < 0.01f).context(cc::format("a metal's diffuse half reflected {}", r[2].mean[0]));
+    CHECK(r[3].mean[0] > 0.8f).context(cc::format("a white metal's specular half reflected only {}", r[3].mean[0]));
+
+    // The subsurface's crossing is all of it, and all of it is the diffuse half.
+    // Against the whole closure rather than 1: a crossing into ior 1.5 compresses radiance by 1/1.5^2, so the
+    // integral over the far side is 0.44 however lossless the interior is.
+    CHECK(r[6].mean[0] > 0.3f).context(cc::format("a white subsurface returned only {}", r[6].mean[0]));
+    CHECK(tg::abs(r[4].mean[0] - r[6].mean[0]) < 0.01f)
+        .context(cc::format("a subsurface's diffuse half carried {} of {}", r[4].mean[0], r[6].mean[0]));
+    CHECK(r[5].mean[0] < 0.01f)
+        .context(cc::format("a subsurface with no specular layer carried {} specularly", r[5].mean[0]));
 }
