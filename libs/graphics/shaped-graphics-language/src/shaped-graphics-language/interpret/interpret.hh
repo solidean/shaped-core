@@ -106,7 +106,7 @@ struct sgl::check::driver_bindings
 {
     /// A group no entry point lists is never read, so one set serves every test of a module.
     cc::vector<bound_group> groups;
-    /// sg's acceleration pool, as the internal doc `raytracing-polyfill.md` lays it out.
+    /// sg's acceleration pool, as the internal doc libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md lays it out.
     cc::pinned_data<byte const> acceleration_pool;
 };
 

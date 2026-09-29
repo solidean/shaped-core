@@ -197,7 +197,7 @@ public:
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
         // EMIT-135: the emulated trace reads sg's acceleration pool and the roots of the dispatch's structures, which sg
-        // binds beside the inline constants (the internal doc raytracing-polyfill.md)
+        // binds beside the inline constants (the internal doc libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md)
         auto traces = false;
         for (auto const& x : p.e.exprs)
             if (auto const* const call = x.node.try_as<flat_call>())

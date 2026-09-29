@@ -2,7 +2,7 @@
 
 using namespace sgl_test;
 
-// The emulated trace run on the interpreter, against pools written by hand as the internal doc raytracing-polyfill.md lays them out.
+// The emulated trace run on the interpreter, against pools written by hand as the internal doc libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md lays them out.
 // Every expectation is worked out from the geometry by hand.
 // No ray passes through an edge or a corner, since the triangle test is not watertight yet.
 

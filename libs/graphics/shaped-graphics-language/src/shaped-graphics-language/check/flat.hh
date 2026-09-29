@@ -346,7 +346,8 @@ struct sgl::check::flat_block
 
 /// The two forms of one value, of which a target writes exactly one: the native form where the device has the construct,
 /// the emulated one where sg does it in software (the trace of raytracing.sgl).
-/// Each is a `flat_block` expression. Structured form only: legalize keeps one of the two by `legalize_options`.
+/// Each is a `flat_block` expression.
+/// Structured form only: legalize keeps one of the two by `legalize_options`.
 struct sgl::check::flat_by_target
 {
     flat_expr_id native = flat_expr_id::none;

@@ -436,7 +436,7 @@ written write_stage_read(call_context const& ctx)
 }
 
 /// `sg_acceleration_roots[k / 4][k % 4]`: the root of the entry point's k-th acceleration member, which only the
-/// emulated form reads (the internal doc `raytracing-polyfill.md`).
+/// emulated form reads (the internal doc libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md).
 written write_polyfill(call_context const& ctx)
 {
     if (ctx.data == 0)
@@ -741,7 +741,7 @@ void sgl::builtins::register_raytracing(registry& r)
     });
 
     r.add_comment("// The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc "
-                  "raytracing-polyfill.md).");
+                  "libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md).");
     for (auto const geometry : {"triangles", "procedural", "mixed"})
         r.add(function_record{
             .signature = cc::format("@pure fun acceleration_root(world: acceleration_structure[.{}]) -> uint", geometry),

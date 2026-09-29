@@ -1433,7 +1433,7 @@
 /// Calls the callable at `index` of the pipeline's callable section, handing the parameter over past the signature.
 @builtin @stages(.raygen, .closest_hit, .miss, .callable) fun call_callable(index: int)
 
-// The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc raytracing-polyfill.md).
+// The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md).
 /// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
 @builtin @pure fun acceleration_root(world: acceleration_structure[.triangles]) -> uint
 /// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
