@@ -229,9 +229,24 @@ void nx::impl::judge_logs(nx::test_schedule_execution& result, bool outermost)
     if (!outermost)
         return;
 
-    // No allowance reaches these: a warning under no test is a defect to fix rather than a case to declare.
+    // A warning under no test is a defect to fix rather than a case to declare, so no PER-TEST declaration reaches
+    // these: `nx::allow_warnings` is scoped to a test, and a record arriving after that test ended is outside it.
+    //
+    // A binary-scope allowance is the exception, because it is a different claim.
+    // NX_ALLOW_LOGS at namespace scope says this domain may log these strings ANYWHERE IN THIS BINARY, and a record
+    // that lands outside every test is still inside the binary that declared it.
+    // Without this, whether a run passes depends on which thread the logger used and how loaded the machine was:
+    // a D3D12 debug-layer advisory allowlisted by name arrives inside its test on an idle box and after it on a busy
+    // one, and only the second fails.
     for (auto const& record : nx::impl::take_unattributed_log_records())
     {
+        auto declared = false;
+        for (auto const& a : log_allowances())
+            if (!declared && record.level <= a.level && matches(a.pattern, a.domain, record))
+                declared = true;
+        if (declared)
+            continue;
+
         result.unattributed_logs.push_back({
             .expr = cc::format("{} under no test", level_name(record.level)),
             .location = {},

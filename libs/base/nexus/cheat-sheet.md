@@ -576,7 +576,8 @@ NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", patterns);        // ... or ea
 - `expect_*` / `allow_*` match their level **exactly**; `allow_logs` and `NX_ALLOW_LOGS` cover their level **and below**.
 - A declaration inside a `SECTION` does not cover its sibling; one above the sections covers every pass.
 - Judged once at the end of `execute_tests`, after one flush — the console **withholds** a test's warnings until then.
-- A warning or error under **no test** fails the run and no declaration reaches it; the `nexus` domain never counts.
+- A warning or error under **no test** fails the run; no per-test declaration reaches it, but `NX_ALLOW_LOGS` does, since it is scoped to the binary.
+  The `nexus` domain never counts.
 - `owns_recorder` tests and `--no-recording` runs are outside the rule.
 
 [docs/log-rule.md](docs/log-rule.md) has the scope, the timing and the console behavior.
