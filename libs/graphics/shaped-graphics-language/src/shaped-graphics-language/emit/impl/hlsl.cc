@@ -107,6 +107,17 @@ public:
         return "";
     }
 
+    /// Whether `type` is a ray payload of the entry point: the one it is handed, or one it traces with.
+    [[nodiscard]] static bool is_payload(plan const& p, check::type_id type)
+    {
+        if (p.e.entry_stage >= stage::raygen && type == p.e.input)
+            return true;
+        for (auto const& r : p.e.traced_rays)
+            if (p.m.at(p.m.at(p.m.at(r.set).type).members)[r.ray].type == type)
+                return true;
+        return false;
+    }
+
     /// Whether the entry point is a pixel stage writing `@depth(.greater_equal)` or `@depth(.less_equal)`.
     [[nodiscard]] static bool writes_conservative_depth(plan const& p)
     {
@@ -150,6 +161,10 @@ public:
         if (owner != nullptr)
             if (auto const semantic = semantic_of(*owner, member, p); !semantic.empty())
                 out.appendf(" : {}", semantic);
+        // EMIT-137: a payload's field states which shaders read and write it
+        // TODO: the widest access on every field; inferred from what each shader does, a driver could keep less live
+        if (owner != nullptr && is_payload(p, owner->type))
+            out += " : read(caller, closesthit, miss, anyhit) : write(caller, closesthit, miss, anyhit)";
         out += ";\n";
     }
 
@@ -257,11 +272,15 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
+        // EMIT-137: a payload states the widest access, which DXC takes for a missed optimization rather than an error
+        // TODO: inferred per field across the pipeline's shaders, as the spec's raytracing file plans
+        if (p.e.entry_stage >= stage::raygen)
+            out += "#pragma dxc diagnostic ignored \"-Wpayload-access-perf\"\n\n";
         write_enum_constants(out, p, *this);
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
-            out.appendf("struct {}\n{{\n", s.name);
+            out.appendf("struct {}{}\n{{\n", is_payload(p, s.type) ? "[raypayload] " : "", s.name);
             for (auto const& member : s.members)
                 write_member(out, &s, member, p);
             out += "};\n\n";

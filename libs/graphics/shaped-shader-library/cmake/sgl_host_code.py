@@ -754,9 +754,13 @@ PIPELINE_STAGES = ("vertex", "tessellation_control", "tessellation_evaluation", 
 
 
 def pipeline_includes(entries: SglEntries) -> list[str]:
-    if not entries.pipelines:
-        return []
-    return ["<shaped-shader-library/pipeline.hh>", "<shaped-graphics/fwd.hh>", "<clean-core/thread/async.hh>"]
+    out = []
+    if entries.pipelines:
+        out += ["<shaped-shader-library/pipeline.hh>", "<shaped-graphics/fwd.hh>", "<clean-core/thread/async.hh>"]
+    if entries.raytracing_pipelines:
+        out += ["<shaped-shader-library/raytracing_pipeline.hh>", "<shaped-graphics/fwd.hh>",
+                "<clean-core/thread/async.hh>", "<clean-core/container/vector.hh>"]
+    return out
 
 
 def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
@@ -904,4 +908,120 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
                 out.append("    (void)parts;\n")
             out.append(f"    return slib::describe_raster_pipeline(&ctx, &definition(), cc::vector<slib::open_part>{stated}, "
                        f"cc::move(customize), {latest});\n}}\n")
+    return "".join(out)
+
+
+# ---- a ray-tracing pipeline --------------------------------------------------------------------------------------------
+
+
+def emit_raytracing_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
+    """One type per `@raytracing pipeline`: its description, its table, and its listed hit groups by position."""
+    out = []
+    for file, p in entries.raytracing_pipelines:
+        type_name = pipeline_type(stems[file.path], p["name"])
+        rays = file.ray_set(p["rays"])["rays"]
+        out.append(f"/// `@raytracing pipeline {p['name']}` of {file.path}, over the ray set `{p['rays']}`. Generated; do not edit.\n")
+        out.append(f"struct {type_name}\n{{\n")
+        out.append(f"    /// The ray types of `{p['rays']}`, in table order: a trace of one takes its position as its contribution and its miss.\n")
+        out.append(f"    static constexpr int ray_count = {len(rays)};\n")
+        out.append("    /// The listed hit groups, by their position among the table's groups.\n")
+        out.append("    struct hit_groups_t\n    {\n")
+        for index, group in enumerate(p["hit_groups"]):
+            out.append(f"        static constexpr int {group} = {index};\n")
+        out.append("    };\n")
+        if p["host_hit_groups"]:
+            out.append(f"    /// The first position a host's hit group takes: they follow the listed ones, in the order handed over.\n")
+            out.append(f"    static constexpr int first_host_hit_group = {len(p['hit_groups'])};\n\n")
+            out.append("    /// The description the build states, with the host's hit groups after the listed ones, ray_count hit shaders each.\n")
+            out.append("    [[nodiscard]] cc::shared_async<sg::raytracing_pipeline_description> description("
+                       "sg::context& ctx, cc::vector<sg::hit_shader> host_hit_shaders = {}) const;\n")
+        else:
+            out.append("\n    /// The description the build states.\n")
+            out.append("    [[nodiscard]] cc::shared_async<sg::raytracing_pipeline_description> description(sg::context& ctx) const;\n")
+        out.append("    /// A table over `pipeline` with its raygen and a miss per ray type; rows follow with `add_row`.\n")
+        out.append("    [[nodiscard]] static sg::raytracing_shader_table_description table_description("
+                   "sg::raytracing_pipeline_handle pipeline);\n")
+        out.append("    /// Appends hit group `group`'s row: a record per ray type, whose offset an instance tracing through it takes.\n")
+        out.append("    [[nodiscard]] static sg::hit_row add_row(sg::raytracing_shader_table_description& table, int group);\n")
+        out.append("    /// What slib describes it from.\n")
+        out.append("    [[nodiscard]] static slib::raytracing_pipeline_definition const& definition();\n")
+        out.append("};\n\n")
+    return "".join(out)
+
+
+def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems: dict[str, str],
+                                   wrappers: dict[tuple[str, str], str]) -> str:
+    out = []
+    generated = {b["name"] for _, b in entries.bindings}
+    for file, p in entries.raytracing_pipelines:
+        stem = stems[file.path]
+        type_name = pipeline_type(stem, p["name"])
+        qualified = f"{namespace}::{type_name}"
+        key = f"{stem}_{p['name']}"
+        where = f"shader package '{package}': `@raytracing pipeline {p['name']}` of '{file.path}'"
+        groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
+        missing = [g for g in groups if g not in generated]
+        if missing:
+            raise HostCodeError(f"{where} is built from generated types, and {', '.join(missing)} has none; "
+                                f"declare the file as '{file.path}:*'")
+        if any(not m for m in p["misses"]):
+            # TODO: a ray type without a miss wants an empty miss record, which sg's table has no spelling for yet
+            raise HostCodeError(f"{where} leaves a ray type without a miss, which slib cannot table yet")
+
+        def handle(entry: str) -> str:
+            if not entry:
+                return "nullptr"
+            return f"&{namespace}::{stem}.{entry}" + (".asset" if (file.path, entry) in wrappers else "")
+
+        out.append("\nnamespace\n{\n")
+        misses = ", ".join(handle(m) for m in p["misses"])
+        out.append(f"slib::shader_asset_handle const* const k_{key}_misses[] = {{{misses}}};\n")
+        for group_name in p["hit_groups"]:
+            group = file.hit_group(group_name)
+            closest = ", ".join(handle(e) for e in group["closest_hits"])
+            any_hits = ", ".join(handle(e) for e in group["any_hits"])
+            out.append(f"slib::shader_asset_handle const* const k_{key}_{group_name}_closest[] = {{{closest}}};\n")
+            out.append(f"slib::shader_asset_handle const* const k_{key}_{group_name}_any[] = {{{any_hits}}};\n")
+        if p["hit_groups"]:
+            out.append(f"slib::hit_group_definition const k_{key}_groups[] = {{\n")
+            for group_name in p["hit_groups"]:
+                group = file.hit_group(group_name)
+                out.append(f'    {{.name = "{group_name}", .intersection = {handle(group["intersection"])}, '
+                           f".closest_hits = k_{key}_{group_name}_closest, .any_hits = k_{key}_{group_name}_any}},\n")
+            out.append("};\n")
+        group_types = ", ".join(f"{namespace}::{g}" for g in groups)
+        out.append(f"sg::pipeline_layout_handle {key}_layout(sg::context& ctx)\n{{\n")
+        out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>();\n}}\n")
+        out.append("} // namespace\n")
+
+        out.append(f"\nslib::raytracing_pipeline_definition const& {qualified}::definition()\n{{\n")
+        out.append("    static slib::raytracing_pipeline_definition const d = {\n")
+        out.append(f'        .file = "{file.path}",\n')
+        out.append(f'        .name = "{p["name"]}",\n')
+        out.append("        .ray_count = ray_count,\n")
+        out.append(f"        .raygen = {handle(p['raygen'])},\n")
+        out.append(f"        .misses = k_{key}_misses,\n")
+        if p["hit_groups"]:
+            out.append(f"        .hit_groups = k_{key}_groups,\n")
+        if p["host_hit_groups"]:
+            out.append("        .has_host_hit_groups = true,\n")
+        out.append(f"        .max_recursion_depth = {p['max_recursion_depth']},\n")
+        out.append(f"        .max_payload_size = {p['max_payload_size']},\n")
+        out.append(f"        .max_attribute_size = {p['max_attribute_size']},\n")
+        out.append(f"        .acquire_layout = &{key}_layout,\n")
+        out.append("    };\n    return d;\n}\n")
+
+        if p["host_hit_groups"]:
+            out.append(f"\ncc::shared_async<sg::raytracing_pipeline_description> {qualified}::description("
+                       "sg::context& ctx, cc::vector<sg::hit_shader> host_hit_shaders) const\n{\n")
+            out.append("    return slib::describe_raytracing_pipeline(&ctx, &definition(), cc::move(host_hit_shaders));\n}\n")
+        else:
+            out.append(f"\ncc::shared_async<sg::raytracing_pipeline_description> {qualified}::description("
+                       "sg::context& ctx) const\n{\n")
+            out.append("    return slib::describe_raytracing_pipeline(&ctx, &definition(), {});\n}\n")
+        out.append(f"\nsg::raytracing_shader_table_description {qualified}::table_description("
+                   "sg::raytracing_pipeline_handle pipeline)\n{\n")
+        out.append("    return slib::table_description(definition(), cc::move(pipeline));\n}\n")
+        out.append(f"\nsg::hit_row {qualified}::add_row(sg::raytracing_shader_table_description& table, int group)\n{{\n")
+        out.append("    return slib::add_hit_group_row(table, group);\n}\n")
     return "".join(out)

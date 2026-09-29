@@ -197,9 +197,26 @@ public:
         case sg::shader_stage::compute:
             stage = sgl::check::stage::compute;
             break;
+        case sg::shader_stage::raygen:
+            stage = sgl::check::stage::raygen;
+            break;
+        case sg::shader_stage::miss:
+            stage = sgl::check::stage::miss;
+            break;
+        case sg::shader_stage::closest_hit:
+            stage = sgl::check::stage::closest_hit;
+            break;
+        case sg::shader_stage::any_hit:
+            stage = sgl::check::stage::any_hit;
+            break;
+        case sg::shader_stage::intersection:
+            stage = sgl::check::stage::intersection;
+            break;
+        case sg::shader_stage::callable:
+            stage = sgl::check::stage::callable;
+            break;
         default:
-            return cc::error(
-                cc::format("SGL has no ray tracing entry points yet, and '{}' is declared as one", desc.entry_point));
+            return cc::error(cc::format("SGL has no entry point of the stage '{}' is declared as", desc.entry_point));
         }
 
         auto text = sgl::compile_to_text(

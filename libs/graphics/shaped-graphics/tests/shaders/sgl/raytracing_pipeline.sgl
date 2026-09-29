@@ -1,0 +1,76 @@
+// A ray-tracing pipeline in sv's shape: two ray types, a shadow ray traced from the closest hit, and cutout any hits.
+require raytracing_pipeline
+
+binding traced:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+    ids: mut buffer[int4]
+
+struct radiance:
+    t: float
+    u: float
+    v: float
+    instance_id: int
+    primitive: int
+    is_hit: int
+    is_lit: int
+
+struct shadow:
+    is_lit: bool
+
+rays path_rays:
+    surface: radiance
+    occlusion: shadow
+
+// One ray per cell of an 8 × 8 grid, along +z from z = -1, a quarter cell off each cell's centre in x.
+@raygen fun primary(@launch_id id: int3){traced}:
+    let mut p = radiance(0.0, 0.0, 0.0, 0, 0, 0, 0)
+    let r = ray(
+        origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+    )
+    trace(traced.world, r, path_rays.surface, mut p)
+    let at = id.x + id.y * 8
+    traced.hits[at] = float4(p.t, p.u, p.v, 0.0)
+    traced.ids[at] = int4(p.is_hit, p.instance_id, p.primitive, p.is_lit)
+
+@miss fun sky(p: mut radiance):
+    p.is_hit = 0
+
+@miss fun open_sky(s: mut shadow):
+    s.is_lit = true
+
+// The shadow ray goes by (4, 0, 2), which is where the second instance stands, so a hit on the first is in its shadow.
+@closest_hit fun shade(h: triangle_hit, p: mut radiance){traced}:
+    let mut s = shadow(false)
+    let o = h.ray.origin + h.ray.direction * h.t
+    let r = ray(origin = o, direction = vec3(4.0, 0.0, 2.0), t_min = 0.001, t_max = 2.0)
+    let flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit
+    trace(traced.world, r, path_rays.occlusion, mut s, flags = flags)
+    p.t = h.t
+    p.u = h.barycentrics.y
+    p.v = h.barycentrics.z
+    p.instance_id = h.instance_id
+    p.primitive = h.primitive_index
+    p.is_hit = 1
+    if s.is_lit => p.is_lit = 1
+
+// primitive 1 of every instance is cut out, for either ray type
+@any_hit fun cutout(c: triangle_candidate, p: mut radiance) -> hit_decision:
+    if c.primitive_index == 1 => return hit_decision.ignore
+    return hit_decision.accept
+
+@any_hit fun shadow_cutout(c: triangle_candidate, s: mut shadow) -> hit_decision:
+    if c.primitive_index == 1 => return hit_decision.ignore
+    return hit_decision.accept
+
+hit_group textured for path_rays:
+    surface = (closest_hit = shade, any_hit = cutout)
+    occlusion = (any_hit = shadow_cutout)
+
+@raytracing pipeline path:
+    rays = path_rays
+    raygen = primary
+    miss.surface = sky
+    miss.occlusion = open_sky
+    hit_groups = (textured)
