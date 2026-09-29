@@ -18,7 +18,7 @@ struct pixel_input:
     color: float3
 
 // a binding is an effect: whoever calls this lists `constants` too
-fun to_clip(p: pos3){constants} -> hpos4 => constants.view_projection * p
+fun to_clip(p: pos3){constants} => constants.view_projection * p
 
 @vertex fun main_vs(v: surface_vertex){constants} -> pixel_input:
     return {
@@ -27,7 +27,7 @@ fun to_clip(p: pos3){constants} -> hpos4 => constants.view_projection * p
         color = v.color
     }
 
-fun lambert(n: vec3, towards: vec3) -> float => saturate dot(n, normalize towards)
+fun lambert(n: vec3, towards: vec3) => saturate dot(n, normalize towards)
 
 // light in bands, as a cel shader draws it: the first band the light stays under is the one it gets
 fun banded(light: float, bands: int) -> float:

@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <shaped-graphics/context/metrics.hh>
 
 namespace sg::backend::metal
 {
@@ -118,9 +119,17 @@ int metal_epoch_system::in_flight_count()
     return _mutex.lock([&](int&) { return int(_in_flight.size()); });
 }
 
+void metal_epoch_system::wait_counted(MTL::SharedEvent* event, u64 value)
+{
+    if (_totals == nullptr)
+        return wait_for_value(event, value);
+    auto const waited = sg::impl::gpu_wait_scope(*_totals);
+    wait_for_value(event, value);
+}
+
 void metal_epoch_system::wait_for(sg::epoch e)
 {
-    wait_for_value(_epoch_event, u64(e));
+    wait_counted(_epoch_event, u64(e));
     retire_completed();
 }
 
@@ -131,7 +140,7 @@ void metal_epoch_system::wait_for_next_inflight()
     if (oldest == 0)
         return;
 
-    wait_for_value(_epoch_event, oldest);
+    wait_counted(_epoch_event, oldest);
     retire_completed();
 }
 
@@ -141,7 +150,7 @@ void metal_epoch_system::block_until_submissions_complete()
     // value to wait on yet, and this has to cover it.
     auto const issued = _next_submission.load(cc::memory_order_acquire);
     if (issued > u64(sg::submission_token::first))
-        wait_for_value(_submission_event, issued - 1);
+        wait_counted(_submission_event, issued - 1);
 
     retire_completed();
 }

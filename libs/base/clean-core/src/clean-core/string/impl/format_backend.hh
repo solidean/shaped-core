@@ -198,6 +198,42 @@ consteval void validate_format_spec(string_view spec)
 {
     (void)cc::impl::format_parse_spec(spec);
 }
+
+/// Formats an integer too wide for u64 with the standard integer grammar: base, `#` prefix, sign, grouping, fill, width.
+/// `digits(base, upper)` returns the magnitude's raw digits in that base, most significant first, with no sign or prefix.
+/// The view it returns must stay valid until this call returns.
+/// This is the delegation target for a wide integer's cc::custom::formatter; pair it with validate_integer_format_spec.
+void format_wide_integer(format_sink const& out,
+                         string_view spec,
+                         bool negative,
+                         function_ref<string_view(int base, bool upper)> digits);
+
+/// Validates that `spec` is an integer spec format_wide_integer accepts: d/x/X/o/b/B, no precision, no 'c'.
+consteval void validate_integer_format_spec(string_view spec)
+{
+    auto const s = cc::impl::format_parse_spec(spec);
+    if (s.presentation == 'c')
+        cc::impl::format_error("'c' is not allowed for a wide integer");
+    if (auto const error = cc::impl::format_spec_error_for_type(s, cc::impl::format_type_tag::sint))
+        cc::impl::format_error(error);
+}
+
+/// Validates that `spec` is a spec cc::format_value accepts for a float or double.
+/// The pairing for a floating-point newtype whose cc::custom::formatter delegates to format_value.
+consteval void validate_float_format_spec(string_view spec)
+{
+    auto const s = cc::impl::format_parse_spec(spec);
+    if (auto const error = cc::impl::format_spec_error_for_type(s, cc::impl::format_type_tag::floating))
+        cc::impl::format_error(error);
+}
+
+/// Whether a float spec asks for the shortest round-trip digits: no presentation type, since without one a precision is ignored.
+/// Width, fill, alignment, sign and grouping do not change which digits are printed, so they are allowed.
+/// A narrower float type uses it to pick digits that round-trip at its own precision rather than a float's.
+[[nodiscard]] constexpr bool is_shortest_float_format_spec(string_view spec)
+{
+    return cc::impl::format_parse_spec(spec).presentation == '\0';
+}
 } // namespace cc
 
 namespace cc::impl

@@ -15,7 +15,7 @@
 /// An sRGB RENDER TARGET is legal, and the hardware decodes on the sample and encodes on the write, so this path
 /// also averages linear values rather than encoded ones — more correct for that content, not merely permitted.
 /// `sg::supports_typed_uav` is the predicate that decides which routine a texture needs, and a caller commits to the
-/// answer at creation time: this one needs `render_target` usage, the compute one `readwrite_texture`.
+/// answer at creation time: this one needs `render_target` usage, the compute one `image`.
 ///
 /// 2D non-array textures only.
 /// A render-target view is 2D-shaped, and an array would mean one pass per slice rather than one dispatch across
@@ -34,7 +34,7 @@ public:
     /// `first_level` must be >= 1 (level 0 is the source of everything and is never generated) and within the
     /// chain; generating from a level whose own contents are not yet uploaded produces garbage, so the caller
     /// orders this after the upload it depends on.
-    /// The texture must carry `readonly_texture | render_target` usage and have the levels allocated already.
+    /// The texture must carry `texture | render_target` usage and have the levels allocated already.
     /// Declines while the shaders or this format's pipeline are still building, and after a compile that failed.
     /// Also declines when the texture has no level to generate, which is not a failure — level_count says so first.
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd,

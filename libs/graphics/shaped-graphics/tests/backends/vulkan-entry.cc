@@ -35,6 +35,7 @@ ASYNC_TEST("sg vulkan backend")
     else
     {
         (void)sg_test::shader_fixtures(); // alive before any child acquires through it
+        ctx.value()->set_portability_checks(true);
         co_await nx::async_invoke_tests_in_sequence("vulkan", ctx.value());
 
         // A device loss during our own tests is a defect, not an environment quirk to tolerate.
@@ -59,6 +60,7 @@ ASYNC_TEST("sg vulkan never-block backend")
         SKIP("no vulkan device");
     else
     {
+        ctx.value()->set_portability_checks(true);
         co_await nx::async_invoke_tests_in_sequence("vulkan-never-block", ctx.value());
 
         // Nothing here can wait, so what the tests left running is awaited before the context goes.

@@ -66,3 +66,4 @@ Whether it may be returned or stored is then decided by whether the choice is st
 * Whether the same inference covers array sizes, loop bounds that must unroll, and resource indices on targets without binding arrays.
 * What the diagnostic says when the demand sits several calls deep.
 * For now, the implementation rejects a function value that is not plainly static.
+* Whether a test in a function body may read a local that is constant once the function is inlined, which today only a `const` may be ([testing.md](testing.md)).

@@ -33,7 +33,7 @@ public:
     /// Builds the root signature from `groups`, each an sg::binding_group_layout_handle downcast to the dx12 type.
     /// At most sg::max_binding_groups groups.
     /// `inline_constants`, when present, adds a 32-bit-constants root parameter (dx12 root constants).
-    /// Its binding must be a uniform_buffer with a block_size that is set and a multiple of 4.
+    /// Its binding must be a constants_buffer with a block_size that is set and a multiple of 4.
     [[nodiscard]] static cc::result<dx12_pipeline_layout_handle> create(
         ID3D12Device* device,
         cc::span<sg::binding_group_layout_handle const> groups,
@@ -45,4 +45,13 @@ public:
 
     int inline_constants_root_param = -1; ///< root-parameter index of the 32-bit-constants param, -1 if none
     int inline_constants_num_32bit = 0;   ///< block_size / 4, for full-replace size validation
+
+    /// Whether the root signature carries a static sampler, a group's or the layout's own.
+    /// **A pipeline over one neither restores from a cached blob nor hands one out.**
+    /// A correct blob, restored in a process that has built the same shader under a static sampler that differs, came
+    /// back sampling through that other sampler.
+    /// The driver accepted the blob and reported no error; a blob stored in such a process was wrong too, and persisted.
+    /// Seen on an RTX 5070 Ti with driver 32.0.15.9186; a pipeline without static samplers restores correctly there.
+    /// docs/bugs-external/d3d12-cached-pso-static-sampler-mixup reproduces it standalone, and says when to retire this.
+    bool has_static_samplers = false;
 };

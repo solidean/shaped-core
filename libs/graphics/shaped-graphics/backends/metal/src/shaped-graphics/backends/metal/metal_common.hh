@@ -155,6 +155,11 @@ static_assert(k_argument_table_buffer_count <= 31,
               "the metal argument table has 31 buffer slots, and sg's budget "
               "no longer fits");
 
+/// The sampler slots one command list's argument table holds, which is where each `bound_sampler` goes.
+/// A bound sampler at register `n` is MSL's `[[sampler(n)]]`, set straight into the table rather than into an argument buffer.
+/// 16 is what Metal guarantees every stage, so a register at or above it is refused at layout creation.
+inline constexpr int k_argument_table_sampler_count = 16;
+
 /// Switch Metal's API validation layer on for this process, and make a violation abort rather than log.
 ///
 /// **Call it from `main`, before any Metal call.**
@@ -177,6 +182,16 @@ void arm_validation_layer();
 
 /// The message half of `metal_error`: what `error` said, or a note that it said nothing.
 [[nodiscard]] cc::string describe_error(NS::Error const* error, cc::string_view what);
+
+/// Builds the MTL::Library holding `shader`, from either of the two formats metal accepts.
+///
+/// `metal_lib` is AIR in a container, loaded as it stands.
+/// `msl` is source, which the driver compiles here — the arm that exists because producing a metallib needs Apple's
+/// separately-installed Metal toolchain while the driver's compiler ships with the OS.
+/// `what` names the shader in the error, e.g. "vertex" or "compute_pipeline".
+[[nodiscard]] cc::result<MTL::Library*> library_from_shader(MTL::Device* device,
+                                                            sg::compiled_shader const& shader,
+                                                            cc::string_view what);
 
 /// Builds a cc::result error from a failed Metal call that reported an NS::Error, recording the call site (not this helper).
 /// `error` may be null, which is what a call that failed without saying why hands back.

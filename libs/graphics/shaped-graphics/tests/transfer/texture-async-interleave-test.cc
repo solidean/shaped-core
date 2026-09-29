@@ -66,7 +66,7 @@ sg::raw_texture_handle make_texture(sg::context_handle const& ctx)
     desc.dimension = sg::texture_dimension::d2;
     desc.width = k_extent;
     desc.height = k_extent;
-    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst | sg::texture_usage::readonly_texture;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst | sg::texture_usage::texture;
     auto tex = ctx->persistent.create_raw_texture(desc);
     CC_ASSERT(tex != nullptr, "texture allocation failed");
     return tex;
@@ -190,7 +190,7 @@ ASYNC_INVOCABLE_TEST("sg - ensure_layout leaves a texture where the next list fi
         auto cmd = ctx->create_command_list();
         REQUIRE(cmd != nullptr);
         cmd->upload.bytes_to_texture(tex, cc::span<byte const>(pattern(67)));
-        cmd->ensure_layout(tex, sg::texture_layout::shader_readonly);
+        cmd->ensure_layout(tex, sg::texture_layout::shader_texture);
         ctx->submit_command_list(cc::move(cmd));
     }
 

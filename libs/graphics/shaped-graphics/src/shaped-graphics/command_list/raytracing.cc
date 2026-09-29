@@ -39,6 +39,7 @@ void command_list_raytracing_scope::dispatch_rays(raytracing_shader_table const&
                                                   int height,
                                                   int depth)
 {
+    _cmd._stats.add(stat::ray_dispatches);
     _cmd.raytracing_dispatch_rays(table, raygen, width, height, depth);
 }
 

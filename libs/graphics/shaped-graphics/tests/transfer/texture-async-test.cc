@@ -53,7 +53,7 @@ sg::raw_texture_handle make_transfer_texture(sg::context_handle const& ctx)
     desc.dimension = sg::texture_dimension::d2;
     desc.width = k_extent;
     desc.height = k_extent;
-    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst | sg::texture_usage::readonly_texture;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst | sg::texture_usage::texture;
     auto tex = ctx->persistent.create_raw_texture(desc);
     CC_ASSERT(tex != nullptr, "async texture transfer test allocation failed");
     return tex;

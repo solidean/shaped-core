@@ -1,0 +1,20 @@
+# shaped-graphics-language's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+
+rules:
+  - kind: allow-include
+    value: <filesystem>
+    reason: walking tests/corpus/ for its files, in the test binary only; clean-core has no directory listing yet
+    files: tests/corpus/corpus-test.cc
+
+  - kind: allow-include
+    value: [<fcntl.h>, <io.h>]
+    reason: the language server's stdio host duplicates stdout and sets binary mode through the CRT; clean-core has no descriptor API
+    files: tools/sgl/lsp/protocol/stdio_host.cc
+
+  - kind: allow-include
+    value: [<errno.h>, <poll.h>, <signal.h>, <time.h>, <unistd.h>]
+    reason: the POSIX half of the stdio host, which polls stdin, dups stdout, retries on EINTR, ignores SIGPIPE and sleeps a millisecond without threads
+    files: tools/sgl/lsp/protocol/stdio_host.cc

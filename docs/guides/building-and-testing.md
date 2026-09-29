@@ -29,6 +29,7 @@ uv run dev.py <command> [options]
 | `assembly`     | Disassemble a symbol, or trace what one invocation actually ran ([disassembly.md](disassembly.md)). |
 | `profiling`    | Report the machine's hardware performance counters ([profiling.md](profiling.md)). |
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
+| `install`      | Install a developer tool of this repo as a link into the checkout: `install sgl-vscode` builds `sgl` and links the SGL extension into every VS Code-family editor. No argument lists them, `--uninstall` removes only its own links. |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
 | `info`         | Inspect resolved compile/link flags and per-file compile commands (see below). |
 | `doctor`       | Read-only toolchain sanity check: cmake, ninja, compiler, presets, clangd, the LLVM tools coverage and PGO need, the networking environment, the graphics environment (Vulkan, windowing, DXC), and any [known external issue](../bugs-external/_index.md) this machine carries, as a `WARN`. |
@@ -385,6 +386,7 @@ Registered checks, **in the order they run**:
 |--------------|--------------------------------------------------------------------------------|----------|
 | `lint`       | clang-tidy whitelist gates on `.cc` sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope.  | yes (applies clang-tidy fixes) |
 | `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (applies its suggested fixes) |
+| `fixed-int-gen` | typed-geometry's generated `fixed_int` headers and golden tests are what `tools/gen-fixed-int.py` writes. | yes (regenerates them) |
 | `format`     | clang-format our C++ sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (rewrites in place) |
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
 | `sgl-prelude`| SGL's committed `prelude/builtins.sgl` and slib's `impl/pipeline_fields.hh` are what `sgl` generates. Builds the `sgl` tool. | yes (rewrites the files) |
@@ -438,6 +440,12 @@ The binding pass exists twice — in C++ for the runtime rewriter, in Python for
 Running only the Python half would let a divergence through to the suite, which is the thing this gate runs ahead of.
 So it builds `shaped-shader-library-test` and runs the corpus case, `--no-test` or not.
 It also fails when that case runs zero times: it selects one test by name, and a runner given a name that matches nothing exits 0.
+
+**`fixed-int-gen` is a generated-file gate that runs before `format`, and needs no build.**
+typed-geometry commits the loop-free `fixed_int` specializations and a golden-vector test that its Python generator writes.
+The step runs the generator with `--check`, or `--write` under `--fix`, and passes it the same clang-format `format` resolves.
+The generator formats its own output with it, so a regenerated file is already what `format` would leave, and standing ahead of `format` is the ordinary place for a fixer.
+[its docstring](../../libs/base/typed-geometry/tools/gen-fixed-int.py) has the rule that picks what is generated.
 
 **`sgl-prelude` builds a target too, and it is the one fixer that stands behind `format`.**
 SGL's builtins live in a C++ registry, and `libs/graphics/shaped-graphics-language/prelude/builtins.sgl` is that registry written out and committed.

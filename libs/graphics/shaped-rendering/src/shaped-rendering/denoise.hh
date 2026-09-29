@@ -10,6 +10,8 @@
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec.hh>
 
+#include <memory>
+
 /// Denoising — and, once a member supports it, upscaling — behind one call.
 ///
 /// `sr::denoise_routine` is the front: a caller names a method (or `automatic`) and the front forwards to the
@@ -98,6 +100,7 @@ struct sr::denoise_settings
 
     /// Every member reads this.
     /// atrous and svgf: the number of wavelet passes (3, 4, 5).
+    /// oidn: `fast` runs its small network, the others its base one.
     denoise_quality quality = denoise_quality::balanced;
 
     /// In [0, 1]; higher keeps more detail and removes less noise.
@@ -152,7 +155,7 @@ struct sr::denoise_inputs
 
     denoise_guides guides;
 
-    /// Where the result goes: needs `readwrite_texture` usage, and must not be `color`.
+    /// Where the result goes: needs `image` usage, and must not be `color`.
     /// Its extent is the output extent; any ratio to the input other than 1 must be one `denoise_input_extent` produced.
     ///
     /// Its rgb is the denoised radiance and **its alpha is `color`'s, carried through untouched** — every member
@@ -205,9 +208,7 @@ struct sr::denoise_outcome
 /// Dropping the history of a view nobody is looking at is how a caller gets that back, and is what a caller with many
 /// views should do.
 ///
-/// It holds images and nothing else.
-/// A member needing state that is not a texture — a vendor feature handle, which dlss_rr and fsr_rr both take — is
-/// what replaces the fixed array with a per-member state object; see libs/graphics/shaped-rendering/docs/denoising.md.
+/// It holds images, plus at most one object of the member's own for state that is not a texture.
 class sr::denoise_history
 {
 public:
@@ -234,10 +235,18 @@ public:
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
+    friend class oidn_denoise_routine;
 
     /// Brings this to `method` at `extent`, dropping everything if either changed.
     /// Returns whether the call starts from no history.
     bool _prepare(denoise_method method, tg::vec2i extent);
+
+    /// A member's own per-stream object — for OIDN, the network and its feature maps.
+    ///
+    /// Type-erased so this header names no member's type; `make_shared` captured the deleter that frees it.
+    /// It must hold only what is safe to drop mid-frame, as sg resources are.
+    /// `_prepare` drops it whenever it drops the rest, since the state is built for one extent.
+    std::shared_ptr<void> _member_state;
 
     denoise_method _method = denoise_method::none;
     tg::vec2i _extent = tg::vec2i(0, 0);

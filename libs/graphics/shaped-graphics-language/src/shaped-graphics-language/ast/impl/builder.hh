@@ -55,6 +55,8 @@ enum class body_owner : u8
     value_loop,
     /// `for` or `while`: `break` and `continue` stop here, and `return` and `yield` look through it.
     statement_loop,
+    /// A `test`: no jump looks past it and none stops at it, so every jump that reaches it has no target.
+    test,
 };
 
 /// One body being read.
@@ -78,6 +80,8 @@ struct fun_signature
     range_of<argument> bindings;
     expr_id return_type = expr_id::none;
     bool has_parameter_list = false;
+    /// Any of the three lists; an extension property may have none of them.
+    bool has_any_list = false;
 };
 
 /// A keyword form taken apart.
@@ -142,6 +146,8 @@ struct builder
     [[nodiscard]] cc::vector<form_id> lines_of(form_id block);
 
     void report(diagnostic_kind kind, source_span where);
+    /// AST-141: a declaration, a field or a parameter named by a reserved name.
+    void reject_reserved_names();
     /// A statement that a keyword heads is reported at that keyword, since its own span runs to the end of its block.
     void report(diagnostic_kind kind, form_id where);
 
@@ -287,7 +293,12 @@ struct builder
 
     decl_id module_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id use_declaration(statement_head const& head, keyword_parts const& parts);
+    decl_id require_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id fun_declaration(statement_head const& head, keyword_parts const& parts);
+    decl_id extension_property(statement_head const& head,
+                               keyword_parts const& parts,
+                               range_of<attribute> attributes,
+                               fun_decl const& signature);
     /// True when no identifier stands where the name of a `fun` belongs, which in expression position is a lambda.
     [[nodiscard]] bool is_anonymous_fun(keyword_parts const& parts) const;
     /// Reads the lists and the return type, and leaves a missing name or parameter list to the caller to report.
@@ -298,6 +309,9 @@ struct builder
     decl_id sampler_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id pipeline_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id notation_declaration(statement_head const& head, keyword_parts const& parts);
+    decl_id test_declaration(statement_head const& head, keyword_parts const& parts);
+    /// True inside the body of a `test`, and not inside a function or a lambda nested in one.
+    [[nodiscard]] bool is_in_test_body() const;
 
     /// The single identifier a declaration is named by; reports and yields an empty span for anything else.
     [[nodiscard]] source_span declared_name(form_id keyword_form, keyword_parts const& parts);

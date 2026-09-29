@@ -149,6 +149,7 @@ vulkan_upload_allocation vulkan_upload_inline_system::reserve(isize size_in_byte
 vulkan_upload_allocation vulkan_upload_inline_system::reserve_outside_ring(isize size_in_bytes)
 {
     warn_outside_ring(size_in_bytes);
+    _ctx->stat_totals().add(sg::stat::bytes_inline_overflow, size_in_bytes);
 
     auto const info = VkBufferCreateInfo{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,

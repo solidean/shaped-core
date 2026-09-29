@@ -1,6 +1,7 @@
 #include "registry.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/ast/build.hh>
@@ -12,6 +13,16 @@ using namespace sgl::builtins;
 
 namespace
 {
+/// One hash of a signature, alike for `cc::string` and `cc::string_view` spellings of it.
+template <class Text>
+u64 signature_hash(cc::string_view name, cc::span<Text const> parameters, cc::span<Text const> named_only)
+{
+    auto h = cc::make_hash(name, parameters.size());
+    for (auto i = isize(0); i < parameters.size(); ++i)
+        h = cc::make_hash(h, cc::string_view(parameters[i]), cc::string_view(named_only[i]));
+    return h;
+}
+
 constexpr cc::string_view k_header
     = "// GENERATED FILE - DO NOT EDIT.\n"
       "//\n"
@@ -68,6 +79,30 @@ cc::string_view function_record::called_in(language l) const
     return write.text.empty() ? cc::string_view(name) : cc::string_view(write.text);
 }
 
+cc::span<cc::string_view const> function_record::names_in(language l) const
+{
+    switch (l)
+    {
+    case language::hlsl:
+        return write.hlsl_names;
+    case language::wgsl:
+        return write.wgsl_names;
+    case language::msl:
+        return write.msl_names;
+    }
+    return {};
+}
+
+bool function_record::writes_name(language l, cc::string_view name) const
+{
+    if (write.kind == spelling_kind::call && called_in(l) == name)
+        return true;
+    for (auto const n : names_in(l))
+        if (n == name)
+            return true;
+    return false;
+}
+
 builtin_type_id registry::add(type_record record)
 {
     items.push_back({.kind = registry_item::kind_t::type, .index = i32(types.size())});
@@ -108,7 +143,7 @@ cc::string registry::prelude_text() const
             if (previous != registry_item::kind_t::comment)
                 out += "\n";
             doc(types[item.index].doc);
-            out.appendf("@builtin {}\n", types[item.index].declaration);
+            out.appendf("@shadowable(false)\n@builtin {}\n", types[item.index].declaration);
             break;
         case registry_item::kind_t::function:
             if (previous == registry_item::kind_t::type)
@@ -140,8 +175,9 @@ void registry::finalize()
         if (item.kind != registry_item::kind_t::type)
             continue;
         auto const* const s = d.node.try_as<ast::struct_decl>();
-        CC_ASSERT(s != nullptr, "a builtin type record that is no struct");
-        types[item.index].name = file.text_of(s->name);
+        auto const* const e = d.node.try_as<ast::enum_decl>();
+        CC_ASSERT(s != nullptr || e != nullptr, "a builtin type record that is no struct and no enum");
+        types[item.index].name = file.text_of(s != nullptr ? s->name : e->name);
     }
     CC_ASSERT(next == declarations.size(), "a builtin record that is more than one declaration");
 
@@ -158,11 +194,13 @@ void registry::finalize()
         auto& record = functions[item.index];
         record.name = file.text_of(f->name);
         record.parameters.clear();
+        record.named_only.clear();
         for (auto const& p : ast.at(f->parameters))
         {
             auto const text = type_text_at(file, ast, p.type);
             CC_ASSERT(!text.empty(), "a builtin signature with a parameter that has no type");
             record.parameters.push_back(cc::string(text));
+            record.named_only.push_back(p.is_named_only ? cc::string(file.text_of(p.name)) : cc::string());
         }
         record.result = find_type(type_name_at(file, ast, f->return_type));
         CC_ASSERT(is_valid(record.result) || !ast::is_valid(f->return_type), "a builtin signature whose result is no "
@@ -170,6 +208,15 @@ void registry::finalize()
         CC_ASSERT(record.evaluate != nullptr, "a builtin function without an evaluator");
         CC_ASSERT(record.write.kind != spelling_kind::custom || record.write.custom != nullptr, "a custom spelling "
                                                                                                 "without a writer");
+    }
+
+    functions_by_name.clear();
+    functions_by_signature.clear();
+    for (auto i = isize(0); i < functions.size(); ++i)
+    {
+        auto const& f = functions[i];
+        functions_by_name[f.name].push_back(builtin_id(i));
+        functions_by_signature[signature_hash<cc::string>(f.name, f.parameters, f.named_only)].push_back(builtin_id(i));
     }
 }
 
@@ -181,28 +228,31 @@ builtin_type_id registry::find_type(cc::string_view name) const
     return builtin_type_id::none;
 }
 
-builtin_id registry::find_function(cc::string_view name, cc::span<cc::string_view const> parameters) const
+builtin_id registry::find_function(cc::string_view name,
+                                   cc::span<cc::string_view const> parameters,
+                                   cc::span<cc::string_view const> named_only) const
 {
-    for (auto i = isize(0); i < functions.size(); ++i)
+    CC_ASSERT(named_only.size() == parameters.size(), "one named-only name, or an empty one, per parameter");
+    auto const* const overloads = functions_by_signature.get_ptr(signature_hash(name, parameters, named_only));
+    if (overloads == nullptr)
+        return builtin_id::none;
+    for (auto const id : *overloads)
     {
-        auto const& f = functions[i];
+        auto const& f = at(id);
         if (f.name != name || f.parameters.size() != parameters.size())
             continue;
         auto is_match = true;
         for (auto k = isize(0); k < parameters.size(); ++k)
-            is_match = is_match && f.parameters[k] == parameters[k];
+            is_match = is_match && f.parameters[k] == parameters[k] && f.named_only[k] == named_only[k];
         if (is_match)
-            return builtin_id(i);
+            return id;
     }
     return builtin_id::none;
 }
 
 bool registry::has_function_named(cc::string_view name) const
 {
-    for (auto const& f : functions)
-        if (f.name == name)
-            return true;
-    return false;
+    return functions_by_name.contains(name);
 }
 
 cc::string sgl::builtins::wrapped(written w, precedence needed)
@@ -222,7 +272,7 @@ spelling sgl::builtins::infix(cc::string_view op)
     auto binds = precedence::comparison;
     if (op == "+" || op == "-")
         binds = precedence::additive;
-    else if (op == "*" || op == "/")
+    else if (op == "*" || op == "/" || op == "%")
         binds = precedence::multiplicative;
     else
         CC_ASSERT(op == "<" || op == "<=" || op == ">" || op == ">=" || op == "==" || op == "!=",

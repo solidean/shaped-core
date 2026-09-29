@@ -36,3 +36,8 @@ command_list::command_list(sg::context& ctx, epoch created_in)
     // The scopes only store the back-reference; they don't touch any not-yet-constructed member.
 }
 } // namespace sg
+
+sg::impl::stat_counts const& sg::impl::recorded_stats(command_list const& cmd)
+{
+    return cmd._stats;
+}

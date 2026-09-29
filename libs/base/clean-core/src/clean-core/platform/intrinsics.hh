@@ -74,7 +74,8 @@ extern "C" unsigned __int64 _umul128(unsigned __int64, unsigned __int64, unsigne
 extern "C" __int64 _mul128(__int64, __int64, __int64*);
 extern "C" unsigned char _addcarry_u64(unsigned char, unsigned __int64, unsigned __int64, unsigned __int64*);
 extern "C" unsigned char _subborrow_u64(unsigned char, unsigned __int64, unsigned __int64, unsigned __int64*);
-#pragma intrinsic(_umul128, _mul128, _addcarry_u64, _subborrow_u64)
+extern "C" unsigned __int64 _udiv128(unsigned __int64, unsigned __int64, unsigned __int64, unsigned __int64*);
+#pragma intrinsic(_umul128, _mul128, _addcarry_u64, _subborrow_u64, _udiv128)
 #endif
 
 #if defined(CC_ARCH_X64) || defined(CC_ARCH_ARM64)

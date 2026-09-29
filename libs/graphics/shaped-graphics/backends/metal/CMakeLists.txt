@@ -110,4 +110,24 @@ if(SC_BUILD_TESTS)
     sc_nexus_binary(shaped-graphics-metal-test KINDS tests)
 
     target_link_libraries(shaped-graphics-metal-test PRIVATE shaped-graphics-metal nexus)
+
+    # The one fixture here that is not hand-written MSL: an SGL package, compiled for metal through slib.
+    # Every other shader in tests/ is MSL with its reflection written beside it, which pins the backend against a
+    # convention no real pipeline produces — this one is the real path, so the addresses nobody wrote have to agree.
+    # slib sits above sg, which a test binary may link (shaped-graphics-test declares a package for the same reason).
+    # The gate is a variable because slib and the compiler are both added after us, so `if(TARGET ...)` would be false
+    # here whatever the real answer; `target_link_libraries` resolves the name at generate time.
+    if(SC_HAS_METAL_COMPILER)
+        target_sources(shaped-graphics-metal-test PRIVATE tests/metal-sgl-test.cc)
+        target_link_libraries(shaped-graphics-metal-test PRIVATE shaped-shader-library)
+        sc_add_shader_package(
+            TARGET     shaped-graphics-metal-test
+            NAME       metal_sgl_shaders
+            NAMESPACE  metal_test::sgl_shaders
+            SOURCE_DIR tests/shaders
+            LANGUAGE   sgl
+            SHADERS
+                cube.sgl:*
+        )
+    endif()
 endif()

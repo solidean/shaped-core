@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/fixed_vector.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/unique_ptr.hh>
@@ -15,7 +16,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
 
-/// One declare_array_buffer_access call, held until the next dispatch resolves it against the bound groups.
+/// One declare_array_buffer_access call, held until the next dispatch or draw resolves it against the bound groups.
 struct sg::backend::vulkan::vulkan_array_buffer_declare
 {
     cc::string name;
@@ -95,6 +96,10 @@ public:
     // Declared for the current op and awaiting the pre-op flush; empty between ops.
     cc::vector<vulkan_buffer const*> _pending_barrier_buffers;
     cc::vector<VkBufferMemoryBarrier2> _pending_buffer_barriers;
+
+    // Buffers of an array a dispatch or draw declared nothing for, whose barriers this op folds into one memory barrier.
+    // Their tracked state still moves per buffer; only the emission is shared.
+    cc::set<vulkan_buffer const*> _global_barrier_buffers;
     cc::vector<vulkan_texture const*> _pending_barrier_textures;
     cc::vector<VkImageMemoryBarrier2> _pending_image_barriers;
 
@@ -114,6 +119,10 @@ public:
     // The layout supplies each slot's schema; the groups supply the resources whose accesses are declared at dispatch.
     vulkan_pipeline_layout const* _bound_pipeline_layout = nullptr;
     cc::vector<vulkan_binding_group const*> _bound_groups;
+    // The bound compute or raytracing pipeline's footprint, which the dispatch declares its groups' accesses from.
+    // The pipeline itself is kept alive by keep_bound.
+    sg::impl::pipeline_footprint const* _bound_footprint = nullptr;
+    void const* _bound_footprint_owner = nullptr; // the pipeline, which a footprint mismatch is logged against
 
     /// What was bound, held until the list is consumed: a group or pipeline dropped between its bind and the draw that reads it must still be there.
     cc::vector<std::shared_ptr<void const>> _bound_keep_alive;
@@ -149,6 +158,10 @@ public:
     // The graphics bind + input-assembly state, all scoped to the rendering scope that set it up.
     vulkan_pipeline_layout const* _bound_raster_layout = nullptr;
     cc::vector<vulkan_binding_group const*> _bound_raster_groups;
+    sg::impl::pipeline_footprint const* _bound_raster_footprint = nullptr;
+    void const* _bound_raster_footprint_owner = nullptr;
+    cc::vector<vulkan_array_buffer_declare> _pending_raster_array_buffer_declares;
+    cc::vector<vulkan_array_texture_declare> _pending_raster_array_texture_declares;
     cc::vector<vulkan_buffer const*> _bound_vertex_buffers;
     vulkan_buffer const* _bound_index_buffer = nullptr;
 
@@ -187,9 +200,20 @@ public:
     // Flushes what the build declared, then records it.
     void record_acceleration_structure_build(built_acceleration_structure const& built);
 
-    /// Resolves the pending array declares against the bound groups and tracks each named element.
-    // Also the accounting pass: a bound array binding with no declaration is an error.
-    void declare_array_accesses();
+    /// Resolves one bind point's pending array declares against its bound groups and `footprint`, tracks what
+    /// sg::impl::plan_array_declarations decides at `op_stages`, then clears both pending sets.
+    /// A mismatch is logged against `pipeline`.
+    void declare_array_accesses(cc::span<vulkan_binding_group const* const> groups,
+                                sg::impl::pipeline_footprint const* footprint,
+                                void const* pipeline,
+                                sg::pipeline_stage_flags op_stages,
+                                cc::vector<vulkan_array_buffer_declare>& buffer_declares,
+                                cc::vector<vulkan_array_texture_declare>& texture_declares);
+
+    /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
+    void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
+                                sg::impl::pipeline_footprint const* footprint,
+                                sg::pipeline_stage_flags op_stages);
 
     // Every resource this list has tracked, so submit can finalize each slot and drop can discard it.
     // Public so the context can walk it at submit; deduplicated by mark_recorded.
@@ -248,6 +272,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
+    void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                            cc::span<sg::array_buffer_access const> elements) override;
+    void raster_declare_array_texture_access(cc::string_view binding_name,
+                                             cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;

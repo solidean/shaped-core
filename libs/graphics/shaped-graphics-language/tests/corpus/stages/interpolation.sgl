@@ -1,0 +1,38 @@
+// how a member crosses from the vertex to the pixel stage: perspective at the pixel centre unless it says otherwise
+
+struct varyings:
+    @position position: hpos4
+    @interpolate(.flat) primitive: int
+    @interpolate(.flat) instance: uint
+    @interpolate(.linear) screen_uv: float2
+    @interpolate(.perspective, .centroid) color: float4
+    world: float3
+
+@vertex struct corner:
+    position: float2
+    color: float4
+
+@pixel struct target:
+    color: float4
+
+fun tint(id: int) -> float => ((id % 4) as float) * 0.25
+
+test tint(5) == 0.25
+
+@vertex fun corners_vs(c: corner, @vertex_index v: int, @instance_index i: int) -> varyings:
+    return {
+        position = hpos4(c.position.x, c.position.y, 0.0, 1.0)
+        primitive = v / 3
+        instance = i as uint
+        screen_uv = c.position
+        color = c.color
+        world = float3(c.position.x, c.position.y, 0.0)
+    }
+
+@pixel fun ids_ps(p: varyings) -> target:
+    return { color = float4(tint(p.primitive), p.instance as float, p.screen_uv.x, p.color.w) }
+
+pipeline ids:
+    vertex = corners_vs
+    pixel = ids_ps
+    format = .rgba8_unorm

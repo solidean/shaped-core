@@ -145,7 +145,7 @@ void dx12_staging_binding_group::write_view_descriptors(int first_descriptor,
                 auto dx = std::dynamic_pointer_cast<dx12_buffer const>(bv.buffer);
                 CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
                 res.buffer = cc::move(dx);
-                res.access = bv.access;
+                res.bound_as = bv.bound_as;
             },
             [&](sg::raw_texture_view const& tv)
             {
@@ -154,7 +154,7 @@ void dx12_staging_binding_group::write_view_descriptors(int first_descriptor,
                 CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
                 res.texture = cc::move(dx);
                 res.range = tv.range;
-                res.access = tv.access;
+                res.bound_as = tv.bound_as;
             },
             [&](sg::raw_tlas_view const& av)
             {
@@ -170,7 +170,7 @@ void dx12_staging_binding_group::write_view_descriptors(int first_descriptor,
                 if (dx_tlas != nullptr)
                 {
                     res.buffer = dx_tlas->_dx12_storage;
-                    res.access = sg::view_class::acceleration_structure;
+                    res.bound_as = sg::view_class::acceleration_structure;
                 }
             },
             [](sg::vacant_view const&)
@@ -199,6 +199,7 @@ void dx12_staging_binding_group::write_sampler_descriptor(int descriptor_index, 
 
 cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
 {
+    _ctx.stat_totals().add(sg::stat::binding_groups_created);
     auto group = std::make_shared<dx12_binding_group>();
     // Set before any allocation: a partial mint is then freed by the group's own destructor.
     group->_ctx = &_ctx;
@@ -240,12 +241,16 @@ cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
 
     // Hand the group the resource references the staged descriptors point at, in the two shapes it needs:
     // a scalar binding is auto-tracked through the hazard vectors, an array binding is declared per dispatch.
-    for (auto const& s : _dx_layout->view_slots)
+    for (isize slot = 0; slot < _dx_layout->view_slots.size(); ++slot)
     {
+        auto const& s = _dx_layout->view_slots[slot];
+        auto const binding = _dx_layout->binding_of_view_slot(slot);
         if (s.binding.is_array())
         {
             auto ab = dx12_array_binding{.name = s.binding.name,
                                          .is_texture = sg::shape_of(s.binding.type) == sg::view_shape::texture,
+                                         .binding = binding,
+                                         .bound_as = sg::view_class_of(s.binding),
                                          .elements = {}};
             for (int e = 0; e < int(s.binding.count); ++e)
             {
@@ -260,12 +265,12 @@ cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
         if (res.texture != nullptr)
         {
             group->referenced_textures.push_back(res.texture);
-            group->texture_hazard_views.push_back({res.texture, res.range, res.access});
+            group->texture_hazard_views.push_back({res.texture, res.range, res.bound_as, binding});
         }
         else if (res.buffer != nullptr)
         {
             group->referenced.push_back(res.buffer);
-            group->hazard_views.push_back({res.buffer, res.access});
+            group->hazard_views.push_back({res.buffer, res.bound_as, binding});
         }
         // else: a scalar slot with no resource — the null acceleration structure, which tracks nothing.
     }

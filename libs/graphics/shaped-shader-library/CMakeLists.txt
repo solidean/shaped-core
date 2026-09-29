@@ -19,7 +19,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/compiler/sgl_compiler.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
     src/shaped-shader-library/binding/impl/hlsl_sampler_state.cc
-    src/shaped-shader-library/binding/impl/hlsl_storage_format.cc
+    src/shaped-shader-library/binding/impl/hlsl_image_format.cc
     src/shaped-shader-library/binding/impl/hlsl_value_types.cc
     src/shaped-shader-library/binding/impl/hlsl_tokens.cc
     src/shaped-shader-library/shader_asset.cc
@@ -38,6 +38,8 @@ target_sources(shaped-shader-library
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
     src/shaped-shader-library/fwd.hh
+    src/shaped-shader-library/gpu_bool.hh
+    src/shaped-shader-library/compiler/block_layout.hh
     src/shaped-shader-library/all.hh
     src/shaped-shader-library/filesystem/filesystem.hh
     src/shaped-shader-library/filesystem/watch.hh
@@ -110,10 +112,30 @@ else()
     target_compile_definitions(shaped-shader-library PUBLIC SLIB_HAS_DXC=0)
 endif()
 
+# The MSL -> metallib compiler, on the same terms as the DXC arm above.
+# Its target exists on Apple alone, and it needs no toolchain of its own to build — shaped-shader-compiler-msl
+# resolves `xcrun metal` at run time and falls back to MSL source where there is none.
+# This is also what carries an SGL package to metal: create_sgl_compiler(create_metal_compiler()).
+if(TARGET shaped-shader-compiler-msl)
+    target_sources(shaped-shader-library PRIVATE src/shaped-shader-library/compiler/metal_compiler.cc)
+    target_sources(shaped-shader-library
+        PUBLIC
+        FILE_SET public_headers
+        TYPE HEADERS
+        BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        FILES src/shaped-shader-library/compiler/metal_compiler.hh
+    )
+    target_link_libraries(shaped-shader-library PRIVATE shaped-shader-compiler-msl)
+    target_compile_definitions(shaped-shader-library PUBLIC SLIB_HAS_METAL=1)
+else()
+    target_compile_definitions(shaped-shader-library PUBLIC SLIB_HAS_METAL=0)
+endif()
+
 # Test binary. Named *-test so the dev.py runner discovers it.
 if(SC_BUILD_TESTS)
     add_executable(shaped-shader-library-test
         tests/main.cc
+        tests/gpu_bool-test.cc
         tests/filesystem/path-test.cc
         tests/filesystem/filesystem-test.cc
         tests/filesystem/real_filesystem-test.cc
@@ -123,10 +145,10 @@ if(SC_BUILD_TESTS)
         tests/compile_source-test.cc
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
-        tests/reflection_mismatch-test.cc
         tests/dxc_compiler-test.cc
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc
+        tests/metal_compiler-test.cc
         tests/pipeline-test.cc
         tests/binding/binding_groups-test.cc
         tests/binding/wgsl_declarations-test.cc

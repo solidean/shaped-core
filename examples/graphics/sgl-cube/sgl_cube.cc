@@ -26,6 +26,7 @@
 #include <shaped-rendering/capture.hh>
 #include <shaped-rendering/window.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
+#include <shaped-shader-library/compiler/metal_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -39,6 +40,8 @@
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #elif SGL_CUBE_BACKEND_DX12
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#elif SGL_CUBE_BACKEND_METAL
+#include <shaped-graphics/backends/metal/metal_context.hh>
 #else
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #endif
@@ -185,6 +188,8 @@ struct orbit_camera
     co_return requested.value();
 #elif SGL_CUBE_BACKEND_DX12
     co_return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp}); // WARP draws this correctly, only slower
+#elif SGL_CUBE_BACKEND_METAL
+    co_return sg::create_metal_context({}); // no software device here: a host below the Metal 4 floor gets an error
 #else
     co_return sg::create_vulkan_context({});
 #endif
@@ -251,6 +256,9 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
         lib.add_compiler(slib::create_sgl_compiler(cc::move(dxil.value())));
     if (spirv.has_value())
         lib.add_compiler(slib::create_sgl_compiler(cc::move(spirv.value())));
+#endif
+#if SLIB_HAS_METAL
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler())); // a metallib, or MSL the driver compiles
 #endif
     lib.add_package(shaders::package());
 

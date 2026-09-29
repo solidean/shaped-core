@@ -1,0 +1,37 @@
+// bool is an enum of two cases, and `true` and `false` are its values by name
+
+test bool.true == true and bool.false == false
+
+fun sign(b: bool) -> float:
+    return case b:
+        true => 1.0
+        false => -1.0
+
+test sign(1 < 2) == 1.0 and sign(2 < 1) == -1.0
+
+// a case of bool is named with a leading dot where a case expects one
+fun flip(b: bool) -> bool:
+    return case b:
+        .true => false
+        .false => true
+
+test flip(true) == false
+test (not flip(false)) == false
+
+// a bool case, a bool constant and a test nested in a function all reach an entry point, and no target writes the test
+fun shade(x: float) -> float:
+    test shade(2.0) == 1.0
+    let lit = case x > 0.5:
+        true => bool.true
+        false => false
+    return sign(flip(not lit)) * 0.5 + 0.5
+
+struct frag:
+    a: float
+
+@pixel struct target:
+    color: float4
+
+@pixel fun main_ps(p: frag) -> target:
+    let s = shade p.a
+    return target(float4(s, s, s, 1.0))

@@ -33,8 +33,17 @@ cc::optional<cc::string> misfit_of(sg::compiled_shader const& shader, sg::pipeli
     return cc::format("the shader '{}' does not fit its pipeline layout:\n{}", shader.entry_point, misfit);
 }
 
+/// Why a compute pipeline of `desc` cannot be built on a device with `supported`, or nothing when it can.
+cc::optional<cc::string> refusal_of(sg::compute_pipeline_description const& desc, sg::feature_set supported)
+{
+    sg::compiled_shader const* const stages[] = {&desc.shader};
+    if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
+        return missing;
+    return misfit_of(desc.shader, desc.layout);
+}
+
 // What the frontend checks of a raster description before any backend sees it.
-cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
+cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc, sg::feature_set supported)
 {
     sg::compiled_shader const* const stages[] = {
         &desc.vertex_shader,
@@ -43,8 +52,24 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
         desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
         desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
     };
+    // a stage the device lacks is refused by its feature, whatever language its shader was written in
+    auto const has_tessellation
+        = desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value();
+    if (has_tessellation && !supported.has(sg::feature::tessellation_shader))
+        return cc::string("the pipeline has tessellation stages, and this device lacks "
+                          "sg::feature::tessellation_shader");
+    if (desc.geometry_shader.has_value() && !supported.has(sg::feature::geometry_shader))
+        return cc::string("the pipeline has a geometry stage, and this device lacks sg::feature::geometry_shader");
+    if (desc.rasterization.fill == sg::fill_mode::wireframe && !supported.has(sg::feature::wireframe_fill))
+        return cc::string("the pipeline fills wireframe, and this device lacks sg::feature::wireframe_fill");
+    if (desc.depth_stencil_format == sg::pixel_format::depth32_float_stencil8
+        && !supported.has(sg::feature::depth32_float_stencil8))
+        return cc::string("the pipeline's depth-stencil format is depth32_float_stencil8, and this device lacks "
+                          "sg::feature::depth32_float_stencil8");
     if (auto conflict = sg::impl::find_binding_conflict(stages); conflict.has_value())
         return conflict;
+    if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
+        return missing;
     for (auto const* stage : stages)
         if (stage != nullptr)
             if (auto misfit = misfit_of(*stage, desc.layout); misfit.has_value())
@@ -97,12 +122,72 @@ sg::raster_target_formats target_formats_of(sg::raster_pipeline_description cons
     return formats;
 }
 
+/// What a pipeline's code does to each binding: every stage's footprint, resolved against `layout`.
+sg::impl::pipeline_footprint footprint_of(sg::pipeline_layout const& layout,
+                                          cc::span<sg::compiled_shader const* const> shaders)
+{
+    cc::vector<sg::impl::pipeline_footprint::stage_input> stages;
+    for (auto const* shader : shaders)
+        if (shader != nullptr)
+            stages.push_back({.footprint = &shader->footprint, .stages = sg::impl::stages_of(shader->stage)});
+    return sg::impl::pipeline_footprint::resolve(layout, stages);
+}
+
+sg::impl::pipeline_footprint footprint_of(sg::compute_pipeline_description const& desc)
+{
+    sg::compiled_shader const* const stages[] = {&desc.shader};
+    return footprint_of(*desc.layout, stages);
+}
+
+sg::impl::pipeline_footprint footprint_of(sg::raster_pipeline_description const& desc)
+{
+    sg::compiled_shader const* const stages[] = {
+        &desc.vertex_shader,
+        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
+        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
+        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
+        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
+    };
+    return footprint_of(*desc.layout, stages);
+}
+
+/// Why every backend refuses `desc`'s bound samplers, or none where it takes them.
+/// A register is one slot whatever its space, since only dx12 has spaces to tell two apart.
+cc::optional<cc::string> bound_sampler_refusal(sg::pipeline_layout_description const& desc)
+{
+    for (auto i = isize(0); i < desc.static_samplers.size(); ++i)
+    {
+        auto const& b = desc.static_samplers[i].binding;
+        if (!sg::is_sampler(b.type) || b.count != 1)
+            return cc::format("pipeline_layout: bound sampler '{}' must be a binding of one sampler", b.name);
+        if (int(b.index) >= sg::max_bound_samplers)
+            return cc::format("pipeline_layout: bound sampler '{}' takes register {}, and a pipeline holds {} on every "
+                              "backend",
+                              b.name, b.index, sg::max_bound_samplers);
+        for (auto j = isize(0); j < i; ++j)
+            if (desc.static_samplers[j].binding.index == b.index)
+                return cc::format("pipeline_layout: bound samplers '{}' and '{}' both take register {}",
+                                  desc.static_samplers[j].binding.name, b.name, b.index);
+    }
+    return {};
+}
+
 cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_pipeline_handle> built,
                                                    cc::string target_set,
-                                                   sg::raster_target_formats formats)
+                                                   sg::raster_target_formats formats,
+                                                   sg::impl::pipeline_footprint footprint)
 {
     auto pipeline = co_await built;
     sg::impl::set_targets(*pipeline, target_set, formats);
+    sg::impl::set_footprint(*pipeline, cc::move(footprint));
+    co_return pipeline;
+}
+
+cc::shared_async<sg::compute_pipeline_handle> with_footprint(cc::shared_async<sg::compute_pipeline_handle> built,
+                                                             sg::impl::pipeline_footprint footprint)
+{
+    auto pipeline = co_await built;
+    sg::impl::set_footprint(*pipeline, cc::move(footprint));
     co_return pipeline;
 }
 } // namespace
@@ -135,7 +220,7 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
                                         "not support — declare a bounded count and treat it as capacity",
                                         b.name));
 
-    if (auto unsupported = impl::find_unsupported_binding(_ctx.supports(feature::extended_storage_formats), bindings);
+    if (auto unsupported = impl::find_unsupported_binding(_ctx.supports(feature::extended_image_formats), bindings);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
 
@@ -154,6 +239,8 @@ pipeline_layout_handle context_uncached_scope::create_pipeline_layout(pipeline_l
 
 cc::result<pipeline_layout_handle> context_uncached_scope::try_create_pipeline_layout(pipeline_layout_description const& desc)
 {
+    if (auto refusal = bound_sampler_refusal(desc); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
     return _ctx.try_create_pipeline_layout(desc, lifetime_scope::persistent);
 }
 
@@ -170,9 +257,13 @@ compute_pipeline_handle context_uncached_scope::create_compute_pipeline(compute_
 cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_pipeline(
     compute_pipeline_description const& desc)
 {
-    if (auto misfit = misfit_of(desc.shader, desc.layout); misfit.has_value())
-        return cc::error(cc::move(misfit.value()));
-    return _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
+    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
+    _ctx._stats.add(stat::pipelines_created);
+    auto r = _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
+    if (r.has_value())
+        impl::set_footprint(*r.value(), footprint_of(desc));
+    return r;
 }
 
 raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pipeline_description const& desc)
@@ -187,34 +278,40 @@ raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pip
 
 cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& desc)
 {
-    if (auto refusal = refusal_of(desc); refusal.has_value())
+    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
 
+    _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
+    {
         impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc));
+        impl::set_footprint(*r.value(), footprint_of(desc));
+    }
     return r;
 }
 
 cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute_pipeline_async(
     compute_pipeline_description const& desc)
 {
-    if (auto misfit = misfit_of(desc.shader, desc.layout); misfit.has_value())
+    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::make_async_from_error<compute_pipeline_handle>(
-            cc::async_error::make_error(cc::any_error(cc::move(misfit.value()))));
-    return _ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent);
+            cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
+    _ctx._stats.add(stat::pipelines_created);
+    return with_footprint(_ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent), footprint_of(desc));
 }
 
 cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_pipeline_async(
     raster_pipeline_description const& desc)
 {
-    if (auto refusal = refusal_of(desc); refusal.has_value())
+    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::make_async_from_error<raster_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
 
     // A backend may settle the build from a callback of its own, so the name is set once it has.
+    _ctx._stats.add(stat::pipelines_created);
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
-    return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc));
+    return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc), footprint_of(desc));
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)
@@ -251,8 +348,14 @@ cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytra
     }
     if (auto conflict = impl::find_binding_conflict(stages); conflict.has_value())
         return cc::error(cc::move(conflict.value()));
+    if (auto missing = impl::find_missing_feature(_ctx.supported_features(), stages); missing.has_value())
+        return cc::error(cc::move(missing.value()));
 
-    return _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
+    _ctx._stats.add(stat::pipelines_created);
+    auto r = _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
+    if (r.has_value())
+        impl::set_footprint(*r.value(), footprint_of(*desc.layout, stages));
+    return r;
 }
 
 raytracing_shader_table_handle context_uncached_scope::create_raytracing_shader_table(

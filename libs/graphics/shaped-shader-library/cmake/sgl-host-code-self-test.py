@@ -21,12 +21,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import sgl_description  # noqa: E402
 import sgl_host_code  # noqa: E402
 from sgl_description import SglFile  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[4]
 
-# sg's typed view aliases, one per sg::texture_view_dimension: what view_traits must name for every dimension.
+# sg's typed view typedefs, one per sg::texture_view_dimension: what view_shape must name for every dimension.
 VIEWS_HH = REPO / "libs" / "graphics" / "shaped-graphics" / "src" / "shaped-graphics" / "resource" / "views.hh"
 
 TESTS = []
@@ -101,18 +102,23 @@ def an_unclamped_max_lod_is_sg_samplers_own_sentinel():
     expect_equal(got, "{.max_lod = sg::sampler::lod_max}", "FLT_MAX as max_lod")
 
 
-# ---- view_traits ----------------------------------------------------------------------------------------------------
+# ---- view_shape -----------------------------------------------------------------------------------------------------
 
 
 @test
-def every_texture_view_dimension_names_sgs_own_alias():
-    aliases = re.findall(r"using (tv_\w+) = texture_view_traits<texture_view_dimension::(\w+)>;",
-                         VIEWS_HH.read_text(encoding="utf-8"))
-    if len(aliases) < 9:
-        raise AssertionError(f"read only {len(aliases)} tv_ alias(es) from {VIEWS_HH} -- the pattern is stale")
-    for alias, dimension in aliases:
-        expect_equal(sgl_host_code.view_traits({"texture_dimension": dimension}), f"sg::{alias}",
-                     f"view_traits of '{dimension}'")
+def every_texture_view_dimension_names_sgs_own_typedefs():
+    text = VIEWS_HH.read_text(encoding="utf-8")
+    aliases = dict(re.findall(r"using (tv_\w+) = texture_view_traits<texture_view_dimension::(\w+)>;", text))
+    textures = dict(re.findall(r"using texture_view_(\w+) = texture_view<(tv_\w+)>;", text))
+    images = dict(re.findall(r"using image_view_(\w+) = image_view<(tv_\w+), Format>;", text))
+    if len(aliases) < 9 or len(textures) < 9 or len(images) < 5:
+        raise AssertionError(f"read {len(aliases)} tv_ alias(es), {len(textures)} texture and {len(images)} image "
+                             f"typedef(s) from {VIEWS_HH} -- the pattern is stale")
+    for alias, dimension in aliases.items():
+        shape = sgl_host_code.view_shape({"texture_dimension": dimension})
+        expect_equal(textures.get(shape), alias, f"texture_view_{shape} for '{dimension}'")
+        if "cube" not in dimension and "ms" not in dimension:
+            expect_equal(images.get(shape), alias, f"image_view_{shape} for '{dimension}'")
 
 
 # ---- binding_entry --------------------------------------------------------------------------------------------------
@@ -126,7 +132,7 @@ def resource(kind: str, **fields) -> dict:
 def a_texture_entry_carries_its_sample_type():
     for sample_type in ("filterable_float", "unfilterable_float", "depth", "sint", "uint"):
         got = sgl_host_code.binding_entry(resource("texture", texture_dimension="cube", sample_type=sample_type))
-        expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::readonly_texture, '
+        expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::texture, '
                           ".texture_dimension = sg::texture_view_dimension::cube, "
                           f".sample_type = sg::texture_sample_type::{sample_type}}}",
                      f"a texture of sample type '{sample_type}'")
@@ -134,12 +140,22 @@ def a_texture_entry_carries_its_sample_type():
 
 @test
 def an_image_entry_carries_its_format_and_access():
-    got = sgl_host_code.binding_entry(resource("image", texture_dimension="tex_2d_array", storage_format="r32_uint",
-                                               storage_access="write"))
-    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::readwrite_texture, '
-                      ".texture_dimension = sg::texture_view_dimension::tex_2d_array, "
-                      ".storage_format = sg::pixel_format::r32_uint, .storage_access = sg::storage_access::write}",
+    got = sgl_host_code.binding_entry(resource("image", texture_dimension="tex_2d_array", image_format="r32_uint",
+                                               access="write"))
+    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::image, '
+                      ".access = sg::access_mode::write, .texture_dimension = sg::texture_view_dimension::tex_2d_array, "
+                      ".image_format = sg::pixel_format::r32_uint}",
                  "an image")
+
+
+@test
+def a_buffer_entry_states_access_only_when_written():
+    got = sgl_host_code.binding_entry(resource("buffer", access="read"))
+    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::buffer}', "a read buffer")
+    got = sgl_host_code.binding_entry(resource("buffer", access="read_write"))
+    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::buffer, '
+                      ".access = sg::access_mode::read_write}",
+                 "a mut buffer")
 
 
 @test
@@ -161,7 +177,9 @@ GROUP = {
         {"kind": "texture", "name": "depth_map", "type": "texture_cube[float]", "host_name": "shadow_depth_map",
          "slot": 0, "texture_dimension": "cube", "sample_type": "depth"},
         {"kind": "image", "name": "counts", "type": "image_3d[uint]", "host_name": "shadow_counts", "slot": 1,
-         "texture_dimension": "tex_3d", "storage_format": "r32_uint", "storage_access": "read_write"},
+         "texture_dimension": "tex_3d", "image_format": "r32_uint", "access": "read_write"},
+        {"kind": "buffer", "name": "weights", "type": "float", "host_name": "shadow_weights", "slot": 4,
+         "access": "read_write"},
         {"kind": "sampler", "name": "picked", "type": "sampler", "host_name": "shadow_picked", "slot": 2,
          "sampler_type": "non_filtering"},
         {"kind": "sampler", "name": "compare", "type": "sampler", "host_name": "shadow_compare", "slot": 3,
@@ -174,9 +192,10 @@ FILE = SglFile(path="shadow.sgl")
 
 @test
 def a_group_has_a_field_per_view_and_per_dynamic_sampler():
-    header = sgl_host_code.emit_group("pkg", "ns", FILE, GROUP)
-    expect_in("sg::readonly_texture_view<sg::tv_cube> depth_map;", header, "a cube texture's field")
-    expect_in("sg::readwrite_texture_view<sg::tv_3d> counts;", header, "a 3d image's field")
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, GROUP)
+    expect_in("sg::texture_view_cube depth_map;", header, "a cube texture's field")
+    expect_in("sg::image_view_3d<sg::pixel_format::r32_uint> counts;", header, "a 3d image's field, typed on its format")
+    expect_in("sg::readwrite_buffer_view<float> weights;", header, "a mut buffer's field, its view by access")
     expect_in("sg::sampler picked;", header, "a dynamic sampler's field")
     # A static sampler is the layout's, so the group the host fills has nothing to set for it.
     expect_not_in(" compare;", header, "a static sampler")
@@ -184,13 +203,147 @@ def a_group_has_a_field_per_view_and_per_dynamic_sampler():
 
 @test
 def a_groups_static_sampler_is_declared_and_its_dynamic_one_gathered():
-    source = sgl_host_code.emit_group_impl("pkg", "ns", FILE, GROUP)
+    source = sgl_host_code.emit_group_impl("pkg", {}, "ns", FILE, GROUP)
     expect_in('{.name = "shadow_compare", .sampler = {.min_filter = sg::sampler_filter::linear, '
               ".compare = sg::compare_op::less}}", source, "the static sampler's table entry")
     expect_in("return k_sgl_samplers_shadow;", source, "declared_samplers")
     expect_in('samplers.push_back({.name = "shadow_picked", .sampler = picked});', source, "the dynamic sampler")
     expect_not_in('.sampler = compare}', source, "a static sampler gathered as a dynamic one")
-    expect_in("views.reserve(2);", source, "only views are gathered as views")
+    expect_in("views.reserve(3);", source, "only views are gathered as views")
+
+
+ARRAYS = {
+    "name": "materials",
+    "inline": False,
+    "members": [
+        {"kind": "texture", "name": "albedo", "type": "texture_2d[float4]", "host_name": "materials_albedo",
+         "slot": 0, "count": 8, "texture_dimension": "tex_2d", "sample_type": "filterable_float"},
+        {"kind": "buffer", "name": "params", "type": "float4", "host_name": "materials_params", "slot": 8,
+         "count": 2, "access": "read"},
+    ],
+}
+
+
+@test
+def a_binding_array_is_a_fixed_array_of_views_gathered_as_one_binding():
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, ARRAYS)
+    expect_in("cc::fixed_array<sg::texture_view_2d, 8> albedo;", header, "a texture array's field")
+    expect_in("cc::fixed_array<sg::readonly_buffer_view<tg::vec4f>, 2> params;", header, "a buffer array's field")
+    source = sgl_host_code.emit_group_impl("pkg", {}, "ns", FILE, ARRAYS)
+    expect_in('{.name = "materials_albedo", .index = 0u, .count = 8u, .type = sg::binding_type::texture', source,
+              "a binding array's count")
+    expect_in("        for (auto const& element : albedo)\n"
+              "            elements.push_back(element);\n"
+              "        views.push_back({.slot = sg::binding_slot(0), .view = cc::move(elements)});\n", source,
+              "every element gathered, in order")
+    # sg keys a view by its position among the group's bindings, which is 1 here although `params` starts at register 8
+    expect_in("        views.push_back({.slot = sg::binding_slot(1), .view = cc::move(elements)});\n", source,
+              "a binding after an array keyed by its position, not its register")
+
+
+# ---- a vertex input ---------------------------------------------------------------------------------------------------
+
+MESH = {
+    "name": "mesh_vertex",
+    "edge": "vertex",
+    "members": [
+        {"name": "position", "type": "float3", "location": 0, "stream": "per_vertex", "per_instance": False,
+         "semantic": "POSITION"},
+        {"name": "color", "type": "float4", "location": 1, "stream": "per_vertex", "per_instance": False,
+         "format": "rgba8_unorm", "semantic": "COLOR"},
+        {"name": "material", "type": "uint", "location": 2, "stream": "per_vertex", "per_instance": False,
+         "semantic": "MATERIAL"},
+    ],
+}
+
+
+@test
+def a_packed_vertex_member_is_its_bytes_on_the_host_and_its_format_in_the_layout():
+    header = sgl_host_code.emit_vertex_input("pkg", "ns", FILE, MESH)
+    # four bytes the host writes, whatever the shader reads them as
+    expect_in("cc::u32 color;", header, "a packed member's host field")
+    expect_in("cc::u32 material;", header, "a uint member's host field")
+    source = sgl_host_code.emit_vertex_input_impl("pkg", "ns", FILE, MESH)
+    expect_in(".format = sg::vertex_attribute_format::rgba8_unorm", source, "a packed member's format")
+    expect_in(".format = sg::vertex_attribute_format::u32", source, "an integer member's format, from its type")
+    expect_in(".format = sg::vertex_attribute_format::vec3f", source, "a float member's format, from its type")
+
+
+# ---- a pipeline -------------------------------------------------------------------------------------------------------
+
+# Every stage filled, and a vertex stage that draws from no vertex buffer.
+TESSELLATED = {
+    "name": "tessellated",
+    "vertex": "vs",
+    "tessellation_control": "tc",
+    "tessellation_evaluation": "te",
+    "geometry": "gs",
+    "pixel": "ps",
+    "vertex_input": "",
+    "target_set": "",
+    "targets": [],
+    "layout": ["shadow"],
+    "inline": "",
+    "open": [],
+    "settings": [],
+    "frozen": ["layout = shadow@0", "inline constants = ", "vertex input = ", "target set = ",
+               "stages = vs, tc, te, gs, ps", "features = geometry_shader, tessellation_shader"],
+}
+
+
+@test
+def a_pipeline_names_every_stage_in_pipeline_definitions_field_order():
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)], pipelines=[(FILE, TESSELLATED)])
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {FILE.path: "shadow"}, {})
+    # a designated initializer follows the declaration, which is not the order a vertex passes the stages
+    fields = [".vertex = &ns::shadow.vs,", ".pixel = &ns::shadow.ps,", ".geometry = &ns::shadow.gs,",
+              ".tessellation_control = &ns::shadow.tc,", ".tessellation_evaluation = &ns::shadow.te,"]
+    positions = []
+    for f in fields:
+        expect_in(f, source, "a stage of the pipeline")
+        positions.append(source.index(f))
+    expect_equal(positions, sorted(positions), "the stages in pipeline_definition's field order")
+    expect_in('    "stages = vs, tc, te, gs, ps",\n', source, "the stages frozen, in the order a vertex passes them")
+    expect_not_in(".vertex_input", source, "a vertex stage that draws from no vertex buffer")
+    header = sgl_host_code.emit_pipelines(entries, {FILE.path: "shadow"})
+    expect_in("vs, tc, te, gs and ps, writing depth alone", header, "the stages the doc comment names")
+
+
+# ---- a file-scope sampler -------------------------------------------------------------------------------------------
+
+EDGE = {"name": "edge", "index": 1, "sampler_type": "non_filtering", "shape": "0",
+        "settings": {"min_filter": "nearest", "address_u": "clamp_edge"}}
+EDGE_ROW = ('{.binding = {.name = "edge", .space = slib::bound_samplers_space, .index = 1u, .count = 1u, '
+            ".type = sg::binding_type::sampler, .sampler_type = sg::sampler_binding_type::non_filtering},")
+
+
+@test
+def an_entry_points_layout_holds_the_file_samplers_its_code_reaches():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["shadow"], "samplers": ["edge"]}
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)],
+                                         described_entry_points={(FILE.path, "cs"): entry},
+                                         file_samplers={FILE.path: [EDGE]})
+    header = sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"})
+    expect_in(EDGE_ROW, header, "the sampler's binding, at its index in slib's space")
+    expect_in(".sampler = {.min_filter = sg::sampler_filter::nearest, "
+              ".address_u = sg::sampler_address_mode::clamp_edge}}", header, "the sampler's settings")
+    expect_in("return ctx.cached.acquire_pipeline_layout<shadow>(samplers);", header, "the layout takes them")
+    expect_in("<shaped-shader-library/binding/binding_groups.hh>", " ".join(sgl_host_code.includes(entries)),
+              "slib::bound_samplers_space's header")
+
+
+@test
+def a_pipelines_layout_holds_the_file_samplers_any_stage_reaches():
+    file = SglFile(path="shadow.sgl", samplers=[EDGE])
+    pipeline = {**TESSELLATED, "samplers": ["edge"]}
+    entries = sgl_description.SglEntries(bindings=[(file, GROUP)], pipelines=[(file, pipeline)])
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {file.path: "shadow"}, {})
+    expect_in("sg::bound_sampler const k_shadow_tessellated_samplers[] = {\n    " + EDGE_ROW, source, "the table")
+    expect_in("acquire_pipeline_layout<ns::shadow>(k_shadow_tessellated_samplers);", source, "the layout takes it")
+    # a pipeline that reaches none passes none
+    plain = sgl_host_code.emit_pipelines_impl("pkg", "ns", sgl_description.SglEntries(
+        bindings=[(file, GROUP)], pipelines=[(file, TESSELLATED)]), {file.path: "shadow"}, {})
+    expect_in("acquire_pipeline_layout<ns::shadow>();", plain, "no sampler")
 
 
 # ---- the runner -----------------------------------------------------------------------------------------------------

@@ -41,13 +41,13 @@ namespace
 /// This epoch's bindless element for `id`'s texture — what a parameter block naming it would carry.
 [[nodiscard]] u32 element_of(sv::gpu_resource_manager& m, sv::texture_id id)
 {
-    return u32(m.acquire_texture(sv::bindless_table::textures_2d, m.textures.get(id).texture.as_readonly_view()));
+    return u32(m.acquire_texture(sv::bindless_table::textures_2d, m.textures.get(id).texture.as_texture_view()));
 }
 
 [[nodiscard]] sg::texture_2d make_texture(sg::context& ctx)
 {
     return ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba8_unorm, .width = 8, .height = 8, .usage = sg::texture_usage::readonly_texture});
+        {.format = sg::pixel_format::rgba8_unorm, .width = 8, .height = 8, .usage = sg::texture_usage::texture});
 }
 } // namespace
 
@@ -84,7 +84,7 @@ ASYNC_INVOCABLE_TEST("sv - the resource manager declares only its configured tab
 
     CHECK(!m.has_table(sv::bindless_table::textures_cube));
     CHECK(m.table_capacity(sv::bindless_table::textures_cube) == 0);
-    CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_cube, make_texture(ctx).as_readonly_view()));
+    CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_cube, make_texture(ctx).as_texture_view()));
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -98,12 +98,12 @@ ASYNC_INVOCABLE_TEST("sv - the resource manager refuses acquires while frozen", 
     m.advance_to(ctx.current_epoch());
 
     auto const tex = make_texture(ctx);
-    (void)m.acquire_texture(sv::bindless_table::textures_2d, tex.as_readonly_view());
+    (void)m.acquire_texture(sv::bindless_table::textures_2d, tex.as_texture_view());
 
     // The manual pair, which freeze is the RAII form of.
     m.lock();
     CHECK(m.is_locked());
-    CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_readonly_view()));
+    CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_texture_view()));
     CHECK_ASSERTS(m.lock());
     m.unlock();
     CHECK(!m.is_locked());
@@ -113,7 +113,7 @@ ASYNC_INVOCABLE_TEST("sv - the resource manager refuses acquires while frozen", 
         auto const bound = m.freeze();
         CHECK(m.is_locked());
         CHECK(bound.group() != nullptr);
-        CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_readonly_view()));
+        CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_texture_view()));
 
         // Advancing under a live snapshot would invalidate the very indices it was taken for.
         CHECK_ASSERTS(m.advance_to(sg::epoch(u64(ctx.current_epoch()) + 1)));
@@ -135,7 +135,7 @@ ASYNC_INVOCABLE_TEST("sv - two freezes in one epoch keep the first's indices", (
     m.advance_to(ctx.current_epoch());
 
     auto const a = make_texture(ctx);
-    auto const a_index = u32(m.acquire_texture(sv::bindless_table::textures_2d, a.as_readonly_view()));
+    auto const a_index = u32(m.acquire_texture(sv::bindless_table::textures_2d, a.as_texture_view()));
     {
         auto const bound = m.freeze();
         CHECK(bound.elements(sv::bindless_table::textures_2d).size() == 1);
@@ -143,9 +143,9 @@ ASYNC_INVOCABLE_TEST("sv - two freezes in one epoch keep the first's indices", (
     }
 
     auto const b = make_texture(ctx);
-    auto const b_index = u32(m.acquire_texture(sv::bindless_table::textures_2d, b.as_readonly_view()));
+    auto const b_index = u32(m.acquire_texture(sv::bindless_table::textures_2d, b.as_texture_view()));
     CHECK(b_index != a_index);
-    CHECK(u32(m.acquire_texture(sv::bindless_table::textures_2d, a.as_readonly_view())) == a_index);
+    CHECK(u32(m.acquire_texture(sv::bindless_table::textures_2d, a.as_texture_view())) == a_index);
 
     {
         auto const bound = m.freeze();
@@ -181,7 +181,7 @@ ASYNC_INVOCABLE_TEST("sv - a pinned texture is declared and outlives its epoch",
     m.advance_to(ctx.current_epoch());
 
     auto const tex = make_texture(ctx);
-    auto const pin = m.pin_texture(sv::bindless_table::textures_2d, tex.as_readonly_view());
+    auto const pin = m.pin_texture(sv::bindless_table::textures_2d, tex.as_texture_view());
     REQUIRE(pin != nullptr);
     auto const index = pin->index();
 
@@ -199,7 +199,7 @@ ASYNC_INVOCABLE_TEST("sv - a pinned texture is declared and outlives its epoch",
         ctx.advance_epoch();
         co_await ctx.idle_completion();
         m.advance_to(ctx.current_epoch());
-        (void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_readonly_view());
+        (void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_texture_view());
         CHECK(pin->index() == index);
     }
 

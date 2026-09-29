@@ -84,7 +84,8 @@ TEST("ssc::dxc compile - raygen shader -> DXIL library + reflection")
 
     auto const* out = find_binding(shader, "Output");
     REQUIRE(out != nullptr);
-    CHECK(out->type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(out->type == sg::binding_type::buffer);
+    CHECK(out->access == sg::access_mode::read_write);
     CHECK(out->index == 0u); // u0
 }
 

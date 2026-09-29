@@ -14,7 +14,7 @@ binding frame:
 
 binding instance:
     model: mat4
-    tex_color: texture2d[rgba8]
+    tex_color: texture_2d[rgba8]
 ```
 
 * Members that are not resources are grouped into a single implicit constant buffer.
@@ -78,7 +78,7 @@ fun foo(v: vec3){frame}:
     return A.sample_sky v // ok! structurally matching binding with name "sky" is available
 ```
 
-The member of the local `binding sky` is a property ([members-and-properties.md](members-and-properties.md)) that forwards to a resource of `frame`.
+The member of the local `binding sky` is a property ([CHK-236](../semantics/checking.md#members-and-constructors)) that forwards to a resource of `frame`.
 `foo` itself declares only `frame`, so the library's `sky` never dictates a binding group of its own to the caller.
 A binding satisfies a requirement when it has the required name and matches structurally.
 
@@ -130,6 +130,7 @@ Binding verification is a very late step: that every function has its bindings s
 
 ## Open
 
+* A `test` lists no binding, and a local binding in its body is how it will give a callee one ([CHK-228](../semantics/checking.md#tests)); until this lands, such a call is `binding-not-listed`.
 * A call-site spelling that mirrors the declaration, as a shorter way to rebind: `a.sample_sky(v){sky = frame_sky}`; the AST reserves the node for it.
 * What a binding entry other than a bare name means, such as `{sky as other}` or `{sky = other}`.
 * What the composition short form does with two members of one name.

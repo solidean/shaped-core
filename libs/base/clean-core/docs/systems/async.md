@@ -175,7 +175,7 @@ The error's kind is always `error`, never `cancelled` — cancellation is a deli
 Containment is not politeness.
 Left to escape, the exception would leave the node `running` forever, parking every dependent permanently, and would unwind out of a pool worker's thread function straight into `std::terminate`.
 
-The default `async_error` carries the message: a `std::exception`'s `what()`, or a fixed text for anything else.
+The default `async_error` carries the message: a `std::exception`'s `what()`, a `cc::exception`'s `message()`, or a fixed text for anything else.
 A custom `E` opts in by specializing the trait, and one that does not is a **runtime** diagnostic — an assert, then the pre-existing rethrow — never a compile error:
 
 ```cpp

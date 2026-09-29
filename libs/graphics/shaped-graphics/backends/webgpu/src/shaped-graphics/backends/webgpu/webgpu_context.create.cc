@@ -66,6 +66,9 @@ void finish_creation(webgpu_context& ctx)
         wgpuAdapterInfoFreeMembers(info);
     }
 
+    // WebGPU tracks usage itself and emits barriers nothing here can see.
+    ctx.set_counted_stats(sg::all_stats.without(sg::barrier_stats));
+
     auto limits = WGPULimits{};
     auto alignment = isize(256);
     if (wgpuDeviceGetLimits(ctx.device(), &limits) == WGPUStatus_Success && limits.minUniformBufferOffsetAlignment > 0)
@@ -73,10 +76,11 @@ void finish_creation(webgpu_context& ctx)
 
     auto const has = [&](WGPUFeatureName f) { return wgpuDeviceHasFeature(ctx.device(), f) != WGPU_FALSE; };
     ctx.set_limits(alignment, {.timestamps = has(WGPUFeatureName_TimestampQuery),
-                               .readwrite_storage_formats = has(WGPUFeatureName_TextureFormatsTier2),
+                               .readwrite_image_formats = has(WGPUFeatureName_TextureFormatsTier2),
                                .float32_filtering = has(WGPUFeatureName_Float32Filterable),
+                               .depth32_float_stencil8 = has(WGPUFeatureName_Depth32FloatStencil8),
                                // sg's extended set holds bgra8_unorm, which WebGPU grants with a feature of its own.
-                               .extended_storage_formats
+                               .extended_image_formats
                                = has(WGPUFeatureName_TextureFormatsTier1) && has(WGPUFeatureName_BGRA8UnormStorage)});
 }
 

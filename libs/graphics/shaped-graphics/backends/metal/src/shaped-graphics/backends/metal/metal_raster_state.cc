@@ -138,6 +138,10 @@ MTL::BlendFactor blend_factor_of(sg::blend_factor factor)
         return MTL::BlendFactorDestinationAlpha;
     case sg::blend_factor::one_minus_dst_alpha:
         return MTL::BlendFactorOneMinusDestinationAlpha;
+    case sg::blend_factor::constant:
+        return MTL::BlendFactorBlendColor;
+    case sg::blend_factor::one_minus_constant:
+        return MTL::BlendFactorOneMinusBlendColor;
     }
     return MTL::BlendFactorOne;
 }

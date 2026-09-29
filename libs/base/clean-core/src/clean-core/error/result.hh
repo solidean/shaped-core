@@ -2,6 +2,7 @@
 
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/exception_base.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/platform/source_location.hh>
@@ -169,7 +170,8 @@ template <size_t N>
 
 /// Exception type thrown by result::or_throw() when converting an error to an exception.
 /// Stores the error as cc::any_error to support any error type E via type erasure.
-struct cc::result_exception
+/// Its message() is the error's to_string(), taken at the throw.
+struct cc::result_exception : cc::exception
 {
 public:
     /// Construct from any error type E via type erasure.
@@ -185,7 +187,7 @@ public:
     [[nodiscard]] cc::any_error&& error() && { return cc::move(_error); }
 
 private:
-    explicit result_exception(cc::any_error&& e) : _error(cc::move(e)) {}
+    explicit result_exception(cc::any_error&& e) : exception(e.to_string()), _error(cc::move(e)) {}
 
     cc::any_error _error;
 };

@@ -1,11 +1,12 @@
 """External prerequisites that must exist before CMake configures.
 
-Four deps are fetched rather than committed — DXC, Zydis, SDL3 and SQLite — so every configure runs their fetch script.
+Five deps are fetched rather than committed — DXC, Zydis, SDL3, SQLite and the OIDN weights — so every configure runs their fetch script.
 That is seconds on a cold install and a cheap pin-file check after, and `SC_SKIP_<NAME>=1` opts out of one.
-A cross-target preset skips all four, since these are host-side dependencies.
+A cross-target preset skips all five, since these are host-side dependencies.
 None of them is fatal: a failure leaves the dependent target unbuilt and configure proceeds.
 
-Zydis is Windows-only; DXC is fetched on Windows and Linux, while SDL3 and SQLite run everywhere — which is what makes a cold Linux or macOS configure do real work.
+Zydis is Windows-only; DXC is fetched on Windows and Linux, while SDL3, SQLite and the OIDN weights run everywhere — which is what makes a cold Linux or macOS configure do real work.
+An `install: on-request` dependency has no `ensure_*` here at all: a person runs its fetch script by hand, and OIDN itself is one.
 Each dep's own docs own its pin, its size and what is missing without it — for Zydis that is tools/instruction-tracer/readme.md, not a libs/ doc.
 """
 
@@ -144,6 +145,24 @@ def ensure_sqlite(root: Path, preset_name: str = "") -> None:
         windows_only=False,
         doing="downloading the pinned SQLite amalgamation for babel::sqlite",
         dependent="babel-serializer's SQLite format",
+    )
+
+
+def ensure_oidn_weights(root: Path, preset_name: str = "") -> None:
+    """Download the trained OIDN networks into extern/oidn-weights/.install when they are missing or at the wrong pin.
+
+    A failure leaves shaped-rendering's OIDN denoise member reporting `unsupported`.
+    """
+    _ensure(
+        root,
+        preset_name,
+        name="oidn-weights",
+        directory="oidn-weights",
+        script_name="fetch-oidn-weights.py",
+        skip_env="SC_SKIP_OIDN_WEIGHTS",
+        windows_only=False,
+        doing="downloading the pinned Open Image Denoise weights for sr::denoise_method::oidn",
+        dependent="shaped-rendering's OIDN denoise member",
     )
 
 

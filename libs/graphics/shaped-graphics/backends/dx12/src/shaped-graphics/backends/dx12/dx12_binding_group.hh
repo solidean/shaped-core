@@ -10,21 +10,25 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh> // sg::view_class
 
-/// A bound buffer paired with the access class it is used as — the backend-typed input to the dispatch
+/// A bound buffer paired with the view class it is used as — the backend-typed input to the dispatch
 /// hazard declares (see dx12_command_list::compute_dispatch).
 struct sg::backend::dx12::dx12_hazard_view
 {
     dx12_buffer_handle buffer;
-    sg::view_class access;
+    sg::view_class bound_as;
+    /// Its position in the group layout's `bindings()`, which the pipeline's footprint is keyed by.
+    isize binding = -1;
 };
 
-/// A bound texture paired with the subresource range + access class it is used as — the texture analogue
+/// A bound texture paired with the subresource range + view class it is used as — the texture analogue
 /// of dx12_hazard_view, declared for layout-transition barriers at dispatch.
 struct sg::backend::dx12::dx12_texture_hazard_view
 {
     dx12_texture_handle texture;
     sg::subresource_range range;
-    sg::view_class access;
+    sg::view_class bound_as;
+    /// Its position in the group layout's `bindings()`, which the pipeline's footprint is keyed by.
+    isize binding = -1;
 };
 
 /// One element of an array binding: the bound resource (exactly one of buffer / texture set, both null when vacant)
@@ -48,6 +52,10 @@ struct sg::backend::dx12::dx12_array_binding
 {
     cc::string name;
     bool is_texture = false;
+    /// Its position in the group layout's `bindings()`.
+    isize binding = -1;
+    /// What its elements are bound as, which an undeclared array falls back to.
+    sg::view_class bound_as = sg::view_class::readonly;
     cc::vector<dx12_array_element> elements;
 };
 
@@ -106,7 +114,7 @@ public:
     dx12_descriptor_alloc sampler_table; // the group's SAMPLER range (empty if the layout has no dynamic samplers)
     cc::vector<dx12_buffer_handle> referenced;           // keeps the bound buffers alive while the group lives
     cc::vector<dx12_texture_handle> referenced_textures; // keeps the bound textures alive while the group lives
-    cc::vector<dx12_hazard_view> hazard_views;           // (buffer + access class) — declared for hazards at dispatch
+    cc::vector<dx12_hazard_view> hazard_views;           // (buffer + view class) — declared for hazards at dispatch
     cc::vector<dx12_texture_hazard_view> texture_hazard_views; // (texture + range + access) — declared at dispatch
 
     // Array bindings (count > 1) are not auto-tracked: their elements appear here instead of in the hazard vectors,

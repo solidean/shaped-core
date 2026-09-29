@@ -64,7 +64,11 @@ struct slib::shader_binding_group
 namespace slib
 {
 inline constexpr u32 inline_constants_space = 9;
-}
+
+/// The register space of a pipeline layout's static samplers on dx12, the `sg::bound_sampler`s no group holds.
+/// SGL's file-scope samplers take `s<index>` of it, and nothing else does.
+inline constexpr u32 bound_samplers_space = 10;
+} // namespace slib
 
 /// The inline-constants block a shader declares:
 ///

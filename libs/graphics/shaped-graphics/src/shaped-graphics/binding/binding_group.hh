@@ -156,6 +156,26 @@ namespace sg::impl
                                                                 cc::span<named_sampler const> supplied);
 } // namespace sg::impl
 
+namespace sg::impl
+{
+/// One buffer a binding group binds outside a binding array, the binding that binds it, and whether it writes it.
+struct buffer_use
+{
+    raw_buffer const* buffer = nullptr;
+    cc::string binding;
+    bool writes = false;
+};
+
+/// Records on `group` the buffers `views` bind outside binding arrays, which `context::portability_checks` reads.
+/// Called once, as the group comes back from its backend and before any bind.
+void record_buffer_uses(binding_group const& group, cc::span<named_view const> views);
+void record_buffer_uses(binding_group const& group, binding_group_layout const& layout, cc::span<slotted_view const> views);
+void set_buffer_uses(binding_group const& group, cc::vector<buffer_use> uses);
+
+/// What `record_buffer_uses` or `set_buffer_uses` recorded on `group`, which is empty where neither ran.
+[[nodiscard]] cc::span<buffer_use const> buffer_uses_of(binding_group const& group);
+} // namespace sg::impl
+
 /// A binding_group_layout instantiated with concrete resources bound: each named view is matched to a layout binding, validated, and turned into a backend descriptor.
 /// Bound at a pipeline-layout slot as a unit.
 /// Immutable after creation — rebind by recreating.
@@ -170,4 +190,10 @@ public:
 
 protected:
     binding_group() = default;
+
+private:
+    friend void impl::set_buffer_uses(binding_group const& group, cc::vector<impl::buffer_use> uses);
+    friend cc::span<impl::buffer_use const> impl::buffer_uses_of(binding_group const& group);
+    /// Set once, as the group is made, which is why a group that is otherwise immutable holds it `mutable`.
+    mutable cc::vector<impl::buffer_use> _buffer_uses;
 };

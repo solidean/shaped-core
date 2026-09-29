@@ -5,6 +5,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 
 /// What the host side of one SGL source is generated from: its binding groups, its pipeline-edge structs and its entry points.
@@ -20,9 +21,9 @@ enum class sgl::described_member_kind : sgl::u8
     constant,
     /// A `buffer[T]`, which the host binds as a resource of its own.
     buffer,
-    /// A sampled texture, `texture2d[float4]` or a depth texture.
+    /// A sampled texture, `texture_2d[float4]` or a depth texture.
     texture,
-    /// A storage texture, `out image2d[.rgba8_unorm]`.
+    /// A storage texture, `out image_2d[.rgba8_unorm]`.
     image,
     /// A sampler: one the host binds, or a static one of the group, which carries `sampler_state`.
     sampler,
@@ -45,20 +46,36 @@ struct sgl::described_sampler
     f32 mip_lod_bias = 0.0f;
 };
 
+/// A file-scope `sampler name:`, a static sampler of the pipeline layout of every entry point that uses it.
+struct sgl::described_file_sampler
+{
+    cc::string name;
+    /// Its position among the file's samplers in declaration order, which is its index in every pipeline layout.
+    i32 index = 0;
+    /// Its `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
+    cc::string sampler_type;
+    described_sampler settings;
+    /// The settings' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
+    cc::string shape;
+};
+
 struct sgl::described_binding_member
 {
     cc::string name;
     described_member_kind kind = described_member_kind::constant;
-    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image2d[.rgba8_unorm]`.
+    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image_2d[.rgba8_unorm]`.
     cc::string type;
-    /// A resource the shader may write: `mut buffer[T]`, or an `out` or `mut` image.
-    bool is_mut = false;
     /// A constant's byte offset in its block; -1 for a resource.
     i32 offset = -1;
     /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
     /// A resource's position among its binding's resources; -1 for a constant.
+    /// A binding array takes `count` consecutive slots from this one.
     i32 slot = -1;
+    /// A binding array's length; 1 for any other resource and for a constant.
+    i32 count = 1;
+    /// A buffer's bytes per element, by the storage rule; 0 for every other kind.
+    i32 stride = 0;
     /// What the host binds a resource by, `binding.member`; empty for a constant.
     /// slib renames the compiled shader's reflected binding to it, so it is the name sg sees.
     cc::string host_name;
@@ -68,9 +85,10 @@ struct sgl::described_binding_member
     cc::string texture_dimension;
     /// A texture's `sg::texture_sample_type`: `filterable_float`, `depth`, ….
     cc::string sample_type;
-    /// An image's `sg::pixel_format` and `sg::storage_access`: `rgba8_unorm`, `write`.
-    cc::string storage_format;
-    cc::string storage_access;
+    /// An image's `sg::pixel_format`: `rgba8_unorm`.
+    cc::string image_format;
+    /// Every resource's `sg::access_mode`: `read`, `write` or `read_write`.
+    cc::string access;
     /// A sampler's `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
     cc::string sampler_type;
     /// A static sampler of the group; absent for one the host binds.
@@ -101,6 +119,12 @@ struct sgl::described_struct_member
     i32 location = -1;
     /// The buffer a vertex input member is read from, and whether it steps per instance; empty on a `@pixel struct`.
     cc::string stream;
+    /// A vertex input member's `sg::vertex_attribute_format` where `@format` states one; empty for its type's own.
+    cc::string format;
+    /// A `@pixel struct` member that is no color target: "depth" or "sample_mask"; empty for a color target.
+    cc::string output;
+    /// A vertex input member's dx12 semantic, which its input layout names it by (EMIT-28); empty on a `@pixel struct`.
+    cc::string semantic;
     bool is_per_instance = false;
 };
 
@@ -115,6 +139,28 @@ struct sgl::described_struct
     cc::string shape;
 };
 
+/// One field of a struct in GPU memory, where the struct's address space places it.
+struct sgl::described_memory_member
+{
+    cc::string name;
+    cc::string type;
+    i32 offset = 0;
+    i32 size = 0;
+};
+
+/// A struct that stands in GPU memory, placed by the rule of the one address space it is in (the spec's layout rules).
+/// A struct in both a constant block and a storage buffer is `layout-conflict`, so each has exactly one layout.
+struct sgl::described_memory_struct
+{
+    cc::string name;
+    /// `constants` or `storage`.
+    cc::string space;
+    /// Where the last member ends; a buffer of it strides by this.
+    i32 size = 0;
+    /// Without a void member, which takes no room.
+    cc::vector<described_memory_member> members;
+};
+
 struct sgl::described_entry_point
 {
     cc::string name;
@@ -122,7 +168,14 @@ struct sgl::described_entry_point
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
+    /// A `@workgroup` binding is left out, since the host binds nothing for it.
     cc::vector<cc::string> bindings;
+    /// The `sg::feature`s a device needs to run it, by name, in the enum's order.
+    cc::vector<cc::string> features;
+    /// What its code does to each binding it lists, a slot it never touches left out (the spec's bindings file, "Footprint").
+    cc::vector<check::slot_footprint> footprint;
+    /// The file-scope samplers its code reaches, which its pipeline layout carries, in index order.
+    cc::vector<cc::string> samplers;
 };
 
 /// One field of a pipeline's description, as the check pass resolved it.
@@ -146,6 +199,10 @@ struct sgl::described_pipeline
     /// Entry point names; `pixel` is empty for a pipeline that writes depth alone.
     cc::string vertex;
     cc::string pixel;
+    /// Empty for a pipeline without the stage; the two tessellation stages are both empty or neither.
+    cc::string geometry;
+    cc::string tessellation_control;
+    cc::string tessellation_evaluation;
     /// The binding layout, in group order, and its one `@inline` binding or empty.
     cc::vector<cc::string> layout;
     cc::string inline_constants;
@@ -154,13 +211,17 @@ struct sgl::described_pipeline
     cc::string target_set;
     /// The members of `target_set`, in location order.
     cc::vector<cc::string> targets;
+    /// What its stages need of a device together, as `described_entry_point::features`.
+    cc::vector<cc::string> features;
+    /// The file-scope samplers any of its stages reaches, in index order.
+    cc::vector<cc::string> samplers;
     /// In the order they apply, each over the ones before it.
     cc::vector<described_pipeline_setting> settings;
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
-    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then the last
-    /// setting of every format and of the sample count.
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, and the samplers.
+    /// Then the stages by name, then `features`, then the last setting of every format and of the sample count.
     /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
     cc::vector<cc::string> frozen;
 };
@@ -170,8 +231,12 @@ struct sgl::module_description
     /// In source order.
     cc::vector<described_binding> bindings;
     cc::vector<described_struct> structs;
+    /// Every struct a binding places in GPU memory, each after every struct it holds.
+    cc::vector<described_memory_struct> memory_structs;
     cc::vector<described_entry_point> entry_points;
     cc::vector<described_pipeline> pipelines;
+    /// The file-scope samplers, in index order.
+    cc::vector<described_file_sampler> samplers;
 };
 
 struct sgl::describe_request

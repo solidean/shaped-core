@@ -156,7 +156,12 @@ ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_c
 
     auto bindings = cc::vector<sg::binding>{
         {.name = "Scene", .group_index = 0, .index = 0, .count = 1, .type = sg::binding_type::acceleration_structure},
-        {.name = "Output", .group_index = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_structured_buffer}};
+        {.name = "Output",
+         .group_index = 0,
+         .index = 1,
+         .count = 1,
+         .type = sg::binding_type::buffer,
+         .access = sg::access_mode::read_write}};
     auto group_layout = ctx.cached.acquire_binding_group_layout(bindings);
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
 

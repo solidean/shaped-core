@@ -166,8 +166,11 @@ TEST("sgl check - a setting's value has the type of its field")
     CHECK(bad("    depth_test = 1\n")
           == "invalid-pipeline user:[1] depth_stencil.depth_test is a bool: `true` or `false`\n");
     CHECK(bad("    sample_count = 1.5\n") == "invalid-pipeline user:[1.5] sample_count is an int: write a number\n");
-    // A hex literal is a number, which the checker cannot read yet: unsupported, not "write a number".
-    CHECK(bad("    stencil_read_mask = 0xFF\n") == "unsupported-yet user:[0xFF] a hex literal\n");
+    // A hex literal is a number like any other (CHK-269), which is how a stencil mask is written.
+    CHECK(bad("    stencil_read_mask = 0xff\n") == "");
+    CHECK(bad("    stencil_write_mask = 0x1ff\n") != "");
+    // A suffixed literal is a number whose meaning needs literal types: unsupported, not "write a number".
+    CHECK(bad("    stencil_read_mask = 255u32\n") == "unsupported-yet user:[255u32] a number literal of this spelling\n");
     // `.host` is only for what the host knows better: a format, and the sample count.
     CHECK(bad("    cull = .host\n")
           == "invalid-pipeline user:[.host] rasterization.cull is no format and no sample count, so the host cannot "
@@ -324,4 +327,25 @@ TEST("sgl check - a pipeline shares its file's names, and only a raster pipeline
           == "duplicate-declaration user:[vs] vs\n");
     CHECK(reports("@compute pipeline p = (vs, ps)\n")
           == "unsupported-yet user:[compute] a @compute pipeline; every compute entry point is its own\n");
+}
+
+TEST("sgl check - a pipeline whose pixel stage writes depth has a depth target")
+{
+    // CHK-276
+    constexpr auto stages
+        = "struct vout:\n    @position p: hpos4\n"
+          "@vertex fun depth_vs(@vertex_index i: int) -> vout:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n"
+          "@pixel struct shaded:\n    c: float4\n    @depth d: float\n"
+          "@pixel fun depth_ps(v: vout) -> shaded:\n    return { c = float4(1.0, 1.0, 1.0, 1.0), d = 0.5 }\n";
+    CHECK(reports(cc::string(stages)
+                  + "pipeline:\n    vertex = depth_vs\n    pixel = depth_ps\n    format = .rgba8_unorm\n")
+              .contains("the pixel stage writes its depth, and the pipeline has no depth target"));
+    CHECK(reports(cc::string(stages)
+                  + "pipeline:\n    vertex = depth_vs\n    pixel = depth_ps\n    format = .rgba8_unorm\n"
+                    "    depth_stencil_format = .depth32_float\n")
+          == "");
+    CHECK(reports(cc::string(stages)
+                  + "pipeline:\n    vertex = depth_vs\n    pixel = depth_ps\n    format = .rgba8_unorm\n    "
+                    "depth_stencil_format = .host\n")
+          == "");
 }

@@ -16,20 +16,17 @@ binding frame:
     sky: texture_cube[float3]
 
 let color = frame.sky.sample(dir)
-let base = frame.sky.sample_level(dir, 0.0)
-let other = frame.sky.sample(dir, sampler = point_clamp, level = 0.0)
+let base = frame.sky.sample(dir, level = 0.0)
+let other = frame.sky.sample(dir, smp = point_clamp, level = 0.0)
 ```
 
 **The functions are ordinary builtins, and the methods fall out of UFCS.**
 A default argument reads the texture's default sampler, and a named argument overrides it:
 
 ```sgl sketch
-@builtin fun sample(tex: texture2d[T], coord: float2, smp: sampler = tex.default_sampler) -> T
-@builtin fun sample(tex: texture2d[T], coord: float2, level: float, smp: sampler = tex.default_sampler) -> T
+@builtin fun sample(tex: texture_2d[T], coord: float2, smp: sampler = tex.default_sampler) -> T
+@builtin fun sample(tex: texture_2d[T], coord: float2, smp: sampler = tex.default_sampler, .level: float) -> T
 ```
-
-`level` is probably keyword-only, so `sample(uv, 0.0)` cannot be misread as a sampler or a bias.
-The free spelling `sample(sky, dir)` stays valid, since UFCS is sugar over it.
 
 **Texels have explicit `load` and `store`, and a subscript is sugar on top.**
 A subscript is variadic, and takes named and optional arguments like a call, so a level has a place: `t[xy]`, `t[xy, level = 2]`, `img[xy] = v`.
@@ -39,9 +36,9 @@ A resource is not a runtime value on any target, so a function taking one is ins
 
 ## What it touches
 
-* Methods and UFCS: a call `x.f(a)` resolving to a free `f(x, a)` ([members-and-properties.md](members-and-properties.md)).
-* Default and named arguments, and keyword-only parameters.
-* Generics over a texture's component type, `texture2d[T] -> T`.
+* Nothing of the call model, which is [CHK-247](../semantics/checking.md#calls-and-overloads) and its neighbours.
+* A default that reads another parameter's binding, `tex.default_sampler`.
+* Generics over a texture's component type, `texture_2d[T] -> T`.
 * The builtin registry: records whose parameters are resources, and a default reading another parameter.
 * Bindings: `@sampler(name)` on a texture member, naming a static sampler at file scope or in the same binding ([bindings.md](../bindings.md#samplers)).
 
@@ -51,14 +48,21 @@ A resource is not a runtime value on any target, so a function taking one is ins
 * A subscript is an index expression whose list may hold any argument, named ones included.
 * `sampler` as a keyword denotes a type in a type position, so `smp: sampler = …` is a parameter like any other.
 
-## Until then
+## What exists
 
-The first texture functions are stubs named `DEBUG_…`, which is SGL's marker for an in-progress stand-in.
-They are free functions in the argument order the methods will have — texture, coordinate, level, sampler — so replacing them is a rename.
+The whole method set is the spec's now, for every shape: [bindings.md](../bindings.md#sampling) and CHK-279 to CHK-281.
+`@sampler(name)` names a sampler of the texture's own binding, static or dynamic, or a file-scope one.
+A call without a sampler on a texture without one is `missing-sampler`.
+
+What stands in for the design above:
+
+* **Each sampling record has a twin without its sampler**, rather than a default reading `tex.default_sampler`.
+  The flattener hands the twin's call the texture's `@sampler`, so the targets see one call either way.
+  A default that reads another parameter's binding retires the twins, and nothing a program writes changes.
+* **Every component type has records of its own**, rather than one generic over `texture_2d[T] -> T`.
 
 ## Open
 
-* Whether `@sampler` may name a dynamic sampler member, and what the host then binds.
-* What a texture without `@sampler` does when sampled without one: an error at the call, or at the declaration.
-* Whether `sample` and `sample_level` are one function with an optional `level`, since a pixel stage alone may leave it out.
-* The full set: gradients, bias, gathers, comparison, sizes, and what each is called.
+* Subscripts, `t[xy]` and `img[xy] = v`, as sugar over `load` and `store`.
+* A gather of an int or a uint texture, which every target has and the prelude does not yet.
+* `level` of a comparison anywhere but 0.0, which some target would need a feature for.

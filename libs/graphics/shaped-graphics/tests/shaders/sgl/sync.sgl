@@ -1,0 +1,24 @@
+// Workgroup memory, atomics and barriers, as the GPU runs them rather than as the interpreter predicts them.
+
+binding tally:
+    values: buffer[int]
+    sums: mut buffer[int]
+    bins: mut buffer[atomic[int]]
+
+@workgroup binding tile:
+    partial: int[64]
+    seen: atomic[int]
+
+// Each workgroup sums its 64 values through workgroup memory, and each thread counts itself into one of four bins.
+@compute(64) fun reduce(@thread_id id: int3, @local_thread_index local: int, @workgroup_id group: int3){tally, tile}:
+    if local == 0 => tile.seen.store(0)
+    tile.partial[local] = tally.values[id.x]
+    workgroup_barrier()
+    tile.seen.add(1)
+    tally.bins[id.x % 4].add(1)
+    workgroup_barrier()
+    if local == 0:
+        let mut total = 0
+        for i in 0 ..< 64:
+            total += tile.partial[i]
+        tally.sums[group.x] = total * 1000 + tile.seen.load()

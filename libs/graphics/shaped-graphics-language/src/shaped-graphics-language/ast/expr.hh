@@ -36,6 +36,12 @@ struct sgl::ast::self_ref
     constexpr bool operator==(self_ref const&) const = default;
 };
 
+/// `void`, which is a reserved name and no keyword: the unit type in a type position, and its one value elsewhere.
+struct sgl::ast::void_ref
+{
+    constexpr bool operator==(void_ref const&) const = default;
+};
+
 struct sgl::ast::wildcard
 {
     constexpr bool operator==(wildcard const&) const = default;
@@ -231,6 +237,12 @@ struct sgl::ast::continue_expr
     constexpr bool operator==(continue_expr const&) const = default;
 };
 
+/// `discard`: the pixel ends with no effect, whatever it would have written (AST-148).
+struct sgl::ast::discard_expr
+{
+    constexpr bool operator==(discard_expr const&) const = default;
+};
+
 /// An unfused `{…}` whose elements are all `name: type`.
 struct sgl::ast::struct_type
 {
@@ -264,7 +276,7 @@ enum class sgl::ast::type_access : sgl::u8
     write_only, ///< `out`
 };
 
-/// `mut buffer[float]`, `out texture2d[rgba8unorm]`: an access word and the type it qualifies (AST-128).
+/// `mut buffer[float]`, `out texture_2d[rgba8unorm]`: an access word and the type it qualifies (AST-128).
 /// Only the top of a type position may carry one, so `buffer[mut float]` is no qualified type.
 struct sgl::ast::qualified_type
 {
@@ -290,6 +302,7 @@ struct sgl::ast::expr
                 literal,
                 name,
                 self_ref,
+                void_ref,
                 wildcard,
                 leading_dot,
                 member,
@@ -310,6 +323,7 @@ struct sgl::ast::expr
                 yield_expr,
                 break_expr,
                 continue_expr,
+                discard_expr,
                 struct_type,
                 function_type,
                 with_bindings,

@@ -36,6 +36,31 @@ TEST("sgl ast - use, with and without an alias, at file level and in a body")
     CHECK(ast_of("use a, b\n") == "(use a) !! too-many-arguments @7+1\n");
 }
 
+TEST("sgl ast - require names features, at file level, in a binding and in a body")
+{
+    // AST-145
+    CHECK(ast_of("require raytracing\n") == "(require raytracing)");
+    CHECK(ast_of("require extended_image_formats, binding_arrays\n") == "(require extended_image_formats binding_arrays)");
+    CHECK(body_of("require raytracing\n") == "(require raytracing)");
+    CHECK(ast_of("binding b:\n    require raytracing\n    x: float\n")
+          == "(binding b\n  (require raytracing)\n  (field x : float))");
+
+    // The block form: one name per line, the same node as the argument form.
+    CHECK(ast_of("require:\n    extended_image_formats\n    binding_arrays\n")
+          == "(require extended_image_formats binding_arrays)");
+    CHECK(body_of("require:\n    raytracing\n") == "(require raytracing)");
+    CHECK(ast_of("require a:\n    b\n").contains("too-many-arguments"));
+    CHECK(ast_of("require:\n    5\n").contains("expected-name"));
+
+    CHECK(ast_of("require\n") == "(require (invalid \"require\")) !! expected-name @0+7\n");
+    CHECK(ast_of("require 5\n") == "(require (invalid \"5\")) !! expected-name @8+1\n");
+    CHECK(ast_of("require a.b\n") == "(require (invalid \"a.b\")) !! expected-name @8+3\n");
+
+    // AST-146: a struct or an enum holds members, and a feature is granted to none of them.
+    CHECK(ast_of("struct s:\n    require raytracing\n").contains("member-not-allowed-here"));
+    CHECK(ast_of("enum e:\n    require raytracing\n").contains("member-not-allowed-here"));
+}
+
 TEST("sgl ast - a function signature: type parameters, parameters, bindings, return type, body")
 {
     CHECK(ast_of("fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model\n")
@@ -150,10 +175,10 @@ TEST("sgl ast - the right side of a type declaration is a type position")
 
 TEST("sgl ast - binding as a block and as a composition")
 {
-    CHECK(ast_of("binding frame:\n    view: mat4\n    tex: texture2d[rgba8]\n")
+    CHECK(ast_of("binding frame:\n    view: mat4\n    tex: texture_2d[rgba8]\n")
           == "(binding frame\n"
              "  (field view : mat4)\n"
-             "  (field tex : (index texture2d rgba8)))");
+             "  (field tex : (index texture_2d rgba8)))");
     CHECK(ast_of("binding scene = frame\n") == "(binding scene = frame)");
     CHECK(ast_of("binding scene = (frame, instance)\n") == "(binding scene = (tuple frame instance))");
     CHECK(ast_of("binding empty\n") == "(binding empty)");
@@ -184,6 +209,37 @@ TEST("sgl ast - a sampler is a list of settings, at file level only")
           == "(sampler s\n  (invalid \"filter: linear\")) !! expected-member @15+14\n");
     CHECK(body_of("sampler s:\n    filter = .linear\n")
           == "(sampler s\n  filter=.linear) !! declaration-not-allowed-here @13+7\n");
+}
+
+TEST("sgl ast - a test is a declaration whose body is a block, or the one line after the keyword")
+{
+    // AST-138, and AST-140: no line of a test body is `no-effect`, since a bool line is a check
+    CHECK(ast_of("test:\n    1 + 2 == 3\n    let x = 10\n    x * x > 50\n")
+          == "(test\n"
+             "  (call:infix == (call:infix + num:1 num:2) num:3)\n"
+             "  (let x = num:10)\n"
+             "  (call:infix > (call:infix * x x) num:50))");
+    CHECK(ast_of("test 1 < 2\n") == "(test => (call:infix < num:1 num:2))");
+    CHECK(ast_of("@expect(fail) test 1 < 2\n") == "(test{@expect(fail)} => (call:infix < num:1 num:2))");
+    CHECK(ast_of("test\n") == "(test) !! expected-body @0+4\n");
+    CHECK(ast_of("test 1 < 2:\n    3 < 4\n") == "(test => (call:infix < num:1 num:2)) !! too-many-arguments @10+11\n");
+
+    // it stands in a struct, an enum and a function body, and not in a binding or another test (AST-139)
+    CHECK(ast_of("struct s:\n    x: float\n    test s(1.0).x == 1.0\n")
+          == "(struct s\n  (field x : float)\n  (test => (call:infix == (member (call:paren s num:1.0) x) num:1.0)))");
+    CHECK(ast_of("fun f():\n    test 1 < 2\n    x + 1\n")
+          == "(fun f (params)\n  (test => (call:infix < num:1 num:2))\n  (call:infix + x num:1)) !! no-effect @28+5\n");
+    CHECK(ast_of("binding b:\n    test 1 < 2\n")
+          == "(binding b\n  (test => (call:infix < num:1 num:2))) !! member-not-allowed-here @15+4\n");
+    CHECK(ast_of("test:\n    test 1 < 2\n    true\n")
+          == "(test\n  (test => (call:infix < num:1 num:2))\n  true) !! declaration-not-allowed-here @10+4\n");
+
+    // no jump leaves a test, and a loop inside one is a loop like any other
+    CHECK(ast_of("test:\n    return\n") == "(test\n  (return)) !! jump-without-target @10+6\n");
+    CHECK(ast_of("test:\n    for i in 0 ..< 3:\n        break\n")
+          == "(test\n  (for i in (range ..< num:0 num:3)\n    (break)))");
+    // a function nested in a test is a function: its lines are no checks
+    CHECK(ast_of("test:\n    fun g():\n        x + 1\n    true\n").contains("!! no-effect"));
 }
 
 TEST("sgl ast - a pipeline is a list of settings whose left side is a path")
@@ -280,4 +336,23 @@ TEST("sgl ast - the value copies and compares whole, and the parsed file is left
         CHECK(sgl::is_valid(s.form));
     for (auto const& d : ast.decls)
         CHECK(sgl::is_valid(d.form));
+}
+
+TEST("sgl ast - a reserved name names nothing a program declares")
+{
+    // AST-141: the meaning of `self` and `void` is fixed, so no declaration may take either
+    cc::string_view const refused[] = {
+        "enum void:\n    a\n",        "struct self:\n    x: float\n",   "fun void() -> int => 1\n",
+        "struct s:\n    void: int\n", "fun f(void: int) -> int => 1\n", "enum e:\n    self\n",
+        "const void = 1\n",
+    };
+    for (auto const source : refused)
+    {
+        auto const file = sgl::parse(source);
+        auto const ast = sgl::ast::build(file);
+        auto is_reported = false;
+        for (auto const& d : ast.diagnostics)
+            is_reported = is_reported || d.kind == sgl::diagnostic_kind::reserved_name;
+        CHECK(is_reported).dump("source", source);
+    }
 }

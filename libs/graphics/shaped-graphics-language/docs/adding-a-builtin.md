@@ -20,7 +20,7 @@ A record is for what SGL cannot say: an opaque type, or a function some target s
 
 ## A function
 
-Say `fract`, the fractional part of a float, which HLSL calls `frac`.
+Say `fract`, the fractional part of a float, which HLSL calls `frac`; this is how the prelude's own `fract` was added.
 It goes into the topic it belongs to, here `register_scalar_math` or the componentwise family of `register_vector_math`.
 
 ```cpp
@@ -59,7 +59,8 @@ What each part of the record is for:
   `transform_position` is one: it widens its position by `1.0`, and HLSL writes the product as `mul(m, v)`.
 * **`@pure` stands in the signature**, and a record without it is a function with an effect, which the legalizer then keeps in its place.
 * **The name a target calls is reserved in that target from the record**, so a local named `frac` is renamed in HLSL without an entry in any list.
-  The exception is a function only a custom writer calls, such as `mul`, which stands in [reserved_words.cc](../src/shaped-graphics-language/emit/reserved_words.cc).
+  A custom writer or a helper lists every other name it writes in `hlsl_names`, `wgsl_names` and `msl_names`: `mul`, `asuint`, a helper's own name.
+  A registry test calls every writer and fails on a name that is neither listed there nor a reserved word of the target.
 
 `add_infix`, `add_negate` and `add_function` in `register.hh` cover everything the prelude has today.
 A record that fits none of them is built by hand and added with `r.add(function_record{…})`.
@@ -69,7 +70,7 @@ A record that fits none of them is built by hand and added with `r.add(function_
 A type record carries its declaration as SGL text, opaque or with fields, and what every target needs to know about it.
 
 * **Its name per target**: `float3`, `vec3f`, `float3`.
-* **Its size and alignment in a constant block, per target**, which is what the `layout-mismatch` check of an `@inline binding` compares.
+* **Its size and alignment in GPU memory, per target**: HLSL's are what SGL's layout rules place it by, and WGSL's and MSL's decide where a target needs a memory form.
   A size of 0 means the type has no place in a block, which is `bool` today.
 * **What a value is to the interpreter**: how many scalars, and of which kind.
 * **Whether it may be a member of a struct that crosses a stage edge.**
@@ -83,5 +84,5 @@ Two things keep the two from drifting apart:
 * the `sgl-prelude` step of `uv run dev.py check`, which builds the `sgl` tool and runs `sgl prelude --check` on the file, and `--write` under `--fix`;
 * the test `sgl driver - the prelude is the generated builtins and the hand-written core`, which compares the same two texts without the tool.
 
-The test `sgl builtins - one record is all a new builtin takes` adds `fract` to a registry of its own.
+The test `sgl builtins - one record is all a new builtin takes` adds `sawtooth`, a `fract` under another name, to a registry of its own.
 It checks that the record alone gets it checked, run and written for every target, so this page stays true.

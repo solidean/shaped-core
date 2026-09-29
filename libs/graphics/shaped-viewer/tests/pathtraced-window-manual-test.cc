@@ -245,11 +245,10 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
         auto const size = tg::vec2i(win->width(), win->height());
         if (size != target_size)
         {
-            color = ctx.persistent.create_texture_2d(
-                {.format = sg::pixel_format::rgba32_float,
-                 .width = size[0],
-                 .height = size[1],
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+            color = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                      .width = size[0],
+                                                      .height = size[1],
+                                                      .usage = sg::texture_usage::texture | sg::texture_usage::image});
 
             target_size = size;
             accum = 0;
@@ -277,11 +276,11 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
         // Trace this frame's samples into the persistent target (blending in place when accum_frame > 0).
         {
             auto trace_cmd = ctx.create_command_list();
-            auto const frame = ctx.transient.create_buffer_from_pod(*trace_cmd, fc, sg::buffer_usage::uniform_buffer);
+            auto const frame = ctx.transient.create_buffer_from_pod(*trace_cmd, fc, sg::buffer_usage::constants_buffer);
 
             // Closed Cornell box: no ray escapes, so the environment probe stays dark — bind an all-zero one.
             auto const background = ctx.transient.create_buffer_from_pod(
-                *trace_cmd, sv::background_gpu::from(sv::background{}), sg::buffer_usage::uniform_buffer);
+                *trace_cmd, sv::background_gpu::from(sv::background{}), sg::buffer_usage::constants_buffer);
 
             // Rebuilt every frame, on the list that traces with it: a record holds this epoch's bindless indices.
             auto records = cc::vector<sv::instance_gpu>();

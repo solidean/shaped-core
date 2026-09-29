@@ -3,6 +3,7 @@
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/exception.hh>
+#include <clean-core/error/exception_base.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/platform/native.hh>
 #include <clean-core/string/format.hh>
@@ -253,6 +254,12 @@ fuzz_machine::started_step fuzz_machine::start_step(state& s, executed_operation
     catch (std::exception const& e)
     {
         step.failure = fail("uncaught exception: ", e.what());
+    }
+    catch (cc::exception const& e)
+    {
+        cc::string msg = "uncaught exception: ";
+        msg += e.message();
+        step.failure = fuzz_machine::execute_result{.ok = false, .error = cc::move(msg)};
     }
     catch (...)
     {

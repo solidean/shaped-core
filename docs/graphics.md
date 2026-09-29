@@ -5,7 +5,7 @@
 This page is the family shape: how they fit together, and where the seams are.
 
 sg is the graphics-API wrapper; sr builds render routines, windowing and the ImGui renderer on it; sv is the visualization renderer on top of sr.
-slib and ssc::dxc hang off sg to the side: shader packages with hot reload, and HLSL compilation.
+slib, ssc::dxc and ssc::msl hang off sg to the side: shader packages with hot reload, and the HLSL and MSL compilers.
 
 This is an **early-stage family**, and the libraries are at very different depths.
 Each library's own docs carry its current state; this page does not try to track it.
@@ -70,6 +70,22 @@ Two-step API: `preprocess` resolves `#include`s via a caller-supplied resolver, 
 DXC is downloaded on demand rather than vendored.
 The [shaped-shader-compiler-dxc readme](../libs/graphics/shaped-shader-compiler-dxc/readme.md) owns that story: which release is pinned, what gets extracted, and `SC_SKIP_DXC`.
 The one consequence worth knowing here is that the release ships `dxil.dll`, so emitted DXIL is signed and runs on dx12 without developer mode.
+
+### shaped-shader-compiler-msl — `ssc::msl::`
+
+The other compiler wrapper, and Apple's toolchain differs from DXC in two ways that shape it.
+
+**There is no library form of Apple's compiler**, so the metallib arm runs `xcrun metal` as a child process, source on stdin and the metallib on stdout.
+**And the toolchain is optional**: Apple ships it as a component installed separately from Xcode, while the driver's own compiler ships with the OS.
+So a compile produces a metallib where the toolchain is there and MSL *source* where it is not, and the `sg::shader_format` on the result says which.
+The metal backend accepts both — source is compiled when a pipeline is built, exactly as WebGPU does with WGSL.
+That is why the library is built unconditionally on Apple rather than gated at configure time the way ssc::dxc is.
+
+Reflection reads the MSL text rather than the compiled output.
+A metallib carries no reflection container, and Metal's own reflection is a by-product of building a pipeline state.
+That needs a device, and it needs a vertex layout before a `[[stage_in]]` vertex function will build at all.
+It does not exist at all for the `[[visible]]` functions a miss or closest-hit shader compiles to.
+The [shaped-shader-compiler-msl readme](../libs/graphics/shaped-shader-compiler-msl/readme.md) owns the rest, including the one rule a shader author needs: every `device T*` is a structured buffer.
 
 ### shaped-shader-library — `slib::`
 

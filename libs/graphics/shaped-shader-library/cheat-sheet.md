@@ -123,7 +123,7 @@ asset->dependencies()               // -> vector<string>; source + resolved incl
 
 ```cpp
 #include <shaped-shader-library/compiler/shader_compiler.hh>
-slib::shader_language              // hlsl | wgsl | sgl   (slang/glsl planned)
+slib::shader_language              // hlsl | wgsl | sgl | metal   (slang/glsl planned)
 slib::include_resolver             // cc::function_ref<cc::optional<cc::string>(cc::string_view path)>
 slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; cc::string label; }
                                    //   label = what a diagnostic calls the source; never opened, may be empty
@@ -143,15 +143,24 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
 slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl -> wgsl, the source IS the bytecode
                                    //   reflection only: a stage or entry point other than the package's is an async error
 
+#include <shaped-shader-library/compiler/metal_compiler.hh>  // Apple only: SLIB_HAS_METAL says whether it is there
+slib::create_metal_compiler()      // -> std::unique_ptr<shader_compiler>; metal -> metal_lib
+                                   //   the artifact is a metallib, or MSL source where Apple's Metal toolchain is not
+                                   //   installed — target_format() is metal_lib either way, and the shader says which
+                                   //   compiles through an ssc::msl::shader_cache: async, in memory and in the blob cache
+                                   //   preprocess hands the text back: MSL here has no #include to flatten
+                                   //   reflection reads the SOURCE (see shaped-shader-compiler-msl/cheat-sheet.md)
+
 #include <shaped-shader-library/compiler/sgl_compiler.hh>   // wherever the inner compiler exists
 slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
                                    // -> std::unique_ptr<shader_compiler>; sgl -> inner->target_format()
-                                   //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL
+                                   //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL, metal_lib -> MSL
                                    //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
                                    //   compile and reflection are the inner compiler's
                                    //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
                                    //   the binding pass runs behind it: the HLSL names each group, the pass writes registers
 lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
+lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));  // ... and this is how a package reaches metal
 
 #include <shaped-shader-library/binding/wgsl_declarations.hh>
 slib::parse_wgsl_declarations(src) // -> cc::result<wgsl_declarations>; { stage; entry_point; workgroup_size; bindings }
@@ -238,7 +247,7 @@ namespace frame_bindings
 // `#pragma sc static <sg::sampler field>=<value>` before a sampler bakes it into the layout;
 //   `filter=linear` sets all three filters, `address=clamp_edge` all three axes, and a tuple form
 //   `filter=(linear, linear, nearest)` addresses them individually, in sg::sampler's declaration order.
-// `#pragma sc format <sg::pixel_format>` before an RWTexture* states its storage_format, and on SPIR-V
+// `#pragma sc format <sg::pixel_format>` before an RWTexture* states its image_format, and on SPIR-V
 //   writes [[vk::image_format]] too; it is how SGL's HLSL states an image's format.
 // `#pragma sc push_constants` before a ConstantBuffer makes it inline constants: register(b0, space9) on
 //   DXIL, [[vk::push_constant]] on SPIR-V. NO arguments -- the space is slib::inline_constants_space,
@@ -277,7 +286,7 @@ auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindi
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>(runtime_samplers);
                                     // + static samplers for the ones the shader left undeclared;
                                     //   supplying one it DID declare asserts -- it is a mistake, not an override
-auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bindings{.albedo = tex.as_readonly_view()});
+auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bindings{.albedo = tex.as_texture_view()});
                                     // the LAYOUT is passed in: a group is created on the frame path, and
                                     //   acquiring hashes the table and takes the pipeline cache's lock
                                     // a sampler the group gathers that `layout` declares static is dropped
@@ -297,21 +306,30 @@ scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
 auto const group = ctx.transient.create_binding_group(cmd, layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
 cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
-// a texture or image member is a typed view too, its traits from the shape (`sg::tv_2d`, `sg::tv_cube`, `sg::tv_2d_array`…):
-//   `albedo: texture2d[float4]`        -> sg::readonly_texture_view<sg::tv_2d> albedo
-//   `dst: out image2d[.rgba8_unorm]`   -> sg::readwrite_texture_view<sg::tv_2d> dst   (any access: read, out, mut)
+// a texture or image member is a typed view too, sg's typedef for its shape (`texture_view_2d`, `texture_view_cube`, `image_view_2d_array<F>`…):
+//   `albedo: texture_2d[float4]`        -> sg::texture_view_2d albedo
+//   `dst: out image_2d[.rgba8_unorm]`   -> sg::image_view_2d<sg::pixel_format::rgba8_unorm> dst   (any access: read, out, mut)
 //   `user_smp: sampler`                -> sg::sampler user_smp, which gather() hands sg by its host name (`work.user_smp`)
 //   `sampler albedo_smp:` block        -> NO field: an sg::named_sampler in declared_samplers(), which the layout carries
-// `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
+// `@inline binding constants` -> shaders::constants: the block byte for byte, and to_block() its own bytes:
 pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
+// a struct a binding places in GPU memory -> shaders::particle: tg members at SGL's offsets, padding as `cc::u32 _padN = {}`,
+//   and static_asserts on sizeof and every offsetof. A buffer of it is sg::readwrite_buffer_view<shaders::particle>:
+auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::particle>{...}, sg::buffer_usage::readwrite_buffer);
+//   a constant block packs as an HLSL cbuffer, a buffer element tight like a tg struct (the SGL spec's layout rules).
+// SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // every name lives in the package namespace, so two files declaring one name is a generator error.
 // sg sees an SGL binding by its path, `work.values`, and a group's constant block by the binding's name:
-//   slib renames what the target's compiler reflected, which stays on each binding as `reflected_name`.
+//   the identifier the target text spells it with stays on each binding as `reflected_name`, for diagnostics.
 // `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
 // an entry point of a `*`-declared file is a small wrapper: `->acquire(ctx)` as before, plus the layout its list states:
 auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
+//   it also holds the file-scope samplers the entry point reaches, as sg::bound_samplers: s<i> of
+//   slib::bound_samplers_space (10) on dx12, binding i + 1 of sg's reserved group elsewhere, a `pipeline`'s the same.
 auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx); // compute: needs nothing else
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
+// a wrapper's layout holds only the samplers ITS entry point reaches, so a file used as a library never fills the sampler slots:
+//   a raster pipeline whose stages reach file samplers is built from the file's `pipeline`, whose layout holds every stage's.
 // a `pipeline` declaration -> shaders::<file>.<name> (an unnamed `pipeline:` is `.pipeline`), built from ITS stages,
 //   layout, vertex input, targets and settings; the host states only what the declaration left `.host`.
 //   It is an sg::raster_pipeline_source, so ctx.cached acquires it like a description:
@@ -321,7 +339,7 @@ auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube.pipelin
 //   .description_latest(ctx, parts)   the newest stages and settings even where the frozen part moved; acquire it yourself
 //   an open field left unset (a format still `undefined`, a sample count still 0) asserts: the declaration said the host would state it
 //   the build's settings are generated field writes (slib::impl::fields, from impl/pipeline_fields.hh, which `sgl pipeline-fields` writes)
-//   hot reload: cull, depth, blend… follow the source; a moved frozen part (layout, vertex input, targets, formats, samples,
+//   hot reload: cull, depth, blend… follow the source; a moved frozen part (layout, vertex input, targets, features, formats, samples,
 //   each struct by name AND shape) keeps the stages and settings this context last built with, and logs what moved
 // `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
@@ -332,9 +350,8 @@ cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = de
 //   the pipeline side, for one built by hand: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
 //   sg then refuses to bind that pipeline in a rendering of another target set, even one of the same shape.
 //   .target_set may be left out: a compiled SGL pixel shader states its own (and its target count), which sg takes.
-// a package with wrapped entry points also gets check_reflection(ctx) -> shared_async<string>: empty while every
-//   entry point's compiled reflection fits the groups it lists. Compiles them all, so it belongs in a test.
-CHECK(co_await shaders::check_reflection(*ctx) == "");
+// an SGL shader's compiled_shader is SGL's own statement of it: bindings, workgroup, targets, features, footprint.
+//   The inner compiler adds only bytecode; its reflection is compared on every compile, and a mismatch logs an error.
 ```
 
 ## include resolution

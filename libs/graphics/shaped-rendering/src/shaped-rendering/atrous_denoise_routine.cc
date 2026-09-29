@@ -77,7 +77,7 @@ cc::shared_async<cc::unit> atrous_denoise_routine::init(sg::routine_init_scope s
     auto const* const constants_binding = [&]() -> sg::binding const*
     {
         for (auto const& b : compiled->bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
+            if (b.type == sg::binding_type::constants_buffer)
                 return &b;
         return nullptr;
     }();
@@ -149,7 +149,7 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     // A missing guide is bound to the colour texture as a stand-in, so the group has every slot filled; its flag is
     // clear, so the shader never reads it.
     auto const stand_in
-        = [&](sg::texture_2d const& t) { return is_set(t) ? t.as_readonly_view() : in.color.as_readonly_view(); };
+        = [&](sg::texture_2d const& t) { return is_set(t) ? t.as_texture_view() : in.color.as_texture_view(); };
     auto const albedo = stand_in(in.guides.albedo);
     auto const normal = stand_in(in.guides.normal);
     auto const depth = stand_in(in.guides.depth);
@@ -179,11 +179,11 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
 
         auto const group = ctx.transient.create_binding_group(cmd, self->_group_layout,
                                                               shaders::atrous_bindings{
-                                                                  .gSource = source.as_readonly_view(),
+                                                                  .gSource = source.as_texture_view(),
                                                                   .gAlbedo = albedo,
                                                                   .gNormal = normal,
                                                                   .gDepth = depth,
-                                                                  .gTarget = target.as_readwrite_view(),
+                                                                  .gTarget = target.as_any_image_view(),
                                                               });
 
         cmd.compute.bind_pipeline(*self->_pipeline);

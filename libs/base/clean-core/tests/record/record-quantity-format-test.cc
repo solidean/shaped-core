@@ -30,6 +30,17 @@ TEST("rec/quantity - seconds scale down as well as up")
     CHECK(cc::rec::format_quantity(1500, cc::rec::unit_seconds) == "1.50 ks");
 }
 
+TEST("rec/quantity - nanoseconds read as seconds live, and as a plain count once the formatter is lost")
+{
+    CHECK(cc::rec::format_quantity(5'000'000, cc::rec::unit_nanoseconds) == "5.00 ms");
+    CHECK(cc::rec::format_quantity(12'000, cc::rec::unit_nanoseconds) == "12.0 us");
+
+    // A loaded recording keeps every field but the function pointer; "5.00 Mns" is what a prefix would have made of it.
+    auto loaded = cc::rec::unit_nanoseconds;
+    loaded.format = nullptr;
+    CHECK(cc::rec::format_quantity(5'000'000, loaded) == "5000000 ns");
+}
+
 TEST("rec/quantity - hertz takes SI prefixes")
 {
     CHECK(cc::rec::format_quantity(3.2e9, cc::rec::unit_hertz) == "3.20 GHz");
