@@ -622,7 +622,7 @@ ASYNC_TEST("sg metal - each geometry of a BLAS selects its own hit group")
     // Non-opaque, because traversal consults an any-hit only on non-opaque geometry.
     sg::blas_triangles const geometries[2] = {
         {.vertices = vertices, .vertex_count = 3, .is_opaque = false},
-        {.vertices = vertices, .vertex_offset_in_bytes = 9 * isize(sizeof(float)), .vertex_count = 3, .is_opaque = false},
+        {.vertices = vertices, .vertex_count = 3, .vertex_offset_in_bytes = 9 * isize(sizeof(float)), .is_opaque = false},
     };
 
     auto cmd = ctx->create_command_list();
@@ -768,7 +768,7 @@ ASYNC_TEST("sg metal - each ray type traces through its own intersection table")
 
     sg::blas_triangles const geometries[2] = {
         {.vertices = vertices, .vertex_count = 3, .is_opaque = false},
-        {.vertices = vertices, .vertex_offset_in_bytes = 9 * isize(sizeof(float)), .vertex_count = 3, .is_opaque = false},
+        {.vertices = vertices, .vertex_count = 3, .vertex_offset_in_bytes = 9 * isize(sizeof(float)), .is_opaque = false},
     };
     auto cmd = ctx->create_command_list();
     auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(geometries),

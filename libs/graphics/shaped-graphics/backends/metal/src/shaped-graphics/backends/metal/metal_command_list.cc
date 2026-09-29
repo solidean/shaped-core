@@ -1483,10 +1483,14 @@ void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const&
                                  NS::UInteger(sg::reserved_binding_group));
 
     // The traced TLAS's per-instance hit-group offsets, which a kernel finds a closest hit's record by.
+    // The slot is always bound, because the kernel declares it whether this dispatch traces or not: an unbound slot
+    // would hand it the previous dispatch's address.
+    auto offsets_address = MTL::GPUAddress(_metal_context.zero_hit_group_offsets()->gpuAddress());
     if (traced != nullptr && traced->hit_group_offsets() != nullptr)
-        argument_table()->setAddress(
-            MTL::GPUAddress(static_cast<metal_buffer const&>(*traced->hit_group_offsets()).gpu_address()),
-            NS::UInteger(k_hit_group_offsets_buffer_index));
+        if (auto const address = static_cast<metal_buffer const&>(*traced->hit_group_offsets()).gpu_address();
+            address != 0)
+            offsets_address = MTL::GPUAddress(address);
+    argument_table()->setAddress(offsets_address, NS::UInteger(k_hit_group_offsets_buffer_index));
 
     // A raygen kernel is dispatched by thread count rather than by threadgroup: sg's width/height/depth is a ray grid,
     // and Metal takes the threadgroup shape separately.

@@ -51,6 +51,15 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
 
     _residency.add(_upload_ring.buffer());
     _residency.add(_download_ring.buffer());
+
+    // Shared rather than private, so it is zeroed here instead of through a copy.
+    auto constexpr zero_offsets_bytes = isize(16);
+    _zero_hit_group_offsets = _device->newBuffer(
+        NS::UInteger(zero_offsets_bytes), MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
+    if (_zero_hit_group_offsets == nullptr)
+        return cc::error("the metal device refused the zeroed hit-group offsets buffer");
+    cc::memset(_zero_hit_group_offsets->contents(), 0, size_t(zero_offsets_bytes));
+    _residency.add(_zero_hit_group_offsets);
     return cc::unit{};
 }
 
@@ -516,6 +525,12 @@ void metal_context::shutdown()
     _download_ring.shutdown();
     _samplers.shutdown();
     _texture_views.shutdown();
+    if (_zero_hit_group_offsets != nullptr)
+    {
+        _residency.remove(_zero_hit_group_offsets);
+        _zero_hit_group_offsets->release();
+        _zero_hit_group_offsets = nullptr;
+    }
 
     if (_compiler != nullptr)
     {
