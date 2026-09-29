@@ -160,6 +160,9 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
 {
     auto& ctx = *handle;
 
+    // The barrier the draw needs on work recorded before its scope is found at the draw, so the scope is suspended for it.
+    nx::expect_warning("was closed and reopened around a barrier", {.domain = "sg"});
+
     auto target
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
                                             .width = k_extent,
@@ -316,6 +319,9 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw declares its array elements and reads w
                      (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
+
+    // The barrier the draw needs on work recorded before its scope is found at the draw, so the scope is suspended for it.
+    nx::expect_warning("was closed and reopened around a barrier", {.domain = "sg"});
 
     constexpr u32 k_first_value = 6;
     constexpr u32 k_last_value = 9;
