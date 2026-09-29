@@ -107,7 +107,8 @@ bool metal_context::supports(sg::feature f) const
 {
     switch (f)
     {
-    case sg::feature::raytracing:
+    case sg::feature::ray_query:
+    case sg::feature::raytracing_pipeline:
         // Every device above this backend's Metal 4 floor can ray trace, so there is nothing to probe.
         // Acceleration structures build, a tlas binds for an inline RayQuery trace, and the DXR-shaped pipeline path
         // maps onto a compute pipeline per raygen plus Metal's function tables.

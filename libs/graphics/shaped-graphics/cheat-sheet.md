@@ -88,8 +88,8 @@ sg::present_mode          // vsync | immediate  (swapchain frame pacing — see 
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
 ctx.accepted_shader_formats()                      // span<shader_format const>, most-preferred first, never empty (dx12 -> dxil, vulkan -> spirv)
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
-ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
-                                                   //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
+ctx.supports(sg::feature::ray_query)               // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
+                                                   //   ray_query | raytracing_pipeline | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
                                                    //   | readwrite_image_formats (false on core webgpu: read_write storage only in r32 formats)
                                                    //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
@@ -105,7 +105,7 @@ ctx.supports(sg::feature::raytracing)              // bool — THE capability qu
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
 ctx.supported_features()                           // sg::feature_set (cc::flags<feature>) — every feature supports() says yes to
 ctx.missing_features(shader)                       // feature_set — what shader.required_features holds that this device lacks; empty when unknown
-sg::to_string(f)  sg::feature_from_string(name)    // "raytracing" <-> feature::raytracing; sg::k_all_features lists them in enum order
+sg::to_string(f)  sg::feature_from_string(name)    // "ray_query" <-> feature::ray_query; sg::k_all_features lists them in enum order
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
 ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
                                                    //   FLOORS a portable caller sizes against, not the most the hardware could do

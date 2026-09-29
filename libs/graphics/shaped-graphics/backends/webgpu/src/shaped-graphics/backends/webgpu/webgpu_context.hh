@@ -133,7 +133,8 @@ public:
         case sg::feature::sample_rate_shading:
             // `@builtin(sample_index)` and `@interpolate(…, sample)` are core WGSL.
             return true;
-        case sg::feature::raytracing:
+        case sg::feature::ray_query:
+        case sg::feature::raytracing_pipeline:
         case sg::feature::wireframe_fill:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:

@@ -257,7 +257,8 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `image*[.F]` with `F` outside the portable image formats | `sg::feature::extended_image_formats`, WebGPU's `texture-formats-tier1` |
 | filtering a 32-bit float texture | `sg::feature::float32_filtering`, WebGPU's `float32-filterable`; refused by sg at bind time, never by SGL |
 
-`binding_arrays` and `raytracing` are names a `require` accepts, and nothing in SGL uses either yet.
+`binding_arrays` is a name a `require` accepts, and nothing in SGL uses it yet.
+`ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 
 ## Which group a binding is
 

@@ -554,7 +554,7 @@ test:
 module example
 
 use brdf_library as brdf
-require extended_image_formats, raytracing
+require extended_image_formats, ray_query
 notation \phi => φ
 
 type color = vec3

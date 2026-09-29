@@ -530,7 +530,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 [bindings.md](../bindings.md#features) lists the forms each one grants.
 
 * **CHK-258** A `require` names features as `sg::feature` names them, and only those a shader can use:
-  `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures` and `raytracing`.
+  `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures`, `ray_query` and `raytracing_pipeline`.
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
@@ -556,11 +556,11 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 
 ```sgl
 @expect(warning = "unused-require") test:
-    require raytracing
+    require ray_query
     1 == 1
 
 @expect(error = "unknown-feature") test:
-    require ray_query
+    require raytracing
     1 == 1
 ```
 

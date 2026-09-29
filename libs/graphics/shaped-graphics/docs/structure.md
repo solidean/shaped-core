@@ -230,9 +230,9 @@ sampler              [in progress]  sampler + static/dynamic samplers. A group's
 accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
                                   triangles + procedural AABBs, build_tlas, is_supported), result sized from a
                                   prebuild query with transient scratch, persistent handles across epochs;
-                                  dx12 real (WARP), vulkan stub. Deferred: transient variant, refit/update, compaction
+                                  dx12, vulkan and metal real. Deferred: transient variant, refit/update, compaction
 raytracing pipeline  [in progress]  raytracing_pipeline + shader table + cmd.raytracing.dispatch_rays, and the
-                                  acceleration_structure binding (inline RayQuery); dx12 real (WARP), vulkan stub.
+                                  acceleration_structure binding (inline RayQuery); dx12, vulkan and metal real.
                                   Deferred: local root signatures, a dedicated shader-table buffer usage, a cached blob
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
                                   per list, one batched inline readback per heap at submit; real on all three

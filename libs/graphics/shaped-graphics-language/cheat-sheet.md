@@ -478,7 +478,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   An entry point needs what the bindings it lists use, its stage inputs, a member it takes per sample and its stage.
   It must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
   A form used without a grant is `needs-feature`, an unknown name `unknown-feature`, and a body `require` nothing needed is the WARNING `unused-require`; a file's or a binding's never is.
-  WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` or `tessellation_shader` as `target-lacks-feature`.
+  WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures`, `ray_query`, `raytracing_pipeline`, `geometry_shader` or `tessellation_shader` as `target-lacks-feature`.
   MSL refuses one needing `geometry_shader` or `tessellation_shader` the same way.
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.
   A `loop:` without a `break` never ends; a `while` always may, whatever its condition.

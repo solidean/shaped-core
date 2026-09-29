@@ -71,6 +71,14 @@ public:
     /// Every feature `supports` answers yes for.
     [[nodiscard]] feature_set supported_features() const;
 
+    /// How this context provides `f`, which `supports(f)` must answer yes for.
+    /// A caller choosing an algorithm by cost asks this; portability never depends on it.
+    [[nodiscard]] virtual feature_implementation implementation_of(feature f) const
+    {
+        (void)f;
+        return feature_implementation::native;
+    }
+
     /// What `shader` needs that this context lacks, which is what building a pipeline from it would be refused for.
     /// Empty for a shader whose `required_features` is unknown: nothing about it can be named.
     [[nodiscard]] feature_set missing_features(compiled_shader const& shader) const;

@@ -56,7 +56,7 @@ namespace
 
 bool metal_command_list::raytracing_is_supported() const
 {
-    return _metal_context.supports(sg::feature::raytracing);
+    return _metal_context.supports(sg::feature::ray_query) || _metal_context.supports(sg::feature::raytracing_pipeline);
 }
 
 MTL::AccelerationStructure* metal_command_list::build_accel_common(MTL4::AccelerationStructureDescriptor* descriptor,

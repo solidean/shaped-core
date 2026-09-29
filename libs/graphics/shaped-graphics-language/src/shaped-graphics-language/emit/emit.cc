@@ -125,8 +125,9 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (t == target::wgsl)
     {
         auto const never = check::feature_set(check::feature::binding_arrays)
-                         | check::feature::multisampled_array_textures | check::feature::raytracing
-                         | check::feature::geometry_shader | check::feature::tessellation_shader;
+                         | check::feature::multisampled_array_textures | check::feature::ray_query
+                         | check::feature::raytracing_pipeline | check::feature::geometry_shader
+                         | check::feature::tessellation_shader;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,

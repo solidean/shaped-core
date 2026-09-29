@@ -15,7 +15,6 @@
 // The trace side is covered end to end by libs/graphics/shaped-shader-compiler-dxc/tests/, which is Windows-only and needs a fetched extern/dxc.
 //
 // Ray tracing is a device capability, so each test skips when cmd.raytracing.is_supported() is false — a backend without RT, or an adapter that lacks DXR.
-// Vulkan is stubbed and unregistered, so today these run on dx12 against WARP, which implements DXR.
 
 namespace
 {

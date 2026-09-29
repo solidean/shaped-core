@@ -143,7 +143,7 @@ Placed allocations, which a future transient variant would want, are not impleme
 On the `cmd.raytracing` scope: `build_blas` for triangles and procedural AABBs, `build_tlas`, and `is_supported()`.
 **dx12** is the reference realization — prebuild-sized result plus transient scratch, `BuildRaytracingAccelerationStructure`, gated on `D3D12_RAYTRACING_TIER` — and it runs on WARP.
 **metal** builds on the compute encoder, as above, and reports `is_supported() == true` on every device above its Metal 4 floor.
-**vulkan** builds through `VK_KHR_acceleration_structure` and reports `is_supported()` from `sg::feature::raytracing`, so a device without the extension answers false.
+**vulkan** builds through `VK_KHR_acceleration_structure` and reports `is_supported()` from `sg::feature::ray_query` and `sg::feature::raytracing_pipeline`, so a device without the extension answers false.
 
 **The trace side is in.**
 A `tlas` binds as a shader resource through the `acceleration_structure` binding type and view kind — inline `RayQuery` in a compute dispatch.

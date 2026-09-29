@@ -95,7 +95,7 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
 TEST("sgl describe - an entry point and a pipeline name the sg features a device needs for them")
 {
     // Both stages may use the image format the file requires, and only the pixel stage lists what does.
-    auto const d = described(R"(require extended_image_formats, raytracing
+    auto const d = described(R"(require extended_image_formats, ray_query
 
 binding narrow:
     r: out image_2d[.r8_unorm]

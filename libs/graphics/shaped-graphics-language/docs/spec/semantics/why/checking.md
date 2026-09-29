@@ -325,7 +325,7 @@ Letting a listed binding carry its needs to the entry point on its own would era
 The floor is defined by what the language counts, never by what an optimizer happens to remove.
 A floor that followed dead-code elimination would change with a compiler version or an unrelated refactor, and the host would find out on a device that lacks the feature.
 So every use the entry point reaches counts, including one behind a condition that is always false.
-A compile-time branch on a feature, `if feature raytracing:`, is the form that may leave a use out, and it is not built.
+A compile-time branch on a feature, `if feature ray_query:`, is the form that may leave a use out, and it is not built.
 
 ## CHK-265
 
