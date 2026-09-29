@@ -216,7 +216,7 @@ void builder::reject_attributes(form_id id)
         report(diagnostic_kind::misplaced_attribute_on_expression, id);
 }
 
-argument builder::list_element(form_id element, bool is_object, bool allows_attributes)
+argument builder::list_element(form_id element, bool is_object, bool allows_attributes, bool allows_mut)
 {
     auto result = argument{.form = element, .attributes = attributes_of(element)};
     if (!allows_attributes)
@@ -249,16 +249,22 @@ argument builder::list_element(form_id element, bool is_object, bool allows_attr
         result.name = at(element).where;
         result.is_shorthand = true;
     }
+    else if (allows_mut && is_mut_argument(element))
+    {
+        // AST-149: `mut x` hands the caller's place over; the value is the place itself.
+        result.is_mut = true;
+        result.value = expression(keyword_parts_of(element).arguments[0], attribute_mode::taken);
+    }
     else
         result.value = expression(element, attribute_mode::taken);
     return result;
 }
 
-range_of<argument> builder::list_elements(form_id list, bool is_object, bool allows_attributes)
+range_of<argument> builder::list_elements(form_id list, bool is_object, bool allows_attributes, bool allows_mut)
 {
     auto collected = cc::vector<argument>();
     for (auto element = at(list).first_child; is_valid(element); element = at(element).next_sibling)
-        collected.push_back(list_element(element, is_object, allows_attributes));
+        collected.push_back(list_element(element, is_object, allows_attributes, allows_mut));
     return append(ast.arguments, cc::span<argument const>(collected));
 }
 
@@ -290,6 +296,14 @@ bool builder::is_field_like(form_id element, bool needs_type) const
     auto const parts = keyword_parts_of(target);
     return parts.keywords.size() == 1 && parts.arguments.size() == 1 && !is_valid(parts.block)
         && is_kind(parts.arguments[0], form_kind::identifier);
+}
+
+bool builder::is_mut_argument(form_id element) const
+{
+    if (!is_keyword_led(element, "mut"))
+        return false;
+    auto const parts = keyword_parts_of(element);
+    return parts.keywords.size() == 1 && parts.arguments.size() == 1 && !is_valid(parts.block);
 }
 
 field builder::make_field(form_id element, diagnostic_kind on_failure)

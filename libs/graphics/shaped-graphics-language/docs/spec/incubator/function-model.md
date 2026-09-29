@@ -45,8 +45,7 @@ let larger = fun [T](a: T, b: T) => max(a, b)
 **A parameter is a value, and `mut` makes it a place.**
 A plain argument is evaluated once and the callee cannot change it.
 `mut self` is the caller's place: `x.dim 0.5` changes `x`, with the index expressions of the place evaluated once.
-`mut` on an ordinary parameter is the caller's place as well, and the call site must mark the argument, so an effect on a variable is visible where it happens.
-The spelling of that mark is not decided.
+A mut parameter, `p: mut T`, and its mark at the call, `f(mut x)`, are specified (AST-149, CHK-315, CHK-316); `mut self` is not built yet.
 
 **Operands and arguments are evaluated left to right, each exactly once.**
 So a shader with two calls that have effects in one expression means the same on every target.
@@ -93,7 +92,7 @@ This is an experiment that may be built back if it turns out to cost more than i
 
 ## Open
 
-* How the call site marks an argument passed to a `mut` parameter, and whether `mut self` is marked by the dot alone.
+* Whether `mut self` is marked by the dot alone.
 * What a function value is as a type; that it is a compile-time entity is settled in [inferred-comptime.md](inferred-comptime.md).
 * The rules for ray tracing function tables.
 * Whether compile-time functions and `[]` parameters are one mechanism or two.

@@ -425,6 +425,8 @@ struct sgl::check::parameter
     bool is_named_only = false;
     /// The stage input its attribute marks it as, `none` for an ordinary parameter (CHK-271).
     stage_input input = stage_input::none;
+    /// `p: mut T`: the caller's place, which a call hands over as `mut x` and the body may assign (CHK-315).
+    bool is_mut = false;
 
     bool operator==(parameter const&) const = default;
 };
@@ -598,6 +600,8 @@ struct sgl::check::written_argument
     ast::expr_id expr = ast::expr_id::none;
     /// A splat is one written argument per field of its value; this is that field, and -1 for no splat.
     i32 splat_member = -1;
+    /// `mut x`: the caller's place, for a `mut` parameter (AST-149, CHK-316).
+    bool is_mut = false;
 
     constexpr bool operator==(written_argument const&) const = default;
 };
@@ -625,6 +629,8 @@ enum class sgl::check::miss_reason : sgl::u8
     missing_argument,
     /// Every argument bound, and `argument` does not convert to `parameter`.
     no_conversion,
+    /// `argument` is marked `mut` and `parameter` is no `mut` parameter, or the reverse (CHK-316).
+    mut_mismatch,
 };
 
 /// One candidate of a call that matched nothing, and why: what a "did you mean" is written from.

@@ -673,7 +673,9 @@ struct checker
     /// It reports nothing, so a literal can try every candidate.
     [[nodiscard]] cc::optional<candidate_match> match(i32 file, symbol_id candidate, call_arguments const& arguments);
     /// The length of the chain that converts written argument `i` to `parameter`; nothing where it does not convert.
-    [[nodiscard]] cc::optional<i32> chain_of(i32 file, type_id parameter, call_arguments const& arguments, isize i);
+    [[nodiscard]] cc::optional<i32> chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i);
+    /// Whether `expr`, already checked, names a place a body could assign, reporting why not; `what` names the use.
+    bool judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what);
     /// The chain of tuple or object literal `literal` to `to`: one more than its call's longest (CHK-84).
     [[nodiscard]] cc::optional<i32> literal_chain(i32 file, type_id to, i32 literal);
     /// The functions of the name of the struct `to` visible from `file`, its synthesized constructor among them.

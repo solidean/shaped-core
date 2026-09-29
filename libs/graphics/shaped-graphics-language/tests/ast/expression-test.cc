@@ -349,7 +349,9 @@ TEST("sgl ast - a statement where a value is expected")
     CHECK(expr_of("(a = b) + 1") == "(call:infix + (tuple a=b) num:1)");
     CHECK(expr_of("f(let x)") == "(call:paren f (invalid \"let x\")) !! statement-in-expression @12+3\n");
     CHECK(expr_of("x = y") == "(invalid \"x = y\") !! statement-in-expression @10+5\n");
-    CHECK(expr_of("f(mut x)") == "(call:paren f (invalid \"mut x\")) !! unexpected-keyword @12+3\n");
+    // AST-149: `mut` before an argument marks the caller's place, and takes one operand.
+    CHECK(expr_of("f(mut x)") == "(call:paren f mut x)");
+    CHECK(expr_of("f(a, mut p.color)") == "(call:paren f a mut (member p color))");
 }
 
 TEST("sgl ast - what the form parser could not read is invalid without a second diagnostic")

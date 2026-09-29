@@ -330,6 +330,9 @@ fun shade(k: float) -> float:
 
 * **CHK-47** A function has typed parameters, and its return type stands behind `->`; one without returns `void`, by CHK-121.
 * **CHK-48** A function with type parameters, or with `mut self`, is `unsupported-yet`, and it fails as a whole.
+* **CHK-315** A parameter `p: mut T` over a value type is a **mut parameter**: the caller's place, which the body may assign like a `let mut` local ([why](why/checking.md#chk-315)).
+  Over a resource or a stream, `mut` is its access instead (AST-128).
+  An entry point takes no mut parameter, and `mut p: T` is `unexpected-keyword`, since a parameter's `mut` is written on its type.
 * **CHK-49** A function whose signature holds the error type is failed.
 * **CHK-50** A function body is an ordered scope: a parameter is visible from the start, and a local from the statement after its `let`.
 * **CHK-51** `let name = value` introduces an immutable local of the type of `value`.
@@ -389,6 +392,10 @@ fun shade(k: float) -> float:
 * **CHK-252** A candidate does not bind where an argument names no parameter, a parameter is filled twice, a positional argument reaches a named-only parameter or lies past the last.
   It does not bind either where a parameter without a default is left unfilled.
   A parameter left unfilled takes its default.
+* **CHK-316** `mut x` in a call hands over a place, and it fills a mut parameter alone ([why](why/checking.md#chk-316)).
+  A mut parameter takes an argument marked `mut` and nothing else, and a marked argument binds to nothing else.
+  The argument is a place by the rules of an assignment's left side, or `not-assignable`, and its type is the parameter's exactly, so its chain has length 0.
+  Its indices are evaluated once, where the call binds it, and the body reads and writes that one place wherever it names the parameter.
 * **CHK-70** A candidate **matches** when it binds, and each argument converts to its parameter's type by a **conversion chain**.
   An argument of the parameter's type does so by a chain of length 0, and so does one a pattern parameter takes (CHK-194, CHK-207); a literal converts by CHK-81 or CHK-253.
 * **CHK-253** A number literal converts to a numeric type that holds it: by a chain of length 0 to its default type, and of length 1 to any other ([why](why/checking.md#chk-253)).

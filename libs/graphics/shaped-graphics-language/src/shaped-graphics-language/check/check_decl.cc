@@ -1147,9 +1147,10 @@ void checker::compile_function(symbol_id id)
                 }
                 input = candidate.input;
             }
-        // `mut self` was reported as itself
+        // `mut self` was reported as itself; a mut parameter is spelled on its type (CHK-315)
         if (p.is_mut && f.receiver != ast::receiver_kind::mut_self)
-            unsupported(file, p.name, "a mut parameter");
+            report(diagnostic_kind::unexpected_keyword, file, p.name,
+                   cc::format("`mut {0}: T` is spelled `{0}: mut T`", name));
 
         for (auto const& other : parameters)
             if (other.name == name && name != "_")
@@ -1161,8 +1162,26 @@ void checker::compile_function(symbol_id id)
         // CHK-206: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-207).
         auto type = checked_module::error_type;
         auto const is_receiver = f.receiver != ast::receiver_kind::none && &p == &ast.at(f.parameters).front();
+        // CHK-315: `p: mut T` over a value type is the caller's place; over a resource or a stream `mut` is its access
+        auto is_mut_parameter = false;
+        if (auto const* const q = ast::is_valid(p.type) ? ast.at(p.type).node.try_as<ast::qualified_type>() : nullptr;
+            q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr)
+        {
+            is_mut_parameter = true;
+            type = resolve_value_type(file, q->type);
+            set_type(file, p.type, type);
+            // what a stage takes the GPU hands it, and nothing hands an entry point a place
+            if (is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr || control != nullptr
+                || is_evaluation)
+            {
+                report(diagnostic_kind::wrong_kind_of_name, file, p.name,
+                       cc::format(
+                           "{} is a parameter of an entry point, which the GPU fills and no caller hands a place", name));
+                is_failed = true;
+            }
+        }
         // CHK-302: a geometry stage's stream is a parameter of its entry point, and of no other function
-        if (ast::is_valid(p.type))
+        else if (ast::is_valid(p.type))
             type = is_builtin          ? resolve_pattern_type(file, p.type)
                  : geometry != nullptr ? resolve_type(file, p.type)
                                        : resolve_value_type(file, p.type);
@@ -1178,7 +1197,8 @@ void checker::compile_function(symbol_id id)
                               .field = ast::field_id(index),
                               .has_default = ast::is_valid(p.default_value),
                               .is_named_only = p.is_named_only,
-                              .input = input});
+                              .input = input,
+                              .is_mut = is_mut_parameter});
     }
 
     auto bindings = cc::vector<symbol_id>();

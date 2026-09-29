@@ -231,3 +231,9 @@ The idea is in [structural types](../../incubator/structural-types.md).
 A `float` has no member to name, and a unit type has no member at all, and those are two statements.
 The first is a type whose inside the language cannot show, which only the floor of the language may be; the second is an ordinary struct.
 A function signature without a body already reads as "declared here, provided elsewhere", and a struct line without a block says the same.
+
+## AST-149
+
+The mark is a keyword form the form tree already builds, `mut` with one operand, so the syntax needed no new token.
+It is read in a paren call's list alone: in a type argument list, `buffer[mut float]`, it stays the error AST-128 and AST-130 make of it.
+Whether an argument may be marked, and whether the mark meets a mut parameter, is the check pass's, as every other question of a call is.

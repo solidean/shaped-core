@@ -1,0 +1,91 @@
+// a `mut` parameter is the caller's place: the call marks it `mut x`, and what the body assigns the caller sees
+
+struct counter:
+    hits: int
+    total: float
+
+fun bump(c: mut counter, by: float):
+    c.hits += 1
+    c.total += by
+
+test:
+    let mut c = counter(0, 0.0)
+    bump(mut c, 2.0)
+    bump(mut c, 0.5)
+    c.hits == 2
+    c.total == 2.5
+
+// a member or an element is a place too, and its index is evaluated once, when the call binds it
+fun twice(x: mut float):
+    x = x * 2.0
+
+fun next(i: mut int) -> int:
+    i += 1
+    return i - 1
+
+test:
+    let mut values = [1.0, 2.0, 3.0]
+    let mut i = 0
+    twice(mut values[next(mut i)])
+    values[0] == 2.0
+    values[1] == 2.0
+    i == 1
+
+test:
+    let mut c = counter(0, 3.0)
+    twice(mut c.total)
+    c.total == 6.0
+
+// a mut parameter passes on as a place
+fun bump_twice(c: mut counter):
+    bump(mut c, 1.0)
+    bump(mut c, 1.0)
+
+test:
+    let mut c = counter(0, 0.0)
+    bump_twice(mut c)
+    c.hits == 2
+
+// the mark and the parameter go together, in both directions
+@expect(error = "no-matching-overload")
+test:
+    let mut c = counter(0, 0.0)
+    bump(c, 1.0)
+    true
+
+@expect(error = "no-matching-overload")
+test:
+    let mut x = 1.0
+    let y = sqrt(mut x)
+    true
+
+// only a place is handed over
+@expect(error = "not-assignable")
+test:
+    let c = counter(0, 0.0)
+    bump(mut c, 1.0)
+    true
+
+// a place keeps its type exactly, so no conversion reaches one
+fun widen(x: mut float):
+    x = 1.0
+
+@expect(error = "no-matching-overload")
+test:
+    let mut n = 1
+    widen(mut n)
+    true
+
+// every target writes a place a body assigns through, a buffer element among them
+binding tally:
+    counts: mut buffer[int]
+    sums: mut buffer[float]
+
+fun add_to(x: mut int, by: int):
+    x += by
+
+@compute(64) fun count(@thread_id id: int3){tally}:
+    let mut c = counter(0, 0.0)
+    bump(mut c, 1.0)
+    add_to(mut tally.counts[id.x], c.hits)
+    twice(mut tally.sums[id.x + 1])

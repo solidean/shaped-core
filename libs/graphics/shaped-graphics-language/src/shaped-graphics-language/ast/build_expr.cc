@@ -233,7 +233,7 @@ expr_id builder::call_expression(form_id form)
     }
     default:
     {
-        auto const arguments = list_elements(list);
+        auto const arguments = list_elements(list, false, false, true);
         return make_expr(form, call{.spelling = call_spelling::paren, .callee = target, .arguments = arguments});
     }
     }

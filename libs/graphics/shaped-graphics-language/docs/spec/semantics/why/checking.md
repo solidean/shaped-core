@@ -302,6 +302,18 @@ EVAL-78's `no-check-ran` catches a run that checked nothing too, but only when t
 A test whose asserts are what it checks pays one line for it, `true // why`, which also says why it checks nothing else.
 A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing: it is fail-closed already.
 
+## CHK-315
+
+A mut parameter is written on its type because that is where `mut` already stands for a geometry stage's stream, and for the access of a resource.
+A `mut` on the name, `mut p: T`, would give one idea two spellings in one signature.
+The ray-tracing stages are the first users: a payload is the caller's place, as DXR's `inout` is.
+
+## CHK-316
+
+Marking the argument keeps an effect on a variable visible where it happens, which the function model asks of every call.
+An exact type is what a place needs: a conversion would make a temporary, and the callee's writes would land in it and be lost.
+The indices of the place are evaluated once so that `bump(mut values[next()])` reads and writes one element, however often the body names it.
+
 ## CHK-259
 
 A `require` is permission, and what an entry point needs is judged from its use (CHK-263).

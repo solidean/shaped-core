@@ -349,6 +349,19 @@ struct flattener
             auto const index = again(element->index, from);
             return add_expr(x.type, from, flat_element{.object = object, .index = index});
         }
+        // a place a `mut` parameter stands for, whose indices were pinned when it was bound (`pin_place`)
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            auto const index = member->member;
+            auto const object = again(member->object, from);
+            return add_expr(x.type, from, flat_member{.object = object, .member = index});
+        }
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto const buffer = again(element->buffer, from);
+            auto const index = again(element->index, from);
+            return add_expr(x.type, from, flat_buffer_element{.buffer = buffer, .index = index});
+        }
         // the mark stays where it was written, which is what a diagnostic about it points at
         if (auto const marked = marked_by_nonuniform(id); is_valid(marked))
         {
@@ -369,6 +382,40 @@ struct flattener
             return add_expr(x.type, from, flat_construct{.arguments = add_list(arguments)});
         }
         return fail();
+    }
+
+    /// `place` with every index it holds evaluated now, into a local where it is no substitutable value, so the place
+    /// can stand wherever a `mut` parameter is named and mean the same element each time (CHK-316).
+    flat_expr_id pin_place(flat_expr_id place)
+    {
+        auto const x = entry.at(place);
+        auto const pin_index = [&](flat_expr_id index)
+        {
+            if (is_substitutable_index(index))
+                return index;
+            auto const local = add_local(local_kind::let, "at", entry.at(index).type);
+            add_stmt(entry.at(index).from, flat_let{.local = local, .value = index});
+            return local_ref(local, entry.at(index).from.expr);
+        };
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            auto const index = member->member;
+            auto const object = pin_place(member->object);
+            return add_expr(x.type, x.from.expr, flat_member{.object = object, .member = index});
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const index = element->index;
+            auto const object = pin_place(element->object);
+            return add_expr(x.type, x.from.expr, flat_element{.object = object, .index = pin_index(index)});
+        }
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto const index = element->index;
+            auto const buffer = element->buffer;
+            return add_expr(x.type, x.from.expr, flat_buffer_element{.buffer = buffer, .index = pin_index(index)});
+        }
+        return place;
     }
 
     /// True for a texture, an image, a sampler or a buffer read from its binding, and a file-scope sampler: it is no
@@ -1459,6 +1506,12 @@ struct flattener
                 is_failed = true;
                 continue;
             }
+            // CHK-316: a `mut` parameter is the caller's place, named again wherever the body names the parameter
+            if (parameters[i].is_mut)
+            {
+                bound.push_back({.where = where, .literal = pin_place(argument)});
+                continue;
+            }
             auto const& x = entry.at(argument);
             auto const* const ref = x.node.try_as<flat_local_ref>();
             if (ref != nullptr && is_substitutable(argument))
@@ -1597,6 +1650,9 @@ struct flattener
     /// that holds it.
     flat_expr_id read_of_place(flat_expr_id place, ast::expr_id target)
     {
+        // a `mut` parameter names a place whose indices were evaluated when it was bound (`pin_place`)
+        if (is_valid(place) && ast().at(target).node.is<ast::name>())
+            return again(place, target);
         if (has_array_index(place))
             return reread(place, target);
         if (!is_valid(place) || !entry.at(place).node.is<flat_buffer_element>())

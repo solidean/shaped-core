@@ -70,6 +70,7 @@ void checker::check_body(symbol_id id)
             .name = text_of(file, ast.at(p.field).name),
             .where = {.kind = target_kind::parameter, .index = i32(p.field)},
             .type = p.type,
+            .is_mut = p.is_mut,
         });
     }
 
@@ -651,6 +652,14 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             result.is_poisoned = true;
             continue;
         }
+        if (a.is_mut)
+        {
+            // CHK-316: `mut x` hands over a place, so what it names must be one a body could assign
+            if (a.is_splat || !judge_place(scope, a.value, "a mut argument"))
+                result.is_poisoned = true;
+            add_argument(result, {.expr = a.value, .is_mut = true}, type, text_of(file, a.name));
+            continue;
+        }
         if (!a.is_splat)
         {
             add_argument(result, {.expr = a.value}, type, text_of(file, a.name), number_of(file, a.value));
@@ -1147,7 +1156,14 @@ void checker::note_near_misses(i32 file,
         for (auto p = isize(0); miss.reason == miss_reason::none && p < parameters.size(); ++p)
         {
             auto const i = bound.slots[p];
-            if (i >= 0 && !chain_of(file, parameters[p].type, arguments, i).has_value())
+            if (i >= 0 && parameters[p].is_mut != arguments.written[i].is_mut)
+                miss = {.file = file,
+                        .call = call,
+                        .candidate = candidate,
+                        .reason = miss_reason::mut_mismatch,
+                        .argument = i,
+                        .parameter = i32(p)};
+            else if (i >= 0 && !chain_of(file, parameters[p], arguments, i).has_value())
                 miss = {.file = file,
                         .call = call,
                         .candidate = candidate,
@@ -1175,7 +1191,7 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
         auto const i = result.slots[p];
         if (i < 0)
             continue;
-        auto const length = chain_of(file, parameters[p].type, arguments, i);
+        auto const length = chain_of(file, parameters[p], arguments, i);
         if (!length.has_value())
             return cc::nullopt;
         result.chains[i] = length.value();
@@ -1183,8 +1199,16 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     return result;
 }
 
-cc::optional<i32> checker::chain_of(i32 file, type_id parameter, call_arguments const& arguments, isize i)
+cc::optional<i32> checker::chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i)
 {
+    // CHK-316: a place is handed over as it is, so it has the parameter's type exactly, and a mark meets a mut parameter
+    if (taking.is_mut || arguments.written[i].is_mut)
+    {
+        if (taking.is_mut != arguments.written[i].is_mut || arguments.types[i] != taking.type)
+            return cc::nullopt;
+        return 0;
+    }
+    auto const parameter = taking.type;
     if (arguments.literals[i] >= 0)
         return literal_chain(file, parameter, arguments.literals[i]);
     if (arguments.numbers[i].is_number)

@@ -80,6 +80,8 @@ struct dumper
     {
         if (a.is_splat)
             out += "..";
+        if (a.is_mut)
+            out += "mut ";
         if (!a.name.empty())
         {
             if (a.is_dotted_name)

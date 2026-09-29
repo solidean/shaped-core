@@ -167,6 +167,8 @@ let v = {1 + 2}
 * **AST-129** A `qualified_type` says what a shader does with a resource, and [bindings.md](../bindings.md) is what the words mean.
   The AST checks neither the word against the type nor the type against anything.
 * **AST-130** `mut` or `out` outside a type position is read as it is elsewhere, so `mut` keeps AST-45 and `out` in an expression is a normal error.
+* **AST-149** `mut` before one operand, as an argument of a paren call, marks that argument: `bump(mut c, 2.0)` ([why](why/ast.md#ast-149)).
+  The argument records the mark and the operand as its value; anywhere else `mut x` keeps AST-130.
 * **AST-135** `sampler` alone in a type position reads as the name `sampler`: the keyword denotes the sampler type there, `smp: sampler`.
   A square group right after it, `sampler[2]`, is an index of that name, as it would be of any other type name.
 
