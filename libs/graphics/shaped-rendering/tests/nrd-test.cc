@@ -538,4 +538,163 @@ ASYNC_INVOCABLE_TEST("sr - NRD follows a moving image through its motion vectors
         .context(cc::format("error with motion {}, without {}, never moved {}", with_motion, without_motion, never_moved));
 }
 
+// Moving a history that owns a vendor object, which is the reason `denoise_history` stopped being defaulted.
+//
+// The slot pairs a `void*` with the function that frees it, and losing it is silent in every way a status flag can see.
+// `_prepare` decides `restarted` from the method and the extent alone.
+// So a history that arrived at a move with no session still reports a continuing stream, builds a fresh NRD instance
+// out of the context's already-warm pipeline cache, and denoises the very next frame.
+// A first draft of this test asserted on `restarted`, and passed with the move constructor deliberately dropping the slot.
+//
+// What an NRD instance actually holds is REBLUR's accumulated history, so the one observable difference is temporal
+// LAG: a stream fed several bright frames and then a dark one comes back part-way between, while a stream whose
+// instance was rebuilt has nothing to blend and lands near the dark value.
+// So this runs that sequence twice, moving the history in one of them, and requires the two to agree.
+namespace
+{
+constexpr auto k_move_bright = 0.8f;
+constexpr auto k_move_dark = 0.1f;
+
+/// Feeds `k_move_warmup` bright frames and then one dark frame, and returns the centre pixel's red channel.
+///
+/// `move_between` moves the history -- by construction and then by assignment over a live one -- after the bright
+/// frames and before the dark one, which is the only difference between the two runs.
+[[nodiscard]] cc::shared_async<f32> lag_after_darkening(sg::context& ctx, bool move_between)
+{
+    constexpr auto k_move_warmup = 6;
+
+    auto const make = [&](sg::pixel_format format)
+    {
+        return ctx.persistent.create_texture_2d({.format = format,
+                                                 .width = k_size,
+                                                 .height = k_size,
+                                                 .usage = sg::texture_usage::readonly_texture
+                                                        | sg::texture_usage::readwrite_texture
+                                                        | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
+    };
+
+    auto const diffuse = make(sg::pixel_format::rgba32_float);
+    auto const specular = make(sg::pixel_format::rgba32_float);
+    auto const normal = make(sg::pixel_format::rgba32_float);
+    auto const roughness = make(sg::pixel_format::rgba32_float);
+    auto const depth = make(sg::pixel_format::rgba32_float);
+    auto const motion = make(sg::pixel_format::rgba32_float);
+    auto const hit_distance = make(sg::pixel_format::rg32_float);
+    auto const albedo_texture = make(sg::pixel_format::rgba32_float);
+    auto const specular_albedo = make(sg::pixel_format::rgba32_float);
+    auto const output = make(sg::pixel_format::rgba32_float);
+
+    auto const in = sr::denoise_inputs{
+        .color = diffuse,
+        .specular = specular,
+        .guides = {.albedo = albedo_texture,
+                   .specular_albedo = specular_albedo,
+                   .normal = normal,
+                   .roughness = roughness,
+                   .depth = depth,
+                   .motion = motion,
+                   .hit_distance = hit_distance},
+        .output = output,
+    };
+
+    auto const fill = [&](sg::command_list& cmd, sg::texture_2d const& t, tg::vec4f v)
+    {
+        auto const pixels = cc::vector<tg::vec4f>::create_filled(k_size * k_size, v);
+        cmd.upload.bytes_to_texture(t.raw(), cc::span<tg::vec4f const>(pixels).as_bytes());
+    };
+
+    // One frame at irradiance `lit`, against whichever history it is handed.
+    auto const run_one = [&](sr::denoise_history& history, f32 lit) -> cc::shared_async<sr::denoise_outcome>
+    {
+        auto cmd = ctx.create_command_list();
+
+        // A constant albedo, so the de-modulated signal is the irradiance and the step below reaches REBLUR intact.
+        constexpr auto k_move_albedo = 0.5f;
+        fill(*cmd, diffuse, tg::vec4f(k_move_albedo * lit, k_move_albedo * lit, k_move_albedo * lit, 0));
+        fill(*cmd, albedo_texture, tg::vec4f(k_move_albedo, k_move_albedo, k_move_albedo, 0));
+        fill(*cmd, specular, tg::vec4f(0, 0, 0, 0));
+        fill(*cmd, specular_albedo, tg::vec4f(0, 0, 0, 0));
+        fill(*cmd, normal, tg::vec4f(0, 0, 1, 0));
+        fill(*cmd, roughness, tg::vec4f(0.5f, 0, 0, 0));
+        fill(*cmd, depth, tg::vec4f(5.0f, 0, 0, 0));
+        fill(*cmd, motion, tg::vec4f(0, 0, 0, 0));
+        {
+            auto const pixels = cc::vector<tg::vec2f>::create_filled(k_size * k_size, tg::vec2f(2.0f, 2.0f));
+            cmd->upload.bytes_to_texture(hit_distance.raw(), cc::span<tg::vec2f const>(pixels).as_bytes());
+        }
+
+        auto const outcome = sr::nrd_denoise_routine::execute(*cmd, in, history);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        cc::async_backlog const* const backlogs[] = {&ctx.backlog};
+        co_await cc::async_settled(cc::async_backlog::settled(backlogs));
+        co_return outcome;
+    };
+
+    auto history = sr::denoise_history();
+    auto denoised = 0;
+    for (auto attempt = 0; attempt < 24 && denoised < k_move_warmup; ++attempt)
+    {
+        auto const outcome = co_await run_one(history, k_move_bright);
+        REQUIRE(outcome.status != sr::denoise_status::failed);
+        if (outcome.is_denoised())
+            ++denoised;
+    }
+    REQUIRE(denoised == k_move_warmup).context("the bright stream never got going");
+
+    // Both move operations, on a history whose NRD instance is now carrying six frames of bright.
+    auto moved = sr::denoise_history();
+    if (move_between)
+    {
+        auto intermediate = cc::move(history); // move construction
+        moved = cc::move(intermediate);        // move assignment, over a history that owns nothing yet
+    }
+    auto& live = move_between ? moved : history;
+
+    {
+        auto const outcome = co_await run_one(live, k_move_dark);
+        REQUIRE(outcome.is_denoised());
+    }
+
+    auto cmd = ctx.create_command_list();
+    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    auto const pixels = co_await readback.data();
+    REQUIRE(pixels.size() == k_size * k_size);
+    co_return pixels[(k_size / 2) * k_size + k_size / 2][0];
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sr - a denoise history carries its vendor state through a move", (sg::context_handle const& ctx_h))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
+    if (!sr::query_denoise_support(ctx).nrd)
+        SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
+
+    sr::nrd_denoise_routine::prewarm(ctx);
+    (void)co_await ctx.routines.idle_completion();
+
+    auto const kept = co_await lag_after_darkening(ctx, false);
+    auto const moved = co_await lag_after_darkening(ctx, true);
+
+    // The darkened frame has to land in the same place either way: the move must carry REBLUR's accumulated history,
+    // not just the textures around it.
+    //
+    // Measured as a fraction of the step rather than as an absolute, so the bound says what it means -- the two runs
+    // must agree to within a twentieth of the distance the image travelled.
+    auto const step = tg::abs(kept - 0.5f * k_move_dark);
+    CHECK(tg::abs(moved - kept) < 0.05f * cc::max(step, 0.01f)).context(cc::format("kept {}, moved {}", kept, moved));
+
+    // And the measurement must have something to see: a run showing no lag at all would make the check above pass on
+    // two identical failures.
+    // Half the albedo is what an unaccumulated dark frame reads, so a lagging one sits well above it.
+    CHECK(kept > 0.5f * k_move_dark * 1.5f).context(cc::format("no temporal lag to detect: {}", kept));
+}
+
 #endif
