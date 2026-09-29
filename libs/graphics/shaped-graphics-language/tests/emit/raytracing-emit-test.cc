@@ -97,3 +97,23 @@ binding frame:
     CHECK(text_of_entry(source, "start", target::hlsl_dx12).contains("const int kept = (flags & 8) | 512;\n"));
     CHECK(text_of_entry(source, "start", target::msl).contains("const int kept = (flags & 8) | 512;\n"));
 }
+
+TEST("sgl emit - a comparison under another comparison is parenthesized")
+{
+    // WGSL refuses `a < b != c`: its comparisons do not chain, whichever side the inner one stands on
+    auto const source = cc::string_view(R"(binding frame:
+    values: mut buffer[float]
+    flags: mut buffer[int]
+
+@compute(1) fun run(@thread_id id: int3){frame}:
+    let below = (frame.values[0] < 0.0) != (frame.flags[0] == 1)
+    let above = (frame.flags[0] == 1) != (frame.values[0] > 0.0)
+    if below and above => frame.flags[0] = 2
+)");
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const text = text_of_entry(source, "run", t);
+        CHECK(text.contains("< 0.0) != (")).dump("target", sgl::emit::to_string(t));
+        CHECK(text.contains("== 1) != (")).dump("target", sgl::emit::to_string(t));
+    }
+}
