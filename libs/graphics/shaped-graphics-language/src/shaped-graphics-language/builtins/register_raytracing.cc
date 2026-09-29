@@ -349,33 +349,47 @@ struct stage_read
     cc::string_view signature;
     cc::string_view hlsl;
     evaluator evaluate;
+    /// A field of the hit record or of the context every metal function of a pipeline is handed (EMIT-139).
+    cc::string_view msl = {};
 };
 
 constexpr stage_read k_stage_reads[] = {
     {"@stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3",
-     "int3(DispatchRaysIndex())", nothing},
+     "int3(DispatchRaysIndex())", nothing, "int3(sgl_ctx.launch_id)"},
     {"@stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_dimensions() -> int3",
-     "int3(DispatchRaysDimensions())", nothing},
-    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_origin() -> pos3", "WorldRayOrigin()", nothing},
+     "int3(DispatchRaysDimensions())", nothing, "int3(sgl_ctx.launch_size)"},
+    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_origin() -> pos3", "WorldRayOrigin()",
+     nothing, "sgl_hit.origin"},
     {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_direction() -> vec3", "WorldRayDirection()",
-     nothing},
-    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_min() -> float", "RayTMin()", zero_float},
-    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_current() -> float", "RayTCurrent()", zero_float},
-    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_instance_id() -> int", "int(InstanceID())", zero_int},
-    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_instance_index() -> int", "int(InstanceIndex())", zero_int},
-    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_geometry_index() -> int", "int(GeometryIndex())", zero_int},
-    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_primitive_index() -> int", "int(PrimitiveIndex())", zero_int},
-    {"@stages(.closest_hit, .any_hit) fun hit_barycentrics() -> float2", "sgl_attributes.barycentrics", zero_float2},
+     nothing, "sgl_hit.direction"},
+    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_min() -> float", "RayTMin()", zero_float,
+     "sgl_hit.t_min"},
+    {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_current() -> float", "RayTCurrent()", zero_float,
+     "sgl_hit.t"},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_instance_id() -> int", "int(InstanceID())", zero_int,
+     "int(sgl_hit.instance_id)"},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_instance_index() -> int", "int(InstanceIndex())", zero_int,
+     "int(sgl_hit.instance_index)"},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_geometry_index() -> int", "int(GeometryIndex())", zero_int,
+     "int(sgl_hit.geometry_index)"},
+    {"@stages(.closest_hit, .any_hit, .intersection) fun hit_primitive_index() -> int", "int(PrimitiveIndex())",
+     zero_int, "int(sgl_hit.primitive_index)"},
+    {"@stages(.closest_hit, .any_hit) fun hit_barycentrics() -> float2", "sgl_attributes.barycentrics", zero_float2,
+     "sgl_hit.barycentrics"},
     {"@stages(.closest_hit, .any_hit) fun hit_is_front_face() -> bool", "(HitKind() == HIT_KIND_TRIANGLE_FRONT_FACE)",
-     no_bool},
+     no_bool, "(sgl_hit.front_face != 0u)"},
     {"@stages(.closest_hit, .any_hit, .intersection) fun hit_object_to_world_row(row: int) -> float4",
-     "ObjectToWorld3x4()[{}]", zero_float4},
+     "ObjectToWorld3x4()[{}]", zero_float4,
+     "float4(sgl_hit.object_to_world[0][{}], sgl_hit.object_to_world[1][{}], sgl_hit.object_to_world[2][{}], "
+     "sgl_hit.object_to_world[3][{}])"},
     {"@stages(.closest_hit, .any_hit, .intersection) fun hit_world_to_object_row(row: int) -> float4",
-     "WorldToObject3x4()[{}]", zero_float4},
+     "WorldToObject3x4()[{}]", zero_float4,
+     "float4(sgl_hit.world_to_object[0][{}], sgl_hit.world_to_object[1][{}], sgl_hit.world_to_object[2][{}], "
+     "sgl_hit.world_to_object[3][{}])"},
     {"@stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_origin() -> float3", "ObjectRayOrigin()",
-     zero_float3},
+     zero_float3, "sgl_hit.object_origin"},
     {"@stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_direction() -> float3", "ObjectRayDirection()",
-     zero_float3},
+     zero_float3, "sgl_hit.object_direction"},
 };
 
 constexpr cc::string_view k_stage_reads_hlsl[] = {
@@ -401,17 +415,23 @@ constexpr cc::string_view k_stage_reads_hlsl[] = {
 
 written write_stage_read(call_context const& ctx)
 {
-    // the pipeline has no WGSL form, and MSL's is written from the kernel that calls the stage
-    if (ctx.target != language::hlsl)
+    // the pipeline has no WGSL form
+    if (ctx.target != language::hlsl && ctx.target != language::msl)
         return {};
-    auto const& read = k_stage_reads[ctx.data];
+    auto const& entry = k_stage_reads[ctx.data];
+    auto const read = stage_read{.hlsl = ctx.target == language::msl ? entry.msl : entry.hlsl};
     if (ctx.arguments.empty())
         return {.text = cc::string(read.hlsl)};
-    // a row of a matrix: the argument stands where the spelling holds `{}`
-    auto const hole = read.hlsl.find("{}");
-    auto text = cc::string(read.hlsl.subview({.offset = 0, .size = hole}));
-    text += ctx.arguments[0].text;
-    text += read.hlsl.subview({.offset = hole + 2, .size = read.hlsl.size() - hole - 2});
+    // a row of a matrix: the argument stands wherever the spelling holds `{}`
+    auto text = cc::string();
+    auto rest = read.hlsl;
+    for (auto hole = rest.find("{}"); hole >= 0; hole = rest.find("{}"))
+    {
+        text += rest.subview({.offset = 0, .size = hole});
+        text += ctx.arguments[0].text;
+        rest = rest.subview({.offset = hole + 2, .size = rest.size() - hole - 2});
+    }
+    text += rest;
     return {.text = cc::move(text)};
 }
 
@@ -430,8 +450,95 @@ written write_polyfill(call_context const& ctx)
 
 /// A ray-tracing stage's trace: (world, origin, direction, t_min, t_max, flags, mask, contribution, multiplier, miss,
 /// payload).
+/// EMIT-139: metal's trace is the kernel's own intersector, then a miss or a closest hit called through sg's tables, the
+/// closest hit's record found from the instance's offset as DXR finds it.
+written write_trace_ray_msl(call_context const& ctx)
+{
+    auto const& a = ctx.arguments;
+    auto const mint = [&](cc::string_view name) { return ctx.mint.is_valid() ? ctx.mint(name) : cc::string(name); };
+    auto const data = mint("sgl_d");
+    auto const traversal = mint("sgl_i");
+    auto const r = mint("sgl_r");
+    auto const found = mint("sgl_h");
+    auto const record = mint("sgl_rec");
+    auto result = written();
+    auto& lines = result.lines;
+    lines.push_back(cc::format("sgl_ray_data {};", data));
+    lines.push_back(cc::format("sgl_store({}.payload, {});", data, a[10].text));
+    lines.push_back(cc::format("{}.world_origin = {};", data, a[1].text));
+    lines.push_back(cc::format("{}.world_direction = {};", data, a[2].text));
+    lines.push_back(cc::format("{}.context = sgl_ctx;", data));
+    lines.push_back(cc::format("intersector<triangle_data, instancing> {};", traversal));
+    lines.push_back(cc::format("sgl_configure({}, uint({}));", traversal, a[5].text));
+    lines.push_back(cc::format("ray {}({}, {}, {}, {});", r, a[1].text, a[2].text, a[3].text, a[4].text));
+    lines.push_back(cc::format("auto const {} = {}.intersect({}, {}, uint({}), sgl_t.hit_{}, {});", found, traversal, r,
+                               a[0].text, a[6].text, a[7].text, data));
+    lines.push_back(cc::format("sgl_hit_record {} = sgl_record_of({}, {}, {});", record, found, r, data));
+    lines.push_back(cc::format("if ({}.type == intersection_type::none)", found));
+    lines.push_back(cc::format("    sgl_t.miss[uint({})]({}.payload, {}, sgl_ctx);", a[9].text, data, record));
+    lines.push_back(cc::format("else if ((uint({}) & 8u) == 0u)", a[5].text));
+    lines.push_back(cc::format("    sgl_t.closest_hit[sgl_ctx.hit_offsets[{0}.instance_id] + {0}.geometry_id * "
+                               "uint({1}) + "
+                               "uint({2})]({3}.payload, {4}, sgl_ctx);",
+                               found, a[8].text, a[7].text, data, record));
+    result.text = cc::format("sgl_load({}, {}.payload)", a[10].text, data);
+    return result;
+}
+
+/// The intersector's options from DXR's ray flags, and the hit record a closest hit or a miss is handed.
+cc::string msl_trace_helper(helper_context const& ctx)
+{
+    if (ctx.target != language::msl)
+        return {};
+    return "void sgl_configure(thread intersector<triangle_data, instancing>& i, uint flags)\n"
+           "{\n"
+           "    i.accept_any_intersection((flags & 4u) != 0u);\n"
+           "    if ((flags & 1u) != 0u)\n"
+           "        i.force_opacity(forced_opacity::opaque);\n"
+           "    else if ((flags & 2u) != 0u)\n"
+           "        i.force_opacity(forced_opacity::non_opaque);\n"
+           "    if ((flags & 16u) != 0u)\n"
+           "        i.set_triangle_cull_mode(triangle_cull_mode::back);\n"
+           "    else if ((flags & 32u) != 0u)\n"
+           "        i.set_triangle_cull_mode(triangle_cull_mode::front);\n"
+           "    if ((flags & 64u) != 0u)\n"
+           "        i.set_opacity_cull_mode(opacity_cull_mode::opaque);\n"
+           "    else if ((flags & 128u) != 0u)\n"
+           "        i.set_opacity_cull_mode(opacity_cull_mode::non_opaque);\n"
+           "    if ((flags & 256u) != 0u)\n"
+           "        i.assume_geometry_type(geometry_type::bounding_box);\n"
+           "    else if ((flags & 512u) != 0u)\n"
+           "        i.assume_geometry_type(geometry_type::triangle);\n"
+           "}\n"
+           "\n"
+           "sgl_hit_record sgl_record_of(intersection_result<triangle_data, instancing> h, ray r, thread sgl_ray_data "
+           "const& d)\n"
+           "{\n"
+           "    sgl_hit_record rec;\n"
+           "    rec.t = h.type == intersection_type::none ? r.max_distance : h.distance;\n"
+           "    rec.t_min = r.min_distance;\n"
+           "    rec.origin = r.origin;\n"
+           "    rec.direction = r.direction;\n"
+           "    rec.object_origin = r.origin;\n"
+           "    rec.object_direction = r.direction;\n"
+           "    rec.instance_id = h.user_instance_id;\n"
+           "    rec.instance_index = h.instance_id;\n"
+           "    rec.geometry_index = h.geometry_id;\n"
+           "    rec.primitive_index = h.primitive_id;\n"
+           "    rec.barycentrics = h.triangle_barycentric_coord;\n"
+           "    rec.front_face = h.triangle_front_facing ? 1u : 0u;\n"
+           "    rec.object_to_world = float4x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1), float3(0));\n"
+           "    rec.world_to_object = rec.object_to_world;\n"
+           "    rec.attributes[0] = d.attributes[0];\n"
+           "    rec.attributes[1] = d.attributes[1];\n"
+           "    return rec;\n"
+           "}\n";
+}
+
 written write_trace_ray(call_context const& ctx)
 {
+    if (ctx.target == language::msl)
+        return write_trace_ray_msl(ctx);
     if (ctx.target != language::hlsl)
         return {};
     auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
@@ -448,10 +555,35 @@ written write_trace_ray(call_context const& ctx)
 }
 
 constexpr cc::string_view k_trace_ray_hlsl[] = {"RayDesc", "TraceRay"};
+constexpr cc::string_view k_trace_ray_msl[] = {
+    "sgl_configure",
+    "sgl_record_of",
+    "intersector",
+    "sgl_ctx",
+    "sgl_t",
+    "sgl_hit",
+    "sgl_store",
+    "sgl_load",
+    "sgl_d",
+    "sgl_i",
+    "sgl_r",
+    "sgl_h",
+    "sgl_rec",
+    "forced_opacity",
+    "geometry_type",
+    "intersection_result",
+    "intersection_type",
+    "opacity_cull_mode",
+    "triangle_cull_mode",
+};
 
 /// A call of callable `index` of the pipeline's callable section: (index, parameter).
 written write_call_callable(call_context const& ctx)
 {
+    // EMIT-139: metal's callable table, whose functions take the parameter as words
+    if (ctx.target == language::msl)
+        return {.text = cc::format("sgl_t.callable[uint({})](reinterpret_cast<thread uint4*>(&{}), sgl_ctx)",
+                                   ctx.arguments[0].text, ctx.arguments[1].text)};
     if (ctx.target != language::hlsl)
         return {};
     return {.text = cc::format("CallShader(uint({}), {})", ctx.arguments[0].text, ctx.arguments[1].text)};
@@ -585,7 +717,11 @@ void sgl::builtins::register_raytracing(registry& r)
                          geometry),
             .doc = "/// Traces a ray through the pipeline's tables, handing the payload over past the signature.",
             .evaluate = nothing,
-            .write = {.kind = spelling_kind::custom, .custom = write_trace_ray, .hlsl_names = k_trace_ray_hlsl},
+            .write = {.kind = spelling_kind::custom,
+                      .custom = write_trace_ray,
+                      .helper = msl_trace_helper,
+                      .hlsl_names = k_trace_ray_hlsl,
+                      .msl_names = k_trace_ray_msl},
             .takes_element = true,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });

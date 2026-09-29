@@ -14,6 +14,11 @@ using namespace sgl::emit::impl;
 /// The buffer index of the inline constants, in every stage that reads them.
 /// It must equal sg's metal `k_inline_constants_buffer_index`, which sgl cannot include.
 constexpr auto k_inline_constants_buffer = 4;
+/// sg's reserved group, where metal's ray-tracing tables arrive; sg's `sg::reserved_binding_group`.
+constexpr auto k_reserved_group = 3;
+/// Where metal's `dispatch_rays` binds each TLAS instance's hit-group offset, the first vertex-buffer slot, which a
+/// kernel never has; sg's metal `k_hit_group_offsets_buffer_index`.
+constexpr auto k_hit_offsets_buffer = 5;
 
 /// MSL's texture types, parallel to `texture_shape`, and the depth ones where a shape has one.
 constexpr cc::string_view k_texture_names[]
@@ -214,6 +219,8 @@ public:
     void write_declarations(cc::string& out, plan const& p) const override
     {
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
+        if (p.e.entry_stage >= stage::raygen)
+            out += "#include <metal_raytracing>\nusing namespace raytracing;\n\n";
         write_enum_constants(out, p, *this);
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
@@ -223,6 +230,8 @@ public:
                 write_member(out, &s, member, p);
             out += "};\n\n";
         }
+        if (p.e.entry_stage >= stage::raygen)
+            write_ray_tracing_types(out, p);
         write_buffers(out, p, *this);
 
         if (!p.constants.has_value())
@@ -230,10 +239,207 @@ public:
         write_block_struct(out, p, p.constants.value());
     }
 
+    /// EMIT-139: what every ray-tracing function of a pipeline agrees on, since each is compiled apart and linked.
+    /// A visible function takes the payload as words and its bindings through `sgl_context`, whatever its ray type, since
+    /// one table holds the miss and closest-hit functions of every ray type; the ray data carries the payload, the
+    /// attributes a procedural hit reports and the context into traversal.
+    static void write_ray_tracing_types(cc::string& out, plan const& p)
+    {
+        auto const set = ray_set_of(p.m, p.e);
+        auto payload_size = cc::string("16");
+        auto ray_count = isize(1);
+        if (check::is_valid(set))
+        {
+            auto const rays = p.m.at(p.m.at(p.m.at(set).type).members);
+            ray_count = rays.size();
+            payload_size = cc::format("sizeof({})", struct_name(p, rays[0].type));
+            for (auto i = isize(1); i < rays.size(); ++i)
+            {
+                auto const next = cc::format("sizeof({})", struct_name(p, rays[i].type));
+                payload_size = cc::format("({0} > {1} ? {0} : {1})", payload_size, next);
+            }
+        }
+        out += "struct sgl_context\n{\n"
+               "    constant void* groups[3];\n"
+               "    constant void* constants;\n"
+               "    device void* tables;\n"
+               "    device uint const* hit_offsets;\n"
+               "    uint3 launch_id;\n"
+               "    uint3 launch_size;\n"
+               "};\n\n";
+        out += "struct sgl_hit_record\n{\n"
+               "    float t;\n"
+               "    float t_min;\n"
+               "    float3 origin;\n"
+               "    float3 direction;\n"
+               "    float3 object_origin;\n"
+               "    float3 object_direction;\n"
+               "    uint instance_id;\n"
+               "    uint instance_index;\n"
+               "    uint geometry_index;\n"
+               "    uint primitive_index;\n"
+               "    float2 barycentrics;\n"
+               "    uint front_face;\n"
+               "    float4x3 object_to_world;\n"
+               "    float4x3 world_to_object;\n"
+               "    uint4 attributes[2];\n"
+               "};\n\n";
+        out.appendf("struct sgl_ray_data\n{{\n"
+                    "    uint4 payload[({} + 15) / 16];\n"
+                    "    uint4 attributes[2];\n"
+                    "    float3 world_origin;\n"
+                    "    float3 world_direction;\n"
+                    "    sgl_context context;\n"
+                    "}};\n\n",
+                    payload_size);
+        out += "struct sgl_box_result\n{\n"
+               "    bool accept [[accept_intersection]];\n"
+               "    float distance [[distance]];\n"
+               "};\n\n";
+        out += "using sgl_hit_function = void(thread uint4*, thread sgl_hit_record const&, thread sgl_context "
+               "const&);\n"
+               "using sgl_callable_function = void(thread uint4*, thread sgl_context const&);\n\n";
+        // sg's reserved group: ray type 0's intersection table at id 0, then miss, closest hit and callable, then the
+        // other ray types' intersection tables from id 4
+        out += "struct sgl_tables\n{\n"
+               "    intersection_function_table<triangle_data, instancing> hit_0 [[id(0)]];\n"
+               "    visible_function_table<sgl_hit_function> miss [[id(1)]];\n"
+               "    visible_function_table<sgl_hit_function> closest_hit [[id(2)]];\n"
+               "    visible_function_table<sgl_callable_function> callable [[id(3)]];\n";
+        for (auto r = isize(1); r < ray_count; ++r)
+            out.appendf("    intersection_function_table<triangle_data, instancing> hit_{} [[id({})]];\n", r, 3 + r);
+        out += "};\n\n";
+        out += "template <typename T>\nvoid sgl_store(thread uint4* words, T value)\n{\n"
+               "    *reinterpret_cast<thread T*>(words) = value;\n}\n\n"
+               "template <typename T>\nvoid sgl_load(thread T& value, thread uint4* words)\n{\n"
+               "    value = *reinterpret_cast<thread T*>(words);\n}\n\n";
+    }
+
+    [[nodiscard]] static cc::string struct_name(plan const& p, type_id type)
+    {
+        auto const k = p.struct_of_type[index_of(type)];
+        return k >= 0 ? p.structs[k].name : cc::string(p.m.name_of(type));
+    }
+
+    /// The groups and the inline constants as locals of a function that is handed them through `sgl_context`.
+    static void write_context_bindings(cc::string& out, plan const& p)
+    {
+        for (auto const& a : p.argument_buffers)
+            out.appendf("    constant {0}& {1} = *static_cast<constant {0}*>(sgl_ctx.groups[{2}]);\n", a.struct_name,
+                        a.parameter, a.group);
+        if (p.constants.has_value())
+            out.appendf("    constant {0}& {1} = *static_cast<constant {0}*>(sgl_ctx.constants);\n",
+                        p.constants.value().block_name, p.constants.value().name);
+        out += "    device sgl_tables& sgl_t = *static_cast<device sgl_tables*>(sgl_ctx.tables);\n";
+    }
+
+    /// EMIT-139: a ray-tracing stage as metal runs it: the raygen a kernel, a miss, closest hit or callable a visible
+    /// function, and an any hit or a procedural group's traversal an intersection function.
+    void write_ray_tracing_head(cc::string& out, plan const& p) const
+    {
+        auto const stage_of = p.e.entry_stage;
+        auto const payload_type = check::is_valid(p.e.input) ? cc::string(type_text(p, *this, p.e.input)) : cc::string();
+        auto const payload = check::is_valid(p.e.input) ? cc::string(p.locals[0]) : cc::string();
+        if (stage_of == stage::raygen)
+        {
+            auto parameters = cc::vector<cc::string>();
+            for (auto const& a : p.argument_buffers)
+                parameters.push_back(cc::format("constant {}& {} [[buffer({})]]", a.struct_name, a.parameter, a.group));
+            if (p.constants.has_value())
+                parameters.push_back(cc::format("constant {}& {} [[buffer({})]]", p.constants.value().block_name,
+                                                p.constants.value().name, k_inline_constants_buffer));
+            parameters.push_back(cc::format("device sgl_tables& sgl_t [[buffer({})]]", k_reserved_group));
+            parameters.push_back(cc::format("device uint const* sgl_hit_offsets [[buffer({})]]", k_hit_offsets_buffer));
+            parameters.push_back("uint3 sgl_launch_id [[thread_position_in_grid]]");
+            parameters.push_back("uint3 sgl_launch_size [[threads_per_grid]]");
+            for (auto const& s : p.samplers)
+                parameters.push_back(cc::format("sampler {} [[sampler({})]]", s.name, s.index));
+            auto list = cc::string();
+            for (auto const& parameter : parameters)
+                list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
+            out.appendf("kernel void {}({})\n{{\n", p.entry_name, list);
+            out += "    sgl_context sgl_ctx;\n";
+            for (auto g = 0; g < 3; ++g)
+                out.appendf("    sgl_ctx.groups[{}] = nullptr;\n", g);
+            for (auto const& a : p.argument_buffers)
+                if (a.group < 3)
+                    out.appendf("    sgl_ctx.groups[{}] = &{};\n", a.group, a.parameter);
+            out.appendf("    sgl_ctx.constants = {};\n",
+                        p.constants.has_value() ? cc::format("&{}", p.constants.value().name) : cc::string("nullptr"));
+            out += "    sgl_ctx.tables = &sgl_t;\n"
+                   "    sgl_ctx.hit_offsets = sgl_hit_offsets;\n"
+                   "    sgl_ctx.launch_id = sgl_launch_id;\n"
+                   "    sgl_ctx.launch_size = sgl_launch_size;\n";
+        }
+        else if (stage_of == stage::miss || stage_of == stage::closest_hit || stage_of == stage::callable)
+        {
+            auto const hit = stage_of == stage::callable ? "" : "thread sgl_hit_record const& sgl_hit, ";
+            out.appendf("[[visible]] void {}(thread uint4* sgl_payload, {}thread sgl_context const& sgl_ctx)\n{{\n",
+                        p.entry_name, hit);
+            write_context_bindings(out, p);
+            if (!payload.empty())
+                out.appendf("    thread {0}& {1} = *reinterpret_cast<thread {0}*>(sgl_payload);\n", payload_type,
+                            payload);
+            else
+                out += "    (void)sgl_payload;\n";
+            if (check::is_valid(p.e.attributes))
+                out.appendf("    thread {0} const& {1} = *reinterpret_cast<thread {0} const*>(sgl_hit.attributes);\n",
+                            type_text(p, *this, p.e.at(p.e.attributes).type), p.locals[index_of(p.e.attributes)]);
+        }
+        else
+        {
+            // an any hit decides a triangle, and a procedural group's traversal reports a box's primitive
+            auto const is_triangle = stage_of == stage::any_hit;
+            out.appendf("[[intersection({}, triangle_data, instancing)]]\n", is_triangle ? "triangle" : "bounding_box");
+            out.appendf("{} {}(", is_triangle ? "bool" : "sgl_box_result", p.entry_name);
+            if (is_triangle)
+                out += "float sgl_distance [[distance]], float2 sgl_barycentrics [[barycentric_coord]], "
+                       "bool sgl_front [[front_facing]], ";
+            out += "float3 sgl_origin [[origin]], float3 sgl_direction [[direction]], "
+                   "float sgl_min [[min_distance]], float sgl_max [[max_distance]], uint sgl_primitive "
+                   "[[primitive_id]], "
+                   "uint sgl_geometry [[geometry_id]], uint sgl_instance [[instance_id]], "
+                   "uint sgl_user_instance [[user_instance_id]], ray_data sgl_ray_data& sgl_data [[payload]])\n{\n";
+            out += "    sgl_context const sgl_ctx = sgl_data.context;\n";
+            write_context_bindings(out, p);
+            // TODO: metal hands a traversal function its instance's transforms only under intersection tags sg's
+            // tables do not declare, so a hit's transforms are the identity here
+            out.appendf("    sgl_hit_record sgl_hit;\n"
+                        "    sgl_hit.t = {};\n"
+                        "    sgl_hit.t_min = sgl_min;\n"
+                        "    sgl_hit.origin = sgl_data.world_origin;\n"
+                        "    sgl_hit.direction = sgl_data.world_direction;\n"
+                        "    sgl_hit.object_origin = sgl_origin;\n"
+                        "    sgl_hit.object_direction = sgl_direction;\n"
+                        "    sgl_hit.instance_id = sgl_user_instance;\n"
+                        "    sgl_hit.instance_index = sgl_instance;\n"
+                        "    sgl_hit.geometry_index = sgl_geometry;\n"
+                        "    sgl_hit.primitive_index = sgl_primitive;\n"
+                        "    sgl_hit.barycentrics = {};\n"
+                        "    sgl_hit.front_face = {};\n"
+                        "    sgl_hit.object_to_world = float4x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1), "
+                        "float3(0));\n"
+                        "    sgl_hit.world_to_object = sgl_hit.object_to_world;\n",
+                        is_triangle ? "sgl_distance" : "sgl_max", is_triangle ? "sgl_barycentrics" : "float2(0)",
+                        is_triangle ? "sgl_front ? 1u : 0u" : "0u");
+            if (!payload.empty())
+                out.appendf("    {0} {1} = *reinterpret_cast<ray_data {0}*>(sgl_data.payload);\n", payload_type, payload);
+            if (check::is_valid(p.e.attributes))
+                out.appendf("    {0} const {1} = *reinterpret_cast<ray_data {0}*>(sgl_data.attributes);\n",
+                            type_text(p, *this, p.e.at(p.e.attributes).type), p.locals[index_of(p.e.attributes)]);
+        }
+    }
+
     /// MSL has no global resources: the inline constants and every group are parameters, and each is bound to a local
     /// at the top of the body under the name the other targets give their global, so the body reads them alike.
     void write_function_head(cc::string& out, plan const& p) const override
     {
+        if (p.e.entry_stage >= stage::raygen)
+        {
+            write_ray_tracing_head(out, p);
+            write_bound_resources(out, p);
+            return;
+        }
         auto parameters = cc::vector<cc::string>();
         if (check::is_valid(p.e.input))
             parameters.push_back(cc::format("{} {} [[stage_in]]", type_text(p, *this, p.e.input), p.locals[0]));
@@ -264,17 +470,22 @@ public:
         else
             out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
                         type_text(p, *this, p.e.result), p.entry_name, list);
-        for (auto const& block : p.group_blocks)
-            out.appendf("    constant auto& {} = *{}.{};\n", block.name, argument_buffer_of(p, block.group).parameter,
-                        block.name);
-        for (auto const& r : p.resources)
-            out.appendf("    constant auto& {} = {}.{};\n", r.name, argument_buffer_of(p, r.group).parameter, r.name);
+        write_bound_resources(out, p);
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const local = p.e.stage_inputs[i].local;
             out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
                         stage_input_value(p, i));
         }
+    }
+
+    static void write_bound_resources(cc::string& out, plan const& p)
+    {
+        for (auto const& block : p.group_blocks)
+            out.appendf("    constant auto& {} = *{}.{};\n", block.name, argument_buffer_of(p, block.group).parameter,
+                        block.name);
+        for (auto const& r : p.resources)
+            out.appendf("    constant auto& {} = {}.{};\n", r.name, argument_buffer_of(p, r.group).parameter, r.name);
     }
 };
 

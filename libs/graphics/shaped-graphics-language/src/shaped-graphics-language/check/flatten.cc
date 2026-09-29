@@ -86,6 +86,14 @@ struct flattener
         feature_set features;
     };
     cc::vector<feature_use> feature_uses;
+    /// CHK-345: an intersection entry point fused with the any hit of one record, which its own `return` runs.
+    struct fusion
+    {
+        symbol_id any_hit = symbol_id::none;
+        local_id payload = local_id::none;
+        local_id box = local_id::none;
+    };
+    cc::optional<fusion> fused;
 
     /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
     /// A test has no stage, so it may reach what any stage may.
@@ -866,6 +874,86 @@ struct flattener
         add_stmt(where, flat_eval{.value = traced});
         add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
         return add_expr(checked_module::void_type, id, flat_construct{});
+    }
+
+    /// CHK-345: a report beyond the ray's range is none, and one in it is what the any hit decides of it.
+    flat_expr_id decide_report(origin from, flat_expr_id reported)
+    {
+        auto const type = entry.at(reported).type;
+        auto const id = from.expr;
+        auto const members = c.out.at(c.out.at(type).members);
+        auto member_at = [&](cc::string_view name)
+        {
+            for (auto i = isize(0); i < members.size(); ++i)
+                if (members[i].name == name)
+                    return i32(i);
+            return i32(-1);
+        };
+        auto const is_hit = member_at("is_hit");
+        auto const t = member_at("t");
+        auto const* const t_min = c.prelude_names.get_ptr("ray_t_min");
+        auto const* const t_current = c.prelude_names.get_ptr("ray_t_current");
+        auto const* const candidate_of = c.prelude_names.get_ptr("candidate_of_box");
+        if (is_hit < 0 || t < 0 || t_min == nullptr || t_current == nullptr || candidate_of == nullptr)
+            return fail();
+        type_id const floats[] = {c.prelude_type(builtins::k_float), c.prelude_type(builtins::k_float)};
+        auto const at_least = c.find_operator(">=", floats);
+        auto const at_most = c.find_operator("<=", floats);
+        if (!is_valid(at_least) || !is_valid(at_most))
+            return fail();
+
+        auto const r = add_local(local_kind::var, "reported", type);
+        add_stmt(from, flat_var{.local = r, .value = reported});
+        auto const field = [&](i32 m)
+        { return add_expr(members[m].type, id, flat_member{.object = local_ref(r, id), .member = m}); };
+        auto const no_hit = [&]
+        {
+            return make_stmt(
+                from, flat_assign{.place = field(is_hit),
+                                  .value = add_expr(members[is_hit].type, id, flat_bool_literal{.value = false})});
+        };
+
+        flat_expr_id const low[] = {field(t), builtin_call(id, t_min->front(), {})};
+        flat_expr_id const high[] = {field(t), builtin_call(id, t_current->front(), {})};
+        auto const in_range
+            = add_expr(members[is_hit].type, id,
+                       flat_and{.lhs = builtin_call(id, at_least, low), .rhs = builtin_call(id, at_most, high)});
+
+        auto const outer = cc::move(block);
+        block = {};
+        if (is_valid(fused.value().any_hit))
+        {
+            // the candidate, as raytracing.sgl builds it from the box and the report
+            auto const attributes = c.out.at(type).element;
+            auto const builder = candidate_of->front();
+            type_id const bindings[] = {c.out.at(c.out.functions[c.out.at(builder).info].type_parameters)[0], attributes};
+            flat_expr_id const box_and_report[] = {local_ref(fused.value().box, id), local_ref(r, id)};
+            i32 const both[] = {0, 1};
+            auto const made = inline_bound(id, builder, box_and_report, both, {}, bindings);
+            auto const& info = c.out.functions[c.out.at(builder).info];
+            auto const candidate_type = c.substitute_existing(info.result, bindings);
+            auto const candidate = add_expr(candidate_type, id, flat_block{.label = made.label, .body = made.body});
+
+            flat_expr_id const handed[] = {candidate, local_ref(fused.value().payload, id)};
+            auto const decided = inline_bound(id, fused.value().any_hit, handed, both);
+            auto const decision_type = c.out.functions[c.out.at(fused.value().any_hit).info].result;
+            auto const decision = add_expr(decision_type, id, flat_block{.label = decided.label, .body = decided.body});
+            // `ignore` is the decision's case 1, which no report survives
+            type_id const ints[] = {decision_type, decision_type};
+            auto const equals = c.find_operator("==", ints);
+            if (!is_valid(equals))
+                return fail();
+            flat_expr_id const compared[] = {decision, add_expr(decision_type, id, flat_enum_value{.case_index = 1})};
+            flat_stmt_id const ignored[] = {no_hit()};
+            add_stmt(from, flat_if{.condition = builtin_call(id, equals, compared), .then_body = add_list(ignored)});
+        }
+        auto const decide = add_list(block);
+        block = cc::move(outer);
+        flat_stmt_id const out_of_range[] = {no_hit()};
+        flat_stmt_id const checked[]
+            = {make_stmt(from, flat_if{.condition = in_range, .then_body = decide, .else_body = add_list(out_of_range)})};
+        add_stmt(from, flat_if{.condition = field(is_hit), .then_body = add_list(checked)});
+        return local_ref(r, id);
     }
 
     /// CHK-344: `table[i](mut p)` is a call of callable `base + i` of the pipeline's section, where `base` is where the
@@ -1986,6 +2074,9 @@ struct flattener
         auto result = flat_expr_id::none;
         if (ast::is_valid(value))
             result = flatten_expr(value);
+        // CHK-345: the entry point's own report, decided by the fused any hit before it leaves
+        if (fused.has_value() && frames.size() == 1 && is_valid(result))
+            result = decide_report(from, result);
         if (is_valid(return_label))
             add_stmt(from, flat_leave{.target = return_label, .value = result});
         else
@@ -2357,7 +2448,7 @@ bool checker::is_sound(type_id type) const
     return true;
 }
 
-void checker::flatten_entry_point(symbol_id id)
+void checker::flatten_entry_point(symbol_id id, traversal_request const* traversal)
 {
     auto const& s = out.at(id);
     auto const& info = out.functions[s.info];
@@ -2376,7 +2467,7 @@ void checker::flatten_entry_point(symbol_id id)
 
     auto f = flattener{.c = *this};
     f.entry.entry_stage = info.entry_stage;
-    f.entry.name = s.name;
+    f.entry.name = traversal != nullptr ? traversal->name : cc::string(s.name);
     f.entry.function = id;
     // CHK-271: the stage struct, when there is one, is the first parameter; every other is a stage input
     if (!parameters.empty() && parameters[0].input == stage_input::none)
@@ -2401,6 +2492,16 @@ void checker::flatten_entry_point(symbol_id id)
     if (info.entry_stage >= stage::raygen)
     {
         f.entry.input = type_id::none;
+        // CHK-345: a traversal function takes the payload its any hit writes, which no intersection is handed
+        if (traversal != nullptr)
+        {
+            f.fused = flattener::fusion{.any_hit = traversal->any_hit};
+            if (is_valid(traversal->payload))
+            {
+                f.fused.value().payload = f.add_local(local_kind::parameter, "payload", traversal->payload);
+                f.entry.input = traversal->payload;
+            }
+        }
         for (auto const& parameter : parameters)
             if (parameter.is_mut)
             {
@@ -2469,6 +2570,8 @@ void checker::flatten_entry_point(symbol_id id)
             f.add_stmt({.file = s.file, .expr = ast::expr_id::none}, flat_let{.local = local, .value = value});
             f.current()->bound.push_back(
                 {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+            if (f.fused.has_value() && source == "current_procedural_box")
+                f.fused.value().box = local;
         }
     }
     // Every parameter is a local, in the order written: the stage struct at `locals[0]` when there is one.
@@ -2560,5 +2663,45 @@ void checker::flatten_entry_point(symbol_id id)
     }
     judge_constants(f.entry);
     judge_uniformity(f.entry);
+    out.entry_points.push_back(cc::move(f.entry));
+}
+
+void checker::flatten_metal_traversals()
+{
+    auto is_any = false;
+    for (auto const& p : out.pipelines)
+    {
+        if (p.kind != pipeline_kind::hit_group && p.kind != pipeline_kind::raytracing)
+            continue;
+        is_any = true;
+        if (p.kind != pipeline_kind::hit_group || !p.is_procedural || out.at(p.symbol).file != i32(out.files.size()) - 1)
+            continue;
+        auto const rays = out.at(out.at(out.at(p.ray_set).type).members);
+        auto const records = out.at(p.records);
+        for (auto r = isize(0); r < rays.size(); ++r)
+        {
+            auto const request = traversal_request{.name = cc::format("sgl_{}_{}", out.at(p.symbol).name, rays[r].name),
+                                                   .any_hit = records[r * 2 + 1],
+                                                   .payload = rays[r].type};
+            flatten_entry_point(p.intersection, &request);
+        }
+    }
+    // CHK-345: a record without a closest hit calls this one on metal, where a table slot holds a function or crashes
+    // it stands for no function of the source, so it is owned by a ray-tracing function of the program
+    auto owner = symbol_id::none;
+    for (auto const& fn : out.functions)
+        if (fn.entry_stage >= stage::raygen && out.at(fn.symbol).file == i32(out.files.size()) - 1)
+            owner = fn.symbol;
+    if (!is_any || !is_valid(owner))
+        return;
+    auto f = flattener{.c = *this};
+    f.entry.entry_stage = stage::closest_hit;
+    f.entry.function = owner;
+    f.entry.name = "sgl_empty_closest_hit";
+    f.entry.result = checked_module::void_type;
+    f.entry.features = feature_set(feature::raytracing_pipeline);
+    f.entry.names.reserve(f.entry.name);
+    f.frames.push_back({.file = i32(out.files.size()) - 1});
+    f.entry.body = f.add_list(f.block);
     out.entry_points.push_back(cc::move(f.entry));
 }

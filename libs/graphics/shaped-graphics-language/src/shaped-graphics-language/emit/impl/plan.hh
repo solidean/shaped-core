@@ -157,6 +157,9 @@ struct planned_argument_buffer
     cc::string parameter;
 };
 
+/// The ray set a ray-tracing entry point traces or is handed a payload of, `none` for one of neither (EMIT-139).
+[[nodiscard]] check::symbol_id ray_set_of(check::checked_module const& m, check::flat_entry_point const& e);
+
 struct plan
 {
     check::checked_module const& m;

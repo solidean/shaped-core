@@ -846,6 +846,17 @@ struct checker
 
     /// True when every member of the type, at any depth, has a type.
     [[nodiscard]] bool is_sound(type_id type) const;
-    void flatten_entry_point(symbol_id id);
+    /// What a metal traversal function fuses into one intersection entry point: the any hit a record runs after it,
+    /// and the payload that any hit writes (CHK-345).
+    struct traversal_request
+    {
+        cc::string name;
+        symbol_id any_hit = symbol_id::none;
+        type_id payload = type_id::none;
+    };
+    void flatten_entry_point(symbol_id id, traversal_request const* traversal = nullptr);
+    /// CHK-345: every procedural hit group's traversal function per ray type, and the empty closest hit, which metal's
+    /// tables hold where DXR's run an intersection and an any hit apart, or nothing.
+    void flatten_metal_traversals();
 };
 } // namespace sgl::check::impl

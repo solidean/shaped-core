@@ -762,6 +762,38 @@ struct writer
                     line("return;");
                     return;
                 }
+                // EMIT-139: metal's any hit is a traversal function that answers whether it accepts, and writes the
+                // payload back into the ray data it copied it from
+                auto const is_msl = d.language() == builtins::language::msl;
+                auto const write_back = [&]
+                {
+                    if (is_msl && check::is_valid(p.e.input))
+                        line(cc::format("*reinterpret_cast<ray_data {}*>(sgl_data.payload) = {};",
+                                        type_text(p, d, p.e.input), p.locals[0]));
+                };
+                if (is_msl && p.e.entry_stage == check::stage::any_hit)
+                {
+                    auto const decision = p.names.mint("decision");
+                    line(cc::format("const int {} = {};", decision, expr(r.value, true).text));
+                    write_back();
+                    line(cc::format("return {} != 1;", decision));
+                    return;
+                }
+                if (is_msl && p.e.entry_stage == check::stage::intersection)
+                {
+                    auto const type = p.e.at(r.value).type;
+                    auto const reported = p.names.mint("reported");
+                    line(cc::format("const {} {} = {};", type_text(p, d, type), reported, expr(r.value, true).text));
+                    write_back();
+                    line(cc::format("if ({}.{})", reported, member_of(type, "is_hit")));
+                    line("{");
+                    line(cc::format("    *reinterpret_cast<ray_data {}*>(sgl_data.attributes) = {}.{};",
+                                    type_text(p, d, p.m.at(type).element), reported, member_of(type, "attributes")));
+                    line(cc::format("    return {{true, {}.{}}};", reported, member_of(type, "t")));
+                    line("}");
+                    line("return {false, 0.0f};");
+                    return;
+                }
                 // EMIT-136: an any hit's decision is the target's call that ends the stage, and a plain return
                 // accepts the candidate
                 if (p.e.entry_stage == check::stage::any_hit)

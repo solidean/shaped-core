@@ -351,6 +351,7 @@ void checker::run()
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             flatten_entry_point(symbol_id(i));
+    flatten_metal_traversals();
     for (auto i = isize(0); i < out.tests.size(); ++i)
         flatten_test(i32(i));
     // after flattening, which finds what a body's calls need (CHK-322)

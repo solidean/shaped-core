@@ -955,6 +955,11 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         p.need(x.type, struct_role::plain);
         p.need_enum(x.type);
     }
+    // EMIT-139: MSL sizes the ray data by every payload of the set, which each of its shaders must agree on
+    if (t == target::msl)
+        if (auto const set = ray_set_of(m, e); check::is_valid(set))
+            for (auto const& ray : m.at(m.at(m.at(set).type).members))
+                p.need(ray.type, struct_role::plain);
     // A struct in a block or a buffer is declared whether or not the code reads it whole.
     for (auto const id : e.bindings)
         for (auto const& member : m.at(m.bindings[m.at(id).info].members))
@@ -1164,4 +1169,21 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
         result.push_back(cc::move(layout));
     }
     return result;
+}
+
+sgl::check::symbol_id sgl::emit::impl::ray_set_of(check::checked_module const& m, check::flat_entry_point const& e)
+{
+    if (!e.traced_rays.empty())
+        return e.traced_rays.front().set;
+    if (e.entry_stage < check::stage::raygen || e.entry_stage == check::stage::callable || !check::is_valid(e.input))
+        return check::symbol_id::none;
+    for (auto const& p : m.pipelines)
+    {
+        if (!check::is_valid(p.ray_set))
+            continue;
+        for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
+            if (ray.type == e.input)
+                return p.ray_set;
+    }
+    return check::symbol_id::none;
 }
