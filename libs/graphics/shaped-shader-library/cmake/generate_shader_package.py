@@ -814,7 +814,10 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     for index, path in enumerate(embedded):
         text = (manifest.source_dir / path).read_text(encoding="utf-8")
         out.append(f"constexpr char const* k_source_{index} ={embed_literal(text)};\n")
-        entries.append(f'{{.path = "{path}", .text = k_source_{index}}}')
+        # The length is emitted rather than counted, since a constexpr strlen over a large package runs past MSVC's step limit.
+        # read_text already turned CRLF into \n, so the UTF-8 byte count is exactly what the literal holds.
+        size = len(text.encode("utf-8"))
+        entries.append(f'{{.path = "{path}", .text = cc::string_view(k_source_{index}, {size})}}')
 
     out.append("\nconstexpr slib::embedded_file k_embedded_files[] = {\n")
     for entry in entries:
