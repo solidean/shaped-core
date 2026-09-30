@@ -855,9 +855,13 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide",
 // What it pins is the contract the front depends on, not the picture: a call carrying every required guide denoises,
 // and one missing a required guide refuses rather than running degraded.
 // The image itself is the driver's and changes with it, which is why no reference is committed.
+//
+// Holds sg-reload-generation: a reload another test signals makes the routine pending until the next tick, and the
+// calls below assume it stays ready from the prewarm to the last of them.
 ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call without its guides",
                      (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     exclusive("slib-shader-library"),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
