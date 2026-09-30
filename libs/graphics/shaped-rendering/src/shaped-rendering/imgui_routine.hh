@@ -46,12 +46,16 @@ private:
 ///
 /// The routine owns one raster pipeline for its target format; the GPU textures behind imgui's atlas belong to the
 /// texture routine above, which every format shares.
-/// execute() runs under acquire_exclusive for its whole length, so two threads recording imgui against the same context serialize rather than race.
+/// prepare() and execute() each take the texture routine's lock, so two threads recording imgui against the same context serialize rather than race.
+/// Only execute() holds this format's instance, for its whole length.
 /// The atlas deliberately survives a shader reload — it has nothing to do with our shaders.
 ///
 /// **Two calls, because a rendering scope must not hold what imgui needs before it draws.**
 /// Its texture requests and its geometry are copies, and a copy inside a scope closes and reopens the pass on vulkan, webgpu and metal.
 /// So prepare() records them on the command list before the scope opens, and execute() only draws.
+/// On vulkan the first draw's barrier on that uploaded geometry still splits the scope once per frame, until sg can
+/// declare a buffer's access before a scope opens — libs/graphics/shaped-rendering/docs/imgui.md says it too, and
+/// libs/graphics/shaped-graphics/docs/TODO.md carries the declaration this waits on.
 ///
 /// This frame's geometry is deliberately *not* routine state:
 /// it is allocated from the transient scope and travels in the prepared_frame, so the pair is re-entrant across imgui's viewports.
@@ -67,6 +71,10 @@ public:
     struct prepared_frame
     {
         ImDrawData* draw_data = nullptr;
+
+        /// The list prepare() recorded the uploads on; execute() asserts the scope it draws in belongs to it.
+        sg::command_list const* command_list = nullptr;
+
         sg::buffer<ImDrawVert> vertices;
 
         /// 32-bit, matching the `ImDrawIdx` our injected imgui config widens — an `ImDrawCmd`'s first index is

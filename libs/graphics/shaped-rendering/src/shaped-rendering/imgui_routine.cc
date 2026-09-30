@@ -188,7 +188,7 @@ imgui_routine::prepared_frame imgui_routine::prepare(sg::command_list& cmd, ImDr
 {
     CC_ASSERT(draw_data != nullptr, "draw data must not be null — call ImGui::Render() first");
     auto& ctx = cmd.context();
-    auto frame = prepared_frame{.draw_data = draw_data};
+    auto frame = prepared_frame{.draw_data = draw_data, .command_list = &cmd};
 
     // A new texture's bytes go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them at
     // submit; an update is a copy on this list, because by then the atlas has been sampled and the copy queue cannot
@@ -226,6 +226,9 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, prepared_
     auto* const draw_data = frame.draw_data;
 
     auto& cmd = scope.command_list();
+    // The frame's geometry was uploaded on one list, and only that list's draws can see it.
+    CC_ASSERT(frame.command_list == &cmd, "this frame was prepared on another command list; prepare and execute it on "
+                                          "the same one");
     CC_ASSERT(!scope.color_formats().empty(), "imgui must be drawn into a scope with a color target");
     auto const target_format = scope.color_formats()[0];
     auto const target_size = scope.render_target_size();
