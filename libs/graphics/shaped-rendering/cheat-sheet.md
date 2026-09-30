@@ -337,8 +337,9 @@ out.method / out.restarted                             // the member that ran; w
 history.reset()                                        // a camera cut: the next call restarts
 
 sr::query_denoise_support(ctx)                         // -> sr::denoise_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd}
-sr::resolve_denoise_method(ctx, settings)              // -> the member `automatic` (or a named method) means here
-sr::denoise_input_extent(ctx, settings, out_extent)    // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
+sr::resolve_denoise_method(ctx, settings, guides)      // -> the member `automatic` (or a named method) means here; `guides` is what the CALLER can supply
+sr::denoise_input_extent(ctx, settings, out_extent, guides)  // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
+                                                       //    both skip a member whose required_guides the caller lacks, so automatic degrades instead of denoising nothing
 sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_set (cc::flags<sr::denoise_guide>)
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly

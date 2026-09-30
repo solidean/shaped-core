@@ -338,12 +338,20 @@ namespace sr
 /// A supported member can still be `pending` for its first frames, and `failed` if its shader does not build.
 [[nodiscard]] denoise_support query_denoise_support(sg::context const& ctx);
 
-/// The member `settings.method` resolves to on `ctx`: itself when named, the best supported one for `automatic`.
-/// `none` when nothing is supported or nothing was asked for.
+/// The member `settings.method` resolves to on `ctx`: itself when named, the best one for `automatic`.
+/// `none` when nothing qualifies or nothing was asked for.
 ///
-/// A named member resolves to itself whether or not `ctx` supports it, so a comparison between two named members
-/// never silently compares one with itself; refusing it is `denoise_routine::execute`'s job.
-[[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings);
+/// **`available_guides` is what the caller can supply**, and `automatic` skips a member that needs more than that.
+/// Without it `automatic` would pick the best member the DEVICE can run, which `execute` then refuses for a guide the
+/// call does not carry — and the caller gets no denoising at all rather than the best member its inputs support.
+/// A caller that already has its textures passes `denoise_inputs::present_guides()`; one still planning its trace
+/// passes the set it intends to write.
+///
+/// A named member resolves to itself whether or not `ctx` supports it and whatever guides are named, so a comparison
+/// between two named members never silently compares one with itself; refusing it is `denoise_routine::execute`'s job.
+[[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx,
+                                                    denoise_settings const& settings,
+                                                    denoise_guide_set available_guides);
 
 /// Whether a member reads history, and so needs fresh per-frame samples and motion vectors rather than a converging mean.
 [[nodiscard]] bool is_temporal(denoise_method m);
@@ -357,11 +365,14 @@ namespace sr
 /// The input extent to trace so that the member `settings` resolves to produces `output_extent` under `settings.scale`.
 ///
 /// Always ask this rather than scaling by hand: a member supports only its own ratios, and a spatial one only 1.
-/// A member `ctx` cannot run answers `output_extent`, because the call will be refused and a caller that traced
+/// A member that will not run answers `output_extent`, because the call would be refused and a caller that traced
 /// smaller for it would composite a smaller image into its own output.
+/// `available_guides` is why that check is not just about the device: a member whose guides the caller cannot supply
+/// will be refused exactly as one the device cannot run, and both have to answer the same way.
 [[nodiscard]] tg::vec2i denoise_input_extent(sg::context const& ctx,
                                              denoise_settings const& settings,
-                                             tg::vec2i output_extent);
+                                             tg::vec2i output_extent,
+                                             denoise_guide_set available_guides);
 } // namespace sr
 
 /// The front routine: one call for every denoiser.

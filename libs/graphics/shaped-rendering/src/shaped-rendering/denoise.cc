@@ -281,38 +281,50 @@ denoise_guide_set optional_guides(denoise_method m)
 namespace
 {
 /// `resolve_denoise_method` against a support answer the caller already has.
-[[nodiscard]] denoise_method resolve_with(denoise_support const& support, denoise_settings const& settings)
+[[nodiscard]] denoise_method resolve_with(denoise_support const& support,
+                                          denoise_settings const& settings,
+                                          denoise_guide_set available_guides)
 {
     if (settings.method != denoise_method::automatic)
         return settings.method;
 
     auto const preference = settings.fresh_samples ? cc::span<denoise_method const>(temporal_preference)
                                                    : cc::span<denoise_method const>(spatial_preference);
+
+    // Both conditions, because a member that fails either one reports `unsupported` from `execute` and writes nothing.
+    // Skipping only the device check would pick the best member the hardware can run and then refuse it for a guide
+    // the caller never had, which leaves `automatic` denoising nothing at all.
     for (auto const m : preference)
-        if (support.supports(m))
+        if (support.supports(m) && required_guides(m).without(available_guides).is_empty())
             return m;
     return denoise_method::none;
 }
 } // namespace
 
-denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings)
+denoise_method resolve_denoise_method(sg::context const& ctx,
+                                      denoise_settings const& settings,
+                                      denoise_guide_set available_guides)
 {
     if (settings.method != denoise_method::automatic)
         return settings.method;
-    return resolve_with(query_denoise_support(ctx), settings);
+    return resolve_with(query_denoise_support(ctx), settings, available_guides);
 }
 
-tg::vec2i denoise_input_extent(sg::context const& ctx, denoise_settings const& settings, tg::vec2i output_extent)
+tg::vec2i denoise_input_extent(sg::context const& ctx,
+                               denoise_settings const& settings,
+                               tg::vec2i output_extent,
+                               denoise_guide_set available_guides)
 {
-    auto const m = resolve_denoise_method(ctx, settings);
+    auto const m = resolve_denoise_method(ctx, settings, available_guides);
 
     // Only the vendor members upscale; every native member and OIDN works at one ratio.
     if (m != denoise_method::dlss_rr && m != denoise_method::fsr_rr)
         return output_extent;
 
-    // A named member this context cannot run will be refused, and a caller that traced smaller for it would then
-    // composite a smaller image into its own output.
-    if (!query_denoise_support(ctx).supports(m))
+    // A member that will be refused answers the output's own size, and there are two ways to be refused: the device
+    // cannot run it, or the caller cannot supply a guide it requires.
+    // A caller that traced smaller for either would composite a smaller image into its own output.
+    if (!query_denoise_support(ctx).supports(m) || !required_guides(m).without(available_guides).is_empty())
         return output_extent;
 
     auto const ratio = vendor_ratio(settings.scale);
@@ -355,7 +367,7 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     auto& ctx = cmd.context();
     // Asked once and used twice, since the resolver and the support check want the same answer.
     auto const support = query_denoise_support(ctx);
-    auto const method = resolve_with(support, settings);
+    auto const method = resolve_with(support, settings, in.present_guides());
     if (method == denoise_method::none || !support.supports(method))
     {
         // The resolved method rather than what was asked for, so both refusal paths report a member rather than

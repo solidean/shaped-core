@@ -247,7 +247,7 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     auto const on_a_mean = sr::denoise_settings{.method = sr::denoise_method::automatic};
     auto const on_fresh_frames = sr::denoise_settings{.method = sr::denoise_method::automatic, .fresh_samples = true};
     CHECK(support.svgf);
-    CHECK(sr::resolve_denoise_method(ctx, on_a_mean) == sr::denoise_method::atrous);
+    CHECK(sr::resolve_denoise_method(ctx, on_a_mean, sr_test::every_guide()) == sr::denoise_method::atrous);
 
     // WHICH temporal member depends on the machine, which is the whole point of `automatic`: a vendor member outranks
     // the native one where its SDK was fetched and the adapter carries it, and svgf is what everything else gets.
@@ -255,7 +255,7 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     //
     // Written as the whole ORDER rather than as one name, because naming the runner-up is a test that passes only on
     // the machines where no better member is present.
-    auto const temporal = sr::resolve_denoise_method(ctx, on_fresh_frames);
+    auto const temporal = sr::resolve_denoise_method(ctx, on_fresh_frames, sr_test::every_guide());
     auto const expected = support.dlss_rr ? sr::denoise_method::dlss_rr
                         : support.fsr_rr  ? sr::denoise_method::fsr_rr
                         : support.nrd     ? sr::denoise_method::nrd
@@ -267,12 +267,12 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must
     // not be quietly exchanged for another.
     auto const dlss = sr::denoise_settings{.method = sr::denoise_method::dlss_rr};
-    CHECK(sr::resolve_denoise_method(ctx, dlss) == sr::denoise_method::dlss_rr);
+    CHECK(sr::resolve_denoise_method(ctx, dlss, sr_test::every_guide()) == sr::denoise_method::dlss_rr);
 
     // Only the vendor members trace smaller than they output; every other member answers the output's own size.
     auto const scaled
         = sr::denoise_settings{.method = sr::denoise_method::atrous, .scale = sr::render_scale_preset::performance};
-    CHECK(sr::denoise_input_extent(ctx, scaled, tg::vec2i(640, 480)) == tg::vec2i(640, 480));
+    CHECK(sr::denoise_input_extent(ctx, scaled, tg::vec2i(640, 480), sr_test::every_guide()) == tg::vec2i(640, 480));
 
     // ...and what an upscaling member answers depends on whether THIS device can run it, so both arms are pinned.
     // Asserting `!support.dlss_rr` instead would be the same mistake the temporal order above avoids: a test that
@@ -280,13 +280,31 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     auto const dlss_scaled = sr::denoise_settings{.method = sr::denoise_method::dlss_rr,
                                                   .scale = sr::render_scale_preset::performance,
                                                   .fresh_samples = true};
-    auto const dlss_extent = sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480));
+    auto const dlss_extent = sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480), sr_test::every_guide());
     if (support.dlss_rr)
         CHECK(dlss_extent == tg::vec2i(320, 240)).context("performance halves each axis");
     else
         // A caller that traced smaller for a call about to be refused would composite a half-resolution image into a
         // full-resolution output.
         CHECK(dlss_extent == tg::vec2i(640, 480)).context("a member this device cannot run does not upscale");
+
+    // `automatic` walks what the CALLER can feed, not what the device can run.
+    // The guides here are what a caller with no specular pair has, which every vendor member requires and svgf does
+    // not — so the answer is svgf however good the hardware is.
+    // Resolving on device support alone would name a vendor member that `execute` then refuses for the missing
+    // guide, and the caller would get no denoising at all rather than the best member its inputs support.
+    using g = sr::denoise_guide;
+    auto const without_specular = g::albedo | g::normal | g::depth | g::motion;
+    CHECK(sr::resolve_denoise_method(ctx, on_fresh_frames, without_specular) == sr::denoise_method::svgf)
+        .context("a member whose required guides are missing is not what automatic picks");
+
+    // And the extent follows it: a member that will be refused answers the output's own size, whichever of the two
+    // reasons refuses it.
+    CHECK(sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480), without_specular) == tg::vec2i(640, 480))
+        .context("a member the caller cannot feed does not upscale either");
+
+    // Dropping motion as well leaves the spatial members, so the temporal ask degrades rather than failing.
+    CHECK(sr::resolve_denoise_method(ctx, on_fresh_frames, g::albedo | g::normal) == sr::denoise_method::atrous);
     co_return;
 }
 

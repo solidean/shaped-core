@@ -44,7 +44,7 @@ Where NRD needs only its sources fetched and then runs on any dx12 adapter, WARP
 So its own test SKIPs everywhere but one developer's machine, and a green check here says nothing about whether DLSS works.
 
 **`dlss_rr` is the member whose output is not its input's size**, and a caller must ask rather than divide.
-`sr::denoise_input_extent(ctx, settings, output_extent)` answers what size to trace, and it is the only correct way to get that number.
+`sr::denoise_input_extent(ctx, settings, output_extent, available_guides)` answers what size to trace, and it is the only correct way to get that number.
 Asking matters most in the case that looks like it needs no answer: a member this device cannot run answers the output's own size.
 A caller who scaled by a ratio of their own would then trace at half resolution for a call about to be refused, and composite that half-resolution image into a full-resolution target.
 The ratio itself comes from `denoise_settings::scale`.
@@ -277,6 +277,11 @@ Whether a vendor member can honour this is open — it may write its own alpha a
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
 `dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
+
+**`automatic` walks what the caller can feed, not only what the device can run.**
+A member is skipped when its `required_guides` are not in the `available_guides` the caller passed, because `execute` would refuse it for exactly that and write nothing.
+Resolving on device support alone picks the best member the hardware has and then refuses it, so a caller with no specular pair gets no denoising rather than SVGF.
+`sr::denoise_input_extent` applies the same rule, since a member that will be refused must answer the output's own size whichever of the two reasons refuses it.
 `oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 A silent fallback would make a comparison between two named members compare one with itself, which is the failure the framework's three-state readiness exists to prevent.
