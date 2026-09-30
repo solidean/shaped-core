@@ -9,5 +9,12 @@ rules:
     reason: sg's handles ARE std::shared_ptr, so anything holding one names it — see shaped-graphics/docs/coding-guidelines.md
 
   - kind: allow-include
+    value: <NRD.h>
+    reason: NVIDIA's denoiser library, reached by impl/nrd_instance.cc and impl/nrd_session.cc alone — the seam they implement names no NRD type
+    files:
+      - src/shaped-rendering/impl/nrd_instance.cc
+      - src/shaped-rendering/impl/nrd_session.cc
+
+  - kind: allow-include
     value: <OpenImageDenoise/oidn.hpp>
     reason: Intel's denoiser library, the OIDN member's test oracle, confined to tests/oidn_reference.cc

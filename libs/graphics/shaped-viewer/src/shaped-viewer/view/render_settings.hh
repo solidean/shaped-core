@@ -44,6 +44,11 @@ struct sv::render_settings
     /// reaches the trace hash — turning it on, off or to another member keeps a converged image converged.
     /// While the mean is young a temporal member denoises this frame's own samples, then a spatial one takes over on
     /// the mean — see `temporal_denoise_frames`.
+    ///
+    /// **Naming a temporal member names the TEMPORAL phase only**, and the spatial phase past the hand-off stays
+    /// `automatic`'s choice.
+    /// A temporal member cannot run the spatial phase at all: it would be handed the converging mean with no motion
+    /// guide, and would report `unsupported`.
     sr::denoise_settings denoise = {.method = sr::denoise_method::none};
 
     /// For how many accumulated frames after a restart a temporal member denoises this frame's own samples, before the

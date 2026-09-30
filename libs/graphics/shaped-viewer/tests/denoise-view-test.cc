@@ -130,13 +130,19 @@ namespace
 {
 /// Captures the cornell box at `accumulate` frames of one sample each, denoised by `method`, as a PNG at `path`.
 /// PNG rather than the JPEG default, because JPEG's own smoothing would blur exactly the difference under test.
-cc::shared_async<cc::unit> capture_box(sg::context& ctx, sr::denoise_method method, cc::string const& path)
+///
+/// `accumulate` is what decides which denoise phase the captured frame is in: at 2 the temporal member owns it, and
+/// past `temporal_denoise_frames + temporal_denoise_fade_frames` — 16 + 8 by default — the spatial one does.
+cc::shared_async<cc::unit> capture_box(sg::context& ctx,
+                                       sr::denoise_method method,
+                                       cc::string const& path,
+                                       int accumulate = 2)
 {
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "96x64");
-    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "2");
+    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", accumulate));
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "20");
 
     auto const box = sv_test::make_cornell_box();
@@ -240,6 +246,99 @@ ASYNC_INVOCABLE_TEST("sv - a denoised capture is smoother than the raw one", (sg
     cc::remove_file(raw_path);
     cc::remove_file(spatial_path);
     cc::remove_file(temporal_path);
+}
+
+// The split-signal path, end to end: NRD reading the two lobes the tracer writes.
+//
+// The assertion is the same smoothness one, and it is what makes this worth having.
+// Every guide NRD requires has to reach it — the split radiance, the hit distances, the specular pair, the matrices —
+// and a call missing one reports `unsupported`, which sv answers by presenting the raw mean.
+// So a viewer that declares a slot but never fills it comes back at the raw image's roughness rather than failing
+// anywhere, and this check is what turns that into a red test.
+ASYNC_INVOCABLE_TEST("sv - the viewer drives the split-signal denoiser", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+    if (!sr::query_denoise_support(ctx).nrd)
+        SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
+
+    auto const raw_path = cc::format("{}/sv-denoise-split-raw.png", cc::temp_directory_path());
+    auto const nrd_path = cc::format("{}/sv-denoise-nrd.png", cc::temp_directory_path());
+
+    co_await capture_box(ctx, sr::denoise_method::none, raw_path);
+    co_await capture_box(ctx, sr::denoise_method::nrd, nrd_path);
+
+    auto const raw = roughness_of(raw_path);
+    auto const nrd = roughness_of(nrd_path);
+    CHECK(nrd < 0.7 * raw).context(cc::format("roughness raw {} nrd {}", raw, nrd));
+
+    cc::remove_file(raw_path);
+    cc::remove_file(nrd_path);
+}
+
+// A layer that NAMES a temporal member, captured past the hand-off.
+//
+// `render_settings::denoise.method` names the temporal phase; the spatial phase that takes over once the mean has
+// `temporal_denoise_frames + temporal_denoise_fade_frames` frames is a different call, on the mean rather than on this
+// frame's samples.
+// Carrying the named temporal member into it hands a temporal member the converging mean with no motion guide, which
+// the front refuses — so the layer presented the RAW MEAN from the hand-off onward, and logged a refusal per frame.
+//
+// Captured at 30 accumulated frames, past 16 + 8, which is the phase the two-frame captures above never reach.
+// Nothing logged is half the assertion: the refusal warns, and the log rule fails the test on it.
+ASYNC_INVOCABLE_TEST("sv - a named temporal member still denoises past the hand-off", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+
+    auto const raw_path = cc::format("{}/sv-handoff-raw.png", cc::temp_directory_path());
+
+    // Both members that `is_temporal` names and this build can run: svgf always, nrd where its SDK was fetched.
+    // svgf is the one that shows this predates the NRD member.
+    auto methods = cc::vector<sr::denoise_method>{sr::denoise_method::svgf};
+    if (sr::query_denoise_support(ctx).nrd)
+        methods.push_back(sr::denoise_method::nrd);
+
+    constexpr auto k_past_handoff = 30;
+
+    co_await capture_box(ctx, sr::denoise_method::none, raw_path, k_past_handoff);
+    auto const raw = roughness_of(raw_path);
+    cc::remove_file(raw_path);
+
+    for (auto const method : methods)
+    {
+        auto const path = cc::format("{}/sv-handoff-{}.png", cc::temp_directory_path(), sr::to_string(method));
+        co_await capture_box(ctx, method, path, k_past_handoff);
+        auto const denoised = roughness_of(path);
+
+        // The spatial phase runs à-trous on the mean, so the captured frame is smoother than the raw one.
+        // Before the fix this came back at the raw image's roughness exactly, because nothing denoised it at all.
+        CHECK(denoised < 0.9 * raw)
+            .context(cc::format("{} past the hand-off: roughness raw {}, denoised {}", sr::to_string(method), raw,
+                                denoised));
+
+        cc::remove_file(path);
+    }
 }
 
 // The curve the hand-off from the temporal denoiser to the spatial one follows.
