@@ -248,10 +248,17 @@ tg::vec3f nrd_hit_distance_parameters()
     return tg::vec3f(defaults.A, defaults.B, defaults.C);
 }
 
+f32 nrd_denoising_range()
+{
+    // Far past any scene we trace, and finite so that a pixel beyond it is unambiguous.
+    return 1.0e5f;
+}
+
 f32 nrd_sky_view_z()
 {
-    // NRD's own ceiling for a half-float payload, which is how far away "not a surface" has to be to stay one.
-    return 65504.0f;
+    // An order of magnitude past the range, so nothing a tracer writes can round back inside it.
+    // Not the half-float ceiling: the view-Z slot is `r32_float`, so the payload does not cap this.
+    return 10.0f * nrd_denoising_range();
 }
 
 bool nrd_session::create(sg::context& ctx, nrd_denoiser denoiser, tg::vec2i extent)
@@ -387,6 +394,16 @@ bool nrd_session::is_ready() const
     return true;
 }
 
+bool nrd_session::has_failed() const
+{
+    if (_instance == nullptr)
+        return false;
+    for (auto const& p : _pipelines)
+        if (p == nullptr || p->has_error())
+            return true;
+    return false;
+}
+
 namespace
 {
 /// `tg`'s matrix written into NRD's `float[16]`, which is the same convention — column-major, vectors are columns.
@@ -455,6 +472,11 @@ bool nrd_session::execute(sg::command_list& cmd, nrd_frame const& frame, nrd_res
     settings.rectSizePrev[1] = u16(_extent[1]);
 
     settings.frameIndex = frame.frame_index;
+
+    // Without this NRD's default of 500000 leaves a sky pixel inside the range, so it reprojects and blurs the sky as
+    // though it were geometry.
+    // `nrd_sky_view_z` is above this by construction, and NRD leaves anything beyond it unwritten.
+    settings.denoisingRange = nrd_denoising_range();
 
     // A reset is what a camera cut and a first frame both are: the history describes something else, so NRD is told to
     // start over rather than to reproject into it.

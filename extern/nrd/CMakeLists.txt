@@ -11,7 +11,7 @@ cmake_minimum_required(VERSION 3.28)
 #
 # Unlike DLSS it needs no native scope and no vendor runtime at all.
 # NRD computes a LIST of dispatches and hands it back; shaped-rendering executes them through sg, which is what makes
-# this the one vendor member that runs on any adapter.
+# this the one vendor member that runs on any dx12 adapter, WARP included.
 set(NRD_INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/.install)
 
 if(NOT EXISTS "${NRD_INSTALL}/pin.txt")

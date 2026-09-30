@@ -22,7 +22,8 @@ struct nrd_repack_constants
     float hit_distance_c;
 
     // What a primary ray that hit nothing writes as view depth.
-    // Sky is not a surface NRD can reproject, and it recognizes one by an out-of-range depth rather than by a flag.
+    // Sky is not a surface NRD can reproject, and NRD has no flag for one: the value is past the denoising range its
+    // common settings carry, which is what makes the pixel sky to it.
     float sky_view_z;
 
     // The rotation of world-to-view, one row per lane; the translation is left out because only a direction is
@@ -78,6 +79,7 @@ using namespace nrd_repack_bindings;
 
     // A missed ray has no normal to speak of; anything normalized will do, and leaving it zero makes NRD's own
     // normalize produce NaNs that then spread through the history.
+    // `nrd_resolve.hlsl` makes the same `depth > 0` test to pass the sky through untouched.
     float3 normal = gNormal.Load(p).rgb;
     normal = is_surface ? normalize(normal) : float3(0, 0, 1);
 

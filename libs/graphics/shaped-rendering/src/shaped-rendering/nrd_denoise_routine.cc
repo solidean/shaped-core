@@ -40,8 +40,25 @@ nrd_options nrd_denoise_routine::options_for(denoise_settings const& settings)
 
 bool nrd_denoise_routine::is_available(sg::context const& ctx)
 {
-    (void)ctx;
-    return impl::nrd_is_compiled_in();
+    if (!impl::nrd_is_compiled_in())
+        return false;
+
+    // NRD embeds DXIL alone, and `nrd_session::create` hands sg exactly that.
+    // A context that cannot build from it would assert inside the backend on the first pipeline, which is the case
+    // `query_denoise_support` exists to keep `automatic` away from.
+    if (!ctx.accepts_shader_format(sg::shader_format::dxil))
+        return false;
+
+#if SR_HAS_NRD
+    // The two passes that bracket NRD are OUR HLSL, so a context whose library has no compiler for them cannot run
+    // the member however well NRD itself is built.
+    // Inside the guard because without the SDK the package carries no such symbols at all.
+    for (auto const& asset : {shaders::nrd_repack.compute.main_cs, shaders::nrd_resolve.compute.main_cs})
+        if (asset == nullptr || !asset->can_acquire(ctx))
+            return false;
+#endif
+
+    return true;
 }
 
 #if SR_HAS_NRD
@@ -177,6 +194,12 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
     auto& session = *static_cast<impl::nrd_session*>(history._member_state.get());
 
     // The instance exists well before its pipelines do — NRD's shaders build through the context's cache like ours.
+    // A build that FAILED is not-ready too, and reporting that as pending declines every frame forever, so it is
+    // asked about first.
+    // The session is kept either way: its pipelines come from the context's cache, so a fresh one gets the same
+    // failed build back.
+    if (session.has_failed())
+        return outcome_of(denoise_status::failed, restarted);
     if (!session.is_ready())
         return outcome_of(denoise_status::pending, restarted);
 
@@ -257,6 +280,9 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
             .gSpecularRadianceHitDistance = history._state[slot_specular_out].as_texture_view(),
             .gDiffuseFactor = history._state[slot_diffuse_factor].as_texture_view(),
             .gSpecularFactor = history._state[slot_specular_factor].as_texture_view(),
+            .gDiffuse = in.color.as_texture_view(),
+            .gSpecular = in.specular.as_texture_view(),
+            .gDepth = in.guides.depth.as_texture_view(),
             .gOutput = in.output.as_any_image_view(),
         });
 

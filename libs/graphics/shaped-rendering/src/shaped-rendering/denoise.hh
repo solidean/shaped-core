@@ -33,7 +33,7 @@ enum class sr::denoise_method : sg::u8
     oidn,    ///< Intel Open Image Denoise; spatial
     dlss_rr, ///< NVIDIA DLSS Ray Reconstruction; temporal
     fsr_rr,  ///< AMD FSR Ray Regeneration; temporal
-    nrd,     ///< NVIDIA Real-Time Denoisers (REBLUR); temporal, and runs on any adapter
+    nrd,     ///< NVIDIA Real-Time Denoisers (REBLUR); temporal, and runs on any dx12 adapter
 
     count_
 };
@@ -232,15 +232,6 @@ public:
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
 
-    /// Releases whatever a member is holding for this stream.
-    ///
-    /// **The GPU must be done with this history**, which for a member holding device memory is a real requirement
-    /// rather than good manners: state released while a frame that used it is still in flight is a use-after-free
-    /// with no diagnostic.
-    /// A caller dropping a history mid-frame drains first; sv drops one only when its view goes, which is after the
-    /// store has let the epoch complete.
-    ~denoise_history() = default;
-
     /// How many images a member may keep here.
     /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
     static constexpr int state_slots = 8;
@@ -268,7 +259,7 @@ private:
     /// Returns whether the call starts from no history.
     bool _prepare(denoise_method method, tg::vec2i extent);
 
-    /// A member's own per-stream object — for OIDN, the network and its feature maps.
+    /// A member's own per-stream object — for OIDN the network and its feature maps, for NRD its instance.
     ///
     /// Type-erased so this header names no member's type; `make_shared` captured the deleter that frees it.
     /// It must hold only what is safe to drop mid-frame, as sg resources are.

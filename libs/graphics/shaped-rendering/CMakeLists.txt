@@ -106,7 +106,7 @@ endif()
 #
 # It links PRIVATE and reaches impl/ alone, like every other vendor SDK here.
 # No backend gate: NRD hands back a LIST of dispatches and shaped-rendering executes them through sg, so unlike DLSS
-# this member needs no native scope and runs wherever sg does.
+# this member needs no native scope and runs on any dx12 adapter, WARP included.
 if(TARGET NRD)
     target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/nrd_instance.cc
                                         src/shaped-rendering/impl/nrd_session.cc)

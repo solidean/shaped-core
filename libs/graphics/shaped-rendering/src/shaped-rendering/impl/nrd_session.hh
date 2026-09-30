@@ -14,7 +14,7 @@
 /// NRD is a planner rather than a renderer: it answers "which compute dispatches would denoise this frame, against
 /// which resources, with which constants", and this executes that answer through sg.
 /// So the pipelines are sg compute pipelines built from the DXIL NRD embeds, the scratch textures are sg textures, and
-/// the dispatches are ours — which is why this member needs no native scope and runs on any adapter.
+/// the dispatches are ours — which is why this member needs no native scope and runs on any dx12 adapter.
 ///
 /// Held in the caller's `sr::denoise_history`, because an NRD instance carries the temporal history and a stream is
 /// what owns one.
@@ -27,8 +27,18 @@ namespace sr::impl
 /// These are NRD's own defaults, which is what a session that sets no REBLUR settings gets.
 [[nodiscard]] tg::vec3f nrd_hit_distance_parameters();
 
+/// The view depth past which NRD treats a pixel as holding no surface, which is what it reads instead of a sky flag.
+///
+/// NRD's own default is 500000, and its header recommends putting the sky strictly beyond whatever this is, so the two
+/// are chosen together here rather than left to that default.
+[[nodiscard]] f32 nrd_denoising_range();
+
 /// The view depth a primary ray that hit nothing writes.
-/// Sky is not a surface NRD can reproject, and it recognizes one by an out-of-range depth rather than by a flag.
+///
+/// Sky is not a surface NRD can reproject, and NRD has no flag for one: a pixel counts as sky by being beyond
+/// `nrd_denoising_range`, so this must stay strictly greater than it.
+/// NRD then leaves such a pixel unwritten, which is why `nrd_resolve.hlsl` passes the tracer's own radiance through
+/// there rather than reading NRD's output.
 [[nodiscard]] f32 nrd_sky_view_z();
 
 /// Which NRD denoiser a session runs.
@@ -111,13 +121,22 @@ public:
     [[nodiscard]] bool create(sg::context& ctx, nrd_denoiser denoiser, tg::vec2i extent);
 
     /// Whether every pipeline has finished building, which is what `execute` needs.
+    /// False both before a build finishes and after one fails, so a caller must ask `has_failed` to tell them apart.
     [[nodiscard]] bool is_ready() const;
+
+    /// Whether any pipeline's build finished in an error, which `is_ready` cannot distinguish from still building.
+    ///
+    /// These pipelines are built against a register layout written out by hand, so an upstream that moves a register
+    /// fails exactly here — and a caller reading that as "still building" declines every frame forever.
+    /// Rebuilding the session does not help: the pipelines come from the context's cache, which hands back the same
+    /// failed build.
+    [[nodiscard]] bool has_failed() const;
 
     [[nodiscard]] bool is_valid() const { return _instance != nullptr; }
     [[nodiscard]] tg::vec2i extent() const { return _extent; }
 
     /// Records this frame's dispatches onto `cmd`.
-    /// False when NRD produced none, or when a pipeline is still building.
+    /// False when NRD produced none, or when a pipeline is not ready — `has_failed` says which of the two that is.
     [[nodiscard]] bool execute(sg::command_list& cmd, nrd_frame const& frame, nrd_resources const& resources);
 
 private:

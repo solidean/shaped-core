@@ -25,8 +25,12 @@ struct sr::nrd_options
 ///
 /// Unlike DLSS it has no device requirement at all.
 /// NRD compiles nothing at run time and records nothing: it answers which compute dispatches would denoise this frame,
-/// and shaped-rendering runs them through sg — so this is the one vendor member that works on any adapter, WARP
-/// included, and the only split-signal member that can be tested without the hardware that shipped it.
+/// and shaped-rendering runs them through sg — so it asks nothing of the adapter and runs on any dx12 one, WARP
+/// included, which is what lets it be tested without the hardware that shipped it.
+///
+/// **dx12 only today**, because NRD embeds DXIL alone and this member hands sg exactly that; `is_available` asks the
+/// context rather than assuming, so a vulkan context reports `unsupported`.
+/// docs/denoising.md has the two routes that would widen it.
 ///
 /// It requires every guide `sr::required_guides(denoise_method::nrd)` names, `split_diffuse_specular` among them: the
 /// denoiser's whole premise is that the two lobes blur differently, so a call carrying one radiance texture reports

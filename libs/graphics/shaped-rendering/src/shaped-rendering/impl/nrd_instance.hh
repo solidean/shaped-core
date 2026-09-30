@@ -14,7 +14,7 @@
 /// answers "given these settings, which compute dispatches would denoise this frame, against which resources, with
 /// which constants".
 /// Everything it asks for is then created and executed through sg, which is why this member needs no native scope and
-/// runs on any adapter — WARP included.
+/// runs on any dx12 adapter — WARP included.
 namespace sr::impl
 {
 /// Whether NRD was compiled into this build at all.

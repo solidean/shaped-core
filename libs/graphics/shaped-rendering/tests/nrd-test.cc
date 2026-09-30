@@ -137,11 +137,19 @@ constexpr auto k_irradiance = 0.5f;
 constexpr auto k_specular_radiance = 0.02f;
 constexpr auto k_specular_albedo = 0.04f;
 
-/// Denoises one flat, uniformly lit surface whose diffuse albedo is `albedo`, and reads the result back.
+/// Denoises one flat surface whose diffuse albedo is `albedo`, and reads the result back.
 ///
-/// The radiance follows the albedo, which is what a uniformly lit surface produces and what makes the de-modulated
-/// signal the thing REBLUR is actually meant to see.
-[[nodiscard]] cc::shared_async<cc::vector<tg::vec4f>> denoise_lit_surface(sg::context& ctx, cc::vector<tg::vec4f> albedo)
+/// By default the radiance follows the albedo, which is what a uniformly lit surface produces and what makes the
+/// de-modulated signal the thing REBLUR is actually meant to see.
+///
+/// `depth` empty means every pixel is a surface at depth 5; give it a value per pixel to place some of them at 0 or
+/// less, which is what the tracer writes where a primary ray escaped.
+/// `radiance` empty means `albedo * k_irradiance`; give it a value per pixel where the radiance must not follow the
+/// albedo, as a sky pixel's does not.
+[[nodiscard]] cc::shared_async<cc::vector<tg::vec4f>> denoise_lit_surface(sg::context& ctx,
+                                                                         cc::vector<tg::vec4f> albedo,
+                                                                         cc::vector<f32> depth_values = {},
+                                                                         cc::vector<tg::vec4f> radiance = {})
 {
     auto const make = [&](sg::pixel_format format)
     {
@@ -164,9 +172,20 @@ constexpr auto k_specular_albedo = 0.04f;
     auto const output = make(sg::pixel_format::rgba32_float);
 
     auto lit = cc::vector<tg::vec4f>();
-    lit.reserve(albedo.size());
-    for (auto const& a : albedo)
-        lit.push_back(a * k_irradiance);
+    if (!radiance.empty())
+        lit = radiance;
+    else
+    {
+        lit.reserve(albedo.size());
+        for (auto const& a : albedo)
+            lit.push_back(a * k_irradiance);
+    }
+
+    // The depth guide reads channel r, so a per-pixel depth goes in as one vec4 per pixel.
+    auto depth_pixels = cc::vector<tg::vec4f>();
+    depth_pixels.reserve(k_size * k_size);
+    for (auto i = 0; i < k_size * k_size; ++i)
+        depth_pixels.push_back(tg::vec4f(depth_values.empty() ? 5.0f : depth_values[i], 0, 0, 0));
 
     auto const fill = [&](sg::command_list& cmd, sg::texture_2d const& t, tg::vec4f v)
     {
@@ -190,7 +209,7 @@ constexpr auto k_specular_albedo = 0.04f;
         fill(*cmd, specular_albedo, tg::vec4f(k_specular_albedo, k_specular_albedo, k_specular_albedo, 0));
         fill(*cmd, normal, tg::vec4f(0, 0, 1, 0));
         fill(*cmd, roughness, tg::vec4f(0.5f, 0, 0, 0));
-        fill(*cmd, depth, tg::vec4f(5.0f, 0, 0, 0));
+        cmd->upload.bytes_to_texture(depth.raw(), cc::span<tg::vec4f const>(depth_pixels).as_bytes());
         fill(*cmd, motion, tg::vec4f(0, 0, 0, 0));
         {
             auto const pixels = cc::vector<tg::vec2f>::create_filled(k_size * k_size, tg::vec2f(2.0f, 2.0f));
@@ -691,6 +710,92 @@ ASYNC_INVOCABLE_TEST("sr - a denoise history carries its vendor state through a 
     // two identical failures.
     // Half the albedo is what an unaccumulated dark frame reads, so a lagging one sits well above it.
     CHECK(kept > 0.5f * k_move_dark * 1.5f).context(cc::format("no temporal lag to detect: {}", kept));
+}
+
+
+// Sky, which NRD holds no surface for and therefore writes nothing to.
+//
+// `CommonSettings::denoisingRange` is what tells NRD where surfaces stop, and its own default is 500000 — so a sky
+// value below that reads to NRD as ordinary geometry, and it reprojects and blurs it.
+// With the range set and the sky above it, NRD leaves those pixels UNWRITTEN instead, which is why `nrd_resolve.hlsl`
+// reads the tracer's own radiance there rather than decoding whatever the scratch last held.
+//
+// This pins the OUTCOME rather than either mechanism, and only the resolve's passthrough can move it: measured, the
+// check fails by 2.02 with the passthrough removed, and passes with the range left unset or the sky back at its old
+// 65504 — because the passthrough keys on the depth guide rather than on anything NRD did.
+// The range is still set, for what it saves rather than for what this test sees: it keeps NRD from reprojecting and
+// filtering sky pixels at all, which its own header asks for.
+// A sky carrying a high-contrast per-pixel pattern has to come back exactly as it went in.
+ASYNC_INVOCABLE_TEST("sr - NRD leaves the sky exactly as the tracer wrote it", (sg::context_handle const& ctx_h))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
+    if (!sr::query_denoise_support(ctx).nrd)
+        SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
+
+    sr::nrd_denoise_routine::prewarm(ctx);
+    (void)co_await ctx.routines.idle_completion();
+
+    // Left half a surface, right half sky.
+    // A half rather than a scatter, so REBLUR's spatial passes cannot reach from the surface into the middle of the sky.
+    auto const albedo_value = tg::vec4f(0.6f, 0.5f, 0.4f, 0);
+
+    auto albedo = cc::vector<tg::vec4f>();
+    auto depth_values = cc::vector<f32>();
+    auto radiance = cc::vector<tg::vec4f>();
+    albedo.reserve(k_size * k_size);
+    depth_values.reserve(k_size * k_size);
+    radiance.reserve(k_size * k_size);
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+        {
+            auto const is_sky = x >= k_size / 2;
+            albedo.push_back(is_sky ? tg::vec4f(0, 0, 0, 0) : albedo_value);
+            depth_values.push_back(is_sky ? 0.0f : 5.0f);
+
+            // A per-pixel checker on the sky, high contrast: anything that filtered it would flatten it, and a pass
+            // that decoded NRD's unwritten output would not land on these numbers at all.
+            auto const bright = ((x + y) % 2) == 0;
+            radiance.push_back(is_sky ? tg::vec4f(bright ? 2.0f : 0.1f, bright ? 0.1f : 2.0f, 1.0f, 0)
+                                      : albedo_value * k_irradiance);
+        }
+
+    auto const out = co_await denoise_lit_surface(ctx, albedo, depth_values, radiance);
+
+    // The resolve adds the two halves, and the specular half is constant everywhere.
+    // Exactly, not nearly: a sky pixel goes through no decode, no de-modulation and no filter, so the only thing
+    // between the tracer and the output is one add.
+    auto worst = 0.0f;
+    auto worst_at = tg::vec2i(0, 0);
+    for (auto y = 1; y < k_size - 1; ++y)
+        for (auto x = k_size / 2 + 2; x < k_size - 1; ++x)
+        {
+            auto const i = y * k_size + x;
+            for (auto c = 0; c < 3; ++c)
+            {
+                auto const expected = radiance[i][c] + k_specular_radiance;
+                auto const got = out[i][c];
+                if (tg::abs(got - expected) > worst)
+                {
+                    worst = tg::abs(got - expected);
+                    worst_at = tg::vec2i(x, y);
+                }
+            }
+        }
+
+    CHECK(worst < 0.01f)
+        .context(cc::format("sky changed by {} at {},{}", worst, worst_at[0], worst_at[1]));
+
+    // And the surface half still denoises, so the range did not simply switch the member off.
+    auto const surface = out[(k_size / 2) * k_size + k_size / 4];
+    for (auto c = 0; c < 3; ++c)
+    {
+        auto const expected = albedo_value[c] * k_irradiance + k_specular_radiance;
+        CHECK(tg::abs(surface[c] - expected) < 0.05f)
+            .context(cc::format("surface channel {}: got {}, expected {}", c, surface[c], expected));
+    }
 }
 
 #endif

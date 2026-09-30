@@ -32,7 +32,7 @@ upstreams:
 
       Unlike DLSS this needs no native scope and no vendor runtime.
       NRD computes a LIST of dispatches and hands it back; we execute them ourselves through sg, which is what makes it
-      the one vendor member that runs on any adapter — WARP included.
+      the one vendor member that runs on any dx12 adapter — WARP included.
 
   - name: ShaderMake
     homepage: https://github.com/NVIDIA-RTX/ShaderMake
