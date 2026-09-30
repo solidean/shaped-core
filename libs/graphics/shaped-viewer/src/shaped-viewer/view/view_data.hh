@@ -107,6 +107,28 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(8) << kind_shift) | u64(layer);
 }
 
+/// A traced layer's frame samples split into their diffuse and specular halves, and the hit distances beside them.
+///
+/// The three travel together and are declared only for a layer whose method may read `split_diffuse_specular`.
+/// `frame_diffuse` and `frame_specular` sum to `frame_samples` exactly, so a member reading them is looking at the
+/// same frame the others are — split rather than traced twice.
+[[nodiscard]] constexpr u64 frame_diffuse(u8 layer)
+{
+    return (u64(11) << kind_shift) | u64(layer);
+}
+
+[[nodiscard]] constexpr u64 frame_specular(u8 layer)
+{
+    return (u64(12) << kind_shift) | u64(layer);
+}
+
+/// Distance to each half's first secondary hit — diffuse in r, specular in g.
+/// What a split-signal denoiser sizes its reprojection from.
+[[nodiscard]] constexpr u64 hit_distance_guide(u8 layer)
+{
+    return (u64(13) << kind_shift) | u64(layer);
+}
+
 /// Whether `id` is an accumulation slot, whatever layer it belongs to.
 ///
 /// For a caller folding over every traced layer of a view rather than naming one.

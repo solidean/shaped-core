@@ -16,6 +16,7 @@ This is the design, including the parts not built yet.
 | `oidn` | spatial, trained | dx12, vulkan (HLSL through DXC) | done; named only, not real-time |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
 | `fsr_rr` | temporal, upscales | AMD RDNA 4 (Ray Regeneration); dx12 | planned |
+| `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
 
 | upscaler | kind | where it runs | status |
 |---|---|---|---|
@@ -29,10 +30,79 @@ DLSS Super Resolution, FSR 3.1 and FSR 4 are temporal upscalers, and on path-tra
 AMD's own guidance places denoisers before the upscaler, at the traced resolution, and that is the order the front runs them in.
 The vendor products that denoise are Ray Reconstruction and Ray Regeneration, and both upscale as part of it, so no upscaler runs behind them.
 
-**The native members are what CI tests.**
+**The native members are what CI tests, and `nrd` does not join them.**
 à-trous and SVGF are our own HLSL, so they run on WARP, and the front's policy is tested through them.
-NRD — vendor-neutral, real-time, compute shaders — stays on the roadmap, and what it waits for is the tracer rather than the denoiser.
-It wants radiance split into diffuse and specular, with hit distances.
+CI never fetches NRD, so what it builds and runs is the null path: `SR_HAS_NRD` is 0, the member reports `unsupported`, and its own tests do not exist.
+They run only where somebody fetched the SDK, which is why a green CI here says nothing about whether NRD works.
+
+**NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
+It compiles nothing at run time, owns no device memory and records nothing.
+What it answers is "which compute dispatches would denoise this frame, against which resources, with which constants", and sr executes that answer through sg.
+So it needs no native scope and no vendor runtime: it runs on whatever adapter dx12 gives it, WARP included, which is what lets it be tested without the hardware that shipped it.
+`fsr_rr` is expected to want the same split signal once it exists, which is why NRD is the reference it will be judged against.
+
+**It is dx12-only today, and that is a scope call rather than a property of NRD.**
+The member builds only where a pinned `dxc.exe` compiles NRD's own shaders, which is Windows.
+It embeds DXIL alone, so `nrd_session::create` hands sg `sg::shader_format::dxil` and a vulkan context would refuse the bytecode.
+Two routes widen it, and the cheap-looking one was tried and is not cheap.
+
+**`nrd::PipelineDesc` carries a `computeShaderSPIRV` beside its DXIL, and turning it on is genuinely one line.**
+The DXC `extern/dxc` already pins emits SPIR-V, so `NRD_EMBEDS_SPIRV_SHADERS ON` plus `SHADERMAKE_DXC_VK_PATH` produces 31 SPIR-V blobs with no second compiler and no network.
+What does not follow is a working vulkan arm.
+Built that far and run against a validating vulkan context, two things break, and neither is a line of configuration.
+
+- **NRD uses two register spaces, which are two descriptor sets under Vulkan.**
+  `nrd_session::create` builds one binding group, which is one set, so the constants land outside the layout it declares:
+  `vkCreateComputePipelines(): ... uses descriptor [Set 1, Binding 2, variable "REBLUR_SplitScreenConstants"] but the binding was not declared in the VkPipelineLayoutCreateInfo::pSetLayouts[1]`.
+  dx12 does not care, which is why the DXIL path never noticed.
+- **NRD's shaders want compute derivatives**, and sg's vulkan backend enables no such feature:
+  `SPIR-V Capability ComputeDerivativeGroupQuadsKHR was declared, but ... computeDerivativeGroupQuads` is required.
+  So is the `VK_KHR_compute_shader_derivatives` extension, which is the same gap seen from the instance side.
+
+Both are answerable — a second binding group here, a device feature in sg — and neither is in this change.
+**With validation off the same run passes**, which is worth knowing before anyone reads a green run as support.
+
+Beyond that, NRD ships its shaders as source, and `PipelineDesc::shaderIdentifier` exists so a custom integration can supply its own compiled form.
+An SGL port of them would reach webgpu and metal too.
+What it costs is owning a translation of someone else's tuned numerics, and keeping that translation agreeing with a constant layout NRD still lays out.
+
+**Its encodings are exact formulas, not conventions, and we never reimplement them.**
+NRD does not take a normal, a roughness and a hit distance as such.
+It takes one normal-roughness texture in an encoding its own build chose, and radiance in YCoCg whose alpha carries a hit distance normalized against a curve of view depth and roughness.
+So `nrd_repack.hlsl` and `nrd_resolve.hlsl` include NRD's own `NRD.hlsli`.
+[extern/nrd/CMakeLists.txt](../../../../extern/nrd/CMakeLists.txt) copies it into sr's shader directory at configure time, because a shader package resolves every include under one source directory.
+A reimplementation that drifted would be a worse image rather than a build error.
+`nrd_session::create` refuses outright a library whose reported encodings are not the ones the repack target's format assumes.
+
+**The radiance handed over is de-modulated, which is what keeps a surface's texture from being filtered as noise.**
+NRD's input contract asks that radiance carry no material information, and `NRD_MaterialFactors` is the helper it ships for the purpose.
+So that is what the repack divides by and the resolve multiplies back.
+The factors are written to scratch by the repack rather than recomputed by the resolve, because NRD requires both directions to use the same ones.
+Storing them makes that structural, instead of two passes independently agreeing on a camera, a normal and a roughness.
+That is why `albedo` and `specular_albedo` are REQUIRED guides for this member rather than optional ones.
+
+It is partial by construction, because NRD floors both factors well above zero and calls the specular half a biased solution.
+On a checkerboard albedo under one flat normal, the case where nothing but the albedo says there is an edge, the member keeps about nine tenths of the contrast.
+Feeding radiance straight through keeps under one tenth of it.
+
+**Known limit: a lobe no path sampled reaches REBLUR as contact rather than as absent.**
+One path carries one lobe, so a pixel whose paths all went diffuse has no specular hit distance, and the tracer reports 0 — which is NRD's own "this lobe was not sampled here".
+`nrd_repack.hlsl` then passes it through `REBLUR_FrontEnd_GetNormHitDist`, whose `max(hitDist, NRD_EPS)` turns that 0 into the smallest non-zero distance.
+REBLUR reads a distance that small as a reflection of something touching the surface.
+Closing it takes three things together, per `NRDSettings.h`'s `HitDistanceReconstructionMode`.
+The primary hit's diffuse/specular choice clamped to [1/4, 3/4] and drawn with Bayer dithering rather than white noise, so every 3x3 area holds a sample of each lobe.
+A raw 0 passed through the repack as 0 rather than floored.
+And `reblur.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3`.
+That is a tracer change of its own, so it is recorded here rather than done.
+
+An escaped secondary ray is a different case and is handled.
+The tracer counts escapes apart from hits and reports the mean over the paths that hit.
+Where every path of a lobe escaped it reports the ray's own `TMax`, which the normalization saturates, so it reads as "far".
+
+**Two conventions run the other way round from ours, and both are carried in settings rather than in a repack.**
+NRD reads a motion vector as `pixelUvPrev = pixelUv + mv`, so its units are UV and its direction is previous minus current, where ours is pixels and current minus previous.
+`motionVectorScale` carries the reciprocal extent and the sign, so the guide itself is handed over untouched.
+Its matrices, despite what `NRDSettings.h` says in prose, are built column by column from the `float[16]`, which is `tg`'s own convention, so they are copied rather than transposed.
 
 ## The FSR upscaler
 
@@ -239,7 +309,7 @@ Whether a vendor member can honour the rule is open — it may write its own alp
 **Explicit means explicit.**
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
-`dlss_rr`, `fsr_rr`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
+`dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
 `oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 The upscaler resolves after the denoiser, and the same way.
@@ -259,7 +329,7 @@ Instead the front's `init` prewarms every supported member, so prewarming the fr
 It is move-only, since a copy would fork a history, and the caller holds one per stream.
 
 **It holds textures, plus one object of the member's own.**
-State that is not a texture — OIDN's network today, a vendor member's *feature handle* later — sits in a type-erased `std::shared_ptr<void>`, so `denoise.hh` names no member's type.
+State that is not a texture — OIDN's network today, a vendor member's *feature handle* later — sits in a type-erased `std::shared_ptr<void>`, so `reconstruct.hh` names no member's type.
 `_prepare` drops it with the textures whenever the member or the extent changes, and it may hold only what is safe to drop mid-frame, as sg resources are.
 
 **A temporal history is large.**

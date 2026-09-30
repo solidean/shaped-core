@@ -47,6 +47,12 @@ void PathTraceRayGen()
     float hit_dist_diffuse_n = 0.0;
     float hit_dist_specular_n = 0.0;
 
+    // Paths of each lobe whose first secondary ray ESCAPED, counted apart from the ones that hit.
+    // REBLUR reads a small normalized hit distance as "contact", so averaging an escape in as zero would tell it a
+    // reflection of the sky came off something touching the surface.
+    float hit_dist_diffuse_escaped = 0.0;
+    float hit_dist_specular_escaped = 0.0;
+
     for (int s = 0; s < spp; ++s)
     {
         // jittered pinhole primary ray
@@ -155,17 +161,22 @@ void PathTraceRayGen()
             {
                 // The first SECONDARY hit's distance, which is what a split-signal denoiser sizes its reprojection
                 // and its blur radius from: a reflection of something near travels differently from one of the sky.
-                // A ray that escaped reports 0, the same "nothing there" the depth guide uses.
-                float const d = hit_t >= 0.0 ? hit_t : 0.0;
+                //
+                // An escape is COUNTED rather than summed as zero.
+                // Zero is what REBLUR reads as contact, so one escaped path among several that hit something near
+                // would pull the pixel's mean toward a reflection that is touching the surface.
+                bool const escaped = hit_t < 0.0;
                 if (path_is_specular)
                 {
-                    hit_dist_specular += d;
-                    hit_dist_specular_n += 1.0;
+                    hit_dist_specular += escaped ? 0.0 : hit_t;
+                    hit_dist_specular_n += escaped ? 0.0 : 1.0;
+                    hit_dist_specular_escaped += escaped ? 1.0 : 0.0;
                 }
                 else
                 {
-                    hit_dist_diffuse += d;
-                    hit_dist_diffuse_n += 1.0;
+                    hit_dist_diffuse += escaped ? 0.0 : hit_t;
+                    hit_dist_diffuse_n += escaped ? 0.0 : 1.0;
+                    hit_dist_diffuse_escaped += escaped ? 1.0 : 0.0;
                 }
             }
             bool const inside = any(medium_sigma_t > float3(0, 0, 0));
@@ -430,9 +441,22 @@ void PathTraceRayGen()
         // A mean over the paths of each kind rather than over all samples: a pixel whose paths were all diffuse has no
         // specular hit distance to report, and averaging its absence in as zero would read as a reflection of
         // something touching the surface.
-        pt_bindings::GuideHitDistance[px]
-            = float2(hit_dist_diffuse_n > 0.0 ? hit_dist_diffuse / hit_dist_diffuse_n : 0.0,
-                     hit_dist_specular_n > 0.0 ? hit_dist_specular / hit_dist_specular_n : 0.0);
+        //
+        // Three cases per lobe, and each is a different thing to say:
+        //   some path hit    -> the mean over those, ignoring the escapes
+        //   every path escaped -> the ray's own TMax, which the normalization saturates, so it reads as "far"
+        //   no path of this lobe -> 0, which is NRD's own "lobe not sampled here"
+        // Reporting a skipped lobe as 0 is only half honest: nrd_repack.hlsl passes it through
+        // REBLUR_FrontEnd_GetNormHitDist, whose max(hitDist, NRD_EPS) turns it back into contact.
+        // Fixing that needs hitDistanceReconstructionMode and a dithered lobe choice — see reconstruction.md's known limit.
+        float const escaped_distance = 1e4; // the RayDesc TMax above
+        float const guide_diffuse = hit_dist_diffuse_n > 0.0
+                                        ? hit_dist_diffuse / hit_dist_diffuse_n
+                                        : (hit_dist_diffuse_escaped > 0.0 ? escaped_distance : 0.0);
+        float const guide_specular = hit_dist_specular_n > 0.0
+                                         ? hit_dist_specular / hit_dist_specular_n
+                                         : (hit_dist_specular_escaped > 0.0 ? escaped_distance : 0.0);
+        pt_bindings::GuideHitDistance[px] = float2(guide_diffuse, guide_specular);
     }
 
     // Progressive accumulation: this frame's estimate folded into the running mean already in the target.

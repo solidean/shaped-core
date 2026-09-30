@@ -15,6 +15,7 @@ add_library(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/nrd_denoise_routine.cc
     src/shaped-rendering/oidn_denoise_routine.cc
     src/shaped-rendering/fsr_upscale_routine.cc
     src/shaped-rendering/impl/tza.cc
@@ -44,6 +45,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/nrd_denoise_routine.hh
     src/shaped-rendering/oidn_denoise_routine.hh
     src/shaped-rendering/fsr_upscale_routine.hh
     src/shaped-rendering/impl/fsr_backend.hh
@@ -103,6 +105,20 @@ else()
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_WINDOW=0)
 endif()
 
+# NRD, when somebody has fetched its sources (extern/nrd/fetch-nrd.py).
+#
+# It links PRIVATE and reaches impl/ alone, like every other vendor SDK here.
+# No backend gate: NRD hands back a LIST of dispatches and shaped-rendering executes them through sg, so unlike DLSS
+# this member needs no native scope and runs on any dx12 adapter, WARP included.
+if(TARGET NRD)
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/nrd_instance.cc
+                                        src/shaped-rendering/impl/nrd_session.cc)
+    target_link_libraries(shaped-rendering PRIVATE NRD)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_NRD=1)
+else()
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/nrd_null.cc)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_NRD=0)
+endif()
 # The trained OIDN weights the member runs, as a path rather than a target: nothing links them, and the member reads
 # the blob at run time.
 # Empty when they were not fetched, which makes the member report `unsupported` rather than fail to build.
@@ -171,6 +187,20 @@ endif()
 # Package generation needs none — it emits C++ descriptors and embeds the sources;
 # compilation happens at runtime through slib.
 # Without a compiler the routine simply acquires no shader and draws nothing, which is the same graceful path a broken shader edit takes.
+#
+# The NRD repack pass is the one conditional entry.
+# It includes NRD's own packing header, which only exists once somebody has fetched the SDK, so listing it
+# unconditionally would turn a missing optional dependency into a configure error.
+set(_sr_nrd_shaders)
+if(TARGET NRD)
+    set(_sr_nrd_shaders
+        nrd_repack.hlsl:compute:main_cs
+        nrd_repack.hlsl:binding:nrd_repack_bindings
+        nrd_repack.hlsl:constants:gConstants
+        nrd_resolve.hlsl:compute:main_cs
+        nrd_resolve.hlsl:binding:nrd_resolve_bindings)
+endif()
+
 sc_add_shader_package(
     TARGET     shaped-rendering
     NAME       sr_shaders
@@ -216,6 +246,7 @@ sc_add_shader_package(
         fsr_clear_uint.hlsl:binding:fsr_clear_uint_bindings
         fsr_clear_uint.hlsl:constants:gConstants
         ${_sr_fsr_shaders}
+        ${_sr_nrd_shaders}
         nn_conv.hlsl:compute:main_cs
         nn_conv.hlsl:binding:nn_conv_bindings
         nn_conv.hlsl:constants:gConstants
@@ -293,6 +324,7 @@ if(SC_BUILD_TESTS)
             tests/denoise-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
+            tests/nrd-test.cc
             tests/oidn-test.cc
             tests/nn-conv-test.cc
             tests/nn-ops-test.cc

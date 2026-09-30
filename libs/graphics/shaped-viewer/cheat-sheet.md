@@ -780,9 +780,13 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **Slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
   A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
   The tracer writes those two only on the frames the temporal member runs, so a still view past the hand-off pays for neither.
-- **The split signals are in the tracer, not yet in sv.** `pt_trace_desc::frame_diffuse`, `frame_specular` and `guide_hit_distance`, behind the frame
-  block's `write_split`, are what a split-signal member will read; the two halves sum to `frame_output` exactly.
-  Nothing in `view_renderer` binds them yet, so no temporal slot exists for them — that lands with the first member that reads them.
+- **A split-signal member adds three more**: `temporal_id::frame_diffuse`, `frame_specular` and `hit_distance_guide`, all three or none.
+  The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
+  Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them, and only on the frames it runs.
+- **`sv::matrices_of(camera_gpu, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
+  sv rasterizes nothing, so these exist for a denoiser that reprojects in world space; `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
+  `reconstruct_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  The per-frame offset a temporal upscaler reconstructs from is the other kind, and sv has none.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.
