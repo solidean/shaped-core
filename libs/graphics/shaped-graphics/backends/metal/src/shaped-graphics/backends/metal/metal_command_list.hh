@@ -393,6 +393,10 @@ private:
     /// A rendering scope whose encoder a copy or a barrier closed, and no draw has reopened yet.
     bool _render_suspended = false;
 
+    /// Draws recorded on the open render encoder since it opened.
+    /// None means every fragment-stage write is in an earlier encoder, which the boundary pair already ordered.
+    isize _draws_in_render_encoder = 0;
+
     /// The pipeline of the open rendering scope, for the primitive type a draw is issued with.
     metal_raster_pipeline const* _bound_raster = nullptr;
 

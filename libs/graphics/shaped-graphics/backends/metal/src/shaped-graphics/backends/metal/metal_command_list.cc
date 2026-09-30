@@ -371,7 +371,9 @@ void metal_command_list::flush_barriers()
     //
     // Only a fragment source reaches this: a dispatch or a copy clamps to nothing here too, but it sits in another
     // encoder and is already ordered by the boundary it crossed.
-    if ((after & MTL::StageFragment) != 0)
+    // So does a fragment write from an earlier render encoder — an earlier scope, or this one before a split — which
+    // is every fragment source while this encoder has drawn nothing yet.
+    if ((after & MTL::StageFragment) != 0 && _draws_in_render_encoder > 0)
     {
         suspend_render_encoder("a barrier after a fragment-stage write");
         return;
@@ -1084,6 +1086,7 @@ void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
         index_type_of(_index_format), MTL::GPUAddress(_index_address + u64(first_byte)),
         NS::UInteger(_index_size_in_bytes - first_byte), NS::UInteger(config.instance_range.size),
         NS::Integer(config.vertex_offset), NS::UInteger(config.instance_range.offset));
+    ++_draws_in_render_encoder;
 }
 
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint)
@@ -1253,6 +1256,7 @@ void metal_command_list::open_render_encoder(bool force_load)
     _render_encoder = _buffer->renderCommandEncoder(descriptor)->retain();
     descriptor->release();
     CC_ASSERT(_render_encoder != nullptr, "metal refused a render command encoder");
+    _draws_in_render_encoder = 0;
 
     // Every encoder is ordered against the queue on open, the same as the compute one.
     _render_encoder->barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
@@ -1450,6 +1454,7 @@ void metal_command_list::raster_draw(draw_config const& config)
     _render_encoder->drawPrimitives(primitive_type_of(_bound_raster->topology()),
                                     NS::UInteger(config.vertex_range.offset), NS::UInteger(config.vertex_range.size),
                                     NS::UInteger(config.instance_range.size), NS::UInteger(config.instance_range.offset));
+    ++_draws_in_render_encoder;
 }
 
 void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pipeline)
