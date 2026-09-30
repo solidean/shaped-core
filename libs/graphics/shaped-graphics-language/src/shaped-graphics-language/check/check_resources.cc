@@ -60,6 +60,8 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
                  : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_image_formats[t.format].name);
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
+    case type_kind::acceleration_structure:
+        return cc::format("acceleration_structure[.{}]", k_geometry_kinds[t.format]);
     case type_kind::atomic:
         return cc::format("{}atomic[{}]", access_prefix(t.access), m.name_of(t.element));
     case type_kind::stream:
@@ -91,6 +93,35 @@ type_id checker::resource_type(check::type_info info)
     return id;
 }
 
+type_id checker::function_type(cc::span<type_id const> parameters, type_id result)
+{
+    auto spelled = cc::string("(");
+    for (auto i = isize(0); i < parameters.size(); ++i)
+        spelled += cc::format("{}{}", i == 0 ? "" : ", ", out.name_of(parameters[i]));
+    spelled += cc::format(") -> {}", out.name_of(result));
+    auto& alike = interned_types[spelled];
+    for (auto const id : alike)
+    {
+        auto const members = out.at(out.at(id).members);
+        auto is_same = out.at(id).kind == type_kind::function && out.at(id).element == result
+                    && members.size() == parameters.size();
+        for (auto i = isize(0); is_same && i < parameters.size(); ++i)
+            is_same = members[i].type == parameters[i];
+        if (is_same)
+            return id;
+    }
+    auto const first = u32(out.members.size());
+    for (auto const p : parameters)
+        out.members.push_back({.type = p});
+    auto const id = type_id(out.types.size());
+    out.types.push_back({.kind = type_kind::function,
+                         .members = {.first = first, .count = u32(parameters.size())},
+                         .element = result,
+                         .spelled = cc::move(spelled)});
+    alike.push_back(id);
+    return id;
+}
+
 void checker::judge_feature(i32 file, source_span where, cc::string_view form, feature needed)
 {
     // CHK-201: granted by a `require` of the file, or of the binding whose members are being compiled
@@ -108,6 +139,13 @@ type_id checker::resolve_resource_name(i32 file, ast::expr_id expr, cc::string_v
 {
     if (text == "sampler" || text == "comparison_sampler")
         return resource_type({.kind = type_kind::sampler, .is_comparison = text == "comparison_sampler"});
+    if (text == "acceleration_structure")
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+               "an acceleration structure says what geometry it holds: `acceleration_structure[.triangles]`, "
+               "`[.procedural]` or `[.mixed]`");
+        return checked_module::error_type;
+    }
 
     for (auto const& shape : k_shapes)
     {
@@ -136,6 +174,8 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
     if (n == nullptr)
         return type_id::none;
     auto const text = text_of(file, n->where);
+    if (text == "acceleration_structure")
+        return resolve_acceleration_structure(file, expr, node);
 
     shape_info const* texture = nullptr;
     shape_info const* image = nullptr;
@@ -191,6 +231,35 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         judge_feature(file, where, cc::format("an image of .{}", k_image_formats[format].name),
                       feature::extended_image_formats);
     return resource_type({.kind = type_kind::image, .shape = image->shape, .format = format});
+}
+
+type_id checker::resolve_acceleration_structure(i32 file, ast::expr_id expr, ast::index const& node)
+{
+    auto const where = span_of(file, expr);
+    auto const arguments = ast_of(file).at(node.arguments);
+    // CHK-320: the geometry it holds is one enum case, which picks what a trace against it is written as
+    auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                              ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
+                              : nullptr;
+    auto geometry = -1;
+    for (auto i = isize(0); dot != nullptr && i < isize(sizeof(k_geometry_kinds) / sizeof(k_geometry_kinds[0])); ++i)
+        if (k_geometry_kinds[i] == text_of(file, dot->name))
+            geometry = i32(i);
+    if (geometry < 0)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               "an acceleration structure takes the geometry it holds: `.triangles`, `.procedural` or `.mixed`");
+        return checked_module::error_type;
+    }
+    // either half of ray tracing may trace against one, and the half the file grants is the one it needs
+    if (!is_prelude_file(file))
+    {
+        auto const is_pipeline
+            = file_features[file].has(feature::raytracing_pipeline) || granted.has(feature::raytracing_pipeline);
+        judge_feature(file, where, "an acceleration structure",
+                      is_pipeline ? feature::raytracing_pipeline : feature::ray_query);
+    }
+    return resource_type({.kind = type_kind::acceleration_structure, .format = geometry});
 }
 
 type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access)

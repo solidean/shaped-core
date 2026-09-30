@@ -1,0 +1,20 @@
+// an @internal declaration of the prelude is the prelude's alone: no lookup from the program finds it, by any path
+
+// the public face of the same prelude file is found as always
+test ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)).t_min == 0.0
+
+// a free call, whose first argument is of a prelude type, so the type's declaring scope is searched too
+@expect(error = "unknown-name")
+test apply_rows(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0), float3(1.0, 2.0, 3.0), 1.0).x == 1.0
+
+// a call through the first argument's type, written as a method call
+@expect(error = "unknown-member")
+test float3(0.0, 0.0, 0.0).is_box_entered(float3(1.0, 1.0, 1.0), float3(0.5, 0.5, -1.0), float3(1.0, 1.0, 1.0), 0.0, 10.0)
+
+// a function of a type scope, called on the type
+@expect(error = "unknown-member")
+test procedural_hit.none(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))).t > 0.0
+
+// a builtin step, which only the prelude's `trace` and the entry points it writes call
+@expect(error = "unknown-name")
+test hit_object_to_world_row(0).x == 1.0

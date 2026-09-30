@@ -94,6 +94,7 @@ void fold_type(cc::byte_stream_builder& b, checked_module const& m, type_id type
     case type_kind::texture:
     case type_kind::image:
     case type_kind::sampler:
+    case type_kind::acceleration_structure:
         b.add_pod(u8(t.shape));
         b.add_bool(t.is_depth);
         b.add_pod(t.format);

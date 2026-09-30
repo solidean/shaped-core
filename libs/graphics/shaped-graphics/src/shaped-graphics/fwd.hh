@@ -39,9 +39,10 @@ struct stream_poll;                   // value type — a source poll's status a
 class stream_source;                  // the lazy chunk sequence feeding a streaming upload
 
 class context;
-struct adapter_info;          // which GPU a context runs on (see context/adapter_info.hh)
-struct cold_caches;           // which persistent caches a process runs cold (see context/cold_caches.hh)
-enum class feature;           // a capability a context has or has not (see context/capabilities.hh)
+struct adapter_info;               // which GPU a context runs on (see context/adapter_info.hh)
+struct cold_caches;                // which persistent caches a process runs cold (see context/cold_caches.hh)
+enum class feature;                // a capability a context has or has not (see context/capabilities.hh)
+enum class feature_implementation; // whether a context has a feature natively, emulated or not at all (see context/capabilities.hh)
 enum class execution_model;   // whether a caller may block on this context at all (see context/capabilities.hh)
 enum class device_error_kind; // what kind of deferred error a backend reported (see context/device_error.hh)
 struct device_error;          // one entry on the deferred error channel (see context/device_error.hh)
@@ -109,6 +110,7 @@ struct blas_aabbs;                  // value type — one procedural (AABB) geom
 struct tlas_instance;               // value type — one instance input to build_tlas
 enum class accel_build_flag;        // one build-time trade-off; a set of them is accel_build_flags
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
+enum class blas_geometry : u8;      // what a blas was built from: triangles or AABBs
 
 } // namespace sg
 
@@ -354,6 +356,8 @@ enum class raygen_index : u32;
 enum class miss_index : u32;
 enum class hit_index : u32;
 enum class callable_index : u32;
+/// A run of `ray_count` consecutive hit records in a raytracing_shader_table, one per ray type; its value is the first record's index.
+enum class hit_row : u32;
 
 /// Hard cap on the number of group slots a pipeline_layout may hand a caller.
 /// Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `group_index`.

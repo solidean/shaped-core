@@ -52,6 +52,9 @@ enum class setting_kind : u8;
 struct pipeline_setting;
 struct open_part;
 struct pipeline_definition;
+struct hit_group_definition;
+struct raytracing_pipeline_definition;
+struct raytracing_host_parts;
 struct pipeline_configuration;
 
 /// A shared filesystem.

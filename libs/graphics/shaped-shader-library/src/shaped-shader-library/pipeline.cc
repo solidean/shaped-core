@@ -11,6 +11,7 @@
 #include <shaped-graphics-language/driver/describe.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-shader-library/impl/frozen.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh>
 #include <shaped-shader-library/shader_asset.hh>
 
@@ -254,6 +255,11 @@ live_pipeline& live_of(cc::vector<cc::unique_ptr<live_pipeline>>& all, slib::pip
 }
 } // namespace
 
+cc::string slib::impl::frozen_moved(cc::span<cc::string_view const> built, cc::span<cc::string const> now)
+{
+    return moved(built, now);
+}
+
 slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d)
 {
     auto generations = cc::fixed_array<u64, 5>{};
@@ -339,6 +345,21 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                        d.name, part.value);
         else
             CC_ASSERTF(part.value > 0, "{}'s {}: {} is stated as no format", d.file, d.name, part.path);
+
+    // A stage the device lacks is refused by its feature before any stage compiles, since a target without the stage
+    // can fail an earlier one first: Metal rejects a vertex stage that feeds tessellation and writes no position.
+    if ((d.tessellation_control != nullptr || d.tessellation_evaluation != nullptr)
+        && !ctx->supports(sg::feature::tessellation_shader))
+        throw sg::pipeline_creation_exception(cc::string(d.name),
+                                              cc::any_error(cc::format("{}'s {}: the pipeline has tessellation stages, "
+                                                                       "and this device "
+                                                                       "lacks sg::feature::tessellation_shader",
+                                                                       d.file, d.name)));
+    if (d.geometry != nullptr && !ctx->supports(sg::feature::geometry_shader))
+        throw sg::pipeline_creation_exception(
+            cc::string(d.name), cc::any_error(cc::format("{}'s {}: the pipeline has a geometry stage, and this device "
+                                                         "lacks sg::feature::geometry_shader",
+                                                         d.file, d.name)));
 
     // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();

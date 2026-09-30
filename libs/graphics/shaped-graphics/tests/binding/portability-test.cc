@@ -109,7 +109,7 @@ TEST("sg - a stage needing a feature the device lacks is refused by that feature
     shader.entry_point = "main_ps";
     sg::compiled_shader const* const stages[] = {nullptr, &shader};
     auto const none = sg::feature_set();
-    auto const tracing = sg::feature_set(sg::feature::raytracing);
+    auto const tracing = sg::feature_set(sg::feature::ray_query);
 
     // Unknown is not judged: nothing about it can be named.
     CHECK(!sg::impl::find_missing_feature(none, stages).has_value());
@@ -121,7 +121,7 @@ TEST("sg - a stage needing a feature the device lacks is refused by that feature
     shader.required_features = tracing;
     auto const missing = sg::impl::find_missing_feature(none, stages);
     REQUIRE(missing.has_value());
-    CHECK(missing.value() == "the shader 'main_ps' needs sg::feature::raytracing, and this device lacks it");
+    CHECK(missing.value() == "the shader 'main_ps' needs sg::feature::ray_query, and this device lacks it");
     CHECK(!sg::impl::find_missing_feature(tracing, stages).has_value());
 }
 
@@ -132,5 +132,5 @@ TEST("sg - every feature has a name, and the name finds it")
         CHECK(!sg::to_string(f).empty());
         CHECK(sg::feature_from_string(sg::to_string(f)) == cc::optional<sg::feature>(f));
     }
-    CHECK(!sg::feature_from_string("ray_query").has_value());
+    CHECK(!sg::feature_from_string("raytracing").has_value());
 }

@@ -803,6 +803,6 @@ void vulkan_command_list::copy_buffer_region(sg::raw_buffer_handle src,
 // it reported false while the seams were stubs, and why it can stop doing so only now.
 bool vulkan_command_list::raytracing_is_supported() const
 {
-    return _ctx.supports(sg::feature::raytracing);
+    return _ctx.supports(sg::feature::ray_query) || _ctx.supports(sg::feature::raytracing_pipeline);
 }
 } // namespace sg::backend::vulkan

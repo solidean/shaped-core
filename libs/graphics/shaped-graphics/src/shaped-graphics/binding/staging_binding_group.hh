@@ -204,10 +204,12 @@ private:
     binding_group_handle _snapshot;
     bool _dirty = true;
 
-    // The buffer each binding outside a binding array last bound, by slot, which each snapshot hands on.
+    // The buffer each binding outside a binding array last bound, by slot, and the tlas each element binds, by slot and
+    // element, which each snapshot hands on.
     // Kept only where the context's portability checks are on.
     cc::vector<impl::buffer_use> _slot_uses;
-    void record_use(binding_slot slot, cc::span<raw_view const> views);
+    cc::vector<cc::vector<tlas_handle>> _slot_tlases;
+    void record_use(binding_slot slot, int first_element, cc::span<raw_view const> views);
 
     // Stamped by the persistent scope right after the backend creates the group: the device's
     // feature::float32_filtering, and whether the context's portability checks are on.

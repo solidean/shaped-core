@@ -68,7 +68,8 @@ cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document>
     auto files = a->module_files();
     auto const behind = files.back();
     files.remove_back();
-    a->module = sgl::check::check(files, behind);
+    auto const* const checked = own >= 0 ? nullptr : sgl::checked_prelude();
+    a->module = checked != nullptr ? sgl::check::check(*checked, behind) : sgl::check::check(files, behind);
 
     auto const user = a->user_file();
     for (auto const& d : a->file.diagnostics)

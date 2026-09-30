@@ -1,4 +1,5 @@
 #include <clean-core/common/utility.hh>
+#include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 
@@ -17,19 +18,34 @@ void add_argument(call_arguments& a,
                   type_id type,
                   cc::string_view name = {},
                   number_literal number = {},
-                  i32 literal = -1)
+                  i32 literal = -1,
+                  i32 function = -1)
 {
     a.written.push_back(w);
     a.types.push_back(type);
     a.names.push_back(name);
     a.numbers.push_back(number);
     a.literals.push_back(literal);
+    a.functions.push_back(function);
+    a.undefineds.push_back(false);
 }
 } // namespace
 
 // ---- bodies ---------------------------------------------------------------------------------------------------------
 
 void checker::check_body(symbol_id id)
+{
+    // CHK-338: a generic body sees its type parameters, as its signature did
+    auto const info = out.at(id).info;
+    auto const before = type_parameter_names.size();
+    if (info >= 0)
+        for (auto const p : out.at(out.functions[info].type_parameters))
+            type_parameter_names.push_back({out.at(p).spelled, p});
+    check_body_of(id);
+    type_parameter_names.resize_down_to(before);
+}
+
+void checker::check_body_of(symbol_id id)
 {
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
@@ -70,6 +86,7 @@ void checker::check_body(symbol_id id)
             .name = text_of(file, ast.at(p.field).name),
             .where = {.kind = target_kind::parameter, .index = i32(p.field)},
             .type = p.type,
+            .is_mut = p.is_mut,
         });
     }
 
@@ -121,6 +138,14 @@ void checker::check_defaults(symbol_id id)
     auto const index = out.at(id).info;
     // by value: checking a default may compile another function, and `functions` then moves
     auto const info = out.functions[index];
+    auto has_default = false;
+    for (auto const& p : out.at(info.parameters))
+        has_default = has_default || (ast::is_valid(p.field) && p.has_default);
+    if (!has_default)
+    {
+        notes[index].are_defaults_sound = true;
+        return;
+    }
     auto scope = function_scope{.function = id, .file = file, .result = info.result};
     // CHK-243: a method's `self` is a parameter before every default
     auto const* const f = ast.at(out.at(id).declaration).node.try_as<ast::fun_decl>();
@@ -243,7 +268,7 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
         return to;
 
     // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
-    auto const* const candidates = operators.get_ptr("as");
+    auto const* const candidates = operators_seen_from(file).get_ptr("as");
     if (candidates != nullptr)
         for (auto const candidate : *candidates)
         {
@@ -402,6 +427,12 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         }
         return local->type;
     }
+    if (is_type_parameter_name(text))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               cc::format("{} is a type parameter, which names a type and no value", text));
+        return error_type;
+    }
 
     auto const* const found = names_seen_from(file).get_ptr(text);
     if (found == nullptr || found->empty())
@@ -477,7 +508,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // `constants.view_projection`: a binding is no value, so the object is looked at before it is checked
     auto const* const object_name
         = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
-    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr)
+    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr
+        && !is_type_parameter_name(text_of(file, object_name->where)))
     {
         auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
         if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::binding)
@@ -499,9 +531,9 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                 is_listed = is_listed || listed == binding;
             // CHK-295: a test's run holds its own workgroup memory, which no host fills
             is_listed = is_listed || (scope.is_test && is_workgroup_binding(binding));
-            // CHK-228: a test lists no binding, and one its function lists is a value of the function's run
+            // CHK-228: a binding the test does not list, and its function does, is a value of the function's run
             auto is_captured = false;
-            if (scope.is_test && is_valid(scope.enclosing) && !is_workgroup_binding(binding))
+            if (scope.is_test && !is_listed && is_valid(scope.enclosing))
                 for (auto const listed : out.at(out.functions[out.at(scope.enclosing).info].bindings))
                     is_captured = is_captured || listed == binding;
             if (is_captured)
@@ -510,7 +542,7 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                                   out.at(scope.enclosing).name));
             else if (!is_listed && scope.is_test)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
-                       cc::format("{} is a binding, and a test lists none", out.at(binding).name));
+                       cc::format("{} is a binding, and the test does not list it", out.at(binding).name));
             else if (!is_listed)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
                        cc::format("{} is not in the binding list of {}", out.at(binding).name,
@@ -625,6 +657,15 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
 {
     auto const file = scope.file;
     auto result = call_arguments();
+    // what the call's own result is expected to be says nothing of its arguments
+    auto const outer_expected = expected_result;
+    expected_result = type_id::none;
+    struct restore
+    {
+        type_id& at;
+        type_id value;
+        ~restore() { at = value; }
+    } const restored{.at = expected_result, .value = outer_expected};
 
     for (auto const& a : ast_of(file).at(range))
     {
@@ -643,12 +684,62 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             continue;
         }
 
+        // CHK-341: the prelude's `undefined()` has the type of the parameter it meets
+        if (auto const* const u = !a.is_splat && !a.is_mut && value != nullptr ? value->try_as<ast::call>() : nullptr;
+            u != nullptr && is_prelude_file(file) && is_named(file, u->callee, "undefined")
+            && ast_of(file).at(u->arguments).empty())
+        {
+            add_argument(result, {.expr = a.value}, type_id::none, text_of(file, a.name));
+            result.undefineds.back() = true;
+            set_target(file, a.value, {.kind = target_kind::undefined_value});
+            continue;
+        }
+
+        // CHK-318: a lambda, or the name of a function, has no type until a parameter of function type meets it
+        if (!a.is_splat && !a.is_mut && value != nullptr && value->is<ast::lambda>())
+        {
+            function_arguments.push_back({.expr = a.value, .is_lambda = true});
+            add_argument(result, {.expr = a.value, .is_function = true}, type_id::none, text_of(file, a.name), {}, -1,
+                         i32(function_arguments.size() - 1));
+            continue;
+        }
+        if (auto const* const n = value != nullptr && !a.is_splat && !a.is_mut ? value->try_as<ast::name>() : nullptr;
+            n != nullptr && scope.find_local(text_of(file, n->where)) == nullptr)
+        {
+            auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+            if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::function)
+            {
+                auto functions = cc::vector<symbol_id>();
+                for (auto const f : *found)
+                    if (out.at(f).kind == symbol_kind::function)
+                        functions.push_back(f);
+                function_arguments.push_back({.expr = a.value, .functions = cc::move(functions)});
+                add_argument(result, {.expr = a.value, .is_function = true}, type_id::none, text_of(file, a.name), {},
+                             -1, i32(function_arguments.size() - 1));
+                continue;
+            }
+        }
+
         handed.push_back(a.value);
         auto const type = check_expr(scope, a.value);
         handed.pop_back();
         if (type == error_type)
         {
             result.is_poisoned = true;
+            continue;
+        }
+        // a parameter of function type handed on to another stands for the function it was handed (CHK-318)
+        if (!a.is_splat && !a.is_mut && out.at(type).kind == type_kind::function)
+        {
+            add_argument(result, {.expr = a.value, .is_function = true}, type, text_of(file, a.name));
+            continue;
+        }
+        if (a.is_mut)
+        {
+            // CHK-316: `mut x` hands over a place, so what it names must be one a body could assign
+            if (a.is_splat || !judge_place(scope, a.value, "a mut argument"))
+                result.is_poisoned = true;
+            add_argument(result, {.expr = a.value, .is_mut = true}, type, text_of(file, a.name));
             continue;
         }
         if (!a.is_splat)
@@ -774,6 +865,10 @@ cc::string checker::call_text(i32 file_of_call, cc::string_view spelling, call_a
         // is named by its text, since its default type is not what failed to match
         if (arguments.literals[i] >= 0)
             text += "a literal";
+        else if (arguments.undefineds[i])
+            text += "undefined()";
+        else if (arguments.functions[i] >= 0)
+            text += function_arguments[arguments.functions[i]].is_lambda ? "a lambda" : "a function";
         else if (arguments.numbers[i].is_number && ast::is_valid(arguments.written[i].expr))
             text += text_of(file_of_call, span_of(file_of_call, arguments.written[i].expr));
         else
@@ -809,7 +904,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2 && arguments.types[0] == void_type
             && arguments.types[1] == void_type)
             return type_of_builtin(builtins::k_bool, file, where);
-        auto const* const found = operators.get_ptr(spelling);
+        auto const* const found = operators_seen_from(file).get_ptr(spelling);
         auto const none = cc::span<symbol_id const>();
         return resolve_overload(scope, id, ast::expr_id::none,
                                 found != nullptr ? cc::span<symbol_id const>(*found) : none, arguments,
@@ -824,6 +919,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     auto const* const n = callee.node.try_as<ast::name>();
     if (callee.node.is<ast::member>())
         return check_dot_call(scope, id, call);
+    // CHK-344: `table[i](mut p)`, a callable of a table picked at run time
+    if (auto const* const index = callee.node.try_as<ast::index>())
+        if (auto const table = callables_named(file, index->object); is_valid(table))
+            return check_callable_call(scope, id, call, *index, table);
     if (n == nullptr)
     {
         (void)check_arguments(scope, call.arguments, false);
@@ -835,6 +934,14 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
 
     auto const text = text_of(file, n->where);
+    if (auto const* const local = scope.find_local(text); local != nullptr && !local->is_captured
+                                                          && local->type != error_type && is_valid(local->type)
+                                                          && out.at(local->type).kind == type_kind::function)
+    {
+        // by value: checking the arguments may declare locals, and `locals` then moves
+        auto const through = *local;
+        return check_function_call(scope, id, call, through);
+    }
     if (auto const* const local = scope.find_local(text))
     {
         set_target(file, call.callee, local->where);
@@ -844,6 +951,25 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         else
             unsupported(file, callee_where, "a call of a local value");
         return error_type;
+    }
+
+    // CHK-338: a type parameter hides every symbol of its name, a struct's constructor among them
+    if (is_type_parameter_name(text))
+    {
+        (void)check_arguments(scope, call.arguments, false);
+        report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
+               cc::format("{} is a type parameter, and a call needs a function or a struct", text));
+        return error_type;
+    }
+
+    // CHK-329: a trace whose third argument names a ray type is a ray-tracing stage's trace
+    if (text == "trace")
+    {
+        auto const arguments = ast.at(call.arguments);
+        if (arguments.size() >= 4 && arguments[2].name.empty() && ast::is_valid(arguments[2].value))
+            if (auto const ray = ray_type_of(file, arguments[2].value); ray.has_value())
+                return ray.value().ray < 0 ? checked_module::error_type
+                                           : check_pipeline_trace(scope, id, call, ray.value());
     }
 
     // CHK-247: the functions of its name, and those of its first argument's type scope, whatever else the name is
@@ -927,7 +1053,8 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     // `T.foo(…)`: the functions of the type scope of `T`, and `T` is no argument (CHK-248)
     auto const* const object_name
         = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
-    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr)
+    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr
+        && !is_type_parameter_name(text_of(file, object_name->where)))
     {
         auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
         auto const kind = found != nullptr && !found->empty() ? out.at(found->front()).kind : symbol_kind::unsupported;
@@ -976,6 +1103,8 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     // CHK-250, CHK-253: the receiver is argument 0, and a number literal there converts like one anywhere else
     arguments.numbers.insert_at(0, number_of(file, member.object));
     arguments.literals.insert_at(0, -1);
+    arguments.functions.insert_at(0, -1);
+    arguments.undefineds.insert_at(0, false);
 
     auto const candidates = candidates_of(file, name, receiver);
     if (candidates.empty())
@@ -1102,12 +1231,17 @@ type_id checker::resolve_overload(function_scope& scope,
                         : target{.kind = target_kind::overload, .symbol = chosen};
     set_target(file, id, self);
     set_target(file, callee, self);
-    record_call(file, id, chosen, arguments, chosen_match.slots);
     // by value: resolving a literal argument may compile another function, and `functions` then moves
     auto const info = out.functions[chosen_symbol.info];
-    commit_literals(scope, arguments, out.at(info.parameters), chosen_match.slots);
+    auto bindings = chosen_match.bindings;
+    commit_literals(scope, arguments, out.at(info.parameters), chosen_match.slots, bindings);
+    // CHK-340: what the arguments left unbound, where the call stands says
+    auto const result = deduce_result(scope, id, chosen, bindings);
+    if (result == error_type)
+        return error_type;
+    record_call(file, id, chosen, arguments, chosen_match.slots, bindings);
     if (chosen_symbol.role == function_role::constructor)
-        set_type(file, callee, info.result);
+        set_type(file, callee, result);
     if (is_valid(out.at(chosen).intrinsic))
     {
         // CHK-300: the mark is what an index into a binding array is written with, and on anything else it means nothing
@@ -1118,12 +1252,152 @@ type_id checker::resolve_overload(function_scope& scope,
                    "`nonuniform i` marks an index into a binding array, and stands only as one: `t[nonuniform i]`");
             return error_type;
         }
-        return info.result;
+        return result;
     }
 
     // A construction is written where it stands, and the defaults of its fields with it, so what they call is reached.
     note_program_call(scope, chosen, where);
-    return info.result;
+    return result;
+}
+
+symbol_id checker::function_of_type(cc::span<symbol_id const> candidates, type_id type)
+{
+    if (!is_valid(type) || type == error_type || out.at(type).kind != type_kind::function)
+        return symbol_id::none;
+    auto const wanted = out.at(out.at(type).members);
+    auto found = symbol_id::none;
+    for (auto const f : candidates)
+    {
+        if (out.at(f).state == symbol_state::in_compilation || demand(f, out.at(f).file, {}) != symbol_state::checked)
+            continue;
+        auto const& info = out.functions[out.at(f).info];
+        // an entry point or a builtin is no function a body calls through a parameter
+        if (info.entry_stage != stage::none || is_valid(out.at(f).intrinsic) || info.result != out.at(type).element)
+            continue;
+        auto const parameters = out.at(info.parameters);
+        auto is_same = parameters.size() == wanted.size();
+        for (auto i = isize(0); is_same && i < parameters.size(); ++i)
+            is_same = parameters[i].type == wanted[i].type && !parameters[i].is_mut;
+        if (!is_same)
+            continue;
+        if (is_valid(found))
+            return symbol_id::none;
+        found = f;
+    }
+    return found;
+}
+
+type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id type, cc::vector<type_id>* bindings)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto const where = span_of(file, expr);
+    auto const& l = ast.at(expr).node.as<ast::lambda>();
+    // CHK-318: an arrow lambda with an arrow body; the rest of the lambda family is not built
+    if (l.spelling != ast::lambda_spelling::arrow || l.body.kind != ast::body_kind::arrow || !ast::is_valid(l.body.value))
+    {
+        unsupported(file, where, "a lambda other than `x => value`");
+        return error_type;
+    }
+    if (type == error_type || out.at(type).kind != type_kind::function)
+        return error_type;
+    auto const parameters = cc::vector<member_info>::create_copy_of(out.at(out.at(type).members));
+    auto const result = out.at(type).element;
+    auto const fields = ast.at(l.parameters);
+    // CHK-340: a lambda's parameters are what the call bound, and its result binds what they left; a type parameter
+    // of the function it is written in is bound already, to itself
+    for (auto const& m : parameters)
+    {
+        auto named = cc::vector<type_id>();
+        collect_type_parameters(m.type, named);
+        auto is_in_scope = true;
+        for (auto const q : named)
+            is_in_scope
+                = is_in_scope && cc::sequence{type_parameter_names}.any([&](auto const& n) { return n.second == q; });
+        if (!is_in_scope)
+        {
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("this lambda takes {}, which nothing in the call says", out.name_of(m.type)));
+            return error_type;
+        }
+    }
+    auto const deduces = bindings != nullptr && is_open(result);
+    auto const locals_before = scope.locals.size();
+    auto is_sound = true;
+    for (auto i = isize(0); i < fields.size(); ++i)
+    {
+        auto const& p = fields[i];
+        if (ast::is_valid(p.type))
+        {
+            auto const written = resolve_value_type(file, p.type, &scope);
+            if (written != error_type && written != parameters[i].type)
+            {
+                report(diagnostic_kind::type_mismatch, file, span_of(file, p.type),
+                       cc::format("this parameter is {}, and the function it stands for takes {}", out.name_of(written),
+                                  out.name_of(parameters[i].type)));
+                is_sound = false;
+            }
+        }
+        auto const index = isize(&p - ast.fields.data());
+        auto const self = target{.kind = target_kind::parameter, .index = i32(index)};
+        judge_shadowing(file, text_of(file, p.name), p.name);
+        scope.locals.push_back(
+            {.name = text_of(file, p.name), .where = self, .type = parameters[i].type, .depth = scope.depth + 1});
+    }
+    auto const value = deduces ? check_expr(scope, l.body.value) : check_expected(scope, l.body.value, result);
+    scope.locals.resize_down_to(locals_before);
+    if (!is_sound || value == error_type)
+        return error_type;
+    if (deduces)
+    {
+        if (!unify(result, value, *bindings))
+        {
+            report(diagnostic_kind::type_mismatch, file, span_of(file, l.body.value),
+                   cc::format("this lambda gives {}, and the function it stands for returns {}", out.name_of(value),
+                              out.name_of(result)));
+            return error_type;
+        }
+        auto const deduced = substitute(type, *bindings);
+        set_type(file, expr, deduced);
+        return deduced;
+    }
+    if (value != result)
+    {
+        report(diagnostic_kind::type_mismatch, file, span_of(file, l.body.value),
+               cc::format("this lambda gives {}, and the function it stands for returns {}", out.name_of(value),
+                          out.name_of(result)));
+        return error_type;
+    }
+    set_type(file, expr, type);
+    return type;
+}
+
+type_id checker::check_function_call(function_scope& scope, ast::expr_id id, ast::call const& call, local_name const& local)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, id);
+    set_target(file, call.callee, local.where);
+    auto const arguments = check_arguments(scope, call.arguments, false);
+    if (arguments.is_poisoned)
+        return error_type;
+    auto const type = local.type;
+    auto parameters = cc::vector<parameter>();
+    for (auto const& m : out.at(out.at(type).members))
+        parameters.push_back({.type = m.type});
+    auto const bound = bind_arguments(parameters, arguments);
+    auto is_match = bound.failure == miss_reason::none;
+    for (auto p = isize(0); is_match && p < parameters.size(); ++p)
+        is_match = bound.slots[p] >= 0 && chain_of(file, parameters[p], arguments, bound.slots[p]).has_value();
+    if (!is_match)
+    {
+        report(diagnostic_kind::no_matching_overload, file, where,
+               cc::format("{} is {}, and these arguments do not fit it", local.name, out.name_of(type)));
+        return error_type;
+    }
+    // CHK-319: the call is written where the function was handed over, so its record names no callee
+    record_call(file, id, symbol_id::none, arguments, bound.slots);
+    commit_literals(scope, arguments, parameters, bound.slots);
+    return out.at(type).element;
 }
 
 void checker::note_near_misses(i32 file,
@@ -1147,7 +1421,14 @@ void checker::note_near_misses(i32 file,
         for (auto p = isize(0); miss.reason == miss_reason::none && p < parameters.size(); ++p)
         {
             auto const i = bound.slots[p];
-            if (i >= 0 && !chain_of(file, parameters[p].type, arguments, i).has_value())
+            if (i >= 0 && parameters[p].is_mut != arguments.written[i].is_mut)
+                miss = {.file = file,
+                        .call = call,
+                        .candidate = candidate,
+                        .reason = miss_reason::mut_mismatch,
+                        .argument = i,
+                        .parameter = i32(p)};
+            else if (i >= 0 && !chain_of(file, parameters[p], arguments, i).has_value())
                 miss = {.file = file,
                         .call = call,
                         .candidate = candidate,
@@ -1161,21 +1442,102 @@ void checker::note_near_misses(i32 file,
 
 cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call_arguments const& arguments)
 {
-    // by value: a literal argument may compile another function, and `parameters` then moves
+    // Read in place, by position: a literal argument may compile another function, and `out.parameters` then moves.
     auto const range = out.functions[out.at(candidate).info].parameters;
-    auto const parameters = cc::vector<parameter>::create_copy_of(out.at(range));
-    auto bound = bind_arguments(parameters, arguments);
+    // Most candidates of a call fail on their count alone, which is decided before anything is allocated.
+    auto required = isize(0);
+    for (auto const& p : out.at(range))
+        required += p.has_default ? 0 : 1;
+    if (arguments.written.size() > isize(range.count) || arguments.written.size() < required)
+        return cc::nullopt;
+    // what `chain_of` reads of a parameter, copied without its name since a compile may move the original
+    auto const shape_of
+        = [&](isize p) { return parameter{.type = out.at(range)[p].type, .is_mut = out.at(range)[p].is_mut}; };
+    auto bound = bind_arguments(out.at(range), arguments);
     if (bound.failure != miss_reason::none)
         return cc::nullopt;
     auto result = candidate_match{.candidate = candidate,
                                   .slots = cc::move(bound.slots),
                                   .chains = cc::vector<i32>::create_filled(arguments.written.size(), 0)};
-    for (auto p = isize(0); p < parameters.size(); ++p)
+    // CHK-340: a parameter whose type names a type parameter binds it to what the argument is, exactly; a function
+    // and a literal wait until the rest are bound, since what they meet depends on it
+    auto deferred = cc::vector<isize>();
+    for (auto p = isize(0); p < isize(range.count); ++p)
     {
         auto const i = result.slots[p];
-        if (i < 0)
+        if (i < 0 || arguments.undefineds[i])
             continue;
-        auto const length = chain_of(file, parameters[p].type, arguments, i);
+        if (is_open(out.at(range)[p].type))
+        {
+            // a number binds the type it was checked as, since nothing asks it for another
+            if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0)
+                deferred.push_back(p);
+            else if (out.at(range)[p].is_mut != arguments.written[i].is_mut
+                     || !unify(out.at(range)[p].type, arguments.types[i], result.bindings))
+                return cc::nullopt;
+            continue;
+        }
+        auto const length = chain_of(file, shape_of(p), arguments, i);
+        if (!length.has_value())
+            return cc::nullopt;
+        result.chains[i] = length.value();
+    }
+    for (auto const p : deferred)
+    {
+        auto const i = result.slots[p];
+        if (arguments.functions[i] >= 0)
+        {
+            // by value: demanding a candidate may push to `function_arguments`
+            auto const f = function_arguments[arguments.functions[i]];
+            auto const& taking = out.at(out.at(range)[p].type);
+            if (taking.kind != type_kind::function)
+                return cc::nullopt;
+            // a lambda binds what its body gives when it is checked, after the call chose this candidate
+            if (f.is_lambda)
+            {
+                auto const& l = ast_of(file).at(f.expr).node.as<ast::lambda>();
+                if (i64(ast_of(file).at(l.parameters).size()) != taking.members.count)
+                    return cc::nullopt;
+                continue;
+            }
+            auto chosen = cc::vector<type_id>();
+            auto matching = 0;
+            for (auto const g : f.functions)
+            {
+                if (out.at(g).state == symbol_state::in_compilation
+                    || demand(g, out.at(g).file, {}) != symbol_state::checked)
+                    continue;
+                auto const& info = out.functions[out.at(g).info];
+                if (info.entry_stage != stage::none || is_valid(out.at(g).intrinsic)
+                    || !out.at(info.type_parameters).empty())
+                    continue;
+                // CHK-318: a function value's parameters are none of them `mut`
+                auto types = cc::vector<type_id>();
+                auto has_mut = false;
+                for (auto const& q : out.at(info.parameters))
+                {
+                    types.push_back(q.type);
+                    has_mut = has_mut || q.is_mut;
+                }
+                if (has_mut)
+                    continue;
+                auto trial = result.bindings;
+                if (unify(out.at(range)[p].type, function_type(types, info.result), trial))
+                {
+                    ++matching;
+                    chosen = cc::move(trial);
+                }
+            }
+            if (matching != 1)
+                return cc::nullopt;
+            result.bindings = cc::move(chosen);
+            continue;
+        }
+        auto taking = shape_of(p);
+        taking.type = substitute(taking.type, result.bindings);
+        if (is_open(taking.type))
+            return cc::nullopt;
+        auto const length = chain_of(file, taking, arguments, i);
         if (!length.has_value())
             return cc::nullopt;
         result.chains[i] = length.value();
@@ -1183,8 +1545,33 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     return result;
 }
 
-cc::optional<i32> checker::chain_of(i32 file, type_id parameter, call_arguments const& arguments, isize i)
+cc::optional<i32> checker::chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i)
 {
+    // CHK-341: `undefined()` is of whatever type it meets
+    if (arguments.undefineds[i])
+        return 0;
+    // CHK-316: a place is handed over as it is, so it has the parameter's type exactly, and a mark meets a mut parameter
+    if (taking.is_mut || arguments.written[i].is_mut)
+    {
+        if (taking.is_mut != arguments.written[i].is_mut || arguments.types[i] != taking.type)
+            return cc::nullopt;
+        return 0;
+    }
+    auto const parameter = taking.type;
+    // CHK-318: a function meets a parameter of function type whose signature it has exactly
+    if (arguments.functions[i] >= 0)
+    {
+        if (!is_valid(parameter) || parameter == error_type || out.at(parameter).kind != type_kind::function)
+            return cc::nullopt;
+        auto const& f = function_arguments[arguments.functions[i]];
+        if (f.is_lambda)
+        {
+            auto const& l = ast_of(file).at(f.expr).node.as<ast::lambda>();
+            return i64(ast_of(file).at(l.parameters).size()) == out.at(parameter).members.count ? cc::optional<i32>(0)
+                                                                                                : cc::nullopt;
+        }
+        return is_valid(function_of_type(f.functions, parameter)) ? cc::optional<i32>(0) : cc::nullopt;
+    }
     if (arguments.literals[i] >= 0)
         return literal_chain(file, parameter, arguments.literals[i]);
     if (arguments.numbers[i].is_number)
@@ -1314,18 +1701,54 @@ void checker::commit_literals(function_scope& scope,
                               cc::span<parameter const> parameters,
                               cc::span<i32 const> slots)
 {
+    auto bindings = cc::vector<type_id>();
+    commit_literals(scope, arguments, parameters, slots, bindings);
+}
+
+void checker::commit_literals(function_scope& scope,
+                              call_arguments const& arguments,
+                              cc::span<parameter const> parameters,
+                              cc::span<i32 const> slots,
+                              cc::vector<type_id>& bindings)
+{
     // by value: resolving a literal may compile another function, and `parameters` then moves
-    auto const copied = cc::vector<parameter>::create_copy_of(parameters);
-    for (auto p = isize(0); p < copied.size(); ++p)
-    {
-        auto const i = slots[p];
-        if (i < 0)
-            continue;
-        if (arguments.numbers[i].is_number)
-            set_type(scope.file, arguments.written[i].expr, copied[p].type);
-        else if (arguments.literals[i] >= 0)
-            (void)resolve_literal(scope, arguments.written[i].expr, copied[p].type, arguments.literals[i]);
-    }
+    auto copied = cc::vector<parameter>::create_copy_of(parameters);
+    // a lambda binds what the others left, so it goes last, and every other argument meets its parameter bound
+    for (auto pass = 0; pass < 2; ++pass)
+        for (auto p = isize(0); p < copied.size(); ++p)
+        {
+            auto const i = slots[p];
+            if (i < 0)
+                continue;
+            auto const is_lambda = arguments.functions[i] >= 0 && function_arguments[arguments.functions[i]].is_lambda;
+            if (is_lambda != (pass == 1))
+                continue;
+            copied[p].type = substitute(copied[p].type, bindings);
+            if (arguments.undefineds[i])
+            {
+                set_type(scope.file, arguments.written[i].expr, copied[p].type);
+                continue;
+            }
+            if (arguments.numbers[i].is_number)
+                set_type(scope.file, arguments.written[i].expr, copied[p].type);
+            else if (arguments.functions[i] >= 0)
+            {
+                // by value: checking a lambda may push to `function_arguments`
+                auto const f = function_arguments[arguments.functions[i]];
+                auto const where = span_of(scope.file, f.expr);
+                if (f.is_lambda)
+                    (void)check_lambda(scope, f.expr, copied[p].type, &bindings);
+                else if (auto const chosen = function_of_type(f.functions, copied[p].type); is_valid(chosen))
+                {
+                    set_target(scope.file, f.expr, {.kind = target_kind::overload, .symbol = chosen});
+                    set_type(scope.file, f.expr, copied[p].type);
+                    // the function is called wherever the parameter is, and that is inlined into this caller
+                    note_program_call(scope, chosen, where);
+                }
+            }
+            else if (arguments.literals[i] >= 0)
+                (void)resolve_literal(scope, arguments.written[i].expr, copied[p].type, arguments.literals[i]);
+        }
 }
 
 type_id checker::resolve_literal(function_scope& scope, ast::expr_id expr, type_id to, i32 literal)
@@ -1370,7 +1793,10 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
     }
     if (node.is<ast::array>() && to != error_type && out.at(to).kind == type_kind::array)
         return check_array_literal(scope, expr, to);
+    auto const outer_expected = expected_result;
+    expected_result = to;
     auto const type = check_expr(scope, expr);
+    expected_result = outer_expected;
     if (type == error_type || to == error_type)
         return type;
     // CHK-253: a number literal where one type is expected converts to it where it holds exactly
@@ -1443,10 +1869,11 @@ bound_arguments checker::bind_arguments(cc::span<parameter const> parameters, ca
     return result;
 }
 
-void checker::judge_wide_literals()
+void checker::judge_wide_literals(isize first)
 {
-    for (auto const& w : wide_literals)
+    for (auto i = first; i < wide_literals.size(); ++i)
     {
+        auto const w = wide_literals[i];
         auto const type = out.files[w.file].type_at(w.expr);
         if (!is_valid(type) || type == error_type || holds(number_of(w.file, w.expr), type))
             continue;
@@ -1458,11 +1885,55 @@ void checker::judge_wide_literals()
     }
 }
 
+type_id checker::deduce_result(function_scope const& scope, ast::expr_id id, symbol_id callee, cc::vector<type_id>& bindings)
+{
+    auto const info = out.functions[out.at(callee).info];
+    auto needed = cc::vector<type_id>();
+    for (auto const& p : out.at(info.parameters))
+        collect_type_parameters(p.type, needed);
+    collect_type_parameters(info.result, needed);
+    if (needed.empty())
+        return info.result;
+    if (is_valid(expected_result) && expected_result != error_type)
+    {
+        (void)unify(info.result, expected_result, bindings);
+        // a generic body expecting its own type parameter binds it to itself
+        auto expected = cc::vector<type_id>();
+        collect_type_parameters(expected_result, expected);
+        for (auto const q : needed)
+        {
+            auto is_bound = false;
+            for (auto i = isize(0); i + 1 < bindings.size(); i += 2)
+                is_bound = is_bound || bindings[i] == q;
+            if (!is_bound && cc::sequence{expected}.any([&](type_id e) { return e == q; }))
+            {
+                bindings.push_back(q);
+                bindings.push_back(q);
+            }
+        }
+    }
+    for (auto const q : needed)
+    {
+        auto is_bound = false;
+        for (auto i = isize(0); i + 1 < bindings.size(); i += 2)
+            is_bound = is_bound || bindings[i] == q;
+        if (!is_bound)
+        {
+            report(diagnostic_kind::no_matching_overload, scope.file, span_of(scope.file, id),
+                   cc::format("{} of {} is said by nothing: neither an argument nor where the call stands",
+                              out.name_of(q), out.at(callee).name));
+            return error_type;
+        }
+    }
+    return substitute(info.result, bindings);
+}
+
 void checker::record_call(i32 file,
                           ast::expr_id id,
                           symbol_id callee,
                           call_arguments const& arguments,
-                          cc::span<i32 const> slots)
+                          cc::span<i32 const> slots,
+                          cc::span<type_id const> bindings)
 {
     auto const written = ast::range_of<written_argument>{.first = u32(out.written_arguments.size()),
                                                          .count = u32(arguments.written.size())};
@@ -1470,7 +1941,11 @@ void checker::record_call(i32 file,
     auto const slot_range = ast::range_of<i32>{.first = u32(out.call_slots.size()), .count = u32(slots.size())};
     out.call_slots.push_back_range(slots);
     out.files[file].call_of[ast::index_of(id)] = i32(out.call_records.size());
-    out.call_records.push_back({.callee = callee, .written = written, .slots = slot_range});
+    out.call_records.push_back({.callee = callee,
+                                .written = written,
+                                .slots = slot_range,
+                                .type_arguments = {.first = u32(out.type_lists.size()), .count = u32(bindings.size())}});
+    out.type_lists.push_back_range(bindings);
 }
 
 void checker::note_program_call(function_scope const& scope, symbol_id callee, source_span where)
@@ -1489,15 +1964,15 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         is_listed = is_listed || (scope.is_test && is_workgroup_binding(needed));
         if (!is_listed && scope.is_test)
         {
-            // CHK-228: a test gives a callee its bindings through a local binding, which delegation will carry
+            // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-333)
             auto& d = report(
                 diagnostic_kind::binding_not_listed, file, where,
-                cc::format("{} needs {}, and a test lists no binding", out.at(callee).name, out.at(needed).name));
+                cc::format("{} needs {}, and the test does not list it", out.at(callee).name, out.at(needed).name));
             d.notes.push_back({.file = file,
                                .where = where,
-                               .message = cc::format("a `binding {}:` declared in the test gives {} its values, "
-                                                     "once local bindings are carried",
-                                                     out.at(needed).name, out.at(callee).name)});
+                               .message = cc::format("`test {{{}}}:` lists it, and the driver that runs the test "
+                                                     "gives its values",
+                                                     out.at(needed).name)});
         }
         else if (!is_listed)
             report(diagnostic_kind::binding_not_listed, file, where,
@@ -1565,9 +2040,9 @@ bool checker::is_out_of_the_running(i32 file, symbol_id candidate, call_argument
     return !match(file, candidate, arguments).has_value();
 }
 
-symbol_id checker::find_operator(cc::string_view spelling, cc::span<type_id const> types) const
+symbol_id checker::find_operator(i32 file, cc::string_view spelling, cc::span<type_id const> types) const
 {
-    auto const* const found = operators.get_ptr(spelling);
+    auto const* const found = operators_seen_from(file).get_ptr(spelling);
     if (found == nullptr)
         return symbol_id::none;
     auto result = symbol_id::none;
@@ -1602,7 +2077,7 @@ symbol_id checker::resolve_operator(i32 file,
 
     auto is_silent = false;
     auto matches = cc::vector<candidate_match>();
-    if (auto const* const found = operators.get_ptr(spelling))
+    if (auto const* const found = operators_seen_from(file).get_ptr(spelling))
         for (auto const candidate : *found)
         {
             if (is_out_of_the_running(file, candidate, arguments))

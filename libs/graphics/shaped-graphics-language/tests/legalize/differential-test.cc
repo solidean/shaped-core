@@ -1,5 +1,7 @@
 #include "random-program.hh"
 
+#include <shaped-graphics-language/legalize/impl/walk.hh>
+
 using namespace sgl_test;
 using namespace sgl::check;
 
@@ -109,4 +111,17 @@ TEST("sgl legalize - the same seed gives the same program")
     auto const checked = flat_test_module();
     CHECK(random_program(checked.module, 7) == random_program(checked.module, 7));
     CHECK(!(random_program(checked.module, 7) == random_program(checked.module, 8)));
+}
+
+TEST("sgl legalize - a random program never nests deeper than the check pass admits")
+{
+    auto const checked = flat_test_module();
+    // each one's first draw nested past `k_max_depth`, which the interpreter and the legalizer stop descending at
+    for (auto const seed : {u64(1047), u64(2367), u64(3015), u64(16095)})
+    {
+        auto const program = random_program(checked.module, seed, shape_of(seed));
+        auto probe = impl::depth_probe{.e = program};
+        probe.body(program.body, 0);
+        CHECK(!probe.found.has_value());
+    }
 }

@@ -98,6 +98,36 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
     }
     return result;
 }
+
+/// The back half of `compile_to_text`: one entry point of a checked module, written for one target.
+cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
+                                                 check::flat_entry_point const& e,
+                                                 emit::target target,
+                                                 cc::string_view source_name)
+{
+    // The check pass writes the structured form, and a target prints the core form.
+    // WebGPU traces through the emulated form of a trace, and every other target through its native query.
+    auto const legal = check::legalize(m, e, {.is_emulated = target == emit::target::wgsl});
+    auto emitted = emit::emit_entry_point(m, legal, target);
+    if (!emitted.has_text())
+    {
+        auto text = cc::string();
+        for (auto const& error : emitted.errors)
+            text.appendf("{}: error: {}: {}\n", source_name, emit::to_string(error.kind), error.detail);
+        return cc::error(cc::move(text));
+    }
+    auto result = sgl::emitted_source{.text = cc::move(emitted.text),
+                                      .entry_point = cc::move(emitted.entry_point),
+                                      .bindings = interface_of(m, legal, emitted.bound_names),
+                                      .color_targets = emitted.color_targets,
+                                      .target_struct = cc::move(emitted.target_struct),
+                                      .features = e.features,
+                                      .footprint = check::footprint_of(m, legal),
+                                      .layouts = cc::move(emitted.layouts)};
+    for (auto axis = 0; axis < 3; ++axis)
+        result.workgroup[axis] = e.workgroup[axis];
+    return result;
+}
 } // namespace
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
@@ -136,26 +166,18 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
         return cc::error(cc::format("{}: error: entry point '{}' is a {} entry point, and a {} one was asked for\n",
                                     request.source_name, e.name, check::stage_name(e.entry_stage),
                                     check::stage_name(request.stage)));
+    return emit_text(m, e, request.target, request.source_name);
+}
 
-    // The check pass writes the structured form, and a target prints the core form.
-    auto const legal = check::legalize(m, e);
-    auto emitted = emit::emit_entry_point(m, legal, request.target);
-    if (!emitted.has_text())
-    {
-        auto text = cc::string();
-        for (auto const& error : emitted.errors)
-            text.appendf("{}: error: {}: {}\n", request.source_name, emit::to_string(error.kind), error.detail);
-        return cc::error(cc::move(text));
-    }
-    auto result = sgl::emitted_source{.text = cc::move(emitted.text),
-                                      .entry_point = cc::move(emitted.entry_point),
-                                      .bindings = interface_of(m, legal, emitted.bound_names),
-                                      .color_targets = emitted.color_targets,
-                                      .target_struct = cc::move(emitted.target_struct),
-                                      .features = e.features,
-                                      .footprint = check::footprint_of(m, legal),
-                                      .layouts = cc::move(emitted.layouts)};
-    for (auto axis = 0; axis < 3; ++axis)
-        result.workgroup[axis] = e.workgroup[axis];
+cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all_text_request const& request)
+{
+    auto const front = driver::impl::run_front_end(request.source, request.source_name);
+    if (!front.errors.empty())
+        return cc::error(front.errors);
+    auto result = cc::vector<entry_text>();
+    for (auto const& e : front.module.entry_points)
+        for (auto const t : request.targets)
+            result.push_back(
+                {.entry_point = e.name, .target = t, .text = emit_text(front.module, e, t, request.source_name)});
     return result;
 }

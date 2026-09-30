@@ -80,14 +80,18 @@ TEST("sgl emit - the dispatch id's unsigned twin is minted, so a local of the pr
     CHECK(wgsl.contains("    let id_in: f32 = 2.0;\n"));
 }
 
-TEST("sgl emit - MSL refuses a compute entry point, which it writes as a kernel")
+TEST("sgl emit - MSL writes a compute entry point as a kernel, which states no workgroup")
 {
-    // EMIT-13's exception: the three other targets write it.
-    constexpr auto plain = "@compute(64) fun main(@thread_id id: int3):\n"
-                           "    let x = id.x\n";
-    CHECK(sgl::emit::dump_errors(emit_source(plain, 0, target::msl))
-          == "unsupported a compute entry point, which MSL writes as a kernel\n");
-    CHECK(sgl::emit::dump_errors(emit_source(plain, 0, target::wgsl)) == "");
+    // EMIT-59: MSL has no spelling for the threadgroup shape, so it reaches sg from SGL's own statement alone.
+    auto const msl = text_of(k_double, target::msl);
+    CHECK(!msl.contains("numthreads"));
+    CHECK(msl.contains("kernel void double_values(uint3 id_in [[thread_position_in_grid]], constant work_arguments& "
+                       "work_group [[buffer(0)]])\n"
+                       "{\n"
+                       "    constant auto& work_values = work_group.work_values;\n"
+                       "    const int3 id = int3(id_in);\n"
+                       "    work_values[id.x] = work_values[id.x] * 2.0;\n"
+                       "}\n"));
 }
 
 TEST("sgl emit - a compute entry point that needs legalizing keeps its workgroup and its thread id")
@@ -309,4 +313,29 @@ TEST("sgl emit - an assignment's index is evaluated before its value, where both
     CHECK(text_of(source, target::wgsl)
               .contains("    let index: i32 = atomicAdd(&shared_hits, 2);\n"
                         "    shared_vals[index] = atomicAdd(&shared_hits, 20);\n"));
+}
+
+TEST("sgl emit - a WebGPU trace of the 17th acceleration member is too-many-acceleration-structures")
+{
+    // WGSL reads each member's root from 16 words sg binds, so only the first 16 members can be traced there
+    auto const source_tracing = [](int k)
+    {
+        auto source = cc::string("require ray_query\nbinding scenes:\n");
+        for (auto i = 0; i < 17; ++i)
+            source.appendf("    a{}: acceleration_structure[.triangles]\n", i);
+        source.appendf("    dst: out image_2d[.rgba8_unorm]\n"
+                       "\n"
+                       "@compute(8, 8) fun cs(@thread_id id: int3){{scenes}}:\n"
+                       "    let h = scenes.a{}.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, "
+                       "1.0)))\n"
+                       "    scenes.dst.store(int2(id.x, id.y), float4(h.t, 0.0, 0.0, 1.0))\n",
+                       k);
+        return source;
+    };
+    CHECK(sgl::emit::dump_errors(emit_source(source_tracing(16), 0, target::wgsl))
+              .contains("too-many-acceleration-structures cs traces the acceleration member at position 16, and "
+                        "WebGPU binds 16 roots"));
+    CHECK(text_of(source_tracing(15), target::wgsl).contains("sg_acceleration_roots[15 / 4][15 % 4]"));
+    // a native trace names its member, and takes no root
+    CHECK(sgl::emit::dump_errors(emit_source(source_tracing(16), 0, target::hlsl_dx12)) == "");
 }

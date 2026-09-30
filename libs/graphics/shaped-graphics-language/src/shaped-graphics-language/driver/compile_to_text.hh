@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -21,6 +23,15 @@ struct sgl::text_request
     emit::target target = emit::target::hlsl_dx12;
     /// Runs the source's own tests after it checked, and makes a test that does not pass an error like any other.
     bool run_tests = false;
+};
+
+/// Every entry point of one SGL source, asked for as the text of each of `targets`.
+struct sgl::all_text_request
+{
+    cc::string_view source;
+    /// What a diagnostic calls the source; it is never opened.
+    cc::string_view source_name = "<sgl>";
+    cc::span<emit::target const> targets;
 };
 
 /// One slot the text declares for the host to bind: a block of constants or a resource, with every fact its API needs.
@@ -78,6 +89,14 @@ struct sgl::emitted_source
     cc::vector<emit::emitted_layout> layouts;
 };
 
+/// One entry point on one target, as `compile_all_to_text` wrote it or said why it could not.
+struct sgl::entry_text
+{
+    cc::string entry_point;
+    emit::target target = emit::target::hlsl_dx12;
+    cc::result<emitted_source, cc::string> text;
+};
+
 namespace sgl
 {
 /// The whole pipeline in one call: parse, build the AST, check against the embedded prelude, and emit one entry point.
@@ -89,4 +108,10 @@ namespace sgl
 ///
 /// Deterministic, and it reads nothing but its arguments, so the text may be cached under the source and the request.
 [[nodiscard]] cc::result<emitted_source, cc::string> compile_to_text(text_request const& request);
+
+/// Every entry point of one source on every target asked for, from one pass of the front end.
+/// A call of `compile_to_text` per entry point and target checks the source, prelude included, that many times.
+/// An error of the front end is the error of the result; an entry point one target cannot write is that element's error.
+/// Ordered by entry point as the source declares them, then by target as asked.
+[[nodiscard]] cc::result<cc::vector<entry_text>, cc::string> compile_all_to_text(all_text_request const& request);
 } // namespace sgl

@@ -250,8 +250,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Placement is `heapAccelerationStructureSizeAndAlign` plus `MTL::Heap::newAccelerationStructure(size, offset)`.
   All three APIs support refitting in place and into a separate structure, so a refit call would not be a Metal shape the others get bent into.
 
-- **Raytracing pipeline.** The dx12 trace path is in — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
+- **Raytracing pipeline.** The trace path is in on dx12, vulkan and metal — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
   Still open: **local root signatures** and a **state-object cached blob**.
+  **metal traces one TLAS per dispatch**, because a kernel finds its closest hits through the one TLAS's hit-group offsets that `dispatch_rays` binds.
+  Lifting it means an offsets buffer per bound TLAS, and a way for the kernel to know which one it traced.
+  **webgpu's BVH has no spatial sort**: the tree follows the primitive order, which a proper build (a sort, then SAH or LBVH) would replace.
+  webgpu has no pipeline either, deliberately: a megakernel over the ray-query polyfill is the shape one would take, and a path tracer on ray queries is the better route there for now.
   Plus a **dedicated shader-table buffer**: `raytracing_shader_table` exists, but its records sit in a plain shader-readable buffer as a stand-in.
   [types.hh](../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately, so the storage needs a type of its own.
 - **`cc::shared_ptr`:** the `*_handle` typedefs still use `std::shared_ptr`.
@@ -375,18 +379,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
 - **Tier 2 / legacy backends:** metal, then opengl, webgl.
   webgpu exists on wasm; what it still owes is its own item below.
-
-- **There is no SGL to metallib edge, so the shader-using half of the tier-1 sweep skips on metal.**
-  `shader_fixtures.cc` registers SGL to WGSL and, where DXC exists, to DXIL and SPIR-V.
-  A metal context accepts none of those, so every tier-1 test that acquires a shader is offered a format it cannot
-  take — eleven of them, across `compute-test.cc`, `raster-test.cc` and `sgl-package-test.cc`.
-  They now ask `sg_test::shaders_reach` and SKIP rather than failing on an acquire that cannot succeed.
-  **CI never saw this**: its macOS runner has no Metal 4 device, so the whole metal driver skips there, and the
-  failure only appears on a Mac that has one.
-  Closing it is an SGL-to-MSL compiler, at which point the guard answers true and the eleven start running with
-  nothing to revert.
-  `sg - the SGL fixtures reach at least one format on every build` is what keeps the guard from quietly skipping them
-  on every backend instead.
 
 - **The webgpu backend's remaining gaps.**
   - **The WGSL twins of sg's tier-1 shader tests.**

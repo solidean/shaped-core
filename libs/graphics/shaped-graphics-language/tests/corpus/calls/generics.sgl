@@ -1,0 +1,39 @@
+// a type parameter is opaque: a value of it is handed on, stored and returned, and a call says what it stands for
+
+fun first[A](a: A, b: A) -> A => a
+
+fun apply[A](x: A, f: (A) -> A) -> A => f(x)
+
+fun twice[A](x: A, f: (A) -> A) -> A => apply(apply(x, f), f)
+
+struct pair_of_floats:
+    a: float
+    b: float
+
+fun swap(p: pair_of_floats) -> pair_of_floats => pair_of_floats(p.b, p.a)
+
+// the arguments say it, a number as the type it was checked as
+test:
+    first(1, 2) == 1
+    first(1.5, 2.5) == 1.5
+
+// a lambda's result says what its parameter left open, and a named function's signature says it whole
+test:
+    apply(3, x => x * 2) == 6
+    twice(3, x => x + 1) == 5
+    let p = apply(pair_of_floats(1.0, 2.0), swap)
+    p.a == 2.0
+
+// two arguments that disagree bind nothing
+@expect(error = "no-matching-overload")
+test:
+    first(1, 2.5) == 1
+
+// a function with a mut parameter is no function value, whether the parameter it meets is generic or not
+fun bumped(x: mut int) -> int:
+    x += 1
+    return x
+
+@expect(error = "no-matching-overload")
+test:
+    apply(1, bumped) == 2

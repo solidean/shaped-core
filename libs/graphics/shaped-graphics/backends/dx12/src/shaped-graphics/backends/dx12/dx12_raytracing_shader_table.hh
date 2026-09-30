@@ -30,8 +30,8 @@ public:
     D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE callable_table = {};
 
 private:
-    explicit dx12_raytracing_shader_table(sg::raytracing_pipeline_handle pipeline)
-      : sg::raytracing_shader_table(cc::move(pipeline))
+    explicit dx12_raytracing_shader_table(sg::raytracing_shader_table_description const& desc)
+      : sg::raytracing_shader_table(desc)
     {
     }
 };

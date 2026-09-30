@@ -2,7 +2,6 @@
 
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
-#include <dispatch/dispatch.h>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 
 #include <mutex>
@@ -11,7 +10,7 @@ namespace sg::backend::metal
 {
 namespace
 {
-/// Load one single-entry metallib blob and mint the binary function its entry point names.
+/// Load one single-entry metallib or MSL shader and mint the binary function its entry point names.
 /// The library comes back through `out_libraries` because a binary function does not keep it alive.
 [[nodiscard]] cc::result<MTL4::BinaryFunction*> make_binary_function(metal_context& ctx,
                                                                      sg::compiled_shader const& shader,
@@ -21,22 +20,10 @@ namespace
 {
     if (shader.stage != expected)
         return cc::error(cc::format("raytracing_pipeline: the {} shader has the wrong stage", what));
-    if (shader.format != sg::shader_format::metal_lib)
-        return cc::error(cc::format("raytracing_pipeline: the metal backend needs a metal_lib {} shader, got format {}",
-                                    what, int(shader.format)));
-    if (shader.bytecode.empty())
-        return cc::error(cc::format("raytracing_pipeline: the {} shader has no bytecode", what));
 
-    // DISPATCH_DATA_DESTRUCTOR_DEFAULT copies, so the pinned bytes need not outlive this call.
-    auto* const blob = dispatch_data_create(shader.bytecode.data(), size_t(shader.bytecode.size()), nullptr,
-                                            DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-    NS::Error* library_error = nullptr;
-    auto* const library = ctx.device()->newLibrary(blob, &library_error);
-    dispatch_release(blob);
-
-    if (library == nullptr)
-        return metal_error(library_error,
-                           cc::format("raytracing_pipeline: the {} metal library could not be loaded", what));
+    auto loaded = library_from_shader(ctx.device(), shader, cc::format("raytracing_pipeline: the {} shader", what));
+    CC_RETURN_IF_ERROR(loaded);
+    auto* const library = loaded.value();
     out_libraries.push_back(library);
 
     auto* const function_descriptor = MTL4::LibraryFunctionDescriptor::alloc()->init();
@@ -207,7 +194,9 @@ cc::result<sg::raytracing_pipeline_handle> metal_context::create_metal_raytracin
     // The units differ from DXR's and the mapping is the conservative direction.
     // DXR counts TraceRay nesting; this counts indirect-call nesting, and a recursive trace ported to Metal spends at
     // least one indirect call per level — the hit function is reached through a visible function table.
-    linking->setMaxCallStackDepth(NS::UInteger(desc.max_recursion_depth));
+    // A callable is one more indirect call below the deepest hit function that calls it.
+    auto const callable_depth = desc.callable_shaders.empty() ? 0 : 1;
+    linking->setMaxCallStackDepth(NS::UInteger(desc.max_recursion_depth + callable_depth));
 
     auto raygen_states = cc::vector<MTL::ComputePipelineState*>();
 
@@ -227,19 +216,11 @@ cc::result<sg::raytracing_pipeline_handle> metal_context::create_metal_raytracin
     {
         if (shader.stage != sg::shader_stage::raygen)
             return fail(cc::error("raytracing_pipeline: a registered raygen shader has the wrong stage"));
-        if (shader.format != sg::shader_format::metal_lib || shader.bytecode.empty())
-            return fail(cc::error("raytracing_pipeline: the metal backend needs a non-empty metal_lib raygen "
-                                  "shader"));
 
-        auto* const blob = dispatch_data_create(shader.bytecode.data(), size_t(shader.bytecode.size()), nullptr,
-                                                DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-        NS::Error* library_error = nullptr;
-        auto* const library = _device->newLibrary(blob, &library_error);
-        dispatch_release(blob);
-
-        if (library == nullptr)
-            return fail(metal_error(library_error, "raytracing_pipeline: the raygen metal library could not be "
-                                                   "loaded"));
+        auto loaded = library_from_shader(_device, shader, "raytracing_pipeline: the raygen shader");
+        if (loaded.has_error())
+            return fail(cc::error(cc::move(loaded).error()));
+        auto* const library = loaded.value();
         libraries.push_back(library);
 
         auto* const function_descriptor = MTL4::LibraryFunctionDescriptor::alloc()->init();

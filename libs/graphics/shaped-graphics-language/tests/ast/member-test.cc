@@ -32,6 +32,22 @@ TEST("sgl ast - a struct holds fields, properties, methods and nested declaratio
              "    (field x : int)))");
 }
 
+TEST("sgl ast - a struct's type parameters stand in a square list after its name")
+{
+    // AST-152: each a field as a function's are, which the check pass judges
+    CHECK(ast_of("struct report[A]:\n    t: float\n    attributes: A\n")
+          == "(struct report (type-params (field A))\n"
+             "  (field t : float)\n"
+             "  (field attributes : A))");
+}
+
+TEST("sgl ast - mut before a typed parameter is recorded, for the check pass to refuse")
+{
+    // CHK-315 spells a mut parameter on its type, and says so where `mut` leads the parameter instead
+    CHECK(ast_of("fun f(mut p: float) => p\n") == "(fun f (params (field mut p : float)) => p)");
+    CHECK(ast_of("fun f(mut p: float = 1.0) => p\n") == "(fun f (params (field mut p : float = num:1.0)) => p)");
+}
+
 TEST("sgl ast - self or mut self as the first parameter makes an instance method")
 {
     auto const file = sgl::parse("struct s:\n"

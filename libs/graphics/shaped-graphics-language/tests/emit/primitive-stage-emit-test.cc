@@ -91,5 +91,6 @@ TEST("sgl emit - WebGPU and Metal have neither stage, and refuse each by its fea
         auto const msl = sgl::emit::dump_errors(emit_source(k_program, entry, target::msl));
         CHECK(msl.contains("target-lacks-feature"));
         CHECK(msl.contains("which Metal does not have"));
+        CHECK(msl.contains(entry == k_geometry ? "geometry_shader" : "tessellation_shader"));
     }
 }

@@ -171,6 +171,8 @@ struct sgl::check::flat_local
     cc::string name;
     type_id type = type_id::none;
     bool is_mut = false;
+    /// The prelude's `undefined()`: never assigned, and handed on and stored as a value whose content means nothing.
+    bool is_undefined = false;
 
     bool operator==(flat_local const&) const = default;
 };
@@ -342,6 +344,18 @@ struct sgl::check::flat_block
     constexpr bool operator==(flat_block const&) const = default;
 };
 
+/// The two forms of one value, of which a target writes exactly one: the native form where the device has the construct,
+/// the emulated one where sg does it in software (the trace of raytracing.sgl).
+/// Each is a `flat_block` expression.
+/// Structured form only: legalize keeps one of the two by `legalize_options`.
+struct sgl::check::flat_by_target
+{
+    flat_expr_id native = flat_expr_id::none;
+    flat_expr_id emulated = flat_expr_id::none;
+
+    constexpr bool operator==(flat_by_target const&) const = default;
+};
+
 struct sgl::check::flat_expr
 {
     type_id type = type_id::none;
@@ -365,7 +379,8 @@ struct sgl::check::flat_expr
                 flat_not,
                 flat_and,
                 flat_or,
-                flat_block>
+                flat_block,
+                flat_by_target>
         node;
 
     bool operator==(flat_expr const&) const = default;
@@ -643,6 +658,15 @@ struct sgl::check::flat_stage_input
 
 /// One entry point as one flat function.
 /// A type, a symbol and a binding are ids into the `checked_module` this value stands in.
+/// A ray type an entry point traces: its set, and its position there.
+struct sgl::check::flat_traced_ray
+{
+    symbol_id set = symbol_id::none;
+    i32 ray = 0;
+
+    constexpr bool operator==(flat_traced_ray const&) const = default;
+};
+
 struct sgl::check::flat_entry_point
 {
     stage entry_stage = stage::none;
@@ -660,6 +684,11 @@ struct sgl::check::flat_entry_point
     i32 workgroup[3] = {1, 1, 1};
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
+    /// The ray types it traces, by their position in their set, each once (CHK-332).
+    cc::vector<flat_traced_ray> traced_rays;
+    /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
+    /// for every other entry point.
+    local_id attributes = local_id::none;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -704,6 +733,7 @@ struct sgl::check::flat_entry_point
             && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
             && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
             && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
-            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names;
+            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names
+            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes;
     }
 };

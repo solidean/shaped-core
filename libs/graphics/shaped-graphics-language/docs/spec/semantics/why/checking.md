@@ -112,10 +112,9 @@ A rule that looked at the condition would make a program's validity depend on wh
 
 ## CHK-129
 
-The language's model is that a body is checked where it is inlined, since a generic has no types before that.
-No function is generic yet, so a body means the same at every call, and checking it once gives the same answers.
-Checking it once is also what reports an error in a function nobody calls, and what reports it one time where three calls would report it three times.
-Once generics arrive, a generic body is checked per inline and every other body stays here.
+The language's model was that a body is checked where it is inlined, since a generic has no types before that.
+Generics arrived the other way: a type parameter is opaque, so a generic body means the same at every call too, and is checked once (CHK-338).
+Checking once is what reports an error in a function nobody calls, and what reports it one time where three calls would report it three times.
 
 ## CHK-131
 
@@ -242,7 +241,8 @@ A builtin needs C++ behind it: an evaluator, a spelling per target, a layout.
 So C++ is the source of truth, and the file is generated from it: one record per builtin, and nothing that has to agree with it.
 The generated file is committed all the same, since the prelude is the documentation of the builtins and a diff of it is how a change to them is reviewed.
 `core.sgl` is what needs no C++: ordinary SGL that is checked and inlined like a program's own functions.
-Until SGL has generics, an overload family cannot be written once in SGL, so the registry's C++ loops write the families out and `core.sgl` holds next to nothing.
+Until SGL has generics a program may declare, an overload family cannot be written once in SGL, so the registry's C++ loops write the families out and `core.sgl` holds next to nothing.
+`raytracing.sgl` is a file of its own because it is large and has one topic: the trace, its vocabulary, and the software traversal webgpu runs.
 
 ## CHK-150
 
@@ -302,6 +302,24 @@ EVAL-78's `no-check-ran` catches a run that checked nothing too, but only when t
 A test whose asserts are what it checks pays one line for it, `true // why`, which also says why it checks nothing else.
 A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing: it is fail-closed already.
 
+## CHK-317
+
+A function value is a compile-time entity (the incubator's inferred-comptime idea), and the parameter is the one place it can be spelled so that every call through it is known statically.
+A local or a field of function type would need a function value at runtime, a tag and a switch at every call, which breaks the performance contract without saying so.
+Ray tracing is the first user: a trace takes its candidate decisions as functions, and the software traversal calls them inside its loop.
+
+## CHK-315
+
+A mut parameter is written on its type because that is where `mut` already stands for a geometry stage's stream, and for the access of a resource.
+A `mut` on the name, `mut p: T`, would give one idea two spellings in one signature.
+The ray-tracing stages are the first users: a payload is the caller's place, as DXR's `inout` is.
+
+## CHK-316
+
+Marking the argument keeps an effect on a variable visible where it happens, which the function model asks of every call.
+An exact type is what a place needs: a conversion would make a temporary, and the callee's writes would land in it and be lost.
+The indices of the place are evaluated once so that `bump(mut values[next()])` reads and writes one element, however often the body names it.
+
 ## CHK-259
 
 A `require` is permission, and what an entry point needs is judged from its use (CHK-263).
@@ -325,7 +343,7 @@ Letting a listed binding carry its needs to the entry point on its own would era
 The floor is defined by what the language counts, never by what an optimizer happens to remove.
 A floor that followed dead-code elimination would change with a compiler version or an unrelated refactor, and the host would find out on a device that lacks the feature.
 So every use the entry point reaches counts, including one behind a condition that is always false.
-A compile-time branch on a feature, `if feature raytracing:`, is the form that may leave a use out, and it is not built.
+A compile-time branch on a feature, `if feature ray_query:`, is the form that may leave a use out, and it is not built.
 
 ## CHK-265
 
@@ -380,3 +398,59 @@ The author writes it instead, because it keeps the cost visible in the source.
 On hardware that needs the mark, a marked access becomes a loop over the distinct indices in the wave.
 A refactor that makes an index non-uniform then fails loudly, where an inserted mark would slow it silently.
 The strict rule is also additively relaxable: making the mark optional later breaks no program, while hiding the cost now and asking for it back later would.
+
+## CHK-320
+
+The geometry is part of the type because it decides what a trace against the structure is written as and what it gives back.
+A triangle trace hands back barycentrics, a procedural one the attributes its intersection reported, and a mixed one either.
+Leaving it to the host would make the shader's result type depend on what was bound, which no target can compile.
+It is required rather than defaulted to `.triangles`, since a default would silently skip every box of a structure that holds some.
+
+## CHK-322
+
+A builtin that needs a feature is reached through the prelude's functions, never named by the program: a trace is dozens of steps of the target's query.
+So the use is counted where the entry point reaches the call, after inlining, which is the only place the chain from the entry point to the step is known.
+The diagnostic names that call, so an author who wrote `world.trace(r)` learns which line needs `require ray_query`.
+
+## CHK-331
+
+A pipeline states what it names and derives what it could state wrongly.
+The payload size, the attribute size and the depth are each a fact of the shaders, and DXR fails at run time, or silently, when a declared one is too small.
+`max_recursion_depth` is the exception, and only beside `.host`: the host's shaders are compiled apart, so nothing here sees what they trace.
+
+## CHK-332
+
+The depth a pipeline needs is the longest chain of traces, which only a graph over ray types can bound.
+A graph over shaders would be finer, and would need the table's indices at check time, which the host's rows make unknowable.
+Over ray types, a cycle is a trace that can nest without end, which DXR allows up to a declared bound and SGL refuses.
+True recursion is the [incubator's](../../incubator/raytracing-futures.md).
+
+## CHK-338
+
+A type parameter is opaque, so a generic body is checked once, over it, and an error in it is reported where it is written, whatever the calls.
+The alternative, checking the body per instantiation as C++ does, reports an error at a call its author may not own, and reports it once per call.
+Bounds would let a body ask more of `A`; nothing needed them yet, so a body may only hand a value of it on.
+The first users are the prelude's traces, which carry an intersection's attributes of whatever type the program reports.
+
+## CHK-339
+
+A generic struct is the prelude's alone because the traces need exactly one shape of it, a hit or a report that carries the program's attributes.
+A user-declared one raises questions nothing has answered yet: methods that name the type parameter, several of them, and what a host sees of an instance.
+The [incubator](../../incubator/function-model.md) holds them.
+
+## CHK-341
+
+`report.none()` must build a report without attributes, and SGL has no optional type and no default value of an arbitrary type.
+`undefined()` is that missing value, made safe by being the prelude's alone: the prelude never reads what it holds.
+The interpreter reads it as zeroes so that a miss, which copies undefined attributes into its result, still runs in a test.
+
+## CHK-342
+
+DXR hands an intersection no payload, so SGL does not either, and an intersection's only output is its report.
+The attributes are a struct of the program because every target passes them as a struct: HLSL's attributes parameter, and metal's words.
+
+## CHK-343
+
+A table belongs to the module rather than to a pipeline so that its place in the callable section is a constant of the module.
+Were a table the pipeline's, a stage calling it would compile once per pipeline, with another offset each time, and a stage shared by two pipelines would be two shaders.
+The cost is that every pipeline of the module holds every callable, which costs table space and nothing else.

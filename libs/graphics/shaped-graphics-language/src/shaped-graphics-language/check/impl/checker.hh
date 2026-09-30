@@ -141,6 +141,8 @@ struct function_notes
     bool are_defaults_sound = true;
     /// Stands on a loop of calls, which was reported.
     bool is_recursive = false;
+    /// For an entry point: what its file, the bindings it lists and its body's `require`s declare (CHK-262).
+    feature_set declared_features;
     /// 0 before anybody asked, 1 for a function that inlines whole, 2 for one that does not.
     /// It inlines whole when its body is sound, it is not recursive, and the same holds for every function it calls.
     u8 inlines_whole = 0;
@@ -191,8 +193,22 @@ struct call_arguments
     /// Parallel to `written`: a tuple or object literal, as a position in `checker::literals`; -1 for anything else.
     /// Such a literal has no type of its own, so its entry in `types` is `none` (CHK-81).
     cc::vector<i32> literals;
+    /// Parallel to `written`: a function's name or a lambda, as a position in `checker::function_arguments`; -1 for
+    /// anything else, including a parameter of function type handed on, which has its type.
+    cc::vector<i32> functions;
+    /// Parallel to `written`: the prelude's `undefined()`, which has the type of the parameter it meets (CHK-341).
+    cc::vector<bool> undefineds;
     /// An argument had the error type or was reported, so the call reports nothing about its arguments.
     bool is_poisoned = false;
+};
+
+/// A function's name or a lambda written as an argument, which has no type until a parameter of function type meets it.
+struct function_argument
+{
+    ast::expr_id expr = ast::expr_id::none;
+    bool is_lambda = false;
+    /// The functions of the name, for a name.
+    cc::vector<symbol_id> functions;
 };
 
 /// One candidate that takes a call's arguments: which argument fills which parameter, and at what cost.
@@ -200,6 +216,8 @@ struct candidate_match
 {
     symbol_id candidate = symbol_id::none;
     cc::vector<i32> slots;
+    /// What a generic candidate's type parameters were deduced as, two by two (CHK-340).
+    cc::vector<type_id> bindings;
     /// Parallel to the call's written arguments: the length of the chain that converts each to its parameter (CHK-70).
     cc::vector<i32> chains;
 };
@@ -280,10 +298,16 @@ struct checker
     cc::map<cc::string, cc::vector<symbol_id>> names;
     /// `@operator` functions by operator spelling.
     cc::map<cc::string, cc::vector<symbol_id>> operators;
+    /// The prelude's alone, which is all a prelude file sees (CHK-190).
+    cc::map<cc::string, cc::vector<symbol_id>> prelude_operators;
     /// The functions of each struct's and enum's type scope, keyed by the index of the type's symbol, then by name.
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     cc::map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
     /// The types `resource_type` and `buffer_type` interned, by spelling, so a mention looks up only its equals.
+    /// The function arguments of every call checked so far; `call_arguments::functions` indexes it.
+    cc::vector<function_argument> function_arguments;
+    /// True while a parameter's type is resolved, the one place a function type may stand (CHK-317).
+    bool allows_function_type = false;
     cc::map<cc::string, cc::vector<type_id>> interned_types;
     cc::vector<pending_extension> pending_extensions;
     /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
@@ -330,6 +354,11 @@ struct checker
     {
         return is_prelude_file(file) ? prelude_names : names;
     }
+    /// The `@operator` functions a use of an operator in `file` may choose from, by spelling.
+    [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& operators_seen_from(i32 file) const
+    {
+        return is_prelude_file(file) ? prelude_operators : operators;
+    }
     [[nodiscard]] source_span span_of(i32 file, form_id form) const;
     [[nodiscard]] source_span span_of(i32 file, ast::expr_id expr) const;
     [[nodiscard]] source_span span_of(i32 file, ast::decl_id decl) const;
@@ -361,7 +390,10 @@ struct checker
 
     // ---- declarations (check.cc, check_decl.cc) ---------------------------------------------------------------------
 
-    void run();
+    /// The whole pass, or what remains of it behind `from`, the state a checked prelude left.
+    /// Every step past the declarations runs only over what `from` does not hold, or is a whole-module step that reads
+    /// the prelude's part without changing it: so a program's check behind a checked prelude is the check of both.
+    void run(resume_point from = {});
     void declare_file(i32 file);
     void declare(i32 file, ast::decl_id decl);
     void add_symbol(symbol s, source_span name_where);
@@ -378,23 +410,27 @@ struct checker
     /// The kind of thing `name` is in the type scope of `owner`, from its block and what was added so far; empty for
     /// nothing, else "field", "case", "property" or "function".
     [[nodiscard]] cc::string_view member_kind_of(symbol_id owner, cc::string_view name) const;
-    /// Every `fun T.name`, into the type scope of `T`; run once every file is declared.
-    void attach_extensions();
-    /// Reports each integer literal beyond `int` that no conversion took to a type holding it (CHK-61).
-    void judge_wide_literals();
+    /// Every `fun T.name` from `pending_extensions[first]` on, into the type scope of `T`; run once every file is declared.
+    void attach_extensions(isize first);
+    /// Reports each integer literal from `wide_literals[first]` on that no conversion took to a type holding it (CHK-61).
+    void judge_wide_literals(isize first);
     /// Two functions of one overload set whose parameters agree in type, name and named-only mark (CHK-241).
-    void judge_redeclarations();
+    /// Only the sets that hold a symbol from `first` on, since the others were judged with the prelude.
+    void judge_redeclarations(isize first);
     /// The functions a call of `name` from `file` may choose from, where `first` is its first argument's type:
     /// the functions of that name visible there, and those of the type scope of `first` (CHK-247).
     [[nodiscard]] cc::vector<symbol_id> candidates_of(i32 file, cc::string_view name, type_id first) const;
+    /// A declaration of the prelude marked `@internal`, which no lookup from the program's file finds (CHK-323).
+    [[nodiscard]] bool is_internal(symbol_id id) const;
     /// True where a lookup from `file` sees a function of `from`: the prelude never sees the program's.
+    /// The program never sees what the prelude keeps internal.
     [[nodiscard]] bool is_visible_from(i32 file, symbol_id from) const
     {
-        return !is_prelude_file(file) || is_prelude_file(out.at(from).file);
+        return is_prelude_file(file) ? is_prelude_file(out.at(from).file) : !is_internal(from);
     }
-    /// Gives every struct with a block its synthesized constructor, a function of the struct's name (CHK-239).
+    /// Gives every struct from symbol `first` on that has a block its synthesized constructor (CHK-239).
     /// Run once every file is declared, so the symbols declared before keep their ids.
-    void declare_constructors();
+    void declare_constructors(isize first);
 
     /// Compiles the symbol when nobody has, and reports a cycle when somebody is.
     /// The state it returns is `checked` or `failed`, or `in_compilation` for a cycle, which was reported at `where`.
@@ -411,6 +447,8 @@ struct checker
     /// Reports `shadows-unshadowable` where a local or a parameter named `name` would hide a `@shadowable(false)` symbol.
     void judge_shadowing(i32 file, cc::string_view name, source_span where);
     void compile_binding(symbol_id id);
+    /// The bindings a `{...}` list names, each checked; an entry that names none is reported and sets `is_failed`.
+    [[nodiscard]] cc::vector<symbol_id> binding_list_of(i32 file, ast::range_of<ast::argument> entries, bool& is_failed);
     void compile_function(symbol_id id);
     /// The synthesized constructor `id`: one parameter per field of its struct, and the struct as its result.
     void compile_constructor(symbol_id id);
@@ -423,7 +461,7 @@ struct checker
     /// True for the prelude's `int3`, the type a dispatch reports a thread's id as.
     [[nodiscard]] bool is_int3(type_id type) const;
     /// The stages a `@stages` attribute names, as `function_info::stages`; every stage without one or after a bad one.
-    [[nodiscard]] u8 stages_of(i32 file, ast::attribute const* a);
+    [[nodiscard]] u16 stages_of(i32 file, ast::attribute const* a);
     [[nodiscard]] interpolation interpolation_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
@@ -442,6 +480,15 @@ struct checker
     type_id check_stream_call(function_scope& scope, ast::expr_id id, ast::call const& call, type_id stream);
     /// CHK-301 to CHK-306: an entry point of the geometry or a tessellation stage, which `judge_entry_point` hands on.
     void judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
+    /// The ray set a `rays` declaration made of `symbol`, and its ray types; null for any other symbol.
+    [[nodiscard]] bool is_ray_set(symbol_id symbol) const;
+    /// `set.ray` as an expression: the set and the ray's position, or `none` where `expr` names no ray set.
+    /// A ray set without that ray type is reported, and its position is -1.
+    [[nodiscard]] cc::optional<ray_trace> ray_type_of(i32 file, ast::expr_id expr);
+    /// `trace(world, r, set.ray, mut payload)`, the trace of a ray-tracing stage (CHK-329).
+    type_id check_pipeline_trace(function_scope& scope, ast::expr_id id, ast::call const& call, ray_trace ray);
+    /// CHK-326: an entry point of a ray-tracing stage, which `judge_entry_point` hands on.
+    void judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
     /// The one name of a `@stream(name)` or a `@sampler(name)`; empty without one, and after a bad argument it reports.
     [[nodiscard]] cc::string name_argument_of(i32 file, ast::attribute const* a);
     /// The members of a struct or a binding, collected locally and appended whole so the range stays contiguous.
@@ -502,12 +549,28 @@ struct checker
     /// Whether `expr` in a type position names a complete type, so that a group applied to it makes an array of it.
     /// Reports nothing, so a caller may still read the group as something else.
     [[nodiscard]] bool is_type_name(i32 file, ast::expr_id expr) const;
+    /// The generic struct of the prelude `expr` names, `none` where it names no such struct (CHK-339).
+    type_id generic_named(i32 file, ast::expr_id expr);
     /// An array's length as written: an int literal or a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
     /// A checked index's value when it is an int literal or names a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
     /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
     [[nodiscard]] type_id resource_type(type_info info);
+    /// `acceleration_structure[.geometry]` (CHK-320).
+    [[nodiscard]] type_id resolve_acceleration_structure(i32 file, ast::expr_id expr, ast::index const& node);
+    /// `(parameters) -> result`, interned: two mentions of one signature share an id (CHK-317).
+    [[nodiscard]] type_id function_type(cc::span<type_id const> parameters, type_id result);
+    /// Of `candidates`, the function whose signature is exactly `type`'s; `none` where no single one is.
+    [[nodiscard]] symbol_id function_of_type(cc::span<symbol_id const> candidates, type_id type);
+    /// A lambda handed to a parameter of function type `type`, checked where it stands (CHK-318).
+    /// `bindings`, where given, is what the call bound: a lambda's result binds what it left (CHK-340).
+    type_id check_lambda(function_scope& scope, ast::expr_id expr, type_id type, cc::vector<type_id>* bindings = nullptr);
+    /// A generic callee's result at this call: its parameters bound by the arguments, then by where the call stands.
+    /// The error type after a report where a parameter is left unbound.
+    type_id deduce_result(function_scope const& scope, ast::expr_id id, symbol_id callee, cc::vector<type_id>& bindings);
+    /// A call through a parameter of function type (CHK-319).
+    type_id check_function_call(function_scope& scope, ast::expr_id id, ast::call const& call, local_name const& local);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
     [[nodiscard]] type_id resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text);
     /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.
@@ -545,6 +608,8 @@ struct checker
     feature_set read_require(i32 file, ast::require_decl const& r, require_scope scope, symbol_id owner);
     /// Records which features entry point `id` needs and reports every one it does not declare (CHK-263, CHK-264).
     void judge_entry_features(symbol_id id);
+    /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
+    void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).
     void report_unused_requires();
 
@@ -561,6 +626,64 @@ struct checker
     // ---- pipelines (check_pipeline.cc) ------------------------------------------------------------------------------
 
     void compile_pipeline(symbol_id id);
+    // ---- generics (check_generics.cc) ----
+    /// A fresh type parameter named `name`, of the function or the generic struct `owner` (CHK-338).
+    type_id new_type_parameter(cc::string_view name, symbol_id owner);
+    /// True where `type` names a type parameter at any depth: it stands for different types at different calls.
+    [[nodiscard]] bool is_open(type_id type) const;
+    /// Every type parameter `type` names, each once, into `into`.
+    void collect_type_parameters(type_id type, cc::vector<type_id>& into) const;
+    /// `generic[argument]`, interned; the template itself where `argument` is its own type parameter (CHK-339).
+    type_id instance_of(type_id generic, type_id argument);
+    /// `instance_of` where it exists already, `none` otherwise.
+    [[nodiscard]] type_id existing_instance(type_id generic, type_id argument) const;
+    /// `type` with every parameter `bindings` binds replaced, interning what that makes.
+    type_id substitute(type_id type, cc::span<type_id const> bindings);
+    /// `substitute` over what exists already, which flattening reads; `none` where an instance was never made.
+    [[nodiscard]] type_id substitute_existing(type_id type, cc::span<type_id const> bindings) const;
+    /// Whether `actual` is `pattern` with its open parameters bound, extending `bindings` with what that takes (CHK-340).
+    [[nodiscard]] bool unify(type_id pattern, type_id actual, cc::vector<type_id>& bindings) const;
+    /// Makes every instance a generic call's inlining will name, before any entry point is flattened.
+    void instantiate_generics();
+    /// The type parameters in scope, innermost last: a generic function's while its signature and body are checked,
+    /// and a generic struct's while its members are.
+    cc::vector<cc::pair<cc::string_view, type_id>> type_parameter_names;
+    /// True where `name` is a type parameter in scope, which hides every symbol of its name (CHK-338).
+    [[nodiscard]] bool is_type_parameter_name(cc::string_view name) const
+    {
+        for (auto const& n : type_parameter_names)
+            if (n.first == name)
+                return true;
+        return false;
+    }
+    /// What a call stands where a type is expected, which a generic callee's result is deduced from where its
+    /// arguments leave a parameter unbound (CHK-340); `none` elsewhere.
+    type_id expected_result = type_id::none;
+
+    /// CHK-330: a `hit_group`, one row of a ray-tracing pipeline's table.
+    void compile_hit_group(symbol_id id);
+    /// CHK-343: a `callables` table.
+    void compile_callables(symbol_id id);
+    /// The `callables` table `expr` names, `none` where it names none.
+    symbol_id callables_named(i32 file, ast::expr_id expr);
+    /// CHK-344: `table[i](mut p)`, a call of the callable at `i`.
+    type_id check_callable_call(function_scope& scope,
+                                ast::expr_id id,
+                                ast::call const& call,
+                                ast::index const& index,
+                                symbol_id table);
+    /// CHK-343: at most one table of a module takes the host's callables, and it is declared last.
+    void judge_callables();
+    /// CHK-331: a `@raytracing pipeline`.
+    void compile_raytracing_pipeline(symbol_id id);
+    /// The entry point of `wanted` that `value` names, or `none` after a report.
+    symbol_id ray_entry_named(i32 file, ast::expr_id value, stage wanted);
+    /// The ray set `name` names, or `none` after a report.
+    symbol_id ray_set_named(i32 file, source_span name);
+    /// The payload an entry point of a ray-tracing stage takes, `none` for a raygen.
+    [[nodiscard]] type_id payload_of(symbol_id entry) const;
+    /// CHK-332: every ray-tracing pipeline's trace graph, once each entry point says what it traces.
+    void judge_trace_graphs();
     /// The prelude's `raster_pipeline_description`, compiled on first use; the error type where the prelude has none.
     [[nodiscard]] type_id pipeline_description_type();
     /// True when `name` alone is one field of the description, or of one target's part when `is_on_target`.
@@ -572,6 +695,7 @@ struct checker
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 
     void check_body(symbol_id id);
+    void check_body_of(symbol_id id);
     /// The defaults of function `id`'s parameters, each in the function's own scope with the parameters before it
     /// visible, and of its parameter's type (CHK-243).
     /// Checked once, after every signature is known, since a default may call what is declared below it.
@@ -673,7 +797,9 @@ struct checker
     /// It reports nothing, so a literal can try every candidate.
     [[nodiscard]] cc::optional<candidate_match> match(i32 file, symbol_id candidate, call_arguments const& arguments);
     /// The length of the chain that converts written argument `i` to `parameter`; nothing where it does not convert.
-    [[nodiscard]] cc::optional<i32> chain_of(i32 file, type_id parameter, call_arguments const& arguments, isize i);
+    [[nodiscard]] cc::optional<i32> chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i);
+    /// Whether `expr`, already checked, names a place a body could assign, reporting why not; `what` names the use.
+    bool judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what);
     /// The chain of tuple or object literal `literal` to `to`: one more than its call's longest (CHK-84).
     [[nodiscard]] cc::optional<i32> literal_chain(i32 file, type_id to, i32 literal);
     /// The functions of the name of the struct `to` visible from `file`, its synthesized constructor among them.
@@ -701,15 +827,26 @@ struct checker
                          call_arguments const& arguments,
                          cc::span<parameter const> parameters,
                          cc::span<i32 const> slots);
+    void commit_literals(function_scope& scope,
+                         call_arguments const& arguments,
+                         cc::span<parameter const> parameters,
+                         cc::span<i32 const> slots,
+                         cc::vector<type_id>& bindings);
     /// Why each of `candidates` did not match call `call`, kept for a later "did you mean".
     void note_near_misses(i32 file,
                           ast::expr_id call,
                           cc::span<symbol_id const> candidates,
                           call_arguments const& arguments);
     /// Remembers how call `id` fills the parameters of `callee`, which is what the flat tree is written from.
-    void record_call(i32 file, ast::expr_id id, symbol_id callee, call_arguments const& arguments, cc::span<i32 const> slots);
-    /// The candidates of `spelling` that take exactly `types`, without a report; what the flat tree is written from.
-    [[nodiscard]] symbol_id find_operator(cc::string_view spelling, cc::span<type_id const> types) const;
+    void record_call(i32 file,
+                     ast::expr_id id,
+                     symbol_id callee,
+                     call_arguments const& arguments,
+                     cc::span<i32 const> slots,
+                     cc::span<type_id const> bindings = {});
+    /// The candidates of `spelling` seen from `file` that take exactly `types`, without a report.
+    /// It is what the flat tree is written from.
+    [[nodiscard]] symbol_id find_operator(i32 file, cc::string_view spelling, cc::span<type_id const> types) const;
     [[nodiscard]] call_arguments check_arguments(function_scope& scope,
                                                  ast::range_of<ast::argument> range,
                                                  bool is_constructor);
@@ -734,6 +871,17 @@ struct checker
 
     /// True when every member of the type, at any depth, has a type.
     [[nodiscard]] bool is_sound(type_id type) const;
-    void flatten_entry_point(symbol_id id);
+    /// What a metal traversal function fuses into one intersection entry point: the any hit a record runs after it,
+    /// and the payload that any hit writes (CHK-345).
+    struct traversal_request
+    {
+        cc::string name;
+        symbol_id any_hit = symbol_id::none;
+        type_id payload = type_id::none;
+    };
+    void flatten_entry_point(symbol_id id, traversal_request const* traversal = nullptr);
+    /// CHK-345: every procedural hit group's traversal function per ray type, and the empty closest hit, which metal's
+    /// tables hold where DXR's run an intersection and an any hit apart, or nothing.
+    void flatten_metal_traversals();
 };
 } // namespace sgl::check::impl

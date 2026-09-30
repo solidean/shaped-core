@@ -107,6 +107,169 @@ public:
         return "";
     }
 
+    /// Which shaders read and write one payload field: the caller, then closesthit, miss and anyhit.
+    struct payload_access
+    {
+        bool reads[4] = {};
+        bool writes[4] = {};
+    };
+
+    /// `: read(…) : write(…)` for `a`; a field nobody reads or writes is still the caller's, since HLSL qualifies each.
+    static cc::string access_text(payload_access const& a)
+    {
+        cc::string_view const names[] = {"caller", "closesthit", "miss", "anyhit"};
+        auto const list = [&](bool const(&on)[4])
+        {
+            auto text = cc::string();
+            for (auto i = 0; i < 4; ++i)
+                if (on[i])
+                    text.appendf("{}{}", text.empty() ? "" : ", ", names[i]);
+            return text.empty() ? cc::string("caller") : text;
+        };
+        return cc::format(" : read({}) : write({})", list(a.reads), list(a.writes));
+    }
+
+    /// EMIT-137: field `name` of payload `type`, as every entry point of the module touches it.
+    /// A stage is its payload parameter's reader and writer, and a caller whatever local of the type it traces with.
+    /// A partial write reads the field too, since what it leaves must arrive intact; and a whole-struct access is one
+    /// of every field.
+    /// Every shader of one SGL file then states the same qualifiers, which is what one pipeline's shaders must agree on.
+    static payload_access payload_access_of(plan const& p, check::type_id type, cc::string_view name)
+    {
+        auto result = payload_access();
+        // Every shader of a pipeline must state the same qualifiers, and a host's hit group is compiled apart from the
+        // pipeline it joins: so a type only closed pipelines of this module trace is inferred, and any other is widest.
+        auto is_traced = false;
+        auto is_open = false;
+        for (auto const& pipeline : p.m.pipelines)
+        {
+            if (pipeline.kind != check::pipeline_kind::raytracing)
+                continue;
+            auto is_its = false;
+            for (auto const& ray : p.m.at(p.m.at(p.m.at(pipeline.ray_set).type).members))
+                is_its = is_its || ray.type == type;
+            is_traced = is_traced || is_its;
+            is_open = is_open || (is_its && pipeline.has_host_hit_groups);
+        }
+        if (!is_traced || is_open)
+        {
+            for (auto i = 0; i < 4; ++i)
+                result.reads[i] = result.writes[i] = true;
+            return result;
+        }
+        auto field = isize(-1);
+        auto const members = p.m.at(p.m.at(type).members);
+        for (auto i = isize(0); i < members.size(); ++i)
+            if (members[i].name == name)
+                field = i;
+        for (auto const& e : p.m.entry_points)
+        {
+            auto const stage_slot = e.entry_stage == stage::closest_hit ? 1
+                                  : e.entry_stage == stage::miss        ? 2
+                                  : e.entry_stage == stage::any_hit     ? 3
+                                                                        : -1;
+            auto is_caller = false;
+            for (auto const& r : e.traced_rays)
+                is_caller = is_caller || p.m.at(p.m.at(p.m.at(r.set).type).members)[r.ray].type == type;
+            auto const slot_of = [&](check::local_id local) -> int
+            {
+                if (stage_slot >= 0 && e.input == type && local == check::local_id(0))
+                    return stage_slot;
+                if (is_caller && e.at(local).type == type)
+                    return 0;
+                return -1;
+            };
+            // what stands as the object of a member, a place, or a trace's payload is no whole-struct read
+            auto is_object = cc::vector<bool>::create_filled(e.exprs.size(), false);
+            auto is_place = cc::vector<bool>::create_filled(e.exprs.size(), false);
+            for (auto const& x : e.exprs)
+            {
+                if (auto const* const m = x.node.try_as<check::flat_member>(); m != nullptr && check::is_valid(m->object))
+                    is_object[index_of(m->object)] = true;
+                auto const* const c = x.node.try_as<check::flat_call>();
+                auto const* const record = c == nullptr ? nullptr : p.m.builtin_function(c->intrinsic);
+                if (record == nullptr || !record->takes_element || e.at(c->arguments).empty())
+                    continue;
+                auto const handed = e.at(c->arguments).back();
+                is_place[index_of(handed)] = true;
+                // a payload handed on to a nested trace or a callable comes back written, whatever the stage itself
+                // does with it: what the nested shaders wrote must survive this stage's exit
+                if (auto const* const ref = e.at(handed).node.try_as<check::flat_local_ref>();
+                    ref != nullptr && slot_of(ref->local) >= 0)
+                    result.reads[slot_of(ref->local)] = result.writes[slot_of(ref->local)] = true;
+            }
+            for (auto const& st : e.stmts)
+            {
+                // a local's value where it is declared is a write of every field
+                if (auto const* const l = st.node.try_as<check::flat_let>(); l != nullptr && slot_of(l->local) >= 0)
+                    result.writes[slot_of(l->local)] = true;
+                if (auto const* const v = st.node.try_as<check::flat_var>();
+                    v != nullptr && check::is_valid(v->value) && slot_of(v->local) >= 0)
+                    result.writes[slot_of(v->local)] = true;
+                auto const* const a = st.node.try_as<check::flat_assign>();
+                if (a == nullptr || !check::is_valid(a->place))
+                    continue;
+                // down the member chain to the field right below the local
+                auto at = a->place;
+                auto top = flat_expr_id::none;
+                auto depth = 0;
+                while (auto const* const m = e.at(at).node.try_as<check::flat_member>())
+                {
+                    is_place[index_of(at)] = true;
+                    top = at;
+                    at = m->object;
+                    ++depth;
+                }
+                auto const* const ref = e.at(at).node.try_as<check::flat_local_ref>();
+                if (ref == nullptr)
+                    continue;
+                is_place[index_of(at)] = true;
+                auto const slot = slot_of(ref->local);
+                if (slot < 0)
+                    continue;
+                if (!check::is_valid(top))
+                    result.writes[slot] = true;
+                else if (e.at(top).node.as<check::flat_member>().member == field)
+                {
+                    result.writes[slot] = true;
+                    result.reads[slot] = result.reads[slot] || depth > 1;
+                }
+            }
+            for (auto i = isize(0); i < e.exprs.size(); ++i)
+            {
+                auto const& x = e.exprs[i];
+                if (auto const* const m = x.node.try_as<check::flat_member>(); m != nullptr && !is_place[i])
+                    if (auto const* const ref = e.at(m->object).node.try_as<check::flat_local_ref>();
+                        ref != nullptr && m->member == field && slot_of(ref->local) >= 0)
+                        result.reads[slot_of(ref->local)] = true;
+                if (auto const* const ref = x.node.try_as<check::flat_local_ref>();
+                    ref != nullptr && !is_object[i] && !is_place[i] && slot_of(ref->local) >= 0)
+                    result.reads[slot_of(ref->local)] = true;
+            }
+        }
+        // a stage that writes a field reads it too: a write it makes only on some paths keeps what came in on the others
+        for (auto i = 1; i < 4; ++i)
+        {
+            result.reads[i] = result.reads[i] || result.writes[i];
+            // what a stage writes the caller reads, since it alone consumes the trace; and what a stage reads the caller
+            // writes, so it arrives defined
+            result.reads[0] = result.reads[0] || result.writes[i];
+            result.writes[0] = result.writes[0] || result.reads[i];
+        }
+        return result;
+    }
+
+    /// Whether `type` is a ray payload of the entry point: the one it is handed, or one it traces with.
+    [[nodiscard]] static bool is_payload(plan const& p, check::type_id type)
+    {
+        if (p.e.entry_stage >= stage::raygen && p.e.entry_stage != stage::callable && type == p.e.input)
+            return true;
+        for (auto const& r : p.e.traced_rays)
+            if (p.m.at(p.m.at(p.m.at(r.set).type).members)[r.ray].type == type)
+                return true;
+        return false;
+    }
+
     /// Whether the entry point is a pixel stage writing `@depth(.greater_equal)` or `@depth(.less_equal)`.
     [[nodiscard]] static bool writes_conservative_depth(plan const& p)
     {
@@ -150,6 +313,9 @@ public:
         if (owner != nullptr)
             if (auto const semantic = semantic_of(*owner, member, p); !semantic.empty())
                 out.appendf(" : {}", semantic);
+        // EMIT-137: a payload's field states which shaders read and write it, as every shader of the module does
+        if (owner != nullptr && is_payload(p, owner->type))
+            out += access_text(payload_access_of(p, owner->type, member.source_name));
         out += ";\n";
     }
 
@@ -248,6 +414,8 @@ public:
             return cc::format("{}<{}>", k_image_names[isize(t.shape)], builtin_spelling(p, texel_name_of(t.format)));
         case type_kind::sampler:
             return t.is_comparison ? "SamplerComparisonState" : "SamplerState";
+        case type_kind::acceleration_structure:
+            return "RaytracingAccelerationStructure";
         default:
             return {};
         }
@@ -255,11 +423,15 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
+        // EMIT-137: a payload the host's shaders may touch states the widest access, which DXC takes for a missed
+        // optimization rather than an error
+        if (p.e.entry_stage >= stage::raygen)
+            out += "#pragma dxc diagnostic ignored \"-Wpayload-access-perf\"\n\n";
         write_enum_constants(out, p, *this);
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
-            out.appendf("struct {}\n{{\n", s.name);
+            out.appendf("struct {}{}\n{{\n", is_payload(p, s.type) ? "[raypayload] " : "", s.name);
             for (auto const& member : s.members)
                 write_member(out, &s, member, p);
             out += "};\n\n";
@@ -416,6 +588,28 @@ public:
         auto list = cc::string();
         for (auto const& parameter : parameters)
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
+
+        // EMIT-136: a ray-tracing stage is a library export, named by its kind, whose payload is `inout`
+        if (p.e.entry_stage >= stage::raygen)
+        {
+            auto const kind = p.e.entry_stage == stage::raygen       ? "raygeneration"
+                            : p.e.entry_stage == stage::miss         ? "miss"
+                            : p.e.entry_stage == stage::closest_hit  ? "closesthit"
+                            : p.e.entry_stage == stage::any_hit      ? "anyhit"
+                            : p.e.entry_stage == stage::intersection ? "intersection"
+                                                                     : "callable";
+            auto rt = cc::string();
+            if (check::is_valid(p.e.input))
+                rt = cc::format("inout {} {}", type_text(p, *this, p.e.input), p.locals[0]);
+            // EMIT-137: a triangle's attributes are its barycentrics, and a procedural primitive's what it reported
+            if (check::is_valid(p.e.attributes))
+                rt += cc::format(", in {} {}", type_text(p, *this, p.e.at(p.e.attributes).type),
+                                 p.locals[index_of(p.e.attributes)]);
+            else if (p.e.entry_stage == stage::closest_hit || p.e.entry_stage == stage::any_hit)
+                rt += ", in BuiltInTriangleIntersectionAttributes sgl_attributes";
+            out.appendf("[shader(\"{}\")]\nvoid {}({})\n{{\n", kind, p.entry_name, rt);
+            return;
+        }
 
         if (p.e.entry_stage == stage::compute)
         {

@@ -41,7 +41,8 @@ TEST("sg metal - ray tracing is reported, and it is the device's answer")
         SKIP("no metal 4 device on this host");
 
     // Every device above this backend's Metal 4 floor can ray trace, so there is nothing to probe and nothing to gate.
-    CHECK(ctx->supports(sg::feature::raytracing));
+    CHECK(ctx->supports(sg::feature::ray_query));
+    CHECK(ctx->supports(sg::feature::raytracing_pipeline));
 
     // Metal has never had a geometry or tessellation stage, so these two are permanent rather than pending.
     CHECK(!ctx->supports(sg::feature::geometry_shader));

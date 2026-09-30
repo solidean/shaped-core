@@ -147,6 +147,24 @@ struct planned_workgroup
     check::type_id type = check::type_id::none;
 };
 
+/// One group as MSL passes it: an argument buffer the entry point takes at `[[buffer(group)]]`.
+struct planned_argument_buffer
+{
+    i32 group = 0;
+    /// The struct of the group's slots, minted from `<binding>_arguments`.
+    cc::string struct_name;
+    /// The parameter it arrives through, minted from `<binding>_group`.
+    cc::string parameter;
+};
+
+/// The ray set that sizes a ray-tracing entry point's ray data on MSL, `none` for one that has none (EMIT-139).
+/// It is the set of the first pipeline or hit group holding the entry point, else the set it traces or is handed a
+/// payload of.
+[[nodiscard]] check::symbol_id ray_set_of(check::checked_module const& m, check::flat_entry_point const& e);
+/// The ray sets of every ray-tracing pipeline and hit group holding `e` as one of its shaders, each once.
+[[nodiscard]] cc::vector<check::symbol_id> owning_ray_sets(check::checked_module const& m,
+                                                           check::flat_entry_point const& e);
+
 struct plan
 {
     check::checked_module const& m;
@@ -181,6 +199,8 @@ struct plan
     cc::vector<planned_sampler> samplers;
     /// The members of its `@workgroup` bindings, in the order listed and then declared.
     cc::vector<planned_workgroup> workgroup;
+    /// MSL's: one per group with a constant block or a resource, in group order; empty on every other target.
+    cc::vector<planned_argument_buffer> argument_buffers;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;
     /// Parallel to `e.stage_inputs`: each as the target hands it over, unsigned, ahead of the local the body reads;

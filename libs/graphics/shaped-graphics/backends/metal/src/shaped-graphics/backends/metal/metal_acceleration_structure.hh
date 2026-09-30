@@ -104,14 +104,16 @@ public:
                isize update_scratch_size_in_bytes,
                sg::accel_build_flags build_flags,
                int instance_count,
-               cc::vector<sg::blas_handle> referenced_blases)
+               cc::vector<sg::blas_handle> referenced_blases,
+               sg::raw_buffer_handle hit_group_offsets)
       : sg::tlas(size_in_bytes,
                  build_scratch_size_in_bytes,
                  update_scratch_size_in_bytes,
                  build_flags,
                  instance_count,
                  cc::move(referenced_blases)),
-        _storage(ctx, accel, size_in_bytes)
+        _storage(ctx, accel, size_in_bytes),
+        _hit_group_offsets(cc::move(hit_group_offsets))
     {
     }
 
@@ -119,8 +121,13 @@ public:
 
     [[nodiscard]] metal_accel_storage const& storage() const { return _storage; }
 
+    /// Each instance's `hit_group_offset`, a `u32` by the instance's index, which a ray-tracing kernel reads to find a
+    /// closest hit's record: see `k_hit_group_offsets_buffer_index`.
+    [[nodiscard]] sg::raw_buffer_handle const& hit_group_offsets() const { return _hit_group_offsets; }
+
 private:
     void on_expired() const override { _storage.release(_finalizers); }
 
     metal_accel_storage _storage;
+    sg::raw_buffer_handle _hit_group_offsets;
 };

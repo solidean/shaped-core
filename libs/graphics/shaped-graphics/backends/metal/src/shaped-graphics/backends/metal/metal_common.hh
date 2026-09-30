@@ -145,6 +145,14 @@ inline constexpr int k_inline_constants_buffer_index = sg::reserved_binding_grou
 /// agree: the pipeline's layout index and the address the draw binds.
 inline constexpr int k_vertex_buffer_base_index = k_inline_constants_buffer_index + 1;
 
+/// The MSL buffer index a `dispatch_rays` binds the traced TLAS's per-instance hit-group offsets at.
+///
+/// Metal's intersection result names the instance but not its `intersectionFunctionTableOffset`, which a kernel needs to
+/// find a closest hit's record as DXR does: `offset + geometry * stride + ray type`.
+/// So a TLAS keeps its instances' offsets in a buffer of its own, and the kernel reads `offsets[instance]`.
+/// A raygen kernel draws no vertices, so vertex-input slot 0 is free during a dispatch and the index is borrowed from it.
+inline constexpr int k_hit_group_offsets_buffer_index = k_vertex_buffer_base_index;
+
 /// The buffer slots one command list's argument table holds: the groups, the reserved one, inline constants, and
 /// every vertex-input slot.
 ///

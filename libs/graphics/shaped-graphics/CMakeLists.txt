@@ -20,6 +20,7 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list/query.cc
     src/shaped-graphics/query/gpu_timestamp.cc
     src/shaped-graphics/raytracing/acceleration_structure.cc
+    src/shaped-graphics/raytracing/impl/hit_record_check.cc
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/barrier/footprint.cc
     src/shaped-graphics/binding/binding.cc
@@ -104,6 +105,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list/query.hh
     src/shaped-graphics/query/gpu_timestamp.hh
     src/shaped-graphics/raytracing/acceleration_structure.hh
+    src/shaped-graphics/raytracing/impl/hit_record_check.hh
     src/shaped-graphics/resource/raw_buffer.hh
     src/shaped-graphics/resource/buffer.hh
     src/shaped-graphics/resource/pixel_format.hh
@@ -261,6 +263,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/slot-recording-test.cc
         tests/barrier/array-plan-test.cc
         tests/context/stats-recording-test.cc
+        tests/raytracing/hit-row-test.cc
     )
     sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
@@ -400,6 +403,8 @@ if(SC_BUILD_TESTS)
             tests/pipeline/sampler-test.cc
             tests/pipeline/texture-shapes-test.cc
             tests/pipeline/stages-test.cc
+            tests/pipeline/ray-query-test.cc
+            tests/pipeline/raytracing-pipeline-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -419,6 +424,10 @@ if(SC_BUILD_TESTS)
                 draws.sgl:*
                 vertex_input.sgl:*
                 dispatch.sgl:*
+                raytracing.sgl:*
+                raytracing_pipeline.sgl:*
+                raytracing_open.sgl:*
+                raytracing_callables.sgl:*
                 pixel_semantics.sgl:*
                 sampling.sgl:*
                 shapes.sgl:*

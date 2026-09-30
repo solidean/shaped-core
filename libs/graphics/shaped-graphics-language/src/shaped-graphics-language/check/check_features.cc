@@ -72,6 +72,9 @@ void checker::judge_entry_features(symbol_id id)
         needed.set(feature::geometry_shader);
     if (info.entry_stage == stage::tessellation_control || info.entry_stage == stage::tessellation_evaluation)
         needed.set(feature::tessellation_shader);
+    // CHK-326: the ray-tracing stages are the pipeline's, which a device grants
+    if (info.entry_stage >= stage::raygen)
+        needed.set(feature::raytracing_pipeline);
     // CHK-274: a pixel stage that takes a member per sample runs per sample, which vulkan gives only with a feature
     if (info.entry_stage == stage::pixel)
         for (auto const& parameter : out.at(info.parameters))
@@ -91,6 +94,7 @@ void checker::judge_entry_features(symbol_id id)
     }
     declared |= in_body;
     info.features = needed;
+    notes[s.info].declared_features = declared;
 
     // CHK-264
     auto const where = ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name;
@@ -112,6 +116,22 @@ void checker::judge_entry_features(symbol_id id)
                                .message = cc::format("{} needs {}", binding.name, name_of(f))});
         }
     }
+}
+
+void checker::mark_requires_used(cc::span<symbol_id const> functions, feature_set features)
+{
+    for (auto const function : functions)
+        for (auto i = isize(0); i < k_feature_count; ++i)
+        {
+            if (!features.has(feature(i)))
+                continue;
+            for (auto& line : require_lines)
+                if (line.owner == function && line.scope == require_scope::body && line.what == feature(i))
+                {
+                    line.is_used = true;
+                    break;
+                }
+        }
 }
 
 void checker::report_unused_requires()

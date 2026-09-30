@@ -88,6 +88,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
   MTL4's render encoder has no `setVertexBuffer`, and Metal has no root constants and no push constants — so both arrive the way a binding group does, as an address in the one `MTL4ArgumentTable`.
   That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
   Groups at 0 to 2, sg's reserved group at 3, inline constants at 4, and vertex-input slot `n` at 5 + `n`.
+  `dispatch_rays` borrows 5, `k_hit_group_offsets_buffer_index`, for the traced TLAS's hit-group offsets, since a kernel draws no vertices.
   An `[[attribute(n)]]` index is the attribute's position in `vertex_input_layout::attributes`, which is the workaround the vulkan backend already states for its SPIR-V locations.
   Both are a workaround for the same missing field: sg names a vertex input by an HLSL semantic, and neither MSL nor SPIR-V has one.
   **Nothing below checks any of it.**
@@ -290,11 +291,23 @@ The pipeline path maps as follows.
   MSL's `visible_function_table<T>` is typed by the function signature, so one table cannot hold miss, closest-hit and callable functions.
   Their signatures differ, and the compiler rejects calling one table two ways.
   Each of sg's index spaces therefore gets a table of its own, and `miss_index` / `hit_index` / `callable_index` are used verbatim with no base to add.
-- **The tables reach a kernel through `sg::reserved_binding_group`**, as four members of that group's argument buffer:
+- **The tables reach a kernel through `sg::reserved_binding_group`**, as members of that group's argument buffer:
   `[[id(0)]]` intersection, `[[id(1)]]` miss, `[[id(2)]]` closest-hit, `[[id(3)]]` callable.
+  A table of more than one ray type adds ray type r's intersection table at `[[id(3 + r)]]`, so a one-ray-type kernel keeps the layout it always had.
   The reservation already existed for exactly this, so nothing about what `group_index` means changes.
   A caller still gets groups 0 to 2.
   Ray tracing and shader-side diagnostics now share that group, so those `[[id(n)]]` assignments are one namespace rather than two.
+- **A TLAS carries its instances' hit-group offsets, and `dispatch_rays` binds them at MSL buffer 5.**
+  Metal's intersection result names the instance but not the `intersectionFunctionTableOffset` it carried, and a kernel needs that offset to find a closest hit's record.
+  So `build_tlas` also uploads one `u32` per instance into `metal_tlas::hit_group_offsets()`.
+  `dispatch_rays` binds it at `k_hit_group_offsets_buffer_index`, which is vertex-input slot 0's index, free during a dispatch.
+  A dispatch with no such TLAS binds a context-wide zeroed buffer there instead, since the kernel declares the slot either way.
+  A kernel then calls the closest-hit table at `offsets[instance] + geometry * stride + ray type`, which is how SGL's kernels find it.
+  **A dispatch traces one TLAS**: it binds the first bound TLAS's offsets, and logs a warning when the bound groups hold more than one.
+  This is untested on metal hardware so far; the tier-1 pipeline tests exercise it in CI.
+- **An empty closest-hit slot holds no function**, and a kernel must not call one.
+  A group without a closest hit leaves its slot empty, which is valid for the table and not callable.
+  SGL's kernels call every record's closest hit, so slib fills the empty slots with `sgl_empty_closest_hit` for them.
 - **One table set per raygen**, because a function handle is minted from a specific pipeline state and this pipeline has one state per raygen shader.
 - **One `MTL::Library` per registered shader**, so a table may draw its entries from as many separate shader files as it has entries.
   That is the realistic shape rather than a nicety: `sg::compiled_shader` is single-entry, so a real shader pipeline hands the backend one blob per shader.
@@ -308,10 +321,18 @@ The pipeline path maps as follows.
   Traversal runs exactly one function per group here, and for a procedural group that is its intersection function — there is nowhere to put an any-hit beside it.
   DXR runs both, so this is a real gap rather than a spelling: fold the any-hit's decision into the intersection function, which is already deciding what the ray hit.
   Accepting the group and dropping the any-hit is what this replaces, and it reports hits DXR would have rejected without saying anything.
-- **Two of DXR's three hit-index contributions map.**
-  The instance contribution is the instance descriptor's `intersectionFunctionTableOffset`, and the geometry contribution is each geometry descriptor's own offset, set to its geometry index.
-  The ray contribution — DXR's per-`TraceRay` term — has no counterpart, because an MSL kernel names the table it calls.
+  An SGL pipeline never meets the refusal: SGL writes each procedural record's intersection and any-hit as one fused traversal function, and slib registers that in their place.
+- **All three of DXR's hit-index contributions map, for a ray type fixed at each call site.**
+  The instance contribution is the instance descriptor's `intersectionFunctionTableOffset`.
+  The geometry contribution is each geometry descriptor's own offset, set to its geometry index times the BLAS's `hit_record_stride`.
+  **The ray contribution is a choice of table.**
+  A shader table of `ray_count` ray types builds that many intersection tables per raygen, and table r's slot s holds the traversal function of hit record s + r.
+  Traversal indexes a table by `hit_group_offset + g * stride`, so tracing ray type r with table r reaches record `hit_group_offset + g * stride + r`.
+  The closest-hit visible table stays indexed by hit record, which the kernel computes from the same three terms.
+  A ray contribution computed at run time has no counterpart, because an MSL kernel names the table it calls.
   [docs/concepts/raytracing-pipeline.md](../../docs/concepts/raytracing-pipeline.md) carries what that costs a ported shader.
+- **A raytracing shader may be MSL source as well as a metallib**, which the driver compiles when the pipeline is built.
+  Every stage goes through the same `library_from_shader` the compute and raster paths use.
 - **Dynamic linking rather than static.**
   `raytracing_pipeline_description` already owns every shader, so static would fit.
   It would also drop the property the handle-to-index split exists for: one pipeline backing several tables with different function sets.
@@ -321,6 +342,7 @@ The pipeline path maps as follows.
   **It defaults to 1**, so a backend that ignored the field would under-declare the stack rather than report anything.
   The units differ from DXR's, and the mapping is the conservative direction.
   DXR counts `TraceRay` nesting and this counts indirect-call nesting, and a recursive trace ported here spends at least one indirect call per level.
+  A pipeline with callables declares one level more, since a closest hit calling a callable is one indirect call deeper than the hit itself.
   `sg metal - a hit function recurses through its own table to the declared depth` pins it, recursing four levels through a self-referential visible function table.
   **The one place recursion genuinely cannot go is inside traversal.**
   An intersection or any-hit function cannot even take an `instance_acceleration_structure` parameter, which the compiler refuses by name.
@@ -340,6 +362,7 @@ A hit reports its distance, a miss reports −1, and a payload nothing wrote sta
 | a hit function recurses through its own table to the declared depth | indirect recursion works, four levels deep |
 | a shader table is built from two separate libraries | table entries may come from different shader files |
 | each geometry of a BLAS selects its own hit group | the geometry contribution reaches the intersection table |
+| each ray type traces through its own intersection table | a table of two ray types: the stride a BLAS bakes and the per-ray-type tables together select `offset + g * 2 + r` |
 | a procedural hit group with an any-hit is refused | the pair metal has no traversal slot for is an error, not a dropped shader |
 
 The any-hit test is the pair of the one above it rather than a standalone assertion.

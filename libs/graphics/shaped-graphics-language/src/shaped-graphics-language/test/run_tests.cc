@@ -177,6 +177,8 @@ cc::string_view sgl::test::to_string(test_status s)
         return "internal-error";
     case test_status::stopped:
         return "stopped";
+    case test_status::invalid_bindings:
+        return "invalid-bindings";
     }
     return "";
 }
@@ -227,7 +229,11 @@ cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
     return text;
 }
 
-test_result sgl::test::run_test(checked_module const& m, cc::span<module_file const> files, i32 t, run_limits const& limits)
+test_result sgl::test::run_test(checked_module const& m,
+                                cc::span<module_file const> files,
+                                i32 t,
+                                run_limits const& limits,
+                                driver_bindings const& bindings)
 {
     CC_ASSERT(t >= 0 && t < m.tests.size(), "a test index names a test of the module");
     auto const& test = m.tests[t];
@@ -238,7 +244,12 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
         return result;
 
     auto const& unit = m.test_units[test.unit];
-    auto const o = interpret(m, unit, {}, limits);
+    // EVAL-94: what the test lists takes its values from the driver
+    auto inputs = resolve_inputs(m, unit, bindings);
+    if (inputs.has_error())
+        return {.test = t, .status = test_status::invalid_bindings, .detail = inputs.error().to_string()};
+    auto const o = interpret(m, unit, inputs.value(), limits);
+    write_back(m, o, bindings);
     for (auto s = isize(0); s < unit.check_sites.size() && s < o.sites.size(); ++s)
     {
         auto const& site = unit.check_sites[s];
@@ -351,7 +362,7 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
             continue;
         if (test.expects_diagnostics())
             continue;
-        results.push_back(run_test(m, files, i32(t), options.limits));
+        results.push_back(run_test(m, files, i32(t), options.limits, options.bindings));
     }
     return results;
 }
@@ -431,6 +442,9 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         break;
     case test_status::internal_error:
         detail = cc::format("the compiler wrote a tree it cannot run: {}", r.detail);
+        break;
+    case test_status::invalid_bindings:
+        detail = cc::format("what the driver bound does not fit the test's bindings: {}", r.detail);
         break;
     case test_status::passed:
     case test_status::not_run:

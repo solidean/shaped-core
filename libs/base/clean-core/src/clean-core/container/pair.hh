@@ -29,10 +29,11 @@ struct cc::pair
     [[nodiscard]] friend constexpr decltype(auto) get(P&& p) noexcept
         requires(std::is_same_v<std::remove_cvref_t<P>, pair> && I < 2)
     {
+        // parenthesized, or decltype(auto) takes the member's declared type and every binding copies it
         if constexpr (I == 0)
-            return cc::forward<P>(p).first;
+            return (cc::forward<P>(p).first);
         else
-            return cc::forward<P>(p).second;
+            return (cc::forward<P>(p).second);
     }
 };
 

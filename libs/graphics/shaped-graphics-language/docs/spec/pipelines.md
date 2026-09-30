@@ -37,6 +37,8 @@ The host then acquires it by name, and states nothing the shader already said: n
   A pipeline shares its file's names with the file's entry points, so it cannot be called like one.
 * **The kind is an attribute**: `@raster`, which is the default, `@compute` and `@raytracing`.
   A compute pipeline needs no declaration, since one shader and its binding list are the whole of it: every compute entry point is its own.
+* **A `@raytracing pipeline` is a table rather than a chain of stages**, and [raytracing.md](raytracing.md) is its model.
+  It names a ray set, a raygen, a miss per ray type and its hit groups, and the rest of this file is about raster pipelines.
 
 ## Settings are assignments
 
@@ -126,11 +128,13 @@ Everything a pipeline states reaches the host as one generated symbol per pipeli
 
 [CHK-174 to CHK-187](semantics/checking.md#pipelines) is what the check pass carries: the stages, the settings with their names and their fan-out, the attributes, and the checks between the stages.
 
-* A raster pipeline of a vertex and a pixel stage, or of a vertex stage alone.
+* A raster pipeline of a vertex and a pixel stage, or of a vertex stage alone, with geometry and tessellation stages between them (CHK-307).
 * A value is a literal, `true`, `false`, a case, `.host`, `.none`, or a paren literal of those.
+* A `@raytracing pipeline`, its hit groups and the module's callables tables, by [CHK-330 to CHK-332 and CHK-343](semantics/checking.md#ray-tracing).
+  Its settings are `rays`, `raygen`, `miss.<ray>`, `hit_groups` and `max_recursion_depth`, which [raytracing.md](raytracing.md#the-pipeline-declaration) lists.
+  What a raster pipeline states as sizes and a depth, it derives: the payload size, the attribute size and the trace depth.
 
 ## Open
 
-* The stages beyond vertex and pixel, which have no stage attribute yet; a pipeline checks each adjacent pair of them the same way.
 * Named blends in the prelude, `blend = .premultiplied_alpha`, which wait on `const` or static members.
-* The settings of a `@raytracing` pipeline.
+* A `@compute pipeline` declaration, which is `unsupported-yet` (CHK-186): every compute entry point is a pipeline of its own already.

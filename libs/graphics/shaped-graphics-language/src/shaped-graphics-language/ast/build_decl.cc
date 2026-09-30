@@ -8,7 +8,8 @@ bool builder::is_declaration_keyword(cc::string_view keyword)
 {
     return keyword == "module" || keyword == "use" || keyword == "fun" || keyword == "struct" || keyword == "enum"
         || keyword == "type" || keyword == "const" || keyword == "binding" || keyword == "sampler"
-        || keyword == "pipeline" || keyword == "notation" || keyword == "test" || keyword == "require";
+        || keyword == "pipeline" || keyword == "rays" || keyword == "hit_group" || keyword == "callables"
+        || keyword == "notation" || keyword == "test" || keyword == "require";
 }
 
 range_of<decl_id> builder::declarations(form_id block, scope_kind scope)
@@ -56,7 +57,8 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
         if (scope != scope_kind::file && scope != scope_kind::binding_body)
             report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
     }
-    else if (keyword == "pipeline" && scope != scope_kind::file)
+    else if ((keyword == "pipeline" || keyword == "rays" || keyword == "hit_group" || keyword == "callables")
+             && scope != scope_kind::file)
         report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
     // AST-146: a feature is granted to a file, a binding or a body, and a type's members are none of those.
     else if (keyword == "require")
@@ -92,6 +94,24 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
         return sampler_declaration(head, parts);
     if (keyword == "pipeline")
         return pipeline_declaration(head, parts);
+    // AST-150: a ray set is a struct's body of ray types, and a hit group a pipeline's block of settings
+    if (keyword == "rays")
+    {
+        auto const id = type_body_declaration(head, parts, scope_kind::struct_body);
+        if (auto* const s = ast.decls[index_of(id)].node.try_as<struct_decl>())
+            s->is_ray_set = true;
+        return id;
+    }
+    if (keyword == "hit_group")
+        return hit_group_declaration(head, parts);
+    // AST-153: `callables name = (f, g, .host)` is a pipeline's short form, a table rather than stages
+    if (keyword == "callables")
+    {
+        auto const id = pipeline_declaration(head, parts);
+        if (auto* const p = ast.decls[index_of(id)].node.try_as<pipeline_decl>())
+            p->is_callables = true;
+        return id;
+    }
     if (keyword == "test")
         return test_declaration(head, parts);
     return notation_declaration(head, parts);
@@ -102,14 +122,19 @@ decl_id builder::test_declaration(statement_head const& head, keyword_parts cons
     auto const attributes = attributes_of(head.whole);
     reject_arrow(head);
     reject_assignment(head);
+
+    // the keyword alone: the keyword form spans its arguments too
+    auto const keyword = parts.keywords.empty() ? head.keyword_form : parts.keywords.front();
+    auto result = test_decl{.keyword = file.at(keyword).where};
+    // AST-151: `test {a, b}:` lists bindings, and the body after a list is a block
+    auto const has_list = !parts.arguments.empty() && is_kind(parts.arguments[0], form_kind::curly_list);
+    if (has_list)
+        result.bindings = list_elements(parts.arguments[0], false, true);
     if (parts.arguments.size() > 1)
         report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
 
     owners.push_back({.owner = body_owner::test});
-    // the keyword alone: the keyword form spans its arguments too
-    auto const keyword = parts.keywords.empty() ? head.keyword_form : parts.keywords.front();
-    auto result = test_decl{.keyword = file.at(keyword).where};
-    if (!parts.arguments.empty())
+    if (!parts.arguments.empty() && !has_list)
     {
         // AST-138: `test value` is the block of that one line, so every rule of a test body is stated once.
         if (is_valid(parts.block))
@@ -183,12 +208,32 @@ decl_id builder::member_declaration(form_id line, scope_kind owner)
     return invalid_declaration(line, diagnostic_kind::expected_member);
 }
 
+range_of<field> builder::type_parameters_of(keyword_parts const& parts)
+{
+    // AST-152: `name[A]` is the call form of a square list, whose elements are the type parameters
+    if (parts.arguments.empty() || !is_kind(parts.arguments[0], form_kind::call))
+        return {};
+    auto const callee = at(parts.arguments[0]).first_child;
+    auto const list = is_valid(callee) ? at(callee).next_sibling : form_id::none;
+    if (!is_valid(list) || !is_kind(list, form_kind::square_list) || !is_kind(callee, form_kind::identifier))
+        return {};
+    return fields_of(list, diagnostic_kind::expected_parameter);
+}
+
 source_span builder::declared_name(form_id keyword_form, keyword_parts const& parts)
 {
     if (parts.arguments.size() > 1)
         report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
     if (!parts.arguments.empty() && is_kind(parts.arguments[0], form_kind::identifier))
         return at(parts.arguments[0]).where;
+    // AST-152: a generic struct's name stands before its type parameters
+    if (!parts.arguments.empty() && is_kind(parts.arguments[0], form_kind::call))
+    {
+        auto const callee = at(parts.arguments[0]).first_child;
+        auto const list = is_valid(callee) ? at(callee).next_sibling : form_id::none;
+        if (is_valid(list) && is_kind(list, form_kind::square_list) && is_kind(callee, form_kind::identifier))
+            return at(callee).where;
+    }
     report(diagnostic_kind::expected_name, parts.arguments.empty() ? keyword_form : parts.arguments[0]);
     return {};
 }
@@ -465,7 +510,10 @@ decl_id builder::type_body_declaration(statement_head const& head, keyword_parts
     reject_assignment(head);
     if (body_scope == scope_kind::struct_body)
         return make_decl(head.whole, attributes,
-                         struct_decl{.name = declared, .members = members, .is_opaque = !is_valid(parts.block)});
+                         struct_decl{.name = declared,
+                                     .members = members,
+                                     .is_opaque = !is_valid(parts.block),
+                                     .type_parameters = type_parameters_of(parts)});
     return make_decl(head.whole, attributes, enum_decl{.name = declared, .members = members});
 }
 
@@ -536,6 +584,47 @@ decl_id builder::sampler_declaration(statement_head const& head, keyword_parts c
     return make_decl(head.whole, attributes, result);
 }
 
+decl_id builder::hit_group_declaration(statement_head const& head, keyword_parts const& parts)
+{
+    // AST-150: `hit_group name for set:` reaches here as the application `name (for set)`
+    auto name = form_id::none;
+    auto set = source_span();
+    auto block = parts.block;
+    if (parts.arguments.size() == 1 && is_kind(parts.arguments[0], form_kind::application))
+    {
+        auto const head_form = at(parts.arguments[0]).first_child;
+        auto const tail = is_valid(head_form) ? at(head_form).next_sibling : form_id::none;
+        if (is_valid(tail) && is_keyword_led(tail, "for"))
+        {
+            auto const tail_parts = keyword_parts_of(tail);
+            if (tail_parts.keywords.size() == 1 && tail_parts.arguments.size() == 1
+                && is_kind(tail_parts.arguments[0], form_kind::identifier) && !is_valid(at(tail).next_sibling))
+            {
+                name = head_form;
+                set = at(tail_parts.arguments[0]).where;
+                // the block hangs off the innermost keyword form of the line, which is `for set:`
+                if (is_valid(tail_parts.block))
+                    block = tail_parts.block;
+            }
+        }
+    }
+    if (!is_valid(name))
+    {
+        report(diagnostic_kind::expected_name, parts.arguments.empty() ? head.keyword_form : parts.arguments[0]);
+        return make_decl(head.whole, attributes_of(head.whole), invalid_decl{});
+    }
+    auto named = parts;
+    named.arguments[0] = name;
+    named.block = block;
+    auto const id = pipeline_declaration(head, named);
+    if (auto* const p = ast.decls[index_of(id)].node.try_as<pipeline_decl>())
+    {
+        p->is_hit_group = true;
+        p->ray_set = set;
+    }
+    return id;
+}
+
 decl_id builder::pipeline_declaration(statement_head const& head, keyword_parts const& parts)
 {
     auto const attributes = attributes_of(head.whole);
@@ -593,10 +682,14 @@ decl_id builder::pipeline_declaration(statement_head const& head, keyword_parts 
             auto const line_parts = run_parts_of(line);
             auto const target = line_parts.operands[0];
             auto const is_path = is_kind(target, form_kind::identifier) || is_kind(target, form_kind::member);
-            collected.push_back(
-                {.form = line,
-                 .path = is_path ? expression(target) : invalid_expression(target, diagnostic_kind::expected_name),
-                 .value = expression(line_parts.operands[1])});
+            // AST-150: `rays = set` names a ray-tracing pipeline's ray set, though `rays` leads a declaration elsewhere
+            auto const is_rays = is_keyword_led(target, "rays") && keyword_parts_of(target).arguments.empty()
+                              && !is_valid(keyword_parts_of(target).block);
+            collected.push_back({.form = line,
+                                 .path = is_path ? expression(target)
+                                       : is_rays ? make_expr(target, name{.where = at(target).where})
+                                                 : invalid_expression(target, diagnostic_kind::expected_name),
+                                 .value = expression(line_parts.operands[1])});
         }
     }
     result.settings = append(ast.settings, cc::span<setting const>(collected));

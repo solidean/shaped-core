@@ -1,5 +1,6 @@
 #include "metal_raytracing_shader_table.hh"
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_raytracing_pipeline.hh>
@@ -8,18 +9,24 @@ namespace sg::backend::metal
 {
 namespace
 {
-/// The four resource ids a kernel reads out of the reserved group, in `[[id(n)]]` order.
+/// The resource ids a kernel reads out of the reserved group, in `[[id(n)]]` order.
 /// Kept next to the header sentence that states the assignment, because the two must not drift.
+/// Ray type 0's intersection table keeps id 0, so a one-ray-type table is the layout it always was, and ray type
+/// r >= 1's follows the callable table at `k_callable_slot + r`.
 constexpr isize k_intersection_slot = 0;
 constexpr isize k_miss_slot = 1;
 constexpr isize k_closest_hit_slot = 2;
 constexpr isize k_callable_slot = 3;
-constexpr isize k_table_slot_count = 4;
+
+[[nodiscard]] constexpr isize intersection_slot(isize ray_type)
+{
+    return ray_type == 0 ? k_intersection_slot : k_callable_slot + ray_type;
+}
 } // namespace
 
 void release_raygen_binding(metal_residency_set& residency, metal_raytracing_shader_table::raygen_binding const& r)
 {
-    // **All five residency entries, because all five were added.**
+    // **Every residency entry, because every one was added.**
     // A resource left in the set is one the queue keeps resident for the context's whole life, and nothing reports it
     // — the same silence that makes a missing entry read zeroes rather than fail.
     //
@@ -32,7 +39,8 @@ void release_raygen_binding(metal_residency_set& residency, metal_raytracing_sha
         object->release();
     };
 
-    give_back(r.intersection);
+    for (auto* const table : r.intersections)
+        give_back(table);
     give_back(r.miss);
     give_back(r.closest_hit);
     give_back(r.callable);
@@ -62,6 +70,9 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
         return cc::error("raytracing_shader_table: the description names no pipeline");
     if (desc.raygen.empty())
         return cc::error("raytracing_shader_table: at least one raygen entry is required");
+    if (desc.ray_count < 1)
+        return cc::error("raytracing_shader_table: ray_count must be >= 1");
+    auto const ray_count = isize(desc.ray_count);
 
     auto const& pipeline = static_cast<metal_raytracing_pipeline const&>(*desc.pipeline);
     auto const scope = autorelease_scope();
@@ -69,9 +80,9 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
     auto raygens = cc::vector<metal_raytracing_shader_table::raygen_binding>();
 
     // **Every failure past this point owns objects nobody else will free.**
-    // Each iteration mints four function tables and an argument buffer, all owned references rather than autoreleased,
-    // and registers five residency entries — and the destructor that would release them never runs, because the table
-    // object is never constructed.
+    // Each iteration mints three visible function tables, one intersection table per ray type and an argument buffer,
+    // all owned references rather than autoreleased, and registers a residency entry for each — and the destructor that
+    // would release them never runs, because the table object is never constructed.
     // Released immediately rather than deferred: nothing here has been submitted.
     auto const unwind = [&](metal_raytracing_shader_table::raygen_binding const& partial)
     {
@@ -105,13 +116,19 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
         binding.closest_hit = visible_table(desc.hit.size());
         binding.callable = visible_table(desc.callable.size());
 
-        auto* const intersection_descriptor = MTL::IntersectionFunctionTableDescriptor::alloc()->init();
-        intersection_descriptor->setFunctionCount(NS::UInteger(desc.hit.size()));
-        binding.intersection = binding.state->newIntersectionFunctionTable(intersection_descriptor);
-        intersection_descriptor->release();
+        auto refused = binding.miss == nullptr || binding.closest_hit == nullptr || binding.callable == nullptr;
+        for (auto r = isize(0); r < ray_count; ++r)
+        {
+            auto* const intersection_descriptor = MTL::IntersectionFunctionTableDescriptor::alloc()->init();
+            intersection_descriptor->setFunctionCount(NS::UInteger(desc.hit.size()));
+            auto* const table = binding.state->newIntersectionFunctionTable(intersection_descriptor);
+            intersection_descriptor->release();
+            refused = refused || table == nullptr;
+            if (table != nullptr)
+                binding.intersections.push_back(table);
+        }
 
-        if (binding.miss == nullptr || binding.closest_hit == nullptr || binding.callable == nullptr
-            || binding.intersection == nullptr)
+        if (refused)
         {
             unwind(binding);
             return cc::error("raytracing_shader_table: the metal device refused a function table");
@@ -165,6 +182,11 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
             }
         }
 
+        // The traversal function of each hit record, or null for Metal's own triangle intersection.
+        // Function handles are autoreleased, and this whole build runs inside one autorelease scope.
+        auto traversal_handles = cc::vector<MTL::FunctionHandle*>();
+        traversal_handles.reserve(desc.hit.size());
+
         for (auto i = isize(0); i < desc.hit.size(); ++i)
         {
             auto const handle = u32(desc.hit[i]);
@@ -196,11 +218,12 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
             }
 
             // What runs during traversal: an intersection shader for a procedural group, otherwise the any-hit if
-            // there is one, and otherwise Metal's own triangle intersection.
+            // there is one, and otherwise Metal's own triangle intersection, which a null entry here stands for.
             auto* const traversal = group.is_procedural ? group.intersection : group.any_hit;
+            auto* handle_for = static_cast<MTL::FunctionHandle*>(nullptr);
             if (traversal != nullptr)
             {
-                auto* const handle_for = binding.state->functionHandle(traversal);
+                handle_for = binding.state->functionHandle(traversal);
                 if (handle_for == nullptr)
                 {
                     unwind(binding);
@@ -208,23 +231,36 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
                                                 "not link into this raygen's pipeline",
                                                 i));
                 }
-                binding.intersection->setFunction(handle_for, NS::UInteger(i));
             }
-            else
+            traversal_handles.push_back(handle_for);
+        }
+
+        // **Table r's slot s is hit record s + r**, which is what makes the ray contribution a choice of table.
+        // Traversal indexes a table by `hit_group_offset + g * stride`, so a kernel tracing ray type r with table r
+        // reaches record `hit_group_offset + g * stride + r` — DXR's three terms, with the last one fixed per call site.
+        // The slots past the last record stay empty; only an instance whose offset overruns the table reaches them.
+        for (auto r = isize(0); r < ray_count; ++r)
+            for (auto slot = isize(0); slot + r < desc.hit.size(); ++slot)
             {
+                auto* const table = binding.intersections[r];
+                if (auto* const handle_for = traversal_handles[slot + r]; handle_for != nullptr)
+                {
+                    table->setFunction(handle_for, NS::UInteger(slot));
+                    continue;
+                }
+
                 // **The signature must match the table's own MSL declaration**, which `None` does not.
                 // A table that holds any triangle group is declared `intersection_function_table<instancing,
                 // triangle_data>` — see the readme, which states that as the requirement on a kernel — so the opaque
                 // default is asked for with exactly those two.
-                binding.intersection->setOpaqueTriangleIntersectionFunction(
+                table->setOpaqueTriangleIntersectionFunction(
                     MTL::IntersectionFunctionSignatureInstancing | MTL::IntersectionFunctionSignatureTriangleData,
-                    NS::UInteger(i));
+                    NS::UInteger(slot));
             }
-        }
 
-        // The reserved group's argument buffer: four resource ids, in the [[id(n)]] order the header states.
-        auto* const arguments
-            = _device->newBuffer(size_t(k_table_slot_count) * sizeof(u64), MTL::ResourceStorageModeShared);
+        // The reserved group's argument buffer: one resource id per table, in the [[id(n)]] order the header states.
+        auto const slot_count = cc::max(k_callable_slot, intersection_slot(ray_count - 1)) + 1;
+        auto* const arguments = _device->newBuffer(size_t(slot_count) * sizeof(u64), MTL::ResourceStorageModeShared);
         if (arguments == nullptr)
         {
             unwind(binding);
@@ -232,7 +268,8 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
         }
 
         auto* const slots = static_cast<u64*>(arguments->contents());
-        slots[k_intersection_slot] = binding.intersection->gpuResourceID()._impl;
+        for (auto r = isize(0); r < ray_count; ++r)
+            slots[intersection_slot(r)] = binding.intersections[r]->gpuResourceID()._impl;
         slots[k_miss_slot] = binding.miss->gpuResourceID()._impl;
         slots[k_closest_hit_slot] = binding.closest_hit->gpuResourceID()._impl;
         slots[k_callable_slot] = binding.callable->gpuResourceID()._impl;
@@ -240,15 +277,16 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
 
         binding.arguments = arguments;
         _residency.add(arguments);
-        _residency.add(binding.intersection);
+        for (auto* const table : binding.intersections)
+            _residency.add(table);
         _residency.add(binding.miss);
         _residency.add(binding.closest_hit);
         _residency.add(binding.callable);
 
-        raygens.push_back(binding);
+        raygens.push_back(cc::move(binding));
     }
 
     return sg::raytracing_shader_table_handle(
-        std::make_shared<metal_raytracing_shader_table const>(*this, desc.pipeline, cc::move(raygens)));
+        std::make_shared<metal_raytracing_shader_table const>(*this, desc, cc::move(raygens)));
 }
 } // namespace sg::backend::metal

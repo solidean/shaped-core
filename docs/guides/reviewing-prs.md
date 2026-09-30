@@ -267,6 +267,9 @@ So a check whose outcome a shader edit can flip logs and degrades safely, and on
 **A read of diagnostics never asserts either**, even on a real misuse.
 A review proposed asserting when a caller indexed a stat the backend does not count, and the answer was "metric reads tearing down programs is nasty".
 `is_counted` documents the trap, and a HUD reading a zero is harmless.
+**A query that can be asked about anything answers everything.**
+A review recommended asserting that `implementation_of(f)` is only asked about a feature the context `supports`, since it answered `native` for an absent one.
+The answer was to make it total instead, with an `absent` case, so the question has no precondition to violate.
 The house pattern is a `try_*` fallible core plus a thin throwing façade.
 
 ### A 64-bit hash is not an identity
@@ -519,6 +522,19 @@ List the seam's callers and read each for such an assumption — the tell is a c
 `declared_size` came off the frame header for zstd and lz4; gzip declares it in the trailer, so a stream probe read four bytes of payload as a length and reserved up to 4 GB.
 The generalization worth keeping: **trailer metadata is a design smell for anything that cannot assume bounded frames**, so the answer was "no streaming size hint for deflate", not a cleverer probe.
 
+### A slow suite is profiled before it is narrowed
+
+**When a change makes tests slow, the first move is a profile of the slow path, not a thinner test.**
+A branch nearly doubled SGL's prelude, every compile checks the prelude, and the debug CI leg crossed its 60-second limit.
+The review offered narrowing the heaviest tests under `nx::is_thorough()`, and got this back:
+
+```raw
+cc has a sampling profiler, do a test where you parse the prelude under the sampler in debug preset and fix low hanging fruits of performance (we never did a serious pass before so i'm sure something turns up). save the chrome tracing profile for me as well and give me the full path so i can open it in perfetto
+```
+
+Code nobody has profiled usually has cheap wins, and every user compile pays for them, not only the test.
+Offer narrowing beside the profile, never instead of it, and hand the maintainer the trace itself.
+
 ### A flake seen during a review is chased before it is deferred
 
 **A failure seen while validating a branch gets a reasonable amount of chasing, whatever code it is in.**
@@ -697,6 +713,9 @@ A `land-changes` comment describes commits the reviewer just wrote, and that is 
 The summary is written from what the fix was meant to do, and the commit does slightly less or slightly else.
 One draft said a fix counted "a callee's asserts" when it counted every assert of the run, and said the second of two expectations "always" saw `passed` when that held only if the first was met.
 It also said a doc "no longer" described something that three of its lines still partly did.
+A comment grouped by area drifts a second way: a change lands under the commit its area came from rather than the one that made it.
+Another draft credited a call-stack fix to the metal commit beside it, and credited "88 ms to 2.9 ms" to the last of the two commits that made it.
+**A number that spans commits names every commit it spans.**
 **Read the diff of each commit while writing its bullet, and name every hunk a reader will see.**
 A sort comparator, a `nan` spelling or a nested-test case left out of the comment is a hunk the author cannot account for.
 
