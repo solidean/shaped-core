@@ -4,6 +4,9 @@
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/impl/dlss_release_queue.hh>
+
+#include <memory> // std::shared_ptr, which is how the release queue reaches a history's deleter
 
 /// Options only the DLSS Ray Reconstruction member has.
 struct sr::dlss_options
@@ -57,4 +60,11 @@ public:
 protected:
     /// Nothing to compile: the networks are the runtime's, and the feature is per stream rather than per context.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
+
+private:
+    /// Features a history dropped mid-frame, released once the GPU has passed the epoch they were dropped in.
+    ///
+    /// Shared rather than owned outright, because a `sr::denoise_history` may outlive this routine and its deleter
+    /// still has to have somewhere to park — see `impl::dlss_release_queue`.
+    std::shared_ptr<impl::dlss_release_queue> _releases = std::make_shared<impl::dlss_release_queue>();
 };

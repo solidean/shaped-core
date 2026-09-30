@@ -5,6 +5,7 @@
 #include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/dlss_ngx.hh>
+#include <shaped-rendering/impl/dlss_release_queue.hh>
 
 #include <memory> // std::shared_ptr, which is what denoise_history::_member_state is
 
@@ -66,6 +67,18 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
     if (!required_guides(denoise_method::dlss_rr).without(in.present_guides()).is_empty())
         return unsupported;
 
+    // The routine owns the release queue, so it is acquired before anything that could park a feature in it.
+    // Its init compiles nothing, so this is ready on the first call rather than declining one.
+    auto const self = try_acquire(cmd);
+    if (self.is_pending())
+        return {.status = denoise_status::pending, .method = denoise_method::dlss_rr};
+    if (self.is_failed())
+        return {.status = denoise_status::failed, .method = denoise_method::dlss_rr};
+
+    // Whatever a previous call parked and the GPU has since passed.
+    // Cheap on the empty queue, which is the usual case, so this asks every call rather than deciding when to.
+    self->_releases->sweep(cmd.context());
+
     auto const input_extent = extent_of(in.color);
     auto const output_extent = extent_of(in.output);
 
@@ -82,8 +95,13 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
         if (feature == nullptr)
             return {.status = denoise_status::failed, .method = denoise_method::dlss_rr, .restarted = restarted};
 
-        // The seam hands back a bare `void*`, so the release function goes in as the deleter rather than beside it.
-        history._member_state = std::shared_ptr<void>(feature, &impl::dlss_release_feature);
+        // The deleter parks rather than releases: `_prepare` drops this slot while the caller is still recording, and
+        // NGX frees device memory a frame in flight may be reading — see `impl::dlss_release_queue`.
+        // The epoch is read here rather than in the deleter, because by then there may be no context to ask.
+        auto const parked_in = cmd.context().current_epoch();
+        auto releases = self->_releases;
+        history._member_state = std::shared_ptr<void>(
+            feature, [releases = cc::move(releases), parked_in](void* f) { releases->retire(f, parked_in); });
     }
 
     auto const evaluated = impl::dlss_evaluate(cmd, history._member_state.get(),
