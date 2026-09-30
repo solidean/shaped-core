@@ -144,11 +144,15 @@ void upload(sg::command_list& cmd, sg::texture_2d const& tex, cc::span<tg::vec4f
     cmd.upload.bytes_to_texture(tex.raw(), pixels.as_bytes());
 }
 
-/// Brings the à-trous member up before a list opens, so the first call does not decline.
+/// Brings the members up before a list opens, so the first call does not decline.
+///
+/// `dlss_rr` is here even though it compiles nothing: `try_acquire` reports rather than initializes, so a routine
+/// nothing has ticked reads as pending whatever its init does.
 cc::shared_async<cc::unit> prewarm(sg::context& ctx)
 {
     sr::atrous_denoise_routine::prewarm(ctx);
     sr::svgf_denoise_routine::prewarm(ctx);
+    sr::dlss_rr_routine::prewarm(ctx);
     sr::denoise_routine::prewarm(ctx);
     (void)co_await ctx.routines.idle_completion();
 }
@@ -837,6 +841,10 @@ ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call 
 
     if (!sr::query_denoise_support(ctx).dlss_rr)
         SKIP("no DLSS Ray Reconstruction here — the SDK is fetched on request, and it needs an RTX adapter on dx12");
+
+    // The member holds a release queue, so it is a routine that has to be ticked up like any other before its first
+    // call — `try_acquire` reports readiness rather than establishing it.
+    co_await prewarm(ctx);
 
     // Every guide it requires, all at the input extent.
     // The values are a plausible surface rather than a rendered one: what is under test is that NGX accepts the set

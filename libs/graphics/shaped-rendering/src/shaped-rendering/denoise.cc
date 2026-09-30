@@ -23,9 +23,17 @@ namespace
 {
 /// The ratio of output to input each vendor preset stands for.
 ///
-/// The vendors publish the same four, and the numbers below are provisional until a vendor member reads them:
-/// check each against NGX's `NVSDK_NGX_PerfQuality_Value` table and FidelityFX's upscale ratios when dlss_rr and
-/// fsr_rr land, since a wrong ratio here is an image traced at the wrong size rather than an error.
+/// **Checked against NGX rather than against a published table**, because the SDK ships none: `nvsdk_ngx_defs.h`
+/// carries the `NVSDK_NGX_PerfQuality_Value` enum with no ratio beside it, and the numbers come from
+/// `NGX_DLSSD_GET_OPTIMAL_SETTINGS`, which asks the driver.
+/// Queried on an RTX 5070 Laptop GPU, driver 616.92, at 1920x1080, 2560x1440 and 3840x2160 — the ratio held across
+/// all three: MaxQuality 1.5, Balanced 1.724, MaxPerf 2.0, DLAA 1.0, UltraPerformance 3.0.
+/// They are the driver's rather than the SDK's, so a bump can move them; re-run that query rather than trusting this
+/// comment if an image starts arriving at a size nobody chose.
+///
+/// `scale` alone decides the extents here and `quality` only picks the network, so a caller may name any pair — these
+/// are what the preset NAMES mean, not a constraint NGX enforces.
+/// FidelityFX's own ratios are still unchecked, and stay that way until `fsr_rr` lands.
 [[nodiscard]] f32 vendor_ratio(render_scale_preset p)
 {
     switch (p)
@@ -35,7 +43,9 @@ namespace
     case render_scale_preset::quality:
         return 1.5f;
     case render_scale_preset::balanced:
-        return 1.7f;
+        // 1.724 rather than 1.7: NGX renders 1114 of 1920, which is 58%, and the round number was a guess that put
+        // the traced image 15 pixels wider than the preset it is named after.
+        return 1.7241379f;
     case render_scale_preset::performance:
         return 2.0f;
     }

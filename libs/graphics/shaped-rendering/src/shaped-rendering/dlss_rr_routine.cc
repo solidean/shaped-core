@@ -68,7 +68,10 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
         return unsupported;
 
     // The routine owns the release queue, so it is acquired before anything that could park a feature in it.
-    // Its init compiles nothing, so this is ready on the first call rather than declining one.
+    //
+    // It declines until a tick has brought it up, exactly as every other member does, even though its init compiles
+    // nothing: `try_acquire` reports readiness and never establishes it.
+    // `denoise_routine::init` prewarms this member, so a caller going through the front pays that tick once.
     auto const self = try_acquire(cmd);
     if (self.is_pending())
         return {.status = denoise_status::pending, .method = denoise_method::dlss_rr};
