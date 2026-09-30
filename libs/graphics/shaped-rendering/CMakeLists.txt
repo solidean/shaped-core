@@ -147,6 +147,10 @@ if(TARGET dlss AND TARGET shaped-graphics-dx12)
 else()
     target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/dlss_null.cc)
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_DLSS=0)
+
+    # Cleared rather than left alone: the cache outlives a configure, so a build directory that once had the SDK would
+    # otherwise keep staging a DLL nothing loads — and fail the copy outright once the file is gone.
+    unset(SC_DLSS_RUNTIME CACHE)
 endif()
 
 # sr's own shader package.
@@ -315,6 +319,7 @@ if(SC_BUILD_TESTS)
     if(SC_DLSS_RUNTIME)
         sc_stage_runtime_dlls(shaped-rendering-test DLLS "${SC_DLSS_RUNTIME}" TAG dlss)
     endif()
+
     target_compile_definitions(shaped-rendering-test PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.

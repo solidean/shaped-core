@@ -15,6 +15,11 @@ struct sr::dlss_options
     /// Whether the radiance handed over is linear HDR, which everything sv traces is.
     /// A caller passing tone-mapped colour clears it, and NGX judges brightness differently.
     bool hdr = true;
+
+    /// The multiplier the caller will apply to the image before display.
+    /// NGX judges noise by how bright a pixel ends up on screen, so a scene denoised at 4 and shown at 4 is not the
+    /// same picture as one denoised at 1 — this is what keeps the two agreeing.
+    f32 exposure = 1.0f;
 };
 
 /// NVIDIA DLSS Ray Reconstruction: a temporal denoiser that upscales as part of denoising.
@@ -42,7 +47,8 @@ public:
                                                  denoise_history& history,
                                                  dlss_options const& options = {});
 
-    /// What the shared knobs map onto: `quality` picks the NGX preset, `exposure` rides on the call.
+    /// What the shared knobs map onto: `quality` picks the NGX preset, `exposure` becomes NGX's pre-exposure.
+    /// Both are read per call rather than baked into the feature, so neither rebuilds a stream's history.
     [[nodiscard]] static dlss_options options_for(denoise_settings const& settings);
 
     /// Whether this build and this device can run it, which is what `sr::query_denoise_support` reports.

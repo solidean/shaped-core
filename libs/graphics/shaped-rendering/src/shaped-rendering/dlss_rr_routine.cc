@@ -28,6 +28,7 @@ dlss_options dlss_rr_routine::options_for(denoise_settings const& settings)
         options.quality = 2;
         break;
     }
+    options.exposure = settings.exposure;
     return options;
 }
 
@@ -68,8 +69,9 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
     auto const input_extent = extent_of(in.color);
     auto const output_extent = extent_of(in.output);
 
-    // The feature is built for one pair of extents, so `_prepare` dropping it is what a resize means here.
-    auto const restarted = history._prepare(denoise_method::dlss_rr, input_extent);
+    // Both extents, because the feature is built for the pair: NGX fixes `InTargetWidth` at creation, and an output
+    // that moved while the traced size rounded to the same value would otherwise keep a feature built for the old one.
+    auto const restarted = history._prepare(denoise_method::dlss_rr, input_extent, output_extent);
 
     if (history._member_state == nullptr)
     {
@@ -95,7 +97,7 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
                                                 .output = in.output,
                                                 .jitter = in.guides.jitter,
                                                 .reset = restarted,
-                                                .exposure = 1.0f});
+                                                .exposure = options.exposure});
     if (!evaluated)
         return {.status = denoise_status::failed, .method = denoise_method::dlss_rr, .restarted = restarted};
 

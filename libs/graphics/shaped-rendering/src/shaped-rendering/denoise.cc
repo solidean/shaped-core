@@ -134,9 +134,9 @@ denoise_guide_set denoise_inputs::present_guides() const
     return set;
 }
 
-bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
+bool denoise_history::_prepare(denoise_method method, tg::vec2i input_extent, tg::vec2i output_extent)
 {
-    auto const changed = _method != method || _extent != extent;
+    auto const changed = _method != method || _extent != input_extent || _output_extent != output_extent;
     auto const restarted = changed || _reset_requested;
     if (changed)
     {
@@ -148,7 +148,8 @@ bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
             t = {};
 
         _method = method;
-        _extent = extent;
+        _extent = input_extent;
+        _output_extent = output_extent;
         _frame = 0;
     }
     else if (_reset_requested)

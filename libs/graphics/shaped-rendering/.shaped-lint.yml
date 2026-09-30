@@ -19,6 +19,7 @@ rules:
   - kind: allow-include
     value: <nvsdk_ngx_helpers_dlssd_d3d.h>
     reason: NGX's DLSS-D (Ray Reconstruction) helpers, same confinement
+
   - kind: allow-include
     value: <NRD.h>
     reason: NVIDIA's denoiser library, reached by impl/nrd_instance.cc and impl/nrd_session.cc alone — the seam they implement names no NRD type

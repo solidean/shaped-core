@@ -184,8 +184,13 @@ void* dlss_create_feature(sg::command_list& cmd, dlss_feature_desc const& desc)
     if (desc.hdr)
         flags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
 
-    // The jitter is already in the motion vectors' frame of reference: the raygen projects a hit through the previous
-    // camera at the same sub-pixel offset, so the motion it writes carries no jitter of its own.
+    // PROVISIONAL, and untestable until a tracer jitters: nothing writes `denoise_guides::jitter` today, so every
+    // call here passes 0 and the flag cannot change a picture.
+    // MVJittered says the motion vectors CARRY the jitter offset.
+    // Whether ours will depends on how sv's raygen projects the previous camera, which is not written yet.
+    // So whoever lands jitter settles this and states the contract on `sr::denoise_guides::motion`, rather than
+    // leaving it to be discovered from a smeared image.
+    // TODO: decide MVJittered against sv's jitter once it exists.
     flags |= NVSDK_NGX_DLSS_Feature_Flags_MVJittered;
     create.InFeatureCreateFlags = flags;
 
@@ -250,6 +255,11 @@ bool dlss_evaluate(sg::command_list& cmd, void* feature, dlss_eval_desc const& d
 
     // The whole image; sub-rects are for a caller rendering into a corner of a larger target, which sv never does.
     eval.InRenderSubrectDimensions = {u32(desc.color.width()), u32(desc.color.height())};
+
+    // The scalar rather than the exposure TEXTURE, which is for a caller whose exposure is computed on the GPU.
+    // NVIDIA's helper reads 0 as "unset" and substitutes 1, so a caller that never sets one lands where it would
+    // anyway — but the zero would be OUR default rather than theirs, and that is the bug this replaced.
+    eval.InPreExposure = desc.exposure;
 
     auto const evaluated
         = NGX_D3D12_EVALUATE_DLSSD_EXT(native.list(), static_cast<NVSDK_NGX_Handle*>(feature), params, &eval);

@@ -257,9 +257,9 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     // the machines where no better member is present.
     auto const temporal = sr::resolve_denoise_method(ctx, on_fresh_frames);
     auto const expected = support.dlss_rr ? sr::denoise_method::dlss_rr
-                        : support.fsr_rr ? sr::denoise_method::fsr_rr
-                        : support.nrd    ? sr::denoise_method::nrd
-                                         : sr::denoise_method::svgf;
+                        : support.fsr_rr  ? sr::denoise_method::fsr_rr
+                        : support.nrd     ? sr::denoise_method::nrd
+                                          : sr::denoise_method::svgf;
     CHECK(temporal == expected)
         .context(cc::format("supported: dlss_rr {}, fsr_rr {}, nrd {}", support.dlss_rr, support.fsr_rr, support.nrd));
     CHECK(sr::is_temporal(temporal));
@@ -804,7 +804,7 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide", (sg::co
 // DLSS Ray Reconstruction, where it can run at all.
 //
 // A vendor member's test is gated on its hardware and SKIPs elsewhere rather than passing, because a green result on a
-// machine that cannot run it says nothing — which is the rule libs/graphics/shaped-rendering/docs/denoising.md sets for every vendor member.
+// machine that cannot run it says nothing — see the `dlss_rr` paragraph in libs/graphics/shaped-rendering/docs/denoising.md.
 // So this runs on an RTX adapter with the SDK fetched, and reports "not run" on everything else.
 //
 // What it pins is the contract the front depends on, not the picture: a call carrying every required guide denoises,
@@ -870,6 +870,25 @@ ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call 
 
         // The history now owns an NGX feature, and dropping it has to release that feature rather than leak it.
         // Drained above, which is what makes the release legal — see sr::denoise_history's destructor.
+        (void)co_await ctx.idle_completion();
+
+        // A feature is built for a PAIR of extents, so an output that moves while the input stays put is a rebuild.
+        // Reachable rather than theoretical: the input is the output divided by a preset ratio and rounded, so more
+        // than one output extent maps to the same traced size — a window dragged one pixel does it at 1.5.
+        // Without the output extent in the history's identity this call reuses a feature whose InTargetWidth is stale.
+        CHECK(history.extent() == tg::vec2i(k_size, k_size));
+        CHECK(history.output_extent() == tg::vec2i(k_size, k_size));
+
+        auto const wider = ctx.persistent.create_texture_2d(
+            {.format = sg::pixel_format::rgba32_float, .width = k_size * 2, .height = k_size * 2, .usage = image_usage});
+        auto cmd2 = ctx.create_command_list();
+        auto const upscaled
+            = sr::dlss_rr_routine::execute(*cmd2, {.color = color, .guides = guides, .output = wider}, history);
+        ctx.submit_command_list(cc::move(cmd2));
+        ctx.advance_epoch();
+
+        CHECK(upscaled.restarted).context("the output extent moved, so the feature is rebuilt");
+        CHECK(history.output_extent() == tg::vec2i(k_size * 2, k_size * 2));
         (void)co_await ctx.idle_completion();
     }
 

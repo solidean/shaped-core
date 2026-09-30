@@ -38,6 +38,18 @@ It is not built, and what it waits for is the tracer rather than the SDK.
 CI never fetches NRD, so what it builds and runs is the null path: `SR_HAS_NRD` is 0, the member reports `unsupported`, and its own tests do not exist.
 They run only where somebody fetched the SDK, which is why a green CI here says nothing about whether NRD works.
 
+**`dlss_rr` is what CI tests least of all, and it needs more than NRD does to run at all.**
+CI never fetches the DLSS SDK, so it builds `SR_HAS_DLSS` 0, compiles `impl/dlss_null.cc` in place of the NGX seam, and the member reports `unsupported`.
+Where NRD needs only its sources fetched and then runs on any dx12 adapter, WARP included, Ray Reconstruction needs an RTX adapter and a driver new enough for the SDK on top of the fetch.
+So its own test SKIPs everywhere but one developer's machine, and a green check here says nothing about whether DLSS works.
+
+**`dlss_rr` is the member whose output is not its input's size**, and a caller must ask rather than divide.
+`sr::denoise_input_extent(ctx, settings, output_extent)` answers what size to trace, and it is the only correct way to get that number.
+Asking matters most in the case that looks like it needs no answer: a member this device cannot run answers the output's own size.
+A caller who scaled by a ratio of their own would then trace at half resolution for a call about to be refused, and composite that half-resolution image into a full-resolution target.
+The ratio itself comes from `denoise_settings::scale`.
+`denoise_settings::quality` separately picks the network NGX runs, so the two are independent knobs here and `scale` alone decides the extents.
+
 **NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
 It compiles nothing at run time, owns no device memory and records nothing.
 What it answers is "which compute dispatches would denoise this frame, against which resources, with which constants", and sr executes that answer through sg.
@@ -338,7 +350,7 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
   Without it a vendor SDK would bypass sg's barrier tracking silently.
 - **OIDN needs nothing sg does not have either**, because the member runs the network rather than the library.
 - **The vendor SDKs are fetched on request, never by default.**
-  DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
+  A vendor SDK sits in sr behind its own `SR_HAS_<VENDOR>` define and links PRIVATE, the way SDL3 does — DLSS is one, and the set grows.
   DLSS is wired: `extern/dlss/fetch-dlss.py` is a deliberate act nothing in dev.py performs, because its license is NVIDIA's own rather than one a build accepts on anyone's behalf.
   Without it `SR_HAS_DLSS` is 0, the routine still exists, and `dlss_rr` reports `unsupported` — the shape `sr::window_system` takes without SDL3.
   Whether OIDN is fetched by default — its CPU build is the one non-native member CI could run — waits on measuring its size.

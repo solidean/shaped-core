@@ -144,6 +144,10 @@ struct sr::denoise_guides
     sg::texture_2d hit_distance;
 
     /// This frame's sub-pixel offset of the primary rays, in input pixels, in [-0.5, 0.5].
+    ///
+    /// **Nothing writes this yet** — no tracer in the repo jitters — so every member reads 0, which is the right
+    /// answer for an unjittered raygen rather than a placeholder.
+    /// Whoever lands jitter also settles whether `motion` carries the offset, which `dlss_rr` declares to NGX.
     tg::vec2f jitter = tg::vec2f(0, 0);
     tg::vec2f previous_jitter = tg::vec2f(0, 0);
 
@@ -258,6 +262,10 @@ public:
     /// The input extent this was built for, or 0x0 while empty.
     [[nodiscard]] tg::vec2i extent() const { return _extent; }
 
+    /// The output extent this was built for, or 0x0 while empty.
+    /// Equal to `extent()` for every member that does not upscale, which is every member but `dlss_rr` today.
+    [[nodiscard]] tg::vec2i output_extent() const { return _output_extent; }
+
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
@@ -265,21 +273,31 @@ private:
     friend class oidn_denoise_routine;
     friend class dlss_rr_routine;
 
-    /// Brings this to `method` at `extent`, dropping everything if either changed.
+    /// Brings this to `method` at this pair of extents, dropping everything if any of the three changed.
     /// Returns whether the call starts from no history.
-    bool _prepare(denoise_method method, tg::vec2i extent);
+    ///
+    /// An upscaling member passes both, because its per-stream state is built for the pair and a changed output with
+    /// an unchanged input is a real case — the input is the output rounded, so more than one output maps to it.
+    /// The two-argument form is for a member that writes its input's extent, and says so by passing it twice.
+    bool _prepare(denoise_method method, tg::vec2i input_extent, tg::vec2i output_extent);
+    bool _prepare(denoise_method method, tg::vec2i extent) { return _prepare(method, extent, extent); }
 
     /// A member's own per-stream object — for OIDN the network and its feature maps, for a vendor member the SDK
     /// handle it must release on a device the GPU is done with.
     ///
     /// Type-erased so this header names no member's type; the deleter is captured where the object is made, which is
     /// what lets a member whose seam hands back a bare `void*` put its own release function in here.
-    /// It must hold only what is safe to drop mid-frame, as sg resources are.
-    /// `_prepare` drops it whenever it drops the rest, since the state is built for one extent.
+    ///
+    /// **The deleter must be safe to run mid-frame**, and that is the member's job rather than this slot's.
+    /// `_prepare` drops the slot on any change of member or extent, which happens inside a member's `execute` while
+    /// the caller is recording — so state whose release needs the GPU to be done with it, as a vendor SDK's handle
+    /// does, defers that release rather than performing it there.
+    /// sg's own resources need no such care, since sg already defers their destruction to an epoch the GPU has passed.
     std::shared_ptr<void> _member_state;
 
     denoise_method _method = denoise_method::none;
     tg::vec2i _extent = tg::vec2i(0, 0);
+    tg::vec2i _output_extent = tg::vec2i(0, 0);
     bool _reset_requested = false;
 
     /// How many calls this history has seen since it was last built, which is what a temporal member ping-pongs on.
