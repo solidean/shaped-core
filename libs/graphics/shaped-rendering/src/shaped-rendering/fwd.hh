@@ -44,8 +44,10 @@ class oidn_denoise_routine;          // the OIDN trained member, run as our own 
 struct oidn_options;                 // its own options
 enum class oidn_network_size : u8;   // which of OIDN's trained networks it runs
 
-class dlss_rr_routine; // the NVIDIA vendor member (dlss_rr_routine.hh)
-struct dlss_options;   // its own options
+class dlss_rr_routine;     // the NVIDIA Ray Reconstruction member (dlss_rr_routine.hh)
+struct dlss_options;       // its own options
+class nrd_denoise_routine; // the NRD split-signal member (nrd_denoise_routine.hh)
+struct nrd_options;        // its own options
 
 class mix_routine; // one image faded into another, in place (mix_routine.hh)
 

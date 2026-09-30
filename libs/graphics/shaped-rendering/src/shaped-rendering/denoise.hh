@@ -33,6 +33,7 @@ enum class sr::denoise_method : sg::u8
     oidn,    ///< Intel Open Image Denoise; spatial
     dlss_rr, ///< NVIDIA DLSS Ray Reconstruction; temporal
     fsr_rr,  ///< AMD FSR Ray Regeneration; temporal
+    nrd,     ///< NVIDIA Real-Time Denoisers (REBLUR); temporal, and runs on any dx12 adapter
 
     count_
 };
@@ -103,6 +104,7 @@ struct sr::denoise_settings
 
     /// Every member reads this.
     /// atrous and svgf: the number of wavelet passes (3, 4, 5).
+    /// nrd: how long REBLUR's two histories may grow.
     /// oidn: `fast` runs its small network, the others its base one.
     denoise_quality quality = denoise_quality::balanced;
 
@@ -120,7 +122,10 @@ struct sr::denoise_settings
     bool noisy_guides = false;
 
     /// A multiplier the caller will apply to the image before display.
-    /// The vendor members judge noise by how bright a pixel ends up on screen, and assume 1 without it.
+    /// dlss_rr only, which judges noise by how bright a pixel ends up on screen and assumes 1 without it.
+    ///
+    /// NRD is the member this does NOT reach, and deliberately: its input contract says radiance must not be
+    /// premultiplied by an exposure, so it is handed the radiance the tracer produced.
     f32 exposure = 1.0f;
 };
 
@@ -140,9 +145,15 @@ struct sr::denoise_guides
 
     /// This frame's sub-pixel offset of the primary rays, in input pixels, in [-0.5, 0.5].
     tg::vec2f jitter = tg::vec2f(0, 0);
+    tg::vec2f previous_jitter = tg::vec2f(0, 0);
 
     tg::mat4f view_to_clip = tg::mat4f::identity;
     tg::mat4f previous_view_to_clip = tg::mat4f::identity;
+
+    /// The camera itself, which a member reprojecting in world space needs beside the projection.
+    /// nrd only; the other members work from the motion guide alone.
+    tg::mat4f world_to_view = tg::mat4f::identity;
+    tg::mat4f previous_world_to_view = tg::mat4f::identity;
 };
 
 /// One denoise call's images.
@@ -250,6 +261,7 @@ public:
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
+    friend class nrd_denoise_routine;
     friend class oidn_denoise_routine;
     friend class dlss_rr_routine;
 
@@ -257,7 +269,8 @@ private:
     /// Returns whether the call starts from no history.
     bool _prepare(denoise_method method, tg::vec2i extent);
 
-    /// A member's own per-stream object — for OIDN the network and its feature maps, for DLSS the NGX feature.
+    /// A member's own per-stream object — for OIDN the network and its feature maps, for a vendor member the SDK
+    /// handle it must release on a device the GPU is done with.
     ///
     /// Type-erased so this header names no member's type; the deleter is captured where the object is made, which is
     /// what lets a member whose seam hands back a bare `void*` put its own release function in here.
@@ -285,6 +298,7 @@ struct sr::denoise_support
     bool oidn = false;
     bool dlss_rr = false;
     bool fsr_rr = false;
+    bool nrd = false;
 
     [[nodiscard]] bool supports(denoise_method m) const;
 };

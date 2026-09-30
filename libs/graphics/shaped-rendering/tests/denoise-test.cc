@@ -9,6 +9,7 @@
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/dlss_rr_routine.hh>
+#include <shaped-rendering/impl/nrd_instance.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
@@ -256,9 +257,11 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     // the machines where no better member is present.
     auto const temporal = sr::resolve_denoise_method(ctx, on_fresh_frames);
     auto const expected = support.dlss_rr ? sr::denoise_method::dlss_rr
-                        : support.fsr_rr  ? sr::denoise_method::fsr_rr
-                                          : sr::denoise_method::svgf;
-    CHECK(temporal == expected).context(cc::format("supported: dlss_rr {}, fsr_rr {}", support.dlss_rr, support.fsr_rr));
+                        : support.fsr_rr ? sr::denoise_method::fsr_rr
+                        : support.nrd    ? sr::denoise_method::nrd
+                                         : sr::denoise_method::svgf;
+    CHECK(temporal == expected)
+        .context(cc::format("supported: dlss_rr {}, fsr_rr {}, nrd {}", support.dlss_rr, support.fsr_rr, support.nrd));
     CHECK(sr::is_temporal(temporal));
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must

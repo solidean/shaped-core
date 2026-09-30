@@ -38,7 +38,7 @@ HOST_KEYS = HOST_OS_KEYS + tuple(f"{os_key}-{arch}" for os_key in HOST_OS_KEYS f
 # `vendored` is committed in-tree; `fetched` hydrates a gitignored .install/ on demand, so it can be absent or stale on a given checkout.
 # `bundled` arrives inside another upstream in the same directory — Zycore, which the Zydis amalgamation folds in — so it has no install state of its own.
 # `on-request` hydrates the same way `fetched` does and is NEVER run for you: no configure step fetches it.
-# Why differs per upstream and belongs in its `notes:` — DLSS's license is one a person accepts rather than one the
+# Why differs per upstream and belongs in its `notes:` — an NVIDIA SDK's license is one a person accepts rather than one the
 # build accepts on their behalf, while OIDN is a test oracle nothing we ship links.
 # So it is normally ABSENT, and everything reading a manifest has to cope with that — a license collector above all.
 INSTALLS = {"vendored", "fetched", "bundled", "on-request"}

@@ -52,16 +52,17 @@ exceptions:
 
   - identifier: LicenseRef-NVIDIA-RTX-SDK
     why: >-
-      NVIDIA RTX SDKs License, governing the DLSS SDK we fetch for sr::dlss_rr_routine.
-      Proprietary, and accepted only for a dependency nothing fetches by default — extern/dlss is `install: on-request`,
-      so a build that nobody opted into never downloads it and never links it.
-      Section 1c permits distributing SDK materials in object code inside an application, which is exactly and only how
-      nvngx_dlssd.dll is used: staged beside a binary that loads it.
+      NVIDIA RTX SDKs License, governing every NVIDIA SDK we fetch for shaped-rendering's denoise members —
+      the NRD sources behind sr::nrd_denoise_routine, and the DLSS SDK behind sr::dlss_rr_routine.
+      Proprietary, and accepted only for dependencies nothing fetches by default — extern/nrd and extern/dlss are both
+      `install: on-request`, so a build that nobody opted into downloads neither and links neither.
+      Section 1c permits distributing SDK materials in object code inside an application, which is how both are used:
+      NRD built from source into shaped-rendering, and nvngx_dlssd.dll staged beside a binary that loads it.
       Section 2a requires the application to have material additional functionality beyond the SDK, which a renderer
       plainly does, and section 4b forbids shipping the SDK as a stand-alone product, which we never do.
       Two terms are worth re-reading on any bump.
       Section 4e forbids using the SDK so that it becomes subject to an open source license, which is why it links
-      PRIVATE behind SR_HAS_DLSS and reaches no public header.
+      PRIVATE behind SR_HAS_NRD and SR_HAS_DLSS, and neither reaches a public header.
       Section 4f excludes life-critical use without a separate agreement, and section 15 carries US export terms.
 
 # Licenses we will not take, listed so a refusal comes with a reason rather than a silent absence.
