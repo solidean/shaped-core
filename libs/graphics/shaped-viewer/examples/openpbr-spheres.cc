@@ -17,12 +17,13 @@ using namespace cc::primitive_defines;
 // attribute no row mentions keeps the specification's own default.
 //
 // `make_rows` is the list: dielectric, metal, coated, fuzz, anisotropic, thin film, coat normal, glass, thin walled,
-// absorbing, dispersion, subsurface, scattering, opacity, diffuse.
+// absorbing, dispersion, subsurface, scattering, opacity, diffuse, emission.
 // Each carries its own comment where the parameters need one.
 //
 // They are laid out in BLOCKS rather than in one file running away from the camera, filled in reading order: near-left,
 // near-right, far-left, far-right.
 // Depth is what a row's legibility is spent on and there is only so much of it — see `rows_per_block`.
+// Sixteen rows is what fills those four blocks exactly, so a seventeenth starts a fifth and leaves three holes beside it.
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/openpbr-spheres
@@ -33,10 +34,10 @@ constexpr int column_count = 7; // roughness samples per row
 constexpr float sphere_radius = 0.45f;
 constexpr float spacing = 1.15f;
 
-/// How the fifteen rows are broken up, since fifteen of them behind one another is not something a camera can fix.
+/// How the sixteen rows are broken up, since sixteen of them behind one another is not something a camera can fix.
 ///
 /// What separates two rows on screen is `spacing * sin(elevation)`, and elevation falls away toward the horizon whatever the
-/// camera does: fifteen rows in one file put the far ones at about 19 degrees, a third of a diameter apart, which is the
+/// camera does: sixteen rows in one file put the far ones at about 19 degrees, a third of a diameter apart, which is the
 /// overlapping-crescents look.
 /// Raising `spacing` lifts the far rows out of the frame long before it separates them.
 ///
@@ -50,6 +51,16 @@ constexpr int blocks_across = 2;
 /// Bare floor between neighbouring blocks, so the grid reads as four groups rather than as one wide slab.
 constexpr float block_gap_x = 2.0f;
 constexpr float block_gap_z = 2.5f;
+
+/// How far the ground reaches, which must be far enough that its EDGE is never in frame.
+///
+/// The top of the frame leaves the camera below horizontal, so it meets the ground at a finite distance — around 30 units
+/// out at this pose, and further as the lens widens.
+/// A quad past that puts floor behind every pixel, and what would otherwise be a hard line across the picture becomes the
+/// gradient the floor falls off into.
+/// Sized against the CAMERA rather than against the grid: a ground that follows the grid is exactly the one the frame
+/// overshoots.
+constexpr float ground_half_size = 200.0f;
 
 /// An indexed UV sphere of `radius`, centered on the origin, wound so every face's geometric normal points outward.
 ///
@@ -308,6 +319,23 @@ struct sweep_row
                                binding::of("specular_weight", 0.0f)},
                     .swept = "base_diffuse_roughness"});
 
+    // Luminance, swept across the range the tonemapper still separates: the near columns read as a tinted surface that
+    // happens to glow and the far ones clip to the emission color.
+    // One nit is one unit of radiance here, the same as the key light's, so the row is scaled against `nits` above rather
+    // than against a number that looked right.
+    //
+    // A dark base is what makes it a sweep of EMISSION: emission adds to the surface, so a lit base would carry the low
+    // columns and the first half of the row would show the light rather than the parameter.
+    // What it cannot show is an emitter lighting anything — next-event estimation samples the analytic lights alone, so
+    // these spheres are visible to the camera and invisible to their neighbours.
+    rows.push_back(
+        {.name = "emission",
+         .shared = {binding::of("base_color", tg::vec3f(0.05f, 0.05f, 0.06f)), binding::of("specular_roughness", 0.3f),
+                    binding::of("emission_color", tg::vec3f(1.0f, 0.72f, 0.35f))},
+         .swept = "emission_luminance",
+         .from = 0.02f,
+         .to = 1.5f});
+
     return rows;
 }
 
@@ -406,13 +434,13 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
         = float(column_count - 1) * spacing * float(blocks_across) + block_gap_x * float(blocks_across - 1);
     float const grid_depth = float(rows_per_block * block_bands - 1) * spacing + block_gap_z * float(block_bands - 1);
 
-    auto const floor = sv::mesh{.name = "ground",
-                                .geometry = sv::triangle_geometry::create_from_positions(
-                                    ground_quad(0.0f, cc::max(grid_width, grid_depth) + 8.0f)),
-                                .material = lib.acquire(sv::material::create(
-                                    "ground", lib.acquire_type(sv::builtin_material::openpbr).value(),
-                                    {sv::material_attribute_binding::of("base_color", tg::vec3f(0.32f, 0.32f, 0.34f)),
-                                     sv::material_attribute_binding::of("specular_roughness", 0.55f)}))};
+    auto const floor
+        = sv::mesh{.name = "ground",
+                   .geometry = sv::triangle_geometry::create_from_positions(ground_quad(0.0f, ground_half_size)),
+                   .material = lib.acquire(sv::material::create(
+                       "ground", lib.acquire_type(sv::builtin_material::openpbr).value(),
+                       {sv::material_attribute_binding::of("base_color", tg::vec3f(0.32f, 0.32f, 0.34f)),
+                        sv::material_attribute_binding::of("specular_roughness", 0.55f)}))};
 
     for (auto f : sv::interactive("shaped-viewer/openpbr-spheres"))
     {
@@ -423,7 +451,7 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
         // The blocked layout is what makes a camera possible at all: the grid is about 16 wide against 11 deep, which
         // perspective compresses to roughly the frame's own aspect, so what fills the picture is spheres rather than floor.
         // From 13 units up the last row still sits about 34 degrees above the horizon, which is two thirds of a diameter
-        // between rows; the same fifteen rows in one file put the far ones at 19 and half-buried in the row in front.
+        // between rows; the same sixteen rows in one file put the far ones at 19 and half-buried in the row in front.
         // The pitch is the depression to the middle of the grid, so the near and far ends sit equally far off centre, and
         // the lens is what the NEAR CORNERS need — they are the widest thing in the frame, not the far ones.
         //
