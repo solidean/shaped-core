@@ -18,7 +18,7 @@ using namespace cc::primitive_defines;
 
 // A denoised layer, end to end through the headless viewer.
 //
-// What this pins is the promise `render_settings::denoise` makes: turning denoising on, off or to another member never
+// What this pins is the promise `render_settings::reconstruct` makes: turning denoising on, off or to another member never
 // restarts accumulation.
 // The guides and the denoised image are written beside the mean, never into it, so the count a capture waits on keeps
 // climbing across every change — while the denoiser's own guides restart on a count of their own.
@@ -288,7 +288,7 @@ ASYNC_INVOCABLE_TEST("sv - the viewer drives the split-signal denoiser", (sg::co
 
 // A layer that NAMES a temporal member, captured past the hand-off.
 //
-// `render_settings::denoise.denoiser` names the temporal phase; the spatial phase that takes over once the mean has
+// `render_settings::reconstruct.denoiser` names the temporal phase; the spatial phase that takes over once the mean has
 // `temporal_denoise_frames + temporal_denoise_fade_frames` frames is a different call, on the mean rather than on this
 // frame's samples.
 // Carrying the named temporal member into it hands a temporal member the converging mean with no motion guide, which

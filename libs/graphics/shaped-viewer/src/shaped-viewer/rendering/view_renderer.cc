@@ -745,6 +745,9 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     {
         auto copy = settings.reconstruct;
         copy.fresh_samples = fresh;
+        // sv traces at the view's own size and does not jitter, so an upscaler here would run 1:1 on a mean it cannot
+        // reconstruct from; sv's TODO item for `render_settings::render_scale` is what lifts this.
+        copy.upscaler = sr::upscale_method::none;
         return copy;
     };
     auto schedule = denoise_schedule{

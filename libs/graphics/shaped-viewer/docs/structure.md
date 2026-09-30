@@ -59,7 +59,7 @@ persistent per-view state                [in progress]  view_id keys what a view
 id stack (push_id / scoped_id)           [done]         seeds view_id so one name under N scopes names N views; independent of layout nesting, and a duplicate within a frame asserts.
                                                         Ids are formattable and take an ImGui-style ## suffix, which separates two views without changing what a human reads
 temporal accumulation                    [in progress]  a traced layer blends into one rgba32_float target in place, uncapped; the camera or the scene changing restarts it, nothing else does
-denoising                                [in progress]  render_settings::denoise: sr's front denoises a layer's mean after its trace, steered by normal, depth and albedo guides the raygen
+denoising                                [in progress]  render_settings::reconstruct: sr's front denoises a layer's mean after its trace, steered by normal, depth and albedo guides the raygen
                                                         blends beside it; the parent samples the denoised image. Nothing in it reaches the trace hash.
                                                         While the mean is young SVGF runs on the frame's own samples and camera motion vectors, then à-trous on the mean.
                                                         The hand-off is crossfaded, and view_ref::camera_cut() drops the history on a teleport. Still to come: render_scale.

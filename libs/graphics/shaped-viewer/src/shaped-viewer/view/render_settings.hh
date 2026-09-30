@@ -49,6 +49,9 @@ struct sv::render_settings
     /// `automatic`'s choice.
     /// A temporal member cannot run the spatial phase at all: it would be handed the converging mean with no motion
     /// guide, and would report `unsupported`.
+    ///
+    /// Its `upscaler`, `scale`, `upscale_sharpness` and `frame_time_ms` are not read yet: sv traces at the view's own
+    /// size, so nothing upscales.
     sr::reconstruct_settings reconstruct = {.denoiser = sr::denoise_method::none};
 
     /// For how many accumulated frames after a restart a temporal member denoises this frame's own samples, before the

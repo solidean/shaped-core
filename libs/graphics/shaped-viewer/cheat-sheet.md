@@ -49,9 +49,9 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; sr::reconstruct_settings denoise; } — per-layer integration controls (no light/sky: those are on the view)
-                                 //   denoise defaults to method none; NOTHING in it restarts accumulation (see "Denoising" below)
-                                 //   sv owns denoise.fresh_samples and overwrites whatever a caller set: each half of the hand-off runs with its own value
+sv::render_settings              // { int samples_per_pixel, max_bounces; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+                                 //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
+                                 //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
@@ -764,7 +764,7 @@ Every path is traced; a point or a parallel light is a delta and has next-event 
 The pick probability `1/N` is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced whatever N is.
 A layer with no lights falls back to `layer::fallback_light` — `sv::default_fallback_light()`, a sun — which `scene.fallback_light(cc::nullopt)` turns off.
 
-**Denoising.** A layer with `render_settings::denoise` on is denoised right after its trace, and its parent samples the result.
+**Denoising.** A layer with `render_settings::reconstruct` on is denoised right after its trace, and its parent samples the result.
 - **Temporal while the mean is young, spatial after.** For `render_settings::temporal_denoise_frames` (16) frames after a restart, a temporal
   member (SVGF under `automatic`) denoises this frame's own samples; then à-trous takes over on the mean, backing off with its sample count.
   A named spatial member (`atrous`) never takes the temporal branch.
