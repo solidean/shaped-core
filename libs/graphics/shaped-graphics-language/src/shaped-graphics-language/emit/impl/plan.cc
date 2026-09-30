@@ -47,7 +47,8 @@ bool is_called_by_a_builtin(checked_module const& m, emit::target t, cc::string_
 struct_role input_role(flat_entry_point const& e)
 {
     // A compute parameter crosses no edge: it is a system value, or a struct of them.
-    if (e.entry_stage == stage::compute)
+    // a ray-tracing stage's payload is a plain struct the target hands over by reference
+    if (e.entry_stage == stage::compute || e.entry_stage >= stage::raygen)
         return struct_role::plain;
     // the geometry and the tessellation stages take an array of what the stage before hands on
     return e.entry_stage == stage::vertex ? struct_role::vertex_input : struct_role::stage_link;
@@ -169,8 +170,9 @@ struct validator
             else if (auto const* c = x.node.try_as<flat_call>())
             {
                 auto const* const record = m.builtin_function(c->intrinsic);
-                auto const expected
-                    = record == nullptr ? -1 : record->parameters.size() + (record->takes_element ? 1 : 0);
+                auto const expected = record == nullptr ? -1
+                                                        : record->parameters.size() + (record->takes_element ? 1 : 0)
+                                                              + (record->takes_acceleration_index ? 1 : 0);
                 if (record == nullptr || expected != e.at(c->arguments).size())
                     report(
                         error_kind::malformed_tree, e.function,
@@ -205,9 +207,10 @@ struct planner
     i32 patch_location_base = 0;
 
     /// A name of the program as this target may spell it: itself, or with a trailing underscore where it is reserved.
+    /// Every target reserves the prefix `sgl_` for what an emitter writes, whose names end in no underscore.
     cc::string spell(cc::string_view name)
     {
-        if (!is_reserved(p.which, name) && !is_called_by_a_builtin(p.m, p.which, name))
+        if (!is_reserved(p.which, name) && !is_called_by_a_builtin(p.m, p.which, name) && !name.starts_with("sgl_"))
             return name;
         return p.names.mint(cc::format("{}_", name));
     }
@@ -231,6 +234,10 @@ struct planner
         {
             if (is_reserved(p.which, result))
                 return false;
+            // EMIT-138: a member named like the struct type of another hides the type from it in HLSL and MSL
+            for (auto const& s : siblings)
+                if (is_valid(s.type) && p.m.at(s.type).kind == type_kind::structure && p.m.name_of(s.type) == result)
+                    return false;
             if (result == name)
                 return true;
             for (auto const& s : siblings)
@@ -299,6 +306,17 @@ struct planner
     }
 
     /// Post-order, so a struct stands after every struct it holds, which HLSL needs and WGSL does not mind.
+    /// `report[hit_attributes]` as a name every target takes: `report_hit_attributes`, minted.
+    cc::string instance_name(type_id type)
+    {
+        // a closing bracket is dropped, since every one ends the name or stands before another
+        auto name = cc::string();
+        for (auto const c : p.m.name_of(type))
+            if (c != ']' && c != ' ')
+                name += c == '[' || c == ',' ? '_' : c;
+        return p.names.mint(name);
+    }
+
     void need(type_id type, struct_role role)
     {
         // a binding array is declared with its resource, and has no type of its own to spell
@@ -325,7 +343,7 @@ struct planner
         p.struct_of_type[index_of(type)] = i32(p.structs.size());
         p.structs.push_back({
             .type = type,
-            .name = spell_type(p.m.at(info.symbol).name),
+            .name = is_valid(info.generic) ? instance_name(type) : spell_type(p.m.at(info.symbol).name),
             .role = role,
             .members = members_of(written, role != struct_role::plain,
                                   role == struct_role::patch_constants ? patch_location_base : 0),
@@ -866,8 +884,9 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
 
-    // A compute entry point has no pipeline edge at either end, so neither struct is judged as one.
-    if (e.entry_stage != stage::compute)
+    // A compute entry point has no pipeline edge at either end, so neither struct is judged as one, and a ray-tracing
+    // stage's payload is handed over by reference rather than across an edge.
+    if (e.entry_stage != stage::compute && e.entry_stage < stage::raygen)
     {
         // the geometry and the tessellation stages take an array of what crosses, and a geometry stage hands its
         // vertices on through its stream rather than its result
@@ -937,6 +956,11 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         p.need(x.type, struct_role::plain);
         p.need_enum(x.type);
     }
+    // EMIT-139: MSL sizes the ray data by every payload of the set, which each of its shaders must agree on
+    if (t == target::msl)
+        if (auto const set = ray_set_of(m, e); check::is_valid(set))
+            for (auto const& ray : m.at(m.at(m.at(set).type).members))
+                p.need(ray.type, struct_role::plain);
     // A struct in a block or a buffer is declared whether or not the code reads it whole.
     for (auto const id : e.bindings)
         for (auto const& member : m.at(m.bindings[m.at(id).info].members))
@@ -946,7 +970,9 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
             p.need(t.kind == type_kind::buffer ? t.element : member.type, struct_role::plain);
         }
     // `spell` is what mints `<name>_` where the target reserves the name or a builtin is called by it.
-    result.entry_name = p.spell(e.name);
+    // An entry point the check pass adds for metal is named `sgl_…` on purpose, and the host asks for it by that name.
+    auto const is_added = check::is_valid(e.function) && m.at(e.function).name != e.name;
+    result.entry_name = is_added ? cc::string(e.name) : p.spell(e.name);
     if (e.entry_stage == stage::tessellation_control)
     {
         result.patch_function = result.names.mint(cc::format("{}_patch", e.name));
@@ -1055,6 +1081,9 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         return k_workgroup_id;
     case stage_input::domain_location:
         return k_domain_location;
+    // a ray-tracing stage reads its launch through builtins, which flatten binds its parameters to
+    case stage_input::launch_id:
+    case stage_input::launch_size:
     case stage_input::none:
         break;
     }
@@ -1143,4 +1172,61 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
         result.push_back(cc::move(layout));
     }
     return result;
+}
+
+cc::vector<sgl::check::symbol_id> sgl::emit::impl::owning_ray_sets(check::checked_module const& m,
+                                                                   check::flat_entry_point const& e)
+{
+    auto result = cc::vector<check::symbol_id>();
+    auto const is_in = [](cc::span<check::symbol_id const> ids, check::symbol_id id)
+    {
+        for (auto const x : ids)
+            if (x == id)
+                return true;
+        return false;
+    };
+    auto const add = [&](check::symbol_id set)
+    {
+        if (check::is_valid(set) && !is_in(result, set))
+            result.push_back(set);
+    };
+    auto const holds = [&](check::pipeline_info const& p)
+    {
+        switch (p.kind)
+        {
+        case check::pipeline_kind::raytracing:
+            // every callable of the module's tables is in each ray-tracing pipeline's callable section
+            return p.raygen == e.function || is_in(m.at(p.misses), e.function) || e.entry_stage == check::stage::callable;
+        case check::pipeline_kind::hit_group:
+            return p.intersection == e.function || is_in(m.at(p.records), e.function);
+        default:
+            return false;
+        }
+    };
+    for (auto const& p : m.pipelines)
+        if (holds(p))
+            add(p.ray_set);
+    return result;
+}
+
+sgl::check::symbol_id sgl::emit::impl::ray_set_of(check::checked_module const& m, check::flat_entry_point const& e)
+{
+    if (e.entry_stage < check::stage::raygen)
+        return check::symbol_id::none;
+    // the pipeline or the hit group that holds the entry point decides, so every shader linked with it agrees
+    if (auto const owners = owning_ray_sets(m, e); !owners.empty())
+        return owners[0];
+    if (!e.traced_rays.empty())
+        return e.traced_rays.front().set;
+    if (e.entry_stage == check::stage::callable || !check::is_valid(e.input))
+        return check::symbol_id::none;
+    for (auto const& p : m.pipelines)
+    {
+        if (!check::is_valid(p.ray_set))
+            continue;
+        for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
+            if (ray.type == e.input)
+                return p.ray_set;
+    }
+    return check::symbol_id::none;
 }

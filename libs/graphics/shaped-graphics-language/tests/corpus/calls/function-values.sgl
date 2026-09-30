@@ -1,0 +1,91 @@
+// a parameter of function type takes a function's name or a lambda, and a call of it is inlined where it stands
+
+fun apply(f: (float) -> float, x: float) -> float => f(x)
+
+fun halve(x: float) -> float => x * 0.5
+fun square(x: float) => x * x
+
+test apply(halve, 3.0) == 1.5
+test apply(square, 3.0) == 9.0
+
+// a lambda sees the names around it, since it is written out where it is called
+test:
+    let k = 3.0
+    apply(x => x * k, 2.0) == 6.0
+
+// the lambda's parameter types come from the parameter it meets, and a written one must agree
+test apply((x: float) => x + 1.0, 1.0) == 2.0
+
+// a parameter of function type is handed on as the function it stands for
+fun twice(f: (float) -> float, x: float) -> float => apply(f, apply(f, x))
+
+test twice(halve, 8.0) == 2.0
+test twice(x => x + 1.0, 0.0) == 2.0
+
+// two parameters, and a function of another result type
+fun pick(choose: (int, int) -> bool, a: int, b: int) -> int:
+    if choose(a, b) => return a
+    return b
+
+fun greater(a: int, b: int) -> bool => a > b
+
+test pick(greater, 3, 7) == 7
+test pick((a, b) => a < b, 3, 7) == 3
+
+// a function is handed over only where a parameter of function type takes it
+@expect(error = "no-matching-overload")
+test:
+    let x = sqrt(halve)
+    true
+
+// its signature must be the parameter's exactly
+fun to_int(x: float) -> int => x as int
+
+@expect(error = "no-matching-overload")
+test:
+    let y = apply(to_int, 1.0)
+    true
+
+// a lambda's arity must match
+@expect(error = "no-matching-overload")
+test:
+    let y = apply((a, b) => a, 1.0)
+    true
+
+// a builtin is no function a parameter takes, however well its signature fits
+@expect(error = "no-matching-overload")
+test:
+    let y = apply(sqrt, 4.0)
+    true
+
+// nor is an entry point, which the GPU calls and no body does
+fun run(f: (int3) -> void):
+    f(int3(0, 0, 0))
+
+@compute(1) fun idle(@thread_id id: int3):
+    return
+
+@expect(error = "no-matching-overload")
+test:
+    run(idle)
+    true
+
+// a function type is the type of a parameter, and of nothing else
+@expect(error = "wrong-kind-of-name")
+test:
+    let f: (float) -> float = halve
+    true
+
+// a function name anywhere but as an argument is a function as a value, which is not carried yet
+@expect(error = "unsupported-yet")
+test:
+    let f = halve
+    true
+
+// every target writes the inlined function
+binding values:
+    data: mut buffer[float]
+
+@compute(64) fun scale(@thread_id id: int3){values}:
+    let k = 2.0
+    values.data[id.x] = twice(x => x * k, values.data[id.x])

@@ -147,7 +147,13 @@ def install_plan(is_windows: bool, arch: str) -> list[tuple[str, Path]]:
     if is_windows:
         # The compiler DLL plus its dxil.dll signer, the import lib, and the two headers dxcapi.h needs
         # (d3d12shader.h sits next to it for dxcapi.h's own include, and backs the DXIL reflection path).
+        #
+        # dxc.exe rides along for a consumer that drives DXC as a TOOL rather than through the API: NRD's build
+        # compiles its own shaders with ShaderMake, which takes a compiler by path.
+        # Without it ShaderMake downloads a DXC of its own at configure time, which would put a second, unpinned
+        # compiler in a build whose whole point is that every dependency is pinned.
         return [
+            (f"bin/{arch}/dxc.exe", Path("bin/dxc.exe")),
             (f"bin/{arch}/dxcompiler.dll", Path("bin/dxcompiler.dll")),
             (f"bin/{arch}/dxil.dll", Path("bin/dxil.dll")),
             (f"lib/{arch}/dxcompiler.lib", Path("lib/dxcompiler.lib")),

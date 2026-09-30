@@ -4,6 +4,7 @@ project(shaped-graphics-webgpu LANGUAGES CXX)
 # The WebGPU backend is its own static library over the shaped-graphics core.
 # The enclosing CMakeLists adds it only under Emscripten with SC_WASM_WEBGPU, whose emdawnwebgpu port supplies <webgpu/webgpu.h>.
 add_library(shaped-graphics-webgpu
+    src/shaped-graphics/backends/webgpu/webgpu_acceleration_pool.cc
     src/shaped-graphics/backends/webgpu/webgpu_binding.cc
     src/shaped-graphics/backends/webgpu/webgpu_command_list.cc
     src/shaped-graphics/backends/webgpu/webgpu_command_list.compute.cc
@@ -14,6 +15,7 @@ add_library(shaped-graphics-webgpu
     src/shaped-graphics/backends/webgpu/webgpu_format.cc
     src/shaped-graphics/backends/webgpu/webgpu_pipeline.cc
     src/shaped-graphics/backends/webgpu/webgpu_query.cc
+    src/shaped-graphics/backends/webgpu/webgpu_raytracing.cc
     src/shaped-graphics/backends/webgpu/webgpu_resources.cc
     src/shaped-graphics/backends/webgpu/webgpu_stream.cc
     src/shaped-graphics/backends/webgpu/webgpu_swapchain.cc
@@ -27,6 +29,7 @@ target_sources(shaped-graphics-webgpu
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
     src/shaped-graphics/backends/webgpu/fwd.hh
+    src/shaped-graphics/backends/webgpu/webgpu_acceleration.hh
     src/shaped-graphics/backends/webgpu/webgpu_binding_group.hh
     src/shaped-graphics/backends/webgpu/webgpu_binding_group_layout.hh
     src/shaped-graphics/backends/webgpu/webgpu_buffer.hh
@@ -65,6 +68,7 @@ if(SC_BUILD_TESTS)
         tests/webgpu-compute-test.cc
         tests/webgpu-binding-test.cc
         tests/webgpu-raster-test.cc
+        tests/webgpu-raytracing-test.cc
         tests/webgpu-threading-test.cc
         tests/webgpu-stream-test.cc
     )

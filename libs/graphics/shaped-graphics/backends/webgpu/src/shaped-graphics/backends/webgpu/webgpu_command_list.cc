@@ -95,6 +95,8 @@ sg::submission_token webgpu_context::submit_webgpu_command_list(std::unique_ptr<
                                                           "in (it cannot span epochs)");
     CC_ASSERT(!cmd->_consumed, "command list already submitted or dropped");
 
+    // A region this list wrote into a pool buffer since outgrown reaches the current one before anything later reads it.
+    cmd->bring_pool_writes_forward();
     cmd->finalize_queries();
     auto const buffer = cmd->finish();
 
@@ -421,38 +423,5 @@ void webgpu_command_list::copy_buffer_region(sg::raw_buffer_handle src,
                                              u64(dst_offset_in_bytes), u64(words));
     touch(src);
     touch(dst);
-}
-
-// -- ray tracing: refused --
-
-sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg::blas_triangles const>,
-                                                                     sg::accel_build_flags)
-{
-    CC_UNREACHABLE("webgpu has no ray tracing; check cmd.raytracing.is_supported()");
-}
-
-sg::blas_handle webgpu_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const>, sg::accel_build_flags)
-{
-    CC_UNREACHABLE("webgpu has no ray tracing; check cmd.raytracing.is_supported()");
-}
-
-sg::tlas_handle webgpu_command_list::raytracing_build_tlas(cc::span<sg::tlas_instance const>, sg::accel_build_flags)
-{
-    CC_UNREACHABLE("webgpu has no ray tracing; check cmd.raytracing.is_supported()");
-}
-
-void webgpu_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const&)
-{
-    CC_UNREACHABLE("webgpu has no ray tracing; check cmd.raytracing.is_supported()");
-}
-
-void webgpu_command_list::raytracing_bind_group(int, sg::binding_group const&)
-{
-    CC_UNREACHABLE("webgpu has no ray tracing; check cmd.raytracing.is_supported()");
-}
-
-void webgpu_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table const&, sg::raygen_index, int, int, int)
-{
-    CC_UNREACHABLE("webgpu has no ray tracing; check cmd.raytracing.is_supported()");
 }
 } // namespace sg::backend::webgpu

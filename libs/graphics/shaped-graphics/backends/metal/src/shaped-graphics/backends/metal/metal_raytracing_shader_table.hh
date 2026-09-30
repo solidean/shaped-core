@@ -16,16 +16,21 @@
 ///
 /// The intersection table is the other kind: it holds what runs *during* traversal, and Metal indexes it by the
 /// instance's `intersectionFunctionTableOffset` plus the geometry descriptor's own — sg's `hit_group_offset` plus the
-/// geometry index, which is where DXR's first two hit-index contributions land.
-/// DXR's third, the per-`TraceRay` ray contribution, has no counterpart at all — see
-/// libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md.
+/// geometry index times the BLAS's `hit_record_stride`, which is where DXR's first two hit-index contributions land.
+/// **DXR's third, the per-`TraceRay` ray contribution, is a choice of table**: there is one intersection table per ray
+/// type, and table r's slot s holds the traversal function of hit record s + r.
+/// A kernel tracing ray type r with table r therefore reaches record `hit_group_offset + g * stride + r`, as DXR would.
+/// That covers a ray type fixed at each call site, which is what SGL generates; a ray contribution computed at run time
+/// has no counterpart — see libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md.
 ///
 /// **A kernel whose intersection table holds any triangle group must declare it
 /// `intersection_function_table<instancing, triangle_data>`**, because the opaque triangle default is installed with
 /// exactly that signature and Metal requires the two to agree.
 ///
-/// **They reach a kernel through `sg::reserved_binding_group`**, as four members of that group's argument buffer:
-/// `[[id(0)]]` intersection, `[[id(1)]]` miss, `[[id(2)]]` closest-hit, `[[id(3)]]` callable.
+/// **They reach a kernel through `sg::reserved_binding_group`**, as members of that group's argument buffer:
+/// `[[id(0)]]` ray type 0's intersection table, `[[id(1)]]` miss, `[[id(2)]]` closest-hit, `[[id(3)]]` callable, and
+/// ray type r >= 1's intersection table at `[[id(3 + r)]]`.
+/// The closest-hit table stays indexed by hit record, which the kernel computes from the same three terms.
 /// The reservation already existed for exactly this — see sg::reserved_binding_group — so nothing about what
 /// `group_index` means changes, and a caller still gets groups 0 to 2 on every backend.
 ///
@@ -38,17 +43,17 @@ public:
     struct raygen_binding
     {
         MTL::ComputePipelineState* state = nullptr; ///< borrowed from the pipeline, which outlives this table
-        MTL::IntersectionFunctionTable* intersection = nullptr;
+        cc::vector<MTL::IntersectionFunctionTable*> intersections; ///< one per ray type, by ray type
         MTL::VisibleFunctionTable* miss = nullptr;
         MTL::VisibleFunctionTable* closest_hit = nullptr;
         MTL::VisibleFunctionTable* callable = nullptr;
-        MTL::Buffer* arguments = nullptr; ///< the reserved group's argument buffer, holding the four resource ids
+        MTL::Buffer* arguments = nullptr; ///< the reserved group's argument buffer, holding the tables' resource ids
     };
 
     metal_raytracing_shader_table(metal_context& ctx,
-                                  sg::raytracing_pipeline_handle pipeline,
+                                  sg::raytracing_shader_table_description const& desc,
                                   cc::vector<raygen_binding> raygens)
-      : sg::raytracing_shader_table(cc::move(pipeline)), _ctx(ctx), _raygens(cc::move(raygens))
+      : sg::raytracing_shader_table(desc), _ctx(ctx), _raygens(cc::move(raygens))
     {
     }
 

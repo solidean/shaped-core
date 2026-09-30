@@ -29,6 +29,8 @@ void register_bit_math(registry& r);
 void register_math(registry& r);
 /// The barriers of a compute workgroup.
 void register_sync(registry& r);
+/// The steps of an inline ray query, `ray_flags`, and the emulated trace's view of sg's acceleration pool.
+void register_raytracing(registry& r);
 } // namespace sgl::builtins
 
 /// What the topic files share.

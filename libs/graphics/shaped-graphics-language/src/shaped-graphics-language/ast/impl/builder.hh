@@ -171,13 +171,21 @@ struct builder
     [[nodiscard]] range_of<attribute> attributes_of(form_id id);
     void reject_attributes(form_id id);
 
-    [[nodiscard]] argument list_element(form_id element, bool is_object, bool allows_attributes);
-    [[nodiscard]] range_of<argument> list_elements(form_id list, bool is_object = false, bool allows_attributes = false);
+    /// `allows_mut` is true for the arguments of a paren call alone, where `mut x` marks a place (AST-149).
+    [[nodiscard]] argument list_element(form_id element, bool is_object, bool allows_attributes, bool allows_mut = false);
+    [[nodiscard]] range_of<argument> list_elements(form_id list,
+                                                   bool is_object = false,
+                                                   bool allows_attributes = false,
+                                                   bool allows_mut = false);
 
     /// True for `name`, `_`, `mut name`, and each of them followed by `: type` and then `= default`.
     [[nodiscard]] bool is_field_like(form_id element, bool needs_type) const;
+    /// `mut name: type`, whose keyword takes the whole field as its argument; a field records the mark (CHK-315).
+    [[nodiscard]] bool is_mut_led_field(form_id element) const;
     /// Reports `on_failure` and yields a nameless field around an `invalid` type when `element` is not field-like.
     [[nodiscard]] field make_field(form_id element, diagnostic_kind on_failure);
+    /// `mut x` as a list element: the mark of a place handed to a `mut` parameter (AST-149).
+    [[nodiscard]] bool is_mut_argument(form_id element) const;
     [[nodiscard]] range_of<field> fields_of(form_id list, diagnostic_kind on_failure);
 
     // ---- expressions (build_expr.cc) -------------------------------------------------------------------------
@@ -307,6 +315,9 @@ struct builder
     decl_id type_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id const_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id sampler_declaration(statement_head const& head, keyword_parts const& parts);
+    decl_id hit_group_declaration(statement_head const& head, keyword_parts const& parts);
+    /// The `[A]` of `struct name[A]:`, empty where the head names no type parameters.
+    [[nodiscard]] range_of<field> type_parameters_of(keyword_parts const& parts);
     decl_id pipeline_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id notation_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id test_declaration(statement_head const& head, keyword_parts const& parts);

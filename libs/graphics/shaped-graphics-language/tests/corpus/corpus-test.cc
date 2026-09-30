@@ -60,15 +60,17 @@ INVOCABLE_TEST("sgl corpus - a file checks clean, passes its tests, and writes e
     // and a test the compiler dropped without a diagnostic would otherwise pass unseen
     CHECK(tested.tests_run + tested.tests_expecting_diagnostics == tested.test_count);
 
-    for (auto const& e : tested.entry_points)
-        for (auto const t : sgl::emit::all_targets())
-        {
-            auto const text = sgl::compile_to_text(
-                {.source = source, .source_name = f.relative_path, .entry_point = e.name, .target = t});
-            CHECK(text.has_value()).dump("entry point", e.name).dump("target", sgl::emit::to_string(t));
-            if (text.has_error())
-                CHECK(text.error() == "");
-        }
+    // one check of the file for every entry point and target, which is what keeps a large corpus quick
+    auto const texts = sgl::compile_all_to_text(
+        {.source = source, .source_name = f.relative_path, .targets = sgl::emit::all_targets()});
+    REQUIRE(texts.has_value());
+    CHECK(texts.value().size() == tested.entry_points.size() * isize(sgl::emit::all_targets().size()));
+    for (auto const& e : texts.value())
+    {
+        CHECK(e.text.has_value()).dump("entry point", e.entry_point).dump("target", sgl::emit::to_string(e.target));
+        if (e.text.has_error())
+            CHECK(e.text.error() == "");
+    }
 }
 
 TEST("sgl corpus - every file")

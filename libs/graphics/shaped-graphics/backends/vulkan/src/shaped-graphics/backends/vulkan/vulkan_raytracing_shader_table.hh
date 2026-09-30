@@ -26,8 +26,8 @@ public:
         vulkan_context& ctx,
         sg::raytracing_shader_table_description const& desc);
 
-    explicit vulkan_raytracing_shader_table(sg::raytracing_pipeline_handle pipeline)
-      : sg::raytracing_shader_table(cc::move(pipeline))
+    explicit vulkan_raytracing_shader_table(sg::raytracing_shader_table_description const& desc)
+      : sg::raytracing_shader_table(desc)
     {
     }
 

@@ -157,6 +157,14 @@ struct planned_argument_buffer
     cc::string parameter;
 };
 
+/// The ray set that sizes a ray-tracing entry point's ray data on MSL, `none` for one that has none (EMIT-139).
+/// It is the set of the first pipeline or hit group holding the entry point, else the set it traces or is handed a
+/// payload of.
+[[nodiscard]] check::symbol_id ray_set_of(check::checked_module const& m, check::flat_entry_point const& e);
+/// The ray sets of every ray-tracing pipeline and hit group holding `e` as one of its shaders, each once.
+[[nodiscard]] cc::vector<check::symbol_id> owning_ray_sets(check::checked_module const& m,
+                                                           check::flat_entry_point const& e);
+
 struct plan
 {
     check::checked_module const& m;

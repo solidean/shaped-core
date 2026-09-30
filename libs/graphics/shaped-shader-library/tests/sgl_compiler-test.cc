@@ -876,8 +876,7 @@ TEST("slib sgl compiler - a broken source fails with the place, the kind and the
     }
 }
 
-TEST("slib sgl compiler - an entry point of the wrong stage, and a stage SGL does not have, are errors",
-     exclusive("slib-shader-library"))
+TEST("slib sgl compiler - an entry point asked for as another stage is an error", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     add_sgl_compilers(lib);
@@ -903,11 +902,9 @@ TEST("slib sgl compiler - an entry point of the wrong stage, and a stage SGL doe
     auto const missing = error_of(lib.compile_source(source, sg::shader_stage::fragment, "main_fs", wgsl, options));
     CHECK(missing.contains("no entry point named 'main_fs' (the source holds: pixel 'main_ps')"));
 
-    // Compute is a stage SGL has now, so asking for it here is the wrong stage rather than an unknown one.
+    // SGL has every stage sg has, so asking for another one is the wrong stage rather than an unknown one.
     auto const wrong_kind = error_of(lib.compile_source(source, sg::shader_stage::compute, "main_ps", wgsl, options));
     CHECK(wrong_kind.contains("entry point 'main_ps' is a pixel entry point"));
-
-    // A stage SGL still has none of.
-    auto const no_stage = error_of(lib.compile_source(source, sg::shader_stage::raygen, "main_ps", wgsl, options));
-    CHECK(no_stage.contains("SGL has no ray tracing entry points yet"));
+    auto const ray_stage = error_of(lib.compile_source(source, sg::shader_stage::raygen, "main_ps", wgsl, options));
+    CHECK(ray_stage.contains("entry point 'main_ps' is a pixel entry point"));
 }

@@ -65,6 +65,11 @@ static_assert(std::is_trivially_copyable_v<cc::tuple<int, float>>);
 static_assert(std::is_trivially_destructible_v<cc::tuple<int, float>>);
 static_assert(std::is_trivially_copyable_v<cc::tuple<int, cc::pair<int, float>>>);
 static_assert(std::is_trivially_copyable_v<cc::tuple<>>);
+
+// a pair's get names its member, so a structured binding over a pair refers into it
+static_assert(std::is_same_v<decltype(get<0>(std::declval<cc::pair<int, float>&>())), int&>);
+static_assert(std::is_same_v<decltype(get<1>(std::declval<cc::pair<int, float> const&>())), float const&>);
+static_assert(std::is_same_v<decltype(get<0>(std::declval<cc::pair<int, float>&&>())), int&&>);
 static_assert(!std::is_trivially_copyable_v<cc::tuple<cc::string>>);
 static_assert(!std::is_trivially_destructible_v<cc::tuple<cc::string>>);
 
@@ -305,6 +310,16 @@ TEST("tuple - apply")
         auto const r = cc::apply([](int a, int b) { return a * b; }, cc::pair<int, int>{3, 4});
         CHECK(r == 12);
     }
+}
+
+TEST("pair - a structured binding refers into the pair")
+{
+    auto p = cc::pair<cc::string, int>{"before", 1};
+    auto& [text, number] = p;
+    text = "after";
+    number = 2;
+    CHECK(p.first == "after");
+    CHECK(p.second == 2);
 }
 
 TEST("tuple - debug string")

@@ -94,7 +94,8 @@ One-liner per library:
   Namespace `bcache`. Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
   See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
-  dx12 and vulkan cover the whole surface; webgpu covers it but ray tracing, on wasm over emdawnwebgpu, and never blocks.
+  dx12 and vulkan cover the whole surface; webgpu covers it but the ray-tracing pipeline, on wasm over emdawnwebgpu, and never blocks.
+  **Ray tracing is two features**, `sg::feature::ray_query` and `raytracing_pipeline`; webgpu has ray queries alone, as a software polyfill `ctx.implementation_of` reports `emulated`.
   **metal** covers it too, on Metal 4 (macOS / iOS 26 floor, Apple silicon): windowed and headless presentation, ray tracing, and GPU timestamps.
   opengl and webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
@@ -111,6 +112,8 @@ One-liner per library:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
   A package is written in HLSL, WGSL, MSL or **SGL**, and an SGL package is one source for dx12, vulkan, webgpu and metal.
   `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC, WGSL or metal compiler that was there already.
+  An SGL `@raytracing pipeline` generates its pipeline description and shader table, with no index written by hand.
+  Hit groups or callables it leaves `.host` compile from SGL at run time — [docs/raytracing-pipelines.md](libs/graphics/shaped-shader-library/docs/raytracing-pipelines.md).
   Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately.
   The compiler edges are optional: shaped-shader-compiler-dxc where DXC exists, shaped-shader-compiler-msl on Apple — **sg does not depend on it**.
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
@@ -122,6 +125,7 @@ One-liner per library:
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
   One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
   [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan, webgpu and metal, from that one source.
+  SGL has generics and ray tracing: inline traces on all four backends (emulated on webgpu), and ray-tracing pipelines on the other three.
   **To write SGL**: [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language.
   `uv run dev.py run sgl -- emit <file> --entry <name> --target <t>` shows what a shader becomes.
   **A rule of the language is tested as a `test` in a corpus file** under `tests/corpus/`, run by `uv run dev.py run sgl -- test <file>`; a C++ `TEST` is for what SGL cannot say yet.

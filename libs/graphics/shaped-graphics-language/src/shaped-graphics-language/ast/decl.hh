@@ -69,6 +69,10 @@ struct sgl::ast::struct_decl
     range_of<decl_id> members;
     /// No block at all: the type has no members one could name, which differs from a block that declares none.
     bool is_opaque = false;
+    /// `rays name:`, a ray set: each member a ray type and the payload it carries (AST-150).
+    bool is_ray_set = false;
+    /// `struct name[A]:`, a generic struct, which only the prelude declares (CHK-339).
+    range_of<field> type_parameters;
 
     constexpr bool operator==(struct_decl const&) const = default;
 };
@@ -132,6 +136,12 @@ struct sgl::ast::pipeline_decl
     range_of<argument> stages;
     /// Whether the short form was written, so `pipeline p = ()` is told apart from an empty block.
     bool is_short_form = false;
+    /// `hit_group name for set:`, one row of a ray-tracing pipeline's table, whose settings name its shaders (AST-150).
+    bool is_hit_group = false;
+    /// The ray set a hit group is for; empty for a pipeline.
+    source_span ray_set;
+    /// `callables name = (f, g, .host)`, a table of callable shaders whose list is `stages` (AST-153).
+    bool is_callables = false;
 
     constexpr bool operator==(pipeline_decl const&) const = default;
 };
@@ -146,11 +156,13 @@ struct sgl::ast::notation_decl
 };
 
 /// `test:` with a block, or `test value`, which is the block of that one line (AST-138).
+/// `test {a, b}:` lists the bindings the test reads, whose values its driver gives (AST-151).
 /// A declaration and no statement: it never runs where it stands, and the check pass runs it on its own.
 struct sgl::ast::test_decl
 {
     /// The `test` keyword, which attributes stand in front of: where a report names the test, and where its extent starts.
     sgl::source_span keyword;
+    range_of<argument> bindings;
     sgl::ast::body body;
 
     constexpr bool operator==(test_decl const&) const = default;

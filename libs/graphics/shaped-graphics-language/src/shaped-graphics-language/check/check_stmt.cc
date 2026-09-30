@@ -210,17 +210,16 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = type, .is_mut = let.is_mut});
 }
 
-void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_stmt const& assign)
+bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what)
 {
     auto const file = scope.file;
     auto const& ast = ast_of(file);
-    auto const where = span_of(file, id);
-
-    auto const place = check_expr(scope, assign.target);
-    auto const is_plain = sgl::is_valid(assign.op) && text_of(file, file_of(file).at(assign.op).where) == "=";
-    // CHK-82: a plain assignment expects the place's type of its value, which a literal converts to
-    auto const value = is_plain && place != error_type ? check_expected(scope, assign.value, place)
-                                                       : check_expr(scope, assign.value);
+    auto const refuse = [&](source_span where, cc::string_view why)
+    {
+        report(diagnostic_kind::not_assignable, file, where,
+               what.empty() ? cc::string(why) : cc::format("{}: {}", what, why));
+        return false;
+    };
 
     // An array element is part of the local that holds it, and a buffer element is a place of its own.
     auto const kind_of_object = [&](ast::index const& indexed)
@@ -230,7 +229,7 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
     };
 
     // A buffer element is a place of its own: `work.dst[i] = v`, and only where the buffer is `mut`.
-    auto const* indexed = ast::is_valid(assign.target) ? ast.at(assign.target).node.try_as<ast::index>() : nullptr;
+    auto const* indexed = ast::is_valid(expr) ? ast.at(expr).node.try_as<ast::index>() : nullptr;
     if (indexed != nullptr && kind_of_object(*indexed) == type_kind::array)
         indexed = nullptr;
     if (indexed != nullptr)
@@ -238,13 +237,14 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
         auto const object = out.files[file].type_at(indexed->object);
         // What it is when it is no buffer at all was reported by `check_index`.
         if (object != type_id::none && out.at(object).kind == type_kind::buffer && !out.at(object).is_mut)
-            report(diagnostic_kind::not_assignable, file, span_of(file, assign.target),
-                   "this buffer is read-only; `mut buffer[T]` declares one a shader writes");
+            return refuse(span_of(file, expr), "this buffer is read-only; `mut buffer[T]` declares one a shader "
+                                               "writes");
+        return true;
     }
 
     // The place is otherwise a mutable local, or a field or an element of one at any depth; a property is read-only
     // (CHK-236), and so is an array's length (CHK-288).
-    auto root = assign.target;
+    auto root = expr;
     auto property = ast::expr_id::none;
     while (ast::is_valid(root))
     {
@@ -262,37 +262,56 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
             property = root;
         root = node.as<ast::member>().object;
     }
-    if (indexed == nullptr && place != error_type && ast::is_valid(property))
-        report(diagnostic_kind::not_assignable, file, span_of(file, assign.target),
-               out.files[file].target_at(property).kind == target_kind::array_length
-                   ? cc::string("an array's length is part of its type, and never assigned")
-                   : cc::format("{} is a property, which is read-only",
-                                text_of(file, ast.at(property).node.as<ast::member>().name)));
-    else if (indexed == nullptr && place != error_type && ast::is_valid(root))
+    if (ast::is_valid(property))
+        return refuse(span_of(file, expr), out.files[file].target_at(property).kind == target_kind::array_length
+                                               ? cc::string("an array's length is part of its type, and never assigned")
+                                               : cc::format("{} is a property, which is read-only",
+                                                            text_of(file, ast.at(property).node.as<ast::member>().name)));
+    if (!ast::is_valid(root))
+        return true;
+
+    auto const* const n = ast.at(root).node.try_as<ast::name>();
+    auto const& named = out.files[file].target_at(root);
+    auto const* local = static_cast<local_name const*>(nullptr);
+    for (auto const& l : scope.locals)
+        if (n != nullptr && l.where == named)
+            local = &l;
+    auto const target_where = span_of(file, expr);
+    if (n == nullptr || (local == nullptr && named.kind != target_kind::symbol))
+        return refuse(target_where, what.empty() ? "only a local, or a member of one, is assigned"
+                                                 : "only a local, or a member of one, is a place");
+    if (local == nullptr)
     {
-        auto const* const n = ast.at(root).node.try_as<ast::name>();
-        auto const& named = out.files[file].target_at(root);
-        auto const* local = static_cast<local_name const*>(nullptr);
-        for (auto const& l : scope.locals)
-            if (n != nullptr && l.where == named)
-                local = &l;
-        auto const target_where = span_of(file, assign.target);
-        if (n == nullptr || (local == nullptr && named.kind != target_kind::symbol))
-            report(diagnostic_kind::not_assignable, file, target_where, "only a local, or a member of one, is assigned");
-        else if (local == nullptr)
-        {
-            // CHK-292: workgroup memory is the one binding a shader writes
-            if (!is_workgroup_binding(named.symbol))
-                report(diagnostic_kind::not_assignable, file, target_where,
-                       cc::format("{} is a binding the host fills, which no shader writes", text_of(file, n->where)));
-        }
-        else if (local->where.kind == target_kind::parameter)
-            report(diagnostic_kind::not_assignable, file, target_where,
-                   cc::format("{} is a parameter, which is a value", local->name));
-        else if (!local->is_mut)
-            report(diagnostic_kind::not_assignable, file, target_where,
-                   cc::format("{} is immutable; `let mut` declares a local an assignment may name", local->name));
+        // CHK-292: workgroup memory is the one binding a shader writes
+        if (!is_workgroup_binding(named.symbol))
+            return refuse(target_where,
+                          cc::format("{} is a binding the host fills, which no shader writes", text_of(file, n->where)));
+        return true;
     }
+    if (local->where.kind == target_kind::parameter && !local->is_mut)
+        return refuse(target_where, cc::format("{} is a parameter, which is a value; `p: mut T` declares one the "
+                                               "caller hands its place to",
+                                               local->name));
+    if (local->where.kind != target_kind::parameter && !local->is_mut)
+        return refuse(target_where,
+                      cc::format("{} is immutable; `let mut` declares a local an assignment may name", local->name));
+    return true;
+}
+
+void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_stmt const& assign)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto const where = span_of(file, id);
+
+    auto const place = check_expr(scope, assign.target);
+    auto const is_plain = sgl::is_valid(assign.op) && text_of(file, file_of(file).at(assign.op).where) == "=";
+    // CHK-82: a plain assignment expects the place's type of its value, which a literal converts to
+    auto const value = is_plain && place != error_type ? check_expected(scope, assign.value, place)
+                                                       : check_expr(scope, assign.value);
+
+    if (place != error_type)
+        (void)judge_place(scope, assign.target, {});
 
     if (place == error_type || value == error_type || !sgl::is_valid(assign.op))
         return;
@@ -491,16 +510,20 @@ void checker::find_recursion()
     auto state = cc::vector<u8>::create_filled(notes.size(), 0);
     auto path = cc::vector<symbol_id>();
 
+    // Each function's calls, so a visit walks its own edges rather than every edge of the module.
+    auto calls_of = cc::vector<cc::vector<isize>>::create_defaulted(notes.size());
+    for (auto i = isize(0); i < calls.size(); ++i)
+        if (auto const info = out.at(calls[i].caller).info; info >= 0)
+            calls_of[info].push_back(i);
+
     auto const visit = [&](auto&& self, symbol_id f) -> void
     {
         state[out.at(f).info] = 1;
         path.push_back(f);
-        for (auto i = isize(0); i < calls.size(); ++i)
+        for (auto const i : calls_of[out.at(f).info])
         {
             // by value: a report does not touch `calls`, and a copy keeps this loop honest if one ever does
             auto const edge = calls[i];
-            if (edge.caller != f)
-                continue;
             auto const seen = state[out.at(edge.callee).info];
             if (seen == 0)
                 self(self, edge.callee);

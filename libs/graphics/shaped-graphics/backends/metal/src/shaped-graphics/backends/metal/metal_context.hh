@@ -120,6 +120,11 @@ public:
     [[nodiscard]] metal_staging_ring& upload_ring() { return _upload_ring; }
     [[nodiscard]] metal_staging_ring& download_ring() { return _download_ring; }
 
+    /// A small zeroed buffer `dispatch_rays` binds at `k_hit_group_offsets_buffer_index` when no traced TLAS brings its
+    /// own, since every ray-tracing kernel declares that slot whether it traces or not.
+    /// Shared storage, written once at creation and never again, so it needs no access tracking.
+    [[nodiscard]] MTL::Buffer* zero_hit_group_offsets() const { return _zero_hit_group_offsets; }
+
     /// Metal has every stage sg models except the two geometry-pipeline ones, which it has never had.
     [[nodiscard]] bool supports(sg::feature f) const override;
 
@@ -378,6 +383,7 @@ private:
 
     metal_staging_ring _upload_ring;
     metal_staging_ring _download_ring;
+    MTL::Buffer* _zero_hit_group_offsets = nullptr;
 
     /// What a completion-signal waiter parks on, and what the GPU's notification handlers wake it through.
     ///

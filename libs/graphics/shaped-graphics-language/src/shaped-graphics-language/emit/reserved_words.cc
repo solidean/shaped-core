@@ -661,6 +661,7 @@ constexpr cc::string_view k_msl[] = {
     "gradientcube",
     "imageblock",
     "instance_acceleration_structure",
+    "instancing",
     "interpolant",
     "intersection_function_table",
     "level",
@@ -693,6 +694,7 @@ constexpr cc::string_view k_msl[] = {
     "texture_buffer",
     "texturecube",
     "texturecube_array",
+    "triangle_data",
     "vec",
     "visible_function_table",
 

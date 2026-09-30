@@ -26,6 +26,8 @@ struct diagnostic;
 struct line_column;
 
 struct text_request;
+struct all_text_request;
+struct entry_text;
 struct tested_source;
 struct emitted_source;
 struct interface_binding;
@@ -50,6 +52,10 @@ struct described_memory_struct;
 struct described_entry_point;
 struct described_pipeline_setting;
 struct described_pipeline;
+struct described_ray_set;
+struct described_hit_group;
+struct described_raytracing_pipeline;
+struct described_callables;
 struct module_description;
 struct describe_request;
 
@@ -225,6 +231,9 @@ struct pipeline_info;
 enum class target_kind : u8;
 struct target;
 struct written_argument;
+struct ray_trace;
+struct callable_call;
+struct flat_traced_ray;
 struct call_record;
 enum class miss_reason : u8;
 struct near_miss;
@@ -256,6 +265,7 @@ struct flat_not;
 struct flat_and;
 struct flat_or;
 struct flat_block;
+struct flat_by_target;
 struct flat_expr;
 struct flat_let;
 struct flat_var;
@@ -290,6 +300,9 @@ struct value;
 struct buffer_contents;
 enum class run_status : u8;
 struct run_inputs;
+struct member_data;
+struct bound_group;
+struct driver_bindings;
 struct run_limits;
 struct check_failure;
 struct site_tally;
@@ -304,6 +317,7 @@ struct related_note;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;
+struct checked_prelude;
 } // namespace sgl::check
 
 namespace sgl::test

@@ -196,6 +196,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "stage-not-allowed";
     case diagnostic_kind::invalid_pipeline:
         return "invalid-pipeline";
+    case diagnostic_kind::recursive_trace:
+        return "recursive-trace";
     case diagnostic_kind::nesting_too_deep:
         return "nesting-too-deep";
     case diagnostic_kind::shadows_unshadowable:
@@ -426,6 +428,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a function reached from an entry point of a stage its `@stages` leaves out";
     case diagnostic_kind::invalid_pipeline:
         return "a `pipeline` whose stages or settings do not fit together";
+    case diagnostic_kind::recursive_trace:
+        return "a ray type whose trace reaches a shader that traces it again";
     case diagnostic_kind::shadows_unshadowable:
         return "a name that would hide a `@shadowable(false)` symbol";
     case diagnostic_kind::test_captures_runtime_value:
@@ -568,6 +572,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::feature_not_declared:
     case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
+    case diagnostic_kind::recursive_trace:
     case diagnostic_kind::nesting_too_deep:
     case diagnostic_kind::shadows_unshadowable:
     case diagnostic_kind::test_captures_runtime_value:

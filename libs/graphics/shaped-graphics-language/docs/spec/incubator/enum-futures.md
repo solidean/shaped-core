@@ -21,11 +21,15 @@ It is also the relaxation most likely to come early, because a value arriving fr
 An attribute on the declaration that says the cases are bits rather than alternatives, which turns on `|`, `&` and a membership test and turns off the ordering above.
 `channel_mask` in the AST's own examples is written this way already, with `red = 1`, `green = 2`, `blue = 4`.
 Without it such a declaration is legal and its arithmetic is not, which is where the first version leaves it.
+A `@builtin enum` takes it already, with `|`, `&` and `has` from its registry, and `ray_flags` is one ([CHK-321](../semantics/checking.md#enums)); an enum of the program waits.
 
 **`@exhaustive(false)`.**
 On a declaration whose set is open — one mirroring a host enum that grows, or a value arriving from outside.
 A `case` over such a type would stop needing a `_` to be accepted, and an emitter would stop writing a `default` arm on the targets that do not demand one.
 WGSL demands one unconditionally, so the attribute never reaches its text; the saving is HLSL's and MSL's alone, which is a thin reason to build it before something needs it.
+
+**Cases that carry values**, `triangle(triangle_hit)`, which a `case` would destructure.
+A mixed trace's result is the first thing that wants one, and [raytracing-futures.md](raytracing-futures.md) says how.
 
 **Nested declarations** inside an `enum` block are `unsupported-yet` in the first version and are meant to work.
 They are the same question `struct` has; an enum's properties and methods are [CHK-233](../semantics/checking.md#members-and-constructors).

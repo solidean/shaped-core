@@ -71,6 +71,13 @@ public:
     /// Every feature `supports` answers yes for.
     [[nodiscard]] feature_set supported_features() const;
 
+    /// How this context provides `f`: `absent` exactly where `supports(f)` is false, whatever the backend.
+    /// A caller choosing an algorithm by cost asks this; portability never depends on it.
+    [[nodiscard]] feature_implementation implementation_of(feature f) const
+    {
+        return supports(f) ? implementation_of_supported(f) : feature_implementation::absent;
+    }
+
     /// What `shader` needs that this context lacks, which is what building a pipeline from it would be refused for.
     /// Empty for a shader whose `required_features` is unknown: nothing about it can be named.
     [[nodiscard]] feature_set missing_features(compiled_shader const& shader) const;
@@ -335,6 +342,13 @@ protected:
 
     /// `accepted_shader_formats` must be non-empty, most-preferred first.
     context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats);
+
+    /// How this backend provides a feature `supports` answers yes for; `implementation_of` answers the rest.
+    [[nodiscard]] virtual feature_implementation implementation_of_supported(feature f) const
+    {
+        (void)f;
+        return feature_implementation::native;
+    }
 
     /// Records which adapter the backend picked.
     /// Called once during creation, before the context is handed out; the adapter cannot change afterwards.

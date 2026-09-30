@@ -195,9 +195,11 @@ private:
 
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] blas_handle raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
-                                                              accel_build_flags flags) override;
+                                                              accel_build_flags flags,
+                                                              int hit_record_stride) override;
     [[nodiscard]] blas_handle raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
-                                                          accel_build_flags flags) override;
+                                                          accel_build_flags flags,
+                                                          int hit_record_stride) override;
     [[nodiscard]] tlas_handle raytracing_build_tlas(cc::span<tlas_instance const> instances,
                                                     accel_build_flags flags) override;
     void raytracing_bind_pipeline(raytracing_pipeline const& pipeline) override;

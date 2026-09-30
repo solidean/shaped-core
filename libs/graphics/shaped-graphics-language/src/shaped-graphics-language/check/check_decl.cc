@@ -33,26 +33,23 @@ bool checker::is_int3(type_id type) const
 }
 
 /// `@stages(.pixel)` or `@stages(.vertex, .pixel)`: a bad argument reports and leaves every stage.
-sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
+sgl::u16 checker::stages_of(i32 file, ast::attribute const* a)
 {
     if (a == nullptr)
         return k_every_stage;
 
     // CHK-208: each argument is one stage as an enum case; the function is reached only from an entry point of one.
-    auto result = u8(0);
+    auto result = u16(0);
     auto const arguments = ast_of(file).at(a->arguments);
     for (auto const& argument : arguments)
     {
         auto const* const dot
             = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
         auto const name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
-        auto const s = name == "vertex"                  ? stage::vertex
-                     : name == "pixel"                   ? stage::pixel
-                     : name == "compute"                 ? stage::compute
-                     : name == "geometry"                ? stage::geometry
-                     : name == "tessellation_control"    ? stage::tessellation_control
-                     : name == "tessellation_evaluation" ? stage::tessellation_evaluation
-                                                         : stage::none;
+        auto s = stage::none;
+        for (auto i = u8(stage::vertex); i <= u8(stage::callable); ++i)
+            if (name == stage_name(stage(i)))
+                s = stage(i);
         if (!argument.name.empty() || argument.is_splat || s == stage::none)
         {
             report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
@@ -60,7 +57,7 @@ sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
                    ".pixel)`");
             return k_every_stage;
         }
-        result = u8(result | stage_bit(s));
+        result = u16(result | stage_bit(s));
     }
     if (arguments.empty())
     {
@@ -295,13 +292,23 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     auto const& e = ast_of(file).at(expr);
     auto const where = span_of(file, expr);
     auto result = checked_module::error_type;
+    // CHK-317: a function type is a parameter's whole type, so no type inside this one may be one
+    auto const is_whole_parameter_type = allows_function_type;
+    allows_function_type = false;
 
     if (!e.attributes.empty())
         unsupported(file, where, "an attribute on a type");
 
     auto const* const n = e.node.try_as<ast::name>();
     auto const resource = n != nullptr ? resolve_resource_name(file, expr, text_of(file, n->where)) : type_id::none;
-    if (e.node.is<ast::void_ref>())
+    // CHK-338: a type parameter in scope hides every type of its name
+    auto parameter = type_id::none;
+    for (auto i = type_parameter_names.size(); n != nullptr && i > 0 && !is_valid(parameter); --i)
+        if (type_parameter_names[i - 1].first == text_of(file, n->where))
+            parameter = type_parameter_names[i - 1].second;
+    if (is_valid(parameter))
+        result = parameter;
+    else if (e.node.is<ast::void_ref>())
         result = checked_module::void_type;
     else if (resource != type_id::none)
         result = resource;
@@ -343,6 +350,17 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             result = resolve_buffer(file, expr, *applied, scope);
         else if (is_named(file, applied->object, "atomic"))
             result = resolve_atomic(file, expr, *applied, scope);
+        else if (auto const generic = generic_named(file, applied->object); is_valid(generic))
+        {
+            // CHK-339: `report[T]`, an instance of a generic struct of the prelude
+            auto const arguments = ast_of(file).at(applied->arguments);
+            if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+                report(diagnostic_kind::wrong_kind_of_name, file, where,
+                       cc::format("{} takes one type argument", out.name_of(generic)));
+            else if (auto const argument = resolve_value_type(file, arguments[0].value, scope);
+                     argument != checked_module::error_type)
+                result = instance_of(generic, argument);
+        }
         else if (is_named(file, applied->object, "point_stream") || is_named(file, applied->object, "line_stream")
                  || is_named(file, applied->object, "triangle_stream"))
             result = resolve_stream(file, expr, *applied, scope);
@@ -351,13 +369,34 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             result = applied_resource;
         else if (ast::is_valid(applied->object) && is_type_name(file, applied->object))
             result = resolve_array(file, expr, *applied, scope);
+        // CHK-317: an array of functions, whose element type is no parameter's whole type
+        else if (ast::is_valid(applied->object) && ast_of(file).at(applied->object).node.is<ast::function_type>())
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, applied->object),
+                   "a function type is the type of a parameter, and of nothing else");
         else
             unsupported(file, where, "type arguments");
     }
     else if (e.node.is<ast::struct_type>())
         unsupported(file, where, "an anonymous struct type");
-    else if (e.node.is<ast::function_type>())
-        unsupported(file, where, "a function type");
+    else if (auto const* const fn = e.node.try_as<ast::function_type>())
+    {
+        // CHK-317: a parameter's type alone, and its parameters and result are value types
+        auto parameters = cc::vector<type_id>();
+        auto is_sound = true;
+        for (auto const& p : ast_of(file).at(fn->parameters))
+        {
+            auto const t = ast::is_valid(p.type) ? resolve_value_type(file, p.type, scope) : checked_module::error_type;
+            is_sound = is_sound && t != checked_module::error_type;
+            parameters.push_back(t);
+        }
+        auto const r
+            = ast::is_valid(fn->result) ? resolve_value_type(file, fn->result, scope) : checked_module::error_type;
+        if (!is_whole_parameter_type)
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   "a function type is the type of a parameter, and of nothing else");
+        else if (is_sound && r != checked_module::error_type)
+            result = function_type(parameters, r);
+    }
     else if (e.node.is<ast::tuple>())
         unsupported(file, where, "a tuple type");
     else if (e.node.is<ast::member>())
@@ -736,7 +775,7 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding"};
+    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -755,7 +794,33 @@ void checker::compile_struct(symbol_id id)
     if (is_vertex && is_pixel)
         unsupported(file, s.name, "a struct of two stages");
 
+    // CHK-339: a generic struct is the prelude's, over one type parameter its members may name
+    auto parameter = type_id::none;
+    if (!s.type_parameters.empty())
+    {
+        auto const parameters = ast_of(file).at(s.type_parameters);
+        if (!is_prelude_file(file) || parameters.size() != 1)
+        {
+            unsupported(file, s.name,
+                        !is_prelude_file(file) ? "a generic struct of the program"
+                                               : "a generic struct of more than one type parameter");
+            out.symbols[index_of(id)].state = symbol_state::failed;
+            return;
+        }
+        parameter = new_type_parameter(text_of(file, parameters[0].name), id);
+        type_parameter_names.push_back({text_of(file, parameters[0].name), parameter});
+    }
     auto const members = compile_members(file, s.members, true, is_pixel, is_vertex);
+    if (is_valid(parameter))
+        type_parameter_names.remove_back();
+    // CHK-328: a ray type's member is the payload its stages take, which is a struct
+    if (s.is_ray_set)
+        for (auto const& m : out.at(members))
+            if (m.type != checked_module::error_type
+                && (out.at(m.type).kind != type_kind::structure || out.builtin_type_of(m.type) != nullptr))
+                report(diagnostic_kind::invalid_pipeline, file, span_of(file, ast_of(file).at(m.field).type),
+                       cc::format("{} is a ray type, whose payload is a struct, and this is {}", m.name,
+                                  out.name_of(m.type)));
 
     // The type exists only now, so a field that needs its own struct found a cycle and not a type.
     auto const type = type_id(out.types.size());
@@ -767,6 +832,8 @@ void checker::compile_struct(symbol_id id)
         // A struct has no compute edge: a compute entry point has no stage struct at all.
         .edge = stage_of(is_vertex, is_pixel, false, false, false, false),
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
+        .element = parameter,
+        .is_template = is_valid(parameter),
     });
     out.symbols[index_of(id)].type = type;
 }
@@ -778,8 +845,12 @@ void checker::compile_enum(symbol_id id)
     auto const& ast = ast_of(file);
     auto const& e = ast.at(decl).node.as<ast::enum_decl>();
 
-    cc::string_view const known[] = {"builtin", "shadowable"};
+    cc::string_view const known[] = {"builtin", "shadowable", "bitflags", "internal"};
     judge_attributes(file, ast.at(decl).attributes, known, "an enum");
+    // CHK-321: a builtin enum's cases may be bits, whose `|`, `&` and `has` its registry gives; a program's waits
+    if (auto const* const flags = find_attribute(file, ast.at(decl).attributes, "bitflags");
+        flags != nullptr && find_attribute(file, ast.at(decl).attributes, "builtin") == nullptr)
+        unsupported(file, flags->name, "@bitflags on an enum of the program");
     // A builtin enum is written as its record says, `bool` as the target's bool, and not as the `int` of its cases.
     if (find_attribute(file, ast.at(decl).attributes, "builtin") != nullptr)
     {
@@ -1069,120 +1140,11 @@ void checker::compile_binding(symbol_id id)
 
 // ---- functions ------------------------------------------------------------------------------------------------------
 
-void checker::compile_function(symbol_id id)
+cc::vector<symbol_id> checker::binding_list_of(i32 file, ast::range_of<ast::argument> entries, bool& is_failed)
 {
-    auto const file = out.at(id).file;
-    auto const decl = out.at(id).declaration;
     auto const& ast = ast_of(file);
-    auto const& d = ast.at(decl);
-    auto const& f = d.node.as<ast::fun_decl>();
-    auto is_failed = false;
-
-    // An entry point's attributes may be pipeline settings, which every pipeline it is a stage of starts from.
-    auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
-                              || find_attribute(file, d.attributes, "pixel") != nullptr;
-    cc::string_view const known[] = {"builtin",
-                                     "pure",
-                                     "operator",
-                                     "vertex",
-                                     "pixel",
-                                     "compute",
-                                     "geometry",
-                                     "tessellation_control",
-                                     "tessellation_evaluation",
-                                     "stages",
-                                     "shadowable",
-                                     "expect"};
-    judge_attributes(file, d.attributes, known, "a function",
-                     is_raster_entry ? setting_scope::description : setting_scope::none);
-    auto const* const geometry = find_attribute(file, d.attributes, "geometry");
-    auto const* const control = find_attribute(file, d.attributes, "tessellation_control");
-    auto const is_evaluation = find_attribute(file, d.attributes, "tessellation_evaluation") != nullptr;
-    read_footprint_pin(id, file, d.attributes,
-                       is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr
-                           || geometry != nullptr || control != nullptr || is_evaluation);
-
-    if (!f.type_parameters.empty())
-    {
-        unsupported(file, f.name, "a generic function");
-        is_failed = true;
-    }
-    // CHK-234: `self` is the receiver of a method, a parameter of its type; `mut self` waits for places (CHK-134)
-    auto receiver = checked_module::error_type;
-    if (f.receiver == ast::receiver_kind::mut_self)
-    {
-        unsupported(file, f.name, "mut self");
-        is_failed = true;
-    }
-    else if (f.receiver == ast::receiver_kind::self && out.at(id).role != function_role::method)
-    {
-        report(diagnostic_kind::wrong_kind_of_name, file, f.name,
-               "self is the receiver of a method, and this function belongs to no type");
-        is_failed = true;
-    }
-    else if (f.receiver == ast::receiver_kind::self)
-        receiver = receiver_of(id);
-
-    auto const is_builtin = find_attribute(file, d.attributes, "builtin") != nullptr;
-    auto parameters = cc::vector<parameter>();
-    for (auto const& p : ast.at(f.parameters))
-    {
-        auto const name = text_of(file, p.name);
-        // CHK-271: a stage input is a parameter its attribute marks, one attribute per input
-        cc::string_view known_on_parameter[16] = {};
-        auto known_count = isize(0);
-        for (auto const& input : stage_inputs())
-            known_on_parameter[known_count++] = input.name;
-        judge_attributes(file, p.attributes, cc::span<cc::string_view const>(known_on_parameter, known_count),
-                         "a parameter");
-        auto input = stage_input::none;
-        for (auto const& candidate : stage_inputs())
-            if (find_attribute(file, p.attributes, candidate.name) != nullptr)
-            {
-                if (input != stage_input::none)
-                {
-                    report(diagnostic_kind::invalid_attribute_arguments, file, p.name,
-                           cc::format("{} is marked as two stage inputs; a parameter is one", name));
-                    is_failed = true;
-                }
-                input = candidate.input;
-            }
-        // `mut self` was reported as itself
-        if (p.is_mut && f.receiver != ast::receiver_kind::mut_self)
-            unsupported(file, p.name, "a mut parameter");
-
-        for (auto const& other : parameters)
-            if (other.name == name && name != "_")
-            {
-                report(diagnostic_kind::duplicate_declaration, file, p.name, name);
-                is_failed = true;
-            }
-
-        // CHK-206: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-207).
-        auto type = checked_module::error_type;
-        auto const is_receiver = f.receiver != ast::receiver_kind::none && &p == &ast.at(f.parameters).front();
-        // CHK-302: a geometry stage's stream is a parameter of its entry point, and of no other function
-        if (ast::is_valid(p.type))
-            type = is_builtin          ? resolve_pattern_type(file, p.type)
-                 : geometry != nullptr ? resolve_type(file, p.type)
-                                       : resolve_value_type(file, p.type);
-        else if (is_receiver)
-            type = receiver;
-        else
-            report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
-        is_failed = is_failed || type == checked_module::error_type;
-
-        auto const index = isize(&p - ast.fields.data());
-        parameters.push_back({.name = name,
-                              .type = type,
-                              .field = ast::field_id(index),
-                              .has_default = ast::is_valid(p.default_value),
-                              .is_named_only = p.is_named_only,
-                              .input = input});
-    }
-
     auto bindings = cc::vector<symbol_id>();
-    for (auto const& entry : ast.at(f.bindings))
+    for (auto const& entry : ast.at(entries))
     {
         auto const where = span_of(file, entry.form);
         auto const* const n = ast::is_valid(entry.value) ? ast.at(entry.value).node.try_as<ast::name>() : nullptr;
@@ -1219,6 +1181,190 @@ void checker::compile_function(symbol_id id)
             is_failed = true;
         }
     }
+    return bindings;
+}
+
+void checker::compile_function(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const decl = out.at(id).declaration;
+    auto const& ast = ast_of(file);
+    auto const& d = ast.at(decl);
+    auto const& f = d.node.as<ast::fun_decl>();
+    auto is_failed = false;
+
+    // An entry point's attributes may be pipeline settings, which every pipeline it is a stage of starts from.
+    auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
+                              || find_attribute(file, d.attributes, "pixel") != nullptr;
+    // CHK-326: a ray-tracing stage is an attribute of its name, and an entry point has one
+    auto ray_stage = stage::none;
+    auto ray_stages = 0;
+    for (auto i = u8(stage::raygen); i <= u8(stage::callable); ++i)
+        if (find_attribute(file, d.attributes, stage_name(stage(i))) != nullptr)
+        {
+            ray_stage = stage(i);
+            ++ray_stages;
+        }
+    cc::string_view const known[] = {"raygen",
+                                     "miss",
+                                     "closest_hit",
+                                     "any_hit",
+                                     "intersection",
+                                     "callable",
+                                     "builtin",
+                                     "pure",
+                                     "operator",
+                                     "vertex",
+                                     "pixel",
+                                     "compute",
+                                     "geometry",
+                                     "tessellation_control",
+                                     "tessellation_evaluation",
+                                     "stages",
+                                     "shadowable",
+                                     "expect",
+                                     "internal"};
+    judge_attributes(file, d.attributes, known, "a function",
+                     is_raster_entry ? setting_scope::description : setting_scope::none);
+    auto const* const geometry = find_attribute(file, d.attributes, "geometry");
+    auto const* const control = find_attribute(file, d.attributes, "tessellation_control");
+    auto const is_evaluation = find_attribute(file, d.attributes, "tessellation_evaluation") != nullptr;
+    read_footprint_pin(id, file, d.attributes,
+                       is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr
+                           || geometry != nullptr || control != nullptr || is_evaluation);
+
+    // CHK-338: a function's type parameters name what its signature and its body may mention and know nothing of
+    auto type_parameters = cc::vector<type_id>();
+    for (auto const& p : ast.at(f.type_parameters))
+    {
+        if (ast::is_valid(p.type) || ast::is_valid(p.default_value) || !p.attributes.empty())
+        {
+            // still declared, so a mention of it is no second diagnostic
+            unsupported(file, span_of(file, p.form), "a type parameter with a bound, a default or an attribute");
+            is_failed = true;
+        }
+        auto const parameter = new_type_parameter(text_of(file, p.name), id);
+        type_parameters.push_back(parameter);
+        type_parameter_names.push_back({text_of(file, p.name), parameter});
+    }
+    if (!type_parameters.empty()
+        && (is_raster_entry || ray_stage != stage::none || geometry != nullptr || control != nullptr || is_evaluation
+            || find_attribute(file, d.attributes, "compute") != nullptr))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, f.name,
+               "an entry point is no generic function: the GPU hands it values of known types");
+        is_failed = true;
+    }
+    // CHK-234: `self` is the receiver of a method, a parameter of its type; `mut self` waits for places (CHK-134)
+    auto receiver = checked_module::error_type;
+    if (f.receiver == ast::receiver_kind::mut_self)
+    {
+        unsupported(file, f.name, "mut self");
+        is_failed = true;
+    }
+    else if (f.receiver == ast::receiver_kind::self && out.at(id).role != function_role::method)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, f.name,
+               "self is the receiver of a method, and this function belongs to no type");
+        is_failed = true;
+    }
+    else if (f.receiver == ast::receiver_kind::self)
+        receiver = receiver_of(id);
+
+    auto const is_builtin = find_attribute(file, d.attributes, "builtin") != nullptr;
+    auto parameters = cc::vector<parameter>();
+    for (auto const& p : ast.at(f.parameters))
+    {
+        auto const name = text_of(file, p.name);
+        // CHK-271: a stage input is a parameter its attribute marks, one attribute per input
+        auto input = stage_input::none;
+        if (!p.attributes.empty())
+        {
+            cc::string_view known_on_parameter[16] = {};
+            auto known_count = isize(0);
+            for (auto const& candidate : stage_inputs())
+                known_on_parameter[known_count++] = candidate.name;
+            judge_attributes(file, p.attributes, cc::span<cc::string_view const>(known_on_parameter, known_count),
+                             "a parameter");
+            for (auto const& candidate : stage_inputs())
+                if (find_attribute(file, p.attributes, candidate.name) != nullptr)
+                {
+                    if (input != stage_input::none)
+                    {
+                        report(diagnostic_kind::invalid_attribute_arguments, file, p.name,
+                               cc::format("{} is marked as two stage inputs; a parameter is one", name));
+                        is_failed = true;
+                    }
+                    input = candidate.input;
+                }
+        }
+        // `mut self` was reported as itself; a mut parameter is spelled on its type (CHK-315)
+        if (p.is_mut && f.receiver != ast::receiver_kind::mut_self)
+            report(diagnostic_kind::unexpected_keyword, file, p.name,
+                   cc::format("`mut {0}: T` is spelled `{0}: mut T`", name));
+
+        for (auto const& other : parameters)
+            if (other.name == name && name != "_")
+            {
+                report(diagnostic_kind::duplicate_declaration, file, p.name, name);
+                is_failed = true;
+            }
+
+        // CHK-206: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-207).
+        auto type = checked_module::error_type;
+        auto const is_receiver = f.receiver != ast::receiver_kind::none && &p == &ast.at(f.parameters).front();
+        // CHK-315: `p: mut T` over a value type is the caller's place; over a resource or a stream `mut` is its access
+        auto is_mut_parameter = false;
+        allows_function_type = !is_builtin && geometry == nullptr;
+        if (auto const* const q = ast::is_valid(p.type) ? ast.at(p.type).node.try_as<ast::qualified_type>() : nullptr;
+            q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr)
+        {
+            is_mut_parameter = true;
+            // a function is no place, so a function type is not the whole type here (CHK-317)
+            allows_function_type = false;
+            type = resolve_value_type(file, q->type);
+            set_type(file, p.type, type);
+            // what a stage takes the GPU hands it, and nothing hands an entry point a place
+            if (is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr || control != nullptr
+                || is_evaluation)
+            {
+                report(diagnostic_kind::wrong_kind_of_name, file, p.name,
+                       cc::format(
+                           "{} is a parameter of an entry point, which the GPU fills and no caller hands a place", name));
+                is_failed = true;
+            }
+            // CHK-316: the argument marked `mut` is the one thing that fills it
+            if (ast::is_valid(p.default_value))
+            {
+                report(diagnostic_kind::default_not_allowed_here, file, span_of(file, p.default_value),
+                       cc::format("{} is a mut parameter, which only a caller's place fills", name));
+                is_failed = true;
+            }
+        }
+        // CHK-302: a geometry stage's stream is a parameter of its entry point, and of no other function
+        else if (ast::is_valid(p.type))
+            // CHK-324: a function of the prelude may take a resource, which inlining substitutes as its argument
+            type = is_builtin                                   ? resolve_pattern_type(file, p.type)
+                 : geometry != nullptr || is_prelude_file(file) ? resolve_type(file, p.type)
+                                                                : resolve_value_type(file, p.type);
+        else if (is_receiver)
+            type = receiver;
+        else
+            report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
+        allows_function_type = false;
+        is_failed = is_failed || type == checked_module::error_type;
+
+        auto const index = isize(&p - ast.fields.data());
+        parameters.push_back({.name = name,
+                              .type = type,
+                              .field = ast::field_id(index),
+                              .has_default = ast::is_valid(p.default_value),
+                              .is_named_only = p.is_named_only,
+                              .input = input,
+                              .is_mut = is_mut_parameter});
+    }
+
+    auto bindings = binding_list_of(file, f.bindings, is_failed);
 
     // Without `-> T` a block body returns `void`, and an arrow body returns what its expression is.
     auto result = checked_module::void_type;
@@ -1228,6 +1374,8 @@ void checker::compile_function(symbol_id id)
     else if (infers_result)
         result = checked_module::error_type;
     is_failed = is_failed || (result == checked_module::error_type && !infers_result);
+
+    type_parameter_names.resize_down_to(type_parameter_names.size() - type_parameters.size());
 
     auto const has_body = f.body.kind != ast::body_kind::none;
     if (find_attribute(file, d.attributes, "builtin") != nullptr)
@@ -1282,17 +1430,20 @@ void checker::compile_function(symbol_id id)
         .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
         .result = result,
         .bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())},
-        .entry_stage
-        = stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr, control != nullptr, is_evaluation),
+        .entry_stage = ray_stage != stage::none ? ray_stage
+                                                : stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr,
+                                                           control != nullptr, is_evaluation),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
         .max_vertices = max_vertices,
         .partitioning = tessellation.partitioning,
         .is_clockwise = tessellation.is_clockwise,
         .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),
+        .type_parameters = {.first = u32(out.type_lists.size()), .count = u32(type_parameters.size())},
     });
     out.parameters.push_back_range(parameters);
     out.binding_lists.push_back_range(bindings);
+    out.type_lists.push_back_range(type_parameters);
     notes.push_back({.infers_result = infers_result});
 
     // The body is part of what a caller needs here, so it is checked now, while the symbol is still in compilation.
@@ -1306,7 +1457,7 @@ void checker::compile_function(symbol_id id)
     }
 
     auto const stages = i32(is_vertex) + i32(is_pixel) + i32(compute != nullptr) + i32(geometry != nullptr)
-                      + i32(control != nullptr) + i32(is_evaluation);
+                      + i32(control != nullptr) + i32(is_evaluation) + ray_stages;
     if (stages > 1)
         report(diagnostic_kind::invalid_entry_point, file, f.name, "an entry point has one stage");
     else if (!is_failed && stages == 1)
@@ -1461,6 +1612,15 @@ void checker::judge_entry_point(symbol_id id)
         return;
     }
 
+    // CHK-326: a ray-tracing stage takes what its kind is handed, and its payload as the caller's place
+    if (info.entry_stage >= stage::raygen)
+    {
+        auto forward = invalid;
+        judge_ray_stage(id, forward);
+        notes[s.info].is_valid_entry = is_valid;
+        return;
+    }
+
     // CHK-271: at most one stage struct, first, and then the stage inputs, each of this stage, each once, of its type
     auto structs = 0;
     auto seen = cc::vector<stage_input>();
@@ -1591,8 +1751,8 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
         {.input = stage_input::primitive_id,
          .name = "primitive_id",
          .in_stage = stage::pixel,
-         .also_in = u8(stage_bit(stage::geometry) | stage_bit(stage::tessellation_control)
-                       | stage_bit(stage::tessellation_evaluation)),
+         .also_in = u16(stage_bit(stage::geometry) | stage_bit(stage::tessellation_control)
+                        | stage_bit(stage::tessellation_evaluation)),
          .type = "int",
          .feature = i32(feature::primitive_index)},
         {.input = stage_input::thread_id, .name = "thread_id", .in_stage = stage::compute, .type = "int3"},
@@ -1604,6 +1764,19 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
          .name = "domain_location",
          .in_stage = stage::tessellation_evaluation,
          .type = "float3"},
+        // CHK-327: every ray-tracing stage knows which ray of the launch it runs for
+        {.input = stage_input::launch_id,
+         .name = "launch_id",
+         .in_stage = stage::raygen,
+         .also_in = u16(stage_bit(stage::miss) | stage_bit(stage::closest_hit) | stage_bit(stage::any_hit)
+                        | stage_bit(stage::intersection) | stage_bit(stage::callable)),
+         .type = "int3"},
+        {.input = stage_input::launch_size,
+         .name = "launch_size",
+         .in_stage = stage::raygen,
+         .also_in = u16(stage_bit(stage::miss) | stage_bit(stage::closest_hit) | stage_bit(stage::any_hit)
+                        | stage_bit(stage::intersection) | stage_bit(stage::callable)),
+         .type = "int3"},
     };
     return k_inputs;
 }

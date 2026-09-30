@@ -16,9 +16,13 @@ binding frame:
 
 fun exposed(){frame} -> float => frame.exposure
 
-// a test lists no binding: a local binding will give one, once those are carried
+// a test reads only the bindings it lists
 @expect(error = "binding-not-listed")
 test exposed() > 0.0
+
+// the driver that runs a test gives what it lists, and `sgl test` gives nothing, which is zero
+test {frame}:
+    exposed() == 0.0
 
 // a line that computes something and checks nothing is no-effect
 @expect(warning = "no-effect")

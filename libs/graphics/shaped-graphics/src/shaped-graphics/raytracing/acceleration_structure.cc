@@ -33,4 +33,23 @@ tlas::tlas(isize size_in_bytes,
     _referenced_blases(cc::move(referenced_blases))
 {
 }
+
+void impl::set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride)
+{
+    // Only ever called on a structure nobody else holds yet, and never on one created const.
+    auto& b = const_cast<sg::blas&>(blas);
+    b._geometry = geometry;
+    b._hit_record_stride = hit_record_stride;
+}
+
+void impl::set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records)
+{
+    // Only ever called on a structure nobody else holds yet, and never on one created const.
+    const_cast<sg::tlas&>(tlas)._instance_records = cc::move(records);
+}
+
+cc::span<impl::tlas_instance_record const> impl::instance_records_of(tlas const& tlas)
+{
+    return tlas._instance_records;
+}
 } // namespace sg

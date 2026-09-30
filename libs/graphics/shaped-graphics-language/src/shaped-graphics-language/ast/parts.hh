@@ -38,6 +38,8 @@ struct sgl::ast::argument
     bool is_shorthand = false;
     /// `.name = value`, the named argument spelled as a leading-dot form; `name` holds it without the dot.
     bool is_dotted_name = false;
+    /// `mut place`: the caller's place handed to a `mut` parameter (AST-149); only a call may take one.
+    bool is_mut = false;
 
     constexpr bool operator==(argument const&) const = default;
 };

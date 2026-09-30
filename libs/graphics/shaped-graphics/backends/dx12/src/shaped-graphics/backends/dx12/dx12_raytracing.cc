@@ -46,7 +46,7 @@ namespace
 
 bool dx12_command_list::raytracing_is_supported() const
 {
-    return _ctx.supports(sg::feature::raytracing);
+    return _ctx.supports(sg::feature::ray_query) || _ctx.supports(sg::feature::raytracing_pipeline);
 }
 
 sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_GEOMETRY_DESC const> geometry_descs,
@@ -117,7 +117,8 @@ sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_G
 }
 
 sg::blas_handle dx12_command_list::raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
-                                                                   sg::accel_build_flags flags)
+                                                                   sg::accel_build_flags flags,
+                                                                   int /*hit_record_stride*/)
 {
     cc::vector<D3D12_RAYTRACING_GEOMETRY_DESC> descs;
     descs.reserve(geometries.size());
@@ -168,7 +169,8 @@ sg::blas_handle dx12_command_list::raytracing_build_blas_triangles(cc::span<sg::
 }
 
 sg::blas_handle dx12_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
-                                                               sg::accel_build_flags flags)
+                                                               sg::accel_build_flags flags,
+                                                               int /*hit_record_stride*/)
 {
     cc::vector<D3D12_RAYTRACING_GEOMETRY_DESC> descs;
     descs.reserve(geometries.size());

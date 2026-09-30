@@ -130,7 +130,9 @@ WGPUBufferUsage to_wgpu_buffer_usage(sg::buffer_usages usage)
         out |= WGPUBufferUsage_Index;
     if (usage.has(sg::buffer_usage::constants_buffer))
         out |= WGPUBufferUsage_Uniform;
-    if (usage.has_any(sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer))
+    // A build reads its inputs from a compute kernel, as storage.
+    if (usage.has_any(sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer
+                      | sg::buffer_usage::accel_structure_build_input))
         out |= WGPUBufferUsage_Storage;
     if (usage.has(sg::buffer_usage::indirect_command_buffer))
         out |= WGPUBufferUsage_Indirect;

@@ -51,6 +51,10 @@ enum class sgl::emit::error_kind : sgl::u8
     padding_forbidden,
     /// A file-scope sampler the entry point reaches whose index is past the 16 a stage holds on Metal and WebGPU.
     too_many_samplers,
+    /// A WebGPU trace of an acceleration member at position 16 or later, past the 16 roots sg binds.
+    too_many_acceleration_structures,
+    /// A metal ray-tracing stage held by pipelines or hit groups whose ray sets size the ray data differently.
+    ray_data_conflict,
 };
 
 struct sgl::emit::error
@@ -152,6 +156,8 @@ namespace sgl::emit
 /// No error depends on `t` but these, so an entry point written for one target is written for every other: `msl`
 /// refuses a compute entry point and a group, which are both arguments of a Metal entry point and wait for a Metal compiler.
 /// It refuses a geometry and a tessellation entry point too, since Metal has neither stage.
+/// It refuses a ray-tracing stage that reaches a file sampler with a mip bias, or that two pipelines size the ray data
+/// of differently.
 /// And `wgsl` refuses an entry point needing a feature WebGPU never has, which is portability the shader opted out of.
 /// Deterministic: equal arguments give equal text.
 [[nodiscard]] emitted_text emit(check::checked_module const& m, isize entry_point, target t);

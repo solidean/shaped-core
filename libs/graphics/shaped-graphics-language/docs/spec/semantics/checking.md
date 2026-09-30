@@ -33,6 +33,7 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-192** Where a call matches functions of both scopes, those of the program's file are its only matching candidates ([why](why/checking.md#chk-192)).
   It is applied before CHK-254 ranks them, so two matches in one scope are still ranked.
 * **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
+  An operator is looked up the same way: `a - b` in a prelude file chooses among the prelude's `@operator` functions alone.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
 * **CHK-14** A `type` alias is `unsupported-yet`, and it still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
@@ -59,6 +60,7 @@ struct b:
 * **CHK-21** A type is canonical: two expressions name the same type exactly when they resolve to the same type, and nothing converts implicitly but a literal, by CHK-81 and CHK-253.
 * **CHK-22** Each `struct` declaration is one type, whatever its fields.
 * **CHK-23** A type position holds a name that resolves to a `struct` or an `enum`, or `void` (CHK-215); every other expression there is `unsupported-yet`.
+  The exceptions are named where they are specified: a resource type (CHK-198), an array (CHK-285), a function type (CHK-317), a type parameter (CHK-338) and an instance of a generic struct (CHK-339).
 * **CHK-24** A name in a type position that is not declared is the normal error `unknown-name`, and one that stands for a function or a binding is `wrong-kind-of-name`.
 * **CHK-25** A format is not a type: nothing such as `rgba8` exists.
 * **CHK-26** A field, a binding member and a parameter have a type; one without is the normal error `missing-type`.
@@ -154,6 +156,10 @@ fun sign(b: bool) -> float:
 * **CHK-151** A nested declaration in an `enum` block is `unsupported-yet`; its properties and methods are those of a struct (CHK-233).
 * **CHK-218** `bool` is a `@builtin enum` of the prelude with the cases `false` and `true`, in that order, so `bool.true` is a value like `light_kind.sun`.
   Its record makes it the targets' bool: CHK-149 and CHK-150 do not hold for it, since its `==` is the prelude's and `and`, `or` and `not` take it (CHK-116).
+* **CHK-321** `@bitflags` on a `@builtin enum` makes its cases bits, which combine: its registry gives `|`, `&` and `has`, and a value may be several cases or none.
+  `ray_flags` is one, with DXR's values.
+  A `case` over one needs a `_` arm (CHK-159), which is where a combined value goes.
+  `@bitflags` on an enum of the program is `unsupported-yet` ([enum futures](../incubator/enum-futures.md)).
 
 ```sgl
 enum light_kind:
@@ -164,7 +170,8 @@ enum light_kind:
 
 ## Tests
 
-* **CHK-224** A `test` is checked as a function of no parameter and no binding that returns `void`, on its own, wherever it stands: at file scope, in a struct or an enum, or in a function body.
+* **CHK-224** A `test` is checked as a function of no parameter that returns `void`, on its own, wherever it stands: at file scope, in a struct or an enum, or in a function body.
+  Its bindings are the ones it lists (CHK-333).
   One in a function body is checked after that body, and it never runs where it stands, so no jump in front of it makes it unreachable.
   Every `test` the source spells is run or fails, and none is ever left out.
   One whose surroundings are never checked, a function whose signature failed or a test inside a test, is checked as one at file scope.
@@ -178,7 +185,11 @@ enum light_kind:
   A condition that writes a buffer, prints, or calls a builtin with an effect is `unsupported-yet`, since no target writes an `assert` (LEGAL-53) and its effect would happen on the interpreter alone.
 * **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
   Those names are still visible, so they hide what the module has of the name; a `const` is no value of a run and may be read.
-  A test lists no binding, so a callee that needs one is `binding-not-listed` by CHK-131, with a note that a local binding in the test will give it.
+  A binding member the test lists is its own and no capture, whatever the function lists.
+  A callee that needs a binding the test does not list is `binding-not-listed` by CHK-131, with a note that listing it gives it.
+* **CHK-333** `test {a, b}:` lists the bindings the test reads, as a function's `{...}` does, and the driver that runs the test gives their values (EVAL-94).
+  A binding it lists holds values, buffers and acceleration structures; a texture, an image or a sampler in one is `unsupported-yet`.
+  A `@workgroup` binding needs no listing (CHK-295).
 * **CHK-229** In the flat tree a check or an `assert` is a `check` statement, whose body leaves every node of the condition in a `var` of its own.
   A node is an `and`, an `or`, a `not`, a comparison, a comparison chain, or a leaf any other expression is; it runs in the order and under the conditions the condition itself would run it.
 * **CHK-230** A test whose body checked clean, and whose every callee inlines whole, has a flat tree of its own, of no stage and without a parameter.
@@ -239,9 +250,10 @@ fun shade(k: float) -> float:
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect` |
-| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding` |
-| an enum | `@builtin`, `@shadowable` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal` |
+| a function, as a ray-tracing stage | `@raygen`, `@miss`, `@closest_hit`, `@any_hit`, `@intersection`, `@callable` |
+| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal` |
+| an enum | `@builtin`, `@shadowable`, `@bitflags`, `@internal` |
 | a const | `@shadowable` |
 | a test | `@expect` |
 | a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding` |
@@ -249,6 +261,13 @@ fun shade(k: float) -> float:
 | a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
+
+* **CHK-323** `@internal` on a declaration of the prelude makes it the prelude's alone: no lookup from the program's file finds it, and the prelude's files still do.
+  That holds for every path a lookup takes: a name, the type scope and declaring scope of a first argument's type (CHK-247), and `T.f(…)` (CHK-248).
+  A builtin step that a function of the prelude wraps is `@internal` too, such as a step of a ray query or of a pipeline's trace.
+  On a declaration of the program's file it hides nothing.
+* **CHK-324** A function of the prelude may take a resource, which a function of the program may not (CHK-206).
+  Inlining substitutes it: the argument stands wherever the parameter is named, since no target holds a resource in a local.
 
 ```sgl
 @builtin struct float
@@ -289,7 +308,8 @@ fun shade(k: float) -> float:
   The settings apply in source order, and a later one overrides what an earlier one set, `filter` over `mip_filter` included.
   An attribute on the block is judged as on any other binding member.
 * **CHK-205** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
-* **CHK-206** A `@builtin` function alone may take a texture, an image or a sampler; for any other function each is `unsupported-yet`, as it is anywhere a value stands.
+* **CHK-206** A `@builtin` function alone may take a texture, an image or a sampler, and a function of the prelude by CHK-324.
+  For any other function each is `unsupported-yet`, as it is anywhere a value stands.
 * **CHK-207** A builtin's image parameter names the texel it loads or stores instead of a format, `out image_2d[float4]`, and is a pattern:
   it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
 * **CHK-194** A builtin's bare `texture_2d` or `image_2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
@@ -329,7 +349,10 @@ fun shade(k: float) -> float:
 ## Functions
 
 * **CHK-47** A function has typed parameters, and its return type stands behind `->`; one without returns `void`, by CHK-121.
-* **CHK-48** A function with type parameters, or with `mut self`, is `unsupported-yet`, and it fails as a whole.
+* **CHK-48** A function with `mut self` is `unsupported-yet`, and it fails as a whole; type parameters are [CHK-338](#generics).
+* **CHK-315** A parameter `p: mut T` over a value type is a **mut parameter**: the caller's place, which the body may assign like a `let mut` local ([why](why/checking.md#chk-315)).
+  Over a resource or a stream, `mut` is its access instead (AST-128).
+  An entry point takes no mut parameter but a ray-tracing stage's payload (CHK-328), and `mut p: T` is `unexpected-keyword`, since a parameter's `mut` is written on its type.
 * **CHK-49** A function whose signature holds the error type is failed.
 * **CHK-50** A function body is an ordered scope: a parameter is visible from the start, and a local from the statement after its `let`.
 * **CHK-51** `let name = value` introduces an immutable local of the type of `value`.
@@ -389,6 +412,22 @@ fun shade(k: float) -> float:
 * **CHK-252** A candidate does not bind where an argument names no parameter, a parameter is filled twice, a positional argument reaches a named-only parameter or lies past the last.
   It does not bind either where a parameter without a default is left unfilled.
   A parameter left unfilled takes its default.
+* **CHK-317** A **function type** `(A, B) -> R` is the type of a parameter and of nothing else ([why](why/checking.md#chk-317)).
+  A local, a field, a member, a result or an element of one is `wrong-kind-of-name`.
+  So is one under a parameter's `mut`, since a function is no place, and one as a type argument, `report[(float) -> float]`.
+  Two function types of the same parameter types and result are one type.
+* **CHK-318** A parameter of function type takes a function's name, an arrow lambda `x => value`, or a parameter of the same function type handed on.
+  A name takes the one function of its name whose parameters and result are the type's exactly, none of them `mut`; a builtin or an entry point is none.
+  A lambda takes the type's parameter types, a parameter type it writes must be the same, and its value must be the type's result.
+  It is checked where it stands, and it sees every name visible there; any other lambda is `unsupported-yet`.
+  A function or a lambda meets no parameter of any other type, and its chain has length 0.
+* **CHK-319** A call of a parameter of function type is a call of the function it was handed, inlined where the parameter is called.
+  A lambda is written out there with the names it saw where it was written, so a function value is never a value of any target.
+* **CHK-316** `mut x` in a call hands over a place, and it fills a mut parameter alone ([why](why/checking.md#chk-316)).
+  A mut parameter takes an argument marked `mut` and nothing else, and a marked argument binds to nothing else.
+  So a default on a mut parameter is `default-not-allowed-here`, at the declaration.
+  The argument is a place by the rules of an assignment's left side, or `not-assignable`, and its type is the parameter's exactly, so its chain has length 0.
+  Its indices are evaluated once, where the call binds it, and the body reads and writes that one place wherever it names the parameter.
 * **CHK-70** A candidate **matches** when it binds, and each argument converts to its parameter's type by a **conversion chain**.
   An argument of the parameter's type does so by a chain of length 0, and so does one a pattern parameter takes (CHK-194, CHK-207); a literal converts by CHK-81 or CHK-253.
 * **CHK-253** A number literal converts to a numeric type that holds it: by a chain of length 0 to its default type, and of length 1 to any other ([why](why/checking.md#chk-253)).
@@ -473,6 +512,7 @@ fun f() -> float:
 
 * **CHK-87** A function that carries `@vertex` or `@pixel` is an **entry point** of that stage; one that carries two stages is the normal error `invalid-entry-point`.
   `@compute`, `@geometry`, `@tessellation_control` and `@tessellation_evaluation` make an entry point too, each of its own stage.
+  So do the ray-tracing stages of [CHK-326](#ray-tracing).
 * **CHK-88** A vertex or pixel entry point takes at most one parameter without a stage input's attribute, its **stage struct**, which is of a struct type with fields and comes first.
   A `@pixel fun` takes one; a `@vertex fun` may take none, and then draws from no vertex buffer.
 * **CHK-89** The stage struct of a `@vertex fun` is of a `@vertex struct`.
@@ -489,6 +529,7 @@ fun f() -> float:
 | `@domain_location` | tessellation evaluation | `float3` or `float2` (CHK-306) |
 | `@thread_id`, `@local_thread_id`, `@workgroup_id` | compute | `int3` |
 | `@local_thread_index` | compute | `int` |
+| `@launch_id`, `@launch_size` | every ray-tracing stage (CHK-327) | `int3` |
 
   A `@compute fun` takes stage inputs alone.
   `vertex_index` and `instance_index` count from the draw's first vertex and first instance on every target.
@@ -515,6 +556,7 @@ fun f() -> float:
 * **CHK-173** `@per_instance` and `@stream(name)` are attributes of a struct field, recorded on the member; `@stream` takes one bare name.
 * **CHK-208** `@stages(.pixel)` on a function, builtin or not, names the stages it may be reached from, each an enum case of a stage.
   The cases are `.vertex`, `.tessellation_control`, `.tessellation_evaluation`, `.geometry`, `.pixel` and `.compute`.
+  The ray-tracing stages are cases too: `.raygen`, `.miss`, `.closest_hit`, `.any_hit`, `.intersection` and `.callable`.
   A function without it may be reached from every stage, and any other argument is `invalid-attribute-arguments`.
 * **CHK-193** An entry point whose inlined body reaches a function whose `@stages` leaves out the entry point's stage is `stage-not-allowed`, at that call.
   It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
@@ -530,7 +572,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 [bindings.md](../bindings.md#features) lists the forms each one grants.
 
 * **CHK-258** A `require` names features as `sg::feature` names them, and only those a shader can use:
-  `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures` and `raytracing`.
+  `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures`, `ray_query` and `raytracing_pipeline`.
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
@@ -539,10 +581,16 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 * **CHK-262** An entry point declares a feature by a `require` of its file, of a binding it lists, or among the lines of its own body ([why](why/checking.md#chk-262)).
   A `require` inside a nested block is `unsupported-yet`.
 * **CHK-263** What an entry point needs of a device is what it uses, never what it merely may use ([why](why/checking.md#chk-263)).
-  It needs what the bindings it lists require, its stage inputs (CHK-272), a member it takes per sample (CHK-274) and its stage itself (CHK-301, CHK-304, CHK-306).
+  It needs what the bindings it lists require, its stage inputs (CHK-272), a member it takes per sample (CHK-274) and its stage itself (CHK-301, CHK-304, CHK-306, CHK-326).
+  It needs what the builtins its inlined body calls need, by CHK-322.
   It is judged once every body is checked, and a use is counted wherever it stands, reached or not.
+* **CHK-322** A builtin's record may name the features a call of it needs, and an entry point whose inlined body reaches such a call needs them too ([why](why/checking.md#chk-322)).
+  It declares them as any other, by CHK-262, and one it does not is `feature-not-declared` with a note at the call.
+  So a body's `require` that such a call needs is used, which CHK-265 judges once every entry point is flattened.
+  The prelude's `trace` is how a program reaches one: its steps need `ray_query`.
 * **CHK-264** A feature an entry point needs and does not declare is the normal error `feature-not-declared` at its name, with a note at each listed binding that needs it.
 * **CHK-265** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
+  A `require` in a test's body or a helper's is used where a call that body reaches, inlined, needs the feature (CHK-322).
   A `require` of a file or of a binding is never unused: each declares an intent, whether anything uses the feature or not ([why](why/checking.md#chk-265)).
 
 ```sgl
@@ -552,15 +600,15 @@ binding post:
     dst: out image_2d[.r8_unorm]
 ```
 
-Nothing in a body uses a feature yet, so a `require` in a test's body is `unused-require`, and a name that is none is `unknown-feature`.
+A `require` in a test's body that nothing in it uses is `unused-require`, and a name that is none is `unknown-feature`.
 
 ```sgl
 @expect(warning = "unused-require") test:
-    require raytracing
+    require ray_query
     1 == 1
 
 @expect(error = "unknown-feature") test:
-    require ray_query
+    require raytracing
     1 == 1
 ```
 
@@ -597,7 +645,7 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 * **CHK-184** Its stages' binding lists, `@inline` bindings left out, name the same binding at every position they share.
   The longest is the pipeline's layout, and the stages list one `@inline` binding at most.
 * **CHK-185** Every target has a format at the end: a case other than `.undefined`, or `.host`.
-* **CHK-186** `@compute` and `@raytracing` on a pipeline are `unsupported-yet`.
+* **CHK-186** `@compute` on a pipeline is `unsupported-yet`; `@raytracing` is [CHK-331](#ray-tracing).
 * **CHK-187** Breaking one of CHK-175 to CHK-185 is `invalid-pipeline`, unless a rule names another kind, and its detail says what broke.
 
 ## Arrays
@@ -705,6 +753,110 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   A geometry stage's primitive is the one the pipeline assembles: the topology's family, or the tessellator's lines for isolines and triangles otherwise.
   A primitive with adjacency is `unsupported-yet` in a pipeline, since sg has no topology that assembles one.
 
+## Ray tracing
+
+[raytracing](../raytracing.md) is the model, with the vocabulary of `prelude/raytracing.sgl`; these are its rules.
+
+### What a trace runs against
+
+* **CHK-320** `acceleration_structure[.geometry]` is a resource type, whose one argument is `.triangles`, `.procedural` or `.mixed` ([why](why/checking.md#chk-320)).
+  Without it, or with any other, it is `wrong-kind-of-name`.
+  In the program's file it needs `ray_query`, or `raytracing_pipeline` where the file or its binding grants that one, as CHK-201 needs a feature of a form.
+* **CHK-325** A builtin whose record takes the acceleration index is handed, past its signature, the position of its argument among the entry point's acceleration members.
+  The members are counted across the entry point's binding list in list order, and the argument is a binding member itself.
+  It is the emulated trace's root: the index into the roots sg binds per dispatch (EMIT-135).
+
+### Stages
+
+* **CHK-326** `@raygen`, `@miss`, `@closest_hit`, `@any_hit`, `@intersection` and `@callable` each make an entry point of a **ray-tracing stage**, which needs `raytracing_pipeline`.
+  Each takes what its stage is handed, and returns what it gives back, by the table below; breaking it is `invalid-entry-point`, and its detail names the stage's shape.
+  A parameter of any type the table does not name is `invalid-entry-point` too.
+* **CHK-327** `@launch_id` and `@launch_size` are stage inputs of every ray-tracing stage, both `int3`: the ray of the launch it runs for, and the launch's size.
+* **CHK-328** A ray-tracing stage's **payload** is its one `mut` parameter, of a struct type: the caller's place, which the stage reads and writes.
+  A payload of another type is `invalid-entry-point`.
+  A ray set's member is the payload of its ray type, so one that is no struct is `invalid-pipeline` at its type.
+* **CHK-342** An `@intersection` is handed its box alone, and no payload ([why](why/checking.md#chk-342)).
+  It returns `report[A]`, whose `A` is a struct of the program; a builtin type or a struct of the prelude there is `invalid-entry-point`.
+  `A` takes at most 32 bytes, a word per scalar and per enum, which is DXR's cap and all metal's ray data holds; a wider one is `invalid-entry-point`.
+  The same holds of the `A` of every `procedural_hit[A]` and `procedural_candidate[A]` a stage takes, in a hit group or not.
+  A procedural hit or candidate a closest hit or an any hit takes carries the attributes the target hands the stage.
+
+| stage | takes, besides stage inputs | returns |
+|---|---|---|
+| `@raygen` | nothing | `void` |
+| `@miss` | its payload, and at most one `ray` | `void` |
+| `@closest_hit` | one `triangle_hit` or `procedural_hit[A]`, and its payload | `void` |
+| `@any_hit` | one `triangle_candidate` or `procedural_candidate[A]`, and its payload | `hit_decision` |
+| `@intersection` | one `procedural_box` | `report[A]` |
+| `@callable` | its parameter, as a payload | `void` |
+
+### Traces and calls
+
+* **CHK-329** `trace(world, r, set.ray, mut p)` whose third argument names a ray type of a ray set is a **trace of a ray type**, and no call of the prelude's `trace`.
+  `world` is an acceleration structure and `r` a `ray`, or `type-mismatch`; a name the set has no ray type of is `unknown-member`.
+  The payload is marked `mut`, or `no-matching-overload`, and it is a place (CHK-316) of exactly the ray type's payload, or `type-mismatch`.
+  `flags`, a `ray_flags`, and `mask`, an `int`, may follow by name, and any other argument is `no-matching-overload`.
+  It gives `void`, and is the target's trace with the ray type's position in its set as the ray contribution and the miss index, and the set's size as the multiplier.
+  Its builtin is `@stages(.raygen, .closest_hit, .miss)`, so a trace from any other stage is `stage-not-allowed` (CHK-193).
+  A test that reaches one is `unsupported-yet`, since a test runs no pipeline and has no tables to trace through.
+* **CHK-343** `callables name = (…)` is a **callables table**: `@callable` entry points of one parameter type, and `.host` last for the host's ([why](why/checking.md#chk-343)).
+  A table lists at least one callable, a block of settings is none, and `.host` anywhere but last is `invalid-pipeline`.
+  So is a callable of another parameter type, whose detail names both.
+  The tables of a module pack in declaration order, so a table that takes `.host` is the module's last, or `invalid-pipeline`.
+* **CHK-344** `table[i](mut p)` calls the callable at the run-time index `i` of a callables table, an `int`.
+  It takes one argument, marked `mut`, or `no-matching-overload`, which is a place of exactly the table's parameter type, or `type-mismatch`.
+  It gives `void`, and is the target's call of the callable at the table's place in the module's section plus `i`.
+  Its builtin is `@stages(.raygen, .closest_hit, .miss, .callable)`, and a test that reaches one is `unsupported-yet`, as by CHK-329.
+
+### Declarations of a pipeline
+
+* **CHK-330** A `hit_group name for set:` is one row of a ray-tracing pipeline's table, for the ray set it names.
+  A name that is no ray set is `invalid-pipeline`, and one that names nothing `unknown-name`, in a hit group and in a pipeline's `rays` alike.
+  Its settings are `geometry`, `intersection`, and at most one record per ray type of its set, `ray = (closest_hit = f, any_hit = g)`, either left out.
+  Each setting stands once.
+  `geometry` is `.triangles`, the default, or `.procedural`; a procedural group names an `@intersection`, and a group that names one is procedural.
+  A record's shaders are entry points of the stage their slot names, and each takes the payload of its record's ray type.
+  They take what the group's geometry hits, a triangle's or a procedural primitive's, and a procedural group's the `A` its intersection reports.
+  Breaking any of these is `invalid-pipeline`, and its detail says what broke.
+* **CHK-331** A `@raytracing pipeline` names its shaders in a block of settings, and its short form is `invalid-pipeline` ([why](why/checking.md#chk-331)).
+  `rays` names its ray set and `raygen` its `@raygen` entry point, and it has both.
+  `miss.<ray>` names the `@miss` of a ray type of the set, which takes that ray type's payload; a ray type may have none, and none has two.
+  `hit_groups` is a hit group, `.host`, or a round list of them by name alone, each a group for the pipeline's ray set, with `.host` last.
+  Each setting but `miss.<ray>` stands once, and each `miss.<ray>` once per ray type.
+  Its raygen, its misses and the closest hits of its listed groups trace ray types of its set alone, since a trace's contribution, multiplier and miss are positions in that set.
+  `max_recursion_depth` is an `int` literal from 1 to 31, which a pipeline with `.host` declares and any other does not.
+  Every shader it names, and every callable of the module's tables (CHK-343), lists the same binding at every position their lists share.
+  `@inline` bindings are left out of that, and they list one `@inline` binding at most.
+  Any other setting, and breaking any of these, is `invalid-pipeline`.
+* **CHK-332** A pipeline's **trace graph** has an edge from each ray type to every ray type its miss, or its closest hit in a listed group, traces ([why](why/checking.md#chk-332)).
+  A cycle in it is `recursive-trace`, and the pipeline fails, whether or not the raygen reaches it: a host's closest hit may trace into it.
+  Its depth is the longest chain from a ray type the raygen traces, and at least 1.
+  Without `.host`, the depth is the pipeline's `max_recursion_depth`; with it, a depth past the declared one is `invalid-pipeline`.
+
+### What metal adds
+
+* **CHK-345** Each record of a procedural hit group is also one **traversal entry point** on metal, `sgl_<group>_<ray>`: its intersection, fused with the record's any hit.
+  A report before the ray's `t_min` or past its current `t` is no hit, and one within it is what the any hit decides, or accepted without one.
+  The traversal takes the payload that any hit writes.
+  Where a record has no closest hit, the module has one more entry point, `sgl_empty_closest_hit`, owned by a ray-tracing entry point of the program, which does nothing.
+
+```sgl
+rays path_rays:
+    surface: radiance
+    occlusion: shadow
+
+hit_group textured for path_rays:
+    surface = (closest_hit = shade, any_hit = cutout)
+    occlusion = (any_hit = shadow_cutout)
+
+@raytracing pipeline path:
+    rays = path_rays
+    raygen = primary
+    miss.surface = sky
+    miss.occlusion = open_sky
+    hit_groups = (textured)
+```
+
 ## The flat tree
 
 * **CHK-94** The pass has two results: side tables over the untouched ASTs, and one **flat tree** per entry point.
@@ -769,6 +921,7 @@ fun falloff(d: float, steps: int) -> float:
 * **CHK-157** `a or b` in a pattern is a list of patterns, and the arm matches when any of them does; the `or` of CHK-116 is not involved and its operands are no `bool`s.
 * **CHK-158** A pattern is evaluated only where it is reached, so a pattern behind the one that matched is never evaluated ([evaluation](evaluation.md#case)).
 * **CHK-159** A `case` is **exhaustive** when it carries a `_`, or when its scrutinee is an enum and its patterns are constant cases that together name every case of it.
+  A `@bitflags` enum (CHK-321) is the exception: a value of it may be several cases or none, so only a `_` makes a `case` over it exhaustive.
 * **CHK-160** A `case` that is not exhaustive is the normal error `non-exhaustive-case`; its detail names the cases nobody matched, or says that a `_` is needed ([why](why/checking.md#chk-160)).
 * **CHK-161** Two constant patterns of one `case` that name one case is the normal error `duplicate-case-pattern`, at the later arm.
   Two patterns that are equal expressions are not compared: what they hold is known at run time and not here.
@@ -821,7 +974,42 @@ fun grade(x: float) -> float:
   So what a function reads is listed by whoever calls it, up to the entry point ([why](why/checking.md#chk-131)).
 * **CHK-132** An entry point has a flat tree when its own body and the body of every function it reaches checked without an error, recursion included.
 * **CHK-133** An inlined call is a block named after its callee, and two inlines of one function share no local: each gets its names from the mint.
-* **CHK-134** A `mut` parameter, `mut self`, a lambda, a function as a value and a nested function are `unsupported-yet`.
+* **CHK-134** `mut self`, a nested function, an anonymous `fun`, an arrow lambda with a block body, and a function name outside an argument, `let f = halve`, are `unsupported-yet`.
+  A mut parameter is CHK-315, and a function handed to a parameter of function type CHK-318.
+
+## Generics
+
+A type parameter is opaque where it is declared, so a generic body is checked once, over it.
+A call deduces what each parameter stands for, and inlining writes that in its place, so no emitter meets one.
+
+* **CHK-338** `fun f[A, B](…)` declares type parameters, which its signature and its body may name and know nothing of ([why](why/checking.md#chk-338)).
+  A value of one is handed on, stored and returned, and nothing else: no field, no operator and no call but one whose parameter is of that type parameter too.
+  A type parameter in scope hides every type of its name, and one with a bound, a default or an attribute is `unsupported-yet`.
+  It hides every other symbol of its name too, so its name as a value, as a callee or before a dot is `wrong-kind-of-name`.
+  An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
+  A call that states its type arguments, `f[float](x)`, is `unsupported-yet` (CHK-78): a call deduces them.
+* **CHK-339** `struct name[A]:` declares a **generic struct**, over one type parameter its members may name ([why](why/checking.md#chk-339)).
+  Only the prelude declares one: in the program's file, and with more than one type parameter, it is `unsupported-yet`.
+  `name[T]` in a type position is an **instance**, and two mentions of one instance are one type; a count of type arguments but one is `wrong-kind-of-name`.
+  An instance's members are the template's with `T` for `A`, and a function of the template's type scope serves every instance.
+  The bare name in a type position is the template itself, open in its parameter, which a call deduces as it deduces a type parameter.
+* **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
+  An argument whose parameter's type names a type parameter binds it to the argument's type exactly, and a number to the type it was checked as.
+  Two arguments that bind one parameter to two types leave the candidate unmatched, and the call is `no-matching-overload`.
+  A function and a literal are bound last, since what they meet depends on the rest: a lambda takes the parameter types the call bound, and its result binds what they left.
+  What is still unbound is bound from the type expected where the call stands (CHK-82); a type parameter nothing binds is `no-matching-overload`, whose detail names it.
+  Every instance an inlined body names exists before the first entry point is flattened.
+* **CHK-341** `undefined()` in the prelude is a value of the type of the parameter it meets, and binds no type parameter ([why](why/checking.md#chk-341)).
+  It is a local declared and never assigned, which nobody may read: the interpreter reads it as zeroes, and a target reads what its local holds.
+  `report.none()` is the use it exists for: a report with no hit has attributes of the report's type and no value.
+
+```sgl
+fun apply[A](x: A, f: (A) -> A) -> A => f(x)
+
+fun twice[A](x: A, f: (A) -> A) -> A => apply(apply(x, f), f)
+
+fun bumped(n: int) -> int => twice(n, x => x + 1)
+```
 
 ## Inferred results and dropped values
 
@@ -837,9 +1025,10 @@ fun grade(x: float) -> float:
 fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 ```
 
-## The two files of the prelude
+## The files of the prelude
 
-* **CHK-138** The prelude has two files, in this order: `builtins.sgl`, which the builtin registry generates, and `core.sgl`, which is written by hand ([why](why/checking.md#chk-138)).
+* **CHK-138** The prelude has three files, in this order: `builtins.sgl`, `core.sgl` and `raytracing.sgl` ([why](why/checking.md#chk-138)).
+  The builtin registry generates the first, and the other two are written by hand.
 * **CHK-140** The text of `builtins.sgl` that is checked is generated in memory, and the committed file is byte for byte the same, so a diagnostic's line and column are right in it.
 * **CHK-141** Every record of the registry carries its declaration as SGL source, and that text goes through the same parser as any other: the registry has no second signature language.
 
@@ -850,38 +1039,41 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
-| `unknown-name` | CHK-24, CHK-62, CHK-245 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300 |
+| `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339 |
+| `unexpected-keyword` | CHK-315 |
+| `default-not-allowed-here` | CHK-316 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281 |
-| `not-assignable` | CHK-112, CHK-236 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-329, CHK-344 |
+| `not-assignable` | CHK-112, CHK-236, CHK-316 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162 |
 | `no-effect` | CHK-225 |
 | `recursive-call` | CHK-130 |
-| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279 |
-| `no-matching-overload` | CHK-71, CHK-155 |
+| `recursive-trace` | CHK-332 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
-| `needs-feature` | CHK-201 |
+| `needs-feature` | CHK-201, CHK-320 |
 | `unknown-feature` | CHK-258 |
-| `feature-not-declared` | CHK-264 |
+| `feature-not-declared` | CHK-264, CHK-322 |
 | `unused-require` | CHK-265 |
-| `stage-not-allowed` | CHK-193, CHK-277, CHK-298 |
+| `stage-not-allowed` | CHK-193, CHK-277, CHK-298, CHK-329, CHK-344 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342 |
 | `nesting-too-deep` | CHK-268 |
-| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
@@ -904,7 +1096,6 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
 * Whether a builtin's declaration is checked against its record beyond the key; today its result type and its attributes are not.
-* Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
 * Whether a pattern may bind a name, which is the pattern language of [patterns](../incubator/patterns.md) and the thing that would make exhaustiveness a real analysis.
 * Whether an enum reaches `int` through a cast, and what an `int` that names no case then is ([enum futures](../incubator/enum-futures.md)).
 * Where a leading dot is resolved beyond a `case` scrutinee: a parameter, a field and a return type each expect a type too.

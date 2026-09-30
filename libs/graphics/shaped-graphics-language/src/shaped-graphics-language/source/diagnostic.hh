@@ -168,6 +168,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
     invalid_pipeline,
+    /// A ray type whose trace reaches a shader that traces it again, which a pipeline's derived depth cannot bound.
+    recursive_trace,
     /// A declaration, a local or a parameter whose name would hide a `@shadowable(false)` symbol.
     shadows_unshadowable,
     /// A test that reads a parameter, a local or a binding member of the function it stands in; it runs on its own.

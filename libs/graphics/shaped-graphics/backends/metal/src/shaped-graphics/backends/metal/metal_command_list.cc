@@ -1495,6 +1495,24 @@ void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const&
     declare_bound_groups(sg::pipeline_stage_flag::raytracing, &_bound_raytracing->footprint());
     declare_array_accesses(&_bound_raytracing->footprint(), _bound_raytracing, sg::pipeline_stage_flag::raytracing,
                            _pending_array_buffer_declares, _pending_array_texture_declares);
+    // One TLAS per dispatch: a kernel tracing two would read the first one's offsets for both.
+    auto const* traced = static_cast<metal_tlas const*>(nullptr);
+    auto tlas_count = 0;
+    for (auto const& slot_tlases : _group_tlases)
+        for (auto const& bound : slot_tlases)
+        {
+            auto const* const t = static_cast<metal_tlas const*>(bound.get());
+            if (t != traced)
+                ++tlas_count;
+            if (traced == nullptr)
+                traced = t;
+        }
+    if (tlas_count > 1)
+        CC_LOG_WARNING("dispatch_rays binds {} TLASes, and a kernel finds its closest hits by the first one's "
+                       "instances",
+                       tlas_count);
+    if (traced != nullptr && traced->hit_group_offsets() != nullptr)
+        declare_buffer(traced->hit_group_offsets(), sg::pipeline_stage_flag::raytracing, sg::access_flag::storage_read);
     flush_barriers();
 
     auto* const encoder = compute_encoder();
@@ -1505,6 +1523,16 @@ void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const&
     // may bind — see sg::reserved_binding_group.
     argument_table()->setAddress(MTL::GPUAddress(binding.arguments->gpuAddress()),
                                  NS::UInteger(sg::reserved_binding_group));
+
+    // The traced TLAS's per-instance hit-group offsets, which a kernel finds a closest hit's record by.
+    // The slot is always bound, because the kernel declares it whether this dispatch traces or not: an unbound slot
+    // would hand it the previous dispatch's address.
+    auto offsets_address = MTL::GPUAddress(_metal_context.zero_hit_group_offsets()->gpuAddress());
+    if (traced != nullptr && traced->hit_group_offsets() != nullptr)
+        if (auto const address = static_cast<metal_buffer const&>(*traced->hit_group_offsets()).gpu_address();
+            address != 0)
+            offsets_address = MTL::GPUAddress(address);
+    argument_table()->setAddress(offsets_address, NS::UInteger(k_hit_group_offsets_buffer_index));
 
     // A raygen kernel is dispatched by thread count rather than by threadgroup: sg's width/height/depth is a ray grid,
     // and Metal takes the threadgroup shape separately.

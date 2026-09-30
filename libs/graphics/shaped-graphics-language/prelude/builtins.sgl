@@ -1309,3 +1309,136 @@
 @builtin @stages(.pixel, .compute) fun load(a: atomic[int]) -> int
 /// Stores `v` in one step.
 @builtin @stages(.pixel, .compute) fun store(a: out atomic[int], v: int)
+
+// Ray tracing: what a ray is traced with, and what a trace reads.
+// A shader calls `trace` of raytracing.sgl, never these: each is a step of HLSL's `RayQuery` and MSL's `intersection_query`.
+/// What a trace may skip, cull or decide without asking: DXR's `RAY_FLAG_*` without the prefix.
+@shadowable(false)
+@builtin @bitflags enum ray_flags:
+    none = 0
+    force_opaque = 1
+    force_non_opaque = 2
+    accept_first_hit_and_end_search = 4
+    skip_closest_hit = 8
+    cull_back_facing = 16
+    cull_front_facing = 32
+    cull_opaque = 64
+    cull_non_opaque = 128
+    skip_triangles = 256
+    skip_procedural = 512
+
+@builtin @pure @operator("|") fun combine_ray_flags(a: ray_flags, b: ray_flags) -> ray_flags
+@builtin @pure @operator("&") fun intersect_ray_flags(a: ray_flags, b: ray_flags) -> ray_flags
+/// Whether every flag of `f` is set in `flags`.
+@builtin @pure fun has(flags: ray_flags, f: ray_flags) -> bool
+
+/// One trace in flight, which only raytracing.sgl steps through.
+@shadowable(false)
+@builtin struct ray_query
+
+/// A query nothing traced yet.
+@builtin @internal fun ray_query_begin() -> ray_query
+/// Starts the trace of a ray.
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.triangles], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+/// Starts the trace of a ray.
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.procedural], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+/// Starts the trace of a ray.
+@builtin @internal fun ray_query_trace(q: ray_query, world: acceleration_structure[.mixed], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int)
+/// Traverses to the next candidate the shader decides, and false once there is none.
+@builtin @internal fun ray_query_proceed(q: ray_query) -> bool
+/// Whether the candidate is a non-opaque triangle rather than a procedural primitive's box.
+@builtin @internal fun ray_query_candidate_is_triangle(q: ray_query) -> bool
+/// Accepts the candidate triangle.
+@builtin @internal fun ray_query_commit_triangle(q: ray_query)
+/// Ends the traversal, keeping what it committed.
+@builtin @internal fun ray_query_abort(q: ray_query)
+/// 0 for nothing, 1 for a triangle, 2 for a procedural primitive.
+@builtin @internal fun ray_query_committed_kind(q: ray_query) -> int
+/// Accepts the candidate box's primitive, hit at `t`.
+@builtin @internal fun ray_query_commit_procedural(q: ray_query, t: float)
+/// Whether the candidate box's geometry is opaque, after the instance's and the ray's forcing.
+@builtin @internal fun ray_query_candidate_is_opaque_box(q: ray_query) -> bool
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_t(q: ray_query) -> float
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_t(q: ray_query) -> float
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_instance_id(q: ray_query) -> int
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_instance_id(q: ray_query) -> int
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_instance_index(q: ray_query) -> int
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_instance_index(q: ray_query) -> int
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_geometry_index(q: ray_query) -> int
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_geometry_index(q: ray_query) -> int
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_primitive_index(q: ray_query) -> int
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_primitive_index(q: ray_query) -> int
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_barycentrics(q: ray_query) -> float2
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_barycentrics(q: ray_query) -> float2
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_is_front_face(q: ray_query) -> bool
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_is_front_face(q: ray_query) -> bool
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_object_to_world_row(q: ray_query, row: int) -> float4
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_object_to_world_row(q: ray_query, row: int) -> float4
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_world_to_object_row(q: ray_query, row: int) -> float4
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_world_to_object_row(q: ray_query, row: int) -> float4
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_object_ray_origin(q: ray_query) -> float3
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_object_ray_origin(q: ray_query) -> float3
+/// Of the candidate.
+@builtin @internal fun ray_query_candidate_object_ray_direction(q: ray_query) -> float3
+/// Of the committed hit.
+@builtin @internal fun ray_query_committed_object_ray_direction(q: ray_query) -> float3
+
+// What a ray-tracing stage reads of its launch, its ray and its hit, which raytracing.sgl hands its entry point.
+@builtin @internal @stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3
+@builtin @internal @stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_dimensions() -> int3
+@builtin @internal @stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_origin() -> pos3
+@builtin @internal @stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_direction() -> vec3
+@builtin @internal @stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_min() -> float
+@builtin @internal @stages(.miss, .closest_hit, .any_hit, .intersection) fun ray_t_current() -> float
+@builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_instance_id() -> int
+@builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_instance_index() -> int
+@builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_geometry_index() -> int
+@builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_primitive_index() -> int
+@builtin @internal @stages(.closest_hit, .any_hit) fun hit_barycentrics() -> float2
+@builtin @internal @stages(.closest_hit, .any_hit) fun hit_is_front_face() -> bool
+@builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_object_to_world_row(row: int) -> float4
+@builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_world_to_object_row(row: int) -> float4
+@builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_origin() -> float3
+@builtin @internal @stages(.closest_hit, .any_hit, .intersection) fun hit_object_ray_direction() -> float3
+
+// A ray-tracing stage's trace, which a `trace` naming a ray type of its set lowers to (CHK-329).
+/// Traces a ray through the pipeline's tables, handing the payload over past the signature.
+@builtin @internal @stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.triangles], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, multiplier: int, miss: int)
+/// Traces a ray through the pipeline's tables, handing the payload over past the signature.
+@builtin @internal @stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.procedural], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, multiplier: int, miss: int)
+/// Traces a ray through the pipeline's tables, handing the payload over past the signature.
+@builtin @internal @stages(.raygen, .closest_hit, .miss) fun trace_ray(world: acceleration_structure[.mixed], origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, multiplier: int, miss: int)
+
+// A call of a callable, which `table[i](mut p)` lowers to with the table's place in the section added (CHK-344).
+/// Calls the callable at `index` of the pipeline's callable section, handing the parameter over past the signature.
+@builtin @internal @stages(.raygen, .closest_hit, .miss, .callable) fun call_callable(index: int)
+
+// The emulated trace's view of sg's acceleration pool, which WGSL alone writes (the internal doc libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md).
+/// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
+@builtin @internal @pure fun acceleration_root(world: acceleration_structure[.triangles]) -> uint
+/// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
+@builtin @internal @pure fun acceleration_root(world: acceleration_structure[.procedural]) -> uint
+/// The pool unit of the TLAS bound as `world`, which the emulated trace starts at.
+@builtin @internal @pure fun acceleration_root(world: acceleration_structure[.mixed]) -> uint
+/// One unit of the pool.
+@builtin @internal @pure fun acceleration_pool_load(unit: uint) -> uint4

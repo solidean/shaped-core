@@ -100,7 +100,8 @@ INVOCABLE_TEST("sg - capability queries agree with the context", (sg::context_ha
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
 
-    CHECK(cmd->raytracing.is_supported() == ctx->supports(sg::feature::raytracing));
+    CHECK(cmd->raytracing.is_supported()
+          == (ctx->supports(sg::feature::ray_query) || ctx->supports(sg::feature::raytracing_pipeline)));
     CHECK(cmd->query.is_supported() == ctx->supports(sg::feature::timestamp_query));
     CHECK(ctx->supports_headless_present() == ctx->supports(sg::feature::headless_present));
 
