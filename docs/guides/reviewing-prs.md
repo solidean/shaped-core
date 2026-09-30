@@ -265,6 +265,9 @@ So a check whose outcome a shader edit can flip logs and degrades safely, and on
 **A read of diagnostics never asserts either**, even on a real misuse.
 A review proposed asserting when a caller indexed a stat the backend does not count, and the answer was "metric reads tearing down programs is nasty".
 `is_counted` documents the trap, and a HUD reading a zero is harmless.
+**A query that can be asked about anything answers everything.**
+A review recommended asserting that `implementation_of(f)` is only asked about a feature the context `supports`, since it answered `native` for an absent one.
+The answer was to make it total instead, with an `absent` case, so the question has no precondition to violate.
 The house pattern is a `try_*` fallible core plus a thin throwing façade.
 
 ### A 64-bit hash is not an identity
@@ -317,6 +320,45 @@ hand-writing bindings is a very uncommon escape hatch. part of sgl's purpose is 
 ```
 
 Name the default's exposure — which paths leave it unset — before offering to change its type or its value.
+
+### A shader does not pay for an edge case no program reaches
+
+Where targets disagree on a value no correct shader produces, SGL leaves it undefined, and the interpreter reports it as a program error.
+It never defines a result that some target has to buy with extra instructions on every execution.
+A design review recommended WGSL's defined integer division by zero on every target, a compare and a select per division on HLSL and MSL, so that the interpreter would predict the GPU exactly:
+
+```raw
+we usually write our programs to avoid those values. so an unconditional pessimization for literally no gain in practice is what makes A unattractive. so we define it "undefined" and "program error" under test/interpreter.
+```
+
+The same review then chose the same way for an out-of-bounds array index, with no clamp, and for workgroup memory read before it is written, with no zeroing prologue.
+In the maintainer's words, "shaders are NOT a place where we can give up performance nilly-willy".
+The checking goes elsewhere: the interpreter reports the program error in a `test`, and a debug build can check live shaders through the logging machinery the incubator plans.
+**Portability is still not optional.**
+A construct that is missing on some target is lowered or feature-gated, never left target-dependent; this rule covers only a value no program should produce.
+Price a defined-everywhere option by what every correct program pays for it, not by what it buys the rare incorrect one.
+
+### A check that costs every dispatch or draw is opt-in
+
+A validation that runs per operation on a hot path is never on by default, whatever it protects against.
+A portability check that refuses what WebGPU refuses ran at every dispatch and draw, quadratic in the buffers bound, and the review first offered to move it inside the assert:
+
+```raw
+is the alias test quadratic in number of bindings? and when does it happen? every draw/dispatch? -- if yes then this is way too expensive per op and we need this opt-in for some tests and not in general
+```
+
+It became a setting on the context, off by default and on in sg's own test contexts, and nothing is recorded or scanned while it is off.
+
+### An SGL file is a library, and a design is priced on what it declares
+
+A mechanism that scales with what a file *declares*, rather than with what a pipeline *uses*, is priced against a file holding far more than any one pipeline reaches.
+A review recommended that every stage's layout carry all of its file's samplers, so two stages of one file always agree:
+
+```raw
+A is out for a simple reason: sgl is designed to build libraries and if you add all samplers, it will exhaust everything very quickly
+```
+
+The same reasoning exposed that numbering file samplers in declaration order caps a library at sixteen usable ones, which was recorded as a known limit with the way out written beside it.
 
 ### "No callers in the repo" is not evidence of dead code
 
@@ -478,6 +520,19 @@ List the seam's callers and read each for such an assumption — the tell is a c
 `declared_size` came off the frame header for zstd and lz4; gzip declares it in the trailer, so a stream probe read four bytes of payload as a length and reserved up to 4 GB.
 The generalization worth keeping: **trailer metadata is a design smell for anything that cannot assume bounded frames**, so the answer was "no streaming size hint for deflate", not a cleverer probe.
 
+### A slow suite is profiled before it is narrowed
+
+**When a change makes tests slow, the first move is a profile of the slow path, not a thinner test.**
+A branch nearly doubled SGL's prelude, every compile checks the prelude, and the debug CI leg crossed its 60-second limit.
+The review offered narrowing the heaviest tests under `nx::is_thorough()`, and got this back:
+
+```raw
+cc has a sampling profiler, do a test where you parse the prelude under the sampler in debug preset and fix low hanging fruits of performance (we never did a serious pass before so i'm sure something turns up). save the chrome tracing profile for me as well and give me the full path so i can open it in perfetto
+```
+
+Code nobody has profiled usually has cheap wins, and every user compile pays for them, not only the test.
+Offer narrowing beside the profile, never instead of it, and hand the maintainer the trace itself.
+
 ### A flake seen during a review is chased before it is deferred
 
 **A failure seen while validating a branch gets a reasonable amount of chasing, whatever code it is in.**
@@ -632,6 +687,9 @@ A `land-changes` comment describes commits the reviewer just wrote, and that is 
 The summary is written from what the fix was meant to do, and the commit does slightly less or slightly else.
 One draft said a fix counted "a callee's asserts" when it counted every assert of the run, and said the second of two expectations "always" saw `passed` when that held only if the first was met.
 It also said a doc "no longer" described something that three of its lines still partly did.
+A comment grouped by area drifts a second way: a change lands under the commit its area came from rather than the one that made it.
+Another draft credited a call-stack fix to the metal commit beside it, and credited "88 ms to 2.9 ms" to the last of the two commits that made it.
+**A number that spans commits names every commit it spans.**
 **Read the diff of each commit while writing its bullet, and name every hunk a reader will see.**
 A sort comparator, a `nan` spelling or a nested-test case left out of the comment is a hunk the author cannot account for.
 

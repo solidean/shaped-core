@@ -112,34 +112,19 @@ ASYNC_INVOCABLE_TEST("sg vulkan - builds a procedural (aabb) blas", (vulkan::vul
 //
 // The alternating rays are what make the readback meaningful: a backend that wrote a constant, traced against an
 // empty scene, or mixed up the miss and hit groups would all produce a uniform buffer.
-ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_context_handle const& handle))
+namespace
 {
-    auto& ctx = *handle;
-    if (!ctx.is_raytracing_supported())
-        SKIP("no ray tracing on this device");
-
+/// Traces the alternating rays and answers whether the readback alternates.
+/// With `leading_empty_group` the table's record 0 is a hit group with no shaders at all, and the instance takes
+/// record 1, so the pipeline and the table both carry an empty group without the trace reaching it.
+[[nodiscard]] cc::shared_async<bool> traces_alternating(vulkan::vulkan_context& ctx, bool leading_empty_group)
+{
     constexpr int k_rays = 64;
 
     auto const verts = make_triangle_vertices(ctx);
     auto const output = ctx.persistent.create_raw_buffer(
         isize(k_rays) * isize(sizeof(u32)), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(output != nullptr);
-
-    // Build the scene.
-    sg::blas_triangles tri;
-    tri.vertices = verts;
-    tri.vertex_count = 3;
-
-    sg::tlas_handle tlas;
-    {
-        auto cmd = ctx.create_command_list();
-        auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
-        sg::tlas_instance inst;
-        inst.blas = blas;
-        tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&inst, 1));
-        ctx.submit_command_list(cc::move(cmd));
-    }
-    REQUIRE(tlas != nullptr);
 
     // One SPIR-V module with three entry points is what a shader library is, so all three stages share bytecode.
     auto const module_bytes
@@ -170,6 +155,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_c
     auto const raygen = desc.add_raygen_shader(make_rt_shader(sg::shader_stage::raygen, "rgen"));
     auto const miss = desc.add_miss_shader(make_rt_shader(sg::shader_stage::miss, "rmiss"));
     auto const hit = desc.add_hit_shader({.closest_hit = make_rt_shader(sg::shader_stage::closest_hit, "rchit")});
+    auto const empty = desc.add_hit_shader({});
 
     auto pipeline = ctx.uncached.create_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
@@ -178,9 +164,28 @@ ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_c
     table_desc.pipeline = pipeline;
     auto const raygen_index = table_desc.add_raygen_shader(raygen);
     (void)table_desc.add_miss_shader(miss);
-    (void)table_desc.add_hit_shader(hit);
+    if (leading_empty_group)
+        (void)table_desc.add_hit_shader(empty);
+    auto const hit_index = table_desc.add_hit_shader(hit);
     auto table = ctx.uncached.create_raytracing_shader_table(table_desc);
     REQUIRE(table != nullptr);
+
+    // Build the scene, with the instance on the hit group's record.
+    sg::blas_triangles tri;
+    tri.vertices = verts;
+    tri.vertex_count = 3;
+
+    sg::tlas_handle tlas;
+    {
+        auto cmd = ctx.create_command_list();
+        auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
+        sg::tlas_instance inst;
+        inst.blas = blas;
+        inst.hit_group_offset = u32(hit_index);
+        tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&inst, 1));
+        ctx.submit_command_list(cc::move(cmd));
+    }
+    REQUIRE(tlas != nullptr);
 
     sg::named_view const views[] = {{.name = "Scene", .view = tlas->as_view()},
                                     {.name = "Output", .view = sg::buffer<u32>::from_raw(output).as_readwrite_buffer()}};
@@ -200,9 +205,30 @@ ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_c
     auto const data = co_await future.data();
     REQUIRE(data.size() == isize(k_rays));
 
-    bool alternating = true;
+    auto alternating = true;
     for (int i = 0; i < k_rays; ++i)
         if (data[i] != u32(i % 2 == 0 ? 1 : 0))
             alternating = false;
-    CHECK(alternating);
+    co_return alternating;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    if (!ctx.is_raytracing_supported())
+        SKIP("no ray tracing on this device");
+
+    CHECK(co_await traces_alternating(ctx, false));
+}
+
+ASYNC_INVOCABLE_TEST("sg vulkan - an empty hit group is a valid record beside the traced one",
+                     (vulkan::vulkan_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    if (!ctx.is_raytracing_supported())
+        SKIP("no ray tracing on this device");
+
+    // The validation layer is what judges the empty triangles group; the readback says the offset reached record 1.
+    CHECK(co_await traces_alternating(ctx, true));
 }

@@ -1,5 +1,6 @@
 #include "../emit/emit-test-support.hh"
 
+#include <clean-core/sequence/sequence.hh>
 #include <shaped-graphics-language/driver/describe.hh>
 
 using namespace sgl_test;
@@ -95,7 +96,7 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
 TEST("sgl describe - an entry point and a pipeline name the sg features a device needs for them")
 {
     // Both stages may use the image format the file requires, and only the pixel stage lists what does.
-    auto const d = described(R"(require extended_image_formats, raytracing
+    auto const d = described(R"(require extended_image_formats, ray_query
 
 binding narrow:
     r: out image_2d[.r8_unorm]
@@ -159,7 +160,7 @@ binding work:
 @compute(64) fun main(@thread_id id: int3){c, work}:
     work.values[id.x] = c.scale
 )");
-    CHECK(error.contains("not the last of the list"));
+    CHECK(error.contains("a group of the list follows"));
 }
 
 TEST("sgl describe - a source with errors describes nothing, and says why")
@@ -222,6 +223,14 @@ TEST("sgl describe - a vertex input's members say which buffer they come from, a
     CHECK(mesh.members[1].is_per_instance);
     CHECK(mesh.members[2].stream == "normals");
     CHECK(mesh.members[2].location == 2); // a stream moves no location
+
+    // The dx12 semantic the host's input layout names each member by, as the emitted text does (EMIT-28).
+    CHECK(mesh.members[0].semantic == "POSITION");
+    CHECK(split.structs[1].members[0].semantic.empty()); // a render target has none
+    auto const crowded = described(cc::string("@vertex struct crowded:\n    uv1: vec3\n    uv1_: vec3\n\n") + edges);
+    REQUIRE(crowded.structs.size() == 2);
+    CHECK(crowded.structs[0].members[0].semantic == "UV1_");
+    CHECK(crowded.structs[0].members[1].semantic == "UV1__");
 
     // Where a stream means nothing, it is refused rather than ignored.
     CHECK(error_of(R"(@vertex struct v:
@@ -423,4 +432,279 @@ struct link:
 )");
     CHECK(error.contains("stage-not-allowed"));
     CHECK(error.contains("store is @stages without it"));
+}
+
+TEST("sgl describe - workgroup memory has no host side, so the host is told nothing of it")
+{
+    auto const d = described("@workgroup binding tile:\n"
+                             "    values: float[64]\n"
+                             "\n"
+                             "binding work:\n"
+                             "    sums: mut buffer[float]\n"
+                             "\n"
+                             "@compute(64) fun cs(@local_thread_index li: int){tile, work}:\n"
+                             "    tile.values[li] = 1.0\n"
+                             "    workgroup_barrier()\n"
+                             "    if li == 0 => work.sums[0] = tile.values[63]\n");
+    REQUIRE(d.bindings.size() == 1);
+    CHECK(d.bindings[0].name == "work");
+    REQUIRE(d.entry_points.size() == 1);
+    REQUIRE(d.entry_points[0].bindings.size() == 1);
+    CHECK(d.entry_points[0].bindings[0] == "work");
+}
+
+TEST("sgl describe - a binding array is its element's binding, with a count and as many slots")
+{
+    auto const d = described("require binding_arrays\n"
+                             "\n"
+                             "binding materials:\n"
+                             "    albedo: texture_2d[float4][8]\n"
+                             "    params: buffer[float4][2]\n");
+    REQUIRE(d.bindings.size() == 1);
+    auto const& members = d.bindings[0].members;
+    REQUIRE(members.size() == 2);
+    CHECK(members[0].type == "texture_2d[float4]");
+    CHECK(members[0].slot == 0);
+    CHECK(members[0].count == 8);
+    CHECK(members[1].type == "float4");
+    CHECK(members[1].slot == 8);
+    CHECK(members[1].count == 2);
+}
+
+namespace
+{
+/// Two file-scope samplers, the first reached by the pixel stage alone and the second by nothing.
+constexpr cc::string_view k_file_samplers = "sampler edge:\n"
+                                            "    filter = .nearest\n"
+                                            "    address = .clamp_edge\n"
+                                            "\n"
+                                            "sampler shadow:\n"
+                                            "    compare = .less\n"
+                                            "    max_lod = 4.0\n"
+                                            "\n"
+                                            "binding material:\n"
+                                            "    albedo: texture_2d[float4]\n"
+                                            "\n"
+                                            "struct pixel_input:\n"
+                                            "    @position position: hpos4\n"
+                                            "    uv: float2\n"
+                                            "\n"
+                                            "@pixel struct target:\n"
+                                            "    color: float4\n"
+                                            "\n"
+                                            "@vertex fun vs(@vertex_index i: int){material} -> pixel_input:\n"
+                                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), uv = float2(0.0, 0.0)}\n"
+                                            "\n"
+                                            "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                                            "    return {color = material.albedo.sample(p.uv, edge)}\n"
+                                            "\n"
+                                            "pipeline drawn:\n"
+                                            "    vertex = vs\n"
+                                            "    pixel = ps\n"
+                                            "    format = .rgba8_unorm\n";
+} // namespace
+
+TEST("sgl describe - a file-scope sampler is described with its index, and each layout names the ones it holds")
+{
+    auto const d = described(k_file_samplers);
+
+    REQUIRE(d.samplers.size() == 2);
+    CHECK(d.samplers[0].name == "edge");
+    CHECK(d.samplers[0].index == 0);
+    CHECK(d.samplers[0].sampler_type == "non_filtering");
+    CHECK(d.samplers[0].settings.min_filter == "nearest");
+    CHECK(d.samplers[0].settings.address_v == "clamp_edge");
+    CHECK(d.samplers[1].name == "shadow");
+    CHECK(d.samplers[1].index == 1);
+    CHECK(d.samplers[1].sampler_type == "comparison");
+    CHECK(d.samplers[1].settings.compare == "less");
+    CHECK(d.samplers[1].settings.max_lod == 4.0f);
+    CHECK(d.samplers[0].shape != d.samplers[1].shape);
+
+    // an entry point names only what its own code reaches, and the pipeline what any of its stages does
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].samplers.empty());
+    REQUIRE(d.entry_points[1].samplers.size() == 1);
+    CHECK(d.entry_points[1].samplers[0] == "edge");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].samplers.size() == 1);
+    CHECK(d.pipelines[0].samplers[0] == "edge");
+
+    // a reload that changes a sampler's settings changes the layout, so the build freezes them
+    auto const frozen = [](sgl::module_description const& m)
+    {
+        for (auto const& line : m.pipelines[0].frozen)
+            if (line.starts_with("samplers = "))
+                return line;
+        return cc::string();
+    };
+    CHECK(frozen(d) == cc::format("samplers = edge#0@{}", d.samplers[0].shape));
+    auto source = cc::string(k_file_samplers);
+    source.replace_all("address = .clamp_edge", "address = .repeat");
+    CHECK(frozen(described(source)) != frozen(d));
+
+    // an unused sampler declared above moves the index the layout bakes it at, so the build freezes the index too
+    auto const shifted = described(cc::format("sampler extra:\n    filter = .linear\n\n{}", k_file_samplers));
+    CHECK(frozen(shifted) != frozen(d));
+    CHECK(frozen(shifted) == cc::format("samplers = edge#1@{}", d.samplers[0].shape));
+}
+
+TEST("sgl describe - a file-scope sampler a texture's @sampler names is one its entry point and pipeline hold")
+{
+    auto source = cc::string(k_file_samplers);
+    source.replace_all("    albedo: texture_2d[float4]\n", "    @sampler(edge)\n    albedo: texture_2d[float4]\n");
+    source.replace_all("material.albedo.sample(p.uv, edge)", "material.albedo.sample(p.uv)");
+    auto const d = described(source);
+
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].samplers.empty());
+    REQUIRE(d.entry_points[1].samplers.size() == 1);
+    CHECK(d.entry_points[1].samplers[0] == "edge");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].samplers.size() == 1);
+    CHECK(d.pipelines[0].samplers[0] == "edge");
+}
+
+namespace
+{
+/// A procedural pipeline whose payload and attributes each hold an enum, and whose intersection alone needs a feature.
+constexpr auto k_procedural_pipeline = cc::string_view(R"(require raytracing_pipeline, extended_image_formats
+
+enum tag:
+    plain
+    glossy
+
+struct radiance:
+    v0: float
+    color: float
+    kind: tag
+
+struct sphere_attributes:
+    u: float
+    v: float
+    kind: tag
+
+rays rs:
+    primary: radiance
+
+binding frame:
+    world: acceleration_structure[.procedural]
+
+binding narrow:
+    r: out image_2d[.r8_unorm]
+
+@raygen fun start(@launch_id id: int3){frame}:
+    let mut p = radiance(0.0, 0.0, tag.plain)
+    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), rs.primary, mut p)
+
+@intersection fun sphere(b: procedural_box){frame, narrow} -> report[sphere_attributes]:
+    return report.none()
+
+@closest_hit fun shade(h: procedural_hit[sphere_attributes], p: mut radiance):
+    p.color = h.attributes.u
+
+hit_group round for rs:
+    geometry = .procedural
+    intersection = sphere
+    primary = (closest_hit = shade)
+
+@raytracing pipeline path:
+    rays = rs
+    raygen = start
+)");
+} // namespace
+
+TEST("sgl describe - a ray-tracing pipeline's sizes count an enum as a word, as the checker's cap does")
+{
+    auto const d = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round)\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    auto const& p = d.raytracing_pipelines[0];
+    // two floats and an enum, in the payload and in what the intersection reports
+    CHECK(p.max_payload_size == 12);
+    CHECK(p.max_attribute_size == 12);
+    // the intersection's needs are the pipeline's, though no record names it
+    CHECK(cc::sequence{p.features}.any([](cc::string const& f) { return f == "extended_image_formats"; }));
+}
+
+TEST("sgl describe - a pipeline with the host's hit groups takes the attribute cap")
+{
+    // a host group may be procedural, and what it reports is compiled apart from this file
+    auto const d
+        = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round, .host)\n    max_recursion_depth = 1\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    CHECK(d.raytracing_pipelines[0].max_attribute_size == 32);
+}
+
+TEST("sgl describe - a ray-tracing pipeline's frozen part names its payloads, its records and its sizes")
+{
+    auto const d = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round)\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    REQUIRE(d.ray_sets.size() == 1);
+    auto const& set = d.ray_sets[0];
+    REQUIRE(set.payload_sizes.size() == 1);
+    CHECK(set.payload_sizes[0] == 12);
+    auto text = cc::string();
+    for (auto const& line : d.raytracing_pipelines[0].frozen)
+        text.appendf("{}\n", line);
+    CHECK(text.starts_with(cc::format("rays = rs: primary radiance@{} 12\n", set.payload_shapes[0])));
+    CHECK(text.contains("\nhit groups = round\nhit group round = sphere; primary: shade + -\n"));
+    CHECK(text.contains("\nmax recursion depth = 1\nmax payload size = 12\nmax attribute size = 12\n"));
+    CHECK(text.contains("\nlayout = frame@"));
+}
+
+TEST("sgl describe - a ray-tracing pipeline's layout carries every sampler its shaders reach")
+{
+    auto const d = described(R"(require raytracing_pipeline
+
+sampler unused:
+    filter = .nearest
+
+sampler clamped:
+    address = .clamp_edge
+
+struct operand:
+    x: float
+
+struct radiance:
+    color: float4
+
+rays rs:
+    primary: radiance
+
+binding frame:
+    world: acceleration_structure[.triangles]
+    tex: texture_2d[float4]
+
+@raygen fun start(@launch_id id: int3){frame}:
+    let mut p = radiance(float4(0.0, 0.0, 0.0, 0.0))
+    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), rs.primary, mut p)
+
+@closest_hit fun shade(h: triangle_hit, p: mut radiance){frame}:
+    p.color = frame.tex.sample(float2(0.5, 0.5), clamped, level = 0.0)
+
+@callable fun doubled(v: mut operand):
+    v.x = v.x * 2.0
+
+callables ops = (doubled, .host)
+
+hit_group lit for rs:
+    primary = (closest_hit = shade)
+
+@raytracing pipeline path:
+    rays = rs
+    raygen = start
+    hit_groups = (lit)
+)");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    auto const& p = d.raytracing_pipelines[0];
+    // reached from the closest hit alone, at the index its declaration gives it
+    REQUIRE(p.samplers.size() == 1);
+    CHECK(p.samplers[0] == "clamped");
+    CHECK(cc::sequence{p.frozen}.any([](cc::string const& line) { return line.starts_with("samplers = clamped#1@"); }));
+    // what a host's callable must take, by name and shape
+    REQUIRE(d.callables.size() == 1);
+    CHECK(p.host_callable_parameter == "operand");
+    CHECK(p.host_callable_shape == d.callables[0].parameter_shape);
+    auto const callables = cc::format("callables = doubled, .host operand@{}", p.host_callable_shape);
+    CHECK(cc::sequence{p.frozen}.any([&](cc::string const& line) { return line == callables; }));
 }

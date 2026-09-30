@@ -1,0 +1,10 @@
+// an operator the program declares is the program's: its own calls choose it, and the prelude's bodies never see it
+
+// the prelude's `-` of two floats, declared again, and wrong on purpose
+@operator("-") fun minus(a: float, b: float) -> float => a
+
+// the program's `3.0 - 1.0` chooses its own, since a match of the program's file hides the prelude's
+test (3.0 - 1.0) == 3.0
+
+// the prelude's `nearly_equal` subtracts inside its body, which the program's `-` does not reach
+test nearly_equal(1.0, 1.0, within = 0.5)

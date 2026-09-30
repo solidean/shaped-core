@@ -92,6 +92,7 @@ sg::impl::pipeline_footprint sg::impl::pipeline_footprint::resolve(pipeline_layo
                                                                    cc::span<stage_input const> stages)
 {
     auto fp = pipeline_footprint();
+    fp._layout = &layout;
     for (auto const& s : stages)
         if (s.footprint == nullptr || !s.footprint->is_known())
             return fp;
@@ -165,21 +166,27 @@ sg::impl::array_plan sg::impl::plan_array_declarations(void const* pipeline,
     if (use.has_value() && !use.value().is_touched())
         return {.how = array_plan::mode::skip};
 
+    // An element is tracked where the code touches its array, the rule a scalar binding follows in access_at.
+    auto const touched = use.has_value() ? use.value().stages & op_stages : pipeline_stage_flags();
+    auto const stages = touched.is_empty() ? op_stages : touched;
+
     auto const code_writes = use.has_value() && is_unordered_write(use.value().access);
+    auto const as_declared = [&](access_flags widen_by)
+    { return array_plan{.how = array_plan::mode::as_declared, .widen_by = widen_by, .stages = stages}; };
     auto const cover_all = [&]
     {
-        auto const stages = use.has_value() ? use.value().stages & op_stages : pipeline_stage_flags();
         return array_plan{
             .how = array_plan::mode::cover_all,
             .cover_access = use.has_value() ? use.value().access : shader_access_of(bound_as),
-            .cover_stages = stages.is_empty() ? op_stages : stages,
+            .stages = stages,
         };
     };
 
     if (!declared.named)
     {
         log_footprint_mismatch_once(pipeline, name,
-                                    "a dispatch declared no access for a bound array, so every element is covered");
+                                    "a dispatch or draw declared no access for a bound array, "
+                                    "so every element is covered");
         return cover_all();
     }
     if (!declared.any_element)
@@ -187,28 +194,28 @@ sg::impl::array_plan sg::impl::plan_array_declarations(void const* pipeline,
         if (!code_writes)
             return {.how = array_plan::mode::skip};
         log_footprint_mismatch_once(pipeline, name,
-                                    "a dispatch declared an array unused that its pipeline's code writes, so every "
-                                    "element is covered");
+                                    "a dispatch or draw declared an array unused that its pipeline's code writes, "
+                                    "so every element is covered");
         return cover_all();
     }
     if (!use.has_value())
-        return {.how = array_plan::mode::as_declared};
+        return as_declared({});
 
     if (code_writes && !is_unordered_write(declared.access))
     {
         log_footprint_mismatch_once(pipeline, name,
-                                    "a dispatch declared no write to an array its pipeline's code writes, so every "
-                                    "declared element is covered for the write too");
-        return {.how = array_plan::mode::as_declared, .widen_by = use.value().access};
+                                    "a dispatch or draw declared no write to an array its pipeline's code writes, "
+                                    "so every declared element is covered for the write too");
+        return as_declared(use.value().access);
     }
     if (!use.value().access.has_all(declared.access))
     {
         log_footprint_mismatch_once(pipeline, name,
-                                    "a dispatch declared an array access its pipeline's code does not perform, so the "
-                                    "barrier covers both");
-        return {.how = array_plan::mode::as_declared, .widen_by = use.value().access};
+                                    "a dispatch or draw declared an array access its pipeline's code does not perform, "
+                                    "so the barrier covers both");
+        return as_declared(use.value().access);
     }
-    return {.how = array_plan::mode::as_declared};
+    return as_declared({});
 }
 
 void sg::impl::log_footprint_mismatch_once(void const* pipeline, cc::string_view binding, cc::string_view message)

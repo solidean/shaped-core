@@ -8,8 +8,8 @@
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
-#include <shaped-graphics/fwd.hh>                          // sg::max_binding_groups
-#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::rewrite_binding_groups
+#include <shaped-graphics/fwd.hh> // sg::max_binding_groups
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::bound_samplers_space, slib::rewrite_binding_groups
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
@@ -422,6 +422,68 @@ ASYNC_TEST("slib sgl compiler - every compiler behind an edge reflects the group
     }
 }
 
+// A file-scope sampler is a pipeline layout's static sampler, and each compiler reflects it where sg binds one.
+// A reflection that disagreed would be logged as an error, which fails the test on its own.
+ASYNC_TEST("slib sgl compiler - a file-scope sampler is stated at the address each target binds a static sampler at",
+           exclusive("slib-shader-library"))
+{
+    constexpr auto source
+        = cc::string_view("sampler unused:\n"
+                          "    filter = .linear\n"
+                          "\n"
+                          "sampler edge:\n"
+                          "    filter = .nearest\n"
+                          "    address = .clamp_edge\n"
+                          "\n"
+                          "binding post:\n"
+                          "    src: texture_2d[float4]\n"
+                          "    dst: out image_2d[.rgba8_unorm]\n"
+                          "\n"
+                          "@compute(8, 8) fun copy(@thread_id id: int3){post}:\n"
+                          "    let xy = int2(id.x, id.y)\n"
+                          "    post.dst.store(xy, post.src.sample(float2(-0.5, 1.5), edge, level = 0.0))\n");
+
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+
+    for (auto const format : lib.supported_formats(slib::shader_language::sgl))
+    {
+        auto const node = lib.compile_source(source, sg::shader_stage::compute, "copy", format,
+                                             {.language = slib::shader_language::sgl, .label = "file-sampler.sgl"});
+        co_await cc::async_settled(node);
+        auto const& cs = value_of(node);
+        auto const* const edge = find_binding(cs, "edge");
+        REQUIRE(edge != nullptr);
+        CHECK(edge->type == sg::binding_type::sampler);
+        CHECK(edge->sampler_type == sg::sampler_binding_type::non_filtering);
+        // dx12's own space
+        // WebGPU keeps binding 0 of the reserved group for the inline constants, so a sampler sits one up
+        // slib's WGSL reader takes that one off again
+        // vulkan's inline constants are push constants, and it keeps the same binding i + 1 for parity
+        switch (format)
+        {
+        case sg::shader_format::dxil:
+            CHECK(edge->space == slib::bound_samplers_space);
+            CHECK(!edge->group_index.has_value());
+            CHECK(edge->index == 1);
+            break;
+        case sg::shader_format::spirv:
+            CHECK(edge->group_index == u32(sg::reserved_binding_group));
+            CHECK(edge->index == 2);
+            break;
+        default:
+            CHECK(edge->group_index == u32(sg::reserved_binding_group));
+            CHECK(edge->index == 1);
+            break;
+        }
+        CHECK(find_binding(cs, "unused") == nullptr);
+        // barriers track what a group binds, and a static sampler is no resource of one
+        for (auto const& slot : cs.footprint.slots)
+            CHECK(slot.name != "edge");
+        CHECK(cs.footprint.slots.size() == 2);
+    }
+}
+
 namespace
 {
 /// A WGSL compiler that reads the text wrong: its reflection moves `post.src` to another slot.
@@ -814,8 +876,7 @@ TEST("slib sgl compiler - a broken source fails with the place, the kind and the
     }
 }
 
-TEST("slib sgl compiler - an entry point of the wrong stage, and a stage SGL does not have, are errors",
-     exclusive("slib-shader-library"))
+TEST("slib sgl compiler - an entry point asked for as another stage is an error", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     add_sgl_compilers(lib);
@@ -841,11 +902,9 @@ TEST("slib sgl compiler - an entry point of the wrong stage, and a stage SGL doe
     auto const missing = error_of(lib.compile_source(source, sg::shader_stage::fragment, "main_fs", wgsl, options));
     CHECK(missing.contains("no entry point named 'main_fs' (the source holds: pixel 'main_ps')"));
 
-    // Compute is a stage SGL has now, so asking for it here is the wrong stage rather than an unknown one.
+    // SGL has every stage sg has, so asking for another one is the wrong stage rather than an unknown one.
     auto const wrong_kind = error_of(lib.compile_source(source, sg::shader_stage::compute, "main_ps", wgsl, options));
     CHECK(wrong_kind.contains("entry point 'main_ps' is a pixel entry point"));
-
-    // A stage SGL still has none of.
-    auto const no_stage = error_of(lib.compile_source(source, sg::shader_stage::geometry, "main_ps", wgsl, options));
-    CHECK(no_stage.contains("SGL has vertex, pixel and compute entry points only"));
+    auto const ray_stage = error_of(lib.compile_source(source, sg::shader_stage::raygen, "main_ps", wgsl, options));
+    CHECK(ray_stage.contains("entry point 'main_ps' is a pixel entry point"));
 }

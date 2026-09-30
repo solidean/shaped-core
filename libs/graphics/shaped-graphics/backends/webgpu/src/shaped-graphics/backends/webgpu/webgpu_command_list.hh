@@ -3,6 +3,7 @@
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/webgpu/fwd.hh>
+#include <shaped-graphics/backends/webgpu/webgpu_acceleration.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_common.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_readback.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -78,6 +79,48 @@ public:
     /// Touches everything a bound group names.
     void touch_group(sg::binding_group const& group);
 
+    /// The acceleration-pool regions this list wrote, with the pool buffer each went into.
+    cc::vector<acceleration_pool_write> _pool_writes;
+
+    /// The pool generation every write in `_pool_writes` was last brought forward to, so a list whose pool has not
+    /// grown since skips the walk.
+    u64 _pool_writes_generation = 0;
+
+    /// Copies every region this list wrote into an older pool buffer forward into the current one, ending the open pass to do so.
+    /// Whatever records against the pool calls it first, and submit calls it last, so no write is lost to a growth.
+    void bring_pool_writes_forward();
+
+    /// The arguments of one build kernel dispatch, `a` to `d` as the kernel names them.
+    struct acceleration_kernel_args
+    {
+        u32 words[16] = {};
+    };
+
+    /// One read-only storage input of a build kernel, the part of `buffer` it reads.
+    /// `offset` must be a multiple of 256 and `size` of 4, which is what lets a range start anywhere in a large buffer.
+    struct acceleration_kernel_input
+    {
+        WGPUBuffer buffer = nullptr;
+        u64 offset = 0;
+        u64 size = 0;
+    };
+
+    /// Dispatches `kernel` over `item_count` items, splitting past WebGPU's per-dimension group limit.
+    /// `inputs` are bound at bindings 2 to 4; one with a null buffer is left unused.
+    void record_acceleration_kernel(acceleration_kernel kernel,
+                                    acceleration_kernel_args args,
+                                    u32 item_count,
+                                    cc::span<acceleration_kernel_input const> inputs = {});
+
+    /// The first unit of a new pool region of `units`, with this list's older writes already brought forward.
+    [[nodiscard]] u32 allocate_acceleration_region(isize units);
+
+    /// Records the copy of `cpu_part` into the start of the region at `unit`, and remembers the region as written.
+    void write_acceleration_region(u32 unit, isize units, cc::span<u32 const> cpu_part);
+
+    /// A readback of the whole acceleration pool as it stands after this list, for tests of the polyfill's layout.
+    [[nodiscard]] sg::bytes_future download_acceleration_pool();
+
     // What bind_* set up, replayed whenever a pass opens.
     // The pipelines and groups are owning references, since a caller may drop its handle before the replay.
     struct bound_state
@@ -87,7 +130,8 @@ public:
         wgpu_render_pipeline render_pipeline;
         cc::fixed_vector<wgpu_bind_group, sg::max_binding_groups> groups;
 
-        // The inline constants block as the caller last set it, and the placement it was last bound at.
+        // The reserved block — the inline constants as the caller last set them, then the bound groups' acceleration
+        // roots — and the placement it was last bound at.
         cc::vector<byte> constants;
         bool constants_dirty = false;
         webgpu_constant_page* constants_page = nullptr;
@@ -220,6 +264,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
+    void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                            cc::span<sg::array_buffer_access const> elements) override;
+    void raster_declare_array_texture_access(cc::string_view binding_name,
+                                             cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;
@@ -228,12 +276,15 @@ protected:
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
 
-    // WebGPU has no ray tracing: support is false, and every recording seam asserts.
-    [[nodiscard]] bool raytracing_is_supported() const override { return false; }
+    // Bodies in webgpu_raytracing.cc.
+    // The builds write the ray-query polyfill's pool; the ray-tracing pipeline has no webgpu form, so its seams assert.
+    [[nodiscard]] bool raytracing_is_supported() const override { return true; }
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
-                                                                  sg::accel_build_flags flags) override;
+                                                                  sg::accel_build_flags flags,
+                                                                  int hit_record_stride) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
-                                                              sg::accel_build_flags flags) override;
+                                                              sg::accel_build_flags flags,
+                                                              int hit_record_stride) override;
     [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
                                                         sg::accel_build_flags flags) override;
     void raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline) override;

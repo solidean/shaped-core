@@ -46,6 +46,7 @@ ASYNC_TEST("sg webgpu backend", main_thread)
         auto const ctx = requested.value();
         fail_on_webgpu_errors(ctx);
         (void)sg_test::shader_fixtures(); // alive before any child acquires through it
+        ctx->set_portability_checks(true);
         co_await nx::async_invoke_tests_in_sequence("webgpu", nx::invocation_options{.inherit_home = true}, ctx);
 
         // Nothing here can wait, so what the tests left running is awaited before the context goes.

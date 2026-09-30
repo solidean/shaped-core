@@ -1,7 +1,7 @@
 #pragma once
 
-#include "background.hlsli"
-#include "bsdf_lobe.hlsli" // sv::bsdf_lobe_* — the raygen classifies a path by the lobe its first bounce took // Background + the SH evaluation the miss and the hits use
+#include "background.hlsli" // Background + the SH evaluation the miss and the hits use
+#include "bsdf_lobe.hlsli" // sv::bsdf_lobe_* — the raygen classifies a path by the lobe its first bounce took
 #include "camera.hlsli"
 #include "instance.hlsli" // sv::instance — the per-item table the group below declares
 #include "light.hlsli" // sv::light — the per-light record the group below declares

@@ -122,6 +122,24 @@ void checker::check_test(i32 index)
     auto const& body = d.node.as<ast::test_decl>().body;
     auto const info = out.at(test.symbol).info;
 
+    // CHK-333: what a test lists is bound by its driver, which gives values, buffers and acceleration structures alone
+    auto is_list_failed = false;
+    auto const bindings = binding_list_of(file, d.node.as<ast::test_decl>().bindings, is_list_failed);
+    for (auto const binding : bindings)
+        for (auto const& member : out.at(out.bindings[out.at(binding).info].members))
+        {
+            auto const kind = out.at(member.type).kind;
+            if (kind == type_kind::texture || kind == type_kind::image || kind == type_kind::sampler)
+            {
+                is_list_failed = true;
+                unsupported(file, test.where,
+                            cc::format("a test that lists {}, whose {} is a texture, an image or a sampler",
+                                       out.at(binding).name, member.name));
+            }
+        }
+    out.functions[info].bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())};
+    out.binding_lists.push_back_range(bindings);
+
     cc::string_view const known[] = {"expect"};
     judge_attributes(file, d.attributes, known, "a test");
     out.tests[index].expectations = expectations_of(file, d.attributes);
@@ -154,13 +172,14 @@ void checker::check_test(i32 index)
     // no statement was reported where it was parsed.
     auto is_fail_closed = false;
     for (auto const& e : out.tests[index].expectations)
-        is_fail_closed = is_fail_closed || e.kind == expectation_kind::fail || e.kind == expectation_kind::assert_;
+        is_fail_closed = is_fail_closed || e.kind == expectation_kind::fail || e.kind == expectation_kind::assert_
+                      || e.kind == expectation_kind::discard;
     auto const is_empty = ast.at(body.statements).empty();
     if (!is_fail_closed && !is_empty && type != error_type && (type != bool_type || !is_valid(type)))
         report(diagnostic_kind::test_must_end_in_check, file, ast::is_valid(last) ? span_of(file, last) : test.where,
                "the last line of a test is a check; end in `true // why` where its asserts are what it checks");
 
-    notes[info].is_body_sound = error_count() == errors_before;
+    notes[info].is_body_sound = error_count() == errors_before && !is_list_failed;
 }
 
 bool checker::has_syntax_error_in(i32 file, source_span extent) const
@@ -202,9 +221,11 @@ cc::vector<test_expectation> checker::expectations_of(i32 file, ast::range_of<as
             auto const case_name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
 
             // CHK-231: a run it fails, or a kind of diagnostic, with `*` for any run of characters
-            if (name.empty() && (case_name == "fail" || case_name == "assert"))
-                result.push_back(
-                    {.kind = case_name == "fail" ? expectation_kind::fail : expectation_kind::assert_, .where = where});
+            if (name.empty() && (case_name == "fail" || case_name == "assert" || case_name == "discard"))
+                result.push_back({.kind = case_name == "fail"   ? expectation_kind::fail
+                                        : case_name == "assert" ? expectation_kind::assert_
+                                                                : expectation_kind::discard,
+                                  .where = where});
             else if ((name == "error" || name == "warning") && literal != nullptr
                      && literal->kind == ast::literal_kind::quoted && text_of(file, where).size() > 2)
             {

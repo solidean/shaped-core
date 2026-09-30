@@ -10,6 +10,8 @@
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec.hh>
 
+#include <memory>
+
 /// Denoising — and, once a member supports it, upscaling — behind one call.
 ///
 /// `sr::denoise_routine` is the front: a caller names a method (or `automatic`) and the front forwards to the
@@ -59,7 +61,10 @@ enum class sr::render_scale_preset : sg::u8
 /// One guide buffer a member may read beside the noisy color.
 enum class sr::denoise_guide : sg::u8
 {
-    albedo,          ///< diffuse reflectance at the primary hit
+    /// Diffuse reflectance at the primary hit, so zero on a metal.
+    /// A member reading split radiance reads it and `specular_albedo` separately; one reading unsplit radiance
+    /// demodulates by their sum.
+    albedo,
     specular_albedo, ///< specular reflectance at the primary hit
     normal,          ///< world-space shading normal at the primary hit, in rgb
     roughness,       ///< perceptual roughness at the primary hit, in r
@@ -98,6 +103,7 @@ struct sr::denoise_settings
 
     /// Every member reads this.
     /// atrous and svgf: the number of wavelet passes (3, 4, 5).
+    /// oidn: `fast` runs its small network, the others its base one.
     denoise_quality quality = denoise_quality::balanced;
 
     /// In [0, 1]; higher keeps more detail and removes less noise.
@@ -205,26 +211,24 @@ struct sr::denoise_outcome
 /// Dropping the history of a view nobody is looking at is how a caller gets that back, and is what a caller with many
 /// views should do.
 ///
-/// It holds images and nothing else.
-/// A member needing state that is not a texture — a vendor feature handle, which dlss_rr and fsr_rr both take — is
-/// what replaces the fixed array with a per-member state object; see libs/graphics/shaped-rendering/docs/denoising.md.
+/// It holds images, plus at most one object of the member's own for state that is not a texture.
 class sr::denoise_history
 {
 public:
     denoise_history() = default;
-    denoise_history(denoise_history&&) noexcept;
-    denoise_history& operator=(denoise_history&&) noexcept;
+    denoise_history(denoise_history&&) noexcept = default;
+    denoise_history& operator=(denoise_history&&) noexcept = default;
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
 
-    /// Releases whatever a vendor member is holding for this stream.
+    /// Releases whatever a member is holding for this stream.
     ///
     /// **The GPU must be done with this history**, which for a member holding device memory is a real requirement
-    /// rather than good manners: a vendor feature released while a frame that used it is still in flight is a
-    /// use-after-free with no diagnostic.
+    /// rather than good manners: state released while a frame that used it is still in flight is a use-after-free
+    /// with no diagnostic.
     /// A caller dropping a history mid-frame drains first; sv drops one only when its view goes, which is after the
     /// store has let the epoch complete.
-    ~denoise_history();
+    ~denoise_history() = default;
 
     /// How many images a member may keep here.
     /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
@@ -233,6 +237,9 @@ public:
     /// Makes the next call start from no history, as on a camera cut.
     /// The textures are kept and overwritten, since a cut does not change their size.
     void reset() { _reset_requested = true; }
+
+    /// Whether a `reset` is waiting for the next call to consume it.
+    [[nodiscard]] bool is_reset_pending() const { return _reset_requested; }
 
     /// The member that built what this holds, or `none` while empty.
     [[nodiscard]] denoise_method method() const { return _method; }
@@ -243,11 +250,20 @@ public:
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
+    friend class oidn_denoise_routine;
     friend class dlss_rr_routine;
 
     /// Brings this to `method` at `extent`, dropping everything if either changed.
     /// Returns whether the call starts from no history.
     bool _prepare(denoise_method method, tg::vec2i extent);
+
+    /// A member's own per-stream object — for OIDN the network and its feature maps, for DLSS the NGX feature.
+    ///
+    /// Type-erased so this header names no member's type; the deleter is captured where the object is made, which is
+    /// what lets a member whose seam hands back a bare `void*` put its own release function in here.
+    /// It must hold only what is safe to drop mid-frame, as sg resources are.
+    /// `_prepare` drops it whenever it drops the rest, since the state is built for one extent.
+    std::shared_ptr<void> _member_state;
 
     denoise_method _method = denoise_method::none;
     tg::vec2i _extent = tg::vec2i(0, 0);
@@ -259,17 +275,6 @@ private:
     /// The images a member keeps from call to call — its history and its scratch — so a steady stream allocates nothing.
     /// Which slot holds what is the member's own business.
     cc::fixed_array<sg::texture_2d, state_slots> _state;
-
-    /// A vendor member's own per-stream object — for DLSS, the NGX feature.
-    ///
-    /// Opaque, with the release function beside it, so this header names no vendor type and a history still frees what
-    /// it holds without knowing what that is.
-    /// `_prepare` releases it whenever it drops the rest, since a feature is built for one extent.
-    void* _vendor_state = nullptr;
-    void (*_release_vendor_state)(void*) = nullptr;
-
-    /// Drops `_vendor_state` through `_release_vendor_state`, and forgets both.
-    void _release_vendor();
 };
 
 /// Which members this context can run.

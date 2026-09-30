@@ -250,32 +250,6 @@ TEST("sgl spec - every rule id is defined exactly once")
 
 namespace
 {
-/// The names after `fun` on every line that declares an entry point, which is what `compile_to_text` is asked for.
-/// A scan rather than a parse: a source that does not check still has entry points to ask for, and each must fail cleanly.
-cc::vector<cc::string> entry_points_of(cc::string_view source)
-{
-    auto result = cc::vector<cc::string>();
-    auto at = isize(0);
-    while (true)
-    {
-        auto const found = source.find(cc::string_view("fun "), at);
-        if (found < 0)
-            break;
-        auto const line_start = source.subview({.start = 0, .end = found}).rfind('\n') + 1;
-        auto const head = source.subview({.start = line_start, .end = found});
-        auto name_end = found + 4;
-        while (name_end < source.size()
-               && (source[name_end] == '_' || (source[name_end] >= 'a' && source[name_end] <= 'z')
-                   || (source[name_end] >= 'A' && source[name_end] <= 'Z')
-                   || (source[name_end] >= '0' && source[name_end] <= '9')))
-            ++name_end;
-        if (head.contains('@') && name_end > found + 4)
-            result.push_back(cc::string(source.subview({.start = found + 4, .end = name_end})));
-        at = found + 4;
-    }
-    return result;
-}
-
 /// Every declared entry point of `source` through every target, and `describe` besides.
 /// Each call must give text or an error that says something; the assert a crash would be fails the test by itself.
 void require_total(cc::string_view source, cc::string_view where, cc::string& failures)
@@ -283,24 +257,33 @@ void require_total(cc::string_view source, cc::string_view where, cc::string& fa
     auto const described = sgl::describe({.source = source, .source_name = where});
     if (described.has_error() && described.error().empty())
         failures.appendf("{}: describe failed without saying why\n", where);
-    for (auto const& name : entry_points_of(source))
-        for (auto const t : sgl::emit::all_targets())
-        {
-            auto const text
-                = sgl::compile_to_text({.source = source, .source_name = where, .entry_point = name, .target = t});
-            if (text.has_error() ? text.error().empty() : text.value().text.empty())
-                failures.appendf("{}: '{}' for {} gave neither text nor a reason\n", where, name,
-                                 sgl::emit::to_string(t));
-        }
+    // the texts come from the same front end, so an example that failed it, or declares no entry point, has nothing more
+    // to say; most examples are either
+    if (described.has_error() || described.value().entry_points.empty())
+        return;
+    // one check of the example for every entry point and target
+    auto const texts
+        = sgl::compile_all_to_text({.source = source, .source_name = where, .targets = sgl::emit::all_targets()});
+    if (texts.has_error())
+    {
+        if (texts.error().empty())
+            failures.appendf("{}: the front end failed without saying why\n", where);
+        return;
+    }
+    for (auto const& e : texts.value())
+        if (e.text.has_error() ? e.text.error().empty() : e.text.value().text.empty())
+            failures.appendf("{}: '{}' for {} gave neither text nor a reason\n", where, e.entry_point,
+                             sgl::emit::to_string(e.target));
 }
-} // namespace
 
-TEST("sgl spec - every example of the spec and every sample compiles for every target or says why, and nothing asserts")
+/// Every example of the spec files under `prefix` through `require_total`, and how many there were.
+int require_total_under(cc::string_view prefix, cc::string& failures)
 {
-    auto failures = cc::string();
     auto sources = 0;
     for (auto const file : spec_files)
     {
+        if (!file.starts_with(prefix))
+            continue;
         auto const path = cc::string(SGL_SPEC_DIR) + "/" + file;
         for (auto const& e : examples_of(read_text(path)))
         {
@@ -308,14 +291,41 @@ TEST("sgl spec - every example of the spec and every sample compiles for every t
             require_total(e.source, cc::format("{}:{}", file, e.line), failures);
         }
     }
+    return sources;
+}
+} // namespace
+
+// Each compile checks the whole prelude, so the examples are split by area to run in parallel.
+TEST("sgl spec - every example of the syntax compiles for every target or says why, and nothing asserts")
+{
+    auto failures = cc::string();
+    CHECK(require_total_under("syntax/", failures) > 10);
+    CHECK(failures == "");
+}
+
+TEST("sgl spec - every example of the checking pass compiles for every target or says why, and nothing asserts")
+{
+    auto failures = cc::string();
+    CHECK(require_total_under("semantics/checking.md", failures) > 10);
+    (void)require_total_under("semantics/why/checking.md", failures);
+    CHECK(failures == "");
+}
+
+TEST("sgl spec - every other example, and every sample, compiles for every target or says why, and nothing asserts")
+{
+    auto failures = cc::string();
+    auto sources = 0;
+    for (auto const file : spec_files)
+        if (!file.starts_with("syntax/") && !file.ends_with("checking.md"))
+            sources += require_total_under(file, failures);
     for (auto const sample : {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl",
                               "members-and-bindings.sgl", "pipeline.sgl"})
     {
         ++sources;
         require_total(read_text(cc::string(SGL_SAMPLES_DIR) + "/" + sample), sample, failures);
     }
+    CHECK(sources > 10);
     CHECK(failures == "");
-    CHECK(sources > 50);
 }
 
 namespace

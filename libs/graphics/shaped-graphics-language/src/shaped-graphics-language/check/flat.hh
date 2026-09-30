@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
@@ -111,8 +112,10 @@ template <class T>
 /// emitter goes on minting from the same value.
 struct sgl::check::name_mint
 {
-    /// Every name handed out or reserved so far.
+    /// Every name handed out or reserved so far, in that order, and the same names as a set to look them up in.
+    /// Both are written by `reserve` and `mint` alone.
     cc::vector<cc::string> taken;
+    cc::set<cc::string> index;
 
     [[nodiscard]] bool is_taken(cc::string_view name) const;
 
@@ -168,6 +171,8 @@ struct sgl::check::flat_local
     cc::string name;
     type_id type = type_id::none;
     bool is_mut = false;
+    /// The prelude's `undefined()`: never assigned, and handed on and stored as a value whose content means nothing.
+    bool is_undefined = false;
 
     bool operator==(flat_local const&) const = default;
 };
@@ -236,8 +241,19 @@ struct sgl::check::flat_binding_member
     symbol_id binding = symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
+    /// Of a `@workgroup` binding: memory the workgroup shares, which a store changes between two reads of it.
+    bool is_workgroup = false;
 
     constexpr bool operator==(flat_binding_member const&) const = default;
+};
+
+/// A file-scope sampler, which is a global of the target at the pipeline layout's address for it (CHK-314).
+struct sgl::check::flat_file_sampler
+{
+    /// Of kind `sampler`.
+    symbol_id sampler = symbol_id::none;
+
+    constexpr bool operator==(flat_file_sampler const&) const = default;
 };
 
 struct sgl::check::flat_member
@@ -260,7 +276,17 @@ struct sgl::check::flat_buffer_element
     constexpr bool operator==(flat_buffer_element const&) const = default;
 };
 
-/// A value of the node's struct type from one value per field, in field order.
+/// `object[index]` on an array value: its element, read or, as a place, assigned.
+/// The index is evaluated after the object; outside `0 ..< length` it is a program error (EVAL-90).
+struct sgl::check::flat_element
+{
+    flat_expr_id object = flat_expr_id::none;
+    flat_expr_id index = flat_expr_id::none;
+
+    constexpr bool operator==(flat_element const&) const = default;
+};
+
+/// A value of the node's struct type from one value per field, in field order, or of its array type, one per element.
 /// A splat is gone: its fields stand here one by one.
 struct sgl::check::flat_construct
 {
@@ -318,6 +344,18 @@ struct sgl::check::flat_block
     constexpr bool operator==(flat_block const&) const = default;
 };
 
+/// The two forms of one value, of which a target writes exactly one: the native form where the device has the construct,
+/// the emulated one where sg does it in software (the trace of raytracing.sgl).
+/// Each is a `flat_block` expression.
+/// Structured form only: legalize keeps one of the two by `legalize_options`.
+struct sgl::check::flat_by_target
+{
+    flat_expr_id native = flat_expr_id::none;
+    flat_expr_id emulated = flat_expr_id::none;
+
+    constexpr bool operator==(flat_by_target const&) const = default;
+};
+
 struct sgl::check::flat_expr
 {
     type_id type = type_id::none;
@@ -332,14 +370,17 @@ struct sgl::check::flat_expr
                 flat_enum_value,
                 flat_local_ref,
                 flat_binding_member,
+                flat_file_sampler,
                 flat_member,
                 flat_buffer_element,
+                flat_element,
                 flat_construct,
                 flat_call,
                 flat_not,
                 flat_and,
                 flat_or,
-                flat_block>
+                flat_block,
+                flat_by_target>
         node;
 
     bool operator==(flat_expr const&) const = default;
@@ -440,6 +481,13 @@ struct sgl::check::flat_for
     ast::range_of<flat_stmt_id> body;
 
     constexpr bool operator==(flat_for const&) const = default;
+};
+
+/// Ends the invocation with no effect: nothing after it runs, and what it would have written is never written.
+/// A pixel entry point's alone (CHK-277); a test's run ends as `discarded`.
+struct sgl::check::flat_discard
+{
+    constexpr bool operator==(flat_discard const&) const = default;
 };
 
 /// Starts the next iteration of the loop `target`, from any depth inside it in the structured form.
@@ -587,6 +635,7 @@ struct sgl::check::flat_stmt
                 flat_while,
                 flat_for,
                 flat_continue,
+                flat_discard,
                 flat_once,
                 flat_break,
                 flat_case,
@@ -598,25 +647,48 @@ struct sgl::check::flat_stmt
     bool operator==(flat_stmt const&) const = default;
 };
 
+/// A parameter of an entry point that the GPU fills, and the local that holds it.
+struct sgl::check::flat_stage_input
+{
+    stage_input input = stage_input::none;
+    local_id local = local_id::none;
+
+    bool operator==(flat_stage_input const&) const = default;
+};
+
 /// One entry point as one flat function.
 /// A type, a symbol and a binding are ids into the `checked_module` this value stands in.
+/// A ray type an entry point traces: its set, and its position there.
+struct sgl::check::flat_traced_ray
+{
+    symbol_id set = symbol_id::none;
+    i32 ray = 0;
+
+    constexpr bool operator==(flat_traced_ray const&) const = default;
+};
+
 struct sgl::check::flat_entry_point
 {
     stage entry_stage = stage::none;
     /// The name as written: the host asks for it, so it is never minted.
     cc::string name;
     symbol_id function = symbol_id::none;
-    /// The one parameter, which is `locals[0]`.
+    /// The stage struct, which is `locals[0]`; `none` for an entry point that takes stage inputs alone.
     type_id input = type_id::none;
+    /// The parameters that are stage inputs, each a local of its own, in the order written (CHK-271).
+    cc::vector<flat_stage_input> stage_inputs;
     type_id result = type_id::none;
     /// The bindings of the function's `{...}` list in the order written, which is what decides the pipeline layout.
     cc::vector<symbol_id> bindings;
     /// The grid a `compute` entry point is dispatched in; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
-    /// The parameter carries `@thread_id` itself rather than being a struct that holds one.
-    bool takes_thread_id = false;
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
+    /// The ray types it traces, by their position in their set, each once (CHK-332).
+    cc::vector<flat_traced_ray> traced_rays;
+    /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
+    /// for every other entry point.
+    local_id attributes = local_id::none;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -657,10 +729,11 @@ struct sgl::check::flat_entry_point
         return entry_stage == rhs.entry_stage && name == rhs.name && function == rhs.function && input == rhs.input
             && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
             && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
-            && takes_thread_id == rhs.takes_thread_id && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
+            && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
             && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
             && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
             && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
-            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names;
+            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names
+            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes;
     }
 };

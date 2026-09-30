@@ -18,7 +18,8 @@ Each file has the same shape, so an idea can be picked up cold:
 | file | the idea in one line |
 |---|---|
 | [structural-types.md](structural-types.md) | paren literals build structural types, named types are nominal, and what a tuple is once it is a value |
-| [function-model.md](function-model.md) | no recursion and no indirect calls, so every function inlines, nested functions need no captures, and `[]` means deducible |
+| [function-model.md](function-model.md) | no recursion and no indirect calls, so every function inlines, nested functions need no captures, and what generics and lambdas still lack |
+| [raytracing-futures.md](raytracing-futures.md) | recursion, a megakernel pipeline for WebGPU, reordering, micromaps, motion, run-time ray types, and the sum types a mixed hit waits for |
 | [types-as-values.md](types-as-values.md) | everything is a value, and an expression in a type position must reduce to a normal form that reads as a type |
 | [scopes.md](scopes.md) | ordered scopes such as functions, unordered ones such as structs and the root, and nested functions that capture nothing |
 | [binding-effects.md](binding-effects.md) | each `binding` is a binding group, functions list the bindings they use, and a local `binding` rebinds for a library |
@@ -35,7 +36,10 @@ Each file has the same shape, so an idea can be picked up cold:
 | [inferred-comptime.md](inferred-comptime.md) | a function value is a compile-time entity, and a parameter that must be constant is inferred from the body, as Zig's `comptime` without the keyword |
 | [patterns.md](patterns.md) | a real pattern language for `case`, where an arm destructures its scrutinee and binds the pieces it names |
 | [enum-futures.md](enum-futures.md) | ordering, casts to and from `int`, `@bitflags` for a mask enum, and `@exhaustive(false)` for an open one |
-| [texture-methods.md](texture-methods.md) | a default sampler declared on the binding, and the texture methods past 2D |
+| [texture-methods.md](texture-methods.md) | subscripts over `load` and `store`, and what is left of the texture methods |
 | [uniformity.md](uniformity.md) | SGL's own uniformity analysis after inlining, refusing a derivative sample in divergent control flow with a fix to offer |
+| [stage-polyfills.md](stage-polyfills.md) | the geometry and tessellation stages as a compute pass ahead of the draw, where a device lacks them |
+| [atomics.md](atomics.md) | float, 64-bit, image and vertex-stage atomics and a compare-exchange, each behind the sg feature its missing target needs |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |
 | [testing.md](testing.md) | tests on the GPU against the interpreter, resource values in tests, captured constants and message matching |
+| [compute-throughput.md](compute-throughput.md) | a 16-bit float and matrix fragments as features, which a fast compute kernel such as a denoise network needs |

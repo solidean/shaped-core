@@ -40,6 +40,9 @@ class atrous_denoise_routine;        // the native spatial member (atrous_denois
 struct atrous_options;               // its own options
 class svgf_denoise_routine;          // the native temporal member (svgf_denoise_routine.hh)
 struct svgf_options;                 // its own options
+class oidn_denoise_routine;          // the OIDN trained member, run as our own shaders (oidn_denoise_routine.hh)
+struct oidn_options;                 // its own options
+enum class oidn_network_size : u8;   // which of OIDN's trained networks it runs
 
 class dlss_rr_routine; // the NVIDIA vendor member (dlss_rr_routine.hh)
 struct dlss_options;   // its own options

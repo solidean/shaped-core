@@ -64,8 +64,12 @@ Every flat expression is pure, so building a struct ahead of the statement that 
 ## EMIT-57
 
 `using namespace metal;` makes every name of the standard library visible in the global scope, where the program's structs are declared.
-A struct called `filter` or `length` would then be ambiguous at its first use, and the compiler would name a header nobody wrote.
+Metal also declares names there of its own, such as the `quad` it reserves for a type it never defines, and its headers define macros.
+A struct called `filter`, `length` or `quad` would then be ambiguous at its first use, and the compiler would name a header nobody wrote.
+So the list holds all of them, found by declaring each identifier of the toolchain's headers as a struct and as a function.
+[tools/msl-probe](../../../../tools/msl-probe/readme.md) is that probe, and re-running it regenerates the list.
 A local only hides such a name, so reserving it there costs an underscore and nothing else.
+Declaring the program in a namespace of its own was the alternative, and it was declined: it would make MSL's entry points qualified names, and minting is how every other target handles a taken name.
 `main` is no keyword, and MSL refuses a function of that name, so by EMIT-20 an entry point called `main` is `main_` in MSL.
 
 ## EMIT-58
@@ -73,7 +77,7 @@ A local only hides such a name, so reserving it there costs an underscore and no
 MSL has no global resources: whatever a stage reads is a parameter of its entry point.
 The body still reads `constants.view_projection`, since a reference parameter is used like the global the other targets declare.
 sg's metal backend binds group N at buffer index N and keeps four such slots, so 4 is the first index no group can take.
-That backend sets no inline constants yet, so the number is a proposal it has to adopt, and the text is where it is written down.
+The backend binds the inline constants there, as `k_inline_constants_buffer_index`.
 A vertex buffer has no index in the text at all: `[[stage_in]]` reads through the pipeline's vertex descriptor.
 
 ## EMIT-62
@@ -114,7 +118,7 @@ It could build a struct with braces, `pixel_input{a, b, c}`, which drops the mem
 
 An unsuffixed literal is a `double` in C++, and MSL has no `double`, so the question is fair.
 The hand-written MSL in this repo and the MSL SPIRV-Cross generates both write `0.5` for a `float`.
-So the unsuffixed form stays until a Metal compiler says otherwise.
+The Metal compiler takes the unsuffixed form, so it stays.
 A suffix would be the only place where one literal is spelled differently per target.
 
 ## EMIT-74
@@ -165,4 +169,30 @@ So the text ignores streams entirely, and the host layout lists its attributes i
 A target's compiler reflects the names the text declares, and those follow each target's identifier rules and reserved words.
 The host binds by the path instead, so whoever compiles the text renames what the compiler reflected, and needs the pairs to do it.
 slib does that as the compile settles, which is why no target's identifier rules ever reach sg.
+
+## EMIT-135
+
+WebGPU has no ray query, and a portable shader that traces is worth more than one refused on a whole platform.
+So the trace is SGL source the prelude holds twice, a native and an emulated form, and each target writes the one it can.
+The emulated form reads one pool per context rather than a binding per structure, since a traversal walks from a TLAS into BLASes nothing else binds.
+The acceleration member keeps its slot and takes no binding, so every other member's slot is what it is on the other targets, and one layout serves all four.
+
+## EMIT-137
+
+DXR's payload qualifiers are a promise the driver optimizes by: a field nobody writes after the caller need not travel back.
+Every shader of one pipeline must state the same qualifiers, so they are inferred from the whole module rather than per entry point.
+A host's hit group is compiled apart and cannot see the module, so a payload it may meet states the widest access, which DXC reads as a missed optimization and not an error.
+
+## EMIT-138
+
+A struct member named like a type, `ray: ray`, is legal in SGL, where a member lives in its struct's scope.
+In HLSL and MSL the member's declaration hides the type for the rest of the struct, so a later member of that type fails to compile.
+Renaming on every target keeps one member name across the texts, which is what a reader comparing them expects.
+
+## EMIT-139
+
+Metal has no shader table: a kernel intersects with its own intersector and calls what it found through function tables.
+One table holds the miss and closest-hit functions of every ray type, so they share one signature, and the payload travels as words each function reads as its own type.
+DXR finds a closest hit's record from the instance's hit-group offset, which Metal's intersection result does not carry, so sg binds each instance's offset beside the tables.
+A procedural group's intersection and its any hit are one function on metal, since Metal runs no any hit after a box's intersection, which is why CHK-345 fuses them.
 

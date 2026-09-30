@@ -1093,17 +1093,16 @@ def test_a_block_name_that_collides_is_rejected(root: Path) -> None:
     raise AssertionError("two blocks of one round cannot share a name")
 
 
-def test_a_retired_background_block_is_an_unknown_block_type(root: Path) -> None:
-    """The `context/*` blocks were removed outright, so an entry still carrying one fails like any other misspelled type."""
+def test_a_retired_background_block_reads_as_its_replacement(root: Path) -> None:
+    """An old review still holds `context/*` blocks, and its answers must stay readable, so each reads as `prose`.
+
+    The entry records what it read that way, which is what the loader warns about.
+    """
     for tier in ("cold", "repo", "delta"):
-        try:
-            parse_text(ENTRY + f"\n## context/{tier}\n\nBackground.\n", Path("entry.md"))
-        except ReviewParseError as e:
-            assert f"unknown block type 'context/{tier}'" in str(e), e
-            assert "write it as `## prose`" in str(e), "a retired type names what replaced it"
-            assert e.line == ENTRY.count("\n") + 2, e.line
-        else:
-            raise AssertionError(f"`context/{tier}` must not parse")
+        entry = parse_text(ENTRY + f"\n## context/{tier}\n\nBackground.\n", Path("entry.md"))
+        retired = [b for b in entry.blocks if "Background." in b.raw]
+        assert len(retired) == 1 and retired[0].type == "prose", [b.type for b in entry.blocks]
+        assert entry.retired == [(ENTRY.count("\n") + 2, f"context/{tier}", "prose")], entry.retired
 
 
 def test_a_collision_says_an_ask_and_a_prose_block_share_one_name_space(root: Path) -> None:
@@ -1469,7 +1468,7 @@ def test_finalize_tags_a_replaced_ask_only_in_its_own_entry(root: Path) -> None:
 def test_a_read_only_command_sees_past_an_entry_that_does_not_parse(root: Path) -> None:
     """One stale entry must not hide the rest of the review from `edit`, `show`, `status` or `validate`.
 
-    Written after a review holding one retired `context/cold` block could not even list its entries,
+    Written after a review holding one retired block type could not even list its entries,
     which is exactly the moment someone needs the path of the broken one to fix it.
     """
     from tools.review.cmd.context import Context
@@ -1479,7 +1478,7 @@ def test_a_read_only_command_sees_past_an_entry_that_does_not_parse(root: Path) 
     paths.entries_dir.mkdir(parents=True)
     good = "---\nid: 010\ntitle: good\ngroup: meta\nstate: open\n---\n\n## prose\n\nFine.\n"
     (paths.entries_dir / "010-good.md").write_text(good, encoding="utf-8")
-    stale = good.replace("010", "020") + "\n## context/cold\n\nOld.\n"
+    stale = good.replace("010", "020") + "\n## no-such-type\n\nOld.\n"
     (paths.entries_dir / "020-stale.md").write_text(stale, encoding="utf-8")
 
     entries, broken = Context.__new__(Context).entries_tolerant(paths)
@@ -2463,6 +2462,18 @@ def test_an_ask_answered_only_in_the_text_box_is_answered(root: Path) -> None:
     assert code == 0 and '"which"' not in out, f"status still lists the ask as open: {out}"
     row = next(r for r in app.state()["entries"] if r["slug"] == "010-x")
     assert row["answered"] == 1, f"the nav counts the text-only answer as missing: {row}"
+
+
+def test_an_addresses_naming_no_comment_of_its_entry_is_refused(root: Path) -> None:
+    """`addresses: c1` on an entry that has no `c1` satisfies nothing and misleads the reader of the thread.
+
+    Found when an answer to a comment on one entry was appended to another, and both `append` and `validate` passed it.
+    """
+    entry = ("---\nid: 010\ntitle: t\ngroup: topics\n---\n\n"
+             "## prose\naddresses: c1\n\nAnswering a comment that is not here.\n")
+    run = design_review(root, {"010-x": entry})
+    code, out = run("validate", "d")
+    assert code != 0 and "addresses 'c1', which is no comment of this entry" in out and "none" in out, out
 
 
 def test_validate_checks_only_the_entries_it_is_given(root: Path) -> None:

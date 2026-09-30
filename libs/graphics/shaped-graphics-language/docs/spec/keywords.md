@@ -11,12 +11,16 @@ Definitions:
 * `fun` without a name - an anonymous function in expression position, `fun (x) => x + 1` ([AST-101](syntax/ast.md#lambdas-case-and-loop))
 * `let` - declares a variable (TODO: or `var`?)
 * `mut` - marks a variable as mutable, and a binding member as read-write: `dst: mut buffer[float]` ([AST-128](syntax/ast.md#types))
+  On a parameter's type it makes a mut parameter, `p: mut T`, and before an argument it hands over a place, `f(mut x)` ([AST-149](syntax/ast.md#types))
 * `out` - marks a binding member as write-only, which only an image is ([bindings](bindings.md#access))
 * `struct` - defines a new structure type
 * `enum` - defines a new enum type
 * `binding` - defines a new binding group
 * `sampler` - declares a static sampler, at file scope or in a binding; in a type position it denotes the sampler type ([bindings](bindings.md#samplers))
 * `pipeline` - declares a pipeline: its stages and the configuration compiled into it ([pipelines](pipelines.md))
+* `rays` - declares a ray set, the ray types of a ray-tracing pipeline and their payloads; inside a pipeline's block, `rays = set` names one ([AST-150](syntax/ast.md#pipelines))
+* `hit_group` - declares one row of a ray-tracing pipeline's table, `hit_group name for set:` ([raytracing](raytracing.md#hit-groups))
+* `callables` - declares a table of callable shaders, `callables name = (f, g, .host)` ([AST-153](syntax/ast.md#pipelines))
 * `test` - declares a test: a body the check pass runs on its own, where a line of type `bool` is a check ([AST-138](syntax/ast.md#declarations))
 * `const` - real constants
 * `use` - import other modules
@@ -28,12 +32,13 @@ Control flow and expressions:
 
 * `if` - branching
 * `else` - branching else
-* `for` - looping
+* `for` - looping; also names a hit group's ray set, `hit_group name for set:`
 * `while` - looping
 * `loop` - looping
 * `return` - leaves the nearest enclosing `fun`, named or anonymous ([AST-112](syntax/ast.md#jumps))
 * `yield` - **experimental**; gives a value block its value: `yield expression` ([AST-108](syntax/ast.md#value-blocks-and-yield))
 * `continue` - continue next loop iteration
+* `discard` - ends a pixel with no effect; a jump, which only a pixel stage may reach ([CHK-277](semantics/checking.md#entry-points))
 * `break` - breaks from loop iteration
 * `case` - generalized if expression
 

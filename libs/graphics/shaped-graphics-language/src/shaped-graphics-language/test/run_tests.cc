@@ -169,10 +169,16 @@ cc::string_view sgl::test::to_string(test_status s)
         return "judged-by-diagnostics";
     case test_status::uninitialized_read:
         return "uninitialized-read";
+    case test_status::program_error:
+        return "program-error";
+    case test_status::discarded:
+        return "discarded";
     case test_status::internal_error:
         return "internal-error";
     case test_status::stopped:
         return "stopped";
+    case test_status::invalid_bindings:
+        return "invalid-bindings";
     }
     return "";
 }
@@ -223,7 +229,11 @@ cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
     return text;
 }
 
-test_result sgl::test::run_test(checked_module const& m, cc::span<module_file const> files, i32 t, run_limits const& limits)
+test_result sgl::test::run_test(checked_module const& m,
+                                cc::span<module_file const> files,
+                                i32 t,
+                                run_limits const& limits,
+                                driver_bindings const& bindings)
 {
     CC_ASSERT(t >= 0 && t < m.tests.size(), "a test index names a test of the module");
     auto const& test = m.tests[t];
@@ -234,7 +244,12 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
         return result;
 
     auto const& unit = m.test_units[test.unit];
-    auto const o = interpret(m, unit, {}, limits);
+    // EVAL-94: what the test lists takes its values from the driver
+    auto inputs = resolve_inputs(m, unit, bindings);
+    if (inputs.has_error())
+        return {.test = t, .status = test_status::invalid_bindings, .detail = inputs.error().to_string()};
+    auto const o = interpret(m, unit, inputs.value(), limits);
+    write_back(m, o, bindings);
     for (auto s = isize(0); s < unit.check_sites.size() && s < o.sites.size(); ++s)
     {
         auto const& site = unit.check_sites[s];
@@ -287,6 +302,12 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
     case run_status::uninitialized_read:
         result.status = test_status::uninitialized_read;
         break;
+    case run_status::program_error:
+        result.status = test_status::program_error;
+        break;
+    case run_status::discarded:
+        result.status = test_status::discarded;
+        break;
     case run_status::fell_off_the_end:
     case run_status::type_error:
         result.status = test_status::internal_error;
@@ -303,12 +324,13 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
     auto const* unmet = static_cast<test_expectation const*>(nullptr);
     for (auto const& e : test.expectations)
     {
-        if (e.kind != expectation_kind::fail && e.kind != expectation_kind::assert_)
+        if (e.kind != expectation_kind::fail && e.kind != expectation_kind::assert_ && e.kind != expectation_kind::discard)
             continue;
         has_run_expectation = true;
         auto const is_met = e.kind == expectation_kind::fail
                               ? ran == test_status::failed || ran == test_status::assertion_failed
-                              : ran == test_status::assertion_failed;
+                          : e.kind == expectation_kind::assert_ ? ran == test_status::assertion_failed
+                                                                : ran == test_status::discarded;
         if (!is_met && unmet == nullptr)
             unmet = &e;
     }
@@ -321,8 +343,9 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
     else if (unmet != nullptr && ran == test_status::passed)
     {
         result.status = test_status::failed;
-        result.detail = unmet->kind == expectation_kind::fail ? "it was to fail, and it passed"
-                                                              : "it was to stop at an assert, and it ran to its end";
+        result.detail = unmet->kind == expectation_kind::fail    ? "it was to fail, and it passed"
+                      : unmet->kind == expectation_kind::assert_ ? "it was to stop at an assert, and it ran to its end"
+                                                                 : "it was to discard, and it ran to its end";
     }
     return result;
 }
@@ -339,7 +362,7 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
             continue;
         if (test.expects_diagnostics())
             continue;
-        results.push_back(run_test(m, files, i32(t), options.limits));
+        results.push_back(run_test(m, files, i32(t), options.limits, options.bindings));
     }
     return results;
 }
@@ -411,8 +434,17 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
     case test_status::uninitialized_read:
         detail = cc::format("the run read a variable nothing assigned: {}", r.detail);
         break;
+    case test_status::program_error:
+        detail = cc::format("the run has no behaviour past this: {}", r.detail);
+        break;
+    case test_status::discarded:
+        detail = "the run reached a discard, which ends it; `@expect(.discard)` says that is what it is to do";
+        break;
     case test_status::internal_error:
         detail = cc::format("the compiler wrote a tree it cannot run: {}", r.detail);
+        break;
+    case test_status::invalid_bindings:
+        detail = cc::format("what the driver bound does not fit the test's bindings: {}", r.detail);
         break;
     case test_status::passed:
     case test_status::not_run:

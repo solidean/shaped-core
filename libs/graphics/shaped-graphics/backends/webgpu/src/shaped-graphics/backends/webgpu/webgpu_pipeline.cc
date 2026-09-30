@@ -107,6 +107,10 @@ namespace
         return WGPUBlendFactor_DstAlpha;
     case sg::blend_factor::one_minus_dst_alpha:
         return WGPUBlendFactor_OneMinusDstAlpha;
+    case sg::blend_factor::constant:
+        return WGPUBlendFactor_Constant;
+    case sg::blend_factor::one_minus_constant:
+        return WGPUBlendFactor_OneMinusConstant;
     }
     CC_UNREACHABLE("unhandled blend_factor");
 }

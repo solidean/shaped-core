@@ -678,6 +678,7 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
     out.append(f"\nnamespace {manifest.namespace}\n{{\n")
     out.append(sgl_host_code.emit_entry_wrappers(entries.sgl, stems))
     out.append(sgl_host_code.emit_pipelines(entries.sgl, stems))
+    out.append(sgl_host_code.emit_raytracing_pipelines(entries.sgl, stems))
 
     for file in files:
         out.append(f"/// {file.path}\n")
@@ -688,7 +689,7 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
                 for entry_point in entry_points:
                     field_type = wrappers.get((file.path, entry_point), "slib::shader_asset_handle")
                     out.append(f"    {field_type} {entry_point};\n")
-            for described, p in entries.sgl.pipelines:
+            for described, p in entries.sgl.pipelines + entries.sgl.raytracing_pipelines:
                 if described.path == file.path:
                     out.append(f"    {sgl_host_code.pipeline_type(file.stem, p['name'])} {p['name']};\n")
         else:
@@ -798,7 +799,7 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space\n")
     if sgl.vertex_inputs or sgl.memory_structs or any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <cstddef> // offsetof\n")
-    if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}) or sgl.pipelines:
+    if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}) or sgl.pipelines or sgl.raytracing_pipelines:
         out.append("#include <clean-core/thread/async_coroutine.hh>\n")
         out.append("#include <shaped-shader-library/shader_asset.hh> // slib::acquire_compute_pipeline\n")
     if sgl.pipelines:
@@ -865,6 +866,10 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         stems = {f.path: f.stem for f in files}
         out.append(sgl_host_code.emit_pipelines_impl(manifest.name, manifest.namespace, sgl, stems,
                                                     sgl_host_code.entry_wrappers(sgl, stems)))
+    if sgl.raytracing_pipelines:
+        stems = {f.path: f.stem for f in files}
+        out.append(sgl_host_code.emit_raytracing_pipelines_impl(manifest.name, manifest.namespace, sgl, stems,
+                                                               sgl_host_code.entry_wrappers(sgl, stems)))
 
     if bindings:
         out.append(f"\ncc::string {manifest.namespace}::self_check()\n{{\n")

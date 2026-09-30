@@ -7,6 +7,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::impl::buffer_use
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
@@ -203,7 +204,16 @@ private:
     binding_group_handle _snapshot;
     bool _dirty = true;
 
-    // The device's feature::float32_filtering, stamped by the persistent scope right after the backend creates the group.
+    // The buffer each binding outside a binding array last bound, by slot, and the tlas each element binds, by slot and
+    // element, which each snapshot hands on.
+    // Kept only where the context's portability checks are on.
+    cc::vector<impl::buffer_use> _slot_uses;
+    cc::vector<cc::vector<tlas_handle>> _slot_tlases;
+    void record_use(binding_slot slot, int first_element, cc::span<raw_view const> views);
+
+    // Stamped by the persistent scope right after the backend creates the group: the device's
+    // feature::float32_filtering, and whether the context's portability checks are on.
     friend class sg::context_persistent_scope;
     bool _float32_filtering = true;
+    bool _records_buffer_uses = false;
 };

@@ -27,6 +27,8 @@ enum class sgl::described_member_kind : sgl::u8
     image,
     /// A sampler: one the host binds, or a static one of the group, which carries `sampler_state`.
     sampler,
+    /// `acceleration_structure[.geometry]`: the TLAS a trace runs against, which the host binds as a `tlas_view`.
+    acceleration_structure,
 };
 
 /// A static sampler's settings, named as `sg::sampler`'s fields and enum values name them.
@@ -46,6 +48,19 @@ struct sgl::described_sampler
     f32 mip_lod_bias = 0.0f;
 };
 
+/// A file-scope `sampler name:`, a static sampler of the pipeline layout of every entry point that uses it.
+struct sgl::described_file_sampler
+{
+    cc::string name;
+    /// Its position among the file's samplers in declaration order, which is its index in every pipeline layout.
+    i32 index = 0;
+    /// Its `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
+    cc::string sampler_type;
+    described_sampler settings;
+    /// The settings' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
+    cc::string shape;
+};
+
 struct sgl::described_binding_member
 {
     cc::string name;
@@ -57,7 +72,10 @@ struct sgl::described_binding_member
     /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
     /// A resource's position among its binding's resources; -1 for a constant.
+    /// A binding array takes `count` consecutive slots from this one.
     i32 slot = -1;
+    /// A binding array's length; 1 for any other resource and for a constant.
+    i32 count = 1;
     /// A buffer's bytes per element, by the storage rule; 0 for every other kind.
     i32 stride = 0;
     /// What the host binds a resource by, `binding.member`; empty for a constant.
@@ -103,6 +121,12 @@ struct sgl::described_struct_member
     i32 location = -1;
     /// The buffer a vertex input member is read from, and whether it steps per instance; empty on a `@pixel struct`.
     cc::string stream;
+    /// A vertex input member's `sg::vertex_attribute_format` where `@format` states one; empty for its type's own.
+    cc::string format;
+    /// A `@pixel struct` member that is no color target: "depth" or "sample_mask"; empty for a color target.
+    cc::string output;
+    /// A vertex input member's dx12 semantic, which its input layout names it by (EMIT-28); empty on a `@pixel struct`.
+    cc::string semantic;
     bool is_per_instance = false;
 };
 
@@ -146,11 +170,18 @@ struct sgl::described_entry_point
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
+    /// A `@workgroup` binding is left out, since the host binds nothing for it.
     cc::vector<cc::string> bindings;
     /// The `sg::feature`s a device needs to run it, by name, in the enum's order.
     cc::vector<cc::string> features;
     /// What its code does to each binding it lists, a slot it never touches left out (the spec's bindings file, "Footprint").
     cc::vector<check::slot_footprint> footprint;
+    /// The file-scope samplers its code reaches, which its pipeline layout carries, in index order.
+    cc::vector<cc::string> samplers;
+    /// A ray-tracing stage's payload, or a callable's parameter, and its structural hash as 32 hex digits.
+    /// Both empty for any other stage and for a stage without one.
+    cc::string payload;
+    cc::string payload_shape;
 };
 
 /// One field of a pipeline's description, as the check pass resolved it.
@@ -174,6 +205,10 @@ struct sgl::described_pipeline
     /// Entry point names; `pixel` is empty for a pipeline that writes depth alone.
     cc::string vertex;
     cc::string pixel;
+    /// Empty for a pipeline without the stage; the two tessellation stages are both empty or neither.
+    cc::string geometry;
+    cc::string tessellation_control;
+    cc::string tessellation_evaluation;
     /// The binding layout, in group order, and its one `@inline` binding or empty.
     cc::vector<cc::string> layout;
     cc::string inline_constants;
@@ -184,13 +219,91 @@ struct sgl::described_pipeline
     cc::vector<cc::string> targets;
     /// What its stages need of a device together, as `described_entry_point::features`.
     cc::vector<cc::string> features;
+    /// The file-scope samplers any of its stages reaches, in index order.
+    cc::vector<cc::string> samplers;
     /// In the order they apply, each over the ones before it.
     cc::vector<described_pipeline_setting> settings;
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
-    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then `features`,
-    /// then the last setting of every format and of the sample count.
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, and the samplers.
+    /// Then the stages by name, then `features`, then the last setting of every format and of the sample count.
+    /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
+    cc::vector<cc::string> frozen;
+};
+
+/// A `rays` declaration: a ray-tracing pipeline's ray types, in table order.
+struct sgl::described_ray_set
+{
+    cc::string name;
+    /// Each ray type's name, and the struct its payload is.
+    cc::vector<cc::string> rays;
+    cc::vector<cc::string> payloads;
+    /// Parallel to `payloads`: the bytes each takes in a trace's payload, and its structural hash as 32 hex digits.
+    cc::vector<i32> payload_sizes;
+    cc::vector<cc::string> payload_shapes;
+};
+
+/// A `hit_group`: one row of a ray-tracing pipeline's table, a record per ray type of its set.
+struct sgl::described_hit_group
+{
+    cc::string name;
+    cc::string ray_set;
+    bool is_procedural = false;
+    /// Empty for a triangle group.
+    cc::string intersection;
+    /// Per ray type, in the set's order; empty where the record has none.
+    cc::vector<cc::string> closest_hits;
+    cc::vector<cc::string> any_hits;
+    /// Per ray type, a procedural group's traversal function on metal: its intersection and the record's any hit as
+    /// one entry point; empty for a triangle group (CHK-345).
+    cc::vector<cc::string> traversals;
+};
+
+/// A `callables` table: callable shaders of one parameter type, packed in the module's declaration order.
+struct sgl::described_callables
+{
+    cc::string name;
+    cc::string parameter;
+    /// The parameter's structural hash, as 32 hex digits.
+    cc::string parameter_shape;
+    cc::vector<cc::string> entries;
+    /// Whether the host appends callables of its own after every listed one of the module.
+    bool has_host = false;
+    /// Where the table starts in the callable section of every ray-tracing pipeline of the module.
+    i32 offset = 0;
+};
+
+/// A `@raytracing pipeline`: its ray set, its shaders, and what sg's description needs that SGL derives.
+struct sgl::described_raytracing_pipeline
+{
+    cc::string name;
+    cc::string ray_set;
+    cc::string raygen;
+    /// Per ray type, in the set's order; empty for a ray type without a miss.
+    cc::vector<cc::string> misses;
+    /// The listed hit groups, in table order; the host's follow them where `has_host_hit_groups`.
+    cc::vector<cc::string> hit_groups;
+    bool has_host_hit_groups = false;
+    i32 max_recursion_depth = 1;
+    /// In bytes: the largest payload of its set, and the largest attributes a hit reports.
+    i32 max_payload_size = 0;
+    i32 max_attribute_size = 0;
+    /// The binding layout, in group order, and its one `@inline` binding or empty.
+    cc::vector<cc::string> layout;
+    cc::string inline_constants;
+    cc::vector<cc::string> features;
+    /// Every callable of the module's tables, in their order, which the pipeline's callable section holds first.
+    cc::vector<cc::string> callables;
+    bool has_host_callables = false;
+    /// The parameter a host's callable takes, and its structural hash; both empty without `.host` callables.
+    cc::string host_callable_parameter;
+    cc::string host_callable_shape;
+    /// The file-scope samplers any of its shaders reaches, its callables included, in index order.
+    cc::vector<cc::string> samplers;
+    /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
+    /// the ray set with each payload's shape and size, the raygen, the misses, the hit groups and each group's records,
+    /// the callables, the recursion depth, the payload and attribute sizes, the layout, the samplers and the features.
     /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
     cc::vector<cc::string> frozen;
 };
@@ -204,6 +317,12 @@ struct sgl::module_description
     cc::vector<described_memory_struct> memory_structs;
     cc::vector<described_entry_point> entry_points;
     cc::vector<described_pipeline> pipelines;
+    cc::vector<described_ray_set> ray_sets;
+    cc::vector<described_hit_group> hit_groups;
+    cc::vector<described_raytracing_pipeline> raytracing_pipelines;
+    cc::vector<described_callables> callables;
+    /// The file-scope samplers, in index order.
+    cc::vector<described_file_sampler> samplers;
 };
 
 struct sgl::describe_request

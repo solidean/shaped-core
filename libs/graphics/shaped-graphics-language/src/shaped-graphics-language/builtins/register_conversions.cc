@@ -118,6 +118,8 @@ written write_bool32_to_bool(call_context const& c)
             .binds = precedence::comparison};
 }
 
+constexpr cc::string_view k_select[] = {"select"};
+
 cc::string type_name(numeric const& n, i32 width)
 {
     return width == 1 ? cc::string(n.name) : cc::format("{}{}", n.name, width);
@@ -141,6 +143,10 @@ void sgl::builtins::register_conversions(registry& r)
                     .signature = cc::format("@pure @operator(\"as\") fun convert_{}_to_{}(x: {}) -> {}", source, target,
                                             source, target),
                     .evaluate = converter_to(to.kind),
+                    // WGSL folds a constant exactly, and no uint holds a negative int (CHK-312)
+                    .unrepresentable_when_constant
+                    = from.kind == value_kind::scalar_int && to.kind == value_kind::scalar_uint ? impl::negative_as_uint
+                                                                                                : nullptr,
                     .write = {.hlsl = target, .wgsl = wgsl, .msl = target},
                 });
             }
@@ -149,7 +155,7 @@ void sgl::builtins::register_conversions(registry& r)
     r.add(function_record{
         .signature = "@pure @operator(\"as\") fun convert_bool_to_bool32(x: bool) -> bool32",
         .evaluate = bool_to_bool32,
-        .write = {.kind = spelling_kind::custom, .custom = write_bool_to_bool32},
+        .write = {.kind = spelling_kind::custom, .custom = write_bool_to_bool32, .wgsl_names = k_select},
     });
     r.add(function_record{
         .signature = "@pure @operator(\"as\") fun convert_bool32_to_bool(x: bool32) -> bool",

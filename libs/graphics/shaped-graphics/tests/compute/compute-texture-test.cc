@@ -10,6 +10,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture.hh>
+#include <shaped-shader-library/binding/binding_groups.hh>
 
 using namespace cc::primitive_defines;
 
@@ -270,5 +271,161 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
     auto mismatches = 0;
     for (auto i = isize(0); i < texels.size(); ++i)
         mismatches += pixels[i] != texels[i] ? 1 : 0;
+    CHECK(mismatches == 0);
+}
+
+namespace
+{
+/// How many bytes `pipeline`, a build of `textures.copy_clamped`, gets wrong: texel (x, y) samples texel (x - 8, y - 8)
+/// at its centre, and the first half of each axis clamps to texel 0.
+cc::shared_async<int> clamped_copy_mismatches(sg::context_handle ctx, sg::compute_pipeline_handle pipeline)
+{
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampled>();
+    auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::texture);
+    auto const dst = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::image);
+    auto const texels = pattern();
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(src.raw(), cc::span<byte const>(texels));
+    auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                           shaders::sampled{
+                                                               .src = src.as_texture_view(),
+                                                               .smp = {},
+                                                               .dst = dst.as_image_view<sg::pixel_format::rgba8_unorm>(),
+                                                           });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(k_extent, k_extent);
+    auto const written = cmd->download.bytes_from_texture(dst.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const copied = co_await written.bytes();
+    CC_ASSERT(copied.size() == texels.size(), "the copy reads back whole");
+    auto const half = k_extent / 2;
+    auto mismatches = 0;
+    for (auto y = 0; y < k_extent; ++y)
+        for (auto x = 0; x < k_extent; ++x)
+        {
+            auto const from = (cc::max(y - half, 0) * k_extent + cc::max(x - half, 0)) * 4;
+            for (auto c = 0; c < 4; ++c)
+                mismatches += copied[(y * k_extent + x) * 4 + c] != texels[from + c] ? 1 : 0;
+        }
+    co_return mismatches;
+}
+} // namespace
+
+// A file-scope sampler is the pipeline layout's rather than a group's: it clamps, and sg's default sampler repeats.
+ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler of the file, which its pipeline layout holds",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::textures.copy_clamped.acquire_pipeline(*ctx);
+    CHECK((co_await clamped_copy_mismatches(ctx, pipeline)) == 0);
+}
+
+ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler when a cached blob seeds it",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // One shader under two layouts that differ only in their bound sampler's address mode.
+    // On dx12 such a pipeline neither hands out nor takes a blob, for docs/bugs-external/d3d12-cached-pso-static-sampler-mixup/.
+    auto const& shader = co_await shaders::textures.copy_clamped->acquire(*ctx);
+    auto const layout_with = [&](sg::sampler_address_mode address)
+    {
+        sg::bound_sampler const samplers[] = {{.binding = {.name = "clamped",
+                                                           .space = slib::bound_samplers_space,
+                                                           .index = 0,
+                                                           .count = 1,
+                                                           .type = sg::binding_type::sampler},
+                                               .sampler = {.min_filter = sg::sampler_filter::nearest,
+                                                           .mag_filter = sg::sampler_filter::nearest,
+                                                           .address_u = address,
+                                                           .address_v = address}}};
+        return ctx->cached.acquire_pipeline_layout<shaders::sampled>(samplers);
+    };
+    auto const clamping = layout_with(sg::sampler_address_mode::clamp_edge);
+    auto const first = co_await ctx->uncached.create_compute_pipeline_async({.shader = shader, .layout = clamping});
+    auto const twin = co_await ctx->uncached.create_compute_pipeline_async(
+        {.shader = shader, .layout = layout_with(sg::sampler_address_mode::repeat)});
+    auto const rebuilt = co_await ctx->uncached.create_compute_pipeline_async(
+        {.shader = shader, .layout = clamping, .cached_pipeline = first->cached_pipeline_data()});
+
+    if (ctx->backend() == sg::backend_kind::dx12)
+    {
+        CHECK(first->cached_pipeline_data().empty());
+        CHECK(!rebuilt->used_cached_pipeline());
+    }
+    CHECK((co_await clamped_copy_mismatches(ctx, twin)) != 0); // the twin repeats, so the check can tell them apart
+    CHECK((co_await clamped_copy_mismatches(ctx, rebuilt)) == 0);
+}
+
+// The same sampler in a `pipeline` whose vertex stage does not reach it: the one layout of both stages holds it.
+ASYNC_INVOCABLE_TEST("sg - an SGL pipeline carries the sampler of the file its pixel stage samples through",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::textures.clamped_draw);
+
+    // Every row is alike, so which way up a backend draws does not matter.
+    constexpr int extent = 4;
+    auto texels = cc::vector<byte>();
+    for (auto y = 0; y < extent; ++y)
+        for (auto x = 0; x < extent; ++x)
+            texels.push_back_range(cc::span<byte const>({byte(40 + 60 * x), byte(200 - 50 * x), byte(10 * x), byte(255)}));
+    auto const albedo = sg::texture_2d::from_raw(ctx->persistent.create_raw_texture({
+        .format = sg::pixel_format::rgba8_unorm,
+        .dimension = sg::texture_dimension::d2,
+        .width = extent,
+        .height = extent,
+        .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst,
+    }));
+    auto const image
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = extent,
+                                             .height = extent,
+                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto const corner = [](float x, float y, float u, float v)
+    { return shaders::screen_vertex{.corner = tg::vec3f(x, y, 0.0f), .uv = tg::vec2f(u, v)}; };
+    shaders::screen_vertex const quad[] = {
+        corner(-1, -1, 0, 1), corner(1, -1, 1, 1), corner(1, 1, 1, 0),
+        corner(-1, -1, 0, 1), corner(1, 1, 1, 0),  corner(-1, 1, 0, 0),
+    };
+    auto const vertices = ctx->persistent.create_buffer_from_data(quad, sg::buffer_usage::vertex_buffer);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(albedo.raw(), cc::span<byte const>(texels));
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::material>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout, shaders::material{.albedo = albedo.as_texture_view()});
+    {
+        auto pass = cmd->raster.render_to(
+            shaders::textured_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+        pass.bind_pipeline(*pipeline);
+        pass.bind_group(0, *group);
+        pass.bind_vertex_buffer(vertices.as_vertex_buffer());
+        pass.draw({.vertex_range = {.offset = 0, .size = 6}});
+    }
+    auto const future = cmd->download.bytes_from_texture(image.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    // Pixel x samples at 2u - 7/16: clamped, texel columns 0, 1, 3 and 3; repeated, they would be 3, 1, 3 and 1.
+    int const column_of[extent] = {0, 1, 3, 3};
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == texels.size());
+    auto mismatches = 0;
+    for (auto y = 0; y < extent; ++y)
+        for (auto x = 0; x < extent; ++x)
+            for (auto c = 0; c < 4; ++c)
+                mismatches += pixels[(y * extent + x) * 4 + c] != texels[(y * extent + column_of[x]) * 4 + c] ? 1 : 0;
     CHECK(mismatches == 0);
 }

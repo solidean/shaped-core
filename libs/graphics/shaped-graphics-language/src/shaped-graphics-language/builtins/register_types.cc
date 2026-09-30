@@ -16,12 +16,12 @@ struct scalar_family
     cc::string_view wgsl_vector_suffix; ///< `f` of `vec3f`, or empty where WGSL has no alias and writes `vec3<bool>`
     value_kind leaf_kind;
     bool has_layout;    ///< a bool has a different size in every target's block, so it has no place in one
-    bool crosses_edges; ///< an int would need a flat interpolation nothing states yet, and WGSL passes no bool
+    bool crosses_edges; ///< WGSL passes no bool; an int crosses only flat, which the check pass holds it to
 };
 
 constexpr scalar_family k_float_family = {"float", "f32", "f", value_kind::scalar_float, true, true};
-constexpr scalar_family k_int_family = {"int", "i32", "i", value_kind::scalar_int, true, false};
-constexpr scalar_family k_uint_family = {"uint", "u32", "u", value_kind::scalar_uint, true, false};
+constexpr scalar_family k_int_family = {"int", "i32", "i", value_kind::scalar_int, true, true};
+constexpr scalar_family k_uint_family = {"uint", "u32", "u", value_kind::scalar_uint, true, true};
 constexpr scalar_family k_bool_family = {"bool", "bool", "", value_kind::boolean, false, false};
 
 /// A vector of `width` scalars of `family` with the fields `x y [z [w]]`, which every target spells as its own vector.

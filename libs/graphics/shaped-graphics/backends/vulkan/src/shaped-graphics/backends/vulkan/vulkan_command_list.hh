@@ -16,7 +16,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
 
-/// One declare_array_buffer_access call, held until the next dispatch resolves it against the bound groups.
+/// One declare_array_buffer_access call, held until the next dispatch or draw resolves it against the bound groups.
 struct sg::backend::vulkan::vulkan_array_buffer_declare
 {
     cc::string name;
@@ -97,7 +97,7 @@ public:
     cc::vector<vulkan_buffer const*> _pending_barrier_buffers;
     cc::vector<VkBufferMemoryBarrier2> _pending_buffer_barriers;
 
-    // Buffers of an array a dispatch declared nothing for, whose barriers this op folds into one memory barrier.
+    // Buffers of an array a dispatch or draw declared nothing for, whose barriers this op folds into one memory barrier.
     // Their tracked state still moves per buffer; only the emission is shared.
     cc::set<vulkan_buffer const*> _global_barrier_buffers;
     cc::vector<vulkan_texture const*> _pending_barrier_textures;
@@ -159,6 +159,9 @@ public:
     vulkan_pipeline_layout const* _bound_raster_layout = nullptr;
     cc::vector<vulkan_binding_group const*> _bound_raster_groups;
     sg::impl::pipeline_footprint const* _bound_raster_footprint = nullptr;
+    void const* _bound_raster_footprint_owner = nullptr;
+    cc::vector<vulkan_array_buffer_declare> _pending_raster_array_buffer_declares;
+    cc::vector<vulkan_array_texture_declare> _pending_raster_array_texture_declares;
     cc::vector<vulkan_buffer const*> _bound_vertex_buffers;
     vulkan_buffer const* _bound_index_buffer = nullptr;
 
@@ -197,9 +200,15 @@ public:
     // Flushes what the build declared, then records it.
     void record_acceleration_structure_build(built_acceleration_structure const& built);
 
-    /// Resolves the pending array declares against the bound groups and the footprint, and tracks what
-    /// sg::impl::plan_array_declarations decides at `op_stages`; a mismatch is logged against `pipeline`.
-    void declare_array_accesses(void const* pipeline, sg::pipeline_stage_flags op_stages);
+    /// Resolves one bind point's pending array declares against its bound groups and `footprint`, tracks what
+    /// sg::impl::plan_array_declarations decides at `op_stages`, then clears both pending sets.
+    /// A mismatch is logged against `pipeline`.
+    void declare_array_accesses(cc::span<vulkan_binding_group const* const> groups,
+                                sg::impl::pipeline_footprint const* footprint,
+                                void const* pipeline,
+                                sg::pipeline_stage_flags op_stages,
+                                cc::vector<vulkan_array_buffer_declare>& buffer_declares,
+                                cc::vector<vulkan_array_texture_declare>& texture_declares);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
@@ -263,6 +272,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
+    void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                            cc::span<sg::array_buffer_access const> elements) override;
+    void raster_declare_array_texture_access(cc::string_view binding_name,
+                                             cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;
@@ -275,9 +288,11 @@ protected:
     // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
-                                                                  sg::accel_build_flags flags) override;
+                                                                  sg::accel_build_flags flags,
+                                                                  int hit_record_stride) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
-                                                              sg::accel_build_flags flags) override;
+                                                              sg::accel_build_flags flags,
+                                                              int hit_record_stride) override;
     [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
                                                         sg::accel_build_flags flags) override;
     void raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline) override;

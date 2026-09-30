@@ -320,6 +320,39 @@ TEST("slib wgsl - a register-bound static sampler in the reserved group is numbe
     CHECK(find(r.value(), "shadow")->index == 3u);
 }
 
+TEST("slib wgsl - the ray-query polyfill's pool and roots in the reserved group are the backend's, not a binding")
+{
+    auto const r = slib::parse_wgsl_declarations(R"(
+        @group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;
+        @group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4<u32>, 4>;
+        @group(0) @binding(0) var<storage, read_write> hits: array<u32>;
+        @compute @workgroup_size(1) fn main() { hits[0] = sg_acceleration_pool[sg_acceleration_roots[0].x].x; }
+    )");
+    REQUIRE(r.has_value());
+    CHECK(r.value().bindings.size() == 1);
+    CHECK(find(r.value(), "sg_acceleration_pool") == nullptr);
+    CHECK(find(r.value(), "sg_acceleration_roots") == nullptr);
+}
+
+TEST("slib wgsl - the ray-query polyfill's bindings are refused in any other shape")
+{
+    CHECK(error_of(R"(
+        @group(3) @binding(17) var<storage, read_write> sg_acceleration_pool: array<vec4u>;
+        @compute @workgroup_size(1) fn main() {}
+    )")
+              .contains("polyfill's pool"));
+    CHECK(error_of(R"(
+        @group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 2>;
+        @compute @workgroup_size(1) fn main() {}
+    )")
+              .contains("polyfill's roots"));
+    CHECK(error_of(R"(
+        @group(3) @binding(18) var<uniform> roots: array<vec4u, 4>;
+        @compute @workgroup_size(1) fn main() {}
+    )")
+              .contains("polyfill's roots"));
+}
+
 TEST("slib wgsl - anything else in the reserved group is refused")
 {
     CHECK(error_of(R"(

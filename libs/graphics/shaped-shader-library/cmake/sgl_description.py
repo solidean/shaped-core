@@ -16,14 +16,28 @@ from pathlib import Path
 
 # An SGL package spells its stages as SGL does, and `pixel` is sg's fragment stage.
 # The word is the package's and the generated symbol's; sg has one stage, so the enumerator stays `fragment`.
-SGL_STAGES = {"vertex": "vertex", "pixel": "fragment", "compute": "compute"}
+SGL_STAGES = {
+    "vertex": "vertex",
+    "tessellation_control": "tessellation_control",
+    "tessellation_evaluation": "tessellation_evaluation",
+    "geometry": "geometry",
+    "pixel": "fragment",
+    "compute": "compute",
+    "raygen": "raygen",
+    "miss": "miss",
+    "closest_hit": "closest_hit",
+    "any_hit": "any_hit",
+    "intersection": "intersection",
+    "callable": "callable",
+}
 
 # The kinds that generate C++ from a declaration rather than naming an entry point, and what `describe` lists each under.
 BINDING_KIND = "binding"
 VERTEX_INPUT_KIND = "vertex_input"
 RENDER_TARGET_KIND = "render_target"
 PIPELINE_KIND = "pipeline"
-TYPED_KINDS = (BINDING_KIND, VERTEX_INPUT_KIND, RENDER_TARGET_KIND, PIPELINE_KIND)
+RAYTRACING_PIPELINE_KIND = "raytracing_pipeline"
+TYPED_KINDS = (BINDING_KIND, VERTEX_INPUT_KIND, RENDER_TARGET_KIND, PIPELINE_KIND, RAYTRACING_PIPELINE_KIND)
 
 # `path:*` is every entry point and every typed declaration the file holds.
 EVERYTHING = "*"
@@ -44,6 +58,12 @@ class SglFile:
     memory_structs: list[dict] = field(default_factory=list)
     entry_points: list[dict] = field(default_factory=list)
     pipelines: list[dict] = field(default_factory=list)
+    # The file-scope samplers, in index order: the static samplers of the layouts that name them.
+    samplers: list[dict] = field(default_factory=list)
+    # The `rays` sets, the `hit_group`s and the `@raytracing pipeline`s, which a ray-tracing pipeline is built from.
+    ray_sets: list[dict] = field(default_factory=list)
+    hit_groups: list[dict] = field(default_factory=list)
+    raytracing_pipelines: list[dict] = field(default_factory=list)
 
     def binding(self, name: str) -> dict | None:
         return next((b for b in self.bindings if b["name"] == name), None)
@@ -57,6 +77,15 @@ class SglFile:
     def pipeline(self, name: str) -> dict | None:
         return next((p for p in self.pipelines if p["name"] == name), None)
 
+    def raytracing_pipeline(self, name: str) -> dict | None:
+        return next((p for p in self.raytracing_pipelines if p["name"] == name), None)
+
+    def hit_group(self, name: str) -> dict | None:
+        return next((g for g in self.hit_groups if g["name"] == name), None)
+
+    def ray_set(self, name: str) -> dict | None:
+        return next((s for s in self.ray_sets if s["name"] == name), None)
+
 
 @dataclass
 class SglEntries:
@@ -66,11 +95,14 @@ class SglEntries:
     entry_points: list[tuple[str, str, str]] = field(default_factory=list)
     # (path, entry point) -> what the compiler said about it, for every entry point of a file it described.
     described_entry_points: dict[tuple[str, str], dict] = field(default_factory=dict)
+    # path -> the file-scope samplers of a file the compiler described, which its entry points' layouts name.
+    file_samplers: dict[str, list[dict]] = field(default_factory=dict)
     # (file, the described binding)
     bindings: list[tuple[SglFile, dict]] = field(default_factory=list)
     vertex_inputs: list[tuple[SglFile, dict]] = field(default_factory=list)
     render_targets: list[tuple[SglFile, dict]] = field(default_factory=list)
     pipelines: list[tuple[SglFile, dict]] = field(default_factory=list)
+    raytracing_pipelines: list[tuple[SglFile, dict]] = field(default_factory=list)
     # (file, the described struct) for every struct a generated binding places in GPU memory, innermost first.
     memory_structs: list[tuple[SglFile, dict]] = field(default_factory=list)
 
@@ -84,7 +116,9 @@ def describe(tool: Path, source: Path, shown_as: str) -> SglFile:
     data = json.loads(result.stdout)
     return SglFile(path=shown_as, bindings=data["bindings"], structs=data["structs"],
                    memory_structs=data.get("memory_structs", []), entry_points=data["entry_points"],
-                   pipelines=data.get("pipelines", []))
+                   pipelines=data.get("pipelines", []), samplers=data.get("samplers", []),
+                   ray_sets=data.get("ray_sets", []), hit_groups=data.get("hit_groups", []),
+                   raytracing_pipelines=data.get("raytracing_pipelines", []))
 
 
 def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | None) -> SglEntries:
@@ -129,6 +163,7 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
             for e in described.entry_points:
                 add("entry_points", (path, e["name"]), (path, e["stage"], e["name"]))
                 out.described_entry_points[(path, e["name"])] = e
+            out.file_samplers[path] = described.samplers
             for b in described.bindings:
                 add("bindings", (path, b["name"]), (described, b))
             for s in described.structs:
@@ -136,13 +171,15 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
                 add(kind, (path, s["name"]), (described, s))
             for p in described.pipelines:
                 add("pipelines", (path, p["name"]), (described, p))
+            for p in described.raytracing_pipelines:
+                add("raytracing_pipelines", (path, p["name"]), (described, p))
             continue
 
         if len(parts) != 3:
             raise DescriptionError(
                 f"shader package '{package}': entry '{entry}' must be path:*, path:stage:entry_point, "
-                f"path:{BINDING_KIND}:name, path:{VERTEX_INPUT_KIND}:struct, path:{RENDER_TARGET_KIND}:struct "
-                f"or path:{PIPELINE_KIND}:name")
+                f"path:{BINDING_KIND}:name, path:{VERTEX_INPUT_KIND}:struct, path:{RENDER_TARGET_KIND}:struct, "
+                f"path:{PIPELINE_KIND}:name or path:{RAYTRACING_PIPELINE_KIND}:name")
         _, kind, name = parts
 
         if kind in SGL_STAGES:
@@ -163,6 +200,10 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
             found = described.pipeline(name)
             listed = [p["name"] for p in described.pipelines]
             target = "pipelines"
+        elif kind == RAYTRACING_PIPELINE_KIND:
+            found = described.raytracing_pipeline(name)
+            listed = [p["name"] for p in described.raytracing_pipelines]
+            target = "raytracing_pipelines"
         else:
             edge = "vertex" if kind == VERTEX_INPUT_KIND else "pixel"
             found = described.struct(name, edge)

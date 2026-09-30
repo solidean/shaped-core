@@ -17,7 +17,7 @@ cc::result<cc::unit> metal_query_system::create(metal_context& ctx)
     _ctx = &ctx;
     _tick_to_seconds = k_tick_to_seconds;
 
-    // Not probed with a real heap, for the reason `sg::feature::raytracing` is not probed either: a timestamp counter
+    // Not probed with a real heap, for the reason `sg::feature::ray_query` is not probed either: a timestamp counter
     // heap is core to Metal 4, so every device above this backend's floor has one.
     //
     // **Probing would cost a heap per context**, and heaps are a device-wide resource with a limit the tier-2 suite

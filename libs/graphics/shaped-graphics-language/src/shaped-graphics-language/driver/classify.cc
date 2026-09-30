@@ -13,7 +13,8 @@ namespace
 [[nodiscard]] bool is_control_word(cc::string_view w)
 {
     return w == "if" || w == "else" || w == "for" || w == "in" || w == "while" || w == "loop" || w == "return"
-        || w == "break" || w == "continue" || w == "yield" || w == "case" || w == "and" || w == "or" || w == "not";
+        || w == "break" || w == "continue" || w == "yield" || w == "case" || w == "and" || w == "or" || w == "not"
+        || w == "discard";
 }
 
 /// One class per token, filled pass by pass: the syntax first, then declarations, then what the check resolved.
@@ -151,6 +152,8 @@ struct classifier
             return token_class::pipeline;
         case check::symbol_kind::constant:
             return token_class::constant;
+        case check::symbol_kind::sampler:
+            return token_class::binding_member;
         case check::symbol_kind::function:
             switch (s.role)
             {
@@ -363,6 +366,11 @@ struct classifier
                 break;
             case check::target_kind::receiver:
                 set(t, token_class::self_, is_declaration);
+                break;
+            case check::target_kind::array_length:
+                set(t, token_class::field, is_declaration);
+                break;
+            case check::target_kind::array_filled:
                 break;
             }
         }

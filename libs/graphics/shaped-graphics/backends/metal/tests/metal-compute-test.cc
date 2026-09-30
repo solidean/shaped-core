@@ -315,8 +315,7 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
     // it the dispatch reads them with no barrier ordering it after the copies.
     auto declares = cc::vector<sg::array_buffer_access>();
     for (auto e = 0; e < k_inputs; ++e)
-        declares.push_back(
-            {.index = e, .stages = sg::pipeline_stage_flag::compute, .access = sg::access_flag::shader_read});
+        declares.push_back({.index = e, .access = sg::access_flag::shader_read});
     cmd->compute.declare_array_buffer_access("inputs", declares);
 
     cmd->compute.dispatch_groups(k_count, 1, 1);

@@ -62,7 +62,7 @@ cc::result<vulkan_raytracing_shader_table_handle> vulkan_raytracing_shader_table
                                    sg::allocation_info{}, VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR);
     CC_RETURN_IF_ERROR(buffer_result);
 
-    auto table = std::make_shared<vulkan_raytracing_shader_table>(desc.pipeline);
+    auto table = std::make_shared<vulkan_raytracing_shader_table>(desc);
     table->buffer = cc::move(buffer_result.value());
 
     // Upload through an ordinary command list, so the records are in place before any trace reads them.

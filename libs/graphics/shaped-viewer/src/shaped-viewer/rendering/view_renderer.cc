@@ -561,35 +561,30 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         .motion = slot_of(temporal_id::motion_guide(tr.layer)),
         .crossfade = slot_of(temporal_id::denoised_crossfade(tr.layer)),
     };
-    auto const has_guides = ds.normal != nullptr && ds.depth != nullptr && ds.albedo != nullptr && ds.denoised != nullptr;
-    auto const has_specular_guides = has_guides && ds.specular_albedo != nullptr && ds.roughness != nullptr;
+    // The guides are declared together, so they are all present or all absent.
+    auto const has_guides = ds.normal != nullptr && ds.depth != nullptr && ds.albedo != nullptr
+                         && ds.specular_albedo != nullptr && ds.roughness != nullptr && ds.denoised != nullptr;
     auto const has_temporal = has_guides && ds.frame != nullptr && ds.motion != nullptr;
 
     // Set after the hash, like accum_frame, so none of it can restart the accumulation.
     // The guides count on the normal slot's own frames, since they may have started after the mean did.
     // They describe the same image, so they restart whenever it does.
-    //
-    // **Every guide blends on this ONE count, so they must all have been written the same number of times.**
-    // A guide slot younger than the rest therefore restarts all of them rather than blending into a texture nothing
-    // wrote: at count n the first write of a fresh slot is (fresh * n + this frame) / (n + 1), which leaves it
-    // converging up from zero for as many frames again.
-    // The specular pair is the one that can arrive late — a layer switching to a method that reads it declares two new
-    // slots while the mean, which no denoise field reaches, carries on.
     if (has_guides)
     {
-        auto const specular_is_young = has_specular_guides && ds.specular_albedo->accum_frame != ds.normal->accum_frame;
-        if (slot->accum_frame == 0 || specular_is_young)
-        {
-            // Both, never just the one: resetting the count the shader reads while leaving the pair's behind would
-            // make them disagree again on the very next frame, and the restart would repeat forever.
+        if (slot->accum_frame == 0)
             ds.normal->accum_frame = 0;
-            if (has_specular_guides)
-                ds.specular_albedo->accum_frame = 0;
-        }
         fc.write_guides = 1;
         fc.guide_frame = ds.normal->accum_frame;
-        fc.write_specular_guides = has_specular_guides ? 1 : 0;
+        fc.write_specular_guides = 1;
     }
+
+    // Decided before the frame block is uploaded, so the tracer writes this frame's own samples and motion only on the
+    // frames the temporal member reads them.
+    // On the mean's count as `_denoise` sees it, after this frame's increment below.
+    auto const schedule
+        = has_guides ? _schedule_denoise(ctx, l.settings, ds, cc::min(slot->accum_frame + 1, accumulation_frame_cap))
+                     : denoise_schedule{};
+    auto const writes_temporal = has_temporal && schedule.runs_temporal();
 
     if (has_temporal)
     {
@@ -598,7 +593,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         if (ds.frame->reset_hash != scene_hash)
             ds.frame->denoise.reset();
         ds.frame->reset_hash = scene_hash;
+    }
 
+    if (writes_temporal)
+    {
         fc.write_temporal = 1;
         fc.previous_camera = ds.motion->has_last_camera ? ds.motion->last_camera : fc.camera;
     }
@@ -632,10 +630,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
               .guide_normal = has_guides ? ds.normal->texture : sg::texture_2d(),
               .guide_depth = has_guides ? ds.depth->texture : sg::texture_2d(),
               .guide_albedo = has_guides ? ds.albedo->texture : sg::texture_2d(),
-              .guide_specular_albedo = has_specular_guides ? ds.specular_albedo->texture : sg::texture_2d(),
-              .guide_roughness = has_specular_guides ? ds.roughness->texture : sg::texture_2d(),
-              .frame_output = has_temporal ? ds.frame->texture : sg::texture_2d(),
-              .guide_motion = has_temporal ? ds.motion->texture : sg::texture_2d(),
+              .guide_specular_albedo = has_guides ? ds.specular_albedo->texture : sg::texture_2d(),
+              .guide_roughness = has_guides ? ds.roughness->texture : sg::texture_2d(),
+              .frame_output = writes_temporal ? ds.frame->texture : sg::texture_2d(),
+              .guide_motion = writes_temporal ? ds.motion->texture : sg::texture_2d(),
               .instance_table = instance_table,
               .lights = light_buffer,
               .hit_groups = resolved.hit_groups,
@@ -657,6 +655,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (slot->accum_frame < accumulation_frame_cap)
         ++slot->accum_frame;
 
+    // Every frame, the temporal member's or not: the first one it runs after a still period reprojects from here.
     if (has_temporal)
     {
         ds.motion->last_camera = fc.camera;
@@ -667,14 +666,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     {
         if (ds.normal->accum_frame < accumulation_frame_cap)
             ++ds.normal->accum_frame;
-        // Counted on the specular slot too, though nothing reads it as a count: it is what the check above compares
-        // against to notice a pair that joined late.
-        if (has_specular_guides && ds.specular_albedo->accum_frame < accumulation_frame_cap)
-            ++ds.specular_albedo->accum_frame;
         // A denoiser still compiling declines the frame, as a tracer still compiling does: a capture that saved it
         // would hold the raw mean where the caller asked for a denoised image.
         // The trace itself landed, so the accumulation above stands.
-        if (_denoise(cmd, l.settings, *slot, ds, res.traces[trace_index]) == sr::denoise_status::pending)
+        if (_denoise(cmd, l.settings, schedule, *slot, ds, res.traces[trace_index]) == sr::denoise_status::pending)
             return sg::routine_outcome::declined;
     }
     return sg::routine_outcome::executed;
@@ -693,21 +688,11 @@ f32 view_renderer::crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fa
     return cc::min(1.0f, f32(into) / f32(fade_frames));
 }
 
-sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
-                                           render_settings const& settings,
-                                           impl::temporal_slot const& accumulator,
-                                           denoise_slots const& ds,
-                                           sg::texture_2d& presented)
+view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context const& ctx,
+                                                                 render_settings const& settings,
+                                                                 denoise_slots const& ds,
+                                                                 u32 accum_frame)
 {
-    auto& denoised = *ds.denoised;
-    auto const guides = sr::denoise_guides{
-        .albedo = ds.albedo->texture,
-        .specular_albedo = ds.specular_albedo != nullptr ? ds.specular_albedo->texture : sg::texture_2d(),
-        .normal = ds.normal->texture,
-        .roughness = ds.roughness != nullptr ? ds.roughness->texture : sg::texture_2d(),
-        .depth = ds.depth->texture,
-    };
-
     // Temporal while the mean is young, on this frame's own samples: a young mean is barely less noisy than one frame,
     // and a temporal member's history is what makes up the difference.
     // Once the mean has more frames than that, a spatial member on the mean takes over, which keeps the converged image
@@ -720,22 +705,41 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         copy.fresh_samples = fresh;
         return copy;
     };
-    auto const temporal_settings = with_fresh_samples(true);
-    auto const spatial_settings = with_fresh_samples(false);
+    auto schedule = denoise_schedule{
+        .temporal_settings = with_fresh_samples(true),
+        .spatial_settings = with_fresh_samples(false),
+    };
 
     auto const may_run_temporally = ds.frame != nullptr && ds.motion != nullptr
-                                 && sr::is_temporal(sr::resolve_denoise_method(cmd.context(), temporal_settings));
+                                 && sr::is_temporal(sr::resolve_denoise_method(ctx, schedule.temporal_settings));
 
-    // 0 while the temporal member owns the frame, 1 once the spatial one does, and the fade in between — so `temporal`
-    // and `spatial` below are never both false.
+    // 0 while the temporal member owns the frame, 1 once the spatial one does, and the fade in between — so the two
+    // members are never both idle.
     // A layer with no crossfade slot has nowhere to run both at once, so it hands over in one frame whatever it asked for.
     auto const fade_frames = ds.crossfade != nullptr ? settings.temporal_denoise_fade_frames : 0;
-    auto const blend = may_run_temporally
-                         ? crossfade_weight(accumulator.accum_frame, settings.temporal_denoise_frames, fade_frames)
-                         : 1.0f;
+    if (may_run_temporally)
+        schedule.blend = crossfade_weight(accum_frame, settings.temporal_denoise_frames, fade_frames);
+    return schedule;
+}
 
-    auto const temporal = blend < 1.0f;
-    auto const spatial = blend > 0.0f;
+sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
+                                           render_settings const& settings,
+                                           denoise_schedule const& schedule,
+                                           impl::temporal_slot const& accumulator,
+                                           denoise_slots const& ds,
+                                           sg::texture_2d& presented)
+{
+    auto& denoised = *ds.denoised;
+    auto const guides = sr::denoise_guides{
+        .albedo = ds.albedo->texture,
+        .specular_albedo = ds.specular_albedo->texture,
+        .normal = ds.normal->texture,
+        .roughness = ds.roughness->texture,
+        .depth = ds.depth->texture,
+    };
+
+    auto const temporal = schedule.runs_temporal();
+    auto const spatial = schedule.runs_spatial();
 
     // Mid-fade both members run, so the frame carries two denoises.
     // That is the whole price of the fade, and it is why the window is counted in frames rather than seconds: it is
@@ -752,7 +756,7 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         };
         // Its own history, not the spatial member's: each would otherwise throw the other's away on every switch, and
         // the temporal one must survive a still period to be worth anything when the camera moves again.
-        outcome = sr::denoise_routine::execute(cmd, inputs, ds.frame->denoise, temporal_settings);
+        outcome = sr::denoise_routine::execute(cmd, inputs, ds.frame->denoise, schedule.temporal_settings);
     }
 
     if (spatial)
@@ -768,13 +772,14 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
             .output = target,
             .sample_count = u32(cc::max(1, settings.samples_per_pixel)) * accumulator.accum_frame,
         };
-        auto const spatial_outcome = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, spatial_settings);
+        auto const spatial_outcome
+            = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
 
         // Mid-fade the frame is only as good as its worse half: a spatial member that declined leaves the crossfade
         // slot holding an older image, and mixing that in would be a visible jump backwards.
         if (!temporal || !spatial_outcome.is_denoised())
             outcome = spatial_outcome;
-        else if (!sr::mix_routine::execute(cmd, denoised.texture, ds.crossfade->texture, blend))
+        else if (!sr::mix_routine::execute(cmd, denoised.texture, ds.crossfade->texture, schedule.blend))
             outcome.status = sr::denoise_status::pending; // the mix is still compiling, so the fade cannot be applied
     }
 

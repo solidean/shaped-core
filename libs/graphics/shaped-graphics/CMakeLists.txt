@@ -14,11 +14,13 @@ add_library(shaped-graphics
     src/shaped-graphics/command_list/download.cc
     src/shaped-graphics/command_list/copy.cc
     src/shaped-graphics/command_list/compute.cc
+    src/shaped-graphics/command_list/impl/aliasing_scope.cc
     src/shaped-graphics/command_list/raster.cc
     src/shaped-graphics/command_list/raytracing.cc
     src/shaped-graphics/command_list/query.cc
     src/shaped-graphics/query/gpu_timestamp.cc
     src/shaped-graphics/raytracing/acceleration_structure.cc
+    src/shaped-graphics/raytracing/impl/hit_record_check.cc
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/barrier/footprint.cc
     src/shaped-graphics/binding/binding.cc
@@ -93,6 +95,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/routine/routine_registry.hh
     src/shaped-graphics/context/pipeline_cache.hh
     src/shaped-graphics/command_list/command_list.hh
+    src/shaped-graphics/command_list/impl/aliasing_scope.hh
     src/shaped-graphics/command_list/upload.hh
     src/shaped-graphics/command_list/download.hh
     src/shaped-graphics/command_list/copy.hh
@@ -102,6 +105,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/command_list/query.hh
     src/shaped-graphics/query/gpu_timestamp.hh
     src/shaped-graphics/raytracing/acceleration_structure.hh
+    src/shaped-graphics/raytracing/impl/hit_record_check.hh
     src/shaped-graphics/resource/raw_buffer.hh
     src/shaped-graphics/resource/buffer.hh
     src/shaped-graphics/resource/pixel_format.hh
@@ -257,7 +261,9 @@ if(SC_BUILD_TESTS)
         tests/barrier/subresource-test.cc
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
+        tests/barrier/array-plan-test.cc
         tests/context/stats-recording-test.cc
+        tests/raytracing/hit-row-test.cc
     )
     sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
@@ -382,9 +388,23 @@ if(SC_BUILD_TESTS)
             tests/shaders/shader_fixtures.cc
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
+            tests/compute/compute-sync-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
             tests/barrier/footprint-barrier-test.cc
+            tests/pipeline/pipeline_harness.cc
+            tests/pipeline/depth-stencil-test.cc
+            tests/pipeline/blend-test.cc
+            tests/pipeline/raster-state-test.cc
+            tests/pipeline/draw-params-test.cc
+            tests/pipeline/vertex-input-test.cc
+            tests/pipeline/dispatch-test.cc
+            tests/pipeline/pixel-semantics-test.cc
+            tests/pipeline/sampler-test.cc
+            tests/pipeline/texture-shapes-test.cc
+            tests/pipeline/stages-test.cc
+            tests/pipeline/ray-query-test.cc
+            tests/pipeline/raytracing-pipeline-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -398,6 +418,20 @@ if(SC_BUILD_TESTS)
                 textures.sgl:*
                 footprint.sgl:*
                 layout.sgl:*
+                sync.sgl:*
+                binding_arrays.sgl:*
+                rects.sgl:*
+                draws.sgl:*
+                vertex_input.sgl:*
+                dispatch.sgl:*
+                raytracing.sgl:*
+                raytracing_pipeline.sgl:*
+                raytracing_open.sgl:*
+                raytracing_callables.sgl:*
+                pixel_semantics.sgl:*
+                sampling.sgl:*
+                shapes.sgl:*
+                stages.sgl:*
         )
     endif()
 

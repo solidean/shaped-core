@@ -80,6 +80,8 @@ struct dumper
     {
         if (a.is_splat)
             out += "..";
+        if (a.is_mut)
+            out += "mut ";
         if (!a.name.empty())
         {
             if (a.is_dotted_name)
@@ -342,8 +344,9 @@ struct dumper
                 out += ")";
             },
             [&](return_expr const& n) { unary("return", n.value); }, [&](yield_expr const& n)
-            { unary("yield", n.value); }, [&](break_expr const& n) { unary("break", n.value); }, [&](continue_expr const&)
-            { out += "(continue)"; }, [&](struct_type const& n) { dump_fields("struct-type", n.fields, depth); },
+            { unary("yield", n.value); }, [&](break_expr const& n) { unary("break", n.value); },
+            [&](continue_expr const&) { out += "(continue)"; }, [&](discard_expr const&) { out += "(discard)"; },
+            [&](struct_type const& n) { dump_fields("struct-type", n.fields, depth); },
             [&](function_type const& n)
             {
                 out += "(function-type ";
@@ -576,6 +579,11 @@ struct dumper
             {
                 open(n.is_opaque ? "struct:opaque" : "struct");
                 name_or_missing(n.name);
+                if (!n.type_parameters.empty())
+                {
+                    out += " ";
+                    dump_fields("type-params", n.type_parameters, depth);
+                }
                 dump_members(n.members, depth);
             },
             [&](enum_decl const& n)
@@ -626,9 +634,14 @@ struct dumper
             },
             [&](pipeline_decl const& n)
             {
-                open(n.is_short_form ? "pipeline:short" : "pipeline");
+                open(n.is_hit_group    ? "hit_group"
+                     : n.is_callables  ? "callables"
+                     : n.is_short_form ? "pipeline:short"
+                                       : "pipeline");
                 // No name is valid here, unlike every other declaration's missing one.
                 out += n.name.empty() ? cc::string_view("<unnamed>") : file.text_of(n.name);
+                if (n.is_hit_group)
+                    out.appendf(" for {}", file.text_of(n.ray_set));
                 if (n.is_short_form)
                     dump_arguments(n.stages, depth);
                 for (auto const& s : ast.at(n.settings))
@@ -659,6 +672,12 @@ struct dumper
                 // A test has no name, so nothing stands between the tag and its body.
                 out += "(test";
                 attributes(d.attributes);
+                if (!n.bindings.empty())
+                {
+                    out += " (uses";
+                    dump_arguments(n.bindings, depth);
+                    out += ")";
+                }
                 dump_body(n.body, depth);
             },
             [&](field_decl const& n)

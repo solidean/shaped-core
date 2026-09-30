@@ -125,9 +125,14 @@ class Context:
         broken: list[review.ReviewParseError] = []
         for file in paths.entry_files() if files is None else files:
             try:
-                out.append(review.parse_entry_file(file))
+                entry = review.parse_entry_file(file)
             except review.ReviewParseError as e:
                 broken.append(e)
+                continue
+            for line, old, new in entry.retired:
+                print(review.console.yellow(f"WARNING: {file}:{line}: `{old}` was retired, read as `{new}`"),
+                      file=sys.stderr)
+            out.append(entry)
         return out, broken
 
     def warn_broken(self, broken: list[review.ReviewParseError]) -> None:

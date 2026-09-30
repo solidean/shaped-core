@@ -46,8 +46,9 @@ cc::result<webgpu_buffer_handle> webgpu_context::create_webgpu_buffer(isize size
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
     assert_on_device_thread();
-    CC_ASSERT(!usage.has_any(sg::buffer_usage::accel_structure_storage | sg::buffer_usage::accel_structure_build_input),
-              "webgpu has no ray tracing, so no acceleration-structure buffer usage");
+    CC_ASSERT(!usage.has(sg::buffer_usage::accel_structure_storage), "webgpu keeps every acceleration structure in its "
+                                                                     "own pool, so no buffer carries "
+                                                                     "accel_structure_storage");
 
     // A placement is ignored: WebGPU has no heaps, and the stub heap only ever sized one.
     auto wgpu_usage = to_wgpu_buffer_usage(usage);

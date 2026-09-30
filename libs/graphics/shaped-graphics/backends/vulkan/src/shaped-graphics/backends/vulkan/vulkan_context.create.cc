@@ -586,6 +586,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         for (auto const* name : k_raytracing_extensions)
             device_extensions.push_back(name);
 
+    // A point is one pixel in sg, as WebGPU has it, and SGL's vertex stages write no point size.
+    // Vulkan draws a point list only from a stage that writes one, unless maintenance5 makes an unwritten size 1.0.
+    // Optional, since it is above the 1.3 floor: without it a point list drawn with such a shader fails validation.
+    char const* const maintenance5_names[] = {VK_KHR_MAINTENANCE_5_EXTENSION_NAME};
+    bool const maintenance5_supported = device_extensions_available(best_device, maintenance5_names);
+    if (maintenance5_supported)
+        device_extensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
+
     // Logical device with a single graphics queue.
     // Every feature is enabled up front, whether or not the milestone using it has landed: a feature costs nothing
     // unused, and enabling them one at a time means re-editing this chain for each.
@@ -637,6 +645,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto vk13_features = VkPhysicalDeviceVulkan13Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext = &descriptor_buffer_features,
+        // DXC writes HLSL's `discard` as a demotion to a helper, which keeps the pixel in its quad's derivatives.
+        // SGL states that on every target, and the capability is invalid unless the feature, which 1.3 requires, is enabled.
+        .shaderDemoteToHelperInvocation = VK_TRUE,
         .synchronization2 = VK_TRUE,
         .dynamicRendering = VK_TRUE,
     };
@@ -691,20 +702,37 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // chain already carries the 1.1, 1.2 and 1.3 structures.
     // `fragmentStoresAndAtomics` is the one sg needs — without it a fragment shader may not write a storage buffer,
     // which is a binding group sg's raster scope accepts.
+    // `imageCubeArray` is what a cube-array view needs, which WebGPU core binds and every desktop device has.
     // `shaderStorageImageExtendedFormats` is enabled wherever the device has it.
     // sg::feature::extended_image_formats reports it together with bgra8_unorm's per-format storage support.
+    // So are the geometry and tessellation stages, per-sample shading and wireframe fill, which sg::feature reports the same way:
+    // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
+    // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
     auto core_features = VkPhysicalDeviceFeatures2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .pNext = &vk11_features,
-        .features = {.fragmentStoresAndAtomics = VK_TRUE,
+        .features = {.imageCubeArray = supported.imageCubeArray,
+                     .geometryShader = supported.geometryShader,
+                     .tessellationShader = supported.tessellationShader,
+                     .sampleRateShading = supported.sampleRateShading,
+                     .fillModeNonSolid = supported.fillModeNonSolid,
+                     .samplerAnisotropy = supported.samplerAnisotropy,
+                     .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats},
+    };
+
+    auto maintenance5_features = VkPhysicalDeviceMaintenance5FeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
+        .pNext = &core_features,
+        .maintenance5 = VK_TRUE,
     };
 
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &core_features,
+        .pNext = maintenance5_supported ? static_cast<void const*>(&maintenance5_features)
+                                        : static_cast<void const*>(&core_features),
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),

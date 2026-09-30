@@ -27,6 +27,12 @@ struct angle;
 using angle_f = angle<f32>;
 using angle_d = angle<f64>;
 
+/// an IEEE 754 binary16 value, with explicit conversions and arithmetic rounded once per operation
+/// (see scalar/half_float.hh).
+struct half_float;
+
+using f16 = half_float;
+
 namespace impl
 {
 template <int Bits, bool Signed>

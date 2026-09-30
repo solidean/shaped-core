@@ -153,6 +153,46 @@ ASYNC_TEST("sg metal - a TLAS builds over an instance and keeps its BLAS alive")
     CHECK(mtl_tlas.storage().accel() != nullptr);
 }
 
+ASYNC_TEST("sg metal - a TLAS uploads each instance's hit-group offset for the kernel to read")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    auto const vertices = make_vertex_buffer(ctx);
+
+    auto cmd = ctx->create_command_list();
+    auto const geometry = sg::blas_triangles{.vertices = vertices, .vertex_count = 3};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&geometry, 1));
+    REQUIRE(blas != nullptr);
+
+    sg::tlas_instance const instances[3] = {
+        {.blas = blas, .hit_group_offset = 0},
+        {.blas = blas, .hit_group_offset = 2},
+        {.blas = blas, .hit_group_offset = 4},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(instances));
+    REQUIRE(tlas != nullptr);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // The intersection result carries no record index, so this buffer is all a kernel has to find a closest hit.
+    auto const& offsets = static_cast<mtl::metal_tlas const&>(*tlas).hit_group_offsets();
+    REQUIRE(offsets != nullptr);
+    REQUIRE(offsets->size_in_bytes() == 3 * isize(sizeof(u32)));
+
+    auto read = ctx->create_command_list();
+    auto future = read->download.bytes_from_buffer(offsets, 0, offsets->size_in_bytes());
+    ctx->submit_command_list(cc::move(read));
+    co_await ctx->idle_completion();
+
+    auto const bytes = future.try_get_bytes();
+    REQUIRE(bytes.has_value());
+    auto const* const words = reinterpret_cast<u32 const*>(bytes.value().data());
+    CHECK(words[0] == 0u);
+    CHECK(words[1] == 2u);
+    CHECK(words[2] == 4u);
+}
+
 ASYNC_TEST("sg metal - a binding group encodes a tlas as a resource id")
 {
     auto const ctx = mtl::test::make_context();
@@ -582,7 +622,7 @@ ASYNC_TEST("sg metal - each geometry of a BLAS selects its own hit group")
     // Non-opaque, because traversal consults an any-hit only on non-opaque geometry.
     sg::blas_triangles const geometries[2] = {
         {.vertices = vertices, .vertex_count = 3, .is_opaque = false},
-        {.vertices = vertices, .vertex_offset_in_bytes = 9 * isize(sizeof(float)), .vertex_count = 3, .is_opaque = false},
+        {.vertices = vertices, .vertex_count = 3, .vertex_offset_in_bytes = 9 * isize(sizeof(float)), .is_opaque = false},
     };
 
     auto cmd = ctx->create_command_list();
@@ -605,4 +645,164 @@ ASYNC_TEST("sg metal - each geometry of a BLAS selects its own hit group")
     CHECK(values[0] == k_triangle_distance)
         .context(cc::format("thread 0 read {}; geometry 1 ran geometry 0's rejecting any-hit", values[0]));
     CHECK(values[1] == k_miss).context(cc::format("miss thread read {}", values[1]));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Ray types.
+//
+// A table with ray_count 2 gets one intersection function table per ray type, and table r's slot s holds hit record
+// s + r, which is how DXR's per-trace ray contribution becomes a choice of table here.
+// The kernel is MSL source the driver compiles at pipeline build, so this needs no metallib from a host toolchain.
+namespace
+{
+constexpr char const* k_ray_type_msl = R"(
+#include <metal_raytracing>
+#include <metal_stdlib>
+using namespace metal;
+using namespace raytracing;
+
+struct scene_bindings
+{
+    instance_acceleration_structure scene [[id(0)]];
+    device float* out [[id(1)]];
+};
+
+/// Ray type 0's intersection table keeps id 0, and ray type 1's follows the callable table at id 4.
+struct ray_type_tables
+{
+    intersection_function_table<instancing, triangle_data> hit_type0 [[id(0)]];
+    visible_function_table<void(thread float&)> miss [[id(1)]];
+    visible_function_table<void(thread float&, float)> closest_hit [[id(2)]];
+    visible_function_table<void(thread float&)> callable [[id(3)]];
+    intersection_function_table<instancing, triangle_data> hit_type1 [[id(4)]];
+};
+
+[[visible]] void miss_marker(thread float& payload) { payload = -1.0f; }
+[[visible]] void closest_hit_marker(thread float& payload, float distance) { payload = distance; }
+
+[[intersection(triangle, instancing, triangle_data)]]
+bool any_hit_reject(float distance [[distance]])
+{
+    return false;
+}
+
+/// Both threads aim at the fixture triangle; thread 0 traces ray type 0 and thread 1 ray type 1.
+kernel void raygen_ray_types(device scene_bindings& b [[buffer(0)]],
+                             device ray_type_tables& t [[buffer(3)]],
+                             uint tid [[thread_position_in_grid]])
+{
+    ray r;
+    r.origin = float3(0.25f, 0.25f, -1.0f);
+    r.direction = float3(0.0f, 0.0f, 1.0f);
+    r.min_distance = 0.0f;
+    r.max_distance = 100.0f;
+
+    intersector<instancing, triangle_data> isect;
+    auto const hit = tid == 0 ? isect.intersect(r, b.scene, 0xFF, t.hit_type0)
+                              : isect.intersect(r, b.scene, 0xFF, t.hit_type1);
+
+    float payload = 0.0f;
+    if (hit.type == intersection_type::none)
+        t.miss[0](payload);
+    else
+        t.closest_hit[0](payload, hit.distance);
+
+    b.out[tid] = payload;
+}
+)";
+
+[[nodiscard]] sg::compiled_shader ray_type_shader(sg::shader_stage stage, cc::string entry_point)
+{
+    auto const source = cc::string_view(k_ray_type_msl);
+    auto shader = sg::compiled_shader{};
+    shader.stage = stage;
+    shader.format = sg::shader_format::msl;
+    shader.entry_point = cc::move(entry_point);
+    auto blob = cc::pinned_data<byte>::create_uninitialized(source.size());
+    cc::memcpy(blob.data(), source.data(), size_t(source.size()));
+    shader.bytecode = cc::pinned_data<byte const>(cc::move(blob));
+    shader.workgroup_size = sg::compute_dimensions{.x = 1, .y = 1, .z = 1};
+    return shader;
+}
+} // namespace
+
+ASYNC_TEST("sg metal - each ray type traces through its own intersection table")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // Geometry 0 is out of the ray's path; geometry 1 is the fixture triangle.
+    // Non-opaque, because traversal consults an any-hit only on non-opaque geometry.
+    constexpr float k_two_triangles[18] = {
+        10, 10, 0, 11, 10, 0, 10, 11, 0, // geometry 0
+        0,  0,  0, 1,  0,  0, 0,  1,  0, // geometry 1
+    };
+    auto const vertices = ctx->persistent.create_raw_buffer(
+        isize(sizeof(k_two_triangles)), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+    auto upload = ctx->create_command_list();
+    upload->upload.bytes_to_buffer(vertices, cc::as_bytes(cc::span<float const>(k_two_triangles)));
+    ctx->submit_command_list(cc::move(upload));
+
+    // Handles and rows first, since the rows decide the instance's offset; the pipeline follows the scene's layout.
+    auto desc = sg::raytracing_pipeline_description{};
+    auto const raygen = desc.add_raygen_shader(ray_type_shader(sg::shader_stage::raygen, "raygen_ray_types"));
+    auto const miss = desc.add_miss_shader(ray_type_shader(sg::shader_stage::miss, "miss_marker"));
+    auto const accept
+        = desc.add_hit_shader({.closest_hit = ray_type_shader(sg::shader_stage::closest_hit, "closest_hit_marker")});
+    auto const reject
+        = desc.add_hit_shader({.closest_hit = ray_type_shader(sg::shader_stage::closest_hit, "closest_hit_marker"),
+                               .any_hit = ray_type_shader(sg::shader_stage::any_hit, "any_hit_reject")});
+
+    // Records: 0 and 1 reject, 2 and 3 reject, 4 accepts, 5 rejects.
+    // The instance takes row 1's offset, 2, so geometry 1 reads slot 2 + 1 * 2 = 4 in every table:
+    // record 4 through ray type 0's table, and record 5 through ray type 1's.
+    auto table_desc = sg::raytracing_shader_table_description{.ray_count = 2};
+    auto const raygen_slot = table_desc.add_raygen_shader(raygen);
+    (void)table_desc.add_miss_shader(miss);
+    sg::hit_shader_handle const rejects[2] = {reject, reject};
+    sg::hit_shader_handle const accepts_type0[2] = {accept, reject};
+    (void)table_desc.add_hit_row(rejects);
+    auto const instance_row = table_desc.add_hit_row(rejects);
+    (void)table_desc.add_hit_row(accepts_type0);
+
+    sg::blas_triangles const geometries[2] = {
+        {.vertices = vertices, .vertex_count = 3, .is_opaque = false},
+        {.vertices = vertices, .vertex_count = 3, .vertex_offset_in_bytes = 9 * isize(sizeof(float)), .is_opaque = false},
+    };
+    auto cmd = ctx->create_command_list();
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(geometries),
+                                                 sg::accel_build_flag::fast_trace, 2);
+    auto const instance = sg::tlas_instance{.blas = blas, .hit_group_offset = u32(instance_row)};
+    auto const tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&instance, 1));
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const scene = finish_scene(ctx, tlas);
+    auto const group = bind_scene(ctx, scene);
+
+    desc.layout = scene.pipeline_layout;
+    auto pipeline = ctx->create_metal_raytracing_pipeline(desc, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
+
+    table_desc.pipeline = pipeline.value();
+    auto table = ctx->create_metal_raytracing_shader_table(table_desc, sg::lifetime_scope::persistent);
+    REQUIRE(table.has_value()).context(table.has_error() ? table.error().to_string() : cc::string());
+    CHECK(table.value()->offset_of(instance_row) == 2u);
+
+    auto trace = ctx->create_command_list();
+    trace->raytracing.bind_pipeline(*pipeline.value());
+    trace->raytracing.bind_group(0, *group);
+    trace->raytracing.dispatch_rays(*table.value(), raygen_slot, int(k_thread_count), 1, 1);
+    auto future = trace->download.bytes_from_buffer(scene.out, 0, scene.out->size_in_bytes());
+    ctx->submit_command_list(cc::move(trace));
+    co_await ctx->idle_completion();
+
+    auto const bytes = future.try_get_bytes();
+    REQUIRE(bytes.has_value());
+    auto const* const values = reinterpret_cast<float const*>(bytes.value().data());
+
+    // A hit on thread 1 would mean both ray types used one table; a miss on thread 0 would mean the BLAS ignored its stride.
+    CHECK(values[0] == k_triangle_distance)
+        .context(cc::format("ray type 0 read {}, expected record 4 to accept the hit", values[0]));
+    CHECK(values[1] == k_miss).context(cc::format("ray type 1 read {}, expected record 5 to reject the hit", values[1]));
 }

@@ -566,7 +566,8 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     cmd.raytracing.bind_group(0, *group);
     cmd.raytracing.bind_group(1, *d.bindless->group());
 
-    // Every bound array binding must be declared before the dispatch, the empty ones included.
+    // An array the code indexes and nobody declared is logged and barriered whole, so every table is declared, the
+    // empty ones included.
     d.bindless->declare_raytracing_access(cmd);
 
     cmd.raytracing.dispatch_rays(*variant->table, variant->raygen, d.output.width(), d.output.height());

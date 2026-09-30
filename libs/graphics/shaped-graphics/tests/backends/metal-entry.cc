@@ -30,6 +30,7 @@ ASYNC_TEST("sg metal backend")
     else
     {
         (void)sg_test::shader_fixtures(); // alive before any child acquires through it
+        ctx.value()->set_portability_checks(true);
         co_await nx::async_invoke_tests_in_sequence("metal", ctx.value());
 
         // A device loss during our own tests is a defect rather than an environment quirk to tolerate.

@@ -1,7 +1,9 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/string/format.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_binding_group_layout.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_pipeline_layout.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
 
 namespace sg::backend::vulkan
@@ -15,13 +17,72 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     if (int(desc.groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
-    // Refused rather than accepted: this backend binds no pipeline-level sampler to a set a shader could read.
-    // The gap is libs/graphics/shaped-graphics/docs/TODO.md's, and a group's name-matched static sampler is the working form.
-    if (!desc.static_samplers.empty())
-        return cc::error("pipeline_layout: a pipeline-level static sampler (bound_sampler) is not bound by the vulkan "
-                         "backend yet; declare it a group's static sampler instead");
-
     auto const hash = sg::impl::pipeline_layout_hash(desc);
+
+    auto bound_samplers = cc::vector<VkSampler>();
+    auto reserved_set_layout = VkDescriptorSetLayout(VK_NULL_HANDLE);
+    auto empty_set_layout = VkDescriptorSetLayout(VK_NULL_HANDLE);
+    auto const destroy_reserved = [&]
+    {
+        if (reserved_set_layout != VK_NULL_HANDLE)
+            vkDestroyDescriptorSetLayout(ctx._device, reserved_set_layout, nullptr);
+        if (empty_set_layout != VK_NULL_HANDLE)
+            vkDestroyDescriptorSetLayout(ctx._device, empty_set_layout, nullptr);
+    };
+
+    if (!desc.static_samplers.empty())
+    {
+        auto reserved_bindings = cc::vector<VkDescriptorSetLayoutBinding>();
+        for (isize i = 0; i < desc.static_samplers.size(); ++i)
+        {
+            // sg refused a malformed or colliding one before the backend saw it.
+            auto const& s = desc.static_samplers[i];
+
+            // The context's cache owns the sampler, and outlives every in-flight use of it.
+            auto const sampler = ctx._samplers.acquire(s.sampler);
+            if (sampler == VK_NULL_HANDLE)
+            {
+                destroy_reserved();
+                return cc::error(
+                    cc::format("pipeline_layout: could not create the bound sampler for '{}'", s.binding.name));
+            }
+            bound_samplers.push_back(sampler);
+        }
+        // Filled only once every sampler exists, since a binding points into `bound_samplers`.
+        for (isize i = 0; i < desc.static_samplers.size(); ++i)
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = desc.static_samplers[i].binding.index + 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+                .pImmutableSamplers = &bound_samplers[i],
+            });
+
+        auto const reserved_info = VkDescriptorSetLayoutCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT
+                   | VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT,
+            .bindingCount = u32(reserved_bindings.size()),
+            .pBindings = reserved_bindings.data(),
+        };
+        if (VkResult const r = vkCreateDescriptorSetLayout(ctx._device, &reserved_info, nullptr, &reserved_set_layout);
+            r != VK_SUCCESS)
+        {
+            destroy_reserved();
+            return vulkan_error(r, "vkCreateDescriptorSetLayout (reserved set) failed");
+        }
+
+        auto const empty_info = VkDescriptorSetLayoutCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT,
+        };
+        if (VkResult const r = vkCreateDescriptorSetLayout(ctx._device, &empty_info, nullptr, &empty_set_layout);
+            r != VK_SUCCESS)
+        {
+            destroy_reserved();
+            return vulkan_error(r, "vkCreateDescriptorSetLayout (empty set) failed");
+        }
+    }
 
     // A group's position in the description is its bind slot, and the same index is the `firstSet` a bind command
     // passes — so the ordering here is the whole of what dx12 needs a root-parameter index table for.
@@ -34,6 +95,12 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         CC_ASSERT(vk_group != nullptr, "binding group layout is not a vulkan one");
         set_layouts.push_back(vk_group->_layout);
         groups.push_back(group);
+    }
+    if (reserved_set_layout != VK_NULL_HANDLE)
+    {
+        while (set_layouts.size() < sg::reserved_binding_group)
+            set_layouts.push_back(empty_set_layout);
+        set_layouts.push_back(reserved_set_layout);
     }
 
     // Inline constants become one push-constant range visible to every stage, matching how the binding itself is
@@ -64,19 +131,37 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
 
     VkPipelineLayout layout = VK_NULL_HANDLE;
     if (VkResult const r = vkCreatePipelineLayout(ctx._device, &info, nullptr, &layout); r != VK_SUCCESS)
+    {
+        destroy_reserved();
         return vulkan_error(r, "vkCreatePipelineLayout failed");
+    }
 
-    return vulkan_pipeline_layout_handle(std::make_shared<vulkan_pipeline_layout>(ctx, hash, layout, cc::move(groups),
-                                                                                  desc.inline_constants, inline_bytes));
+    auto result = std::make_shared<vulkan_pipeline_layout>(ctx, hash, layout, cc::move(groups), desc.inline_constants,
+                                                           inline_bytes);
+    result->_reserved_set_layout = reserved_set_layout;
+    result->_empty_set_layout = empty_set_layout;
+    return vulkan_pipeline_layout_handle(cc::move(result));
 }
 
-// Immediate rather than epoch-deferred, unchanged from what the destructor always did: a layout is consumed at
-// pipeline-creation and descriptor-allocation time, so no in-flight work names it.
+void vulkan_pipeline_layout::bind_embedded_samplers(VkCommandBuffer buffer, VkPipelineBindPoint bind_point) const
+{
+    if (_reserved_set_layout != VK_NULL_HANDLE)
+        _ctx._descriptor_functions.cmd_bind_embedded_samplers(buffer, bind_point, _layout,
+                                                              u32(sg::reserved_binding_group));
+}
+
+// Immediate rather than epoch-deferred: the layout objects are consumed at pipeline-creation and descriptor-allocation time, so no in-flight work names them.
 void vulkan_pipeline_layout::release_backend_objects()
 {
     if (_layout != VK_NULL_HANDLE)
         vkDestroyPipelineLayout(_ctx._device, _layout, nullptr);
+    if (_reserved_set_layout != VK_NULL_HANDLE)
+        vkDestroyDescriptorSetLayout(_ctx._device, _reserved_set_layout, nullptr);
+    if (_empty_set_layout != VK_NULL_HANDLE)
+        vkDestroyDescriptorSetLayout(_ctx._device, _empty_set_layout, nullptr);
     _layout = VK_NULL_HANDLE;
+    _reserved_set_layout = VK_NULL_HANDLE;
+    _empty_set_layout = VK_NULL_HANDLE;
 }
 
 vulkan_pipeline_layout::~vulkan_pipeline_layout()

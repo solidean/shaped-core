@@ -88,15 +88,17 @@ TEST("sgl check - a test reads nothing of the function it stands in")
           == "test-captures-runtime-value user:[frame] frame is a binding of f, and a test runs on its own\n");
 }
 
-TEST("sgl check - a test lists no binding, and a callee that needs one is told how it will get it")
+TEST("sgl check - a test reads only the bindings it lists, and a callee that needs another is told how to list it")
 {
-    // CHK-228
+    // CHK-228, CHK-333
     CHECK(reports_for("binding frame:\n    e: float\nfun g(){frame} -> float => frame.e\ntest g() > 0.0\n")
-          == "binding-not-listed user:[g()] g needs frame, and a test lists no binding\n"
-             "  note user:[g()] a `binding frame:` declared in the test gives g its values, once local bindings are "
-             "carried\n");
+          == "binding-not-listed user:[g()] g needs frame, and the test does not list it\n"
+             "  note user:[g()] `test {frame}:` lists it, and the driver that runs the test gives its values\n");
     CHECK(reports_for("binding frame:\n    e: float\ntest frame.e > 0.0\n")
-          == "binding-not-listed user:[frame] frame is a binding, and a test lists none\n");
+          == "binding-not-listed user:[frame] frame is a binding, and the test does not list it\n");
+    CHECK(reports_for("binding frame:\n    e: float\nfun g(){frame} -> float => frame.e\ntest {frame}:\n    g() >= "
+                      "0.0\n")
+          == "");
 }
 
 TEST("sgl check - assert takes a bool, anywhere")
@@ -138,4 +140,13 @@ TEST("sgl check - an assert whose condition writes is refused, and one that only
                       + "@compute(64) fun main(@thread_id id: int3){work}:\n    assert half(1.0) > 0.0\n"
                         "    work.values[id.x] = 1.0\n")
           == "");
+}
+
+TEST("sgl check - a test takes no derivative, since its run is one invocation with no quad around it")
+{
+    auto const reports = reports_for("fun edge(x: float) -> float => ddx(x)\n\ntest edge(1.0) == 0.0\n");
+    CHECK(reports.contains("stage-not-allowed"));
+    CHECK(reports.contains("ddx takes derivatives across a quad of pixels, and a test runs one invocation"));
+    // a function that takes one is still fine where no test reaches it
+    CHECK(reports_for("fun edge(x: float) -> float => ddx(x)\n") == "");
 }

@@ -11,6 +11,8 @@ struct sgl::check::legalize_options
     bool skip_pinning = false;
     /// Skips the tests of rule X5, so an exit that crossed a construct ends there.
     bool skip_flag_tests = false;
+    /// Keeps the emulated form of every `flat_by_target` rather than the native one: the target has no native form.
+    bool is_emulated = false;
 };
 
 namespace sgl::check

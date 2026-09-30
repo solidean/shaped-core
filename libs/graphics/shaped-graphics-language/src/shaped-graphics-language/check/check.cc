@@ -1,8 +1,10 @@
 #include "check.hh"
 
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
+#include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 
 using namespace sgl;
@@ -25,6 +27,54 @@ checked_module sgl::check::check(cc::span<module_file const> prelude, module_fil
     return check(prelude, user, builtins::default_registry());
 }
 
+sgl::check::checked_prelude::checked_prelude() = default;
+sgl::check::checked_prelude::checked_prelude(checked_prelude&&) noexcept = default;
+sgl::check::checked_prelude& sgl::check::checked_prelude::operator=(checked_prelude&&) noexcept = default;
+sgl::check::checked_prelude::~checked_prelude() = default;
+
+cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file const> prelude,
+                                                        builtins::registry const& builtins)
+{
+    // The program's file stands behind the prelude even when it is empty, since that is what makes a file the prelude's.
+    auto const empty_file = parse("");
+    auto const empty_ast = ast::build(empty_file);
+    auto result = checked_prelude();
+    result._files.push_back_range(prelude);
+    auto files = cc::vector<module_file>();
+    files.push_back_range(prelude);
+    files.push_back({.file = empty_file, .ast = empty_ast});
+
+    result._state = cc::make_unique<checker>(checker{.files = files, .builtins = builtins});
+    auto& c = *result._state;
+    c.out.builtins = &builtins;
+    c.run();
+    if (!c.out.diagnostics.empty())
+        return {};
+    // The empty file's tables are the program's to replace, and nothing may point into the empty file past here.
+    c.files = {};
+    c.out.files.remove_back();
+    c.file_features.remove_back();
+    result._resume = {
+        .files = i32(prelude.size()),
+        .symbols = c.out.symbols.size(),
+        .extensions = c.pending_extensions.size(),
+        .tests = c.out.tests.size(),
+        .wide_literals = c.wide_literals.size(),
+    };
+    return result;
+}
+
+checked_module sgl::check::check(checked_prelude const& prelude, module_file user)
+{
+    auto files = cc::vector<module_file>();
+    files.push_back_range(prelude._files);
+    files.push_back(user);
+    auto c = *prelude._state;
+    c.files = files;
+    c.run(prelude._resume);
+    return cc::move(c.out);
+}
+
 // ---- number literals ------------------------------------------------------------------------------------------------
 
 number_class impl::classify_number(cc::string_view text)
@@ -42,6 +92,22 @@ number_class impl::classify_number(cc::string_view text)
 
     if (at < size && (text[at] == '-' || text[at] == '+'))
         ++at;
+
+    // NUM-10: `0x` and `0b` spell an integer like any other, held to the type asked of it (CHK-269)
+    if (at + 1 < size && text[at] == '0' && (text[at + 1] == 'x' || text[at + 1] == 'b'))
+    {
+        auto const is_hex = text[at + 1] == 'x';
+        at += 2;
+        auto const start = at;
+        while (at < size
+               && (text[at] == '\'' || (text[at] >= '0' && text[at] <= '1')
+                   || (is_hex
+                       && (is_digit(text[at]) || (text[at] >= 'a' && text[at] <= 'f')
+                           || (text[at] >= 'A' && text[at] <= 'F')))))
+            ++at;
+        return at > start && at == size ? number_class::plain_integer : number_class::other;
+    }
+
     if (!digits())
         return number_class::other;
     if (at == size)
@@ -78,11 +144,43 @@ cc::optional<f64> impl::parse_plain_float(cc::string_view text)
 
 cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
 {
-    auto plain = cc::string();
-    for (auto const c : text)
-        if (c != '\'' && c != '+')
-            plain += c;
-    return cc::from_string<i64>(plain);
+    auto at = isize(0);
+    auto const is_negative = !text.empty() && text[0] == '-';
+    if (!text.empty() && (text[0] == '-' || text[0] == '+'))
+        ++at;
+    auto base = u64(10);
+    if (at + 1 < text.size() && text[at] == '0' && (text[at + 1] == 'x' || text[at + 1] == 'b'))
+    {
+        base = text[at + 1] == 'x' ? 16 : 2;
+        at += 2;
+    }
+
+    // The magnitude of the most negative i64 is one past the largest positive one.
+    auto const limit = is_negative ? u64(1) << 63 : (u64(1) << 63) - 1;
+    auto magnitude = u64(0);
+    auto has_digit = false;
+    for (; at < text.size(); ++at)
+    {
+        auto const c = text[at];
+        if (c == '\'')
+            continue;
+        auto digit = u64(0);
+        if (c >= '0' && c <= '9')
+            digit = u64(c - '0');
+        else if (c >= 'a' && c <= 'f')
+            digit = u64(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F')
+            digit = u64(c - 'A' + 10);
+        else
+            return cc::nullopt;
+        if (digit >= base || magnitude > (limit - digit) / base)
+            return cc::nullopt;
+        magnitude = magnitude * base + digit;
+        has_digit = true;
+    }
+    if (!has_digit)
+        return cc::nullopt;
+    return is_negative ? i64(0u - magnitude) : i64(magnitude);
 }
 
 cc::optional<i32> impl::parse_plain_integer(cc::string_view text)
@@ -172,6 +270,9 @@ isize checker::error_count() const
 
 ast::attribute const* checker::find_attribute(i32 file, ast::range_of<ast::attribute> range, cc::string_view name) const
 {
+    // most declarations carry none, and this is asked many names per declaration
+    if (range.empty())
+        return nullptr;
     for (auto const& a : ast_of(file).at(range))
         if (text_of(file, a.name) == name)
             return &a;
@@ -219,8 +320,9 @@ void checker::judge_attributes(i32 file,
                 report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
                        "@shadowable takes `false` or `true`, as in @shadowable(false)");
         }
-        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream"
-                 && name != "stages" && name != "shadowable" && name != "expect")
+        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream" && name != "stages"
+                 && name != "shadowable" && name != "expect" && name != "interpolate" && name != "format"
+                 && name != "depth" && name != "sampler" && name != "geometry" && name != "tessellation_control")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }
@@ -240,11 +342,14 @@ void checker::set_target(i32 file, ast::expr_id expr, target where)
 
 // ---- the driver -----------------------------------------------------------------------------------------------------
 
-void checker::run()
+void checker::run(resume_point from)
 {
-    out.types.push_back({.kind = type_kind::error});
-    out.types.push_back({.kind = type_kind::void_});
-    for (auto file = i32(0); file < i32(files.size()); ++file)
+    if (from.files == 0)
+    {
+        out.types.push_back({.kind = type_kind::error});
+        out.types.push_back({.kind = type_kind::void_});
+    }
+    for (auto file = from.files; file < i32(files.size()); ++file)
     {
         auto const count = ast_of(file).exprs.size();
         out.files.push_back({
@@ -255,28 +360,28 @@ void checker::run()
         file_features.push_back({});
     }
 
-    for (auto file = i32(0); file < i32(files.size()); ++file)
+    for (auto file = from.files; file < i32(files.size()); ++file)
         declare_file(file);
-    declare_constructors();
+    declare_constructors(from.symbols);
     merge_scopes();
-    attach_extensions();
+    attach_extensions(from.extensions);
 
     // Source order is only the order of the first demand: whatever a symbol needs is compiled from inside it.
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].state == symbol_state::untouched)
             compile(symbol_id(i));
 
-    judge_redeclarations();
+    judge_redeclarations(from.symbols);
 
     // A default is checked where it is declared, once, and a call binds against the signature alone (CHK-243).
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_defaults(symbol_id(i));
 
     // A call needs a signature only, so each body is checked once, after every signature is known.
     // That is what lets a function call one declared below it.
     // The exception checked its body already: an arrow body without `-> T`, whose signature is not known before.
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_body(symbol_id(i));
 
@@ -285,24 +390,30 @@ void checker::run()
     add_unregistered_tests();
 
     // Last, since a test in a function body is found while that body is checked (CHK-224).
-    for (auto i = isize(0); i < out.tests.size(); ++i)
+    for (auto i = from.tests; i < out.tests.size(); ++i)
         check_test(i32(i));
 
-    judge_wide_literals();
+    judge_wide_literals(from.wide_literals);
     find_recursion();
 
     // Every binding and body is checked by now, so what each entry point needs and declares is known.
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             judge_entry_features(symbol_id(i));
-    report_unused_requires();
 
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    index_builtin_symbols();
+    instantiate_generics();
+    for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             flatten_entry_point(symbol_id(i));
-    for (auto i = isize(0); i < out.tests.size(); ++i)
+    flatten_metal_traversals();
+    for (auto i = from.tests; i < out.tests.size(); ++i)
         flatten_test(i32(i));
+    // after flattening, which finds what a body's calls need (CHK-322)
+    report_unused_requires();
     judge_footprint_pins();
+    judge_trace_graphs();
+    judge_callables();
 }
 
 void checker::declare_file(i32 file)
@@ -325,6 +436,8 @@ void checker::add_symbol(symbol s, source_span name_where)
     if (!spelling.empty())
     {
         operators[spelling].push_back(id);
+        if (is_prelude_file(file))
+            prelude_operators[spelling].push_back(id);
         return;
     }
 
@@ -428,9 +541,9 @@ void checker::add_member(symbol s, source_span name_where)
     type_scopes[i32(index_of(owner))][name].push_back(id);
 }
 
-void checker::attach_extensions()
+void checker::attach_extensions(isize first)
 {
-    for (auto const& pending : pending_extensions)
+    for (auto const& pending : cc::span<pending_extension const>(pending_extensions).subspan(first))
     {
         auto const file = pending.file;
         auto const& d = ast_of(file).at(pending.declaration).node;
@@ -502,17 +615,36 @@ cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, typ
     if (is_prelude_file(out.at(type.symbol).file))
         if (auto const* const declared = prelude_names.get_ptr(name))
             for (auto const id : *declared)
-                if (out.at(id).kind == symbol_kind::function)
+                if (out.at(id).kind == symbol_kind::function && is_visible_from(file, id))
                     add(id);
     return result;
 }
 
-void checker::judge_redeclarations()
+void checker::judge_redeclarations(isize first)
 {
+    // Two overloads can clash only when their parameters hash alike, so each meets only the earlier ones that do.
+    auto const signature_hash = [&](symbol const& s) -> u64
+    {
+        auto h = u64(0);
+        for (auto const& p : out.at(out.functions[s.info].parameters))
+            h = cc::make_hash(h, u32(p.type), p.name, p.is_named_only);
+        return h;
+    };
     auto const judge = [&](cc::span<symbol_id const> set)
     {
+        auto is_new = false;
+        for (auto const id : set)
+            is_new = is_new || index_of(id) >= first;
+        if (set.size() < 2 || !is_new)
+            return;
+        auto earlier = cc::map<u64, cc::vector<isize>>();
         for (auto i = isize(0); i < set.size(); ++i)
-            for (auto j = isize(0); j < i; ++j)
+        {
+            auto const& candidate = out.at(set[i]);
+            if (candidate.kind != symbol_kind::function || candidate.info < 0)
+                continue;
+            auto& alike = earlier[signature_hash(candidate)];
+            for (auto const j : alike)
             {
                 auto const& a = out.at(set[j]);
                 auto const& b = out.at(set[i]);
@@ -539,6 +671,8 @@ void checker::judge_redeclarations()
                 // No call could choose between the two, so the later one is out of every lookup.
                 out.symbols[index_of(later)].state = symbol_state::failed;
             }
+            alike.push_back(i);
+        }
     };
     for (auto const& [name, ids] : prelude_names)
         judge(ids);
@@ -560,10 +694,10 @@ bool checker::is_overload_set(cc::span<symbol_id const> ids) const
     return true;
 }
 
-void checker::declare_constructors()
+void checker::declare_constructors(isize first)
 {
     auto const count = out.symbols.size();
-    for (auto i = isize(0); i < count; ++i)
+    for (auto i = first; i < count; ++i)
     {
         auto const s = out.symbols[i];
         if (s.kind != symbol_kind::structure)
@@ -595,9 +729,21 @@ bool checker::is_all_functions(cc::span<symbol_id const> ids) const
     return result;
 }
 
+bool checker::is_internal(symbol_id id) const
+{
+    auto const& s = out.at(id);
+    return is_prelude_file(s.file) && ast::is_valid(s.declaration)
+        && find_attribute(s.file, ast_of(s.file).at(s.declaration).attributes, "internal") != nullptr;
+}
+
 void checker::merge_scopes()
 {
-    names = prelude_names;
+    // CHK-323: an `@internal` symbol of the prelude is the prelude's alone, and no lookup from the program finds it
+    names = {};
+    for (auto const& [name, ids] : prelude_names)
+        for (auto const id : ids)
+            if (!is_internal(id))
+                names[name].push_back(id);
     for (auto const& [name, ids] : file_names)
     {
         auto& seen = names[name];
@@ -728,7 +874,11 @@ void checker::declare(i32 file, ast::decl_id decl)
             if (!c.name.empty())
                 add_symbol(named(symbol_kind::constant, c.name), c.name);
         },
-        [&](ast::sampler_decl const& s) { unsupported_symbol(s.name, "sampler"); },
+        [&](ast::sampler_decl const& s)
+        {
+            if (!s.name.empty())
+                add_symbol(named(symbol_kind::sampler, s.name), s.name);
+        },
         [&](ast::pipeline_decl const& p)
         {
             // Without a name it is the file's pipeline, named `pipeline`; a second one is a duplicate like any other.
@@ -784,6 +934,9 @@ void checker::compile(symbol_id id)
     auto* const outer_used = used_features;
     granted = {};
     used_features = nullptr;
+    // a symbol compiled from inside a generic one sees none of its type parameters
+    auto outer_parameters = cc::move(type_parameter_names);
+    type_parameter_names = {};
 
     switch (out.at(id).kind)
     {
@@ -810,6 +963,9 @@ void checker::compile(symbol_id id)
     case symbol_kind::constant:
         compile_const(id);
         break;
+    case symbol_kind::sampler:
+        compile_file_sampler(id);
+        break;
     case symbol_kind::test:
         // A test's signature is made where it is found, and its body is checked with the others.
         break;
@@ -820,6 +976,7 @@ void checker::compile(symbol_id id)
 
     granted = outer_granted;
     used_features = outer_used;
+    type_parameter_names = cc::move(outer_parameters);
     compiling.remove_back();
     if (out.at(id).state == symbol_state::in_compilation)
         out.symbols[index_of(id)].state = symbol_state::checked;

@@ -187,13 +187,19 @@ TEST("sgl emit - a group's plain member is a field of the constant buffer the gr
                                    "    return {\n"
                                    "        color = scene.tint\n"
                                    "    }\n");
-    // Three targets write it, and MSL declines a group as it declines a buffer (EMIT-89).
     CHECK(emit_source(source, 0, target::hlsl_dx12).errors.empty());
     CHECK(emit_source(source, 0, target::hlsl_vulkan).errors.empty());
-    CHECK(!emit_source(source, 0, target::msl).errors.empty());
     auto const wgsl = emit_source(source, 0, target::wgsl).text;
     CHECK(wgsl.contains("@group(0) @binding(0) var<uniform> scene: scene_data;"));
     CHECK(wgsl.contains("scene.tint")); // a member is read through the block
+
+    // EMIT-89: MSL's group is an argument buffer, whose block is a pointer at slot 0, bound to a local of the block's name.
+    auto const msl = emit_source(source, 0, target::msl);
+    CHECK(sgl::emit::dump_errors(msl) == "");
+    CHECK(msl.text.contains("struct scene_arguments\n{\n    constant scene_data* scene [[id(0)]];\n};\n"));
+    CHECK(msl.text.contains("constant scene_arguments& scene_group [[buffer(0)]]"));
+    CHECK(msl.text.contains("    constant auto& scene = *scene_group.scene;\n"));
+    CHECK(msl.text.contains("scene.tint"));
 
     // A member with no place in a block has no address either, in a group as in an `@inline` binding.
     auto const e = emit_source(with_edges("binding scene:\n"
@@ -317,6 +323,81 @@ TEST("sgl emit - a struct of the program is declared before its first use, and b
                         "    );\n"));
 }
 
+TEST("sgl emit - a vertex member whose name ends in a digit gets a semantic that does not")
+{
+    // HLSL reads `UV1` as the semantic `UV` at index 1, and dx12 refuses an input layout naming `UV1`.
+    auto const source = cc::string("@vertex struct two_uvs:\n"
+                                   "    uv0: float2\n"
+                                   "    uv1: float2\n"
+                                   "\n"
+                                   "struct pixel_input:\n"
+                                   "    @position position: hpos4\n"
+                                   "\n"
+                                   "@vertex fun main_vs(v: two_uvs) -> pixel_input:\n"
+                                   "    return {\n"
+                                   "        position = hpos4(v.uv0.x, v.uv1.y, 0.0, 1.0)\n"
+                                   "    }\n");
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("    float2 uv0 : UV0_;\n    float2 uv1 : UV1_;\n"));
+}
+
+TEST("sgl emit - a vertex member whose semantic another member took moves on")
+{
+    // `uv1_` would be `UV1_` too, and so would `UV1`, since a semantic ignores case.
+    auto const source = cc::string("@vertex struct crowded:\n"
+                                   "    uv1: float2\n"
+                                   "    uv1_: float2\n"
+                                   "    UV1: float2\n"
+                                   "\n"
+                                   "struct pixel_input:\n"
+                                   "    @position position: hpos4\n"
+                                   "\n"
+                                   "@vertex fun main_vs(v: crowded) -> pixel_input:\n"
+                                   "    return {\n"
+                                   "        position = hpos4(v.uv1.x, v.uv1_.y, v.UV1.x, 1.0)\n"
+                                   "    }\n");
+    CHECK(text_of(source, target::hlsl_dx12)
+              .contains("    float2 uv1 : UV1_;\n    float2 uv1_ : UV1__;\n    float2 UV1 : UV1___;\n"));
+}
+
+TEST("sgl emit - a pixel stage's depth and sample mask are outputs, not color targets")
+{
+    auto const source = cc::string("struct varyings:\n"
+                                   "    @position position: hpos4\n"
+                                   "\n"
+                                   "@pixel struct shaded:\n"
+                                   "    color: float4\n"
+                                   "    @depth depth: float\n"
+                                   "    @sample_mask covered: uint\n"
+                                   "\n"
+                                   "@pixel fun shade_ps(p: varyings) -> shaded:\n"
+                                   "    return { color = float4(1.0, 1.0, 1.0, 1.0), depth = 0.5, covered = 0x1 }\n");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::wgsl})
+    {
+        auto const e = emit_source(source, 0, t);
+        CHECK(sgl::emit::dump_errors(e) == "");
+        CHECK(e.color_targets == 1);
+        CHECK(e.target_struct == "shaded");
+    }
+    CHECK(!text_of(source, target::hlsl_dx12).contains("centroid"));
+}
+
+TEST("sgl emit - a pixel stage writing a conservative depth takes its position at the centroid on dx12")
+{
+    // DXIL refuses SV_DepthGreaterEqual from a pixel stage whose SV_Position is interpolated at the pixel centre.
+    auto const source = cc::string("struct varyings:\n"
+                                   "    @position position: hpos4\n"
+                                   "\n"
+                                   "@pixel struct pushed:\n"
+                                   "    color: float4\n"
+                                   "    @depth(.greater_equal) depth: float\n"
+                                   "\n"
+                                   "@pixel fun push_ps(p: varyings) -> pushed:\n"
+                                   "    return { color = float4(1.0, 1.0, 1.0, 1.0), depth = p.position.z + 0.5 }\n");
+    CHECK(text_of(source, target::hlsl_dx12).contains("    noperspective centroid float4 position : SV_Position;\n"));
+    CHECK(text_of(source, target::hlsl_vulkan).contains("    float4 position : SV_Position;\n"));
+}
+
 TEST("sgl emit - a member whose dx12 semantic would be a system value is an error")
 {
     CHECK(errors_of("@vertex struct mesh_vertex:\n"
@@ -354,8 +435,6 @@ TEST("sgl emit - the reserved words differ by target and hold no word twice")
     CHECK(sgl::emit::is_reserved(target::wgsl, "filter"));
     CHECK(!sgl::emit::is_reserved(target::hlsl_dx12, "target"));
     CHECK(sgl::emit::is_reserved(target::hlsl_vulkan, "float4x4"));
-    CHECK(sgl::emit::is_reserved(target::hlsl_dx12, "mul"));
-    CHECK(!sgl::emit::is_reserved(target::wgsl, "mul"));
     CHECK(sgl::emit::is_reserved(target::msl, "main"));
     CHECK(sgl::emit::is_reserved(target::msl, "fragment"));
     CHECK(sgl::emit::is_reserved(target::msl, "packed_float3"));

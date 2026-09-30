@@ -174,7 +174,8 @@ vulkan_command_list::built_acceleration_structure vulkan_command_list::build_acc
 }
 
 sg::blas_handle vulkan_command_list::raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
-                                                                     sg::accel_build_flags flags)
+                                                                     sg::accel_build_flags flags,
+                                                                     int /*hit_record_stride*/)
 {
     CC_ASSERT(_ctx.is_raytracing_supported(), "ray tracing is not supported on this device (check "
                                               "cmd.raytracing.is_supported())");
@@ -248,7 +249,8 @@ sg::blas_handle vulkan_command_list::raytracing_build_blas_triangles(cc::span<sg
 }
 
 sg::blas_handle vulkan_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
-                                                                 sg::accel_build_flags flags)
+                                                                 sg::accel_build_flags flags,
+                                                                 int /*hit_record_stride*/)
 {
     CC_ASSERT(_ctx.is_raytracing_supported(), "ray tracing is not supported on this device (check "
                                               "cmd.raytracing.is_supported())");
@@ -407,6 +409,7 @@ void vulkan_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const
     vkCmdBindPipeline(_buffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rp->_pipeline);
 
     _bound_pipeline_layout = rp->layout.get();
+    _bound_pipeline_layout->bind_embedded_samplers(_buffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->_groups.size(), nullptr);
     _bound_footprint = &pipeline.footprint();
     _bound_footprint_owner = &pipeline;
@@ -458,7 +461,8 @@ void vulkan_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table c
     // Declare each bound group's accesses at the raytracing stage — a bound TLAS surfaces as accel_read — the same
     // rhythm as compute_dispatch.
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::raytracing);
-    declare_array_accesses(_bound_footprint_owner, sg::pipeline_stage_flag::raytracing);
+    declare_array_accesses(_bound_groups, _bound_footprint, _bound_footprint_owner, sg::pipeline_stage_flag::raytracing,
+                           _pending_array_buffer_declares, _pending_array_texture_declares);
 
     // The shader table buffer is read by the fixed-function ray dispatch.
     track_buffer_access(*vt->buffer, sg::pipeline_stage_flag::raytracing, sg::access_flag::shader_read);

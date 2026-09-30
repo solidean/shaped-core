@@ -23,17 +23,24 @@ public:
     /// Non-indexed geometries need `vertex_count % 3 == 0`, indexed ones `index_count % 3 == 0`, and `fast_trace` / `fast_build` are mutually exclusive.
     /// Throws sg::allocation_exception if the result buffer cannot be allocated.
     /// Requires is_supported().
+    ///
+    /// `hit_record_stride` is the number of shader-table records one geometry of this BLAS takes: the ray count of the pipelines that trace it, and must be >= 1.
+    /// Metal bakes it into the structure, setting geometry g's intersection-function-table offset to `g * hit_record_stride`.
+    /// dx12 and vulkan take the multiplier per trace instead and ignore it.
     [[nodiscard]] blas_handle build_blas(cc::span<blas_triangles const> geometries,
-                                         accel_build_flags flags = accel_build_flag::fast_trace);
+                                         accel_build_flags flags = accel_build_flag::fast_trace,
+                                         int hit_record_stride = 1);
 
     /// Build a procedural (AABB) BLAS.
     /// Same contract as the triangle overload; a BLAS is triangles or AABBs, never both.
     [[nodiscard]] blas_handle build_blas(cc::span<blas_aabbs const> geometries,
-                                         accel_build_flags flags = accel_build_flag::fast_trace);
+                                         accel_build_flags flags = accel_build_flag::fast_trace,
+                                         int hit_record_stride = 1);
 
     /// Build a TLAS over `instances`.
     /// Each instance's `blas` must be non-null and already built, and the TLAS holds every referenced blas_handle alive.
     /// `instance_id` / `hit_group_offset` are 24-bit, and assert on overflow.
+    /// Under `context::portability_checks` the TLAS also keeps each instance's BLAS, offset and mask, which is what dispatch_rays checks.
     /// Throws sg::allocation_exception if the result buffer cannot be allocated.
     /// Requires is_supported().
     [[nodiscard]] tlas_handle build_tlas(cc::span<tlas_instance const> instances,
@@ -59,10 +66,16 @@ public:
     /// Traces a `width` x `height` x `depth` grid of rays, launching the raygen shader at `raygen` in `table`.
     /// Each dimension must be >= 1, and their product <= 2^30.
     /// Requires a bound pipeline, and `table` must have been built for it.
+    ///
+    /// Under `context::portability_checks`, every instance of every bound tlas is checked against the hit records it reaches.
+    /// Each must exist, and be procedural exactly when the instance's BLAS holds AABBs.
+    /// A mismatch logs an error, once per table and tlas in a list, and the dispatch still runs, since hot reload can change a hit group under a running program.
+    /// Only a tlas built, and a group or staging group created, while the checks were on is seen.
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height = 1, int depth = 1);
 
     /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch_rays only** — the compute scope's contract, at the raytracing stage.
-    /// Every bound array binding must be declared before each dispatch; an empty `elements` span declares "unused".
+    /// Every array the pipeline's code indexes must be declared before each dispatch.
+    /// An undeclared one logs and is covered whole, and an empty `elements` span declares it unused.
     void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
 
     /// Declares per-element access for a *texture* array / bindless binding.

@@ -31,8 +31,18 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "float4": ("tg::vec4f", 16, "vec4f"),
     "int3": ("tg::vec3i", 12, "vec3i"),
     "mat4": ("tg::mat4f", 64, None),
+    # an atomic is a plain integer to the host, which never updates it while the shader does
+    "atomic[uint]": ("cc::u32", 4, None),
+    "atomic[int]": ("cc::i32", 4, None),
     "bool32": ("slib::gpu_bool", 4, None),
 }
+
+
+def dx12_semantic(member: dict) -> str:
+    """The dx12 semantic of a vertex input member, which `sgl describe` states (EMIT-28).
+    The text SGL emits takes it from the same place, so the input layout and the shader always agree."""
+    return member["semantic"]
+
 
 def memory_structs_of(entries: SglEntries) -> dict[str, int]:
     """Every struct the package places in GPU memory, by name, and its size: each is a host type named as SGL names it."""
@@ -78,9 +88,15 @@ def check_names(package: str, entries: SglEntries, taken: dict[str, str]) -> Non
 
 def includes(entries: SglEntries) -> list[str]:
     """The headers the generated SGL types need, beyond what every package header includes."""
+    out = []
+    # A layout's static samplers: an entry point's stated in the header, a pipeline's in the source that includes it.
+    if (any(e.get("samplers") for e in entries.described_entry_points.values())
+            or any(p.get("samplers") for _, p in entries.pipelines)):
+        out += ["<shaped-graphics/binding/pipeline_layout.hh>", "<shaped-graphics/binding/sampler.hh>",
+                "<shaped-shader-library/binding/binding_groups.hh>"]
     if not entries.bindings and not entries.vertex_inputs and not entries.render_targets:
-        return []
-    out = ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
+        return out
+    out += ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
            "<shaped-graphics/binding/binding.hh>", "<shaped-graphics/binding/binding_group.hh>"]
     if entries.vertex_inputs:
         out += ["<shaped-graphics/raster/vertex_input.hh>", "<shaped-graphics/resource/buffer.hh>",
@@ -93,12 +109,14 @@ def includes(entries: SglEntries) -> list[str]:
                 "<shaped-graphics/raster/raster_pipeline.hh>"]
     if any(b["inline"] for _, b in entries.bindings):
         out += ["<clean-core/container/fixed_array.hh>", "<clean-core/fwd.hh>"]
+    if any(m.get("count", 1) > 1 for _, b in entries.bindings for m in b["members"]):
+        out += ["<clean-core/container/fixed_array.hh>"]
 
     # Every type a field names: a constant's own, a buffer's element, and a vertex attribute's.
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
     types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
     types |= {m["type"] for _, s in entries.memory_structs for m in s["members"]}
-    if types & {"int", "uint"}:
+    if types & {"int", "uint", "atomic[int]", "atomic[uint]"}:
         out.append("<clean-core/fwd.hh>")
     if types & {"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"}:
         out.append("<typed-geometry/linalg/vec.hh>")
@@ -133,16 +151,22 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
     # A plain member is a plain field: the group owns the constant buffer it lands in, and sg fills it at creation.
     for member in binding["members"]:
         where = f"'{file.path}' `binding {name}` member '{member['name']}'"
+        # a binding array is one field holding a view per element
+        count = member.get("count", 1)
+        array = (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1 else (lambda view: view)
         if member["kind"] == "constant":
             out.append(f"    {host_type(package, memory, where, member['type'])} {member['name']}; ///< `{member['type']}`, "
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
-            out.append(f"    sg::texture_view_{view_shape(member)} {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    {array(f'sg::texture_view_{view_shape(member)}')} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "image":
             view = f"sg::image_view_{view_shape(member)}<sg::pixel_format::{member['image_format']}>"
-            out.append(f"    {view} {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    {array(view)} {member['name']}; ///< `{member['type']}`\n")
+            continue
+        if member["kind"] == "acceleration_structure":
+            out.append(f"    sg::tlas_view {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.
@@ -153,7 +177,7 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         is_written = member["access"] == "read_write"
         access = "readwrite" if is_written else "readonly"
         sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
-        out.append(f"    sg::{access}_buffer_view<{element}> {member['name']}; ///< `{sgl_type}`\n")
+        out.append(f"    {array(f'sg::{access}_buffer_view<{element}>')} {member['name']}; ///< `{sgl_type}`\n")
     out.append("\n")
     if has_block(binding):
         out.append("    /// The group's constant buffer: its plain members, laid out as the shader reads them, at this slot.\n")
@@ -221,9 +245,25 @@ def sampler_initializer(state: dict) -> str:
     return "{" + ", ".join(fields) + "}"
 
 
+def bound_samplers(where: str, samplers: list[dict], names: list[str], indent: str) -> str:
+    """The `sg::bound_sampler` rows of a layout's file-scope samplers, one per line, each at the index SGL gave it."""
+    by_name = {s["name"]: s for s in samplers}
+    out = []
+    for name in names:
+        if name not in by_name:
+            raise HostCodeError(f"{where} names the sampler '{name}', which its file does not describe")
+        s = by_name[name]
+        out.append(f'{indent}{{.binding = {{.name = "{name}", .space = slib::bound_samplers_space, '
+                   f".index = {s['index']}u, .count = 1u, .type = sg::binding_type::sampler, "
+                   f".sampler_type = sg::sampler_binding_type::{s['sampler_type']}}},\n"
+                   f"{indent} .sampler = {sampler_initializer(s['settings'])}}},\n")
+    return "".join(out)
+
+
 def binding_entry(member: dict) -> str:
     """The sg::binding a resource member is, its fields in sg::binding's declaration order."""
-    head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
+    # a binding array takes `count` consecutive slots from its own
+    head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = {member.get("count", 1)}u, '
     kind = member["kind"]
     if kind == "buffer":
         access = "" if member["access"] == "read" else f", .access = sg::access_mode::{member['access']}"
@@ -232,6 +272,8 @@ def binding_entry(member: dict) -> str:
         return head + (f".type = sg::binding_type::texture, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
                        f".sample_type = sg::texture_sample_type::{member['sample_type']}}}")
+    if kind == "acceleration_structure":
+        return head + ".type = sg::binding_type::acceleration_structure}"
     if kind == "image":
         return head + (f".type = sg::binding_type::image, .access = sg::access_mode::{member['access']}, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
@@ -243,7 +285,7 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     name = binding["name"]
     qualified = f"{namespace}::{name}"
     resources = [m for m in binding["members"] if m["kind"] != "constant"]
-    views = [m for m in resources if m["kind"] in ("buffer", "texture", "image")]
+    views = [m for m in resources if m["kind"] in ("buffer", "texture", "image", "acceleration_structure")]
     statics = [m for m in resources if m["kind"] == "sampler" and "static_sampler" in m]
     dynamic = [m for m in resources if m["kind"] == "sampler" and "static_sampler" not in m]
     out = [f"\n// `binding {name}` of {file.path}: the table the shader's resources were numbered from.\n"]
@@ -275,8 +317,20 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     if not dynamic:
         out.append("    (void)samplers;\n")
     out.append(f"    views.reserve({len(views)});\n")
+    # sg keys a view by its position in declared_bindings(), which a binding array's run of registers no longer matches.
+    position = {m["name"]: i + (1 if has_block(binding) else 0) for i, m in enumerate(resources)}
     for member in views:
-        out.append(f"    views.push_back({{.slot = sg::binding_slot({member['slot']}), .view = {member['name']}}});\n")
+        slot = position[member["name"]]
+        if member.get("count", 1) > 1:
+            # one view per element, in element order
+            out.append("    {\n")
+            out.append("        auto elements = cc::vector<sg::raw_view>();\n")
+            out.append(f"        for (auto const& element : {member['name']})\n")
+            out.append("            elements.push_back(element);\n")
+            out.append(f"        views.push_back({{.slot = sg::binding_slot({slot}), .view = cc::move(elements)}});\n")
+            out.append("    }\n")
+            continue
+        out.append(f"    views.push_back({{.slot = sg::binding_slot({slot}), .view = {member['name']}}});\n")
     for member in dynamic:
         out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = {member["name"]}}});\n')
     out.append("}\n")
@@ -479,10 +533,19 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> str:
         out.append("    [[nodiscard]] bool operator==(std::nullptr_t) const { return asset == nullptr; }\n")
         out.append("\n")
         out.append(f"    /// The pipeline layout this entry point's binding list states, with no reflected binding in it.\n")
-        out.append("    /// A raster pipeline whose stages list different groups needs their union instead, spelled with\n")
-        out.append("    /// `ctx.cached.acquire_pipeline_layout<...>()`.\n")
+        out.append("    /// It carries only the file samplers this entry point reaches, so a file used as a library never fills the sampler slots.\n")
+        out.append("    /// A raster pipeline whose stages list different groups needs their union, spelled `ctx.cached.acquire_pipeline_layout<...>()`.\n")
+        out.append("    /// One whose stages reach file samplers is built from the file's SGL `pipeline`, whose layout carries every stage's samplers.\n")
         out.append("    [[nodiscard]] sg::pipeline_layout_handle acquire_layout(sg::context& ctx) const\n    {\n")
-        out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>();\n    }}\n")
+        samplers = described.get("samplers", [])
+        if samplers:
+            # The file-scope samplers its code reaches, which no group holds.
+            rows = bound_samplers(f"'{path}' entry point '{name}'", entries.file_samplers.get(path, []), samplers,
+                                  "            ")
+            out.append(f"        static sg::bound_sampler const samplers[] = {{\n{rows}        }};\n")
+            out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>(samplers);\n    }}\n")
+        else:
+            out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>();\n    }}\n")
         if described["stage"] == "compute":
             out.append("\n")
             out.append("    /// The compute pipeline of this entry point over that layout, which is all a compute pipeline needs.\n")
@@ -504,7 +567,20 @@ def streams_of(struct: dict) -> list[tuple[str, bool, list[dict]]]:
     return [(name, per_instance, members) for name, (per_instance, members) in out.items()]
 
 
+# A member whose `@format` packs it: the bytes the host writes, whatever type the shader reads them as.
+PACKED_HOST_TYPES = {"rgba8_unorm": "cc::u32", "rgba8_uint": "cc::u32"}
+
+
+def vertex_member_host_type(package: str, where: str, member: dict) -> str:
+    fmt = member.get("format", "")
+    if fmt in PACKED_HOST_TYPES:
+        return PACKED_HOST_TYPES[fmt]
+    return host_type(package, {}, where, member["type"])
+
+
 def vertex_format(package: str, file: SglFile, struct: str, member: dict) -> str:
+    if member.get("format"):
+        return member["format"]
     # A vertex attribute is a builtin, never a struct in GPU memory.
     host_type(package, {}, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", member["type"])
     fmt = HOST_TYPES[member["type"]][2]
@@ -527,8 +603,8 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
     def fields(members: list[dict], indent: str) -> str:
         out = []
         for m in members:
-            cpp = host_type(package, {}, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m["type"])
-            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{m['name'].upper()}` on dx12\n")
+            cpp = vertex_member_host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m)
+            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{dx12_semantic(m)}` on dx12\n")
         return "".join(out)
 
     out = [f"\nnamespace {namespace}\n{{\n"]
@@ -583,7 +659,7 @@ def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: 
     out.append("            .attributes = {\n")
     for member in struct["members"]:
         fmt = vertex_format(package, file, name, member)
-        out.append(f'                {{.semantic = "{member["name"].upper()}", '
+        out.append(f'                {{.semantic = "{dx12_semantic(member)}", '
                    f".format = sg::vertex_attribute_format::{fmt}, "
                    f".offset = cc::isize(offsetof({owner(member['stream'])}, {member['name']})), "
                    f".slot = {slot_of[member['stream']]}}},\n")
@@ -608,7 +684,8 @@ def emit_render_target(package: str, namespace: str, file: SglFile, struct: dict
     mixes two target sets even where their formats agree.
     """
     name = struct["name"]
-    members = struct["members"]
+    # the depth and the sample mask a pixel stage writes are outputs, and no color target a rendering binds
+    members = [m for m in struct["members"] if not m.get("output")]
     for m in members:
         if m["name"] in RENDER_TARGET_RESERVED:
             raise HostCodeError(
@@ -642,7 +719,7 @@ def emit_render_target(package: str, namespace: str, file: SglFile, struct: dict
 
 def emit_render_target_impl(namespace: str, struct: dict) -> str:
     qualified = f"{namespace}::{struct['name']}"
-    names = [m["name"] for m in struct["members"]]
+    names = [m["name"] for m in struct["members"] if not m.get("output")]
     out = [f"\n{qualified}::operator sg::rendering_info() const\n{{\n"]
     out.append("    return {.color_targets = {" + ", ".join(names) + "}, .depth_stencil_target = depth_stencil, "
                ".target_set = name};\n}\n")
@@ -672,10 +749,18 @@ def open_fields(pipeline: dict) -> list[tuple[str, str, str]]:
     return out
 
 
+# A pipeline's stages in the order a vertex passes through them, each a field of `describe`'s pipeline.
+PIPELINE_STAGES = ("vertex", "tessellation_control", "tessellation_evaluation", "geometry", "pixel")
+
+
 def pipeline_includes(entries: SglEntries) -> list[str]:
-    if not entries.pipelines:
-        return []
-    return ["<shaped-shader-library/pipeline.hh>", "<shaped-graphics/fwd.hh>", "<clean-core/thread/async.hh>"]
+    out = []
+    if entries.pipelines:
+        out += ["<shaped-shader-library/pipeline.hh>", "<shaped-graphics/fwd.hh>", "<clean-core/thread/async.hh>"]
+    if entries.raytracing_pipelines:
+        out += ["<shaped-shader-library/raytracing_pipeline.hh>", "<shaped-graphics/fwd.hh>",
+                "<clean-core/thread/async.hh>", "<clean-core/container/vector.hh>"]
+    return out
 
 
 def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
@@ -685,7 +770,8 @@ def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
         stem = stems[file.path]
         type_name = pipeline_type(stem, p["name"])
         fields = open_fields(p)
-        stages = p["vertex"] + (f" and {p['pixel']}" if p["pixel"] else "")
+        named = [p[s] for s in PIPELINE_STAGES if p[s]]
+        stages = ", ".join(named[:-1]) + " and " + named[-1] if len(named) > 1 else named[0]
         writes = f", writing `{p['target_set']}`" if p["target_set"] else ", writing depth alone"
         out.append(f"/// `pipeline {p['name']}` of {file.path}: {stages}{writes}. Generated; do not edit.\n")
         out.append(f"/// Acquired as `ctx.cached.acquire_raster_pipeline({stem}.{p['name']}, …)`.\n")
@@ -754,7 +840,8 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         key = f"{stem}_{p['name']}"
         groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
         missing = [g for g in groups if g not in generated]
-        if p["vertex_input"] not in vertex_inputs:
+        # empty for a vertex stage that draws from no vertex buffer
+        if p["vertex_input"] and p["vertex_input"] not in vertex_inputs:
             missing.append(p["vertex_input"])
         if missing:
             raise HostCodeError(
@@ -771,8 +858,14 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         frozen = ",\n".join(f'    "{line}"' for line in p["frozen"])
         out.append(f"constexpr cc::string_view k_{key}_frozen[] = {{\n{frozen},\n}};\n")
         group_types = ", ".join(f"{namespace}::{g}" for g in groups)
+        samplers = p.get("samplers", [])
+        if samplers:
+            where = f"shader package '{package}': `pipeline {p['name']}` of '{file.path}'"
+            rows = bound_samplers(where, file.samplers, samplers, "    ")
+            out.append(f"sg::bound_sampler const k_{key}_samplers[] = {{\n{rows}}};\n")
         out.append(f"sg::pipeline_layout_handle {key}_layout(sg::context& ctx)\n{{\n")
-        out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>();\n}}\n")
+        passed = f"k_{key}_samplers" if samplers else ""
+        out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>({passed});\n}}\n")
 
         # The build's settings as code, in the order they apply, and then what the host stated.
         out.append(f"void {key}_apply(sg::raster_pipeline_description& d, cc::span<slib::open_part const> open)\n{{\n")
@@ -791,11 +884,13 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         out.append("    static slib::pipeline_definition const d = {\n")
         out.append(f'        .file = "{file.path}",\n')
         out.append(f'        .name = "{p["name"]}",\n')
-        out.append(f"        .vertex = {handle(p['vertex'])},\n")
-        if p["pixel"]:
-            out.append(f"        .pixel = {handle(p['pixel'])},\n")
+        # in pipeline_definition's field order, which a designated initializer has to follow
+        for s in ("vertex", "pixel", "geometry", "tessellation_control", "tessellation_evaluation"):
+            if p[s]:
+                out.append(f"        .{s} = {handle(p[s])},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")
-        out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")
+        if p["vertex_input"]:
+            out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")
         if p["target_set"]:
             out.append(f"        .target_set = {namespace}::{p['target_set']}::name,\n")
         if p["targets"]:
@@ -813,4 +908,159 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
                 out.append("    (void)parts;\n")
             out.append(f"    return slib::describe_raster_pipeline(&ctx, &definition(), cc::vector<slib::open_part>{stated}, "
                        f"cc::move(customize), {latest});\n}}\n")
+    return "".join(out)
+
+
+# ---- a ray-tracing pipeline --------------------------------------------------------------------------------------------
+
+
+def emit_raytracing_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
+    """One type per `@raytracing pipeline`: its description, its table, and its listed hit groups by position."""
+    out = []
+    for file, p in entries.raytracing_pipelines:
+        type_name = pipeline_type(stems[file.path], p["name"])
+        rays = file.ray_set(p["rays"])["rays"]
+        out.append(f"/// `@raytracing pipeline {p['name']}` of {file.path}, over the ray set `{p['rays']}`. Generated; do not edit.\n")
+        out.append(f"struct {type_name}\n{{\n")
+        out.append(f"    /// The ray types of `{p['rays']}`, in table order: a trace of one takes its position as its contribution and its miss.\n")
+        out.append(f"    static constexpr int ray_count = {len(rays)};\n")
+        out.append("    /// A hit group's position among this pipeline's table's groups, which no other pipeline's `add_row` takes.\n")
+        out.append("    struct hit_group\n    {\n        int index = 0;\n    };\n")
+        out.append("    /// The listed hit groups, by their position among the table's groups.\n")
+        out.append("    struct hit_groups_t\n    {\n")
+        for index, group in enumerate(p["hit_groups"]):
+            out.append(f"        static constexpr hit_group {group} = {{{index}}};\n")
+        out.append("    };\n")
+        if p["host_hit_groups"]:
+            out.append(f"    /// The first position a host's hit group takes: they follow the listed ones, in the order handed over.\n")
+            out.append(f"    static constexpr hit_group first_host_hit_group = {{{len(p['hit_groups'])}}};\n")
+        if p["host_callables"]:
+            out.append(f"    /// The index a shader calls the host's first callable by: they follow every one the module lists.\n")
+            out.append(f"    static constexpr int first_host_callable = {len(p['callables'])};\n")
+        out.append("\n    /// The description the build states, with what the declaration leaves to the host in `host`.\n")
+        out.append("    [[nodiscard]] cc::shared_async<sg::raytracing_pipeline_description> description("
+                   "sg::context& ctx, slib::raytracing_host_parts host = {}) const;\n")
+        out.append("    /// A table over `pipeline` with its raygen, a miss per ray type and every callable; rows follow with `add_row`.\n")
+        out.append("    /// `host` is what the pipeline was described with, whose callables take records after the module's.\n")
+        out.append("    [[nodiscard]] static sg::raytracing_shader_table_description table_description("
+                   "sg::raytracing_pipeline_handle pipeline, slib::raytracing_host_parts const& host = {});\n")
+        out.append("    /// Appends hit group `group`'s row: a record per ray type, whose offset an instance tracing through it takes.\n")
+        out.append("    [[nodiscard]] static sg::hit_row add_row(sg::raytracing_shader_table_description& table, hit_group group);\n")
+        out.append("    /// What slib describes it from.\n")
+        out.append("    [[nodiscard]] static slib::raytracing_pipeline_definition const& definition();\n")
+        out.append("};\n\n")
+    return "".join(out)
+
+
+def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems: dict[str, str],
+                                   wrappers: dict[tuple[str, str], str]) -> str:
+    out = []
+    generated = {b["name"] for _, b in entries.bindings}
+    for file, p in entries.raytracing_pipelines:
+        stem = stems[file.path]
+        type_name = pipeline_type(stem, p["name"])
+        qualified = f"{namespace}::{type_name}"
+        key = f"{stem}_{p['name']}"
+        where = f"shader package '{package}': `@raytracing pipeline {p['name']}` of '{file.path}'"
+        groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
+        missing = [g for g in groups if g not in generated]
+        if missing:
+            raise HostCodeError(f"{where} is built from generated types, and {', '.join(missing)} has none; "
+                                f"declare the file as '{file.path}:*'")
+        if any(not m for m in p["misses"]):
+            # TODO: a ray type without a miss wants an empty miss record, which sg's table has no spelling for yet
+            raise HostCodeError(f"{where} leaves a ray type without a miss, which slib cannot table yet")
+
+        def handle(entry: str) -> str:
+            if not entry:
+                return "nullptr"
+            return f"&{namespace}::{stem}.{entry}" + (".asset" if (file.path, entry) in wrappers else "")
+
+        out.append("\nnamespace\n{\n")
+        ray_set = file.ray_set(p["rays"])
+        names = ", ".join(f'"{ray}"' for ray in ray_set["rays"])
+        out.append(f"constexpr cc::string_view k_{key}_rays[] = {{{names}}};\n")
+        payloads = ", ".join(f'"{payload}"' for payload in ray_set["payloads"])
+        out.append(f"constexpr cc::string_view k_{key}_payloads[] = {{{payloads}}};\n")
+        sizes = ", ".join(str(size) for size in ray_set["payload_sizes"])
+        out.append(f"constexpr cc::i32 k_{key}_payload_sizes[] = {{{sizes}}};\n")
+        shapes = ", ".join(f'"{shape}"' for shape in ray_set["payload_shapes"])
+        out.append(f"constexpr cc::string_view k_{key}_payload_shapes[] = {{{shapes}}};\n")
+        frozen = ",\n".join(f'    "{line}"' for line in p["frozen"])
+        out.append(f"constexpr cc::string_view k_{key}_frozen[] = {{\n{frozen},\n}};\n")
+        misses = ", ".join(handle(m) for m in p["misses"])
+        out.append(f"slib::shader_asset_handle const* const k_{key}_misses[] = {{{misses}}};\n")
+        for group_name in p["hit_groups"]:
+            group = file.hit_group(group_name)
+            closest = ", ".join(handle(e) for e in group["closest_hits"])
+            any_hits = ", ".join(handle(e) for e in group["any_hits"])
+            out.append(f"slib::shader_asset_handle const* const k_{key}_{group_name}_closest[] = {{{closest}}};\n")
+            out.append(f"slib::shader_asset_handle const* const k_{key}_{group_name}_any[] = {{{any_hits}}};\n")
+            # metal runs a procedural group's intersection and any hit as one traversal function per ray type
+            if any(group.get("traversals", [])):
+                traversals = ", ".join(handle(e) for e in group["traversals"])
+                out.append(f"slib::shader_asset_handle const* const k_{key}_{group_name}_traversals[] = {{{traversals}}};\n")
+        if p["hit_groups"]:
+            out.append(f"slib::hit_group_definition const k_{key}_groups[] = {{\n")
+            for group_name in p["hit_groups"]:
+                group = file.hit_group(group_name)
+                traversals = (f", .metal_traversals = k_{key}_{group_name}_traversals"
+                              if any(group.get("traversals", [])) else "")
+                out.append(f'    {{.name = "{group_name}", .intersection = {handle(group["intersection"])}, '
+                           f".closest_hits = k_{key}_{group_name}_closest, .any_hits = k_{key}_{group_name}_any"
+                           f"{traversals}}},\n")
+            out.append("};\n")
+        group_types = ", ".join(f"{namespace}::{g}" for g in groups)
+        # the file samplers any of its shaders reaches, which the layout carries as a raster pipeline's does
+        samplers = p.get("samplers", [])
+        if samplers:
+            rows = bound_samplers(where, file.samplers, samplers, "    ")
+            out.append(f"sg::bound_sampler const k_{key}_samplers[] = {{\n{rows}}};\n")
+        passed = f"k_{key}_samplers" if samplers else ""
+        out.append(f"sg::pipeline_layout_handle {key}_layout(sg::context& ctx)\n{{\n")
+        out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>({passed});\n}}\n")
+        if p["callables"]:
+            callables = ", ".join(handle(e) for e in p["callables"])
+            out.append(f"slib::shader_asset_handle const* const k_{key}_callables[] = {{{callables}}};\n")
+        out.append("} // namespace\n")
+
+        out.append(f"\nslib::raytracing_pipeline_definition const& {qualified}::definition()\n{{\n")
+        out.append("    static slib::raytracing_pipeline_definition const d = {\n")
+        out.append(f'        .file = "{file.path}",\n')
+        out.append(f'        .name = "{p["name"]}",\n')
+        out.append("        .ray_count = ray_count,\n")
+        out.append(f'        .ray_set = "{p["rays"]}",\n')
+        out.append(f"        .rays = k_{key}_rays,\n")
+        out.append(f"        .payloads = k_{key}_payloads,\n")
+        out.append(f"        .payload_sizes = k_{key}_payload_sizes,\n")
+        out.append(f"        .payload_shapes = k_{key}_payload_shapes,\n")
+        out.append(f"        .raygen = {handle(p['raygen'])},\n")
+        out.append(f"        .misses = k_{key}_misses,\n")
+        if p["hit_groups"]:
+            out.append(f"        .hit_groups = k_{key}_groups,\n")
+        if p["host_hit_groups"]:
+            out.append("        .has_host_hit_groups = true,\n")
+        if p["callables"]:
+            out.append(f"        .callables = k_{key}_callables,\n")
+        if p["host_callables"]:
+            out.append("        .has_host_callables = true,\n")
+            out.append(f'        .host_callable_parameter = "{p["host_callable_parameter"]}",\n')
+            out.append(f'        .host_callable_shape = "{p["host_callable_shape"]}",\n')
+        out.append(f"        .max_recursion_depth = {p['max_recursion_depth']},\n")
+        out.append(f"        .max_payload_size = {p['max_payload_size']},\n")
+        out.append(f"        .max_attribute_size = {p['max_attribute_size']},\n")
+        out.append(f"        .acquire_layout = &{key}_layout,\n")
+        if file.entry_point("sgl_empty_closest_hit") is not None:
+            out.append(f"        .empty_closest_hit = {handle('sgl_empty_closest_hit')},\n")
+        out.append(f"        .frozen = k_{key}_frozen,\n")
+        out.append("    };\n    return d;\n}\n")
+
+        out.append(f"\ncc::shared_async<sg::raytracing_pipeline_description> {qualified}::description("
+                   "sg::context& ctx, slib::raytracing_host_parts host) const\n{\n")
+        out.append("    return slib::describe_raytracing_pipeline(&ctx, &definition(), cc::move(host));\n}\n")
+        out.append(f"\nsg::raytracing_shader_table_description {qualified}::table_description("
+                   "sg::raytracing_pipeline_handle pipeline, slib::raytracing_host_parts const& host)\n{\n")
+        out.append("    return slib::table_description(definition(), cc::move(pipeline), host);\n}\n")
+        out.append(f"\nsg::hit_row {qualified}::add_row(sg::raytracing_shader_table_description& table, hit_group group)\n{{\n")
+        out.append("    return slib::add_hit_group_row(table, group.index);\n}\n")
     return "".join(out)

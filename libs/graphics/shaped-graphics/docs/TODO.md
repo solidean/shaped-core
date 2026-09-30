@@ -26,12 +26,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
   That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.
   Not needed for OIDN on the CPU, which goes through the existing download and upload; built with the OIDN member.
-- **A pipeline-level static sampler (`bound_sampler`) is bound by dx12 and webgpu only.**
-  vulkan created the `VkSampler`s and bound them to no set, and metal read `static_samplers` not at all, so a shader sampling through one read nothing.
-  Both now refuse a pipeline layout that carries one, rather than building a pipeline that samples garbage.
-  Closing it is a reserved descriptor set of immutable samplers on vulkan, at `sg::reserved_binding_group` as webgpu has it, and the same argument buffer slot on metal.
-  SGL's file-scope `sampler name:` waits on this, and a group's name-matched static sampler is what works everywhere meanwhile.
-
 - **The metal backend serializes no pipeline blob.**
   `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a
   caller persisting a blob across runs gets nothing to persist and every build is a cold one.
@@ -154,18 +148,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     Finer would be to notice it per window and stop mid-copy, releasing the source with it.
     Pure quality of implementation: the bytes are unobservable either way, and what it buys is releasing a large source sooner.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
-  - **array bindings in raster draws** — the one gap here that a real renderer will hit, so it is spelled out rather than listed.
-    `declare_array_buffer_access` / `declare_array_texture_access` live on the compute scope and the raytracing scope alone.
-    `command_list_raster_scope` has neither, and there is no `raster_declare_array_*` virtual for one to dispatch to.
-    A dispatch therefore resolves its declares against the bound groups, and a draw cannot.
-    dx12, vulkan and metal each assert `"array bindings are not supported in raster draws yet"` on a bound array binding.
-    [concepts/bindings.md](concepts/bindings.md#array-bindings) states that refusal as the contract.
-    webgpu has no binding arrays at all, so there is nothing there to refuse.
-    **What it costs is any bindless material table on a draw.**
-    sv's tables work today only because it path-traces, declaring them through `cmd.raytracing` in `gpu_resource_manager`; the moment a raster path wants one it stops at this assert.
-    Closing it is the declare pair on the raster scope, a `raster_declare_array_*` virtual, and the resolution in three backends — the compute path's shape, at the vertex and fragment stages.
-    webgpu would have to gain binding arrays first.
-    Nothing subtle blocks it; it has simply never been the blocking thing.
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
@@ -252,8 +234,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Placement is `heapAccelerationStructureSizeAndAlign` plus `MTL::Heap::newAccelerationStructure(size, offset)`.
   All three APIs support refitting in place and into a separate structure, so a refit call would not be a Metal shape the others get bent into.
 
-- **Raytracing pipeline.** The dx12 trace path is in — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
+- **Raytracing pipeline.** The trace path is in on dx12, vulkan and metal — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
   Still open: **local root signatures** and a **state-object cached blob**.
+  **metal traces one TLAS per dispatch**, because a kernel finds its closest hits through the one TLAS's hit-group offsets that `dispatch_rays` binds.
+  Lifting it means an offsets buffer per bound TLAS, and a way for the kernel to know which one it traced.
+  **webgpu's BVH has no spatial sort**: the tree follows the primitive order, which a proper build (a sort, then SAH or LBVH) would replace.
+  webgpu has no pipeline either, deliberately: a megakernel over the ray-query polyfill is the shape one would take, and a path tracer on ray queries is the better route there for now.
   Plus a **dedicated shader-table buffer**: `raytracing_shader_table` exists, but its records sit in a plain shader-readable buffer as a stand-in.
   [types.hh](../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately, so the storage needs a type of its own.
 - **`cc::shared_ptr`:** the `*_handle` typedefs still use `std::shared_ptr`.
@@ -377,18 +363,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
 - **Tier 2 / legacy backends:** metal, then opengl, webgl.
   webgpu exists on wasm; what it still owes is its own item below.
-
-- **There is no SGL to metallib edge, so the shader-using half of the tier-1 sweep skips on metal.**
-  `shader_fixtures.cc` registers SGL to WGSL and, where DXC exists, to DXIL and SPIR-V.
-  A metal context accepts none of those, so every tier-1 test that acquires a shader is offered a format it cannot
-  take — eleven of them, across `compute-test.cc`, `raster-test.cc` and `sgl-package-test.cc`.
-  They now ask `sg_test::shaders_reach` and SKIP rather than failing on an acquire that cannot succeed.
-  **CI never saw this**: its macOS runner has no Metal 4 device, so the whole metal driver skips there, and the
-  failure only appears on a Mac that has one.
-  Closing it is an SGL-to-MSL compiler, at which point the guard answers true and the eleven start running with
-  nothing to revert.
-  `sg - the SGL fixtures reach at least one format on every build` is what keeps the guard from quietly skipping them
-  on every backend instead.
 
 - **The webgpu backend's remaining gaps.**
   - **The WGSL twins of sg's tier-1 shader tests.**

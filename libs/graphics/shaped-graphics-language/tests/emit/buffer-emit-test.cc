@@ -124,15 +124,41 @@ TEST("sgl emit - an @inline binding takes no group, and stands last")
                                  "    let v = work.values[0] * tuning.scale\n"
                                  "    return {color = float4(v, v, v, 1.0)}\n";
     CHECK(errors_for(wrong_order, target::wgsl)
-          == "unsupported an @inline binding that is not the last of the list: 'tuning'\n");
+          == "unsupported an @inline binding a group of the list follows: 'tuning'\n");
+
+    // Workgroup memory is bound by no host, so it may stand after the inline constants or before them.
+    constexpr auto with_workgroup = "binding work:\n"
+                                    "    values: mut buffer[float]\n"
+                                    "\n"
+                                    "@workgroup binding scratch:\n"
+                                    "    seen: float\n"
+                                    "\n"
+                                    "@inline binding tuning:\n"
+                                    "    scale: float\n"
+                                    "\n"
+                                    "@compute(64) fun before(@thread_id id: int3){work, scratch, tuning}:\n"
+                                    "    scratch.seen = tuning.scale\n"
+                                    "    work.values[id.x] = scratch.seen\n"
+                                    "\n"
+                                    "@compute(64) fun after(@thread_id id: int3){work, tuning, scratch}:\n"
+                                    "    scratch.seen = tuning.scale\n"
+                                    "    work.values[id.x] = scratch.seen\n";
+    CHECK(errors_for(with_workgroup, target::wgsl) == "");
 }
 
-TEST("sgl emit - MSL declines a buffer rather than writing text no compiler takes")
+TEST("sgl emit - MSL passes a group's buffers in an argument buffer, a read-only one through a const pointer")
 {
-    // A Metal buffer is an argument of the kernel, not a global, which this writer does not build yet.
-    CHECK(errors_for(k_buffers, target::msl)
-          == "unsupported a binding group, which MSL takes as an argument buffer of the entry point\n");
-    CHECK(errors_for(k_buffers, target::hlsl_vulkan) == "");
+    // EMIT-89: a Metal buffer is an argument of the entry point, so the group is a struct the entry point takes.
+    auto const msl = text_of(k_buffers, target::msl);
+    CHECK(msl.contains("struct work_arguments\n"
+                       "{\n"
+                       "    const device float* work_src [[id(0)]];\n"
+                       "    device float* work_dst [[id(1)]];\n"
+                       "};\n"));
+    CHECK(msl.contains("fragment frame main_ps(pixel_input p [[stage_in]], constant work_arguments& work_group "
+                       "[[buffer(0)]])\n"));
+    CHECK(msl.contains("    constant auto& work_src = work_group.work_src;\n"));
+    CHECK(msl.contains("    work_dst[1] = v * 2.0;\n"));
 }
 
 TEST("sgl emit - a buffer's identifier is minted like any other name, and the text says what the host calls it")

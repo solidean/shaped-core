@@ -45,6 +45,8 @@ enum class sgl::check::expectation_kind : sgl::u8
     fail,
     /// `.assert`: the run stops at a false `assert`.
     assert_,
+    /// `.discard`: the run ends at a `discard` (CHK-278).
+    discard,
     /// `error = "kind"`: a diagnostic of that kind, a normal or a fatal error, stands in the test.
     error,
     /// `warning = "kind"`: the same, of a warning.
@@ -116,8 +118,10 @@ struct sgl::check::checked_module
     cc::vector<function_info> functions;
     cc::vector<parameter> parameters;
     cc::vector<binding_info> bindings;
-    /// The binding lists of the functions, and the layouts of the pipelines.
+    /// The binding lists of the functions, the layouts of the pipelines, and the shaders of the ray-tracing ones.
     cc::vector<symbol_id> binding_lists;
+    /// The type parameters of the generic functions, and what each generic call deduced them as.
+    cc::vector<type_id> type_lists;
     /// The static samplers a binding declares, which its members name by `member_info::static_sampler`.
     cc::vector<sampler_state> samplers;
     /// Only the pipelines that checked without an error.
@@ -131,6 +135,10 @@ struct sgl::check::checked_module
     cc::vector<i32> call_slots;
     /// Every candidate of every call that reported `no-matching-overload`, with the reason it did not match.
     cc::vector<near_miss> near_misses;
+    /// Every trace of a ray-tracing pipeline's ray type: the call, and which ray of which set (CHK-329).
+    cc::vector<ray_trace> ray_traces;
+    /// Every call of a callable by its table's index (CHK-344).
+    cc::vector<callable_call> callable_calls;
 
     /// One entry per file `check` was given, in that order.
     cc::vector<file_tables> files;
@@ -175,6 +183,7 @@ struct sgl::check::checked_module
     {
         return ast::impl::slice(binding_lists, r);
     }
+    [[nodiscard]] cc::span<type_id const> at(ast::range_of<type_id> r) const { return ast::impl::slice(type_lists, r); }
     [[nodiscard]] cc::span<pipeline_setting const> at(ast::range_of<pipeline_setting> r) const
     {
         return ast::impl::slice(pipeline_settings, r);
@@ -212,12 +221,41 @@ struct sgl::check::checked_module
         return builtins != nullptr && builtins->is_known(id) ? &builtins->at(id) : nullptr;
     }
 
+    /// DXR's cap on the attributes a procedural hit carries, which metal's two `uint4` of ray data match (CHK-342).
+    static constexpr i32 max_attribute_bytes = 32;
+
+    /// The bytes a payload or a hit's attributes take in a ray-tracing pipeline: a 32-bit word per scalar and per enum.
+    /// The checker's attribute cap and `describe`'s sizes for sg both read this, so the two cannot disagree.
+    [[nodiscard]] i32 ray_data_bytes(type_id id) const
+    {
+        if (auto const* const builtin = builtin_type_of(id))
+            return 4 * builtin->leaf_count;
+        auto const& t = at(id);
+        if (t.kind == type_kind::enumeration)
+            return 4;
+        if (t.kind == type_kind::array)
+            return t.count * ray_data_bytes(t.element);
+        auto result = 0;
+        for (auto const& member : at(t.members))
+            result += ray_data_bytes(member.type);
+        return result;
+    }
+
     /// The name a type is written with; `<error>` for the error type.
+    /// A resource, or a binding array of one: what takes slots of its group rather than a place in its constant block.
+    [[nodiscard]] bool takes_slots(type_id id) const
+    {
+        auto const& t = at(id);
+        return is_resource(t.kind) || (t.kind == type_kind::array && is_resource(at(t.element).kind));
+    }
+
     [[nodiscard]] cc::string_view name_of(type_id id) const
     {
         auto const& t = at(id);
         if (t.kind == type_kind::void_)
             return "void";
+        if (t.kind == type_kind::structure && is_valid(t.generic))
+            return t.spelled;
         if (t.kind == type_kind::structure || t.kind == type_kind::enumeration)
             return at(t.symbol).name;
         if (!t.spelled.empty())
@@ -231,12 +269,13 @@ struct sgl::check::checked_module
         return is_equal(symbols, rhs.symbols) && is_equal(types, rhs.types) && is_equal(members, rhs.members)
             && is_equal(enum_cases, rhs.enum_cases) && is_equal(functions, rhs.functions)
             && is_equal(parameters, rhs.parameters) && is_equal(bindings, rhs.bindings)
-            && is_equal(binding_lists, rhs.binding_lists) && is_equal(samplers, rhs.samplers)
-            && is_equal(pipelines, rhs.pipelines) && is_equal(pipeline_settings, rhs.pipeline_settings)
-            && is_equal(constants, rhs.constants) && is_equal(call_records, rhs.call_records)
-            && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
-            && is_equal(near_misses, rhs.near_misses) && is_equal(files, rhs.files)
-            && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
+            && is_equal(binding_lists, rhs.binding_lists) && is_equal(type_lists, rhs.type_lists)
+            && is_equal(samplers, rhs.samplers) && is_equal(pipelines, rhs.pipelines)
+            && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
+            && is_equal(call_records, rhs.call_records) && is_equal(written_arguments, rhs.written_arguments)
+            && is_equal(call_slots, rhs.call_slots) && is_equal(near_misses, rhs.near_misses)
+            && is_equal(ray_traces, rhs.ray_traces) && is_equal(callable_calls, rhs.callable_calls)
+            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;
     }

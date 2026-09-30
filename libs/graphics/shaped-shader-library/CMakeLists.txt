@@ -24,6 +24,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/binding/impl/hlsl_tokens.cc
     src/shaped-shader-library/shader_asset.cc
     src/shaped-shader-library/pipeline.cc
+    src/shaped-shader-library/raytracing_pipeline.cc
     src/shaped-shader-library/shader_library.cc
     src/shaped-shader-library/impl/reload_watcher.cc
 )
@@ -56,6 +57,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/shader_asset.hh
     src/shaped-shader-library/shader_library.hh
     src/shaped-shader-library/pipeline.hh
+    src/shaped-shader-library/raytracing_pipeline.hh
     src/shaped-shader-library/impl/pipeline_field_support.hh
     src/shaped-shader-library/impl/pipeline_fields.hh
 )
@@ -150,6 +152,7 @@ if(SC_BUILD_TESTS)
         tests/sgl_compiler-test.cc
         tests/metal_compiler-test.cc
         tests/pipeline-test.cc
+        tests/raytracing_pipeline-test.cc
         tests/binding/binding_groups-test.cc
         tests/binding/wgsl_declarations-test.cc
     )

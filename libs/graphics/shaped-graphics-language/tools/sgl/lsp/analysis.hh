@@ -8,13 +8,13 @@
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics-language/check/check.hh>
+#include <shaped-graphics-language/driver/prelude.hh>
 
-/// The prelude's files as the library carries them, parsed once for the whole process.
+/// The prelude's files as the library carries them, parsed once for the whole process, with what the server adds.
 struct sgl_lsp::prelude
 {
     cc::vector<cc::string> names;
-    cc::vector<sgl::parsed_file> files;
-    cc::vector<sgl::ast::file_ast> asts;
+    cc::span<sgl::parsed_prelude_file const> files;
     cc::vector<lsp::text_index> indices;
 
     /// The `sgl-prelude:` uri a note into prelude file `i` names, which the client asks `sgl/preludeText` for.

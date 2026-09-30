@@ -19,3 +19,6 @@ rules:
   - kind: allow-include
     value: <nvsdk_ngx_helpers_dlssd_d3d.h>
     reason: NGX's DLSS-D (Ray Reconstruction) helpers, same confinement
+  - kind: allow-include
+    value: <OpenImageDenoise/oidn.hpp>
+    reason: Intel's denoiser library, the OIDN member's test oracle, confined to tests/oidn_reference.cc

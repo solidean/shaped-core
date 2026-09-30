@@ -29,3 +29,32 @@ test:
     case k:
         .spot => falloff(k) == 0.5
         _ => false
+
+// a @bitflags value may be several cases or none, so naming every case of it is not exhaustive: it needs a `_`
+@expect(error = "non-exhaustive-case")
+test:
+    let f = ray_flags.force_opaque | ray_flags.cull_back_facing
+    let n = case f:
+        .none => 0
+        .force_opaque => 1
+        .force_non_opaque => 2
+        .accept_first_hit_and_end_search => 3
+        .skip_closest_hit => 4
+        .cull_back_facing => 5
+        .cull_front_facing => 6
+        .cull_opaque => 7
+        .cull_non_opaque => 8
+        .skip_triangles => 9
+        .skip_procedural => 10
+    n == 0
+
+// and a combined value, which is none of the cases, takes the `_`
+fun flags_code(f: ray_flags) -> int:
+    return case f:
+        .none => 0
+        .force_opaque => 1
+        .cull_back_facing => 5
+        _ => 10
+
+test flags_code(ray_flags.force_opaque) == 1
+test flags_code(ray_flags.force_opaque | ray_flags.cull_back_facing) == 10

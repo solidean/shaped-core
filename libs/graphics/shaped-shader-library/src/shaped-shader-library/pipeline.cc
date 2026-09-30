@@ -3,6 +3,7 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -10,6 +11,7 @@
 #include <shaped-graphics-language/driver/describe.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-shader-library/impl/frozen.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh>
 #include <shaped-shader-library/shader_asset.hh>
 
@@ -186,13 +188,19 @@ cc::string moved(Built const& built, Now const& now)
     return out;
 }
 
+/// `d`'s stage handles, each null without its stage.
+cc::fixed_array<slib::shader_asset_handle const*, 5> stages_of(slib::pipeline_definition const& d)
+{
+    return {d.vertex, d.pixel, d.geometry, d.tessellation_control, d.tessellation_evaluation};
+}
+
 /// One declared pipeline's reload state, kept for the life of the process like the definition it belongs to.
 struct live_pipeline
 {
     slib::pipeline_definition const* definition = nullptr;
-    /// The stages' generations the configuration was last read at; the build's settings are generation 0's.
-    u64 vertex_generation = 0;
-    u64 pixel_generation = 0;
+    /// The stages' generations the configuration was last read at, in `stages_of` order; the build's settings are
+    /// generation 0's.
+    cc::fixed_array<u64, 5> generations = {};
     slib::pipeline_configuration configuration;
 
     /// The stages last described on a context while the frozen part still matched the build.
@@ -202,9 +210,32 @@ struct live_pipeline
         sg::context const* ctx = nullptr;
         sg::compiled_shader vertex;
         cc::optional<sg::compiled_shader> pixel;
+        cc::optional<sg::compiled_shader> geometry;
+        cc::optional<sg::compiled_shader> tessellation_control;
+        cc::optional<sg::compiled_shader> tessellation_evaluation;
     };
     cc::vector<kept> kept_stages;
 };
+
+/// The stages `desc` was described with on `ctx`, to fall back to after a reload moves the frozen part.
+live_pipeline::kept kept_of(sg::context const* ctx, sg::raster_pipeline_description const& desc)
+{
+    return {.ctx = ctx,
+            .vertex = desc.vertex_shader,
+            .pixel = desc.fragment_shader,
+            .geometry = desc.geometry_shader,
+            .tessellation_control = desc.tessellation_control_shader,
+            .tessellation_evaluation = desc.tessellation_evaluation_shader};
+}
+
+void use_kept(sg::raster_pipeline_description& desc, live_pipeline::kept const& k)
+{
+    desc.vertex_shader = k.vertex;
+    desc.fragment_shader = k.pixel;
+    desc.geometry_shader = k.geometry;
+    desc.tessellation_control_shader = k.tessellation_control;
+    desc.tessellation_evaluation_shader = k.tessellation_evaluation;
+}
 
 cc::mutex<cc::vector<cc::unique_ptr<live_pipeline>>>& live_pipelines()
 {
@@ -224,10 +255,17 @@ live_pipeline& live_of(cc::vector<cc::unique_ptr<live_pipeline>>& all, slib::pip
 }
 } // namespace
 
+cc::string slib::impl::frozen_moved(cc::span<cc::string_view const> built, cc::span<cc::string const> now)
+{
+    return moved(built, now);
+}
+
 slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d)
 {
-    auto const vertex_generation = d.vertex != nullptr && *d.vertex != nullptr ? (*d.vertex)->generation() : 0;
-    auto const pixel_generation = d.pixel != nullptr && *d.pixel != nullptr ? (*d.pixel)->generation() : 0;
+    auto generations = cc::fixed_array<u64, 5>{};
+    auto const stages = stages_of(d);
+    for (auto i = isize(0); i < stages.size(); ++i)
+        generations[i] = stages[i] != nullptr && *stages[i] != nullptr ? (*stages[i])->generation() : 0;
 
     // What is known now, and whether a reload moved a stage since it was read.
     auto needs_read = false;
@@ -235,7 +273,8 @@ slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d
         [&](cc::vector<cc::unique_ptr<live_pipeline>>& all) -> pipeline_configuration
         {
             auto const& live = live_of(all, d);
-            needs_read = live.vertex_generation != vertex_generation || live.pixel_generation != pixel_generation;
+            for (auto i = isize(0); i < generations.size(); ++i)
+                needs_read = needs_read || live.generations[i] != generations[i];
             return live.configuration;
         });
     if (!needs_read)
@@ -284,8 +323,7 @@ slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d
         {
             auto& live = live_of(all, d);
             live.configuration = next;
-            live.vertex_generation = vertex_generation;
-            live.pixel_generation = pixel_generation;
+            live.generations = generations;
         });
     return next;
 }
@@ -308,13 +346,36 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         else
             CC_ASSERTF(part.value > 0, "{}'s {}: {} is stated as no format", d.file, d.name, part.path);
 
+    // A stage the device lacks is refused by its feature before any stage compiles, since a target without the stage
+    // can fail an earlier one first: Metal rejects a vertex stage that feeds tessellation and writes no position.
+    if ((d.tessellation_control != nullptr || d.tessellation_evaluation != nullptr)
+        && !ctx->supports(sg::feature::tessellation_shader))
+        throw sg::pipeline_creation_exception(cc::string(d.name),
+                                              cc::any_error(cc::format("{}'s {}: the pipeline has tessellation stages, "
+                                                                       "and this device "
+                                                                       "lacks sg::feature::tessellation_shader",
+                                                                       d.file, d.name)));
+    if (d.geometry != nullptr && !ctx->supports(sg::feature::geometry_shader))
+        throw sg::pipeline_creation_exception(
+            cc::string(d.name), cc::any_error(cc::format("{}'s {}: the pipeline has a geometry stage, and this device "
+                                                         "lacks sg::feature::geometry_shader",
+                                                         d.file, d.name)));
+
     // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();
     desc.layout = d.acquire_layout(*ctx);
     desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx);
     if (d.pixel != nullptr)
         desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx);
-    desc.vertex_input = d.vertex_input();
+    if (d.geometry != nullptr)
+        desc.geometry_shader = co_await (*d.geometry)->acquire(*ctx);
+    if (d.tessellation_control != nullptr)
+        desc.tessellation_control_shader = co_await (*d.tessellation_control)->acquire(*ctx);
+    if (d.tessellation_evaluation != nullptr)
+        desc.tessellation_evaluation_shader = co_await (*d.tessellation_evaluation)->acquire(*ctx);
+    // a vertex stage that draws from no vertex buffer, reading `@vertex_index` alone, has no layout
+    if (d.vertex_input != nullptr)
+        desc.vertex_input = d.vertex_input();
     desc.target_set = cc::string(d.target_set);
     for (auto i = isize(0); i < d.targets.size(); ++i)
         desc.color_targets.push_back({});
@@ -333,20 +394,14 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                     if (k.ctx == ctx)
                     {
                         if (is_moved)
-                        {
-                            desc.vertex_shader = k.vertex;
-                            desc.fragment_shader = k.pixel;
-                        }
+                            use_kept(desc, k);
                         else
-                        {
-                            k.vertex = desc.vertex_shader;
-                            k.pixel = desc.fragment_shader;
-                        }
+                            k = kept_of(ctx, desc);
                         return true;
                     }
                 if (is_moved)
                     return false;
-                live.kept_stages.push_back({.ctx = ctx, .vertex = desc.vertex_shader, .pixel = desc.fragment_shader});
+                live.kept_stages.push_back(kept_of(ctx, desc));
                 return true;
             });
         if (!is_kept)

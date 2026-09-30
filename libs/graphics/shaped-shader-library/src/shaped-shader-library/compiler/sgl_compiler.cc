@@ -4,7 +4,7 @@
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics/binding/binding.hh>
-#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::bound_samplers_space
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh> // the pixel formats by name
 
@@ -96,14 +96,26 @@ static_assert(
 }
 
 /// `b` as sg sees it on `format`: dx12 numbers a group as a register space, vulkan and WebGPU as a set.
+/// A file-scope sampler is stated as each target's reflection reports the address sg binds a `bound_sampler` at:
+/// dx12's `s<i>` of `bound_samplers_space`, SPIR-V's binding i + 1 of the reserved set, slib's WGSL reader's index i
+/// of the reserved group, and Metal's sampler slot i.
 [[nodiscard]] sg::binding binding_of(sgl::interface_binding const& b, sg::shader_format format, sg::shader_stage stage)
 {
     auto result = sg::binding{.name = b.name,
                               .reflected_name = b.emitted == b.name ? cc::string() : b.emitted,
                               .index = u32(b.slot),
-                              .count = 1u};
+                              .count = u32(b.count)};
     auto const is_dx12 = format == sg::shader_format::dxil;
-    if (b.is_inline)
+    if (b.is_file_sampler)
+    {
+        if (is_dx12)
+            result.space = slib::bound_samplers_space;
+        else if (format == sg::shader_format::spirv || format == sg::shader_format::wgsl)
+            result.group_index = u32(sg::reserved_binding_group);
+        if (format == sg::shader_format::spirv)
+            result.index = u32(b.slot + 1);
+    }
+    else if (b.is_inline)
     {
         // dx12 reads the inline block at b0 of slib's reserved space; every other backend places it by its own rule.
         if (is_dx12)
@@ -140,6 +152,9 @@ static_assert(
         result.type = sg::binding_type::sampler;
         result.sampler_type = sampler_type_of(b.sampler_type);
         break;
+    case sgl::described_member_kind::acceleration_structure:
+        result.type = sg::binding_type::acceleration_structure;
+        break;
     }
     result.visibility.set(stage);
     return result;
@@ -162,16 +177,47 @@ public:
         (void)resolve; // SGL has no include directive
 
         auto stage = sgl::check::stage::none;
-        if (desc.stage == sg::shader_stage::vertex)
+        switch (desc.stage)
+        {
+        case sg::shader_stage::vertex:
             stage = sgl::check::stage::vertex;
-        else if (desc.stage == sg::shader_stage::fragment)
+            break;
+        case sg::shader_stage::tessellation_control:
+            stage = sgl::check::stage::tessellation_control;
+            break;
+        case sg::shader_stage::tessellation_evaluation:
+            stage = sgl::check::stage::tessellation_evaluation;
+            break;
+        case sg::shader_stage::geometry:
+            stage = sgl::check::stage::geometry;
+            break;
+        case sg::shader_stage::fragment:
             stage = sgl::check::stage::pixel;
-        else if (desc.stage == sg::shader_stage::compute)
+            break;
+        case sg::shader_stage::compute:
             stage = sgl::check::stage::compute;
-        else
-            return cc::error(cc::format("SGL has vertex, pixel and compute entry points only, and '{}' is declared as "
-                                        "none of them",
-                                        desc.entry_point));
+            break;
+        case sg::shader_stage::raygen:
+            stage = sgl::check::stage::raygen;
+            break;
+        case sg::shader_stage::miss:
+            stage = sgl::check::stage::miss;
+            break;
+        case sg::shader_stage::closest_hit:
+            stage = sgl::check::stage::closest_hit;
+            break;
+        case sg::shader_stage::any_hit:
+            stage = sgl::check::stage::any_hit;
+            break;
+        case sg::shader_stage::intersection:
+            stage = sgl::check::stage::intersection;
+            break;
+        case sg::shader_stage::callable:
+            stage = sgl::check::stage::callable;
+            break;
+        default:
+            return cc::error(cc::format("SGL has no entry point of the stage '{}' is declared as", desc.entry_point));
+        }
 
         auto text = sgl::compile_to_text(
             {.source = desc.source,

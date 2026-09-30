@@ -168,6 +168,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
     invalid_pipeline,
+    /// A ray type whose trace reaches a shader that traces it again, which a pipeline's derived depth cannot bound.
+    recursive_trace,
     /// A declaration, a local or a parameter whose name would hide a `@shadowable(false)` symbol.
     shadows_unshadowable,
     /// A test that reads a parameter, a local or a binding member of the function it stands in; it runs on its own.
@@ -186,8 +188,25 @@ enum class sgl::diagnostic_kind : sgl::u8
     literal_not_representable,
     /// A literal converted to `T` by a function of `T`'s name that returns another type.
     literal_conversion_result,
-    /// An operator over integer literals alone that only an operator of another type takes: `7 / 2` without an int `/`.
+    /// An operator over integer literals alone that only an operator of another type takes, or `/` and `%` over them.
     literal_needs_type,
+    /// A shift whose count is a constant outside 0 to 31, which can only be a mistake.
+    shift_out_of_range,
+    /// A call of constants that has no value, or an integer divided by a constant zero: wrong on every run.
+    constant_without_value,
+    /// A constant whose value its type cannot hold, which WGSL refuses when it creates the shader.
+    constant_not_representable,
+    /// A texture method called without its sampler, on a texture whose binding member names none by `@sampler`.
+    missing_sampler,
+    /// An argument a target takes only as a constant, such as a texel offset, given a value computed at run time or a
+    /// constant outside the range the targets take.
+    invalid_constant_argument,
+    /// A barrier, or a call that takes derivatives, where some invocations of its group may not arrive.
+    non_uniform_control_flow,
+    /// An index into a binding array that may differ between invocations, and is not marked `nonuniform`.
+    non_uniform_index,
+    /// A `nonuniform` mark on an index the check pass proves uniform, which pays for nothing; a warning.
+    needless_nonuniform,
     /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.
     nesting_too_deep,
 };

@@ -5,6 +5,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/thread.hh>
 #include <shaped-graphics/backends/webgpu/fwd.hh>
+#include <shaped-graphics/backends/webgpu/webgpu_acceleration.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_binding_group.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_binding_group_layout.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_buffer.hh>
@@ -89,7 +90,8 @@ struct sg::backend::webgpu::webgpu_epoch_state
 ///
 /// What WebGPU lacks is emulated or refused, per libs/graphics/shaped-graphics/backends/webgpu/readme.md.
 /// Inline constants and register-bound samplers live in group 3, 1D textures are 2D, and heaps place nothing.
-/// Ray tracing, binding arrays and staging binding groups are refused.
+/// Ray queries are a software polyfill over one storage buffer of acceleration structures, so `implementation_of(ray_query)` is `emulated`.
+/// The ray-tracing pipeline, binding arrays and staging binding groups are refused.
 class sg::backend::webgpu::webgpu_context final : public sg::context
 {
     static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::wgsl};
@@ -126,19 +128,34 @@ public:
             return _readwrite_image_formats;
         case sg::feature::float32_filtering:
             return _float32_filtering;
+        case sg::feature::depth32_float_stencil8:
+            return _depth32_float_stencil8;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
-        case sg::feature::raytracing:
+        case sg::feature::sample_rate_shading:
+            // `@builtin(sample_index)` and `@interpolate(…, sample)` are core WGSL.
+            return true;
+        case sg::feature::ray_query:
+            return true;
+        case sg::feature::raytracing_pipeline:
+        case sg::feature::wireframe_fill:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
         case sg::feature::binding_arrays:
         case sg::feature::multisampled_array_textures:
+        case sg::feature::primitive_index:
+            // `primitive-index` is a WebGPU extension the emdawnwebgpu this builds against does not request.
             return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;
         }
         return false;
+    }
+
+    [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
+    {
+        return f == sg::feature::ray_query ? sg::feature_implementation::emulated : sg::feature_implementation::native;
     }
 
     /// Routes this device's validation and out-of-memory errors to `callback` too, as they arrive.
@@ -242,13 +259,16 @@ public:
         sg::raytracing_pipeline_description const&,
         sg::lifetime_scope) override
     {
-        return cc::error("webgpu has no ray tracing");
+        return cc::error("webgpu has no ray-tracing pipeline; its ray queries are a polyfill traced from ordinary "
+                         "stages "
+                         "(ctx.supports(sg::feature::raytracing_pipeline) is false)");
     }
     [[nodiscard]] cc::result<sg::raytracing_shader_table_handle> try_create_raytracing_shader_table(
         sg::raytracing_shader_table_description const&,
         sg::lifetime_scope) override
     {
-        return cc::error("webgpu has no ray tracing");
+        return cc::error("webgpu has no ray-tracing pipeline, so no shader table "
+                         "(ctx.supports(sg::feature::raytracing_pipeline) is false)");
     }
 
     [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
@@ -430,6 +450,7 @@ public:
     webgpu_sampler_cache _samplers;
     webgpu_stream_system _streams;
     webgpu_query_system _queries;
+    webgpu_acceleration_pool _acceleration;
 
     /// The optional device features creation was granted.
     struct granted_features
@@ -437,6 +458,7 @@ public:
         bool timestamps = false;
         bool readwrite_image_formats = false; ///< texture-formats-tier2
         bool float32_filtering = false;       ///< float32-filterable
+        bool depth32_float_stencil8 = false;  ///< depth32float-stencil8
         bool extended_image_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
     };
 
@@ -455,6 +477,7 @@ private:
     isize _uniform_offset_alignment = 256;
     bool _readwrite_image_formats = false; // texture-formats-tier2 was granted
     bool _float32_filtering = false;
+    bool _depth32_float_stencil8 = false;
     bool _extended_image_formats = false;
 
     sg::epoch _current_epoch = sg::epoch::first;

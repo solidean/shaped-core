@@ -21,7 +21,8 @@ stmt_list ids_of(flat_entry_point const& e, ast::range_of<flat_stmt_id> range)
 /// True for a statement after which the rest of its list never runs.
 bool is_exit(flat_stmt const& s)
 {
-    return s.node.is<flat_leave>() || s.node.is<flat_continue>() || s.node.is<flat_break>() || s.node.is<flat_return>();
+    return s.node.is<flat_leave>() || s.node.is<flat_continue>() || s.node.is<flat_break>() || s.node.is<flat_return>()
+        || s.node.is<flat_discard>();
 }
 
 bool holds_leave(flat_entry_point const& e, flat_stmt_id id, label_id label, int depth = 0)
@@ -513,6 +514,11 @@ struct compactor
             element->buffer = expr(element->buffer, depth + 1);
             element->index = expr(element->index, depth + 1);
         }
+        else if (auto* const array_element = copy.node.try_as<flat_element>())
+        {
+            array_element->object = expr(array_element->object, depth + 1);
+            array_element->index = expr(array_element->index, depth + 1);
+        }
         else if (auto* const construct = copy.node.try_as<flat_construct>())
             construct->arguments = exprs(construct->arguments, depth);
         else if (auto* const call = copy.node.try_as<flat_call>())
@@ -593,6 +599,7 @@ struct compactor
                                 n.body = body(ids_of(in, n.body), depth + 1);
                             },
                             [&](flat_continue&) {},                                                                   //
+                            [&](flat_discard&) {},                                                                    //
                             [&](flat_once& n) { n.body = body(ids_of(in, n.body), depth + 1); }, [&](flat_break&) {}, //
                             [&](flat_case& n)
                             {
@@ -640,11 +647,23 @@ flat_entry_point sgl::check::impl::compacted(checked_module const& m, flat_entry
     return cc::move(c.out.e);
 }
 
-flat_entry_point sgl::check::legalize(checked_module const& m, flat_entry_point const& e, legalize_options const& options)
+flat_entry_point sgl::check::legalize(checked_module const& m,
+                                      flat_entry_point const& given,
+                                      legalize_options const& options)
 {
+    // First, each `flat_by_target` becomes the one form this target writes, and the other is left unreachable.
+    auto chosen = given;
+    for (auto& x : chosen.exprs)
+        if (auto const* const both = x.node.try_as<flat_by_target>())
+        {
+            auto const form = options.is_emulated ? both->emulated : both->native;
+            x.node = given.at(form).node;
+        }
+    auto const& e = chosen;
+
     // Compacted even when it is core already: what legalize returns has nothing unreachable in it and nothing shared,
     // which is what lets a pass over its arrays stand for the tree.
-    if (is_core(e))
+    if (is_core(m, e))
         return compacted(m, e, ids_of(e, e.body));
     auto out = flat_builder::extend(m, e);
     out.set_body(erase_checks(out, ids_of(out.e, out.e.body)));

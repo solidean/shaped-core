@@ -213,6 +213,11 @@ public:
         }
         for (auto& b : bindings)
         {
+            auto polyfill = is_acceleration_polyfill(b);
+            CC_RETURN_IF_ERROR(polyfill);
+            if (polyfill.value())
+                continue;
+
             auto binding = sg::binding{};
             CC_RETURN_IF_ERROR(to_binding(b, binding));
             result.bindings.push_back(cc::move(binding));
@@ -647,6 +652,51 @@ private:
         return *t;
     }
 
+    /// Whether `p` is the ray-query polyfill's pool or roots, which the webgpu backend binds itself rather than a group.
+    /// Only the exact declarations of libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md qualify.
+    cc::result<bool> is_acceleration_polyfill(pending_binding const& p) const
+    {
+        auto group = integer_of(p.group, p.line);
+        CC_RETURN_IF_ERROR(group);
+        auto index = integer_of(p.index, p.line);
+        CC_RETURN_IF_ERROR(index);
+        if (group.value() != sg::reserved_binding_group || (index.value() != 17 && index.value() != 18))
+            return false;
+
+        auto const is_vec4u = [&](parsed_type const& t)
+        {
+            auto const& e = resolved(t);
+            return e.name == "vec4u" || (e.name == "vec4" && e.args.size() == 1 && resolved(e.args[0]).name == "u32");
+        };
+        auto const& type = resolved(p.type);
+        auto const is_array_of_vec4u = type.name == "array" && type.args.size() == 1 && is_vec4u(type.args[0]);
+
+        if (index.value() == 17)
+        {
+            auto const is_pool = p.name == "sg_acceleration_pool" && p.address_space == "storage"
+                              && (p.access.empty() || p.access == "read") && is_array_of_vec4u && type.count.empty();
+            if (!is_pool)
+                return cc::error(cc::format("line {}: @group({}) @binding(17) is the ray-query polyfill's pool, which "
+                                            "must be 'var<storage, read> sg_acceleration_pool: array<vec4u>'",
+                                            p.line, group.value()));
+            return true;
+        }
+
+        auto is_roots = p.name == "sg_acceleration_roots" && p.address_space == "uniform" && is_array_of_vec4u
+                     && !type.count.empty();
+        if (is_roots)
+        {
+            auto count = integer_of(type.count, p.line);
+            CC_RETURN_IF_ERROR(count);
+            is_roots = count.value() == 4;
+        }
+        if (!is_roots)
+            return cc::error(cc::format("line {}: @group({}) @binding(18) is the ray-query polyfill's roots, which "
+                                        "must be 'var<uniform> sg_acceleration_roots: array<vec4u, 4>'",
+                                        p.line, group.value()));
+        return true;
+    }
+
     /// The layout of a host-shareable type, under WGSL's alignment and size rules.
     cc::result<type_layout> layout_of(parsed_type const& type_in, int line) const
     {
@@ -990,7 +1040,8 @@ private:
                 b.index = index - 1;
             else
                 return cc::error(cc::format("line {}: @group({}) is sg's reserved group, which holds only the "
-                                            "inline-constants block at binding 0 and static samplers after it",
+                                            "inline-constants block at binding 0, static samplers after it, and the "
+                                            "ray-query polyfill's pool and roots at 17 and 18",
                                             p.line, group));
         }
         return cc::unit{};

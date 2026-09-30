@@ -1,4 +1,5 @@
 #include <clean-core/common/utility.hh>
+#include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
@@ -73,13 +74,57 @@ struct flattener
 {
     checker const& c;
     cc::vector<stage_violation> stage_violations;
+    /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
+    cc::vector<stage_violation> ray_stage_calls;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
     cc::vector<origin> effectful_asserts;
+    /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
+    cc::vector<origin> discards;
+    /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
+    struct feature_use
+    {
+        i32 file = 0;
+        ast::expr_id call = ast::expr_id::none;
+        feature_set features;
+        /// The functions whose bodies the call stands in, the tree's own first, each of which uses what it needs.
+        cc::vector<symbol_id> within;
+    };
+    cc::vector<feature_use> feature_uses;
+    /// CHK-345: an intersection entry point fused with the any hit of one record, which its own `return` runs.
+    struct fusion
+    {
+        symbol_id any_hit = symbol_id::none;
+        local_id payload = local_id::none;
+        local_id box = local_id::none;
+    };
+    cc::optional<fusion> fused;
 
     /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
-    /// A test has no stage, so it may reach what any stage may.
+    /// A test has no stage, so it may reach what any stage may, but a builtin only the ray-tracing stages run.
     void judge_stage(ast::expr_id call, symbol_id callee)
     {
+        if (auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+            record != nullptr && !record->features.is_empty())
+        {
+            auto within = cc::vector<symbol_id>();
+            for (auto const& fr : frames)
+                within.push_back(fr.function);
+            feature_uses.push_back(
+                {.file = file(), .call = call, .features = record->features, .within = cc::move(within)});
+        }
+        // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
+        if (is_test)
+        {
+            auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+            if (record != nullptr && record->uses_derivatives)
+                stage_violations.push_back({.file = file(), .call = call, .callee = callee});
+            auto const ray_stages = stage_bit(stage::raygen) | stage_bit(stage::miss) | stage_bit(stage::closest_hit)
+                                  | stage_bit(stage::any_hit) | stage_bit(stage::intersection)
+                                  | stage_bit(stage::callable);
+            if (auto const& s = c.out.at(callee); s.info >= 0 && (c.out.functions[s.info].stages & ~ray_stages) == 0)
+                ray_stage_calls.push_back({.file = file(), .call = call, .callee = callee});
+            return;
+        }
         if (entry.entry_stage == stage::none)
             return;
         auto const& s = c.out.at(callee);
@@ -115,7 +160,27 @@ struct flattener
         local_id local = local_id::none;
         /// A parameter whose argument is a literal: the literal stands wherever the parameter is read.
         flat_expr_id literal = flat_expr_id::none;
+        /// A parameter of function type: a position in `closures`, the function a call of the parameter inlines.
+        i32 closure = -1;
     };
+
+    /// A function handed to a parameter of function type (CHK-318): a function of the program, or a lambda with the
+    /// names it sees where it was written.
+    struct closure
+    {
+        symbol_id function = symbol_id::none;
+        i32 file = 0;
+        ast::expr_id lambda = ast::expr_id::none;
+        cc::vector<bound_name> bound;
+        ast::range_of<call_site> chain;
+        /// The function the lambda was written in.
+        symbol_id owner = symbol_id::none;
+        /// What the type parameters it sees stood for where it was written.
+        cc::vector<type_id> bindings;
+    };
+    cc::vector<closure> closures;
+    /// Parallel to what `flatten_written` returned last: the closure a function argument hands over, -1 elsewhere.
+    cc::vector<i32> written_closures;
 
     /// A loop of the source around the statement being written.
     struct loop_target
@@ -140,6 +205,8 @@ struct flattener
         cc::vector<loop_target> loops;
         /// The value blocks of the `case` arms being written, innermost last; a `yield` leaves the last.
         cc::vector<label_id> value_blocks;
+        /// What the type parameters of a generic function stand for in this inlining, two by two (CHK-340).
+        cc::vector<type_id> bindings;
     };
     cc::vector<frame> frames;
 
@@ -191,8 +258,23 @@ struct flattener
         return flat_expr_id::none;
     }
 
+    /// `type` as the current frame's bindings make it: a generic body names its type parameters, and the tree never does.
+    [[nodiscard]] type_id concrete(type_id type)
+    {
+        if (frames.empty() || frames.back().bindings.empty())
+            return type;
+        auto const result = c.substitute_existing(type, frames.back().bindings);
+        if (!is_valid(result) || c.is_open(result))
+        {
+            is_failed = true;
+            return type;
+        }
+        return result;
+    }
+
     local_id add_local(local_kind kind, cc::string_view desired, type_id type)
     {
+        type = concrete(type);
         is_failed = is_failed || !c.is_sound(type);
         meets_error = meets_error || holds_error(type);
         // `_` is a name nobody reads, and no name at all in WGSL
@@ -222,6 +304,7 @@ struct flattener
     template <class Node>
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
+        type = concrete(type);
         // A builtin with an effect may give nothing, `store`, and its call is only ever an `eval`'s value.
         auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::void_type;
         is_failed = is_failed || (!c.is_sound(type) && !is_effect_call);
@@ -284,7 +367,38 @@ struct flattener
         return ref != nullptr && !entry.at(ref->local).is_mut;
     }
 
-    /// One more node that means what the substitutable `id` means, attributed to `from`.
+    /// What `nonuniform i` marks, `i`; none for anything else.
+    [[nodiscard]] flat_expr_id marked_by_nonuniform(flat_expr_id id) const
+    {
+        auto const* const call = is_valid(id) ? entry.at(id).node.try_as<flat_call>() : nullptr;
+        auto const* const record = call != nullptr ? c.out.builtin_function(call->intrinsic) : nullptr;
+        return record != nullptr && record->is_nonuniform_mark ? entry.at(call->arguments)[0] : flat_expr_id::none;
+    }
+
+    /// An index that may stand in several places: a substitutable one, or `nonuniform i` of one, the mark kept on it.
+    [[nodiscard]] bool is_substitutable_index(flat_expr_id id) const
+    {
+        return is_substitutable(id) || is_substitutable(marked_by_nonuniform(id));
+    }
+
+    /// A construction of literals alone, such as a texel offset, which a target may take only as it is written.
+    [[nodiscard]] bool is_literal_construction(flat_expr_id id) const
+    {
+        auto const* const made = is_valid(id) ? entry.at(id).node.try_as<flat_construct>() : nullptr;
+        if (made == nullptr)
+            return false;
+        for (auto const a : entry.at(made->arguments))
+        {
+            auto const& x = entry.at(a).node;
+            auto const is_literal = x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_bool_literal>()
+                                 || x.is<flat_enum_value>();
+            if (!is_literal && !is_literal_construction(a))
+                return false;
+        }
+        return true;
+    }
+
+    /// One more node that means what the substitutable `id`, or a construction of literals, means, attributed to `from`.
     flat_expr_id again(flat_expr_id id, ast::expr_id from)
     {
         auto const x = entry.at(id);
@@ -300,15 +414,93 @@ struct flattener
             return add_expr(x.type, from, *v);
         if (auto const* const m = x.node.try_as<flat_binding_member>())
             return add_expr(x.type, from, *m);
+        if (auto const* const smp = x.node.try_as<flat_file_sampler>())
+            return add_expr(x.type, from, *smp);
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = again(element->object, from);
+            auto const index = again(element->index, from);
+            return add_expr(x.type, from, flat_element{.object = object, .index = index});
+        }
+        // a place a `mut` parameter stands for, whose indices were pinned when it was bound (`pin_place`)
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            auto const index = member->member;
+            auto const object = again(member->object, from);
+            return add_expr(x.type, from, flat_member{.object = object, .member = index});
+        }
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto const buffer = again(element->buffer, from);
+            auto const index = again(element->index, from);
+            return add_expr(x.type, from, flat_buffer_element{.buffer = buffer, .index = index});
+        }
+        // the mark stays where it was written, which is what a diagnostic about it points at
+        if (auto const marked = marked_by_nonuniform(id); is_valid(marked))
+        {
+            flat_expr_id const arguments[] = {again(marked, from)};
+            auto copy = x;
+            copy.node.as<flat_call>().arguments = add_list(arguments);
+            entry.exprs.push_back(cc::move(copy));
+            return flat_expr_id(entry.exprs.size() - 1);
+        }
+        if (auto const* const made = x.node.try_as<flat_construct>())
+        {
+            // copied first: `again` appends to the lists the view reads
+            auto arguments = cc::vector<flat_expr_id>();
+            for (auto const a : entry.at(made->arguments))
+                arguments.push_back(a);
+            for (auto& a : arguments)
+                a = again(a, from);
+            return add_expr(x.type, from, flat_construct{.arguments = add_list(arguments)});
+        }
         return fail();
     }
 
-    /// True for a texture, an image, a sampler or a buffer read from its binding: it is no value a local could hold,
-    /// and it stands wherever it is named, since naming one has no effect.
+    /// `place` with every index it holds evaluated now, into a local where it is no substitutable value, so the place
+    /// can stand wherever a `mut` parameter is named and mean the same element each time (CHK-316).
+    flat_expr_id pin_place(flat_expr_id place)
+    {
+        auto const x = entry.at(place);
+        auto const pin_index = [&](flat_expr_id index)
+        {
+            if (is_substitutable_index(index))
+                return index;
+            auto const local = add_local(local_kind::let, "at", entry.at(index).type);
+            add_stmt(entry.at(index).from, flat_let{.local = local, .value = index});
+            return local_ref(local, entry.at(index).from.expr);
+        };
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            auto const index = member->member;
+            auto const object = pin_place(member->object);
+            return add_expr(x.type, x.from.expr, flat_member{.object = object, .member = index});
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const index = element->index;
+            auto const object = pin_place(element->object);
+            return add_expr(x.type, x.from.expr, flat_element{.object = object, .index = pin_index(index)});
+        }
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto const index = element->index;
+            auto const buffer = element->buffer;
+            return add_expr(x.type, x.from.expr, flat_buffer_element{.buffer = buffer, .index = pin_index(index)});
+        }
+        return place;
+    }
+
+    /// True for a texture, an image, a sampler or a buffer read from its binding, and a file-scope sampler: it is no
+    /// value a local could hold, and it stands wherever it is named, since naming one has no effect.
     [[nodiscard]] bool is_resource_member(flat_expr_id id) const
     {
-        return is_valid(id) && entry.at(id).node.is<flat_binding_member>()
-            && is_resource(c.out.at(entry.at(id).type).kind);
+        if (!is_valid(id) || !is_resource(c.out.at(entry.at(id).type).kind))
+            return false;
+        // an element of a binding array, at an index that reads the same wherever it stands
+        if (auto const* const element = entry.at(id).node.try_as<flat_element>())
+            return entry.at(element->object).node.is<flat_binding_member>() && is_substitutable_index(element->index);
+        return entry.at(id).node.is<flat_binding_member>() || entry.at(id).node.is<flat_file_sampler>();
     }
 
     /// A value that is read more than once and evaluated once, where it stands.
@@ -373,6 +565,9 @@ struct flattener
             if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
                 && c.out.at(where.symbol).state == symbol_state::checked)
                 return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
+            if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::sampler
+                && c.out.at(where.symbol).state == symbol_state::checked)
+                return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
             return fail();
         }
         if (auto const* const m = e.node.try_as<ast::member>())
@@ -383,7 +578,18 @@ struct flattener
             if (where.kind == target_kind::enum_case)
                 return enum_value(type, id, where.index);
             if (where.kind == target_kind::binding_member)
-                return add_expr(type, id, flat_binding_member{.binding = where.symbol, .member = where.index});
+                return add_expr(type, id,
+                                flat_binding_member{.binding = where.symbol,
+                                                    .member = where.index,
+                                                    .is_workgroup = c.is_workgroup_binding(where.symbol)});
+            // CHK-288: a constant, and an object with an effect still runs for it
+            if (where.kind == target_kind::array_length)
+            {
+                auto const object = flatten_expr(m->object);
+                if (calls_impure(object, 0))
+                    add_stmt({.file = file(), .expr = id}, flat_eval{.value = object});
+                return add_expr(type, id, flat_int_literal{.value = where.index});
+            }
             if (where.kind != target_kind::field)
                 return fail();
             auto const object = flatten_expr(m->object);
@@ -391,14 +597,30 @@ struct flattener
         }
         if (auto const* const indexed = e.node.try_as<ast::index>())
         {
-            // The check pass let only a buffer element through, so the object is a resource and the index an int.
             auto const arguments = ast().at(indexed->arguments);
+            auto const object_type = tables().type_at(indexed->object);
+            // CHK-287: one element per index, `grid[i, j]` being `grid[i][j]`
+            if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::array)
+            {
+                auto object = flatten_expr(indexed->object);
+                auto element_type = object_type;
+                for (auto const& a : arguments)
+                {
+                    element_type = c.out.at(element_type).element;
+                    auto const index = flatten_expr(a.value);
+                    object = add_expr(element_type, id, flat_element{.object = object, .index = index});
+                }
+                return object;
+            }
+            // The check pass let only a buffer element through otherwise, so the object is a resource.
             if (arguments.size() != 1)
                 return fail();
             auto const buffer = flatten_expr(indexed->object);
             auto const index = flatten_expr(arguments[0].value);
             return add_expr(type, id, flat_buffer_element{.buffer = buffer, .index = index});
         }
+        if (auto const* const literal = e.node.try_as<ast::array>())
+            return flatten_array_literal(id, type, *literal);
         if (auto const* const call = e.node.try_as<ast::call>())
             return flatten_call(id, type, where, *call);
         if (auto const* const cast = e.node.try_as<ast::cast>())
@@ -425,14 +647,18 @@ struct flattener
         return fail();
     }
 
-    /// A case of `type`; a case of `bool` is a bool literal, since a target writes a bool and not the `int` of a case.
+    /// A case of `type`; a case of a builtin enum is a literal of what the targets write it as: a bool, or an int.
     flat_expr_id enum_value(type_id type, ast::expr_id from, i32 case_index)
     {
         if (c.out.is_plain_enum(type))
             return add_expr(type, from, flat_enum_value{.case_index = case_index});
         auto const cases = c.out.at(c.out.at(type).cases);
-        auto const is_known_case = case_index >= 0 && case_index < cases.size();
-        return is_known_case ? add_expr(type, from, flat_bool_literal{.value = cases[case_index].value != 0}) : fail();
+        if (case_index < 0 || case_index >= cases.size())
+            return fail();
+        auto const value = cases[case_index].value;
+        if (c.out.builtin_type_of(type)->leaf_kind == value_kind::boolean)
+            return add_expr(type, from, flat_bool_literal{.value = value != 0});
+        return add_expr(type, from, flat_int_literal{.value = i32(value)});
     }
 
     /// A const stands for its value, written where the name stood.
@@ -473,8 +699,75 @@ struct flattener
         return value.has_value() ? add_expr(type, id, flat_literal{.value = value.value()}) : fail();
     }
 
+    /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
+    flat_expr_id flatten_array_literal(ast::expr_id id, type_id type, ast::array const& literal)
+    {
+        auto values = cc::vector<flat_expr_id>();
+        for (auto const& element : ast().at(literal.elements))
+            values.push_back(flatten_expr(element.value));
+        // a target may build one in any order, so two with an effect run first, in order
+        auto with_effect = 0;
+        for (auto const v : values)
+            with_effect += calls_impure(v, 0) ? 1 : 0;
+        if (with_effect >= 2)
+            for (auto& v : values)
+                if (calls_impure(v, 0))
+                {
+                    auto const local = add_local(local_kind::temporary, "element", entry.at(v).type);
+                    add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = v});
+                    v = local_ref(local, id);
+                }
+        return add_expr(type, id, flat_construct{.arguments = add_list(values)});
+    }
+
+    /// CHK-289: `T[N].filled(v)` is a local every element of which is assigned `v`, evaluated once.
+    flat_expr_id flatten_filled(ast::expr_id id, type_id type, ast::call const& call)
+    {
+        auto const arguments = ast().at(call.arguments);
+        if (arguments.size() != 1 || !is_valid(type))
+            return fail();
+        auto const where = origin{.file = file(), .expr = id};
+        auto const& info = c.out.at(type);
+        auto const value = flatten_expr(arguments[0].value);
+        if (!is_valid(value))
+            return fail();
+
+        auto const label = add_label("filled");
+        auto body = cc::vector<flat_stmt_id>();
+        auto filler = value;
+        if (!is_substitutable(value))
+        {
+            auto const held = add_local(local_kind::let, "fill", info.element);
+            body.push_back(make_stmt(where, flat_let{.local = held, .value = value}));
+            filler = local_ref(held, id);
+        }
+        auto const result = add_local(local_kind::var, "filled", type);
+        body.push_back(make_stmt(where, flat_var{.local = result}));
+        auto const index = add_local(local_kind::index, "i", int_type());
+        auto const element
+            = add_expr(info.element, id, flat_element{.object = local_ref(result, id), .index = local_ref(index, id)});
+        flat_stmt_id const store[] = {make_stmt(where, flat_assign{.place = element, .value = filler})};
+        body.push_back(make_stmt(where, flat_for{.label = add_label("fill"),
+                                                 .index = index,
+                                                 .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                                 .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
+                                                 .body = add_list(store)}));
+        body.push_back(make_stmt(where, flat_leave{.target = label, .value = local_ref(result, id)}));
+        return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
+    }
+
     flat_expr_id flatten_call(ast::expr_id id, type_id type, target const& where, ast::call const& call)
     {
+        if (where.kind == target_kind::array_filled)
+            return flatten_filled(id, type, call);
+        // CHK-341: `undefined()` is a local declared and never assigned, whose value nobody reads
+        if (where.kind == target_kind::undefined_value)
+        {
+            auto const local = add_local(local_kind::var, "undefined", type);
+            entry.locals[index_of(local)].is_undefined = true;
+            add_stmt({.file = file(), .expr = id}, flat_var{.local = local});
+            return local_ref(local, id);
+        }
         if (sgl::is_valid(call.op))
         {
             auto const spelling = c.text_of(file(), c.file_of(file()).at(call.op).where);
@@ -496,10 +789,275 @@ struct flattener
                 return flatten_void_equality(id, type, spelling == "==", arguments[0].value, arguments[1].value);
         }
 
+        for (auto const& t : c.out.ray_traces)
+            if (t.call == id && t.file == file())
+                return flatten_ray_trace(id, call, t);
+        for (auto const& t : c.out.callable_calls)
+            if (t.call == id && t.file == file())
+                return flatten_callable_call(id, call, t);
+
         auto const record = tables().call_at(id);
+        // CHK-319: a call through a parameter of function type records no callee, and inlines what was handed over
+        if (record >= 0 && !is_valid(c.out.call_records[record].callee) && ast::is_valid(call.callee))
+        {
+            auto const through = tables().target_at(call.callee);
+            for (auto const& b : current()->bound)
+                if (b.where == through && b.closure >= 0)
+                    return flatten_closure_call(id, type, b.closure, c.out.call_records[record]);
+            return fail();
+        }
         if (record < 0 || (where.kind != target_kind::overload && where.kind != target_kind::constructor))
             return fail();
         return flatten_bound_call(id, type, c.out.call_records[record]);
+    }
+
+    /// CHK-329: `trace(world, r, set.ray, mut p)` is the target's trace, with the ray's position in its set as its
+    /// contribution and its miss, and the set's size as its multiplier.
+    /// The payload is handed over as a local the call writes through, copied in and out where it is another place.
+    flat_expr_id flatten_ray_trace(ast::expr_id id, ast::call const& call, ray_trace const& t)
+    {
+        auto const arguments = ast().at(call.arguments);
+        auto const where = origin{.file = file(), .expr = id};
+        auto const world = flatten_expr(arguments[0].value);
+        auto const world_type = tables().type_at(arguments[0].value);
+        auto const* const overloads = c.prelude_names.get_ptr("trace_ray");
+        auto callee = symbol_id::none;
+        for (auto const candidate :
+             overloads == nullptr ? cc::span<symbol_id const>() : cc::span<symbol_id const>(*overloads))
+            if (c.out.at(c.out.functions[c.out.at(candidate).info].parameters)[0].type == world_type)
+                callee = candidate;
+        if (!is_valid(callee) || !is_valid(world))
+            return fail();
+
+        // the ray once, then its fields
+        auto ray = flatten_expr(arguments[1].value);
+        if (!is_valid(ray))
+            return fail();
+        if (!is_substitutable(ray))
+        {
+            auto const local = add_local(local_kind::let, "ray", entry.at(ray).type);
+            add_stmt(where, flat_let{.local = local, .value = ray});
+            ray = local_ref(local, id);
+        }
+        auto const fields = c.out.at(c.out.at(entry.at(ray).type).members);
+        auto const field
+            = [&](i32 m) { return add_expr(fields[m].type, id, flat_member{.object = again(ray, id), .member = m}); };
+
+        auto flags = add_expr(c.out.at(c.out.functions[c.out.at(callee).info].parameters)[5].type, id,
+                              flat_int_literal{.value = 0});
+        auto mask = add_expr(int_type(), id, flat_int_literal{.value = 0xff});
+        for (auto i = isize(4); i < arguments.size(); ++i)
+        {
+            auto const name = c.text_of(file(), arguments[i].name);
+            (name == "flags" ? flags : mask) = flatten_expr(arguments[i].value);
+        }
+        auto const count = c.out.at(c.out.at(c.out.at(t.set).type).members).size();
+
+        auto place = flatten_expr(arguments[3].value);
+        if (!is_valid(place))
+            return fail();
+        auto const is_local = entry.at(place).node.is<flat_local_ref>();
+        auto payload = place;
+        if (!is_local)
+        {
+            place = with_bound_index(place, id);
+            auto const local = add_local(local_kind::var, "payload", entry.at(place).type);
+            add_stmt(where, flat_var{.local = local});
+            add_stmt(where, flat_assign{.place = add_expr(entry.at(place).type, id, flat_local_ref{.local = local}),
+                                        .value = again(place, id)});
+            payload = local_ref(local, id);
+        }
+
+        flat_expr_id const values[] = {
+            world,
+            field(0),
+            field(1),
+            field(2),
+            field(3),
+            flags,
+            mask,
+            add_expr(int_type(), id, flat_int_literal{.value = t.ray}),
+            add_expr(int_type(), id, flat_int_literal{.value = i32(count)}),
+            add_expr(int_type(), id, flat_int_literal{.value = t.ray}),
+            payload,
+        };
+        auto const traced_ray = flat_traced_ray{.set = t.set, .ray = t.ray};
+        if (!cc::sequence{entry.traced_rays}.any([&](flat_traced_ray const& r) { return r == traced_ray; }))
+            entry.traced_rays.push_back(traced_ray);
+        auto const traced = builtin_call(id, callee, values);
+        if (is_local)
+            return traced;
+        add_stmt(where, flat_eval{.value = traced});
+        add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
+        return add_expr(checked_module::void_type, id, flat_construct{});
+    }
+
+    /// CHK-345: a report beyond the ray's range is none, and one in it is what the any hit decides of it.
+    flat_expr_id decide_report(origin from, flat_expr_id reported)
+    {
+        auto const type = entry.at(reported).type;
+        auto const id = from.expr;
+        auto const members = c.out.at(c.out.at(type).members);
+        auto member_at = [&](cc::string_view name)
+        {
+            for (auto i = isize(0); i < members.size(); ++i)
+                if (members[i].name == name)
+                    return i32(i);
+            return i32(-1);
+        };
+        auto const is_hit = member_at("is_hit");
+        auto const t = member_at("t");
+        auto const* const t_min = c.prelude_names.get_ptr("ray_t_min");
+        auto const* const t_current = c.prelude_names.get_ptr("ray_t_current");
+        auto const* const candidate_of = c.prelude_names.get_ptr("candidate_of_box");
+        if (is_hit < 0 || t < 0 || t_min == nullptr || t_current == nullptr || candidate_of == nullptr)
+            return fail();
+        type_id const floats[] = {c.prelude_type(builtins::k_float), c.prelude_type(builtins::k_float)};
+        auto const at_least = c.find_operator(file(), ">=", floats);
+        auto const at_most = c.find_operator(file(), "<=", floats);
+        if (!is_valid(at_least) || !is_valid(at_most))
+            return fail();
+
+        auto const r = add_local(local_kind::var, "reported", type);
+        add_stmt(from, flat_var{.local = r, .value = reported});
+        auto const field = [&](i32 m)
+        { return add_expr(members[m].type, id, flat_member{.object = local_ref(r, id), .member = m}); };
+        auto const no_hit = [&]
+        {
+            return make_stmt(
+                from, flat_assign{.place = field(is_hit),
+                                  .value = add_expr(members[is_hit].type, id, flat_bool_literal{.value = false})});
+        };
+
+        flat_expr_id const low[] = {field(t), builtin_call(id, t_min->front(), {})};
+        flat_expr_id const high[] = {field(t), builtin_call(id, t_current->front(), {})};
+        auto const in_range
+            = add_expr(members[is_hit].type, id,
+                       flat_and{.lhs = builtin_call(id, at_least, low), .rhs = builtin_call(id, at_most, high)});
+
+        auto const outer = cc::move(block);
+        block = {};
+        if (is_valid(fused.value().any_hit))
+        {
+            // the candidate, as raytracing.sgl builds it from the box and the report
+            auto const attributes = c.out.at(type).element;
+            auto const builder = candidate_of->front();
+            type_id const bindings[] = {c.out.at(c.out.functions[c.out.at(builder).info].type_parameters)[0], attributes};
+            flat_expr_id const box_and_report[] = {local_ref(fused.value().box, id), local_ref(r, id)};
+            i32 const both[] = {0, 1};
+            auto const made = inline_bound(id, builder, box_and_report, both, {}, bindings);
+            auto const& info = c.out.functions[c.out.at(builder).info];
+            auto const candidate_type = c.substitute_existing(info.result, bindings);
+            auto const candidate = add_expr(candidate_type, id, flat_block{.label = made.label, .body = made.body});
+
+            flat_expr_id const handed[] = {candidate, local_ref(fused.value().payload, id)};
+            auto const decided = inline_bound(id, fused.value().any_hit, handed, both);
+            auto const decision_type = c.out.functions[c.out.at(fused.value().any_hit).info].result;
+            auto const decision = add_expr(decision_type, id, flat_block{.label = decided.label, .body = decided.body});
+            // `ignore` is the decision's case 1, which no report survives
+            type_id const ints[] = {decision_type, decision_type};
+            auto const equals = c.find_operator(file(), "==", ints);
+            if (!is_valid(equals))
+                return fail();
+            flat_expr_id const compared[] = {decision, add_expr(decision_type, id, flat_enum_value{.case_index = 1})};
+            flat_stmt_id const ignored[] = {no_hit()};
+            add_stmt(from, flat_if{.condition = builtin_call(id, equals, compared), .then_body = add_list(ignored)});
+        }
+        auto const decide = add_list(block);
+        block = cc::move(outer);
+        flat_stmt_id const out_of_range[] = {no_hit()};
+        flat_stmt_id const checked[]
+            = {make_stmt(from, flat_if{.condition = in_range, .then_body = decide, .else_body = add_list(out_of_range)})};
+        add_stmt(from, flat_if{.condition = field(is_hit), .then_body = add_list(checked)});
+        return local_ref(r, id);
+    }
+
+    /// CHK-344: `table[i](mut p)` is a call of callable `base + i` of the pipeline's section, where `base` is where the
+    /// module's tables before this one end: they pack in declaration order.
+    flat_expr_id flatten_callable_call(ast::expr_id id, ast::call const& call, callable_call const& t)
+    {
+        auto const where = origin{.file = file(), .expr = id};
+        auto base = 0;
+        for (auto const& p : c.out.pipelines)
+            if (p.kind == pipeline_kind::callables && index_of(p.symbol) < index_of(t.table))
+                base += i32(p.records.count);
+        auto const* const found = c.prelude_names.get_ptr("call_callable");
+        if (found == nullptr || found->empty())
+            return fail();
+        auto const callee = found->front();
+
+        auto const& index_node = ast().at(call.callee).node.as<ast::index>();
+        auto index = flatten_expr(ast().at(index_node.arguments)[0].value);
+        if (!is_valid(index))
+            return fail();
+        if (base != 0)
+        {
+            type_id const types[] = {int_type(), int_type()};
+            auto const plus = c.find_operator(file(), "+", types);
+            if (!is_valid(plus))
+                return fail();
+            flat_expr_id const operands[] = {index, add_expr(int_type(), id, flat_int_literal{.value = base})};
+            index = builtin_call(id, plus, operands);
+        }
+
+        auto place = flatten_expr(ast().at(call.arguments)[0].value);
+        if (!is_valid(place))
+            return fail();
+        auto const is_local = entry.at(place).node.is<flat_local_ref>();
+        auto parameter = place;
+        if (!is_local)
+        {
+            place = with_bound_index(place, id);
+            auto const local = add_local(local_kind::var, "parameter", entry.at(place).type);
+            add_stmt(where, flat_var{.local = local});
+            add_stmt(where, flat_assign{.place = add_expr(entry.at(place).type, id, flat_local_ref{.local = local}),
+                                        .value = again(place, id)});
+            parameter = local_ref(local, id);
+        }
+        flat_expr_id const values[] = {index, parameter};
+        auto const called = builtin_call(id, callee, values);
+        if (is_local)
+            return called;
+        add_stmt(where, flat_eval{.value = called});
+        add_stmt(where, flat_assign{.place = again(place, id), .value = again(parameter, id)});
+        return add_expr(checked_module::void_type, id, flat_construct{});
+    }
+
+    /// The element `place` names, over a local holding its index where evaluating the index twice could differ.
+    flat_expr_id with_bound_index(flat_expr_id place, ast::expr_id id)
+    {
+        // by value: binding adds nodes, and the arrays move
+        auto const x = entry.at(place);
+        auto bind = [&](flat_expr_id index)
+        {
+            if (is_substitutable_index(index))
+                return index;
+            // `nonuniform i` binds `i`, and marks the bound local, since a mark is read only where it indexes (CHK-300)
+            auto const marked = marked_by_nonuniform(index);
+            auto const value = is_valid(marked) ? marked : index;
+            auto const local = add_local(local_kind::temporary, "index", entry.at(value).type);
+            add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = value});
+            if (!is_valid(marked))
+                return local_ref(local, id);
+            flat_expr_id const arguments[] = {local_ref(local, id)};
+            auto mark = entry.at(index);
+            mark.node.as<flat_call>().arguments = add_list(arguments);
+            entry.exprs.push_back(cc::move(mark));
+            return flat_expr_id(entry.exprs.size() - 1);
+        };
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto const buffer = element->buffer;
+            auto const index = bind(element->index);
+            return add_expr(x.type, id, flat_buffer_element{.buffer = buffer, .index = index});
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = element->object;
+            auto const index = bind(element->index);
+            return add_expr(x.type, id, flat_element{.object = object, .index = index});
+        }
+        return place;
     }
 
     /// True where a call of a program function is inlined rather than written as a call of the target.
@@ -512,11 +1070,14 @@ struct flattener
     /// A call as its record says: the written arguments evaluated in the order written, each filling its parameter.
     flat_expr_id flatten_bound_call(ast::expr_id id, type_id type, call_record const& record)
     {
+        if (is_by_target(record.callee))
+            return flatten_by_target(id, type, record);
         auto const values = flatten_written(c.out.at(record.written));
+        auto const handed = written_closures;
         auto const slots = c.out.at(record.slots);
         if (is_inlined(record.callee))
         {
-            auto const inlined = inline_bound(id, record.callee, values, slots);
+            auto const inlined = inline_bound(id, record.callee, values, slots, handed, c.out.at(record.type_arguments));
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         return target_call(id, type, record.callee, values, slots);
@@ -560,9 +1121,16 @@ struct flattener
             auto const value = values[i];
             if (!is_valid(value))
                 return fail();
-            if (is_substitutable(value) || is_resource_member(value))
+            if (is_substitutable(value) || is_resource_member(value) || is_literal_construction(value))
             {
                 bound[i] = value;
+                continue;
+            }
+            // an atomic names the memory the call updates, and a binding array's element the resource it hands over,
+            // so either's index is bound in its stead, and never its value
+            if (auto const kind = c.out.at(entry.at(value).type).kind; kind == type_kind::atomic || is_resource(kind))
+            {
+                bound[i] = with_bound_index(value, id);
                 continue;
             }
             auto name = cc::string_view("argument");
@@ -588,7 +1156,7 @@ struct flattener
             frames.push_back({.function = callee, .file = s.file, .chain = chain});
             for (auto p = isize(0); p < slots.size(); ++p)
                 if (slots[p] >= 0)
-                    bind_parameter(parameters[p], copies[p]);
+                    bind_parameter(parameters[p], copies[p], true);
             bind_defaults(parameters, slots);
             filled = cc::move(current()->bound);
             frames.remove_back();
@@ -612,6 +1180,10 @@ struct flattener
                 return fail();
             arguments.push_back(value);
         }
+        // CHK-303: a stream's `emit` takes the vertex past its signature, which no slot names
+        if (auto const* const record = c.out.builtin_function(s.intrinsic); record != nullptr && record->takes_element)
+            for (auto i = slots.size(); i < bound.size(); ++i)
+                arguments.push_back(entry.at(bound[i]).node.is<flat_local_ref>() ? bound[i] : again(bound[i], id));
         add_stmt(where, flat_leave{.target = label, .value = call_of(arguments)});
         auto const body = add_list(block);
         block = cc::move(outer);
@@ -657,6 +1229,42 @@ struct flattener
         if (!is_valid(s.intrinsic) || s.info < 0)
             return fail();
         auto const& info = c.out.functions[s.info];
+        auto const* const record = c.out.builtin_function(s.intrinsic);
+        if (record != nullptr && record->with_default_sampler != builtin_id::none)
+            return default_sampled_call(id, record->with_default_sampler, arguments);
+        if (record != nullptr && record->takes_acceleration_index)
+        {
+            // CHK-325: the position of the member among the entry point's acceleration members, counted in list order
+            auto const* const member = !arguments.empty() && is_valid(arguments[0])
+                                         ? entry.at(arguments[0]).node.try_as<flat_binding_member>()
+                                         : nullptr;
+            if (member == nullptr)
+                return fail();
+            auto k = 0;
+            auto is_found = false;
+            for (auto const binding : entry.bindings)
+            {
+                auto const members = c.out.at(c.out.bindings[c.out.at(binding).info].members);
+                for (auto i = isize(0); i < members.size() && !is_found; ++i)
+                {
+                    if (binding == member->binding && i32(i) == member->member)
+                        is_found = true;
+                    else if (c.out.at(members[i].type).kind == type_kind::acceleration_structure)
+                        ++k;
+                }
+                if (is_found)
+                    break;
+            }
+            if (!is_found)
+                return fail();
+            auto widened = cc::vector<flat_expr_id>::create_copy_of(arguments);
+            widened.push_back(add_expr(int_type(), id, flat_int_literal{.value = k}));
+            return add_expr(info.result, id,
+                            flat_call{.callee = callee,
+                                      .intrinsic = s.intrinsic,
+                                      .is_pure = info.is_pure,
+                                      .arguments = add_list(widened)});
+        }
         return add_expr(info.result, id,
                         flat_call{.callee = callee,
                                   .intrinsic = s.intrinsic,
@@ -664,14 +1272,55 @@ struct flattener
                                   .arguments = add_list(arguments)});
     }
 
+    /// A sampling call without its sampler calls the record that takes one, with the texture's `@sampler` after the
+    /// coordinate (CHK-279): a member of its binding, or a file-scope sampler.
+    /// The check pass has made sure the texture names one.
+    flat_expr_id default_sampled_call(ast::expr_id id, builtin_id with_sampler, cc::span<flat_expr_id const> arguments)
+    {
+        // the texture, or the binding array it is an element of
+        auto named = arguments.size() >= 2 ? arguments[0] : flat_expr_id::none;
+        if (auto const* const element = is_valid(named) ? entry.at(named).node.try_as<flat_element>() : nullptr)
+            named = element->object;
+        auto const* const texture = is_valid(named) ? entry.at(named).node.try_as<flat_binding_member>() : nullptr;
+        if (texture == nullptr)
+            return fail();
+        auto const members = c.out.at(c.out.bindings[c.out.at(texture->binding).info].members);
+        auto const& m = members[texture->member];
+        auto const file_sampler = m.default_file_sampler;
+        if (m.default_sampler < 0 && (!is_valid(file_sampler) || c.out.at(file_sampler).state != symbol_state::checked))
+            return fail();
+        // the call becomes one of the record that takes the sampler, so its arguments match its callee's parameters
+        auto const declared = c.symbol_declaring(with_sampler);
+        if (!is_valid(declared))
+            return fail();
+        auto with = cc::vector<flat_expr_id>();
+        with.push_back_range(arguments);
+        with.insert_at(2, is_valid(file_sampler)
+                              ? add_expr(c.out.at(file_sampler).type, id, flat_file_sampler{.sampler = file_sampler})
+                              : add_expr(members[m.default_sampler].type, id,
+                                         flat_binding_member{.binding = texture->binding, .member = m.default_sampler}));
+        auto const& info = c.out.functions[c.out.at(declared).info];
+        return add_expr(
+            info.result, id,
+            flat_call{.callee = declared, .intrinsic = with_sampler, .is_pure = info.is_pure, .arguments = add_list(with)});
+    }
+
     /// The values of a call's written arguments, in the order written.
     /// A splat stands for one member access per field, and its value is evaluated once: where the first one stands.
     cc::vector<flat_expr_id> flatten_written(cc::span<written_argument const> written)
     {
         auto result = cc::vector<flat_expr_id>();
+        auto handed = cc::vector<i32>();
         auto splat = evaluated_once{};
         for (auto const& w : written)
         {
+            handed.push_back(w.is_function ? closure_of(w.expr) : -1);
+            if (w.is_function)
+            {
+                // a function is no value: it is handed over as a closure, and the slot holds nothing
+                result.push_back(flat_expr_id::none);
+                continue;
+            }
             if (w.splat_member < 0)
             {
                 result.push_back(flatten_expr(w.expr));
@@ -694,7 +1343,138 @@ struct flattener
             result.push_back(add_expr(members[w.splat_member].type, w.expr,
                                       flat_member{.object = object, .member = w.splat_member}));
         }
+        written_closures = cc::move(handed);
         return result;
+    }
+
+    /// The closure the function argument `expr` hands over: a lambda, a function's name, or a parameter handed on.
+    i32 closure_of(ast::expr_id expr)
+    {
+        if (ast().at(expr).node.is<ast::lambda>())
+        {
+            closures.push_back({.file = file(),
+                                .lambda = expr,
+                                .bound = current()->bound,
+                                .chain = current()->chain,
+                                .owner = current()->function,
+                                .bindings = current()->bindings});
+            return i32(closures.size() - 1);
+        }
+        auto const where = tables().target_at(expr);
+        if (where.kind == target_kind::overload)
+        {
+            closures.push_back({.function = where.symbol});
+            return i32(closures.size() - 1);
+        }
+        for (auto const& b : current()->bound)
+            if (b.where == where && b.closure >= 0)
+                return b.closure;
+        is_failed = true;
+        return -1;
+    }
+
+    /// `f(args)` where `f` is a parameter of function type: the function it was handed, inlined here (CHK-319).
+    flat_expr_id flatten_closure_call(ast::expr_id id, type_id type, i32 handed, call_record const& record)
+    {
+        auto const values = flatten_written(c.out.at(record.written));
+        auto const argument_closures = written_closures;
+        auto const slots = c.out.at(record.slots);
+        return call_closure(id, type, handed, values, slots, argument_closures);
+    }
+
+    /// `by_target(native, emulated)` of raytracing.sgl: both lambdas written out, each a block, and one node holding both.
+    [[nodiscard]] bool is_by_target(symbol_id callee) const
+    {
+        auto const& s = c.out.at(callee);
+        return s.name == "by_target" && c.is_prelude_file(s.file);
+    }
+
+    flat_expr_id flatten_by_target(ast::expr_id id, type_id type, call_record const& record)
+    {
+        (void)flatten_written(c.out.at(record.written));
+        auto const handed = written_closures;
+        if (handed.size() != 2 || handed[0] < 0 || handed[1] < 0)
+            return fail();
+        auto const native = closure_block(id, type, handed[0], "native");
+        auto const emulated = closure_block(id, type, handed[1], "emulated");
+        if (!is_valid(native) || !is_valid(emulated))
+            return fail();
+        return add_expr(type, id, flat_by_target{.native = native, .emulated = emulated});
+    }
+
+    /// The closure `handed`, called with nothing, as a block that leaves with its value.
+    flat_expr_id closure_block(ast::expr_id id, type_id type, i32 handed, cc::string_view name)
+    {
+        auto const label = add_label(name);
+        auto const outer = cc::move(block);
+        block = {};
+        auto const value = call_closure(id, type, handed, {}, {}, {});
+        if (is_valid(value))
+            add_stmt({.file = file(), .expr = id}, flat_leave{.target = label, .value = value});
+        auto const body = add_list(block);
+        block = cc::move(outer);
+        if (!is_valid(value))
+            return fail();
+        return add_expr(type, id, flat_block{.label = label, .body = body});
+    }
+
+    /// The closure `handed`, inlined over `values`, which `slots` assigns to its parameters.
+    flat_expr_id call_closure(ast::expr_id id,
+                              type_id type,
+                              i32 handed,
+                              cc::span<flat_expr_id const> values,
+                              cc::span<i32 const> slots,
+                              cc::span<i32 const> argument_closures)
+    {
+        // by value: flattening below may push closures, and the vector moves
+        auto const f = closures[handed];
+        if (is_valid(f.function))
+        {
+            auto const inlined = inline_bound(id, f.function, values, slots, argument_closures);
+            return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
+        }
+        auto const& lambda_ast = c.ast_of(f.file);
+        auto const& l = lambda_ast.at(f.lambda).node.as<ast::lambda>();
+        auto const fields = lambda_ast.at(l.parameters);
+        auto bound = f.bound;
+        auto const lambda_type = c.out.files[f.file].type_at(f.lambda);
+        auto const parameter_types = c.out.at(c.out.at(lambda_type).members);
+        for (auto p = isize(0); p < fields.size() && p < slots.size(); ++p)
+        {
+            auto const k = slots[p];
+            auto const field_index = i32(&fields[p] - lambda_ast.fields.data());
+            auto const where = target{.kind = target_kind::parameter, .index = field_index};
+            if (k < 0 || k >= values.size())
+                return fail();
+            if (c.out.at(parameter_types[p].type).kind == type_kind::function)
+            {
+                bound.push_back({.where = where, .closure = argument_closures[k]});
+                continue;
+            }
+            auto const argument = values[k];
+            if (!is_valid(argument))
+                return fail();
+            auto const* const ref = entry.at(argument).node.try_as<flat_local_ref>();
+            if (ref != nullptr && is_substitutable(argument))
+                bound.push_back({.where = where, .local = ref->local});
+            else if (is_substitutable(argument))
+                bound.push_back({.where = where, .literal = argument});
+            else
+            {
+                auto const local = add_local(local_kind::let, c.text_of(f.file, fields[p].name), entry.at(argument).type);
+                add_stmt(entry.at(argument).from, flat_let{.local = local, .value = argument});
+                bound.push_back({.where = where, .local = local});
+            }
+        }
+        frames.push_back({.function = f.owner,
+                          .file = f.file,
+                          .result = type,
+                          .chain = f.chain,
+                          .bound = cc::move(bound),
+                          .bindings = f.bindings});
+        auto const value = flatten_expr(l.body.value);
+        frames.remove_back();
+        return value;
     }
 
     /// `a < b <= c` is `a < b and b <= c` with `b` evaluated once, and the `and` keeps `c` unevaluated where it must.
@@ -719,7 +1499,7 @@ struct flattener
 
             type_id const types[] = {entry.at(left.first).type, entry.at(right.first).type};
             auto const spelling = c.text_of(file(), c.file_of(file()).at(operators[i]).where);
-            auto const callee = c.find_operator(spelling, types);
+            auto const callee = c.find_operator(file(), spelling, types);
             if (!is_valid(callee))
                 return fail();
             flat_expr_id const arguments[] = {left.first, right.first};
@@ -798,7 +1578,7 @@ struct flattener
         if (!is_valid(compared))
             return symbol_id::none;
         type_id const both[] = {compared, compared};
-        return c.find_operator("==", both);
+        return c.find_operator(file(), "==", both);
     }
 
     /// The prelude's `bool`, even where the user file shadows the name.
@@ -979,7 +1759,7 @@ struct flattener
             nodes[link_node].rhs = i32(nodes.size() - 1);
 
             type_id const types[] = {entry.at(left).type, entry.at(right).type};
-            auto const callee = c.find_operator(spelling, types);
+            auto const callee = c.find_operator(file(), spelling, types);
             if (!is_valid(callee))
             {
                 is_failed = true;
@@ -1045,7 +1825,8 @@ struct flattener
             auto const where = origin{.file = file(), .expr = arm.result.value};
             auto const& e = ast().at(arm.result.value);
             auto const is_jump = e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>()
-                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>();
+                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>()
+                              || e.node.is<ast::discard_expr>();
             if (is_jump)
                 flatten_expr_stmt(where, arm.result.value);
             else if (is_valid(value_block))
@@ -1099,7 +1880,8 @@ struct flattener
 
     /// Binds a value to parameter `p` in the current frame: a literal or an immutable local stands for it, and
     /// anything else is bound once by a `let` of the block being written.
-    void bind_parameter(parameter const& p, flat_expr_id value)
+    /// `keeps_constructions` binds a construction of literals as it stands, for a builtin that takes one only so.
+    void bind_parameter(parameter const& p, flat_expr_id value, bool keeps_constructions = false)
     {
         if (!is_valid(value))
         {
@@ -1111,7 +1893,8 @@ struct flattener
         auto const* const ref = x.node.try_as<flat_local_ref>();
         if (ref != nullptr && is_substitutable(value))
             current()->bound.push_back({.where = where, .local = ref->local});
-        else if (is_substitutable(value) || is_resource_member(value))
+        else if (is_substitutable(value) || is_resource_member(value)
+                 || (keeps_constructions && is_literal_construction(value)))
             current()->bound.push_back({.where = where, .literal = value});
         else
         {
@@ -1153,8 +1936,17 @@ struct flattener
     inlined_body inline_bound(ast::expr_id call,
                               symbol_id callee,
                               cc::span<flat_expr_id const> values,
-                              cc::span<i32 const> slots)
+                              cc::span<i32 const> slots,
+                              cc::span<i32 const> handed = {},
+                              cc::span<type_id const> type_arguments = {})
     {
+        // CHK-340: what the callee's type parameters stand for, in the caller's terms made concrete
+        auto bindings = cc::vector<type_id>();
+        for (auto i = isize(0); i + 1 < type_arguments.size(); i += 2)
+        {
+            bindings.push_back(type_arguments[i]);
+            bindings.push_back(concrete(type_arguments[i + 1]));
+        }
         judge_stage(call, callee);
         auto const& s = c.out.at(callee);
         auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
@@ -1201,17 +1993,35 @@ struct flattener
         {
             auto const i = filled[k];
             auto const where = target{.kind = target_kind::parameter, .index = i32(parameters[i].field)};
+            // CHK-319: a parameter of function type stands for the closure its argument handed over
+            if (c.out.at(parameters[i].type).kind == type_kind::function)
+            {
+                if (k >= handed.size() || handed[k] < 0)
+                {
+                    is_failed = true;
+                    continue;
+                }
+                bound.push_back({.where = where, .closure = handed[k]});
+                continue;
+            }
             auto const argument = values[k];
             if (!is_valid(argument))
             {
                 is_failed = true;
                 continue;
             }
+            // CHK-316: a `mut` parameter is the caller's place, named again wherever the body names the parameter
+            if (parameters[i].is_mut)
+            {
+                bound.push_back({.where = where, .literal = pin_place(argument)});
+                continue;
+            }
             auto const& x = entry.at(argument);
             auto const* const ref = x.node.try_as<flat_local_ref>();
             if (ref != nullptr && is_substitutable(argument))
                 bound.push_back({.where = where, .local = ref->local});
-            else if (is_substitutable(argument))
+            // CHK-324: a resource stands wherever the parameter is named, since no target holds one in a local
+            else if (is_substitutable(argument) || is_resource_member(argument))
                 bound.push_back({.where = where, .literal = argument});
             else
             {
@@ -1226,7 +2036,8 @@ struct flattener
                           .result = info.result,
                           .return_label = label,
                           .chain = chain_range,
-                          .bound = cc::move(bound)});
+                          .bound = cc::move(bound),
+                          .bindings = cc::move(bindings)});
         // `self`, the first parameter of a method or a property, is the receiver its body and its defaults read
         auto const has_receiver = s.role == function_role::property
                                || (s.role == function_role::method && function->receiver == ast::receiver_kind::self);
@@ -1279,6 +2090,9 @@ struct flattener
         auto result = flat_expr_id::none;
         if (ast::is_valid(value))
             result = flatten_expr(value);
+        // CHK-345: the entry point's own report, decided by the fused any hit before it leaves
+        if (fused.has_value() && frames.size() == 1 && is_valid(result))
+            result = decide_report(from, result);
         if (is_valid(return_label))
             add_stmt(from, flat_leave{.target = return_label, .value = result});
         else
@@ -1327,7 +2141,7 @@ struct flattener
         if (op != "=")
         {
             type_id const types[] = {entry.at(place).type, entry.at(value).type};
-            auto const callee = c.find_operator(op.subview({.offset = 0, .size = op.size() - 1}), types);
+            auto const callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
             if (!is_valid(callee))
             {
                 is_failed = true;
@@ -1345,6 +2159,11 @@ struct flattener
     /// that holds it.
     flat_expr_id read_of_place(flat_expr_id place, ast::expr_id target)
     {
+        // a `mut` parameter names a place whose indices were evaluated when it was bound (`pin_place`)
+        if (is_valid(place) && ast().at(target).node.is<ast::name>())
+            return again(place, target);
+        if (has_array_index(place))
+            return reread(place, target);
         if (!is_valid(place) || !entry.at(place).node.is<flat_buffer_element>())
             return flatten_expr(target);
 
@@ -1362,6 +2181,45 @@ struct flattener
         auto const buffer_again = add_expr(buffer.type, indexed.object, buffer.node);
         auto const index_again = once.later == once.first ? again(once.first, arguments[0].value) : once.later;
         return add_expr(x.type, target, flat_buffer_element{.buffer = buffer_again, .index = index_again});
+    }
+
+    [[nodiscard]] bool has_array_index(flat_expr_id id) const
+    {
+        for (auto depth = 0; is_valid(id) && depth < k_max_inline_depth; ++depth)
+        {
+            auto const& node = entry.at(id).node;
+            if (node.is<flat_element>())
+                return true;
+            auto const* const member = node.try_as<flat_member>();
+            if (member == nullptr)
+                return false;
+            id = member->object;
+        }
+        return false;
+    }
+
+    /// The place `id` read a second time, each array index in it evaluated once: the place keeps the first evaluation,
+    /// and the read takes the local that holds it (EVAL-14).
+    flat_expr_id reread(flat_expr_id id, ast::expr_id from)
+    {
+        // by value: evaluating once adds nodes, and the arrays move
+        auto const x = entry.at(id);
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            auto const object = reread(member->object, from);
+            return add_expr(x.type, from, flat_member{.object = object, .member = member->member});
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = reread(element->object, from);
+            auto const once = evaluate_once(element->index, "index", from);
+            entry.exprs[index_of(id)].node = flat_element{.object = element->object, .index = once.first};
+            auto const index = once.later == once.first ? again(once.first, from) : once.later;
+            return add_expr(x.type, from, flat_element{.object = object, .index = index});
+        }
+        if (x.node.is<flat_local_ref>())
+            return again(id, from);
+        return fail();
     }
 
     void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
@@ -1470,6 +2328,12 @@ struct flattener
             is_failed = is_failed || !is_valid(target);
             return add_stmt(from, flat_leave{.target = target, .value = flatten_expr(b->value)});
         }
+        if (x.node.is<ast::discard_expr>())
+        {
+            // CHK-277: only a pixel entry point may reach it, which is known once the whole body is inlined
+            discards.push_back({.file = file(), .expr = value});
+            return add_stmt(from, flat_discard{});
+        }
         if (x.node.is<ast::continue_expr>())
         {
             if (loops.empty())
@@ -1530,54 +2394,6 @@ struct flattener
     static constexpr isize k_max_inline_depth = 256;
 };
 
-/// Finds the first node of a flat tree that stands deeper than `k_max_depth`, counted the way every later walk counts.
-/// It descends at most one level past the limit, so it is safe on any tree the flattener wrote.
-struct depth_probe
-{
-    flat_entry_point const& e;
-    cc::optional<origin> found;
-
-    void expr(flat_expr_id id, int depth)
-    {
-        if (found.has_value() || !is_known(e, id))
-            return;
-        auto const& x = e.at(id);
-        if (depth > k_max_depth)
-        {
-            found = x.from;
-            return;
-        }
-        if (auto const* const b = x.node.try_as<flat_block>())
-            body(b->body, depth + 1);
-        for_each_operand(e, x, [&](flat_expr_id operand) { expr(operand, depth + 1); });
-    }
-
-    void body(ast::range_of<flat_stmt_id> range, int depth)
-    {
-        if (found.has_value() || !is_known(e, range))
-            return;
-        for (auto const id : e.at(range))
-        {
-            if (found.has_value() || !is_known(e, id))
-                continue;
-            auto const& s = e.at(id);
-            if (depth > k_max_depth)
-            {
-                found = s.from;
-                return;
-            }
-            for_each_expr_of(s, [&](flat_expr_id x) { expr(x, depth + 1); });
-            for_each_pattern_of(e, s,
-                                [&](ast::range_of<flat_expr_id> patterns)
-                                {
-                                    if (is_known(e, patterns))
-                                        for (auto const p : e.at(patterns))
-                                            expr(p, depth + 1);
-                                });
-            for_each_body_of(e, s, [&](ast::range_of<flat_stmt_id> inner) { body(inner, depth + 1); });
-        }
-    }
-};
 } // namespace
 
 void checker::flatten_test(i32 index)
@@ -1585,9 +2401,9 @@ void checker::flatten_test(i32 index)
     // by value: flattening appends to the module's vectors
     auto const test = out.tests[index];
     auto const info = out.at(test.symbol).info;
-    // A test that expects a diagnostic is never run (CHK-232), and one whose text an earlier phase found an error in has
-    // been reported already: flattening either could only add a second diagnostic to the first.
-    if (test.expects_diagnostics() || has_syntax_error_in(test.file, test.extent))
+    // One whose text an earlier phase found an error in has been reported already: flattening it could only add a
+    // second diagnostic to the first.
+    if (has_syntax_error_in(test.file, test.extent))
         return;
     if (!notes[info].is_body_sound || !inlines_whole(test.symbol))
         return;
@@ -1596,6 +2412,9 @@ void checker::flatten_test(i32 index)
     f.entry.name = "test";
     f.entry.function = test.symbol;
     f.entry.result = checked_module::void_type;
+    // CHK-333: what the test lists, which its driver binds
+    for (auto const binding : out.at(out.functions[out.at(test.symbol).info].bindings))
+        f.entry.bindings.push_back(binding);
     for (auto const& other : out.symbols)
         if (!other.name.empty())
             f.entry.names.reserve(other.name);
@@ -1604,16 +2423,40 @@ void checker::flatten_test(i32 index)
     auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
     for (auto const stmt : ast_of(test.file).at(body.statements))
         f.flatten_stmt(stmt);
+    // CHK-265: the test's `require` and a helper's that the test reaches are used by the calls that need them
+    for (auto const& u : f.feature_uses)
+        mark_requires_used(u.within, u.features);
+
+    // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
+    // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
+    if (test.expects_diagnostics())
+    {
+        if (!f.is_failed)
+        {
+            f.entry.body = f.add_list(f.block);
+            judge_constants(f.entry);
+        }
+        return;
+    }
 
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
+    for (auto const& v : f.stage_violations)
+        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+               cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
+                          out.at(v.callee).name));
+    // a pipeline's trace or callable runs against tables a test has none of
+    for (auto const& v : f.ray_stage_calls)
+        unsupported(v.file, span_of(v.file, v.call),
+                    cc::format("a test that reaches {}, which only the ray-tracing stages run", out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
-    if (f.is_failed)
+    if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty())
         return;
     f.entry.body = f.add_list(f.block);
+    judge_constants(f.entry);
     out.tests[index].unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
 }
@@ -1628,7 +2471,7 @@ bool checker::is_sound(type_id type) const
     return true;
 }
 
-void checker::flatten_entry_point(symbol_id id)
+void checker::flatten_entry_point(symbol_id id, traversal_request const* traversal)
 {
     auto const& s = out.at(id);
     auto const& info = out.functions[s.info];
@@ -1636,22 +2479,26 @@ void checker::flatten_entry_point(symbol_id id)
     if (info.entry_stage == stage::none || !note.is_valid_entry || !inlines_whole(id))
         return;
 
-    auto const parameter = out.at(info.parameters)[0];
+    auto const parameters = out.at(info.parameters);
     // A compute entry point hands nothing back, so `nothing` is its result and not a hole.
     auto const wants_result = info.entry_stage != stage::compute;
-    if (!is_sound(parameter.type) || (wants_result && !is_sound(info.result)))
+    auto is_parameter_sound = true;
+    for (auto const& parameter : parameters)
+        is_parameter_sound = is_parameter_sound && is_sound(parameter.type);
+    if (!is_parameter_sound || (wants_result && !is_sound(info.result)))
         return;
 
     auto f = flattener{.c = *this};
     f.entry.entry_stage = info.entry_stage;
-    f.entry.name = s.name;
+    f.entry.name = traversal != nullptr ? traversal->name : cc::string(s.name);
     f.entry.function = id;
-    f.entry.input = parameter.type;
+    // CHK-271: the stage struct, when there is one, is the first parameter; every other is a stage input
+    if (!parameters.empty() && parameters[0].input == stage_input::none)
+        f.entry.input = parameters[0].type;
     f.entry.result = info.result;
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];
-    f.entry.takes_thread_id = parameter.is_thread_id;
     f.entry.features = info.features;
     for (auto const binding : out.at(info.bindings))
         f.entry.bindings.push_back(binding);
@@ -1663,9 +2510,102 @@ void checker::flatten_entry_point(symbol_id id)
             f.entry.names.reserve(other.name);
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
-    auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
-    f.current()->bound.push_back(
-        {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+    // CHK-326: a ray-tracing stage's one parameter of the target is its payload, `locals[0]`, which the stage writes
+    // through; its launch, its ray and its hit it reads from the target where the entry point starts
+    if (info.entry_stage >= stage::raygen)
+    {
+        f.entry.input = type_id::none;
+        // CHK-345: a traversal function takes the payload its any hit writes, which no intersection is handed
+        if (traversal != nullptr)
+        {
+            f.fused = flattener::fusion{.any_hit = traversal->any_hit};
+            if (is_valid(traversal->payload))
+            {
+                f.fused.value().payload = f.add_local(local_kind::parameter, "payload", traversal->payload);
+                f.entry.input = traversal->payload;
+            }
+        }
+        for (auto const& parameter : parameters)
+            if (parameter.is_mut)
+            {
+                auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
+                f.entry.input = parameter.type;
+                f.current()->bound.push_back(
+                    {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+            }
+        for (auto const& parameter : parameters)
+        {
+            if (parameter.is_mut)
+                continue;
+            // CHK-342: a procedural hit or candidate carries the attributes the target hands the stage
+            auto const& t = out.at(parameter.type);
+            if (is_valid(t.generic))
+            {
+                auto const is_hit = out.at(t.symbol).name == "procedural_hit";
+                auto const* const found
+                    = prelude_names.get_ptr(is_hit ? cc::string_view("current_procedural_hit")
+                                                   : cc::string_view("current_procedural_candidate"));
+                if (found == nullptr || found->empty())
+                {
+                    f.is_failed = true;
+                    continue;
+                }
+                auto const builder = found->front();
+                auto const attributes = f.add_local(local_kind::parameter, "attributes", t.element);
+                f.entry.attributes = attributes;
+                type_id const bindings[] = {out.at(out.functions[out.at(builder).info].type_parameters)[0], t.element};
+                flat_expr_id const arguments[] = {f.local_ref(attributes, ast::expr_id::none)};
+                i32 const slots[] = {0};
+                auto const inlined = f.inline_bound(ast::expr_id::none, builder, arguments, slots, {}, bindings);
+                auto const value = f.add_expr(parameter.type, ast::expr_id::none,
+                                              flat_block{.label = inlined.label, .body = inlined.body});
+                auto const local = f.add_local(local_kind::let, parameter.name, parameter.type);
+                f.add_stmt({.file = s.file, .expr = ast::expr_id::none}, flat_let{.local = local, .value = value});
+                f.current()->bound.push_back(
+                    {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+                continue;
+            }
+            auto const source
+                = parameter.input == stage_input::launch_id           ? cc::string_view("launch_index")
+                : parameter.input == stage_input::launch_size         ? cc::string_view("launch_dimensions")
+                : out.name_of(parameter.type) == "ray"                ? cc::string_view("current_ray")
+                : out.name_of(parameter.type) == "triangle_hit"       ? cc::string_view("current_triangle_hit")
+                : out.name_of(parameter.type) == "triangle_candidate" ? cc::string_view("current_triangle_candidate")
+                : out.name_of(parameter.type) == "procedural_box"     ? cc::string_view("current_procedural_box")
+                                                                      : cc::string_view();
+            auto const* const found = prelude_names.get_ptr(source);
+            if (source.empty() || found == nullptr || found->empty())
+            {
+                f.is_failed = true;
+                continue;
+            }
+            auto const read = found->front();
+            auto value = flat_expr_id::none;
+            if (is_valid(out.at(read).intrinsic))
+                value = f.builtin_call(ast::expr_id::none, read, {});
+            else
+            {
+                auto const inlined = f.inline_call(ast::expr_id::none, read, {});
+                value = f.add_expr(parameter.type, ast::expr_id::none,
+                                   flat_block{.label = inlined.label, .body = inlined.body});
+            }
+            auto const local = f.add_local(local_kind::let, parameter.name, parameter.type);
+            f.add_stmt({.file = s.file, .expr = ast::expr_id::none}, flat_let{.local = local, .value = value});
+            f.current()->bound.push_back(
+                {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+            if (f.fused.has_value() && source == "current_procedural_box")
+                f.fused.value().box = local;
+        }
+    }
+    // Every parameter is a local, in the order written: the stage struct at `locals[0]` when there is one.
+    for (auto const& parameter : info.entry_stage >= stage::raygen ? cc::span<check::parameter const>() : parameters)
+    {
+        auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
+        f.current()->bound.push_back(
+            {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+        if (parameter.input != stage_input::none)
+            f.entry.stage_inputs.push_back({.input = parameter.input, .local = local});
+    }
 
     auto const& body = ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().body;
     if (ast::is_valid(body.value))
@@ -1673,28 +2613,58 @@ void checker::flatten_entry_point(symbol_id id)
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
 
-    // CHK-193: known only now, since only the whole inlined body says what an entry point reaches.
-    auto const stage_name = [](stage st)
+    // CHK-322: what the body calls needs a device's feature, which the entry point declares like one of its signature
+    auto used = feature_set();
+    for (auto const& u : f.feature_uses)
+        used |= u.features;
+    auto const declared = notes[s.info].declared_features;
+    for (auto i = isize(0); i < k_feature_count; ++i)
     {
-        return st == stage::vertex ? "vertex" : st == stage::pixel ? "pixel" : "compute";
-    };
+        auto const needed = feature(i);
+        if (!used.has(needed))
+            continue;
+        if (!declared.has(needed))
+        {
+            auto& d = report(diagnostic_kind::feature_not_declared, s.file,
+                             ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                             cc::format("{} needs {}, which neither its file, a binding it lists nor its body requires",
+                                        s.name, name_of(needed)));
+            for (auto const& u : f.feature_uses)
+                if (u.features.has(needed))
+                {
+                    d.notes.push_back(
+                        {.file = u.file, .where = span_of(u.file, u.call), .message = "the call that needs it"});
+                    break;
+                }
+        }
+    }
+    // a body's `require` that declares it is used, as one declaring a need of the signature is (CHK-265)
+    for (auto const& u : f.feature_uses)
+        mark_requires_used(u.within, u.features);
+    out.functions[s.info].features |= used;
+    f.entry.features |= used;
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     for (auto const& v : f.stage_violations)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-               cc::format("{} is a {} entry point, and {} is @stages without it", s.name, stage_name(info.entry_stage),
-                          out.at(v.callee).name));
+               cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
+                          check::stage_name(info.entry_stage), out.at(v.callee).name));
+    auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
+    for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
+        report(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
+               cc::format("{} is a {} entry point, and only a pixel stage discards", s.name,
+                          check::stage_name(info.entry_stage)));
     if ((info.stages & stage_bit(info.entry_stage)) == 0)
         report(diagnostic_kind::stage_not_allowed, s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
-                          stage_name(info.entry_stage)));
+                          check::stage_name(info.entry_stage)));
     // CHK-213: a gap of this pass is reported, so an entry point never vanishes without a word.
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                     cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));
-    if (f.is_failed || !f.stage_violations.empty() || (info.stages & stage_bit(info.entry_stage)) == 0)
+    if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0)
         return;
     f.entry.body = f.add_list(f.block);
 
@@ -1710,5 +2680,47 @@ void checker::flatten_entry_point(symbol_id id)
                cc::format("'{}' nests deeper than {} levels here, with every call inlined", s.name, k_max_depth));
         return;
     }
+    judge_constants(f.entry);
+    judge_uniformity(f.entry);
+    out.entry_points.push_back(cc::move(f.entry));
+}
+
+void checker::flatten_metal_traversals()
+{
+    auto is_any = false;
+    for (auto const& p : out.pipelines)
+    {
+        if (p.kind != pipeline_kind::hit_group && p.kind != pipeline_kind::raytracing)
+            continue;
+        is_any = true;
+        if (p.kind != pipeline_kind::hit_group || !p.is_procedural || out.at(p.symbol).file != i32(out.files.size()) - 1)
+            continue;
+        auto const rays = out.at(out.at(out.at(p.ray_set).type).members);
+        auto const records = out.at(p.records);
+        for (auto r = isize(0); r < rays.size(); ++r)
+        {
+            auto const request = traversal_request{.name = cc::format("sgl_{}_{}", out.at(p.symbol).name, rays[r].name),
+                                                   .any_hit = records[r * 2 + 1],
+                                                   .payload = rays[r].type};
+            flatten_entry_point(p.intersection, &request);
+        }
+    }
+    // CHK-345: a record without a closest hit calls this one on metal, where a table slot holds a function or crashes
+    // it stands for no function of the source, so it is owned by a ray-tracing function of the program
+    auto owner = symbol_id::none;
+    for (auto const& fn : out.functions)
+        if (fn.entry_stage >= stage::raygen && out.at(fn.symbol).file == i32(out.files.size()) - 1)
+            owner = fn.symbol;
+    if (!is_any || !is_valid(owner))
+        return;
+    auto f = flattener{.c = *this};
+    f.entry.entry_stage = stage::closest_hit;
+    f.entry.function = owner;
+    f.entry.name = "sgl_empty_closest_hit";
+    f.entry.result = checked_module::void_type;
+    f.entry.features = feature_set(feature::raytracing_pipeline);
+    f.entry.names.reserve(f.entry.name);
+    f.frames.push_back({.file = i32(out.files.size()) - 1});
+    f.entry.body = f.add_list(f.block);
     out.entry_points.push_back(cc::move(f.entry));
 }

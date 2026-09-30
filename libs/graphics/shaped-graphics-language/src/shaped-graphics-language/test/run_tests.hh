@@ -25,6 +25,11 @@ enum class sgl::test::test_status : sgl::u8
     /// The run read a `var` nothing assigned, a mistake of the program the check pass cannot see yet.
     /// A status of its own, so `@expect(.fail)` never passes on it.
     uninitialized_read,
+    /// The run reached a `discard`, which ends it with no result and no effect; `@expect(.discard)` expects it.
+    discarded,
+    /// The run met a value no target defines an operation for, such as an integer divisor of zero.
+    /// A status of its own for the same reason: it is a mistake of the program, never a check that failed.
+    program_error,
     /// The test has no flat tree: its body did not check, which a diagnostic already says.
     not_run,
     /// The test expects diagnostics, so whether they occurred is its verdict, and `contain_expected` gives it.
@@ -33,6 +38,8 @@ enum class sgl::test::test_status : sgl::u8
     internal_error,
     /// The caller raised `run_limits::stop` while it ran; the result says nothing about the test.
     stopped,
+    /// What the driver bound does not fit the bindings the test lists, and `test_result::detail` says how (EVAL-94).
+    invalid_bindings,
 };
 
 /// One part of a failing condition that was false, and the values that made it so.
@@ -95,6 +102,8 @@ struct sgl::test::test_options
     /// Only the tests of this file, a position in the files `check` was given; -1 runs every test of the module.
     i32 file = -1;
     check::run_limits limits;
+    /// The values of the bindings a test lists (CHK-333); a `mut buffer` bound through `mutable_bytes` holds what the last test left.
+    check::driver_bindings bindings;
 };
 
 namespace sgl::test
@@ -114,7 +123,8 @@ namespace sgl::test
 [[nodiscard]] test_result run_test(check::checked_module const& m,
                                    cc::span<check::module_file const> files,
                                    i32 test,
-                                   check::run_limits const& limits = {});
+                                   check::run_limits const& limits = {},
+                                   check::driver_bindings const& bindings = {});
 
 /// Removes from `diagnostics` every one inside a test that has an `@expect(error = …)` or `@expect(warning = …)`, and
 /// reports each such expectation that none of them met as `unmet-expectation` (CHK-232).

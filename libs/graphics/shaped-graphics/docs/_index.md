@@ -28,6 +28,7 @@ The [readme](../readme.md#file-organization) has the per-folder table, the inclu
 - [writing a backend](writing-a-backend.md) — the procedure for building one: what to do before any rendering code, the milestone order, which sg abstractions turned out portable and which forked.
   Written from the vulkan build-out and grown as it goes, because only a second implementation knows which of the first one's choices were the API leaking through.
 - [testing](testing.md) — the two test tiers: backend-agnostic API tests (`INVOCABLE_TEST`, run against every backend) vs per-backend smoke + internal-invariant suites, and where a new test goes.
+- [tier1-pipeline-tests](tier1-pipeline-tests.md) — the plan for executing the pipeline semantics in tier 1: the harness, the enum zoo, and the sg follow-ups it found.
 - [TODO](TODO.md) — running list of known follow-ups.
 
 ## Concepts
@@ -56,6 +57,7 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
   opaque driver-built structures whose creation is a recorded `cmd.raytracing` build, the DXR∩Vulkan input vocabulary, and the persistent-vs-transient handle lifetime.
 - [raytracing pipeline](concepts/raytracing-pipeline.md) — the full DXR path:
   a `raytracing_pipeline` (state object) + `raytracing_shader_table` + `cmd.raytracing.dispatch_rays`, the two-phase handle/index model, and why records hold only a shader identifier.
+  Also which backend has `ray_query` and `raytracing_pipeline`, and what metal and webgpu make of them.
 - [raster pipeline](concepts/raster-pipeline.md) — the graphics path:
   a `raster_pipeline` (PSO) with its fixed-function state baked in, why the target formats live in the description,
   and how draws record on the `rendering_scope` handle as well as `cmd.raster` / `cmd.raster.manual`.

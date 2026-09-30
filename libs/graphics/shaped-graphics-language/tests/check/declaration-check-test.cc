@@ -177,8 +177,8 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
           == "unsupported-yet user:[2.0 * 1.0] a const whose value is no literal, no enum case and no const\n");
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
     CHECK(reports_for("use brdf\n") == "unsupported-yet user:[use brdf] use\n");
-    CHECK(reports_for("sampler s:\n    filter = .linear\n") == "unsupported-yet user:[sampler s:] sampler\n");
-    CHECK(reports_for("fun id[T](x: T) -> T => x\n").starts_with("unsupported-yet user:[id] a generic function\n"));
+    // CHK-339: a generic struct is the prelude's
+    CHECK(reports_for("struct box[T]:\n    value: T\n") == "unsupported-yet user:[box] a generic struct of the program\n");
     CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
           == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
@@ -194,13 +194,81 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("module cube\nstruct a:\n    x: float\n") == "");
 }
 
-TEST("sgl check - a function needs a body unless it is @builtin, and a generic one fails as a whole")
+TEST("sgl check - a function needs a body unless it is @builtin")
 {
     CHECK(reports_for("fun f(x: float) -> float\n") == "expected-body user:[f] f\n");
+}
 
-    auto const checked = check_sources(read_prelude(), "fun id[T](x: float) -> float => x\n");
-    CHECK(symbol_named(checked.module, "id").state == symbol_state::failed);
-    CHECK(sgl::check::dump(checked.module).ends_with("(fun id failed)\n"));
+TEST("sgl check - a type parameter is opaque, and a call says what it stands for")
+{
+    // CHK-338: what a body does with a value of a type parameter is hand it on, store it and return it
+    CHECK(reports_for("fun id[T](x: T) -> T => x\n") == "");
+    CHECK(reports_for("fun twice[T](x: T) -> T => x + x\n").starts_with("no-matching-overload user:[x + x]"));
+    // CHK-340: a type parameter the arguments leave open is said by where the call stands, or the call is an error.
+    // Only the prelude has a value of an open type to give, `undefined()`, so `pick` stands in a prelude file.
+    auto const builtins = builtins_text();
+    cc::string_view const open_result[]
+        = {builtins, "fun pass[T](x: T) -> T => x\nfun pick[T](x: float) -> T => pass(undefined())\n",
+           "fun f() -> float => pick(1.0)\nfun g():\n    let y = pick(1.0)\n"};
+    CHECK(reports_of(check_files(open_result))
+          == "no-matching-overload user:[pick(1.0)] T of pick is said by nothing: neither an argument nor where the "
+             "call stands\n");
+    // an entry point is handed values of known types
+    CHECK(reports_for("@compute(1) fun main[T](@thread_id id: int3):\n    return\n")
+          == "wrong-kind-of-name user:[main] an entry point is no generic function: the GPU hands it values of known "
+             "types\n");
+    // CHK-338: a type parameter hides every symbol of its name, and names no value
+    CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\n")
+          == "wrong-kind-of-name user:[A] A is a type parameter, and a call needs a function or a struct\n");
+    CHECK(reports_for("fun f[A](v: A) -> A:\n    let k = A\n    return v\n")
+          == "wrong-kind-of-name user:[A] A is a type parameter, which names a type and no value\n");
+    CHECK(reports_for("fun f[T: float](x: T) => x\n")
+          == "unsupported-yet user:[T: float] a type parameter with a bound, a default or an attribute\n");
+    CHECK(reports_for("fun f[T = float](x: T) => x\n")
+          == "unsupported-yet user:[T = float] a type parameter with a bound, a default or an attribute\n");
+}
+
+TEST("sgl check - a generic struct is the prelude's, and an instance names one type argument")
+{
+    // CHK-339
+    CHECK(reports_for("struct box[A]:\n    v: A\n") == "unsupported-yet user:[box] a generic struct of the program\n");
+    CHECK(reports_for("fun f(r: report[float, float]) => 1.0\n")
+          == "wrong-kind-of-name user:[report[float, float]] report takes one type argument\n");
+}
+
+TEST("sgl check - a mut parameter is spelled on its type, takes no default, and no entry point has one")
+{
+    // CHK-315
+    CHECK(reports_for("fun f(mut p: float) => p\n") == "unexpected-keyword user:[p] `mut p: T` is spelled `p: mut T`\n");
+    CHECK(reports_for("@compute(1) fun main(@thread_id id: int3, x: mut float):\n    return\n")
+          == "wrong-kind-of-name user:[x] x is a parameter of an entry point, which the GPU fills and no caller hands "
+             "a "
+             "place\n");
+    // CHK-316: only the caller's place fills it
+    CHECK(reports_for("fun bump(p: mut int = 0):\n    p += 1\n")
+          == "default-not-allowed-here user:[0] p is a mut parameter, which only a caller's place fills\n");
+}
+
+TEST("sgl check - a function type is a parameter's whole type, and nothing else's")
+{
+    // CHK-317
+    auto const refused = cc::string("a function type is the type of a parameter, and of nothing else\n");
+    CHECK(reports_for("fun g(f: mut (float) -> float) => 1.0\n")
+          == "wrong-kind-of-name user:[(float) -> float] " + refused);
+    CHECK(reports_for("fun g(fs: ((float) -> float)[2]) => 1.0\n")
+          == "wrong-kind-of-name user:[(float) -> float] " + refused);
+    CHECK(reports_for("fun g(r: report[(float) -> float]) => 1.0\n")
+          == "wrong-kind-of-name user:[(float) -> float] " + refused);
+    CHECK(reports_for("struct s:\n    f: (float) -> float\n") == "wrong-kind-of-name user:[(float) -> float] " + refused);
+    CHECK(reports_for("fun g(x: float) -> (float) -> float => g\n")
+              .starts_with("wrong-kind-of-name user:[(float) -> float] " + refused));
+}
+
+TEST("sgl check - @bitflags is the prelude's")
+{
+    // CHK-321
+    CHECK(reports_for("@bitflags enum e:\n    a = 1\n")
+          == "unsupported-yet user:[bitflags] @bitflags on an enum of the program\n");
 }
 
 TEST("sgl check - @operator hides the function's name, and takes one quoted operator")
@@ -255,13 +323,24 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@vertex fun vs(v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n") == "");
 
     CHECK(entry_reports("@vertex fun vs(v: plain) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] the parameter of a @vertex fun is a @vertex struct\n");
+          == "invalid-entry-point user:[vs] the struct parameter of a @vertex fun is a @vertex struct\n");
     CHECK(entry_reports("@vertex fun vs(v: vin, w: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] an entry point takes one struct parameter\n");
-    CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n")
-          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
+          == "invalid-entry-point user:[vs] an entry point takes its stage struct first, and stage inputs after it\n");
+    // CHK-271: a vertex stage may draw from no vertex buffer, and takes its stage inputs after its struct
+    CHECK(entry_reports("@vertex fun vs(@vertex_index i: int) -> vout:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
+          == "");
+    CHECK(entry_reports("@vertex fun vs(v: vin, @instance_index i: int, @vertex_index k: int) -> vout:\n"
+                        "    return { p = hpos4(..v.p, 1.0) }\n")
+          == "");
+    CHECK(entry_reports("@vertex fun vs(@vertex_index i: int, v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
+          == "invalid-entry-point user:[vs] an entry point takes its stage struct first, and stage inputs after it\n");
+    CHECK(entry_reports("@vertex fun vs(v: vin, @vertex_index i: uint) -> vout:\n    return { p = hpos4(..v.p, 1.0) "
+                        "}\n")
+          == "invalid-entry-point user:[vs] a @vertex_index parameter is an int\n");
+    // a vertex that a tessellation stage reads first has no @position; the pipeline asks for it where the rasterizer reads it
+    CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n") == "");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> two:\n    return { a = hpos4(..v.p, 1.0), b = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
+          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with at most one @position field\n");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> wrong:\n    return { a = float4(..v.p, 1.0) }\n")
           == "invalid-entry-point user:[vs] the @position field of a @vertex fun is an hpos4\n");
 
@@ -269,7 +348,13 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n")
           == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct\n");
     CHECK(entry_reports("@pixel fun ps(v: float) -> target:\n    return { c = float4(v, v, v, v) }\n")
-          == "invalid-entry-point user:[ps] the parameter of an entry point is a struct with fields\n");
+          == "invalid-entry-point user:[ps] the struct parameter of an entry point is a struct with fields\n");
+    CHECK(entry_reports("@pixel fun ps(v: vout, @is_front_facing f: bool, @sample_mask m: uint) -> target:\n"
+                        "    return { c = float4(..v.p) }\n")
+          == "");
+    CHECK(entry_reports("@pixel fun ps(@is_front_facing f: bool) -> target:\n    return { c = float4(1.0, 1.0, 1.0, "
+                        "1.0) }\n")
+          == "invalid-entry-point user:[ps] a @pixel fun takes the struct its vertex stage returns\n");
     CHECK(entry_reports("@vertex @pixel fun ps(v: vout) -> target:\n    return { c = float4(..v.p) }\n")
           == "invalid-entry-point user:[ps] an entry point has one stage\n");
 }
@@ -326,4 +411,89 @@ TEST("sgl check - a type scope holds one kind of thing per name, and an extensio
     CHECK(reports_for("fun f(self) -> float => 1.0\n")
           == "wrong-kind-of-name user:[f] self is the receiver of a method, and this function belongs to no type\n");
     CHECK(reports_for("fun f() -> float => self\n") == "unknown-name user:[self] self\n");
+}
+
+TEST("sgl check - a member crossing stages says how it is interpolated, and an integer crosses only flat")
+{
+    // CHK-273
+    constexpr auto vs = "@vertex fun vs(v: vin) -> link:\n    return { p = hpos4(..v.p, 1.0), id = 1 }\n";
+    auto const with = [](cc::string_view link_member)
+    {
+        return reports_for(cc::string("@vertex struct vin:\n    p: pos3\nstruct link:\n    @position p: hpos4\n    ")
+                           + link_member + "\n" + vs);
+    };
+    CHECK(with("@interpolate(.flat) id: int") == "");
+    CHECK(with("id: int")
+          == "invalid-entry-point user:[vs] the int member 'id' crosses stages only flat: write "
+             "`@interpolate(.flat)`\n");
+    CHECK(with("@interpolate(.linear) id: int").contains("crosses stages only flat"));
+    // flat takes one vertex's value, so it has no sampling point
+    CHECK(with("@interpolate(.flat, .centroid) id: int").contains("invalid-attribute-arguments"));
+    CHECK(with("@interpolate(.sideways) id: int").contains("invalid-attribute-arguments"));
+
+    // nothing that crosses no stage edge is interpolated
+    CHECK(reports_for("@vertex struct vin:\n    @interpolate(.flat) p: pos3\nstruct vout:\n    @position p: hpos4\n"
+                      "@vertex fun vs(v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
+              .contains("crosses no stage edge"));
+}
+
+TEST("sgl check - a pixel stage interpolating per sample needs sample_rate_shading")
+{
+    // CHK-274
+    constexpr auto source = "struct link:\n    @position p: hpos4\n    @interpolate(.perspective, .sample) c: float4\n"
+                            "@pixel struct target:\n    c: float4\n"
+                            "@pixel fun ps(l: link) -> target:\n    return { c = l.c }\n";
+    CHECK(reports_for(source).contains("feature-not-declared user:[ps] ps needs sample_rate_shading"));
+    CHECK(reports_for(cc::string("require sample_rate_shading\n") + source) == "");
+}
+
+TEST("sgl check - a vertex member's @format names the bytes it reads, and they decode into its type")
+{
+    // CHK-275
+    auto const with = [](cc::string_view member)
+    { return reports_for(cc::string("@vertex struct vin:\n    p: float3\n    ") + member + "\n"); };
+    CHECK(with("@format(.rgba8_unorm) c: float4") == "");
+    CHECK(with("@format(.rgba8_uint) j: uint4") == "");
+    CHECK(with("@format(.rgba8_unorm) c: float3")
+          == "type-mismatch user:[format] @format(.rgba8_unorm) decodes into a float4, and the member is a float3\n");
+    CHECK(with("@format(.bgra8) c: float4").contains("invalid-attribute-arguments"));
+    // on a struct that is no vertex input, @format is no member's own
+    CHECK(reports_for("struct plain:\n    @format(.rgba8_unorm) c: float4\n").contains("unsupported-yet"));
+}
+
+TEST("sgl check - a @pixel struct's depth and sample mask are outputs of their types, one each")
+{
+    // CHK-276
+    auto const pixel = [](cc::string_view members)
+    {
+        return reports_for(cc::string("struct vout:\n    @position p: hpos4\n@pixel struct target:\n") + members
+                           + "@pixel fun ps(v: vout) -> target:\n    return target()\n");
+    };
+    CHECK(reports_for("struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n    @depth d: "
+                      "float\n"
+                      "    @sample_mask m: uint\n@pixel fun ps(v: vout) -> target:\n"
+                      "    return { c = float4(1.0, 1.0, 1.0, 1.0), d = 0.5, m = 0xff }\n")
+          == "");
+    CHECK(pixel("    @depth d: float4\n").contains("a @depth member is a float, and d is a float4"));
+    CHECK(pixel("    @sample_mask m: int\n").contains("a @sample_mask member is a uint"));
+    CHECK(pixel("    @depth(.sideways) d: float\n").contains("invalid-attribute-arguments"));
+    CHECK(pixel("    @depth a: float\n    @depth b: float\n")
+              .contains("a @pixel struct has at most one @depth member and one @sample_mask member"));
+    // only a @pixel struct writes a pixel's outputs
+    CHECK(reports_for("struct plain:\n    @depth d: float\n").contains("unsupported-yet"));
+}
+
+TEST("sgl check - only a pixel entry point may reach discard")
+{
+    // CHK-277: judged once the body is inlined, so a helper may hold one
+    constexpr auto helper = "fun cut(a: float) -> float:\n    if a < 0.5 => discard\n    return a\n";
+    CHECK(reports_for(cc::string(helper)
+                      + "struct vout:\n    @position p: hpos4\n"
+                        "@vertex fun vs(@vertex_index i: int) -> vout:\n"
+                        "    return { p = hpos4(cut(0.25), 0.0, 0.0, 1.0) }\n")
+          == "stage-not-allowed user:[discard] vs is a vertex entry point, and only a pixel stage discards\n");
+    CHECK(reports_for(cc::string(helper)
+                      + "struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n"
+                        "@pixel fun ps(v: vout) -> target:\n    return { c = float4(cut(v.p.x), 0.0, 0.0, 1.0) }\n")
+          == "");
 }

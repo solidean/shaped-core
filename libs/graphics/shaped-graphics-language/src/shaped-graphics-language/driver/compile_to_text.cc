@@ -23,7 +23,7 @@ bool is_reached(check::checked_module const& m, check::flat_entry_point const& l
         auto const* const b = x.node.try_as<check::flat_binding_member>();
         if (b == nullptr || b->binding != binding)
             continue;
-        auto const is_resource = !info.is_inline && check::is_resource(m.at(members[b->member].type).kind);
+        auto const is_resource = !info.is_inline && m.takes_slots(members[b->member].type);
         if ((is_resource ? b->member : -1) == member)
             return true;
     }
@@ -48,6 +48,9 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
     for (auto const id : legal.bindings)
     {
         auto const& s = m.at(id);
+        // workgroup memory takes no group, and no host binds it
+        if (m.bindings[s.info].is_workgroup)
+            continue;
         auto const is_inline = m.bindings[s.info].is_inline;
         auto const described = driver::impl::describe_binding(m, s);
         if (is_inline || described.block_slot == 0)
@@ -71,6 +74,7 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
                               .kind = member.kind,
                               .group = group,
                               .slot = member.slot,
+                              .count = member.count,
                               .is_used = is_reached(m, legal, id, i32(i)),
                               .access = member.access,
                               .texture_dimension = member.texture_dimension,
@@ -80,6 +84,48 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
         }
         ++group;
     }
+    for (auto const id : driver::impl::file_samplers_of(legal))
+    {
+        auto const described = driver::impl::describe_file_sampler(m, id);
+        result.push_back({.name = described.name,
+                          .emitted = emitted_of(described.name),
+                          .kind = described_member_kind::sampler,
+                          .is_file_sampler = true,
+                          .group = -1,
+                          .slot = described.index,
+                          .is_used = true,
+                          .sampler_type = described.sampler_type});
+    }
+    return result;
+}
+
+/// The back half of `compile_to_text`: one entry point of a checked module, written for one target.
+cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
+                                                 check::flat_entry_point const& e,
+                                                 emit::target target,
+                                                 cc::string_view source_name)
+{
+    // The check pass writes the structured form, and a target prints the core form.
+    // WebGPU traces through the emulated form of a trace, and every other target through its native query.
+    auto const legal = check::legalize(m, e, {.is_emulated = target == emit::target::wgsl});
+    auto emitted = emit::emit_entry_point(m, legal, target);
+    if (!emitted.has_text())
+    {
+        auto text = cc::string();
+        for (auto const& error : emitted.errors)
+            text.appendf("{}: error: {}: {}\n", source_name, emit::to_string(error.kind), error.detail);
+        return cc::error(cc::move(text));
+    }
+    auto result = sgl::emitted_source{.text = cc::move(emitted.text),
+                                      .entry_point = cc::move(emitted.entry_point),
+                                      .bindings = interface_of(m, legal, emitted.bound_names),
+                                      .color_targets = emitted.color_targets,
+                                      .target_struct = cc::move(emitted.target_struct),
+                                      .features = e.features,
+                                      .footprint = check::footprint_of(m, legal),
+                                      .layouts = cc::move(emitted.layouts)};
+    for (auto axis = 0; axis < 3; ++axis)
+        result.workgroup[axis] = e.workgroup[axis];
     return result;
 }
 } // namespace
@@ -110,7 +156,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     {
         auto held = cc::string();
         for (auto const& e : m.entry_points)
-            held.appendf("{}{} '{}'", held.empty() ? "" : ", ", emit::impl::stage_name(e.entry_stage), e.name);
+            held.appendf("{}{} '{}'", held.empty() ? "" : ", ", check::stage_name(e.entry_stage), e.name);
         return cc::error(cc::format("{}: error: no entry point named '{}' (the source holds: {})\n", request.source_name,
                                     request.entry_point, held.empty() ? cc::string_view("none") : cc::string_view(held)));
     }
@@ -118,28 +164,20 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     auto const& e = m.entry_points[index];
     if (request.stage != check::stage::none && e.entry_stage != request.stage)
         return cc::error(cc::format("{}: error: entry point '{}' is a {} entry point, and a {} one was asked for\n",
-                                    request.source_name, e.name, emit::impl::stage_name(e.entry_stage),
-                                    emit::impl::stage_name(request.stage)));
+                                    request.source_name, e.name, check::stage_name(e.entry_stage),
+                                    check::stage_name(request.stage)));
+    return emit_text(m, e, request.target, request.source_name);
+}
 
-    // The check pass writes the structured form, and a target prints the core form.
-    auto const legal = check::legalize(m, e);
-    auto emitted = emit::emit_entry_point(m, legal, request.target);
-    if (!emitted.has_text())
-    {
-        auto text = cc::string();
-        for (auto const& error : emitted.errors)
-            text.appendf("{}: error: {}: {}\n", request.source_name, emit::to_string(error.kind), error.detail);
-        return cc::error(cc::move(text));
-    }
-    auto result = sgl::emitted_source{.text = cc::move(emitted.text),
-                                      .entry_point = cc::move(emitted.entry_point),
-                                      .bindings = interface_of(m, legal, emitted.bound_names),
-                                      .color_targets = emitted.color_targets,
-                                      .target_struct = cc::move(emitted.target_struct),
-                                      .features = e.features,
-                                      .footprint = check::footprint_of(m, legal),
-                                      .layouts = cc::move(emitted.layouts)};
-    for (auto axis = 0; axis < 3; ++axis)
-        result.workgroup[axis] = e.workgroup[axis];
+cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all_text_request const& request)
+{
+    auto const front = driver::impl::run_front_end(request.source, request.source_name);
+    if (!front.errors.empty())
+        return cc::error(front.errors);
+    auto result = cc::vector<entry_text>();
+    for (auto const& e : front.module.entry_points)
+        for (auto const t : request.targets)
+            result.push_back(
+                {.entry_point = e.name, .target = t, .text = emit_text(front.module, e, t, request.source_name)});
     return result;
 }

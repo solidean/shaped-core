@@ -32,6 +32,8 @@ auto cs = my::shaders::vignette.compute.main->acquire(ctx);   // sg::async_compi
   HLSL→DXIL and HLSL→SPIR-V exist where DXC does, WGSL→WGSL exists everywhere, MSL→metallib on Apple, and SGL wraps any of the four.
 - **A package in SGL is one source for every backend**: `create_sgl_compiler(inner)` writes it as the text `inner` compiles.
   [examples/graphics/sgl-cube](../../../examples/graphics/sgl-cube/sgl_cube.cc) is the worked example.
+- **An SGL `@raytracing pipeline` generates its description and its table**, so no shader handle or table index is written by hand.
+  Hit groups and callables it leaves `.host` compile from SGL at run time: [docs/raytracing-pipelines.md](docs/raytracing-pipelines.md).
 - **Dev vs shipping is not a mode flag**, and shader sources are reached only through a mounted virtual filesystem.
 
 ## File organization
@@ -40,7 +42,7 @@ Source lives in `src/shaped-shader-library/`, with `cmake/`, `docs/` and `tests/
 
 | Path | What's in it |
 |---|---|
-| (root) | `fwd.hh`, `all.hh`, and the core: `shader_package`, `shader_asset`, `shader_library` |
+| (root) | `fwd.hh`, `all.hh`, and the core: `shader_package`, `shader_asset`, `shader_library`; `pipeline` and `raytracing_pipeline`, what SGL pipeline declarations generate against |
 | `filesystem/` | the mountable VFS: the `filesystem` interface, `mount_table`, and the `memory` / `embedded` / `real` implementations |
 | `compiler/` | the `shader_compiler` seam and the concrete compilers (`dxc_compiler`, `wgsl_compiler`, `sgl_compiler`) |
 | `impl/` | internal: the reload watcher |

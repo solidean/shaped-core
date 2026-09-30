@@ -286,7 +286,10 @@ struct generator
                 loops.push_back(t.label);
 
         auto stmt = flat_stmt_id::none;
-        if (!loops.empty() && chance(35))
+        // a discard ends the whole run, which both forms must do at the same step; rarely, or little else runs
+        if (chance(4))
+            stmt = b.discard();
+        else if (!loops.empty() && chance(35))
             stmt = b.continue_(loops[pick(int(loops.size()))]);
         else
         {
@@ -606,22 +609,33 @@ cc::string scope_violation(flat_entry_point const& e)
 
 flat_entry_point sgl_test::random_program(checked_module const& m, u64 seed, program_shape const& shape)
 {
-    auto g = generator{.b = float_function(m), .rng = cc::random(seed), .shape = shape, .nodes_left = shape.max_nodes};
-    g.float_type = g.b.type_named("float");
-    g.int_type = g.b.type_named("int");
-    g.bool_type = g.b.type_named("bool");
-    g.float3_type = g.b.type_named("float3");
-    g.store = store_binding(m);
-    if (is_valid(g.store))
-        g.b.e.bindings.push_back(g.store);
-    g.targets.push_back({.label = g.b.e.root, .value_type = g.float_type});
+    // A shape bounds statements, not the expressions each list starts afresh, so a deep one now and then nests too deep.
+    // The check pass refuses such a program as `nesting-too-deep`, so the next draw of the same stream replaces it.
+    auto rng = cc::random(seed);
+    while (true)
+    {
+        auto g = generator{.b = float_function(m), .rng = cc::move(rng), .shape = shape, .nodes_left = shape.max_nodes};
+        g.float_type = g.b.type_named("float");
+        g.int_type = g.b.type_named("int");
+        g.bool_type = g.b.type_named("bool");
+        g.float3_type = g.b.type_named("float3");
+        g.store = store_binding(m);
+        if (is_valid(g.store))
+            g.b.e.bindings.push_back(g.store);
+        g.targets.push_back({.label = g.b.e.root, .value_type = g.float_type});
 
-    auto body = g.statements(shape.max_depth);
-    // generous again, so that the value the function ends in is as rich as the statements before it
-    g.nodes_left = cc::max(g.nodes_left, 12);
-    body.push_back(g.b.leave(g.b.e.root, g.expr(g.float_type, 2)));
-    g.b.set_body(body);
-    return cc::move(g.b.e);
+        auto body = g.statements(shape.max_depth);
+        // generous again, so that the value the function ends in is as rich as the statements before it
+        g.nodes_left = cc::max(g.nodes_left, 12);
+        body.push_back(g.b.leave(g.b.e.root, g.expr(g.float_type, 2)));
+        g.b.set_body(body);
+
+        auto probe = impl::depth_probe{.e = g.b.e};
+        probe.body(g.b.e.body, 0);
+        if (!probe.found.has_value())
+            return cc::move(g.b.e);
+        rng = cc::move(g.rng);
+    }
 }
 
 cc::string sgl_test::differential_failure(checked_module const& m,
@@ -644,14 +658,14 @@ cc::string sgl_test::differential_failure(checked_module const& m,
         return text;
     };
 
-    // a program the generator got wrong proves nothing about the legalizer
-    if (expected.status != run_status::ok)
+    // a program the generator got wrong proves nothing about the legalizer; a discard is a program ending as it may
+    if (expected.status != run_status::ok && expected.status != run_status::discarded)
         return report("the generated program does not run to a result", nullptr, nullptr);
     if (auto const violation = scope_violation(structured); !violation.empty())
         return report(cc::format("the generated program is not scoped: {}", violation), nullptr, nullptr);
 
     auto const core = legalize(m, structured, options);
-    if (auto const violation = find_core_violation(core); violation.has_value())
+    if (auto const violation = find_core_violation(m, core); violation.has_value())
         return report(cc::format("the legalized tree is not core: {}", violation.value().reason), &core, nullptr);
 
     if (auto const violation = scope_violation(core); !violation.empty())

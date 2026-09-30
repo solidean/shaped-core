@@ -17,6 +17,23 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-4** Two trees **behave the same** when every input gives them the same result and the same trace.
 * **EVAL-5** An implementation may produce anything that behaves the same as the structured form: this is the **as-if rule** ([why](why/evaluation.md#eval-5)).
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
+* **EVAL-83** An integer `/` truncates toward zero, and `%` is what it leaves, with the sign of its left operand: `-7 / 2` is `-3` and `-7 % 3` is `-1`.
+  A float `%` is `a - b * trunc(a / b)`, with the sign of `a` the same way.
+* **EVAL-86** `&`, `|`, `^` and `~` work on the 32 bits of an `int` or a `uint`, componentwise over their vectors.
+  A shift uses the low five bits of its count, `x << 33` of a count computed as 33 is `x << 1`, and `>>` is arithmetic for an `int` and logical for a `uint`.
+  `<<` of an `int` shifts its 32 bits whatever its sign, and keeps the low 32, as for a `uint`.
+* **EVAL-87** A maths builtin has no value where a target leaves its result indeterminate, and a run that reaches one is EVAL-85's `program-error`.
+  That is `pow` of a negative base or of zero to a power that is not positive, `asin` and `acos` outside -1 to 1, and `smoothstep` whose low edge is not below its high one.
+  It is also `atan2` of a zero `y` and a zero `x`, which HLSL gives as pi / 2 and SPIR-V leaves undefined.
+  And it is `clamp` whose `low` is above its `high`, of floats and of integers alike, which MSL leaves undefined and WGSL may answer for floats with the median of the three.
+* **EVAL-88** A transcendental builtin is computed to within a few units in the last place of a `float`, and no closer ([why](why/evaluation.md#eval-88)).
+  `round` is ties to even, `floor`, `ceil`, `trunc` and `fract` are exact, and a derivative in a run of one invocation is 0.
+  A rounding that lands on zero keeps the sign of its argument, so `round(-0.4)` is `-0.0`, as a GPU gives it.
+  `step(edge, x)` is 1 where `x >= edge` and 0 elsewhere, as HLSL and WGSL define it, so a NaN on either side gives 0.
+  A byte of `pack_unorm4x8` and `pack_snorm4x8` is `floor(v + 0.5)` of the scaled value, WGSL's formula, which HLSL's text writes too.
+  Metal does not promise that rounding of a value exactly midway between two bytes, so MSL may take it to the even one.
+* **EVAL-89** A `discard` ends the run with no result, as the status `discarded`: nothing after it runs, and nothing it would have printed or stored after it happens.
+* **EVAL-84** An integer `/` or `%` by zero, and the most negative `int` divided by `-1`, have no value: a run that reaches one has no behaviour past it ([why](why/evaluation.md#eval-84)).
 * **EVAL-7** A struct value is one value per field, in field order.
 * **EVAL-64** An enum value is the `int` value of one of its type's cases, and `==` and `!=` over two of them compare those `int`s.
   `bool` is the exception: it is a `@builtin` enum (CHK-218), and its value is `false` or `true`, compared by the prelude's `==`.
@@ -28,9 +45,9 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-9** `let` declares an immutable local and gives it its value; nothing assigns it afterwards.
 * **EVAL-10** `var` declares a mutable local; without a value it holds nothing, and reading it before an assignment is an error of the program.
 * **EVAL-11** A declaration that runs again, in a later iteration of a loop, starts the local afresh.
-* **EVAL-12** A **place** is a mutable local, a member of a place, or an element of a `mut` buffer.
+* **EVAL-12** A **place** is a mutable local, a member of a `@workgroup` binding, a member or an array element of a place, or an element of a `mut` buffer.
 * **EVAL-13** `place = value` evaluates `value` and then stores it; the members of the place it does not name keep their values.
-* **EVAL-14** The one expression a place holds is a buffer element's index: it is evaluated once, before the value, and the store goes to the element it named.
+* **EVAL-14** The expressions a place holds are its indices: each is evaluated once, before the value, the one nearest the local first, and the store goes to the element they named.
 
 ## Expressions
 
@@ -188,11 +205,26 @@ fun graded(a: float) -> float:
 * **EVAL-41** A run that reads a `var` holding nothing, or ends a block expression or the root block without a value, has no behaviour.
 * **EVAL-42** The as-if rule promises nothing about such a run ([why](why/evaluation.md#eval-42)).
 * **EVAL-43** The machine reports each as a status of its own, and a tree that is ill typed or malformed as a type error; it never asserts.
+* **EVAL-85** An operation that has no value for its operands, by EVAL-84 and its like, is the status `program-error`, which names the operation ([why](why/evaluation.md#eval-84)).
+* **EVAL-90** An index outside `0 ..< length` of an array, or past the end of a buffer, is the status `program-error` as well.
+  No target agrees on what one does, and a correct program has none, so no target pays to define it ([why](why/evaluation.md#eval-84)).
+* **EVAL-91** A square literal evaluates its elements in the order written, and so does a construction.
+* **EVAL-92** A run holds the memory of each `@workgroup` binding it reaches, from its start, and a read of any part of it nothing was stored to is a `program-error`.
+  A run is one invocation, so a barrier waits for nobody and what it stored is all the memory holds.
+* **EVAL-93** An atomic's update names its place first, then evaluates its other arguments, then reads, updates and writes the atomic in one step, giving the value it read.
+  A run is one invocation, so no other update ever falls between.
+* **EVAL-94** The bindings of a run are what its driver binds by name, a binding by its name and a member by its own.
+  A value is its scalars in field order, 4 bytes each and never padded, and a buffer its elements one after another, each laid out so.
+  A member the driver leaves out is zero, a buffer it leaves out is empty, and an acceleration member it leaves out is the empty TLAS.
+  A store to a `mut buffer` the driver bound as mutable bytes is written back into them when the run ends.
+  A member name its binding lacks, or bytes that are no whole value or no whole number of elements, fail the test as `invalid-bindings`, and it never runs.
+* **EVAL-95** A trace runs its emulated form, over the acceleration pool the driver binds, laid out as sg's webgpu backend lays it out.
+  `acceleration_root(world)` is the root unit the driver gives that member, and `acceleration_pool_load(u)` is unit `u` of the pool.
+  A run without a pool reads zero at every unit, so every trace misses; a unit past the end of a pool it has is a `program-error`.
 * **EVAL-44** A run is bounded by a fuel count, one unit per statement, per expression node and per iteration, and running out is a status as well.
 
 ## Open
 
 * Definite assignment: a `let` without a value is what would let a program read a `var` that holds nothing, and the check pass carries none yet.
-* What an `int` division by zero is, which is why `int` has no `/` yet.
 * Whether `float` arithmetic is exact across targets; the machine computes in `f32`, and a target may fuse or reorder.
 * Whether a pattern that has an effect is worth the ordering EVAL-68 has to promise, which a pattern language would make sharper ([patterns](../incubator/patterns.md)).

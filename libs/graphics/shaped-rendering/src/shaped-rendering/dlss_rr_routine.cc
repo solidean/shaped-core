@@ -3,6 +3,8 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/dlss_rr_routine.hh>
+
+#include <memory> // std::shared_ptr, which is what denoise_history::_member_state is
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/dlss_ngx.hh>
 
@@ -69,7 +71,7 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
     // The feature is built for one pair of extents, so `_prepare` dropping it is what a resize means here.
     auto const restarted = history._prepare(denoise_method::dlss_rr, input_extent);
 
-    if (history._vendor_state == nullptr)
+    if (history._member_state == nullptr)
     {
         auto* const feature = impl::dlss_create_feature(cmd, {.input_extent = input_extent,
                                                               .output_extent = output_extent,
@@ -78,11 +80,11 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
         if (feature == nullptr)
             return {.status = denoise_status::failed, .method = denoise_method::dlss_rr, .restarted = restarted};
 
-        history._vendor_state = feature;
-        history._release_vendor_state = &impl::dlss_release_feature;
+        // The seam hands back a bare `void*`, so the release function goes in as the deleter rather than beside it.
+        history._member_state = std::shared_ptr<void>(feature, &impl::dlss_release_feature);
     }
 
-    auto const evaluated = impl::dlss_evaluate(cmd, history._vendor_state,
+    auto const evaluated = impl::dlss_evaluate(cmd, history._member_state.get(),
                                                {.color = in.color,
                                                 .albedo = in.guides.albedo,
                                                 .specular_albedo = in.guides.specular_albedo,

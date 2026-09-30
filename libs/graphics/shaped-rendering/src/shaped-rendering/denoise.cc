@@ -10,6 +10,7 @@
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
+#include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 #include <sr_shaders.hh>
 
@@ -41,10 +42,16 @@ namespace
 }
 
 /// The members `automatic` walks, best first.
+///
+/// `oidn` is in neither: at roughly 0.2 s per megapixel it is a reference-quality member, not one a frame loop can
+/// afford, so a caller has to name it.
 constexpr denoise_method temporal_preference[] = {
-    denoise_method::dlss_rr, denoise_method::fsr_rr, denoise_method::svgf, denoise_method::oidn, denoise_method::atrous,
+    denoise_method::dlss_rr,
+    denoise_method::fsr_rr,
+    denoise_method::svgf,
+    denoise_method::atrous,
 };
-constexpr denoise_method spatial_preference[] = {denoise_method::oidn, denoise_method::atrous};
+constexpr denoise_method spatial_preference[] = {denoise_method::atrous};
 
 /// Which refusal a bit stands for, so one reason being logged does not silence the other.
 enum class refusal_reason : u32
@@ -127,70 +134,18 @@ denoise_guide_set denoise_inputs::present_guides() const
     return set;
 }
 
-denoise_history::denoise_history(denoise_history&& other) noexcept
-  : _method(other._method),
-    _extent(other._extent),
-    _reset_requested(other._reset_requested),
-    _frame(other._frame),
-    _vendor_state(other._vendor_state),
-    _release_vendor_state(other._release_vendor_state)
-{
-    for (auto i = 0; i < 8; ++i)
-        _state[i] = cc::move(other._state[i]);
-
-    // Moved FROM rather than shared: two histories releasing one vendor feature is the double free this exists to
-    // prevent, and the type is move-only precisely so there is one owner.
-    other._vendor_state = nullptr;
-    other._release_vendor_state = nullptr;
-}
-
-denoise_history& denoise_history::operator=(denoise_history&& other) noexcept
-{
-    if (this == &other)
-        return *this;
-
-    // Whatever this held is going away, so it owes its release before it is overwritten.
-    _release_vendor();
-
-    _method = other._method;
-    _extent = other._extent;
-    _reset_requested = other._reset_requested;
-    _frame = other._frame;
-    for (auto i = 0; i < 8; ++i)
-        _state[i] = cc::move(other._state[i]);
-
-    _vendor_state = other._vendor_state;
-    _release_vendor_state = other._release_vendor_state;
-    other._vendor_state = nullptr;
-    other._release_vendor_state = nullptr;
-    return *this;
-}
-
-denoise_history::~denoise_history()
-{
-    _release_vendor();
-}
-
-void denoise_history::_release_vendor()
-{
-    if (_vendor_state != nullptr && _release_vendor_state != nullptr)
-        _release_vendor_state(_vendor_state);
-    _vendor_state = nullptr;
-    _release_vendor_state = nullptr;
-}
-
 bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
 {
     auto const changed = _method != method || _extent != extent;
     auto const restarted = changed || _reset_requested;
     if (changed)
     {
+        // The member's object is built for one extent and one member, so it goes with them.
+        _member_state = nullptr;
+
         // Built for another member or size, so nothing in it can be reused.
         for (auto& t : _state)
             t = {};
-
-        // A vendor feature is built for one extent and one member, so it goes with them.
-        _release_vendor();
 
         _method = method;
         _extent = extent;
@@ -246,8 +201,8 @@ denoise_support query_denoise_support(sg::context const& ctx)
     auto const buildable
         = [&](slib::shader_asset_handle const& asset) { return asset != nullptr && asset->can_acquire(ctx); };
 
-    // A vendor member answers for itself instead — whether its SDK was compiled in, whether this is a backend it can
-    // record on, and whether the adapter and driver carry the feature.
+    // A member answers for itself: whether its shaders build, whether it is compiled in, and whether this device
+    // can run it.
     // The ones still unimplemented stay false, which is what makes `automatic` skip them and a named request report
     // `unsupported` rather than silently running something else.
     return {
@@ -255,6 +210,7 @@ denoise_support query_denoise_support(sg::context const& ctx)
         .svgf = buildable(sr::shaders::svgf_temporal.compute.main_cs)
              && buildable(sr::shaders::svgf_variance.compute.main_cs)
              && buildable(sr::shaders::svgf_atrous.compute.main_cs),
+        .oidn = oidn_denoise_routine::is_available(ctx),
         .dlss_rr = dlss_rr_routine::is_available(ctx),
     };
 }
@@ -275,8 +231,10 @@ denoise_guide_set required_guides(denoise_method m)
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
         return g::albedo | g::normal | g::roughness | g::depth | g::motion;
-    case denoise_method::atrous:
     case denoise_method::oidn:
+        // Six of the network's nine input channels are these two, so a call without them is not a degraded run.
+        return g::albedo | g::normal;
+    case denoise_method::atrous:
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -291,11 +249,11 @@ denoise_guide_set optional_guides(denoise_method m)
     switch (m)
     {
     case denoise_method::atrous:
-        return g::albedo | g::normal | g::depth;
+        return g::albedo | g::specular_albedo | g::normal | g::depth;
     case denoise_method::svgf:
-        return g::albedo;
+        return g::albedo | g::specular_albedo;
     case denoise_method::oidn:
-        return g::albedo | g::normal;
+        return {};
     case denoise_method::dlss_rr:
         return g::hit_distance;
     case denoise_method::fsr_rr:
@@ -308,18 +266,28 @@ denoise_guide_set optional_guides(denoise_method m)
     return {};
 }
 
-denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings)
+namespace
+{
+/// `resolve_denoise_method` against a support answer the caller already has.
+[[nodiscard]] denoise_method resolve_with(denoise_support const& support, denoise_settings const& settings)
 {
     if (settings.method != denoise_method::automatic)
         return settings.method;
 
-    auto const support = query_denoise_support(ctx);
     auto const preference = settings.fresh_samples ? cc::span<denoise_method const>(temporal_preference)
                                                    : cc::span<denoise_method const>(spatial_preference);
     for (auto const m : preference)
         if (support.supports(m))
             return m;
     return denoise_method::none;
+}
+} // namespace
+
+denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings)
+{
+    if (settings.method != denoise_method::automatic)
+        return settings.method;
+    return resolve_with(query_denoise_support(ctx), settings);
 }
 
 tg::vec2i denoise_input_extent(sg::context const& ctx, denoise_settings const& settings, tg::vec2i output_extent)
@@ -353,6 +321,8 @@ cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
         atrous_denoise_routine::prewarm(ctx);
     if (support.svgf)
         svgf_denoise_routine::prewarm(ctx);
+    if (support.oidn)
+        oidn_denoise_routine::prewarm(ctx);
     if (support.dlss_rr)
         dlss_rr_routine::prewarm(ctx); // nothing to compile, but the member is a routine like the others
     co_return;
@@ -369,8 +339,10 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     (void)try_acquire(cmd);
 
     auto& ctx = cmd.context();
-    auto const method = resolve_denoise_method(ctx, settings);
-    if (method == denoise_method::none || !query_denoise_support(ctx).supports(method))
+    // Asked once and used twice, since the resolver and the support check want the same answer.
+    auto const support = query_denoise_support(ctx);
+    auto const method = resolve_with(support, settings);
+    if (method == denoise_method::none || !support.supports(method))
     {
         // The resolved method rather than what was asked for, so both refusal paths report a member rather than
         // `automatic`, which is not one.
@@ -392,9 +364,10 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
         return atrous_denoise_routine::execute(cmd, in, history, atrous_denoise_routine::options_for(settings));
     case denoise_method::svgf:
         return svgf_denoise_routine::execute(cmd, in, history, svgf_denoise_routine::options_for(settings));
+    case denoise_method::oidn:
+        return oidn_denoise_routine::execute(cmd, in, history, oidn_denoise_routine::options_for(settings));
     case denoise_method::dlss_rr:
         return dlss_rr_routine::execute(cmd, in, history, dlss_rr_routine::options_for(settings));
-    case denoise_method::oidn:
     case denoise_method::fsr_rr:
     case denoise_method::none:
     case denoise_method::automatic:

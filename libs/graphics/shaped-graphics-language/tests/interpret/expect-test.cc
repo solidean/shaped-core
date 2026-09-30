@@ -10,21 +10,22 @@ namespace
 /// does not pass as its `test-failed`: what a driver shows for the source.
 cc::string outcome_of(cc::string_view source)
 {
-    auto const checked = check_sources(read_prelude(), source);
+    auto checked = check_sources(read_prelude(), source);
     auto files = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < checked.files.size(); ++i)
-        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
 
-    auto shown = checked;
-    shown.module.diagnostics.clear();
+    auto shown = cc::vector<sgl::check::located_diagnostic>();
     for (auto const& d : checked.user_ast.diagnostics)
-        shown.module.diagnostics.push_back({.what = d, .file = checked.user_file()});
-    shown.module.diagnostics.push_back_range(checked.module.diagnostics);
-    sgl::test::contain_expected(checked.module, shown.module.diagnostics);
+        shown.push_back({.what = d, .file = checked.user_file()});
+    shown.push_back_range(checked.module.diagnostics);
+    sgl::test::contain_expected(checked.module, shown);
     for (auto const& r : sgl::test::run_tests(checked.module, files, {.file = checked.user_file()}))
         if (!r.is_passed())
-            shown.module.diagnostics.push_back(sgl::test::diagnostic_of(checked.module, r));
-    return reports_of(shown);
+            shown.push_back(sgl::test::diagnostic_of(checked.module, r));
+    // the module is done with, so its list is what `reports_of` shows
+    checked.module.diagnostics = cc::move(shown);
+    return reports_of(checked);
 }
 } // namespace
 

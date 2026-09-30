@@ -1,0 +1,17 @@
+// a `require` in a test's body or a helper's is used by a call the body reaches that needs the feature
+
+require ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+
+fun is_blocked(r: ray){scene} -> bool:
+    require ray_query
+    return scene.world.trace(r).is_hit
+
+test {scene}:
+    require ray_query
+    not scene.world.trace(ray(pos3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0))).is_hit
+
+test {scene}:
+    not is_blocked(ray(pos3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0)))

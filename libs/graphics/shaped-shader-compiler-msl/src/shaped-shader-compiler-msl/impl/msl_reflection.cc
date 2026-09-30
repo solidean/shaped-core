@@ -274,10 +274,22 @@ namespace
 /// It must equal `sg::backend::metal::k_inline_constants_buffer_index`, which ssc::msl cannot include.
 constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_group + 1);
 
-/// The texture kind a `texture*` type names, with `tex_2d` standing for the plain one.
+/// The texture kind a `texture*` or `depth*` type names, with `tex_2d` standing for the plain one.
 [[nodiscard]] cc::optional<sg::texture_view_dimension> texture_dimension_of(cc::string_view type)
 {
     // Longest first: `texture2d_array` also contains `texture2d`.
+    if (has_word(type, "depthcube_array"))
+        return sg::texture_view_dimension::cube_array;
+    if (has_word(type, "depthcube"))
+        return sg::texture_view_dimension::cube;
+    if (has_word(type, "depth2d_ms_array"))
+        return sg::texture_view_dimension::tex_2d_ms_array;
+    if (has_word(type, "depth2d_ms"))
+        return sg::texture_view_dimension::tex_2d_ms;
+    if (has_word(type, "depth2d_array"))
+        return sg::texture_view_dimension::tex_2d_array;
+    if (has_word(type, "depth2d"))
+        return sg::texture_view_dimension::tex_2d;
     if (has_word(type, "texturecube_array"))
         return sg::texture_view_dimension::cube_array;
     if (has_word(type, "texturecube"))
@@ -312,9 +324,13 @@ constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_grou
     {
         binding.texture_dimension = dimension;
 
-        // `access::read` is the default when the type does not say, and only a writable one is a storage image.
+        // An access the type states makes it a storage image, `access::read` included, which is how SGL writes a
+        // read-only one; the default, `access::sample`, is a sampled texture.
         auto const writes = has_word(type, "write") || has_word(type, "read_write");
-        binding.type = writes ? sg::binding_type::image : sg::binding_type::texture;
+        auto const is_image = writes || has_word(type, "read");
+        binding.type = is_image ? sg::binding_type::image : sg::binding_type::texture;
+        if (type.starts_with("depth"))
+            binding.sample_type = sg::texture_sample_type::depth;
         binding.access = !writes                      ? sg::access_mode::read
                        : has_word(type, "read_write") ? sg::access_mode::read_write
                                                       : sg::access_mode::write;
@@ -578,6 +594,28 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
                                             "be a `constant T&`",
                                             param.value().name, entry_point, buffer_index));
 
+            binding.value().visibility = stage;
+            result.bindings.push_back(cc::move(binding.value()));
+            continue;
+        }
+
+        // A sampler slot of the argument table is a pipeline layout's static sampler, `sg::bound_sampler`, at its index.
+        // It reflects with no group and no space, since no group holds it.
+        if (sampler_index >= 0 && buffer_index < 0 && texture_index < 0)
+        {
+            auto binding = binding_of(param.value(), cc::string_view(entry_point));
+            if (binding.has_error())
+                return cc::error(cc::move(binding).error());
+            if (binding.value().type != sg::binding_type::sampler)
+                return cc::error(cc::format("'{}' of '{}' sits at [[sampler({})]], so it must be a `sampler`",
+                                            param.value().name, entry_point, sampler_index));
+            // `array<sampler, N>` reflects with a count of 1, so the type is checked as well as the count.
+            if (binding.value().count != 1 || has_word(param.value().type, "array"))
+                return cc::error(cc::format("'{}' of '{}' sits at [[sampler({})]], so it must be one `sampler`, not an "
+                                            "array",
+                                            param.value().name, entry_point, sampler_index));
+
+            binding.value().index = u32(sampler_index);
             binding.value().visibility = stage;
             result.bindings.push_back(cc::move(binding.value()));
             continue;

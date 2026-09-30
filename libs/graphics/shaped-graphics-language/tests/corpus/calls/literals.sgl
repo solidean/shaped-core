@@ -82,7 +82,7 @@ test:
     let t = (1.0, 2.0)
     true
 
-// an operator over integer literals alone meets no operator of another type: there is no int `/` yet
+// `/` over integer literals alone would divide integers or floats depending on nothing written, so it needs a type
 @expect(error = "literal-needs-type")
 test 7 / 2 == 3
 

@@ -28,6 +28,8 @@ The host then acquires it by name, and states nothing the shader already said: n
 
 * **A declaration names its entry points by stage**: `vertex = main_vs`, `pixel = main_ps`.
   The stage slots are named after SGL's stages ([terminology](terminology.md)), since what fills one is an SGL entry point.
+* **`geometry`, `tessellation_control` and `tessellation_evaluation` are optional slots**, the last two filled together (CHK-307).
+  Each needs a feature a device grants, and a tessellated pipeline draws the patch its stages take, so its topology is never a setting.
 * **The short form lists them instead**: `pipeline shadow = (shadow_vs, shadow_ps)`.
   Each entry point goes to the slot its stage attribute names, so their order is free, and two of one stage are an error.
   Settings go in a block under the list, `pipeline shadow = (shadow_vs, shadow_ps):`, the same ones a declaration takes.
@@ -35,6 +37,8 @@ The host then acquires it by name, and states nothing the shader already said: n
   A pipeline shares its file's names with the file's entry points, so it cannot be called like one.
 * **The kind is an attribute**: `@raster`, which is the default, `@compute` and `@raytracing`.
   A compute pipeline needs no declaration, since one shader and its binding list are the whole of it: every compute entry point is its own.
+* **A `@raytracing pipeline` is a table rather than a chain of stages**, and [raytracing.md](raytracing.md) is its model.
+  It names a ray set, a raygen, a miss per ray type and its hit groups, and the rest of this file is about raster pipelines.
 
 ## Settings are assignments
 
@@ -75,6 +79,7 @@ A shader that is only correct under one configuration says so where it is writte
 
 * **`@name(value)` on an entry point or an edge struct is the setting `name = value`**, found the same way a setting's name is.
 * **On a member of a `@pixel struct` it is that target's**: `@format(.rgba16_float) normal: float4`.
+  On a member of a `@vertex struct` it is no setting at all but the member's vertex format (CHK-275).
   `@format` is one of these, which is how a shader pins a target's format.
 * **Stage names are not settings**, since `@vertex` and `@pixel` already mark a stage.
 
@@ -91,12 +96,14 @@ Two sources of one step that set one field differently are an error, unless the 
 
 A pipeline is the first place two stages meet, so it is where they are checked against each other.
 
-* **Adjacent stages pass one interface**: what the vertex stage returns has the members the pixel stage takes, with the same names and types, in the same order.
+* **Adjacent stages pass one interface**: what one stage returns has the members the next one takes, with the same names and types, in the same order.
+  The struct that reaches the rasterizer has one `@position`, whichever stage returns it.
   A location is a member's position ([EMIT-26](semantics/emitting.md#addresses)), and each stage is compiled apart ([EMIT-6](semantics/emitting.md#targets)).
   So agreeing member for member is what makes the slots agree.
 * **The binding lists agree by position**: with `@inline` left out, each stage's list names the same binding as the longest one at every position it has.
   The pipeline's binding layout is that longest list, and all its stages list one `@inline` binding at most.
 * **Every target has a format**: stated by a setting, by `@format`, or left to the host with `.host`.
+* **A pixel stage that writes its depth has a depth target**: a `@depth` member of the `@pixel struct` needs a `depth_stencil_format` (CHK-276).
 
 ## Formats the host states
 
@@ -109,7 +116,8 @@ A few parts of a pipeline are only known when the program runs, such as the form
 
 Everything a pipeline states reaches the host as one generated symbol per pipeline, which `ctx.cached` acquires; slib's [cheat sheet](../../../shaped-shader-library/cheat-sheet.md) has its spelling.
 
-* **The frozen part is what the host's own code was built against**: the binding layout, the vertex input, the target set, the features its stages need of a device, every format, and the sample count.
+* **The frozen part is what the host's own code was built against**: the binding layout, the vertex input, the target set and the stages.
+  So are the features the stages need of a device, every format, and the sample count.
   The features are frozen because the host chose its device by them: a reload that needs one more could be refused by a device the build ran on.
   A struct or binding in it is compared by its name and its shape, the structural hash of its members, so a member added under the same name is a change.
   It never changes under a hot reload.
@@ -120,11 +128,13 @@ Everything a pipeline states reaches the host as one generated symbol per pipeli
 
 [CHK-174 to CHK-187](semantics/checking.md#pipelines) is what the check pass carries: the stages, the settings with their names and their fan-out, the attributes, and the checks between the stages.
 
-* A raster pipeline of a vertex and a pixel stage, or of a vertex stage alone.
+* A raster pipeline of a vertex and a pixel stage, or of a vertex stage alone, with geometry and tessellation stages between them (CHK-307).
 * A value is a literal, `true`, `false`, a case, `.host`, `.none`, or a paren literal of those.
+* A `@raytracing pipeline`, its hit groups and the module's callables tables, by [CHK-330 to CHK-332 and CHK-343](semantics/checking.md#ray-tracing).
+  Its settings are `rays`, `raygen`, `miss.<ray>`, `hit_groups` and `max_recursion_depth`, which [raytracing.md](raytracing.md#the-pipeline-declaration) lists.
+  What a raster pipeline states as sizes and a depth, it derives: the payload size, the attribute size and the trace depth.
 
 ## Open
 
-* The stages beyond vertex and pixel, which have no stage attribute yet; a pipeline checks each adjacent pair of them the same way.
 * Named blends in the prelude, `blend = .premultiplied_alpha`, which wait on `const` or static members.
-* The settings of a `@raytracing` pipeline.
+* A `@compute pipeline` declaration, which is `unsupported-yet` (CHK-186): every compute entry point is a pipeline of its own already.

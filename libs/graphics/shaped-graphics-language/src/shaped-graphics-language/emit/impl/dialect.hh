@@ -16,6 +16,8 @@ struct local_declaration
     cc::string_view type;
     /// Empty for a local that is declared now and filled member by member afterwards.
     cc::string_view value;
+    /// HLSL's array lengths, `[3][5]`, which it writes after the name; empty wherever the type says them.
+    cc::string_view dimensions;
     bool is_mut = false;
 };
 
@@ -49,12 +51,19 @@ public:
     /// False for WGSL: `if c {`, `loop {`, and a `once` that is `loop { … break; }`.
     [[nodiscard]] virtual bool is_c_like() const = 0;
 
+    /// A `discard` as a whole statement: `discard;`, or MSL's `discard_fragment();` (EMIT-117).
+    [[nodiscard]] virtual cc::string_view discard_statement() const { return "discard;"; }
+
     /// The head of a `for` over an int range, without the brace: `for (int i = 0; i < n; ++i)`.
     virtual void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const
         = 0;
 
     /// One constant of an enum, without indentation and with its line break: `static const int light_kind_point = 0;`.
     virtual void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const = 0;
+    /// One variable of workgroup memory, a line of its own: at file scope, or at the top of the function where
+    /// `declares_workgroup_in_function` says so.
+    virtual void write_workgroup(cc::string& out, planned_workgroup const& w, plan const& p) const = 0;
+    [[nodiscard]] virtual bool declares_workgroup_in_function() const { return false; }
 
     /// The structs of `p.structs` and the constant block, each followed by an empty line.
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;
@@ -66,11 +75,18 @@ public:
                              planned_constants const* block,
                              cc::span<planned_resource const> buffers) const = 0;
 
+    /// One file-scope sampler, a line of its own at the address of the pipeline layout's static samplers (EMIT-133).
+    /// A target that takes it as a parameter of the entry point writes nothing here.
+    virtual void write_file_sampler(cc::string& out, plan const& p, planned_sampler const& s) const = 0;
+
     /// How the target spells a texture, an image or a sampler type, as a helper's parameter declares it.
     [[nodiscard]] virtual cc::string resource_text(plan const& p, check::type_id type) const = 0;
 
     /// Everything of the function up to and including the line that opens its body.
     virtual void write_function_head(cc::string& out, plan const& p) const = 0;
+    /// What follows the entry point's function, such as the hull function a tessellation control stage hands its
+    /// control points on through; nothing for most stages.
+    virtual void write_function_tail(cc::string&, plan const&) const {}
 
 protected:
     ~dialect() = default;
@@ -81,17 +97,13 @@ protected:
 /// The name of a type as `d` writes it: a builtin's spelling, or the planned name of a struct of the program.
 [[nodiscard]] cc::string_view type_text(plan const& p, dialect const& d, check::type_id type);
 
-/// "vertex" or "pixel", as SGL names the stage.
-[[nodiscard]] cc::string_view stage_name(check::stage s);
 
 /// The constants of every enum of `p`, each set followed by an empty line; a dialect calls it from its declarations.
 void write_enum_constants(cc::string& out, plan const& p, dialect const& d);
 /// The helpers the entry point's builtin calls need, each once, ahead of the function.
 void write_helpers(cc::string& out, plan const& p, dialect const& d);
-/// Every resource of the entry point, handed to the dialect one binding at a time.
+/// Every resource of the entry point, handed to the dialect one binding at a time, and then its file-scope samplers.
 void write_buffers(cc::string& out, plan const& p, dialect const& d);
-/// True when the entry point calls a builtin that takes derivatives implicitly: a sample that picks its own level.
-[[nodiscard]] bool uses_derivatives(plan const& p);
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.
 /// Mints what the body still needs from `p.names`.

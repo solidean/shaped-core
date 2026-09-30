@@ -8,6 +8,8 @@
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture.hh>
 
+using namespace cc::primitive_defines;
+
 // Each form below is refused where the device lacks its feature and built where it has it, on every backend alike.
 
 namespace
@@ -85,16 +87,22 @@ INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_f
     CHECK(group_of(ctx->uncached.create_binding_group_layout(bindings), r32));
 }
 
-INVOCABLE_TEST("sg - a pipeline-level static sampler builds where the backend binds it and is refused elsewhere",
+INVOCABLE_TEST("sg - a pipeline-level static sampler builds a layout on every backend, and two at one register do not",
                (sg::context_handle const& ctx))
 {
-    // A known gap, which libs/graphics/shaped-graphics/docs/TODO.md records: vulkan and metal bind no bound_sampler yet.
-    // They refuse one rather than build a pipeline that samples nothing, so closing the gap fails this test on purpose.
-    auto const binds = ctx->backend() == sg::backend_kind::dx12 || ctx->backend() == sg::backend_kind::webgpu;
-    auto const layout = ctx->uncached.try_create_pipeline_layout(sg::pipeline_layout_description{
-        .static_samplers
-        = {sg::bound_sampler{.binding = {.name = "point", .space = 0u, .index = 0, .type = sg::binding_type::sampler},
-                             .sampler = {.min_filter = sg::sampler_filter::nearest}}},
-    });
-    CHECK(layout.has_value() == binds);
+    auto const at = [](cc::string_view name, u32 index)
+    {
+        return sg::bound_sampler{
+            .binding = {.name = name, .space = 0u, .index = index, .type = sg::binding_type::sampler},
+            .sampler = {.min_filter = sg::sampler_filter::nearest}};
+    };
+    CHECK(ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), at("other", 1)}}).has_value());
+    CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), at("clash", 0)}}).has_value());
+    // A register is one slot whatever its space, and a pipeline holds 16 on every backend, as Metal and WebGPU do.
+    auto spaced = at("spaced", 0);
+    spaced.binding.space = 1u;
+    CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("point", 0), spaced}}).has_value());
+    CHECK(ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("last", sg::max_bound_samplers - 1)}})
+              .has_value());
+    CHECK(!ctx->uncached.try_create_pipeline_layout({.static_samplers = {at("past", sg::max_bound_samplers)}}).has_value());
 }

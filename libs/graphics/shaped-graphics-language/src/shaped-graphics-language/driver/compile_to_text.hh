@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -23,6 +25,15 @@ struct sgl::text_request
     bool run_tests = false;
 };
 
+/// Every entry point of one SGL source, asked for as the text of each of `targets`.
+struct sgl::all_text_request
+{
+    cc::string_view source;
+    /// What a diagnostic calls the source; it is never opened.
+    cc::string_view source_name = "<sgl>";
+    cc::span<emit::target const> targets;
+};
+
 /// One slot the text declares for the host to bind: a block of constants or a resource, with every fact its API needs.
 /// Enums are spelled as the sg enum value they are, as `sgl describe` spells them; empty where a fact does not apply.
 struct sgl::interface_binding
@@ -35,9 +46,14 @@ struct sgl::interface_binding
     described_member_kind kind = described_member_kind::constant;
     /// The `@inline` block, which takes no group and rides as inline constants.
     bool is_inline = false;
-    /// The group it is listed at, counted without the `@inline` binding, and its slot there; -1 and 0 for the `@inline` block.
+    /// A file-scope sampler, a static sampler of the pipeline layout that no group holds: `slot` is its index there.
+    bool is_file_sampler = false;
+    /// The group it is listed at, counted without the `@inline` binding, and its slot there.
+    /// -1 and 0 for the `@inline` block, and -1 and its index for a file-scope sampler.
     i32 group = -1;
     i32 slot = 0;
+    /// A binding array's length, taking `count` consecutive slots from `slot`; 1 for everything else.
+    i32 count = 1;
     /// Whether the entry point's code reaches it; the text declares every slot of every binding it lists either way.
     bool is_used = false;
     /// A block's size in bytes, where its last constant ends; 0 for a resource.
@@ -56,7 +72,8 @@ struct sgl::emitted_source
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.
     cc::string entry_point;
-    /// Every slot the text declares, in the order of the binding list and then of each binding's slots.
+    /// Every slot the text declares, in the order of the binding list and then of each binding's slots, and then the
+    /// file-scope samplers its code reaches.
     /// This is the interface a host builds against; a compiler's reflection of the text can only confirm it.
     cc::vector<interface_binding> bindings;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
@@ -72,6 +89,14 @@ struct sgl::emitted_source
     cc::vector<emit::emitted_layout> layouts;
 };
 
+/// One entry point on one target, as `compile_all_to_text` wrote it or said why it could not.
+struct sgl::entry_text
+{
+    cc::string entry_point;
+    emit::target target = emit::target::hlsl_dx12;
+    cc::result<emitted_source, cc::string> text;
+};
+
 namespace sgl
 {
 /// The whole pipeline in one call: parse, build the AST, check against the embedded prelude, and emit one entry point.
@@ -83,4 +108,10 @@ namespace sgl
 ///
 /// Deterministic, and it reads nothing but its arguments, so the text may be cached under the source and the request.
 [[nodiscard]] cc::result<emitted_source, cc::string> compile_to_text(text_request const& request);
+
+/// Every entry point of one source on every target asked for, from one pass of the front end.
+/// A call of `compile_to_text` per entry point and target checks the source, prelude included, that many times.
+/// An error of the front end is the error of the result; an entry point one target cannot write is that element's error.
+/// Ordered by entry point as the source declares them, then by target as asked.
+[[nodiscard]] cc::result<cc::vector<entry_text>, cc::string> compile_all_to_text(all_text_request const& request);
 } // namespace sgl

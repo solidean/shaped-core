@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
@@ -56,12 +57,13 @@ VkCompareOp to_vk_compare_op(sg::compare_op op)
     CC_UNREACHABLE("unhandled compare_op");
 }
 
-VkSamplerCreateInfo to_vk_sampler_info(sg::sampler const& s)
+VkSamplerCreateInfo to_vk_sampler_info(vulkan_context const& ctx, sg::sampler const& s)
 {
     // max_anisotropy == 1 means anisotropy off, which Vulkan spells as a disable flag rather than a ratio of one.
     // Where it is on, the per-axis filters still apply — D3D12 has to encode anisotropy *into* the filter and thereby
     // overrides them, which is a translation this backend does not inherit.
-    bool const anisotropic = s.max_anisotropy > 1;
+    bool const anisotropic = ctx._sampler_anisotropy && s.max_anisotropy > 1;
+    auto const max_anisotropy = cc::min(float(s.max_anisotropy), ctx.device_properties().limits.maxSamplerAnisotropy);
 
     return VkSamplerCreateInfo{
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -73,7 +75,7 @@ VkSamplerCreateInfo to_vk_sampler_info(sg::sampler const& s)
         .addressModeW = to_vk_address_mode(s.address_w),
         .mipLodBias = s.mip_lod_bias,
         .anisotropyEnable = anisotropic ? VK_TRUE : VK_FALSE,
-        .maxAnisotropy = anisotropic ? float(s.max_anisotropy) : 1.0f,
+        .maxAnisotropy = anisotropic ? max_anisotropy : 1.0f,
         .compareEnable = s.compare.has_value() ? VK_TRUE : VK_FALSE,
         .compareOp = s.compare.has_value() ? to_vk_compare_op(s.compare.value()) : VK_COMPARE_OP_NEVER,
         .minLod = s.min_lod,
@@ -112,7 +114,7 @@ VkSampler vulkan_sampler_cache::acquire(sg::sampler const& s)
             if (auto const* existing = samplers.get_ptr(key); existing != nullptr)
                 return *existing;
 
-            auto const info = to_vk_sampler_info(s);
+            auto const info = to_vk_sampler_info(_ctx, s);
             VkSampler sampler = VK_NULL_HANDLE;
             if (VkResult const r = vkCreateSampler(_ctx._device, &info, nullptr, &sampler); r != VK_SUCCESS)
                 return VkSampler(VK_NULL_HANDLE);

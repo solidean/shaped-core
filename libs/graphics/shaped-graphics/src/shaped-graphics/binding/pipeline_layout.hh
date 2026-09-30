@@ -11,7 +11,8 @@
 
 /// A static sampler bound directly to a shader register, for attaching to a pipeline_layout — the register-bound counterpart to a group layout's name-matched `named_sampler`.
 /// Use this for a static sampler a pipeline needs on top of, or independent of, its group layouts.
-/// `binding` carries the register (index), its space and count, and its `type` must be a sampler binding.
+/// `binding` carries the register (index), its space and count, and its `type` must be a sampler binding of count 1.
+/// The register must be below `sg::max_bound_samplers`, and no two of a layout's may share one, whatever their spaces.
 struct sg::bound_sampler
 {
     sg::binding binding;

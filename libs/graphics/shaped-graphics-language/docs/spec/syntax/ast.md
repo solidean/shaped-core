@@ -167,7 +167,10 @@ let v = {1 + 2}
 * **AST-129** A `qualified_type` says what a shader does with a resource, and [bindings.md](../bindings.md) is what the words mean.
   The AST checks neither the word against the type nor the type against anything.
 * **AST-130** `mut` or `out` outside a type position is read as it is elsewhere, so `mut` keeps AST-45 and `out` in an expression is a normal error.
+* **AST-149** `mut` before one operand, as an argument of a paren call, marks that argument: `bump(mut c, 2.0)` ([why](why/ast.md#ast-149)).
+  The argument records the mark and the operand as its value; anywhere else `mut x` keeps AST-130.
 * **AST-135** `sampler` alone in a type position reads as the name `sampler`: the keyword denotes the sampler type there, `smp: sampler`.
+  A square group right after it, `sampler[2]`, is an index of that name, as it would be of any other type name.
 
 ```sgl
 type blend = (vec3, vec3) -> vec3
@@ -310,6 +313,7 @@ struct rect:
 ### Jumps
 
 * **AST-40** `return`, `break`, `continue` and `yield` are expressions, the **jumps** ([why](why/ast.md#ast-40)).
+* **AST-148** `discard` is a jump too, which takes no value and always has a target: the invocation it ends.
 * **AST-41** `return` and `break` take at most one value, `yield` takes exactly one, and `continue` takes none; a `yield` without a value is the normal error `expected-expression`.
 * **AST-112** `return` leaves the nearest enclosing `fun`, named or anonymous, through every value block and every loop between ([why](why/ast.md#ast-112)).
 * **AST-113** A `return` in the block of an arrow lambda, or in a `case` arm inside one, is the normal error `return-in-lambda`; it is written `yield`.
@@ -525,13 +529,20 @@ fun update(state: particle):
 | binding composition | `binding name = other`, `binding name = (a, b)` | yes | yes |
 | sampler | `sampler name:` and a block of settings | yes | no |
 | pipeline | `pipeline name:` and a block of settings, or `pipeline name = (a, b)` | yes | no |
+| ray set | `rays name:` and a block of members | yes | no |
+| hit group | `hit_group name for set:` and a block of settings | yes | no |
+| callables table | `callables name = (a, b)` | yes | no |
 | notation | `notation a => b` | yes | yes |
-| test | `test:` and a block, or `test expression` | yes | yes |
+| test | `test:` and a block, `test {bindings}:` and a block, or `test expression` | yes | yes |
 | `let` | see [statements](#let-and-assignment) | no | yes |
 
 * **AST-64** A file holds at most one `module` declaration, and it stands before every other declaration of the file.
+* **AST-152** `struct name[A]:` reads as a struct whose name stands before a square list of type parameters, each a field as a function's are (AST-68).
+  The AST records them, and the check pass says who may declare one ([CHK-339](../semantics/checking.md#generics)).
 * **AST-65** The type of a constant stands in a type position.
 * **AST-138** `test expression` reads as a `test` whose block holds the one expression statement `expression`; a `test` with both, or with neither, is a normal error.
+* **AST-151** A braced list right after `test` names the bindings it reads, as a function's `{bindings}` does, and the body after it is a block.
+  The one-line form takes no list: in `test {a} value` the braces are an object, part of the value.
 * **AST-139** A `test` stands in a struct and an enum as well, and inside another `test` is `declaration-not-allowed-here`.
   No jump crosses a `test`'s body, so a `return` in it is `jump-without-target`.
 * **AST-145** Each argument of a `require` is one name, and any other argument, or none at all, is `expected-name`.
@@ -552,7 +563,7 @@ test:
 module example
 
 use brdf_library as brdf
-require extended_image_formats, raytracing
+require extended_image_formats, ray_query
 notation \phi => φ
 
 type color = vec3
@@ -575,6 +586,7 @@ fun falloff(d: float) -> float:
 * **AST-143** An extension without parameters is a property of its extended type, as AST-81 reads one: `fun ray.inverted => …` ([why](why/ast.md#ast-143)).
   It may carry `-> type` before its body, and type parameters or bindings there are `missing-parameter-list`.
 * **AST-68** A **parameter** is a [field](#members), and a type parameter is a parameter whose type may be left out.
+  `mut` before a parameter's name is recorded as a mark, with a type or without, and the check pass judges it ([CHK-315](../semantics/checking.md#functions)).
 * **AST-144** A parameter or a field whose name is a leading-dot form, `.level: float`, is **named-only**: the AST records the mark, and the name without its dot.
   A named-only mark on a binding member, on a member of a `struct_type` or on `self` is the normal error `named-only-not-allowed-here`, and the member is still read.
 * **AST-69** An element of the bindings is a **binding entry**, and the AST keeps it as an expression.
@@ -652,6 +664,28 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
   A block under the list holds settings, as AST-131's block does; the block hangs off the list, the rightmost form of the line (FORM-34).
 * **AST-134** A setting whose left side is neither a name nor a member chain is the normal error `expected-name`, and a line that is no `=` is `expected-member`.
   Both are still read.
+* **AST-150** Ray tracing declares with two keywords of its own ([why](why/ast.md#ast-150)).
+  `rays name:` reads as a struct with a block of members, each a ray type and the payload it carries, marked as a ray set.
+  `hit_group name for set:` reads as a pipeline with a block of settings, marked as a hit group and recording the ray set it names; one without `for` and a name is `expected-name`.
+  Inside a pipeline's block, `rays = set` is a setting whose path is the name `rays`, though `rays` leads a declaration elsewhere.
+* **AST-153** `callables name = (a, b, .host)` reads as a pipeline's short form, marked as a callables table, whose list is its entries.
+
+```sgl
+rays path_rays:
+    surface: radiance
+    occlusion: shadow
+
+hit_group textured for path_rays:
+    surface = (closest_hit = shade, any_hit = cutout)
+
+callables ops = (doubled, negated, .host)
+
+@raytracing pipeline path:
+    rays = path_rays
+    raygen = primary
+    miss.surface = sky
+    hit_groups = (textured)
+```
 
 ```sgl
 pipeline:

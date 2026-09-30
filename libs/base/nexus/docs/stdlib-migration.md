@@ -58,6 +58,7 @@ and includes no `<iostream>`.
 - **`std::exception` (and bare `catch (...)`).** [execute.cc](../src/nexus/tests/execute.cc) catches whatever a test body throws.
   An uncaught exception becomes a reported failure rather than a crash, and [fuzz/machine.cc](../src/nexus/fuzz/machine.cc) does the same around each fuzzed operation.
   Both run arbitrary user code that throws `std::exception` subclasses, so this boundary stays whatever clean-core grows.
+  They catch `cc::exception` beside it, so a library exception's `message()` reaches the report too.
 - **Core type traits (`<type_traits>`).** `nx::fuzz` uses `std::decay_t`, `std::is_*` and `std::remove_cvref_t` for signature deduction.
   These are language-level traits with no clean-core replacement intended.
 

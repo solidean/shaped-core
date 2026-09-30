@@ -176,6 +176,7 @@ void webgpu_command_list::apply_raster_state()
 {
     auto& s = _raster;
     CC_ASSERT(bool(s.render_pipeline), "bind a raster pipeline before drawing");
+    bring_pool_writes_forward();
     if (!_render_pass)
         open_render_pass(true);
 
@@ -192,11 +193,11 @@ void webgpu_command_list::apply_raster_state()
     {
         for (auto i = s.groups.size(); i < sg::reserved_binding_group; ++i)
             wgpuRenderPassEncoderSetBindGroup(pass, u32(i), s.layout->empty_group(), 0, nullptr);
-        auto const has_constants = s.layout->inline_constants_bytes() > 0;
-        auto const offset = s.constants_offset;
+        u32 offsets[2] = {};
+        auto const offset_count = s.layout->reserved_dynamic_offsets(s.constants_offset, offsets);
         wgpuRenderPassEncoderSetBindGroup(pass, u32(sg::reserved_binding_group),
-                                          s.layout->reserved_group_for(s.constants_page), has_constants ? 1 : 0,
-                                          has_constants ? &offset : nullptr);
+                                          s.layout->reserved_group_for(s.constants_page), size_t(offset_count),
+                                          offset_count > 0 ? offsets : nullptr);
     }
     s.needs_full_apply = false;
 }
@@ -235,6 +236,19 @@ void webgpu_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg
             wgpuRenderPassEncoderSetVertexBuffer(render_pass(), u32(first_slot + i), binding.buffer, binding.offset,
                                                  binding.size);
     }
+}
+
+void webgpu_command_list::raster_declare_array_buffer_access(cc::string_view,
+                                                             cc::span<sg::array_buffer_access const> elements)
+{
+    // The compute pair's rule: no layout accepts an array binding here, so only the empty declaration can be right.
+    CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
+}
+
+void webgpu_command_list::raster_declare_array_texture_access(cc::string_view,
+                                                              cc::span<sg::array_texture_access const> elements)
+{
+    CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
 }
 
 void webgpu_command_list::raster_bind_index_buffer(sg::index_buffer_view const& view)

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/atomic.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
@@ -51,6 +53,10 @@ enum class sgl::check::run_status : sgl::u8
     type_error,
     /// A `var` was read before anything was assigned to it.
     uninitialized_read,
+    /// A `discard` ended the run: the invocation has no result and no effect after it.
+    discarded,
+    /// An operation met a value no target defines it for, such as an integer divisor of zero; `outcome::detail` says which.
+    program_error,
     /// An `assert` was false; the run stopped there (EVAL-76).
     assertion_failed,
     /// The caller raised `run_limits::stop`; what the run had found so far means nothing.
@@ -59,13 +65,49 @@ enum class sgl::check::run_status : sgl::u8
 
 struct sgl::check::run_inputs
 {
-    /// The value of `locals[0]`.
+    /// The value of the stage struct, `locals[0]`; unread for an entry point without one.
     value parameter;
+    /// Parallel to `flat_entry_point::stage_inputs`; a missing one is zero.
+    cc::vector<value> stage_inputs;
     /// Parallel to `flat_entry_point::bindings`: the members of each binding as one value, in member order.
     /// A buffer member has no scalars there; its contents are `buffers`.
     cc::vector<value> bindings;
     /// What every buffer the tree reads or writes holds when the run starts; one it names and this lacks is a type error.
     cc::vector<buffer_contents> buffers;
+    /// sg's acceleration pool, units of 16 bytes, which `acceleration_pool_load` reads (EVAL-95).
+    /// Empty reads as zero at every unit, which is the empty TLAS wherever a trace starts.
+    cc::pinned_data<byte const> acceleration_pool;
+    /// The root unit of each acceleration member of the entry point, counted across its binding list in order; a missing one is 0.
+    cc::vector<u32> acceleration_roots;
+};
+
+/// What a driver binds to one member of a binding, found by the member's name.
+/// A value is its scalars in field order, 4 bytes each and never padded: a `float3` is 12 bytes, a `float4x4` 64 of them, column by column.
+/// A buffer is its elements one after another, each laid out so, and never as a target lays it out; a `bool` is a 32-bit 0 or 1.
+struct sgl::check::member_data
+{
+    cc::string name;
+    cc::pinned_data<byte const> bytes;
+    /// For a `mut buffer[T]`, in place of `bytes`: what the run stored is written back into it (`write_back`).
+    cc::pinned_data<byte> mutable_bytes;
+    /// For an acceleration member: the pool unit of its TLAS, where 0 is the empty one.
+    u32 acceleration_root = 0;
+};
+
+/// What a driver binds to one `binding` of the module, found by the binding's name.
+struct sgl::check::bound_group
+{
+    cc::string name;
+    cc::vector<member_data> members;
+};
+
+/// Everything a driver binds for runs, by name, which `resolve_inputs` makes the inputs of one run (EVAL-94).
+struct sgl::check::driver_bindings
+{
+    /// A group no entry point lists is never read, so one set serves every test of a module.
+    cc::vector<bound_group> groups;
+    /// sg's acceleration pool, as the internal doc libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md lays it out.
+    cc::pinned_data<byte const> acceleration_pool;
 };
 
 struct sgl::check::run_limits
@@ -158,6 +200,26 @@ namespace sgl::check
                                 flat_entry_point const& e,
                                 run_inputs const& inputs,
                                 run_limits const& limits = {});
+
+/// The inputs of a run of `e` from what `bound` binds by name, placed through the module's bindings (EVAL-94).
+/// A member the driver leaves out is zero, a buffer empty and an acceleration root 0.
+/// A member name its binding lacks, or bytes that are no whole value or no whole number of elements, is an error.
+[[nodiscard]] cc::result<run_inputs> resolve_inputs(checked_module const& m,
+                                                    flat_entry_point const& e,
+                                                    driver_bindings const& bound);
+
+/// Writes every buffer `o` stored to back into the `mutable_bytes` `bound` gave it, laid out as `resolve_inputs` read it.
+/// A buffer bound through `bytes` alone keeps what it held.
+void write_back(checked_module const& m, outcome const& o, driver_bindings const& bound);
+
+/// True where `id` is a constant of `e`: a literal, an enum value, or a construction, a member, a logical operator or
+/// a call of a `@pure` builtin whose operands are all constants.
+/// It is what WGSL folds when it creates the shader, so what the check pass judges of constants (CHK-310).
+[[nodiscard]] bool is_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id);
+
+/// The value of constant `id` on the abstract machine: `ok` with it as the result, or `program_error` where some call
+/// under it has none (EVAL-85); a `type_error` for an `id` that is no constant.
+[[nodiscard]] outcome evaluate_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id);
 
 /// `ok 1.5` with one ` | print …` per printed value, then one ` | buffer …` per buffer, for a failing test to show.
 [[nodiscard]] cc::string dump(outcome const& o);

@@ -113,6 +113,8 @@ class Entry:
     text: str = ""
     body_start: int = 0
     newline: str = "\n"
+    # Blocks written in a type the grammar has since retired, read as their replacement: (line, old type, new type).
+    retired: list[tuple[int, str, str]] = field(default_factory=list)
 
     @property
     def id(self) -> str:
@@ -508,9 +510,10 @@ def parse_text(text: str, path: Path, slug: str = "", pending_round: int = 0) ->
                                    "write `## <type>` or `## <type> <argument>`")
         block_type, head = m.group(1), (m.group(2) or "").strip()
         if block_type in RETIRED_BLOCK_TYPES:
-            raise ReviewParseError(path, number, f"unknown block type {block_type!r}",
-                                   f"`{block_type}` was retired: write it as `## {RETIRED_BLOCK_TYPES[block_type]}`, "
-                                   "which introduces what the entry needs in its own words")
+            # An old review still holds them, and dropping the whole entry would hide its answers from `show`.
+            # So the block reads as its replacement, and the loader warns rather than refuses.
+            entry.retired.append((number, block_type, RETIRED_BLOCK_TYPES[block_type]))
+            block_type = RETIRED_BLOCK_TYPES[block_type]
         if block_type not in BLOCK_TYPES:
             # A block type is lowercase kebab-case, so anything else here is usually a markdown heading
             # inside a block whose body is markdown — an `artifact` above all.

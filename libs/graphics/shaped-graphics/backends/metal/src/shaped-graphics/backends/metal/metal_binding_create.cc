@@ -75,8 +75,24 @@ cc::result<metal_pipeline_layout_handle> metal_context::create_metal_pipeline_la
                              "multiple of 4");
     }
 
+    // Each bound sampler is set into the argument table's sampler slot its register names, `[[sampler(n)]]` in MSL.
+    // The state comes from the context's cache, which already outlives every command list that names it.
+    auto bound = cc::vector<metal_pipeline_layout::bound_sampler_state>();
+    for (isize i = 0; i < desc.static_samplers.size(); ++i)
+    {
+        // sg refused a malformed or colliding one before the backend saw it, and a register is below the table's size.
+        auto const& s = desc.static_samplers[i];
+        static_assert(sg::max_bound_samplers <= k_argument_table_sampler_count);
+        auto* const state = _samplers.acquire(_device, s.sampler);
+        if (state == nullptr)
+            return cc::error(cc::format("pipeline_layout: the device refused bound sampler '{}'", s.binding.name));
+        bound.push_back({.slot = int(s.binding.index), .id = state->gpuResourceID()});
+    }
+
     auto const hash = sg::impl::pipeline_layout_hash(desc);
-    return std::make_shared<metal_pipeline_layout const>(hash, desc);
+    auto layout = std::make_shared<metal_pipeline_layout>(hash, desc);
+    layout->_bound_samplers = cc::move(bound);
+    return metal_pipeline_layout_handle(cc::move(layout));
 }
 
 cc::result<sg::staging_binding_group_handle> metal_context::create_metal_staging_binding_group(

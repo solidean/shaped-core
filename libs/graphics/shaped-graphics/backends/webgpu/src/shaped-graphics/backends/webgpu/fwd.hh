@@ -46,6 +46,11 @@ struct webgpu_expiring_resource; // a released object awaiting its epoch
 struct webgpu_epoch_data;        // what one epoch owns
 struct webgpu_epoch_state;       // epoch counters and the in-flight FIFO
 struct webgpu_callback_anchor;   // what a WebGPU callback reaches the context through
+class webgpu_acceleration_pool;  // the one storage buffer every BLAS and TLAS lives in (see webgpu_acceleration.hh)
+enum class acceleration_kernel;  // the compute kernels a build records
+struct acceleration_pool_write;  // a pool region a command list wrote, and into which buffer
+class webgpu_blas;               // a BLAS: a region of that pool
+class webgpu_tlas;               // a TLAS: a region of that pool
 
 /// The domain every recording site in the WebGPU backend is attributed to.
 /// It shadows sg's, so a backend message is never mistaken for a portable one.

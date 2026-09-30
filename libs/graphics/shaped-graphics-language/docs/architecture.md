@@ -66,6 +66,13 @@ It yields side tables over the untouched AST, which is what an editor asks about
 `check` takes the prelude's files and then the program's, so the program is the LAST file and never "file 1": behind the library's prelude it is file 2.
 A diagnostic, an origin and a side table all name a file that way, and `compile_to_text` is what turns a position back into `builtins.sgl`, `core.sgl` or the source's own name.
 
+**The library's prelude is checked once per process.**
+`sgl::checked_prelude()` is `check::check_prelude` over `parsed_prelude()`: the checker's whole state after the prelude, behind an empty program file.
+Every driver continues from a copy of it with `check::check(checked, program)`, which runs only what the program adds, so every id the program makes comes after the prelude's.
+A prelude that reports anything is never kept, and a custom prelude, or a source that stands in for a prelude file, takes the whole pass.
+It stays one pass because nothing the prelude checks depends on the program: a lookup from a prelude file, operators included, sees the prelude alone.
+`tests/check/checked-prelude-test.cc` compares the two paths over the corpus, the samples and sg's shaders.
+
 **The check pass is a tracer.**
 It carries what its samples need, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
 [semantics/checking.md](spec/semantics/checking.md) says what is carried.
@@ -139,9 +146,10 @@ The registry has no signature language of its own: `registry::finalize` parses t
 A family of overloads is a C++ loop that formats one signature per type, until generics can write it once in SGL.
 `builtins::default_registry()` is the one cached value in the library: it is immutable, and building it parses the whole prelude.
 
-**The prelude is two files.**
-`prelude/builtins.sgl` is generated from the registry and committed, and `prelude/core.sgl` is hand-written SGL.
-The compiler never opens the committed file: it generates the same text in memory, and `core.sgl` is embedded when CMake configures.
+**The prelude is three files.**
+`prelude/builtins.sgl` is generated from the registry and committed, and `prelude/core.sgl` and `prelude/raytracing.sgl` are hand-written SGL.
+`raytracing.sgl` holds the trace, its vocabulary, and the software traversal webgpu runs ([spec/raytracing.md](spec/raytracing.md)).
+The compiler never opens the committed file: it generates the same text in memory, and the hand-written two are embedded when CMake configures.
 The two texts are byte-identical, which is why a diagnostic's line and column are right in the committed file, and why `*.sgl` is `eol=lf` in `.gitattributes`.
 A library test compares them as well, so a plain test run catches drift without the tool.
 The `sgl-prelude` step of `dev.py check` refuses a generated file that differs from the registry, and `--fix` regenerates it.
@@ -157,8 +165,8 @@ The size and alignment the layout rules place a value by, and each target's own,
 * Every target carries its **final addresses**: member order is the location, and an `@inline binding` sits where sg expects inline constants.
   HLSL writes a group's resources at the register or `[[vk::binding]]` sg's backends give its slot, so no binding pass reads SGL's text.
 * A name that is reserved in one target gets a trailing underscore there.
-  The function a builtin is called as is reserved from its record, so a local named `lerp` is renamed in HLSL without an entry in any list.
-  The exception is a function only a custom writer calls, such as `mul`, which stands in `emit/reserved_words.cc`.
+  Every name a builtin writes is reserved from its record, so a local named `lerp` is renamed in HLSL without an entry in any list.
+  A custom writer's own names, such as HLSL's `mul`, stand in its spelling's `hlsl_names`, `wgsl_names` and `msl_names`.
   An entry point is renamed the same way, and `emitted_text::entry_point` is the name a caller compiles.
 * **The `msl` text compiles**, through `shaped-shader-compiler-msl` and slib's metal edge.
 
@@ -194,7 +202,7 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 
 ## What does not exist yet
 
-Generics, lambdas and `mut self`.
+Generic structs of the program, lambdas beyond an arrow body, and `mut self`.
 GLSL, and in MSL a compute entry point and a group.
 Iterative walks: `interpret`'s `eval` and the legalizer's expression walks recurse, so the smallest stack a walk runs on bounds `k_max_depth`.
 That makes a 40-term sum `nesting-too-deep` (CHK-268).

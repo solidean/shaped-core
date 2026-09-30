@@ -61,7 +61,9 @@ TEST("sgl check - an assignment names a mutable local, or a member of one")
     CHECK(body_reports("let mut v = vec3(k, k, k)\nv.x = 1.0\nv = normalize v\nreturn v.x\n") == "");
     CHECK(body_reports("let v = k\nv = 1.0\nreturn v\n")
           == "not-assignable user:[v] v is immutable; `let mut` declares a local an assignment may name\n");
-    CHECK(body_reports("k = 1.0\nreturn k\n") == "not-assignable user:[k] k is a parameter, which is a value\n");
+    CHECK(body_reports("k = 1.0\nreturn k\n")
+          == "not-assignable user:[k] k is a parameter, which is a value; `p: mut T` declares one the caller hands its "
+             "place to\n");
     CHECK(body_reports("for i in 0 ..< n:\n    i = 2\nreturn k\n")
           == "not-assignable user:[i] i is immutable; `let mut` declares a local an assignment may name\n");
     CHECK(body_reports("let mut x = k\nx = n\nreturn x\n") == "type-mismatch user:[n] expected float, got int\n");
@@ -71,7 +73,7 @@ TEST("sgl check - an assignment names a mutable local, or a member of one")
           == "no-matching-overload user:[b -= b] operator -(bool, bool)\n");
     CHECK(reports_for("binding frame:\n    exposure: float\nfun f(k: float){frame} -> float:\n    frame.exposure = k\n"
                       "    return k\n")
-          == "not-assignable user:[frame.exposure] frame is a binding, which no shader writes\n");
+          == "not-assignable user:[frame.exposure] frame is a binding the host fills, which no shader writes\n");
 }
 
 TEST("sgl check - a block is a scope: a local ends with it, and a later local shadows an earlier one")

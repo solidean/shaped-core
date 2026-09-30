@@ -2,6 +2,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte, cc::u32
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::named_view
@@ -40,6 +42,13 @@ namespace
 sg::buffer_usages const copy_dst = sg::buffer_usage::copy_dst;
 sg::buffer_usages const copy_src = sg::buffer_usage::copy_src;
 sg::buffer_usages const copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
+
+// A frame whose binding group leaves the layout's one binding unprovided, so the create throws out of the coroutine.
+cc::shared_async<int> create_unwired_group(sg::context_handle ctx, sg::binding_group_layout_handle layout)
+{
+    auto group = ctx->transient.create_binding_group(layout, cc::span<sg::named_view const>());
+    co_return group != nullptr ? 1 : 0;
+}
 } // namespace
 
 INVOCABLE_TEST("sg error handling - buffer creation validates its size", (sg::context_handle const& ctx))
@@ -290,6 +299,28 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
                     sg::binding_group_exception);
     CHECK_THROWS_AS(ctx->transient.create_binding_group(layout, cc::span<sg::named_view const>()),
                     sg::binding_group_exception);
+}
+
+// sg::exception is not a std::exception, and an async frame's error must still carry its message.
+ASYNC_INVOCABLE_TEST("sg error handling - an sg exception escaping a coroutine keeps its message",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    sg::binding const b = {
+        .name = "Data",
+        .space = 0,
+        .index = 0,
+        .count = 1,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
+    };
+    auto layout = ctx->cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
+    REQUIRE(layout != nullptr);
+
+    auto const outcome = co_await cc::async_as_result(create_unwired_group(ctx, layout));
+    REQUIRE(outcome.has_error());
+    CHECK(outcome.error().underlying().to_string().contains("binding_group creation failed"));
 }
 
 // The deferred half of error reporting: failures that arrive after the call that caused them.

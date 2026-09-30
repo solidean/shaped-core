@@ -3,6 +3,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_native_scope.hh>
 
 using namespace cc::primitive_defines;
@@ -22,6 +23,20 @@ namespace
 namespace dx12 = sg::backend::dx12;
 
 constexpr isize k_size = 256;
+
+constexpr int k_dim = 16;
+constexpr isize k_texture_bytes = isize(k_dim) * k_dim * 4;
+
+sg::texture_description copyable_desc()
+{
+    sg::texture_description d;
+    d.format = sg::pixel_format::rgba8_unorm;
+    d.dimension = sg::texture_dimension::d2;
+    d.width = k_dim;
+    d.height = k_dim;
+    d.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    return d;
+}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sg dx12 - a native scope brackets foreign work in one list",
@@ -65,6 +80,49 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a native scope brackets foreign work in one list
     auto matches = true;
     for (auto i = 0; i < k_size; ++i)
         if (bytes[i] != byte(i))
+            matches = false;
+    CHECK(matches);
+}
+
+ASYNC_INVOCABLE_TEST("sg dx12 - a native scope transitions textures in one list",
+                     (dx12::dx12_context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // A texture's declared access carries a layout the buffer path has none of, and that transition is what a vendor
+    // SDK depends on: CopyResource wants COPY_SOURCE and COPY_DEST, and sg last left A in COPY_DEST from the upload.
+    auto a = c.persistent.create_raw_texture(copyable_desc());
+    auto b = c.persistent.create_raw_texture(copyable_desc());
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+
+    byte pattern[k_texture_bytes];
+    for (auto i = 0; i < k_texture_bytes; ++i)
+        pattern[i] = byte(i * 7 + 1);
+
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_texture(a, cc::span<byte const>(pattern, k_texture_bytes));
+
+    {
+        auto const native = dx12::dx12_native_scope::open(
+            *cmd, {{.texture = a, .access = sg::access_flag::copy_read, .stages = sg::pipeline_stage_flag::copy},
+                   {.texture = b, .access = sg::access_flag::copy_write, .stages = sg::pipeline_stage_flag::copy}});
+
+        // CopyResource needs identical format and size, which is why both come from one description.
+        native.list()->CopyResource(native.resource(b), native.resource(a));
+    }
+
+    auto const future = cmd->download.bytes_from_texture(b);
+    c.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == k_texture_bytes);
+
+    auto matches = true;
+    for (auto i = 0; i < k_texture_bytes; ++i)
+        if (bytes[i] != pattern[i])
             matches = false;
     CHECK(matches);
 }

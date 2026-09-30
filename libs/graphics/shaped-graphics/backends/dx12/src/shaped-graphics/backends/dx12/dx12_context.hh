@@ -174,9 +174,12 @@ public:
     }
 
     /// Whether this device supports ray tracing (DXR tier >= 1.0), cached from CheckFeatureSupport at creation.
-    /// A build_blas / build_tlas requires a supported device.
+    /// That is the pipeline and acceleration structures, so a build_blas / build_tlas requires it.
     /// Surfaced through cmd.raytracing.is_supported().
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
+
+    /// Whether this device supports inline `RayQuery` (DXR tier >= 1.1).
+    [[nodiscard]] bool supports_ray_query() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_1; }
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
 
@@ -189,7 +192,9 @@ public:
     {
         switch (f)
         {
-        case sg::feature::raytracing:
+        case sg::feature::ray_query:
+            return supports_ray_query();
+        case sg::feature::raytracing_pipeline:
             return supports_raytracing();
         case sg::feature::timestamp_query:
             return _query_system.supports_timestamps();
@@ -200,6 +205,10 @@ public:
         case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
         case sg::feature::multisampled_array_textures:
+        case sg::feature::primitive_index:
+        case sg::feature::sample_rate_shading:
+        case sg::feature::wireframe_fill:
+        case sg::feature::depth32_float_stencil8:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;

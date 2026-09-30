@@ -56,6 +56,7 @@ Anything outside it is an error naming the declaration rather than a guess.
   MSL spells a raw byte-addressed buffer exactly the same way, so the text cannot tell them apart.
 - Resources reach a shader through argument buffers only: a struct of `[[id(n)]]` members, bound at `[[buffer(N)]]` for group N.
   The one other address is the inline-constants block, a `constant T&` at `[[buffer(4)]]`.
+  A `sampler` at `[[sampler(i)]]` is the pipeline layout's static sampler of index i, an `sg::bound_sampler`.
   Any other `[[buffer]]`, `[[texture]]` or `[[sampler]]` on the entry point is an error, since the metal backend never binds one.
 - A compute shader's threadgroup shape comes from `#pragma sc numthreads x y z` directly above its signature, because MSL states none of its own.
 

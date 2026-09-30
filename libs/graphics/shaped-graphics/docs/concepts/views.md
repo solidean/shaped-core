@@ -232,7 +232,7 @@ A render target must be a renderable color format (`is_render_target_format` —
 The rendering scope `cmd.raster.render_to` is what binds them — see [raster-pipeline](raster-pipeline.md).
 A backend lands these descriptors in its own non-shader-visible RTV/DSV heap, which is a bounded resource: creating one can fail where a shader-facing view cannot.
 
-Deferred: **aspect (depth/stencil) selection plus format reinterpretation** on texture views, since depth-as-SRV needs a typeless resource.
+Deferred: **aspect (depth/stencil) selection plus format reinterpretation** on texture views.
 Also **texel buffers** — `Buffer<T>` / `samplerBuffer`, a format-decoded linear buffer.
 **Samplers** are supported but are not views, so they live outside this concept — see [bindings](bindings.md) and `sampler.hh`.
 

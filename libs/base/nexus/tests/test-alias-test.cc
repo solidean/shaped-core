@@ -68,6 +68,30 @@ TEST("aliases - setup API selects invocables by decayed signature and records al
     CHECK(reg.aliases[0].fragments[0].driver == s.find_test("driver"));
 }
 
+TEST("aliases - an alias named after a test takes that test's location, so a file filter reaches it")
+{
+    nx::test_registry reg;
+    add_invocable(reg, "child", [&](int) { CHECK(true); });
+    reg.add_declaration("drv", {}, [&] {});
+
+    nx::setup s(reg);
+    auto const here = cc::source_location::current();
+    s.define_alias("child", {nx::alias_fragment{.driver = s.find_test("drv"), .section_path = {"g", "child"}}}, here);
+    s.define_alias("elsewhere", {nx::alias_fragment{.driver = s.find_test("drv"), .section_path = {"g", "child"}}}, here);
+    REQUIRE(reg.aliases.size() == 2);
+
+    // The alias standing for an invocable is where that invocable is declared, whoever defined it.
+    auto const& child = reg.aliases[0];
+    REQUIRE(child.name == "child");
+    CHECK(child.location.line() == s.find_test("child")->location.line());
+    CHECK(child.location.line() != here.line());
+
+    // One named after no test keeps the site it was given.
+    auto const& elsewhere = reg.aliases[1];
+    REQUIRE(elsewhere.name == "elsewhere");
+    CHECK(elsewhere.location.line() == here.line());
+}
+
 TEST("aliases - a filter matching an alias expands to one scoped instance", no_scheduler)
 {
     int ran_a = 0;

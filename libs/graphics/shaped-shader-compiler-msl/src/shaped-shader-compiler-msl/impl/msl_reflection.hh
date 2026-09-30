@@ -22,11 +22,14 @@
 ///     N is the binding group and n is the binding index, which is the layout metal_common.hh fixes
 ///   - a `constant T&` at `[[buffer(4)]]`, one past `sg::reserved_binding_group`, is the inline-constants block, and it
 ///     reflects with no group and no space
+///   - a `sampler` at `[[sampler(i)]]` on the entry point is the pipeline layout's static sampler of index i, an
+///     `sg::bound_sampler`, and it reflects with no group and no space
 ///   - any other `[[buffer]]`, `[[texture]]` or `[[sampler]]` on the entry point itself is an error, since the backend
 ///     binds nothing there
 ///   - `constant T&` and `constant T*` are uniform buffers, `device T*` is a structured buffer, and a `const` pointee
 ///     makes it readonly
-///   - `texture*<...>` is a texture, readwrite when its access is `read_write` or `write`
+///   - `texture*<...>` is a sampled texture, and a storage image when it states `access::read`, `write` or `read_write`
+///   - `depth*<float>` is a sampled texture whose sample type is `depth`
 ///   - `sampler` is a sampler, and an acceleration structure is one of the `raytracing::` handles
 ///   - a member declared `T name[k]` is an array binding of count k, which occupies k consecutive indices
 ///

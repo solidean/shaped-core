@@ -44,18 +44,20 @@ cc::string sum_source(int terms)
 }
 } // namespace
 
-TEST("sgl driver - the prelude is the generated builtins and the hand-written core, and both match their files")
+TEST("sgl driver - the prelude is the generated builtins and the hand-written files, and each matches its file")
 {
     auto const files = sgl::prelude_files();
-    REQUIRE(files.size() == 2);
+    REQUIRE(files.size() == 3);
     CHECK(files[0].name == "builtins.sgl");
     CHECK(files[1].name == "core.sgl");
+    CHECK(files[2].name == "raytracing.sgl");
 
     // The committed builtins.sgl is what the registry generates, byte for byte: `uv run dev.py check sgl-prelude --fix` rewrites it.
     // That is also what makes a diagnostic's line and column right in the committed file, which the compiler never opens.
     CHECK(files[0].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/builtins.sgl"));
     // core.sgl is embedded when CMake configures, and editing it re-runs the configure.
     CHECK(files[1].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/core.sgl"));
+    CHECK(files[2].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/raytracing.sgl"));
 }
 
 TEST("sgl driver - a line and a column are 1-based, and end of file is a place")
@@ -79,8 +81,8 @@ TEST("sgl driver - a line and a column are 1-based, and end of file is a place")
 
 TEST("sgl driver - every diagnostic kind has a summary a reader understands without its name")
 {
-    // `literal_needs_type` is the last kind; a kind added after it moves this bound
-    for (auto k = 0; k <= int(sgl::diagnostic_kind::literal_needs_type); ++k)
+    // `nesting_too_deep` is the last kind; a kind added after it moves this bound
+    for (auto k = 0; k <= int(sgl::diagnostic_kind::nesting_too_deep); ++k)
     {
         auto const kind = sgl::diagnostic_kind(k);
         CHECK(!sgl::summary_of(kind).empty());
@@ -179,4 +181,37 @@ TEST("sgl driver - a request to run the tests makes one that fails an error, and
     auto const e = error_of({.source = source, .source_name = "cube.sgl", .entry_point = "main_ps", .run_tests = true});
     CHECK(e.contains(": error: test-failed: 1 of 1 checks failed (deliberately false)\n"));
     CHECK(e.contains(": note: `2 < 1` is 2 < 1\n"));
+}
+
+TEST("sgl driver - a file-scope sampler the code reaches is an interface binding of no group, at its index")
+{
+    constexpr auto source
+        = "sampler unused:\n"
+          "    filter = .linear\n"
+          "\n"
+          "sampler edge:\n"
+          "    filter = .nearest\n"
+          "\n"
+          "binding set:\n"
+          "    src: texture_2d[float4]\n"
+          "    dst: out image_2d[.rgba8_unorm]\n"
+          "\n"
+          "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+          "    set.dst.store(int2(id.x, id.y), set.src.sample(float2(0.5, 0.5), edge, level = 0.0))\n";
+    auto const r = sgl::compile_to_text({.source = source, .entry_point = "cs", .target = target::wgsl});
+    REQUIRE(r.has_value());
+    auto const& bindings = r.value().bindings;
+    REQUIRE(bindings.size() == 3);
+    auto const& smp = bindings[2];
+    CHECK(smp.name == "edge");
+    CHECK(smp.emitted == "edge");
+    CHECK(smp.is_file_sampler);
+    CHECK(smp.kind == sgl::described_member_kind::sampler);
+    CHECK(smp.group == -1);
+    CHECK(smp.slot == 1);
+    CHECK(smp.is_used);
+    CHECK(smp.sampler_type == "non_filtering");
+    // a static sampler is the layout's, so no footprint names it: barriers track what a group binds
+    for (auto const& slot : r.value().footprint)
+        CHECK(slot.host_name != "edge");
 }

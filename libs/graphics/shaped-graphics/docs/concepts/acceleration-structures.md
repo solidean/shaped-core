@@ -53,6 +53,8 @@ It was computed against DXR and Vulkan RT first, and Metal — checked field by 
   `gl_InstanceCustomIndex`), an **8-bit** visibility `mask`, an optional per-instance opaque override, a
   cull mode (front/back/none), and a **24-bit** `hit_group_offset` (`InstanceContributionToHitGroupIndex`).
   The 24-bit fields assert on overflow.
+- **A BLAS build takes a `hit_record_stride`**, the shader-table records one of its geometries spans.
+  Metal bakes it into each geometry's offset, and dx12 and vulkan ignore it; [raytracing-pipeline](raytracing-pipeline.md#hit-rows-one-record-per-ray-type) says why.
 
 Every constraint here is a portability choice, not a backend limitation to route around.
 
@@ -131,6 +133,26 @@ Preserve these; the rest is tuning:
 - The four `MTL::AccelerationStructureInstanceOptions` bits map 1:1 onto `instance_cull_mode` plus `opaque_override`.
 - `metal-cpp`'s umbrella `Metal.hpp` does **not** include `MTL4AccelerationStructure.hpp`, and nothing else in the package does either.
   So those descriptors need that header named directly, unlike every other MTL4 type.
+- **A TLAS also keeps each instance's `hit_group_offset` in a buffer of its own**, `metal_tlas::hit_group_offsets()`, one `u32` per instance.
+  A pipeline's kernel reads it to find a closest hit's record, since Metal's intersection result names the instance and not its offset.
+  [raytracing-pipeline](raytracing-pipeline.md#metal-maps-it-onto-a-compute-pipeline-because-a-raygen-shader-is-the-kernel) says how it is bound.
+
+## webgpu implementation: a software polyfill
+
+WebGPU has no acceleration structures, so sg builds its own and SGL's prelude traverses them; `ctx.implementation_of(sg::feature::ray_query)` is `emulated`.
+The layout is a contract with SGL, and [raytracing-polyfill.md](../../../shaped-graphics-language/docs/raytracing-polyfill.md) is where it lives.
+
+- **Every BLAS and TLAS is a region of one storage buffer per context**, the acceleration pool, suballocated in 16-byte units.
+  A structure's handle is its offset there, so `size_in_bytes()` is its region's size.
+- **The tree follows the primitive order, with no spatial sort.**
+  Leaves are consecutive runs of up to four primitives and each level pairs consecutive nodes, so the CPU writes the topology and compute kernels fill in the boxes.
+  A mesh in a coherent triangle order traces well, and a triangle soup traces slowly.
+- **The build flags are checked and otherwise change nothing**: one build path serves them all, with no refit or compaction behind it.
+- **A pipeline layout binds at most 16 acceleration structures**, the size of the roots block the pool is traced from.
+- **All structures together fit in 128 MiB**, WebGPU's default largest storage binding, since the pool is bound whole.
+  A build past it throws `sg::allocation_exception`.
+
+[backends/webgpu/readme.md](../../backends/webgpu/readme.md#ray-queries) covers the pool's growth, reuse and bindings.
 
 The **vulkan** backend builds through `VK_KHR_acceleration_structure`, with `to_vk_buffer_usage` mapping both
 `accel_structure_*` usages and the buffer device address they need.
@@ -138,17 +160,18 @@ Placed allocations, which a future transient variant would want, are not impleme
 
 ## What's implemented today vs deferred
 
-**Today:** the single-shot build path, on all three backends.
+**Today:** the single-shot build path, on all four backends, webgpu's as the polyfill above.
 `sg::blas` / `sg::tlas` with `blas_handle` / `tlas_handle`, plus the input vocabulary: `blas_triangles`, `blas_aabbs`, `tlas_instance`, `accel_build_flags`, `instance_cull_mode`, `index_format`.
 On the `cmd.raytracing` scope: `build_blas` for triangles and procedural AABBs, `build_tlas`, and `is_supported()`.
 **dx12** is the reference realization — prebuild-sized result plus transient scratch, `BuildRaytracingAccelerationStructure`, gated on `D3D12_RAYTRACING_TIER` — and it runs on WARP.
 **metal** builds on the compute encoder, as above, and reports `is_supported() == true` on every device above its Metal 4 floor.
-**vulkan** builds through `VK_KHR_acceleration_structure` and reports `is_supported()` from `sg::feature::raytracing`, so a device without the extension answers false.
+**vulkan** builds through `VK_KHR_acceleration_structure`.
+It reports `is_supported()` from `sg::feature::ray_query` and `sg::feature::raytracing_pipeline`, so a device without the extension answers false.
 
 **The trace side is in.**
-A `tlas` binds as a shader resource through the `acceleration_structure` binding type and view kind — inline `RayQuery` in a compute dispatch.
-The full DXR pipeline path runs a raygen→miss→closest-hit trace on WARP: `raytracing_pipeline` (a DXR state object), `raytracing_shader_table`, and `cmd.raytracing.dispatch_rays`.
-See [raytracing-pipeline](raytracing-pipeline.md).
+A `tlas` binds as a shader resource through the `acceleration_structure` binding type and view kind, for a ray query from any stage — on every backend.
+The pipeline path is `raytracing_pipeline`, `raytracing_shader_table` and `cmd.raytracing.dispatch_rays`, on dx12 (WARP included), vulkan and metal.
+See [raytracing-pipeline](raytracing-pipeline.md), which also says which feature each backend reports.
 
 **Deferred** (see [TODO.md](../TODO.md)):
 

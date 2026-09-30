@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
@@ -53,14 +54,17 @@ struct sgl_test::library_prelude
 struct sgl_test::checked_sources
 {
     /// One entry per file of the module, in the module's order.
-    cc::vector<sgl::parsed_file> files;
-    cc::vector<sgl::ast::file_ast> asts;
+    /// The library's prelude points into `sgl::parsed_prelude()`; every other file into `owned_files` and `owned_asts`.
+    cc::vector<sgl::parsed_file const*> files;
+    cc::vector<sgl::ast::file_ast const*> asts;
+    cc::vector<cc::unique_ptr<sgl::parsed_file>> owned_files;
+    cc::vector<cc::unique_ptr<sgl::ast::file_ast>> owned_asts;
     /// Copies of the last entry of each, which is what nearly every test reads.
     sgl::parsed_file user;
     sgl::ast::file_ast user_ast;
     sgl::check::checked_module module;
 
-    /// The position of the user file, which a diagnostic and an origin name it by: 1 behind one prelude file, 2 behind the library's.
+    /// The position of the user file, which a diagnostic and an origin name it by: 1 behind one prelude file, 3 behind the library's.
     [[nodiscard]] sgl::i32 user_file() const { return sgl::i32(files.size() - 1); }
     /// The side tables of the user file.
     [[nodiscard]] sgl::check::file_tables const& tables() const { return module.files[user_file()]; }
@@ -73,24 +77,42 @@ inline library_prelude read_prelude()
     return {};
 }
 
+/// `shared` files of the library's prelude in front, then `sources` parsed here, the user file last.
+inline checked_sources check_behind(cc::span<sgl::parsed_prelude_file const> shared,
+                                    cc::span<cc::string_view const> sources)
+{
+    auto result = checked_sources();
+    for (auto const& f : shared)
+    {
+        result.files.push_back(&f.file);
+        result.asts.push_back(&f.ast);
+    }
+    for (auto const source : sources)
+    {
+        result.owned_files.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(source)));
+        result.owned_asts.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*result.owned_files.back())));
+        result.files.push_back(result.owned_files.back().get());
+        result.asts.push_back(result.owned_asts.back().get());
+    }
+
+    auto prelude = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i + 1 < result.files.size(); ++i)
+        prelude.push_back({.file = *result.files[i], .ast = *result.asts[i]});
+    auto const user = sgl::check::module_file{.file = *result.files.back(), .ast = *result.asts.back()};
+    // the library's prelude alone in front is what every compile continues from
+    auto const is_library = sources.size() == 1 && shared.data() == sgl::parsed_prelude().data()
+                         && shared.size() == sgl::parsed_prelude().size() && sgl::checked_prelude() != nullptr;
+    result.module = is_library ? sgl::check::check(*sgl::checked_prelude(), user) : sgl::check::check(prelude, user);
+
+    result.user = *result.files.back();
+    result.user_ast = *result.asts.back();
+    return result;
+}
+
 /// `sources` are the files of the module in order, the user file last.
 inline checked_sources check_files(cc::span<cc::string_view const> sources)
 {
-    auto result = checked_sources();
-    for (auto const source : sources)
-        result.files.push_back(sgl::parse(source));
-    for (auto const& file : result.files)
-        result.asts.push_back(sgl::ast::build(file));
-
-    // only now: a `module_file` is two references, and both vectors are complete
-    auto prelude = cc::vector<sgl::check::module_file>();
-    for (auto i = isize(0); i + 1 < result.files.size(); ++i)
-        prelude.push_back({.file = result.files[i], .ast = result.asts[i]});
-    result.module = sgl::check::check(prelude, {.file = result.files.back(), .ast = result.asts.back()});
-
-    result.user = result.files.back();
-    result.user_ast = result.asts.back();
-    return result;
+    return check_behind({}, sources);
 }
 
 /// `user` behind ONE prelude file of the test's own, so the user file is file 1.
@@ -103,11 +125,8 @@ inline checked_sources check_sources(cc::string_view prelude, cc::string_view us
 /// `user` behind the library's prelude, so the user file is file 2.
 inline checked_sources check_sources(library_prelude, cc::string_view user)
 {
-    auto sources = cc::vector<cc::string_view>();
-    for (auto const& p : sgl::prelude_files())
-        sources.push_back(p.source);
-    sources.push_back(user);
-    return check_files(sources);
+    cc::string_view const sources[] = {user};
+    return check_behind(sgl::parsed_prelude(), sources);
 }
 
 /// The diagnostics of the check pass, one per line, with the source they point at in place of an offset:
@@ -119,7 +138,7 @@ inline cc::string reports_of(checked_sources const& s)
     auto out = cc::string();
     for (auto const& d : s.module.diagnostics)
     {
-        auto text = s.files[d.file].text_of(d.what.where);
+        auto text = s.files[d.file]->text_of(d.what.where);
         if (auto const end = text.find('\n'); end >= 0)
             text = text.subview({.offset = 0, .size = end});
         auto const prelude_count = s.files.size() - 1;
@@ -133,7 +152,7 @@ inline cc::string reports_of(checked_sources const& s)
         // A related note stands under its diagnostic, indented: `  note user:[let x = k] x is declared here`.
         for (auto const& n : d.notes)
         {
-            auto note_text = s.files[n.file].text_of(n.where);
+            auto note_text = s.files[n.file]->text_of(n.where);
             if (auto const end = note_text.find('\n'); end >= 0)
                 note_text = note_text.subview({.offset = 0, .size = end});
             out.appendf("  note {}:[{}] {}\n", n.file == s.user_file() ? "user" : "prelude", note_text, n.message);

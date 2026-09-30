@@ -240,7 +240,7 @@ protected:
 
 private:
     /// What the guide bindings hold when a trace writes no guides: every binding of the group must be filled, and the
-    /// raygen never writes them while `write_guides` is clear.
+    /// raygen never writes them while the flag that governs each is clear.
     sg::texture_2d _guide_normal_stand_in;
     sg::texture_2d _guide_depth_stand_in;
     sg::texture_2d _guide_albedo_stand_in;

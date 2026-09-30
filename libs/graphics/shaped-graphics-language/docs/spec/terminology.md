@@ -8,6 +8,7 @@ Back to the [specification](_index.md).
 ## Graphics terms
 
 * "inline constants". called push constants or root constants or SetBytes* in other apis
+* "stage input" - a value the GPU hands an invocation, such as its vertex index or its thread id; an entry point takes it as a parameter marked `@vertex_index`, `@thread_id`, …
 * "buffer"
 * "texture" - a sampled texture, read through the texture unit; also sg's word for the resource itself
 * "image" - a storage texture, addressed per texel in a named format, read, written or both
@@ -17,18 +18,28 @@ Back to the [specification](_index.md).
         * "vertex"
         * "pixel" - not fragment
         * "geometry"
-        * "tessellation eval/control" - TODO i feel like we want "tessellation" in the name but not sure about the other
+        * "tessellation_control", "tessellation_evaluation" - sg's names, spelled out; the control stage returns a patch's factors, and the evaluation stage runs once per domain location
     * mesh shading??
         * "mesh" - is this right? what about amplification? this is basically TODO
     * compute
         * "compute"
-    * ray tracing - TODO: do we want a shared "ray" prefix or not?
+    * ray tracing - DXR's names without a shared prefix, as sg's `shader_stage` spells them ([raytracing](raytracing.md#stages))
         * "raygen"
         * "miss"
-        * "callable"
         * "closest_hit"
         * "any_hit"
         * "intersection"
+        * "callable"
+* "inline trace" - a trace that hands its hit back as a value, from any stage; `ray_query`, which WebGPU gets emulated ([raytracing](raytracing.md#inline-traces))
+* "decision" - a function an inline trace calls on what the traversal cannot decide alone: an any hit, or an intersection
+* "acceleration structure" - the TLAS a trace runs against, a binding member `acceleration_structure[.geometry]`
+* "ray set" - a `rays` declaration: the ray types of a pipeline, each with its payload, whose positions are their addresses
+* "ray type" - a member of a ray set; its position is a trace's ray contribution and miss index
+* "payload" - the struct a ray type carries, which a ray-tracing stage takes as a `mut` parameter
+* "hit group" - one row of a ray-tracing pipeline's table: a record per ray type ([raytracing](raytracing.md#hit-groups))
+* "record" - one ray type's closest hit and any hit in a hit group; `()` is an empty one
+* "callables table" - `callables name = (…)`: callable shaders of one parameter type, called by index
+* "trace graph" - the ray types of a pipeline, with an edge where a ray type's miss or closest hit traces another; its longest chain is the depth
 
 ## Syntax terms
 
@@ -107,7 +118,11 @@ Each term links to the rule that defines it.
 | **binding entry** | an element of the bindings of a signature (AST-69) |
 | **signature-only** | a function without a body (AST-72) |
 | **composition short form** | `binding name = other` or `binding name = (a, b)` (AST-74) |
-| **setting** | one `name = value` line of a `sampler` block (AST-76), or one `path = value` line of a `pipeline` block (AST-131) |
+| **setting** | one `name = value` line of a `sampler` block (AST-76), or one `path = value` line of a `pipeline` or `hit_group` block (AST-131, AST-150) |
+| **mut parameter** | a parameter `p: mut T` over a value type: the caller's place, handed over as `mut x` (CHK-315, CHK-316) |
+| **function type** | `(A, B) -> R`, the type of a parameter and of nothing else (CHK-317) |
+| **type parameter** | `A` of `fun f[A](…)` or `struct name[A]:`, opaque where it is declared and deduced at a call (CHK-338, CHK-340) |
+| **generic struct** | a struct over a type parameter, which only the prelude declares; `name[T]` is an **instance** of it (CHK-339) |
 | **pipeline** | shader stages and the configuration compiled into them ([pipelines.md](pipelines.md)) |
 | **frozen part** | what a host's own code is built against: a pipeline's binding layout, vertex input, target set, features, formats and sample count; no hot reload changes it |
 | **open part** | a format or a sample count a pipeline leaves to the host with `.host` (CHK-180) |

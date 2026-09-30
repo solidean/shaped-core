@@ -10,6 +10,7 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_backlog.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -70,6 +71,13 @@ public:
     /// Every feature `supports` answers yes for.
     [[nodiscard]] feature_set supported_features() const;
 
+    /// How this context provides `f`: `absent` exactly where `supports(f)` is false, whatever the backend.
+    /// A caller choosing an algorithm by cost asks this; portability never depends on it.
+    [[nodiscard]] feature_implementation implementation_of(feature f) const
+    {
+        return supports(f) ? implementation_of_supported(f) : feature_implementation::absent;
+    }
+
     /// What `shader` needs that this context lacks, which is what building a pipeline from it would be refused for.
     /// Empty for a shader whose `required_features` is unknown: nothing about it can be named.
     [[nodiscard]] feature_set missing_features(compiled_shader const& shader) const;
@@ -77,6 +85,14 @@ public:
     /// The numeric bounds a portable caller stays inside.
     /// See sg::device_limits.
     [[nodiscard]] device_limits const& limits() const { return _limits; }
+
+    /// Whether this context refuses what WebGPU refuses and the other backends run, where checking it costs every
+    /// dispatch and draw: a buffer written through one binding and read through another in one dispatch or draw.
+    /// **Off by default**; sg's own tests turn it on, and a program can in its debug builds.
+    /// Set it before creating the binding groups and recording the command lists it should cover.
+    /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+    [[nodiscard]] bool portability_checks() const { return _portability_checks.load(cc::memory_order_relaxed); }
+    void set_portability_checks(bool enabled) { _portability_checks.store(enabled, cc::memory_order_relaxed); }
 
     /// Whether `ctx.create_swapchain` can be given a `headless_extent` on this context.
     ///
@@ -316,6 +332,13 @@ protected:
 
     /// `accepted_shader_formats` must be non-empty, most-preferred first.
     context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats);
+
+    /// How this backend provides a feature `supports` answers yes for; `implementation_of` answers the rest.
+    [[nodiscard]] virtual feature_implementation implementation_of_supported(feature f) const
+    {
+        (void)f;
+        return feature_implementation::native;
+    }
 
     /// Records which adapter the backend picked.
     /// Called once during creation, before the context is handed out; the adapter cannot change afterwards.
@@ -728,6 +751,7 @@ protected:
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     bool _device_lost = false;
+    cc::atomic<bool> _portability_checks = false;
     cc::string _device_loss_reason;
 
     // Built-in pipeline/layout cache reached via ctx.cached.

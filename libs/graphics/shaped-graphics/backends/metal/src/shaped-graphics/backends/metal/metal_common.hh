@@ -145,6 +145,14 @@ inline constexpr int k_inline_constants_buffer_index = sg::reserved_binding_grou
 /// agree: the pipeline's layout index and the address the draw binds.
 inline constexpr int k_vertex_buffer_base_index = k_inline_constants_buffer_index + 1;
 
+/// The MSL buffer index a `dispatch_rays` binds the traced TLAS's per-instance hit-group offsets at.
+///
+/// Metal's intersection result names the instance but not its `intersectionFunctionTableOffset`, which a kernel needs to
+/// find a closest hit's record as DXR does: `offset + geometry * stride + ray type`.
+/// So a TLAS keeps its instances' offsets in a buffer of its own, and the kernel reads `offsets[instance]`.
+/// A raygen kernel draws no vertices, so vertex-input slot 0 is free during a dispatch and the index is borrowed from it.
+inline constexpr int k_hit_group_offsets_buffer_index = k_vertex_buffer_base_index;
+
 /// The buffer slots one command list's argument table holds: the groups, the reserved one, inline constants, and
 /// every vertex-input slot.
 ///
@@ -154,6 +162,11 @@ inline constexpr int k_argument_table_buffer_count = k_vertex_buffer_base_index 
 static_assert(k_argument_table_buffer_count <= 31,
               "the metal argument table has 31 buffer slots, and sg's budget "
               "no longer fits");
+
+/// The sampler slots one command list's argument table holds, which is where each `bound_sampler` goes.
+/// A bound sampler at register `n` is MSL's `[[sampler(n)]]`, set straight into the table rather than into an argument buffer.
+/// 16 is what Metal guarantees every stage, so a register at or above it is refused at layout creation.
+inline constexpr int k_argument_table_sampler_count = 16;
 
 /// Switch Metal's API validation layer on for this process, and make a violation abort rather than log.
 ///

@@ -683,7 +683,7 @@ m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for t
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
-bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (which dispatch ASSERTS on)
+bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
 bound.declare_raytracing_access(cmd)        // declares EVERY declared table for the next dispatch_rays, empty ones included
 m.bindless_layout()                         // -> the same layout, without taking a snapshot
 m.has_table(table) / m.table_capacity(table)
@@ -775,10 +775,11 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   are dropped — nothing reprojects across a cut.
   It is sticky until a frame traces the view, and it restarts no accumulation of its own.
 - **The specular guides** `temporal_id::specular_albedo_guide` (F0, blended to the base colour by metalness) and `roughness_guide` (the coat's where a coat covers the base).
-  Declared for a named member that reads them and for `automatic`; written under the frame block's own `write_specular_guides`, so a diffuse-only member pays for neither.
+  Declared for every member with the other guides: a split member reads them beside the diffuse albedo, and à-trous and SVGF demodulate by the sum of the two, since a metal's diffuse albedo is zero.
   `pt_guides.hlsli` holds all three guide functions apart from the tracer's bindings, which is what lets `bsdf_probe.hlsl` assert on them.
-- **Four more temporal slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
+- **Slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
   A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
+  The tracer writes those two only on the frames the temporal member runs, so a still view past the hand-off pays for neither.
 - **The split signals are in the tracer, not yet in sv.** `pt_trace_desc::frame_diffuse`, `frame_specular` and `guide_hit_distance`, behind the frame
   block's `write_split`, are what a split-signal member will read; the two halves sum to `frame_output` exactly.
   Nothing in `view_renderer` binds them yet, so no temporal slot exists for them — that lands with the first member that reads them.

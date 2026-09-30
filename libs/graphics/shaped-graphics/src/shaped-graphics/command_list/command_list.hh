@@ -1,11 +1,13 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list/compute.hh>
 #include <shaped-graphics/command_list/copy.hh>
 #include <shaped-graphics/command_list/download.hh>
+#include <shaped-graphics/command_list/impl/aliasing_scope.hh>
 #include <shaped-graphics/command_list/query.hh>
 #include <shaped-graphics/command_list/raster.hh>
 #include <shaped-graphics/command_list/raytracing.hh>
@@ -142,6 +144,20 @@ protected:
     void close_rendering();
     void bind_raster_pipeline(raster_pipeline const& pipeline);
 
+    // What every facade calls instead of the bind, dispatch and draw seams.
+    // They keep what is bound, for the portability checks a context may have on (impl::aliasing_scope), and forward.
+    void bind_compute_pipeline(compute_pipeline const& pipeline);
+    void bind_compute_group(int group_index, binding_group const& group);
+    void dispatch(int x, int y, int z);
+    void bind_raster_group(int group_index, binding_group const& group);
+    void bind_raster_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views);
+    void bind_raster_index_buffer(index_buffer_view const& view);
+    void draw(draw_config const& config);
+    void draw_indexed(draw_indexed_config const& config);
+    void bind_raytracing_pipeline(raytracing_pipeline const& pipeline);
+    void bind_raytracing_group(int group_index, binding_group const& group);
+    void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height, int depth);
+
     // Raster draw recording (reached through cmd.raster / cmd.raster.manual).
     // bind_pipeline sets the graphics PSO + root signature and the IA topology, bind_group binds through
     // that root signature, and the set/bind ops configure IA + dynamic state.
@@ -150,6 +166,13 @@ protected:
     virtual void raster_bind_group(int group_index, binding_group const& group) = 0;
     virtual void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) = 0;
     virtual void raster_bind_index_buffer(index_buffer_view const& view) = 0;
+
+    // The raster twin of the compute pair above, held for the next draw rather than the next dispatch.
+    // The graphics bind point keeps its own pending declarations, since its bound groups are its own.
+    virtual void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                    cc::span<array_buffer_access const> elements) = 0;
+    virtual void raster_declare_array_texture_access(cc::string_view binding_name,
+                                                     cc::span<array_texture_access const> elements) = 0;
     virtual void raster_set_viewport(viewport const& vp) = 0;
     virtual void raster_set_scissor(tg::aabb2i const& rect) = 0;
     virtual void raster_set_stencil_reference(u32 reference) = 0;
@@ -164,10 +187,13 @@ protected:
     // Each sizes and allocates the persistent result buffer, records the build with transient scratch, and returns the handle.
     // raytracing_is_supported gates them; a backend without RT returns false.
     [[nodiscard]] virtual bool raytracing_is_supported() const = 0;
+    // `hit_record_stride` is what each geometry's record offset advances by, which only metal bakes in.
     [[nodiscard]] virtual blas_handle raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
-                                                                      accel_build_flags flags) = 0;
+                                                                      accel_build_flags flags,
+                                                                      int hit_record_stride) = 0;
     [[nodiscard]] virtual blas_handle raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
-                                                                  accel_build_flags flags) = 0;
+                                                                  accel_build_flags flags,
+                                                                  int hit_record_stride) = 0;
     [[nodiscard]] virtual tlas_handle raytracing_build_tlas(cc::span<tlas_instance const> instances,
                                                             accel_build_flags flags) = 0;
 
@@ -198,6 +224,34 @@ protected:
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
 
 private:
+    void check_raster_aliasing(bool indexed);
+    void check_hit_records(raytracing_shader_table const& table);
+
     cc::string _rendering_target_set;                       // of the open rendering, or empty
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
+
+    // What is bound, by slot; the backend keeps each bound object alive for the recording, so the pointers stay valid.
+    // A pipeline over another layout unbinds the groups, and one over the same layout keeps them, as webgpu does.
+    // The layouts are compared by address only.
+    pipeline_layout const* _compute_layout = nullptr;
+    pipeline_layout const* _raster_layout = nullptr;
+    binding_group const* _compute_groups[max_binding_groups] = {};
+    binding_group const* _raster_groups[max_binding_groups] = {};
+    pipeline_layout const* _raytracing_layout = nullptr;
+    binding_group const* _raytracing_groups[max_binding_groups] = {};
+    raw_buffer const* _vertex_buffers[max_vertex_buffers] = {};
+    raw_buffer const* _index_buffer = nullptr;
+
+    // Of the current dispatch and draw, kept to reuse their storage.
+    impl::aliasing_scope _compute_aliasing;
+    impl::aliasing_scope _raster_aliasing;
+
+    // Each shader table and tlas dispatch_rays has checked against each other in this list, so a list logs a mismatch once.
+    // Held rather than pointed at, so neither address can be reused by another table or tlas while the list records.
+    struct checked_trace
+    {
+        raytracing_shader_table_handle table;
+        tlas_handle tlas;
+    };
+    cc::vector<checked_trace> _checked_traces;
 };

@@ -369,17 +369,14 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
                             int(u8(bytes.value()[0])), int(u8(bytes.value()[1])), int(u8(bytes.value()[2]))));
 }
 
-TEST("sg metal - a draw refuses a bound array binding")
+TEST("sg metal - a draw resolves its array declarations against the groups it binds")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    // **The raster scope has no declare_array_*_access**, so a bound array binding cannot be accounted for and the
-    // draw refuses it — the contract libs/graphics/shaped-graphics/docs/concepts/bindings.md states, which dx12
-    // and vulkan assert in the same words.
-    // Routing a draw through the compute path's accounting instead would demand a declare nothing can give.
-    // libs/graphics/shaped-graphics/docs/TODO.md carries the feature that would lift this.
+    // A draw meets its declarations with what is bound exactly as a dispatch does: an empty span declares the array
+    // unused, and an element the array does not have is the host's mistake, which asserts.
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
 
@@ -429,6 +426,13 @@ TEST("sg metal - a draw refuses a bound array binding")
         scope.set_inline_constants(tint_constants{});
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
 
+        scope.declare_array_buffer_access("inputs", {});
+        scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+
+        sg::array_buffer_access const out_of_range[] = {
+            {.index = 4, .access = sg::access_flag::shader_read},
+        };
+        scope.declare_array_buffer_access("inputs", out_of_range);
         CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
     }
     ctx->drop_command_list(cc::move(cmd));
@@ -440,8 +444,8 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    // A group bound in one scope must not still be bound in the next, or the array refusal above fires on a draw that
-    // bound nothing — which is what `_group_arrays` outliving its scope would cause.
+    // A group bound in one scope must not still be bound in the next, or a draw that bound nothing resolves the arrays
+    // of a group it never saw — which is what `_group_arrays` outliving its scope would cause.
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
 
@@ -502,8 +506,11 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
         scope.set_inline_constants(tint_constants{});
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+
+        // Nothing this scope binds carries `inputs`, so a declaration naming it asserts unless a stale group does.
+        scope.declare_array_buffer_access("inputs", {});
+        CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
     }
-    CHECK(true); // reaching here is the assertion: no stale array binding refused the second draw
     ctx->drop_command_list(cc::move(cmd));
 }
 
@@ -516,8 +523,8 @@ TEST("sg metal - a compute-bound group is not bound at the first draw of a rende
     // **One set of per-slot bookkeeping serves compute, ray tracing and raster here**, where dx12 walks a raster set of
     // its own — so a group bound for a dispatch is still on the books when a rendering scope opens unless the scope
     // clears it.
-    // With an array binding in that group the draw below refuses outright; without one it merely declares resources no
-    // draw reads, which is the same bug spending barriers instead of asserting.
+    // Left on the books, the group's buffers and its array are declared for a draw that reads none of them, which
+    // spends barriers on work that never touches them.
     // dx12 and vulkan both draw this.
     auto kernel = mtl::test::mesh_kernel("array_sum_main");
     kernel.bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
@@ -588,7 +595,10 @@ TEST("sg metal - a compute-bound group is not bound at the first draw of a rende
         scope.set_inline_constants(tint_constants{});
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+
+        // Nothing this scope binds carries `inputs`, so a declaration naming it asserts unless a stale group does.
+        scope.declare_array_buffer_access("inputs", {});
+        CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
     }
-    CHECK(true); // reaching here is the assertion: the compute group's array binding did not refuse this draw
     ctx->drop_command_list(cc::move(cmd));
 }

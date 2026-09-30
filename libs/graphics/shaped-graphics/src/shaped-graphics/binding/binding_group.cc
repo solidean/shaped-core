@@ -6,6 +6,75 @@ namespace sg
 {
 binding_group::~binding_group() = default;
 
+namespace
+{
+/// The use `bound` makes of a buffer, or none for a binding array or a binding that is not a buffer.
+void add_use(cc::vector<impl::buffer_use>& out, cc::string_view binding, bound_view const& bound)
+{
+    // A binding array is exempt: WebGPU, the backend the check stands in for, has none.
+    if (bound.size() != 1)
+        return;
+    if (auto const* buffer = try_as_buffer_view(bound.span()[0]); buffer != nullptr && buffer->buffer != nullptr)
+        out.push_back({.buffer = buffer->buffer.get(),
+                       .binding = cc::string(binding),
+                       .writes = buffer->bound_as == view_class::readwrite});
+}
+
+/// Every non-null tlas `bound` binds, arrays included, since a trace reaches each of them.
+void add_tlases(cc::vector<tlas_handle>& out, bound_view const& bound)
+{
+    for (auto const& v : bound.span())
+        if (auto const* tlas = try_as_tlas_view(v); tlas != nullptr && tlas->tlas != nullptr)
+            out.push_back(tlas->tlas);
+}
+} // namespace
+
+void impl::record_buffer_uses(binding_group const& group, cc::span<named_view const> views)
+{
+    auto uses = cc::vector<buffer_use>();
+    for (auto const& v : views)
+    {
+        add_use(uses, v.name, v.view);
+        add_tlases(group._tlases, v.view);
+    }
+    set_buffer_uses(group, cc::move(uses));
+}
+
+void impl::record_buffer_uses(binding_group const& group,
+                              binding_group_layout const& layout,
+                              cc::span<slotted_view const> views)
+{
+    auto const bindings = layout.bindings();
+    auto uses = cc::vector<buffer_use>();
+    for (auto const& v : views)
+    {
+        if (auto const slot = isize(u32(v.slot)); slot < bindings.size())
+            add_use(uses, bindings[slot].name, v.view);
+        add_tlases(group._tlases, v.view);
+    }
+    set_buffer_uses(group, cc::move(uses));
+}
+
+void impl::set_buffer_uses(binding_group const& group, cc::vector<buffer_use> uses)
+{
+    group._buffer_uses = cc::move(uses);
+}
+
+cc::span<impl::buffer_use const> impl::buffer_uses_of(binding_group const& group)
+{
+    return group._buffer_uses;
+}
+
+void impl::set_tlases(binding_group const& group, cc::vector<tlas_handle> tlases)
+{
+    group._tlases = cc::move(tlases);
+}
+
+cc::span<tlas_handle const> impl::tlases_of(binding_group const& group)
+{
+    return group._tlases;
+}
+
 void impl::drop_static_samplers(binding_group_layout const& layout, cc::vector<named_sampler>& samplers)
 {
     auto const declared_static = layout.static_samplers();

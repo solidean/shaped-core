@@ -51,6 +51,15 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
 
     _residency.add(_upload_ring.buffer());
     _residency.add(_download_ring.buffer());
+
+    // Shared rather than private, so it is zeroed here instead of through a copy.
+    auto constexpr zero_offsets_bytes = isize(16);
+    _zero_hit_group_offsets = _device->newBuffer(
+        NS::UInteger(zero_offsets_bytes), MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
+    if (_zero_hit_group_offsets == nullptr)
+        return cc::error("the metal device refused the zeroed hit-group offsets buffer");
+    cc::memset(_zero_hit_group_offsets->contents(), 0, size_t(zero_offsets_bytes));
+    _residency.add(_zero_hit_group_offsets);
     return cc::unit{};
 }
 
@@ -107,7 +116,8 @@ bool metal_context::supports(sg::feature f) const
 {
     switch (f)
     {
-    case sg::feature::raytracing:
+    case sg::feature::ray_query:
+    case sg::feature::raytracing_pipeline:
         // Every device above this backend's Metal 4 floor can ray trace, so there is nothing to probe.
         // Acceleration structures build, a tlas binds for an inline RayQuery trace, and the DXR-shaped pipeline path
         // maps onto a compute pipeline per raygen plus Metal's function tables.
@@ -132,6 +142,15 @@ bool metal_context::supports(sg::feature f) const
         // Apple silicon writes every uncompressed color format from a shader, which is this backend's floor.
         return true;
     case sg::feature::multisampled_array_textures:
+    case sg::feature::primitive_index:
+    case sg::feature::sample_rate_shading:
+        // `[[primitive_id]]` and `[[sample_id]]` exist on every Apple GPU this backend's Metal 4 floor admits.
+        return true;
+    case sg::feature::wireframe_fill:
+        // `MTLTriangleFillModeLines` is on every Apple GPU.
+        return true;
+    case sg::feature::depth32_float_stencil8:
+        // `MTLPixelFormatDepth32Float_Stencil8` is on every Apple GPU.
         return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
@@ -506,6 +525,12 @@ void metal_context::shutdown()
     _download_ring.shutdown();
     _samplers.shutdown();
     _texture_views.shutdown();
+    if (_zero_hit_group_offsets != nullptr)
+    {
+        _residency.remove(_zero_hit_group_offsets);
+        _zero_hit_group_offsets->release();
+        _zero_hit_group_offsets = nullptr;
+    }
 
     if (_compiler != nullptr)
     {
@@ -927,11 +952,6 @@ cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_gr
 cc::result<sg::pipeline_layout_handle> metal_context::try_create_pipeline_layout(pipeline_layout_description const& desc,
                                                                                  lifetime_scope scope)
 {
-    // Refused rather than accepted: nothing here places the samplers where a shader could read them.
-    // The gap is libs/graphics/shaped-graphics/docs/TODO.md's, and a group's name-matched static sampler is the working form.
-    if (!desc.static_samplers.empty())
-        return cc::error("pipeline_layout: a pipeline-level static sampler (bound_sampler) is not bound by the metal "
-                         "backend yet; declare it a group's static sampler instead");
     return cc::result<sg::pipeline_layout_handle>(create_metal_pipeline_layout(desc, scope));
 }
 

@@ -56,7 +56,7 @@ namespace
 
 bool metal_command_list::raytracing_is_supported() const
 {
-    return _metal_context.supports(sg::feature::raytracing);
+    return _metal_context.supports(sg::feature::ray_query) || _metal_context.supports(sg::feature::raytracing_pipeline);
 }
 
 MTL::AccelerationStructure* metal_command_list::build_accel_common(MTL4::AccelerationStructureDescriptor* descriptor,
@@ -119,7 +119,8 @@ sg::blas_handle metal_command_list::build_blas_common(MTL4::PrimitiveAcceleratio
 }
 
 sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
-                                                                    accel_build_flags flags)
+                                                                    accel_build_flags flags,
+                                                                    int hit_record_stride)
 {
     CC_ASSERT(!geometries.empty(), "build_blas needs at least one geometry");
     auto const scope = autorelease_scope();
@@ -149,10 +150,9 @@ sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<bla
         // **DXR's geometry contribution to the hit index, which Metal spells per geometry descriptor.**
         // The instance's own offset alone makes every geometry of a BLAS select one hit group, so a BLAS whose second
         // geometry needs a different any-hit would run the first's.
-        // The multiplier is 1 here, which is what sg's surface implies — see
-        // libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md for the contribution metal has no
-        // counterpart for.
-        d->setIntersectionFunctionTableOffset(NS::UInteger(geometry_descs.size()));
+        // DXR multiplies it per trace; Metal has no per-trace term, so the stride is baked here, and the ray
+        // contribution is which of the shader table's per-ray-type intersection tables the kernel traces with.
+        d->setIntersectionFunctionTableOffset(NS::UInteger(geometry_descs.size() * isize(hit_record_stride)));
 
         if (g.indices != nullptr)
         {
@@ -193,7 +193,8 @@ sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<bla
 }
 
 sg::blas_handle metal_command_list::raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
-                                                                accel_build_flags flags)
+                                                                accel_build_flags flags,
+                                                                int hit_record_stride)
 {
     CC_ASSERT(!geometries.empty(), "build_blas needs at least one geometry");
     auto const scope = autorelease_scope();
@@ -212,7 +213,8 @@ sg::blas_handle metal_command_list::raytracing_build_blas_aabbs(cc::span<blas_aa
         d->setBoundingBoxStride(NS::UInteger(g.aabb_stride_in_bytes));
         d->setBoundingBoxCount(NS::UInteger(g.aabb_count));
         d->setOpaque(g.is_opaque);
-        d->setIntersectionFunctionTableOffset(NS::UInteger(geometry_descs.size())); // see the triangle path
+        d->setIntersectionFunctionTableOffset(
+            NS::UInteger(geometry_descs.size() * isize(hit_record_stride))); // see the triangle path
 
         inputs.push_back(g.aabbs);
         geometry_descs.push_back(d);
@@ -319,8 +321,18 @@ sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance
     auto update_scratch = isize(0);
     auto* const accel = build_accel_common(descriptor, size, build_scratch, update_scratch);
 
-    auto const result = std::make_shared<metal_tlas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
-                                                     int(instances.size()), cc::move(referenced_blases));
+    // what a ray-tracing kernel reads to find a closest hit's record, which the intersection result does not carry
+    auto offsets = cc::vector<u32>();
+    for (auto const& inst : instances)
+        offsets.push_back(inst.hit_group_offset);
+    auto const hit_group_offsets = _metal_context.persistent.create_raw_buffer(
+        isize(offsets.size() * sizeof(u32)),
+        sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+    upload_bytes_to_buffer(hit_group_offsets, cc::as_bytes(cc::span<u32 const>(offsets)), 0);
+
+    auto const result
+        = std::make_shared<metal_tlas>(_metal_context, accel, size, build_scratch, update_scratch, flags,
+                                       int(instances.size()), cc::move(referenced_blases), hit_group_offsets);
 
     auto const scratch_raw
         = _metal_context.transient.create_raw_buffer(build_scratch, sg::buffer_usage::readwrite_buffer);

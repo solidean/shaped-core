@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics-language/check/flat.hh>
 
 namespace sgl::check::impl
@@ -60,6 +61,11 @@ void for_each_operand(flat_entry_point const& e, flat_expr const& x, Fn&& fn)
         fn(element->buffer);
         fn(element->index);
     }
+    else if (auto const* const element = x.node.try_as<flat_element>())
+    {
+        fn(element->object);
+        fn(element->index);
+    }
     else if (auto const* const construct = x.node.try_as<flat_construct>())
     {
         if (is_known(e, construct->arguments))
@@ -115,6 +121,7 @@ void for_each_expr_of(flat_stmt const& s, Fn&& fn)
                      visit(n.end);
                  },
                  [&](flat_continue const&) {}, //
+                 [&](flat_discard const&) {},  //
                  [&](flat_once const&) {},     //
                  [&](flat_break const&) {},    //
                  [&](flat_case const& n) { visit(n.scrutinee); }, [&](flat_switch const& n) { visit(n.scrutinee); },
@@ -176,4 +183,53 @@ void for_each_body_of(flat_entry_point const& e, flat_stmt const& s, Fn&& fn)
         fn(sw->default_body);
     }
 }
+
+/// Finds the first node of a flat tree that stands deeper than `k_max_depth`, counted the way every later walk counts.
+/// It descends at most one level past the limit, so it is safe on any tree the flattener wrote.
+struct depth_probe
+{
+    flat_entry_point const& e;
+    cc::optional<origin> found;
+
+    void expr(flat_expr_id id, int depth)
+    {
+        if (found.has_value() || !is_known(e, id))
+            return;
+        auto const& x = e.at(id);
+        if (depth > k_max_depth)
+        {
+            found = x.from;
+            return;
+        }
+        if (auto const* const b = x.node.try_as<flat_block>())
+            body(b->body, depth + 1);
+        for_each_operand(e, x, [&](flat_expr_id operand) { expr(operand, depth + 1); });
+    }
+
+    void body(ast::range_of<flat_stmt_id> range, int depth)
+    {
+        if (found.has_value() || !is_known(e, range))
+            return;
+        for (auto const id : e.at(range))
+        {
+            if (found.has_value() || !is_known(e, id))
+                continue;
+            auto const& s = e.at(id);
+            if (depth > k_max_depth)
+            {
+                found = s.from;
+                return;
+            }
+            for_each_expr_of(s, [&](flat_expr_id x) { expr(x, depth + 1); });
+            for_each_pattern_of(e, s,
+                                [&](ast::range_of<flat_expr_id> patterns)
+                                {
+                                    if (is_known(e, patterns))
+                                        for (auto const p : e.at(patterns))
+                                            expr(p, depth + 1);
+                                });
+            for_each_body_of(e, s, [&](ast::range_of<flat_stmt_id> inner) { body(inner, depth + 1); });
+        }
+    }
+};
 } // namespace sgl::check::impl

@@ -136,13 +136,45 @@ kernel void blur(constant outputs& o [[buffer(0)]]) { (void)o; }
     CHECK(r.value().bindings[0].access == sg::access_mode::read_write);
 }
 
+TEST("ssc::msl reflect - a texture that states `access::read` is a read-only storage image, not a sampled texture")
+{
+    // MSL's default access is `sample`, so a stated `read` is the one spelling a read-only image has.
+    constexpr char const* source = R"(
+struct inputs { texture2d<float, access::read> history [[id(0)]]; texture2d<float, access::sample> albedo [[id(1)]]; };
+kernel void resolve(constant inputs& i [[buffer(0)]]) { (void)i; }
+)";
+
+    auto r = ssc::msl::impl::reflect(source, "resolve", sg::shader_stage::compute);
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().bindings.size() == 2);
+    CHECK(r.value().bindings[0].type == sg::binding_type::image);
+    CHECK(r.value().bindings[0].access == sg::access_mode::read);
+    CHECK(r.value().bindings[1].type == sg::binding_type::texture);
+}
+
+TEST("ssc::msl reflect - a depth texture is a texture of its shape, whose samples are depth")
+{
+    constexpr char const* source = R"(
+struct shadows { depth2d<float> map [[id(0)]]; depthcube_array<float> cubes [[id(1)]]; depth2d_ms<float> msaa [[id(2)]]; };
+kernel void light(constant shadows& s [[buffer(0)]]) { (void)s; }
+)";
+
+    auto r = ssc::msl::impl::reflect(source, "light", sg::shader_stage::compute);
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().bindings.size() == 3);
+    CHECK(r.value().bindings[0].type == sg::binding_type::texture);
+    CHECK(r.value().bindings[0].texture_dimension == sg::texture_view_dimension::tex_2d);
+    CHECK(r.value().bindings[0].sample_type == sg::texture_sample_type::depth);
+    CHECK(r.value().bindings[1].texture_dimension == sg::texture_view_dimension::cube_array);
+    CHECK(r.value().bindings[2].texture_dimension == sg::texture_view_dimension::tex_2d_ms);
+}
+
 TEST("ssc::msl reflect - a resource bound straight on the entry point is refused, since the backend binds none")
 {
-    // The metal backend sets group N's argument buffer at [[buffer(N)]] and never a texture or a sampler slot.
+    // The metal backend sets group N's argument buffer at [[buffer(N)]], and never a texture slot.
     char const* const sources[] = {
         "kernel void k(device float* data [[buffer(0)]]) { (void)data; }",
         "kernel void k(texture2d<float> tex [[texture(0)]]) { (void)tex; }",
-        "kernel void k(sampler s [[sampler(0)]]) { (void)s; }",
     };
 
     for (auto const* const source : sources)
@@ -150,6 +182,40 @@ TEST("ssc::msl reflect - a resource bound straight on the entry point is refused
         auto r = ssc::msl::impl::reflect(source, "k", sg::shader_stage::compute);
         REQUIRE(r.has_error());
         CHECK(r.error().to_string().contains("argument buffers only")).context(r.error().to_string());
+    }
+}
+
+TEST("ssc::msl reflect - a sampler slot of the entry point is the layout's static sampler of that index, in no group")
+{
+    auto r = ssc::msl::impl::reflect("kernel void k(sampler edge [[sampler(2)]]) { (void)edge; }", "k",
+                                     sg::shader_stage::compute);
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().bindings.size() == 1);
+    auto const& edge = r.value().bindings[0];
+    CHECK(edge.name == "edge");
+    CHECK(edge.type == sg::binding_type::sampler);
+    CHECK(edge.index == 2);
+    CHECK(!edge.group_index.has_value());
+    CHECK(!edge.space.has_value());
+
+    // a sampler slot holds a sampler and nothing else
+    auto wrong = ssc::msl::impl::reflect("kernel void k(texture2d<float> t [[sampler(0)]]) { (void)t; }", "k",
+                                         sg::shader_stage::compute);
+    REQUIRE(wrong.has_error());
+}
+
+TEST("ssc::msl reflect - a sampler slot of the entry point holds one sampler, never an array")
+{
+    char const* const sources[] = {
+        "kernel void k(array<sampler, 2> s [[sampler(0)]]) { (void)s; }",
+        "kernel void k(sampler s[2] [[sampler(0)]]) { (void)s; }",
+    };
+
+    for (auto const* const source : sources)
+    {
+        auto r = ssc::msl::impl::reflect(source, "k", sg::shader_stage::compute);
+        REQUIRE(r.has_error());
+        CHECK(r.error().to_string().contains("not an array")).context(r.error().to_string());
     }
 }
 

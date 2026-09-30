@@ -222,7 +222,7 @@ TEST("sgl source - both forms of a program behave the same, on every input")
         auto const& m = checked.module;
         auto const& structured = m.entry_points[0];
         auto const core = legalize(m, structured);
-        CHECK(!find_core_violation(core).has_value());
+        CHECK(!find_core_violation(m, core).has_value());
 
         for (auto const a : {-0.5f, 0.0f, 0.125f, 0.25f, 0.375f, 0.5f, 0.75f, 1.5f})
             for (auto const b : {-1.0f, 0.125f, 0.5f, 0.625f, 2.0f})

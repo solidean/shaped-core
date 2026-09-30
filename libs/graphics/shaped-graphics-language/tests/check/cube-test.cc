@@ -76,7 +76,9 @@ TEST("sgl check - the pass is total: every truncation of the cube checks, settle
     auto const prelude = read_prelude();
     auto const cube = read_cube();
     // A prime stride cuts through every kind of token over the length of the file.
-    for (auto length = isize(0); length < cube.size(); length += 13)
+    // Each length checks against the whole prelude, so the default run takes a coarser one.
+    auto const stride = nx::is_thorough() ? 13 : 41;
+    for (auto length = isize(0); length < cube.size(); length += stride)
     {
         auto const checked = check_sources(prelude, cc::string_view(cube).subview({.offset = 0, .size = length}));
         auto const& m = checked.module;
@@ -86,7 +88,7 @@ TEST("sgl check - the pass is total: every truncation of the cube checks, settle
             all_settled = all_settled
                        && (s.state == sgl::check::symbol_state::checked || s.state == sgl::check::symbol_state::failed);
         CHECK(all_settled);
-        CHECK(m.files.size() == 3);
+        CHECK(m.files.size() == 4);
         CHECK(checked.tables().type_of.size() == checked.user_ast.exprs.size());
         CHECK(m.entry_points.size() <= 2);
         // the dumps walk every id the module holds
@@ -99,7 +101,10 @@ TEST("sgl check - a truncated prelude checks too")
 {
     auto const prelude = builtins_text();
     auto const cube = read_cube();
-    for (auto length = isize(0); length < prelude.size(); length += 13)
+    // Each length checks the whole prefix, so a fixed stride grows with the square of the prelude.
+    // The default run takes about 128 lengths whatever its size, an odd stride; --thorough takes every 13th.
+    auto const stride = nx::is_thorough() ? 13 : (prelude.size() / 128) | 1;
+    for (auto length = isize(0); length < prelude.size(); length += stride)
     {
         auto const checked = check_sources(cc::string_view(prelude).subview({.offset = 0, .size = length}), cube);
         CHECK(checked.module.files.size() == 2);

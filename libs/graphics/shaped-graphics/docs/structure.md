@@ -68,7 +68,7 @@ src/shaped-graphics/
     copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (both backends real); texture copies pending
     compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
     raster.hh/.cc                 [done]        cmd.raster: rendering scope, bindings, viewport/scissor state, draws (both backends real)
-    raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (both backends real)
+    raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12, vulkan, metal; webgpu builds only)
     query.hh/.cc                  [done]        cmd.query: record_gpu_timestamp / is_supported (real on all three backends)
 
   compute/
@@ -103,9 +103,13 @@ src/shaped-graphics/
     vertex_input.hh               [in progress] vertex_input_layout / slots / attributes; attributes are still HLSL-semantic-keyed
 
   raytracing/
-    acceleration_structure.hh/.cc [done]        blas / tlas + their build inputs; dx12 = a storage buffer, vulkan = a VkAccelerationStructureKHR over one
-    raytracing_pipeline.hh/.cc    [done]        DXR state object + the shader-handle registration phase; vulkan = ray-tracing shader groups
-    raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table; both backends real; its records still sit in a plain buffer
+    acceleration_structure.hh/.cc [done]        blas / tlas + their build inputs; dx12 = a storage buffer, vulkan = a VkAccelerationStructureKHR over one,
+                                                metal = an MTLAccelerationStructure, webgpu = a region of the polyfill's pool
+    raytracing_pipeline.hh/.cc    [done]        DXR state object + the shader-handle registration phase; vulkan = ray-tracing shader groups;
+                                                metal = a compute pipeline per raygen
+    raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table, hit rows and ray_count; real on dx12, vulkan and metal;
+                                                its records still sit in a plain buffer
+    impl/hit_record_check.hh/.cc  [done]        what dispatch_rays checks under the portability checks: each record an instance reaches
 
   resource/
     pixel_format.hh               [done]        restrictive texel-format enum + helpers (depth/compressed/block-size)
@@ -137,8 +141,8 @@ backends/                                       # each subclasses the abstract s
   vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): the whole surface, ray tracing included
   metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): the whole surface, ray tracing included;
                                                 presents windowed and headless; records GPU timestamps
-  webgpu/                         [in progress] sg::backend::webgpu + sg::request_webgpu_context (wasm, emdawnwebgpu): the whole surface but ray tracing;
-                                                never blocks. See backends/webgpu/readme.md
+  webgpu/                         [in progress] sg::backend::webgpu + sg::request_webgpu_context (wasm, emdawnwebgpu): the whole surface but the RT pipeline;
+                                                ray queries are a polyfill; never blocks. See backends/webgpu/readme.md
     tests/                                      shaped-graphics-webgpu-test over hand-written WGSL
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat
@@ -148,7 +152,7 @@ backends/                                       # each subclasses the abstract s
 
 - **Tier 1 (now):** dx12, vulkan.
   Both are real across the surface.
-- **Tier 2:** metal and webgpu are both real; webgpu is the one missing ray tracing.
+- **Tier 2:** metal and webgpu are both real; webgpu is the one missing the ray-tracing pipeline, and its ray queries are a software polyfill.
   metal covers the whole surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting windowed and headless and recording GPU timestamps.
   It refuses below its floor rather than degrading, realizes the epochs on a pair of MTLSharedEvents, and runs the whole tier-1 sweep unconditionally.
   `SC_THREADS=OFF` is refused on Apple targets, because metal takes command-buffer completion on a thread the flag cannot remove.
@@ -224,14 +228,17 @@ pipeline             [in progress]  compute + raster pipelines and the bind path
 sampler              [in progress]  sampler + static/dynamic samplers. A group's static sampler (named_sampler on the
                                   group layout) binds on all four: dx12 root-sig static samplers, vulkan immutable
                                   samplers, metal argument-buffer entries, webgpu the layout's own sampler.
-                                  A pipeline-level one (bound_sampler) binds on dx12 and webgpu; vulkan and metal
-                                  refuse the pipeline layout. dx12 keeps dynamic ones in a separate sampler heap
+                                  A pipeline-level one (bound_sampler) binds on all four too: dx12 root-sig static
+                                  samplers, vulkan and webgpu the reserved group, metal the argument table's sampler
+                                  slots. dx12 keeps dynamic ones in a separate sampler heap
 accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
                                   triangles + procedural AABBs, build_tlas, is_supported), result sized from a
                                   prebuild query with transient scratch, persistent handles across epochs;
-                                  dx12 real (WARP), vulkan stub. Deferred: transient variant, refit/update, compaction
+                                  dx12, vulkan and metal real; webgpu real as the ray-query polyfill's own
+                                  structures. Deferred: transient variant, refit/update, compaction
 raytracing pipeline  [in progress]  raytracing_pipeline + shader table + cmd.raytracing.dispatch_rays, and the
-                                  acceleration_structure binding (inline RayQuery); dx12 real (WARP), vulkan stub.
+                                  acceleration_structure binding (inline RayQuery); dx12, vulkan and metal real,
+                                  and webgpu's ray query real as a software polyfill.
                                   Deferred: local root signatures, a dedicated shader-table buffer usage, a cached blob
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
                                   per list, one batched inline readback per heap at submit; real on all three
@@ -269,6 +276,6 @@ See [concepts/epochs.md](concepts/epochs.md).
 4. textures + views                                        [in progress]  resource, creation, views and host↔device copies real on dx12 and vulkan; texel buffer views remain
 5. pipelines + shaders                                     [in progress]  compute + raster bind paths real on dx12 and vulkan, DXC compiler in place
 6. presentation (swapchain/surface) + submission/sync      [done]         dx12 (WARP-tested) and vulkan
-7. tier 2 backends (metal, webgpu)                         [in progress]  metal covers the whole surface; webgpu is real but ray tracing
+7. tier 2 backends (metal, webgpu)                         [in progress]  metal covers the whole surface; webgpu is real but the RT pipeline
 8. legacy backends (opengl, webgl)                         [planned]
 ```

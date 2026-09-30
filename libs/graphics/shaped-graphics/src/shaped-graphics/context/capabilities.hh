@@ -17,9 +17,14 @@
 /// Absent means the code path does not exist on this backend or device — not that it is slow.
 enum class sg::feature
 {
-    /// Ray tracing: acceleration structures, ray-tracing pipelines, inline RayQuery.
+    /// Inline ray tracing: a trace called from an ordinary stage (HLSL's `RayQuery`, MSL's `intersection_query`).
+    /// Acceleration structures exist wherever this or `raytracing_pipeline` does.
+    /// WebGPU has it through a software polyfill, which `context::implementation_of` reports as emulated.
+    ray_query,
+
+    /// The ray-tracing pipeline: raygen, miss, hit and callable shaders, the shader table and `dispatch_rays`.
     /// A device fact as much as a backend one, since an adapter may lack DXR / VK_KHR_ray_tracing_pipeline.
-    raytracing,
+    raytracing_pipeline,
 
     /// GPU timestamp queries (`cmd.query.record_gpu_timestamp`).
     /// Absent where the queue family does not time, and an optional feature on WebGPU.
@@ -64,6 +69,22 @@ enum class sg::feature
     /// A texture binding may be a multisampled 2D array (`texture_view_dimension::tex_2d_ms_array`).
     /// WebGPU has no such binding at all, and it is also how a multisampled cube is sampled.
     multisampled_array_textures,
+
+    /// A pixel shader may read which primitive it belongs to (SGL's `@primitive_id`).
+    /// Vulkan gives it only with the `geometryShader` device feature, and WebGPU behind `primitive-index`.
+    primitive_index,
+
+    /// A pixel shader may run per sample: read `@sample_index`, or interpolate a member at each sample.
+    /// Vulkan gives it only with the `sampleRateShading` device feature; D3D12, Metal and WebGPU always.
+    sample_rate_shading,
+
+    /// A raster pipeline may fill triangles as wireframe (`fill_mode::wireframe`).
+    /// WebGPU has no wireframe fill at all, and Vulkan gives it only with the `fillModeNonSolid` device feature.
+    wireframe_fill,
+
+    /// A texture or a raster pipeline may use `pixel_format::depth32_float_stencil8`, sg's one format with a stencil aspect.
+    /// WebGPU has it only with the optional `depth32float-stencil8` feature, and Vulkan asks the device per format.
+    depth32_float_stencil8,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u16);
@@ -75,7 +96,8 @@ using feature_set = cc::flags<feature>;
 
 /// Every feature, in the enum's order.
 inline constexpr feature k_all_features[] = {
-    feature::raytracing,
+    feature::ray_query,
+    feature::raytracing_pipeline,
     feature::timestamp_query,
     feature::headless_present,
     feature::geometry_shader,
@@ -86,17 +108,23 @@ inline constexpr feature k_all_features[] = {
     feature::extended_image_formats,
     feature::unaligned_block_compression,
     feature::multisampled_array_textures,
+    feature::primitive_index,
+    feature::sample_rate_shading,
+    feature::wireframe_fill,
+    feature::depth32_float_stencil8,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::multisampled_array_textures) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::depth32_float_stencil8) + 1,
               "k_all_features lists every feature");
 
-/// The enumerator's name, `raytracing`, which is also what SGL's `require` spells it as.
+/// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
 [[nodiscard]] constexpr cc::string_view to_string(feature f)
 {
     switch (f)
     {
-    case feature::raytracing:
-        return "raytracing";
+    case feature::ray_query:
+        return "ray_query";
+    case feature::raytracing_pipeline:
+        return "raytracing_pipeline";
     case feature::timestamp_query:
         return "timestamp_query";
     case feature::headless_present:
@@ -117,6 +145,14 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "unaligned_block_compression";
     case feature::multisampled_array_textures:
         return "multisampled_array_textures";
+    case feature::primitive_index:
+        return "primitive_index";
+    case feature::sample_rate_shading:
+        return "sample_rate_shading";
+    case feature::wireframe_fill:
+        return "wireframe_fill";
+    case feature::depth32_float_stencil8:
+        return "depth32_float_stencil8";
     }
     return "";
 }
@@ -130,6 +166,20 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
     return {};
 }
 } // namespace sg
+
+/// How a context provides a feature, or that it has none.
+/// A caller that picks an algorithm by cost asks this; a shader never does, since both run the same source.
+enum class sg::feature_implementation
+{
+    /// The context lacks the feature: `supports` answers no.
+    absent,
+
+    /// The device does it.
+    native,
+
+    /// sg does it in software on top of the device, correctly and more slowly: webgpu's `ray_query`.
+    emulated,
+};
 
 /// Whether the thread driving this context may block at all.
 ///
