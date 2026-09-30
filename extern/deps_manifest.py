@@ -330,6 +330,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         _check_files(path, up)
     if not up.license_files and not up.license_text:
         raise ValueError(f"{path}: {up.name}: needs `license_files` or `license_text`")
+
     return up
 
 

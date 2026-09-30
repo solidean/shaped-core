@@ -4,19 +4,24 @@
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
-#include <shaped-rendering/impl/dlss_release_queue.hh>
 
-#include <memory> // std::shared_ptr, which is how the release queue reaches a history's deleter
+#include <memory> // std::shared_ptr, which is how the routine shares its NGX instance with every stream
+
+namespace sr::impl
+{
+struct dlss_instance;
+}
 
 /// Options only the DLSS Ray Reconstruction member has.
 struct sr::dlss_options
 {
     /// Which of NGX's presets the feature is created with, which selects the network as well as its cost.
-    /// 0 fastest, 1 balanced, 2 best — `options_for` maps `denoise_quality` onto it.
-    int quality = 1;
+    /// A creation parameter: changing it between calls restarts the stream.
+    sr::denoise_quality quality = sr::denoise_quality::balanced;
 
     /// Whether the radiance handed over is linear HDR, which everything sv traces is.
     /// A caller passing tone-mapped colour clears it, and NGX judges brightness differently.
+    /// A creation parameter like `quality`, so changing it restarts the stream.
     bool hdr = true;
 
     /// The multiplier the caller will apply to the image before display.
@@ -37,7 +42,8 @@ struct sr::dlss_options
 ///
 /// **Temporal, so it wants this frame's own samples** rather than a converging mean — see `sr::denoise_routine`, which
 /// picks between the two.
-/// Its per-stream feature lives in the caller's `sr::denoise_history`, and a new extent or a `reset` builds a new one.
+/// Its per-stream feature lives in the caller's `sr::denoise_history`.
+/// A new extent, `quality` or `hdr` builds a new one, and a `reset` restarts the one it has.
 class sr::dlss_rr_routine : public sg::render_routine<dlss_rr_routine>
 {
 public:
@@ -51,20 +57,24 @@ public:
                                                  dlss_options const& options = {});
 
     /// What the shared knobs map onto: `quality` picks the NGX preset, `exposure` becomes NGX's pre-exposure.
-    /// Both are read per call rather than baked into the feature, so neither rebuilds a stream's history.
+    /// `exposure` is read per call; `quality` and `hdr` are creation parameters, and changing one restarts the stream.
     [[nodiscard]] static dlss_options options_for(denoise_settings const& settings);
 
     /// Whether this build and this device can run it, which is what `sr::query_denoise_support` reports.
     [[nodiscard]] static bool is_available(sg::context const& ctx);
 
+    /// Closes NGX for the device once the GPU is done with it, through `ctx.defer_until_retired`.
+    ///
+    /// Never directly: a context's shutdown clears its routines before its final drain, so NGX work may still be
+    /// executing when this runs.
+    ~dlss_rr_routine() override;
+
 protected:
-    /// Nothing to compile: the networks are the runtime's, and the feature is per stream rather than per context.
+    /// Opens NGX for the context's device; nothing is compiled, since the networks are the runtime's.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    /// Features a history dropped mid-frame, released once the GPU has passed the epoch they were dropped in.
-    ///
-    /// Shared rather than owned outright, because a `sr::denoise_history` may outlive this routine and its deleter
-    /// still has to have somewhere to park — see `impl::dlss_release_queue`.
-    std::shared_ptr<impl::dlss_release_queue> _releases = std::make_shared<impl::dlss_release_queue>();
+    /// Null until init, and where the device cannot run DLSS.
+    std::shared_ptr<impl::dlss_instance> _instance;
+    sg::context* _ctx = nullptr;
 };

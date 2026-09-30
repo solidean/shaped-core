@@ -8,28 +8,51 @@
 
 namespace sr::impl
 {
+struct dlss_instance
+{
+};
+
 bool dlss_is_available(sg::context const& ctx)
 {
     (void)ctx;
     return false;
 }
 
-void* dlss_create_feature(sg::command_list& cmd, dlss_feature_desc const& desc)
+std::shared_ptr<dlss_instance> dlss_open(sg::context& ctx)
+{
+    (void)ctx;
+    return nullptr;
+}
+
+void dlss_close(std::shared_ptr<dlss_instance> const& instance)
+{
+    (void)instance;
+}
+
+dlss_stream* dlss_create_stream(sg::command_list& cmd,
+                                std::shared_ptr<dlss_instance> const& instance,
+                                dlss_feature_desc const& desc)
 {
     (void)cmd;
+    (void)instance;
     (void)desc;
     return nullptr;
 }
 
-void dlss_release_feature(void* feature)
+void dlss_release_stream(dlss_stream* stream)
 {
-    (void)feature;
+    delete stream;
 }
 
-bool dlss_evaluate(sg::command_list& cmd, void* feature, dlss_eval_desc const& desc)
+int dlss_released_stream_count()
+{
+    return 0;
+}
+
+bool dlss_evaluate(sg::command_list& cmd, dlss_stream& stream, dlss_eval_desc const& desc)
 {
     (void)cmd;
-    (void)feature;
+    (void)stream;
     (void)desc;
     return false;
 }

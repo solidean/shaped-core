@@ -131,6 +131,14 @@ sg::submission_token webgpu_context::last_issued_submission()
     return sg::submission_token(_next_submission - 1);
 }
 
+void webgpu_context::do_defer_until_retired(cc::unique_function<void()> fn)
+{
+    // An expiring resource that owns no object, so only its finalizer is owed at retire.
+    auto expiring = webgpu_expiring_resource{};
+    expiring.finalizers.push_back(cc::move(fn));
+    schedule_deferred_deletion(cc::move(expiring));
+}
+
 void webgpu_context::schedule_deferred_deletion(webgpu_expiring_resource expiring)
 {
     // The staging list belongs to the device thread; a resource dropped elsewhere joins it there, at the next advance.

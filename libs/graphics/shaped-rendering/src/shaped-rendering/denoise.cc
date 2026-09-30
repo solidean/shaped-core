@@ -33,7 +33,6 @@ namespace
 ///
 /// `scale` alone decides the extents here and `quality` only picks the network, so a caller may name any pair — these
 /// are what the preset NAMES mean, not a constraint NGX enforces.
-/// FidelityFX's own ratios are still unchecked, and stay that way until `fsr_rr` lands.
 [[nodiscard]] f32 vendor_ratio(render_scale_preset p)
 {
     switch (p)
@@ -43,8 +42,7 @@ namespace
     case render_scale_preset::quality:
         return 1.5f;
     case render_scale_preset::balanced:
-        // 1.724 rather than 1.7: NGX renders 1114 of 1920, which is 58%, and the round number was a guess that put
-        // the traced image 15 pixels wider than the preset it is named after.
+        // 1.724 rather than 1.7: NGX renders 1114 of 1920.
         return 1.7241379f;
     case render_scale_preset::performance:
         return 2.0f;
@@ -162,11 +160,6 @@ bool denoise_history::_prepare(denoise_method method, tg::vec2i input_extent, tg
         _output_extent = output_extent;
         _frame = 0;
     }
-    else if (_reset_requested)
-    {
-        // A reset keeps the feature — it is still the right size — and tells the member to start its history over,
-        // which for NGX is a per-call flag rather than a rebuild.
-    }
     _reset_requested = false;
     return restarted;
 }
@@ -245,7 +238,8 @@ denoise_guide_set required_guides(denoise_method m)
     case denoise_method::dlss_rr:
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
-        return g::albedo | g::normal | g::roughness | g::depth | g::motion;
+        return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::hit_distance
+             | g::split_diffuse_specular;
     case denoise_method::nrd:
         // The albedo pair is required rather than optional: NRD asks for radiance with no material information in it,
         // and the member divides both out rather than handing it texture to filter as noise.
@@ -277,7 +271,7 @@ denoise_guide_set optional_guides(denoise_method m)
     case denoise_method::dlss_rr:
         return g::hit_distance;
     case denoise_method::fsr_rr:
-        return g::specular_albedo | g::hit_distance;
+        return {};
     case denoise_method::nrd:
         return {};
     case denoise_method::none:
@@ -327,8 +321,8 @@ tg::vec2i denoise_input_extent(sg::context const& ctx,
 {
     auto const m = resolve_denoise_method(ctx, settings, available_guides);
 
-    // Only the vendor members upscale; every native member and OIDN works at one ratio.
-    if (m != denoise_method::dlss_rr && m != denoise_method::fsr_rr)
+    // Only `dlss_rr` upscales; every other member works at one ratio.
+    if (m != denoise_method::dlss_rr)
         return output_extent;
 
     // A member that will be refused answers the output's own size, and there are two ways to be refused: the device

@@ -9,6 +9,7 @@
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/dlss_rr_routine.hh>
+#include <shaped-rendering/impl/dlss_ngx.hh>
 #include <shaped-rendering/impl/nrd_instance.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
@@ -842,7 +843,7 @@ ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call 
     if (!sr::query_denoise_support(ctx).dlss_rr)
         SKIP("no DLSS Ray Reconstruction here — the SDK is fetched on request, and it needs an RTX adapter on dx12");
 
-    // The member holds a release queue, so it is a routine that has to be ticked up like any other before its first
+    // The member opens NGX in its init, so it is a routine that has to be ticked up like any other before its first
     // call — `try_acquire` reports readiness rather than establishing it.
     co_await prewarm(ctx);
 
@@ -894,10 +895,7 @@ ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call 
         // one the stream will produce.
         CHECK(out.restarted);
 
-        // The history now owns an NGX feature, and dropping it has to release that feature rather than leak it.
-        // Drained above, which is what makes the release legal — see sr::denoise_history's destructor.
-        (void)co_await ctx.idle_completion();
-
+        // What this block checks is that the feature is rebuilt when the output extent moves.
         // A feature is built for a PAIR of extents, so an output that moves while the input stays put is a rebuild.
         // Reachable rather than theoretical: the input is the output divided by a preset ratio and rounded, so more
         // than one output extent maps to the same traced size — a window dragged one pixel does it at 1.5.
@@ -907,14 +905,34 @@ ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call 
 
         auto const wider = ctx.persistent.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float, .width = k_size * 2, .height = k_size * 2, .usage = image_usage});
+        // Nothing is awaited since the first call, so the frame that evaluated the old feature may still be on the GPU
+        // when this call drops it.
+        auto const released_before = sr::impl::dlss_released_stream_count();
         auto cmd2 = ctx.create_command_list();
         auto const upscaled
             = sr::dlss_rr_routine::execute(*cmd2, {.color = color, .guides = guides, .output = wider}, history);
+
+        // The drop happened inside that execute, and a release never runs inline.
+        // Checked here and nowhere later: once the GPU may have finished, "not yet released" is a race.
+        CHECK(sr::impl::dlss_released_stream_count() == released_before)
+            .context("a dropped stream waits for the epoch it was dropped in");
         ctx.submit_command_list(cc::move(cmd2));
         ctx.advance_epoch();
 
         CHECK(upscaled.restarted).context("the output extent moved, so the feature is rebuilt");
         CHECK(history.output_extent() == tg::vec2i(k_size * 2, k_size * 2));
+        (void)co_await ctx.idle_completion();
+        CHECK(sr::impl::dlss_released_stream_count() == released_before + 1);
+
+        // `quality` is fixed at creation like the extents, so a new one is a new stream rather than a no-op.
+        auto cmd3 = ctx.create_command_list();
+        auto const requalified = sr::dlss_rr_routine::execute(
+            *cmd3, {.color = color, .guides = guides, .output = wider}, history, {.quality = sr::denoise_quality::best});
+        ctx.submit_command_list(cc::move(cmd3));
+        ctx.advance_epoch();
+
+        CHECK(requalified.status == sr::denoise_status::denoised);
+        CHECK(requalified.restarted).context("the quality changed, so the stream is rebuilt");
         (void)co_await ctx.idle_completion();
     }
 

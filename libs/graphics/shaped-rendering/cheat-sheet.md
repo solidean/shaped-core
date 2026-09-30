@@ -344,7 +344,7 @@ sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_s
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
-sr::dlss_rr_routine::execute(cmd, inputs, history, {.quality = 2})  // NVIDIA Ray Reconstruction; temporal, UPSCALES; needs EVERY required guide
+sr::dlss_rr_routine::execute(cmd, inputs, history, {.quality = sr::denoise_quality::best})  // NVIDIA Ray Reconstruction; temporal, UPSCALES; needs EVERY required guide; a new quality or hdr restarts the stream
 sr::dlss_rr_routine::is_available(ctx)                 // -> bool; SDK fetched (extern/dlss/fetch-dlss.py) + dx12 + RTX adapter. SR_HAS_DLSS
 sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal, split-signal, NO upscaling; needs hit_distance + specular + BOTH albedos (de-modulation)
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD

@@ -6,6 +6,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
@@ -280,6 +281,17 @@ public:
     /// Safe to call at any time and from any thread, but not concurrently with advance_epoch; also runs implicitly after the waits below.
     void process_completed_epochs();
 
+    /// Runs `fn` once the GPU has finished every epoch up to and including the current one.
+    /// Runs on sg's retire sweep (`process_completed_epochs`, or the drain at shutdown), never inline in this call,
+    /// except on a context already shut down, where nothing retires again and `fn` runs immediately.
+    /// Callbacks registered for the same epoch run in registration order.
+    /// At shutdown every outstanding callback runs after the GPU is idle and before the device is released.
+    /// webgpu is the one exception to "idle": it cannot wait, so it runs them unretired, which is safe there because every WebGPU object is reference counted.
+    ///
+    /// For state foreign code allocated on the device — a vendor SDK's handle — which sg's own deferred destruction cannot see.
+    /// Safe from any thread.
+    void defer_until_retired(cc::unique_function<void()> fn);
+
     /// Settles when `e`'s GPU work has finished — how a caller learns an epoch is done without waiting for it.
     ///
     /// An epoch already retired hands back a node that is ready, so a caller never has to special-case the past.
@@ -437,6 +449,11 @@ protected:
     /// The public process_completed_epochs() calls this and then settles the completion asyncs that came due, which is
     /// why the public one is not the virtual.
     virtual void retire_completed_epochs() = 0;
+
+    /// The backend's half of `defer_until_retired`: queue `fn` behind the open epoch, in the list its retire sweep and
+    /// its shutdown drain already run.
+    /// Never called on a shut-down context.
+    virtual void do_defer_until_retired(cc::unique_function<void()> fn) = 0;
 
     /// Blocks until every command list submitted so far has finished executing.
     /// The GPU half of drain_at_shutdown: it does NOT advance the epoch and does NOT drain the actors.

@@ -15,7 +15,7 @@ Bigger design intent lives in [structure.md](structure.md).
     What is missing is one offset shared by every pixel of a frame, which is what a temporal upscaler reconstructs sub-pixel detail from.
     So it lands with `render_settings::render_scale` rather than before it.
   - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
-  - **`render_settings::render_scale`**, once a member upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.
+  - **`render_settings::render_scale`**, now that `dlss_rr` upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.
     Inert until then, which is why it is not there yet.
   - **`render_settings::exposure`**, for the tonemap when it lands; `dlss_rr` already reads `denoise.exposure`, and NRD deliberately does not.
   - **`view_renderer::execute`** — the single-view entry point — does not denoise; only the plan path does.

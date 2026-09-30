@@ -15,7 +15,7 @@ This is the design, including the parts not built yet.
 | `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
 | `oidn` | spatial, trained | dx12, vulkan (HLSL through DXC) | done; named only, not real-time |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12 | done, SDK fetched on request |
-| `fsr_rr` | temporal, upscales | dx12 | planned |
+| `fsr_rr` | temporal, split-signal | dx12 | planned |
 | `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**

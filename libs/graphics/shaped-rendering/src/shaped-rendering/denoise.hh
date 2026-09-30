@@ -236,13 +236,12 @@ public:
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
 
-    /// Releases whatever a member is holding for this stream.
+    /// Dropping it hands member state to its deleter, and the GPU must be done with that state before it is released.
+    /// The member arranges that, through `ctx.defer_until_retired`, so a caller may drop a history mid-frame.
     ///
-    /// **The GPU must be done with this history**, which for a member holding device memory is a real requirement
-    /// rather than good manners: state released while a frame that used it is still in flight is a use-after-free
-    /// with no diagnostic.
-    /// A caller dropping a history mid-frame drains first; sv drops one only when its view goes, which is after the
-    /// store has let the epoch complete.
+    /// **A history must still go before the context it was built on**, and a `dlss_rr` one before that member's routine.
+    /// Its stream is released under the NGX instance the routine opened, so one dropped after the routine closed that
+    /// instance is logged as an error, and its stream deleted without a call into NGX.
     ~denoise_history() = default;
 
     /// How many images a member may keep here.
@@ -275,6 +274,7 @@ private:
 
     /// Brings this to `method` at this pair of extents, dropping everything if any of the three changed.
     /// Returns whether the call starts from no history.
+    /// A `reset` alone keeps the member's state, which is still the right size, and only restarts its history.
     ///
     /// An upscaling member passes both, because its per-stream state is built for the pair and a changed output with
     /// an unchanged input is a real case — the input is the output rounded, so more than one output maps to it.
@@ -288,10 +288,10 @@ private:
     /// Type-erased so this header names no member's type; the deleter is captured where the object is made, which is
     /// what lets a member whose seam hands back a bare `void*` put its own release function in here.
     ///
-    /// **The deleter must be safe to run mid-frame**, and that is the member's job rather than this slot's.
+    /// **A member whose state the GPU may still read releases it through `ctx.defer_until_retired`**, never in the
+    /// deleter itself.
     /// `_prepare` drops the slot on any change of member or extent, which happens inside a member's `execute` while
-    /// the caller is recording — so state whose release needs the GPU to be done with it, as a vendor SDK's handle
-    /// does, defers that release rather than performing it there.
+    /// the caller is recording, so frames that read the state may still be in flight.
     /// sg's own resources need no such care, since sg already defers their destruction to an epoch the GPU has passed.
     std::shared_ptr<void> _member_state;
 

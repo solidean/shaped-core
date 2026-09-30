@@ -5,7 +5,6 @@
 #include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/dlss_ngx.hh>
-#include <shaped-rendering/impl/dlss_release_queue.hh>
 
 #include <memory> // std::shared_ptr, which is what denoise_history::_member_state is
 
@@ -16,21 +15,7 @@ using impl::is_set;
 
 dlss_options dlss_rr_routine::options_for(denoise_settings const& settings)
 {
-    auto options = dlss_options{};
-    switch (settings.quality)
-    {
-    case denoise_quality::fast:
-        options.quality = 0;
-        break;
-    case denoise_quality::balanced:
-        options.quality = 1;
-        break;
-    case denoise_quality::best:
-        options.quality = 2;
-        break;
-    }
-    options.exposure = settings.exposure;
-    return options;
+    return {.quality = settings.quality, .exposure = settings.exposure};
 }
 
 bool dlss_rr_routine::is_available(sg::context const& ctx)
@@ -38,12 +23,17 @@ bool dlss_rr_routine::is_available(sg::context const& ctx)
     return impl::dlss_is_available(ctx);
 }
 
+dlss_rr_routine::~dlss_rr_routine()
+{
+    if (_instance == nullptr)
+        return;
+    _ctx->defer_until_retired([instance = cc::move(_instance)] { impl::dlss_close(instance); });
+}
+
 cc::shared_async<cc::unit> dlss_rr_routine::init(sg::routine_init_scope scope)
 {
-    // Nothing to build.
-    // The networks belong to NGX's runtime and the feature is per stream, so there is no per-context object for a
-    // routine to hold — this exists so the member is a routine like every other one.
-    (void)scope;
+    _ctx = &scope.context();
+    _instance = impl::dlss_open(*_ctx);
     co_return;
 }
 
@@ -67,7 +57,7 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
     if (!required_guides(denoise_method::dlss_rr).without(in.present_guides()).is_empty())
         return unsupported;
 
-    // The routine owns the release queue, so it is acquired before anything that could park a feature in it.
+    // The routine owns the NGX instance every stream is created under, so it is acquired before any stream is.
     //
     // It declines until a tick has brought it up, exactly as every other member does, even though its init compiles
     // nothing: `try_acquire` reports readiness and never establishes it.
@@ -75,39 +65,42 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
     auto const self = try_acquire(cmd);
     if (self.is_pending())
         return {.status = denoise_status::pending, .method = denoise_method::dlss_rr};
-    if (self.is_failed())
+    if (self.is_failed() || self->_instance == nullptr)
         return {.status = denoise_status::failed, .method = denoise_method::dlss_rr};
-
-    // Whatever a previous call parked and the GPU has since passed.
-    // Cheap on the empty queue, which is the usual case, so this asks every call rather than deciding when to.
-    self->_releases->sweep(cmd.context());
 
     auto const input_extent = extent_of(in.color);
     auto const output_extent = extent_of(in.output);
 
     // Both extents, because the feature is built for the pair: NGX fixes `InTargetWidth` at creation, and an output
     // that moved while the traced size rounded to the same value would otherwise keep a feature built for the old one.
-    auto const restarted = history._prepare(denoise_method::dlss_rr, input_extent, output_extent);
+    auto restarted = history._prepare(denoise_method::dlss_rr, input_extent, output_extent);
+
+    // `quality` and `hdr` are fixed at creation like the extents, so a change to either is a new stream too.
+    auto const* const existing = static_cast<impl::dlss_stream const*>(history._member_state.get());
+    if (existing != nullptr && (existing->quality != options.quality || existing->hdr != options.hdr))
+    {
+        history._member_state = nullptr;
+        history._frame = 0;
+        restarted = true;
+    }
 
     if (history._member_state == nullptr)
     {
-        auto* const feature = impl::dlss_create_feature(cmd, {.input_extent = input_extent,
-                                                              .output_extent = output_extent,
-                                                              .quality = options.quality,
-                                                              .hdr = options.hdr});
-        if (feature == nullptr)
+        auto* const stream = impl::dlss_create_stream(
+            cmd, self->_instance,
+            {.input_extent = input_extent, .output_extent = output_extent, .quality = options.quality, .hdr = options.hdr});
+        if (stream == nullptr)
             return {.status = denoise_status::failed, .method = denoise_method::dlss_rr, .restarted = restarted};
 
-        // The deleter parks rather than releases: `_prepare` drops this slot while the caller is still recording, and
-        // NGX frees device memory a frame in flight may be reading — see `impl::dlss_release_queue`.
-        // The epoch is read here rather than in the deleter, because by then there may be no context to ask.
-        auto const parked_in = cmd.context().current_epoch();
-        auto releases = self->_releases;
+        // Dropped while the caller is still recording — `_prepare` and the rebuild above both do it — so the release
+        // waits for the epoch current at the drop, and every frame that evaluated the stream has finished by then.
+        auto* const ctx = &cmd.context();
         history._member_state = std::shared_ptr<void>(
-            feature, [releases = cc::move(releases), parked_in](void* f) { releases->retire(f, parked_in); });
+            stream, [ctx](void* s)
+            { ctx->defer_until_retired([s] { impl::dlss_release_stream(static_cast<impl::dlss_stream*>(s)); }); });
     }
 
-    auto const evaluated = impl::dlss_evaluate(cmd, history._member_state.get(),
+    auto const evaluated = impl::dlss_evaluate(cmd, *static_cast<impl::dlss_stream*>(history._member_state.get()),
                                                {.color = in.color,
                                                 .albedo = in.guides.albedo,
                                                 .specular_albedo = in.guides.specular_albedo,

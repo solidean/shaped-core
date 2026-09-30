@@ -16,7 +16,7 @@ upstreams:
 
     # The pin over the whole set: the sha256 of the `path sha256` lines below, in order.
     # One hash to compare against .install/pin.txt, while every file is still verified on its own.
-    pin_hash: 8840fc53ee9c984cd9db3e750066b9d9a9ec00264946eed3c7263688c88076b7
+    pin_hash: 02b83127c171177c9989da69852102e370a2b219ff81adfece907550eadcf6d7
 
     license: LicenseRef-NVIDIA-RTX-SDK
     license_files: [.install/LICENSE.txt]
@@ -29,7 +29,7 @@ upstreams:
       is a deliberate act, and SR_HAS_DLSS stays 0 until someone performs it.
 
       Only what a dx12 Ray Reconstruction integration needs is fetched, rather than the repository:
-      the headers, the import library, and nvngx_dlssd.dll.
+      the headers, the import library for each CRT, and nvngx_dlssd.dll.
       The full tree carries the super-resolution and frame-generation runtimes for five platforms, which is several
       hundred megabytes of things we do not call.
 
@@ -89,5 +89,7 @@ upstreams:
         sha256: 2d364ce7132881eb669e9498fd570d74cba563b1fbebc82c235f8e1ad2dd8b6d
       - path: lib/Windows_x86_64/x64/nvsdk_ngx_d.lib
         sha256: 4b6cecad7f1906571c94010241f650e4a5457e64fad49ddaccb82de79f6c2999
+      - path: lib/Windows_x86_64/x64/nvsdk_ngx_d_dbg.lib
+        sha256: 712f18162c8c8766c92c98031b52d2ba34ee0ad027ba79731278ee6b63cd3e02
       - path: lib/Windows_x86_64/rel/nvngx_dlssd.dll
         sha256: 4bc7ea5fcb2f32cf86bc2cb072e8d2860914a0be511cbdcb2fc206c1d9d83b80
