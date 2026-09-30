@@ -69,7 +69,6 @@ struct controls
     /// `quality` traces at 1/1.5 of the window, so the upscaler behind the denoiser is on screen from the first frame.
     sr::reconstruct_settings denoise = {.scale = sr::render_scale_preset::quality, .fresh_samples = true};
     bool denoise_enabled = true;
-    bool fsr_sharpening = false;
     int spp = 1;
     float light_size = 0.6f;
     bool orbiting = false;
@@ -91,9 +90,10 @@ struct controls
     }
 
     /// The settings the front is called with: denoising off still upscales when a scale asks for it.
-    [[nodiscard]] sr::reconstruct_settings settings() const
+    [[nodiscard]] sr::reconstruct_settings settings(f32 frame_time_ms) const
     {
         auto out = denoise;
+        out.frame_time_ms = frame_time_ms;
         if (!denoise_enabled)
             out.denoiser = sr::denoise_method::none;
         return out;
@@ -300,6 +300,7 @@ void draw_panel(controls& ui,
         ImGui::TextDisabled("not in this build: the call is refused");
 
     ImGui::Checkbox("fresh samples", &ui.denoise.fresh_samples);
+    ImGui::SetItemTooltip("turn it off and `samples` climbs: a spatial member then backs off");
     ImGui::SameLine();
     ImGui::TextDisabled("(temporal)");
 
@@ -323,7 +324,7 @@ void draw_panel(controls& ui,
         ui.denoise.upscaler = k_upscaler_values[upscaler_index];
     if (ui.denoise.upscaler == sr::upscale_method::fsr && !support.supports(sr::upscale_method::fsr))
         ImGui::TextDisabled("not in this build: the call is refused");
-    ImGui::Checkbox("fsr sharpening", &ui.fsr_sharpening);
+    ImGui::SliderFloat("sharpening", &ui.denoise.upscale_sharpness, 0.0f, 1.0f);
 
     ImGui::SeparatorText("guides");
     ImGui::Checkbox("albedo", &ui.use_albedo);
@@ -363,15 +364,13 @@ void draw_panel(controls& ui,
     ImGui::Text("samples    %u", sample_count);
     ImGui::Text("traced     %d x %d", traced[0], traced[1]);
     ImGui::Text("%.1f fps", double(ImGui::GetIO().Framerate));
-    ImGui::TextDisabled("turn `fresh samples` off and `samples`");
-    ImGui::TextDisabled("climbs: a spatial member then backs off");
     ImGui::End();
 }
 } // namespace
 
 ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 {
-    // Picking a member this build cannot run is the refusal path, and the method dropdown offers three of them on
+    // Picking a member or an upscaler this build cannot run is the refusal path, which the panel keeps reachable on
     // purpose — so the one line each of them logs is expected here rather than a surprise.
     // Showing what a refusal does is a thing this example is FOR, and it would otherwise fail the moment it is used.
     nx::allow_warnings("did not run: not supported by this build or device");
@@ -564,7 +563,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
         // The front answers what to trace: smaller while an upscaler runs behind the denoiser, the output's own size
         // otherwise.
-        auto const settings = ui.settings();
+        auto const settings = ui.settings(dt * 1000.0f);
         auto const upscaling = sr::resolve_upscale_method(ctx, settings) != sr::upscale_method::none;
         auto const traced = sr::reconstruct_input_extent(ctx, settings, viewport);
         if (images.extent != viewport || images.traced != traced)

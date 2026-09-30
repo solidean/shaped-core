@@ -89,7 +89,7 @@ sr::svgf_denoise_routine     [done]     temporal, native; temporal, variance and
                                         reconstruct_history; the member that proves the moving-camera path in CI
 sr::oidn_denoise_routine     [done]     spatial, trained; Intel's weights in our own shaders, named only
                                         (far too slow for `automatic`)
-sr::fsr_upscale_routine      [done]     AMD FSR 3.1's upscaler, its host code driven through sg; any GPU, dx12 today
+sr::fsr_upscale_routine      [done]     AMD FSR 3.1's upscaler, its host code driven through sg; any GPU, dx12 and vulkan, not WARP yet
 dlss_rr                      [planned]  needs sg's declared native scope
 fsr_rr                       [planned]  AMD Ray Regeneration; RDNA 4 only
 nrd                          [planned]  waits for a tracer that splits diffuse from specular

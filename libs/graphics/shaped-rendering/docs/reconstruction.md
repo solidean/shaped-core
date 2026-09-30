@@ -126,7 +126,8 @@ The fp16 and wave64 variants AMD tunes for are a follow-up that needs sg to repo
 
 **The inputs meet FSR's conventions in the backend, and sr's guides stay as they are.**
 - Depth: sr's linear view depth is converted to an inverted, infinite-far device depth by a small pass, `near / depth`, which FSR reads back as the same view depth.
-- Motion: sr's motion is this frame's pixel minus last frame's, and FSR's the way back, so `motionVectorScale` flips the sign.
+- Motion: sr's motion is the surface's own, measured from where this frame's sample was traced, so a still camera reports zero whatever the jitter.
+  FSR's runs the way back, so `motionVectorScale` flips the sign.
 - Jitter: FSR's offset is the one a rasterizer adds to its projection, the opposite of where the sample lands, so it is negated.
   A test pins the sign: the flipped one reconstructs visibly worse.
 - Exposure: `reconstruct_settings::exposure` is the value FSR's exposure image holds.

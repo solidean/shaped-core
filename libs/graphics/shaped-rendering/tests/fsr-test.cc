@@ -161,11 +161,6 @@ cc::shared_async<stream_result> run_stream(sg::context& ctx, stream_options opti
 {
     if (!sr::query_reconstruct_support(ctx).fsr)
         return cc::string_view("FSR does not run on this build or context");
-
-    // WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass; the hardware runs it correctly.
-    // libs/graphics/shaped-rendering/docs/TODO.md records what bisecting it established.
-    if (ctx.metrics.adapter().is_software)
-        return cc::string_view("WARP crashes executing FSR's shading-change pyramid; see sr's TODO");
     return {};
 }
 } // namespace
@@ -231,6 +226,16 @@ ASYNC_INVOCABLE_TEST("sr - an upscaler resolves behind a denoiser, and traces sm
     auto const vendor = sr::reconstruct_settings{.denoiser = sr::denoise_method::dlss_rr,
                                                  .scale = sr::render_scale_preset::performance};
     CHECK(sr::resolve_upscale_method(ctx, vendor) == sr::upscale_method::none);
+
+    // A denoiser this context cannot run gets the whole call refused, so a caller must not trace smaller or jitter for
+    // the upscaler behind it.
+    if (!sr::query_reconstruct_support(ctx).nrd)
+    {
+        auto const refused = sr::reconstruct_settings{.denoiser = sr::denoise_method::nrd,
+                                                      .scale = sr::render_scale_preset::performance};
+        CHECK(sr::reconstruct_input_extent(ctx, refused, out) == out);
+        CHECK(sr::reconstruct_jitter(ctx, refused, out, 5) == tg::vec2f(0, 0));
+    }
     co_return;
 }
 
@@ -358,4 +363,68 @@ ASYNC_INVOCABLE_TEST("sr - an upscaler without depth and motion is refused and w
     auto const pixels = co_await readback.data();
     REQUIRE(pixels.size() == k_out * k_out);
     CHECK(pixels[0][0] == -7.0f);
+}
+
+// Needs no FSR, so it runs on every build: automatic at a native scale resolves to no upscaler anywhere.
+ASYNC_INVOCABLE_TEST("sr - upscaling alone with nothing to upscale is refused and writes nothing",
+                     (sg::context_handle const& ctx_h), )
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    nx::allow_warnings("upscaler 'automatic' did not run");
+
+    auto const color = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
+    auto const depth = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
+    auto const motion = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
+    auto const output = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
+
+    auto history = sr::reconstruct_history();
+    auto cmd = ctx.create_command_list();
+    upload(*cmd, output, filled(k_in, tg::vec4f(-7, -7, -7, -7)));
+    auto const outcome = sr::reconstruct_routine::execute(
+        *cmd, {.color = color, .guides = {.depth = depth, .motion = motion}, .output = output}, history,
+        {.denoiser = sr::denoise_method::none, .upscaler = sr::upscale_method::automatic});
+    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    CHECK(outcome.status == sr::reconstruct_status::unsupported);
+    CHECK(outcome.denoiser == sr::denoise_method::none);
+    CHECK(outcome.upscaler == sr::upscale_method::none);
+    auto const pixels = co_await readback.data();
+    REQUIRE(pixels.size() == k_in * k_in);
+    CHECK(pixels[0][0] == -7.0f);
+}
+
+// WARP crashes executing FSR, so a software adapter must never be offered it; CI's WARP leg is what runs this.
+ASYNC_INVOCABLE_TEST("sr - fsr is refused on a software adapter", (sg::context_handle const& ctx_h), )
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    if (!ctx.metrics.adapter().is_software)
+        SKIP("the adapter is hardware");
+
+    (void)sr_test::shader_fixtures();
+    nx::allow_warnings("upscaler 'fsr' did not run");
+    CHECK(!sr::query_reconstruct_support(ctx).fsr);
+
+    auto const color = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
+    auto const depth = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
+    auto const motion = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
+    auto const output = make_image(ctx, k_out, sg::pixel_format::rgba32_float);
+
+    auto history = sr::reconstruct_history();
+    auto cmd = ctx.create_command_list();
+    auto const outcome = sr::reconstruct_routine::execute(
+        *cmd, {.color = color, .guides = {.depth = depth, .motion = motion}, .output = output}, history,
+        {.denoiser = sr::denoise_method::none,
+         .upscaler = sr::upscale_method::fsr,
+         .scale = sr::render_scale_preset::performance});
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    CHECK(outcome.status == sr::reconstruct_status::unsupported);
+    CHECK(outcome.upscaler == sr::upscale_method::fsr);
+    co_return;
 }

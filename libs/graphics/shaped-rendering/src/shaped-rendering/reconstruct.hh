@@ -86,8 +86,10 @@ enum class sr::reconstruct_guide : sg::u8
     normal,          ///< world-space shading normal at the primary hit, in rgb
     roughness,       ///< perceptual roughness at the primary hit, in r
     depth,           ///< linear view depth of the primary hit, in r; 0 or less where a ray missed
-    motion,          ///< this frame's pixel minus last frame's, in input pixels, in rg
-    hit_distance,    ///< distance to the first secondary hit, in r
+    /// The surface's own motion, in input pixels, in rg: where this frame's sample was traced minus where that
+    /// surface was last frame, so a still camera reports zero whatever the jitter.
+    motion,
+    hit_distance, ///< distance to the first secondary hit, in r
 
     split_diffuse_specular, ///< radiance arrives as two textures (`color` diffuse, `specular` specular) rather than one
 };
@@ -149,6 +151,13 @@ struct sr::reconstruct_settings
     /// NRD is the member this does NOT reach, and deliberately: its input contract says radiance must not be
     /// premultiplied by an exposure, so it is handed the radiance the tracer produced.
     f32 exposure = 1.0f;
+
+    /// In [0, 1]; 0 is off.
+    /// Sharpening applied to the upscaled image; fsr reads it (RCAS).
+    f32 upscale_sharpness = 0.0f;
+
+    /// The time since the previous call, in milliseconds; fsr scales a few of its decay rates by it.
+    f32 frame_time_ms = 1000.0f / 60.0f;
 };
 
 /// Everything beside the noisy color that a member may read.
@@ -245,7 +254,8 @@ struct sr::upscale_inputs
     /// Linear view depth of the primary hit, in r; 0 or less where a ray missed.
     sg::texture_2d depth;
 
-    /// This frame's pixel minus last frame's, in input pixels, in rg.
+    /// The surface's own motion, in input pixels, in rg: where this frame's sample was traced minus where that
+    /// surface was last frame, so a still camera reports zero whatever the jitter.
     sg::texture_2d motion;
 
     /// This frame's sub-pixel offset of every sample, in input pixels, in [-0.5, 0.5].

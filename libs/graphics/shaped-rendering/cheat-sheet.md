@@ -328,7 +328,9 @@ auto const settings = sr::reconstruct_settings{
     .denoiser = sr::denoise_method::automatic,             // flat knobs, each says who reads it; `none` = upscale only
     .upscaler = sr::upscale_method::automatic,             // fsr where supported, none while the scale is native
     .scale = sr::render_scale_preset::performance,         // named ratios only: 1, 1.5, 1.7, 2
-    .fresh_samples = true};                                // true only when feeding this frame's own samples + motion
+    .fresh_samples = true,                                 // true only when feeding this frame's own samples + motion
+    .upscale_sharpness = 0.3f,                             // [0, 1], 0 = off; fsr's RCAS on the upscaled image
+    .frame_time_ms = dt_ms};                               // time since the previous call; fsr decays its history by it
 auto const traced = sr::reconstruct_input_extent(ctx, settings, out_extent);  // -> tg::vec2i to trace; ALWAYS ask
 auto const jitter = sr::reconstruct_jitter(ctx, settings, out_extent, frame); // -> one offset for EVERY sample; (0,0) when nothing upscales
 

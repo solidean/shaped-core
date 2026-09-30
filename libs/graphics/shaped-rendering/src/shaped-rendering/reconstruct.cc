@@ -369,6 +369,18 @@ namespace
     return 1.0f;
 }
 
+/// The upscaler a call with `settings` actually runs, which is what planning a frame must follow.
+/// `none` when the denoiser in front of it will be refused, since `execute` then refuses the whole call, and when the
+/// upscaler itself cannot run here.
+[[nodiscard]] upscale_method planned_upscaler(reconstruct_support const& support, reconstruct_settings const& settings)
+{
+    auto const denoiser = resolve_with(support, settings);
+    if (settings.denoiser != denoise_method::none && (denoiser == denoise_method::none || !support.supports(denoiser)))
+        return upscale_method::none;
+    auto const u = resolve_upscaler_with(support, settings, denoiser);
+    return u != upscale_method::none && support.supports(u) ? u : upscale_method::none;
+}
+
 [[nodiscard]] tg::vec2i scaled_down(tg::vec2i output_extent, f32 ratio)
 {
     auto const scaled = [&](int v) { return cc::max(1, int(f32(v) / ratio + 0.5f)); };
@@ -441,8 +453,8 @@ tg::vec2i reconstruct_input_extent(sg::context const& ctx, reconstruct_settings 
         return support.supports(m) ? scaled_down(output_extent, vendor_ratio(settings.scale)) : output_extent;
 
     // Any other denoiser runs at one ratio, and the upscaler behind it maps the preset, under the same refusal rule.
-    auto const u = resolve_upscaler_with(support, settings, m);
-    if (u == upscale_method::none || !support.supports(u))
+    auto const u = planned_upscaler(support, settings);
+    if (u == upscale_method::none)
         return output_extent;
     return scaled_down(output_extent, upscaler_ratio(u, settings.scale));
 }
@@ -452,9 +464,7 @@ tg::vec2f reconstruct_jitter(sg::context const& ctx,
                              tg::vec2i output_extent,
                              u32 frame_index)
 {
-    auto const support = query_reconstruct_support(ctx);
-    auto const u = resolve_upscaler_with(support, settings, resolve_with(support, settings));
-    if (u != upscale_method::fsr || !support.supports(u))
+    if (planned_upscaler(query_reconstruct_support(ctx), settings) != upscale_method::fsr)
         return tg::vec2f(0, 0);
     return fsr_upscale_routine::jitter(frame_index, reconstruct_input_extent(ctx, settings, output_extent),
                                        output_extent);
@@ -495,10 +505,19 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
     auto const support = query_reconstruct_support(ctx);
     auto const method = resolve_with(support, settings);
     auto const upscaler = resolve_upscaler_with(support, settings, method);
-    CC_ASSERT(settings.denoiser != denoise_method::none || upscaler != upscale_method::none,
+    CC_ASSERT(settings.denoiser != denoise_method::none || settings.upscaler != upscale_method::none,
               "a caller with denoising and upscaling both off does not call the front");
 
     auto const denoising = settings.denoiser != denoise_method::none;
+    if (!denoising && upscaler == upscale_method::none)
+    {
+        // What could not run is the request itself, which is why the log names `automatic`.
+        log_upscaler_refusal_once(upscale_method::automatic, refusal_reason::unsupported,
+                                  "resolves to no upscaler on this context, and the denoiser is none");
+        return {.status = reconstruct_status::unsupported,
+                .denoiser = denoise_method::none,
+                .upscaler = upscale_method::none};
+    }
     if (denoising)
     {
         if (method == denoise_method::none || !support.supports(method))
@@ -564,7 +583,7 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
                                                         .view_to_clip = in.guides.view_to_clip,
                                                         .exposure = settings.exposure,
                                                         .output = in.output},
-                                                       history._upscale);
+                                                       history._upscale, fsr_upscale_routine::options_for(settings));
     return {.status = upscaled.status,
             .denoiser = source_denoiser,
             .upscaler = upscaler,

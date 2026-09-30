@@ -57,8 +57,18 @@ tg::vec2f fsr_upscale_routine::jitter(u32 frame_index, tg::vec2i input_extent, t
     return -impl::fsr_jitter_offset(frame_index, input_extent, output_extent);
 }
 
+fsr_options fsr_upscale_routine::options_for(reconstruct_settings const& settings)
+{
+    auto const s = settings.upscale_sharpness;
+    return {.sharpening = s > 0.0f, .sharpness = s, .frame_time_ms = settings.frame_time_ms};
+}
+
 bool fsr_upscale_routine::is_available(sg::context const& ctx)
 {
+    // WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass.
+    // libs/graphics/shaped-rendering/docs/TODO.md records what bisecting it established.
+    if (ctx.metrics.adapter().is_software)
+        return false;
     if (!impl::fsr_passes_available(ctx))
         return false;
     for (auto const& asset : {shaders::fsr_prepare_depth.compute.main_cs, shaders::fsr_clear_float.compute.main_cs,
@@ -166,7 +176,7 @@ upscale_outcome fsr_upscale_routine::execute(sg::command_list& cmd,
     CC_ASSERT(output_extent[0] >= input_extent[0] && output_extent[1] >= input_extent[1],
               "FSR upscales: the output must be at least the input's extent");
 
-    if (!impl::fsr_passes_available(cmd.context()))
+    if (cmd.context().metrics.adapter().is_software || !impl::fsr_passes_available(cmd.context()))
         return {.status = reconstruct_status::unsupported};
 
     auto const self = try_acquire(cmd);

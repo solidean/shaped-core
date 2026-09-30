@@ -25,7 +25,8 @@ struct sr::fsr_options
 ///
 /// AMD's own host code plans each frame — which of its passes run, with which constants, against which of its images —
 /// and sr's backend executes that plan as ordinary sg dispatches, with sg inferring every barrier.
-/// So it needs no vendor runtime and no particular hardware, and runs on WARP.
+/// So it needs no vendor runtime and no particular vendor: it runs on hardware adapters on dx12 and vulkan, and not on
+/// WARP yet, which crashes executing it.
 /// It is available where the FidelityFX sources were fetched (`SR_HAS_FSR`), and needs HLSL through DXC today.
 ///
 /// It upscales and does not denoise: a noisy input comes out noisy or smeared.
@@ -36,14 +37,18 @@ public:
     /// Upscales `in.color` into `in.output`, carrying `history` from call to call.
     ///
     /// Any output extent at least the input's works; `render_scale_preset` names the ratios FSR is tuned for.
-    /// `pending` while the passes compile, `failed` when one does not build, and `unsupported` without SR_HAS_FSR.
+    /// `pending` while the passes compile, `failed` when one does not build, and `unsupported` without SR_HAS_FSR or
+    /// on a software adapter.
     [[nodiscard]] static upscale_outcome execute(sg::command_list& cmd,
                                                  upscale_inputs const& in,
                                                  upscale_history& history,
                                                  fsr_options const& options = {});
 
-    /// Whether this build and `ctx`'s shader library can run it.
+    /// Whether this build, `ctx`'s shader library and its adapter can run it; never on a software adapter.
     [[nodiscard]] static bool is_available(sg::context const& ctx);
+
+    /// The options the front's settings mean: `upscale_sharpness` and `frame_time_ms`.
+    [[nodiscard]] static fsr_options options_for(reconstruct_settings const& settings);
 
     /// The ratio of output to input FSR runs `preset` at, per axis: 1, 1.5, 1.7 or 2.
     [[nodiscard]] static f32 ratio_of(render_scale_preset preset);
