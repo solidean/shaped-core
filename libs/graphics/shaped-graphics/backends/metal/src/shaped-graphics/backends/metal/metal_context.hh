@@ -239,6 +239,7 @@ private:
     void wait_for_epoch(sg::epoch e) override { _epochs.wait_for(e); }
     void wait_for_next_inflight_epoch() override { _epochs.wait_for_next_inflight(); }
     void retire_completed_epochs() override { _epochs.retire_completed(); }
+    void do_defer_until_retired(cc::unique_function<void()> fn) override { _epochs.defer(cc::move(fn)); }
     void block_until_submissions_complete() override { _epochs.block_until_submissions_complete(); }
     /// Wait until every download's copy-out has run.
     ///

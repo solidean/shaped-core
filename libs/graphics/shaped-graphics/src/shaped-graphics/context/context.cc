@@ -230,6 +230,17 @@ void context::process_completed_epochs()
     settle_due_completions();
 }
 
+void context::defer_until_retired(cc::unique_function<void()> fn)
+{
+    // Nothing retires past shutdown, so deferring would mean never running at all.
+    if (_is_shut_down)
+    {
+        fn();
+        return;
+    }
+    do_defer_until_retired(cc::move(fn));
+}
+
 void context::advance_epoch()
 {
     do_advance_epoch();

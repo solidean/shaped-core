@@ -8,6 +8,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/nrd_denoise_routine.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
@@ -22,9 +23,16 @@ namespace
 {
 /// The ratio of output to input each vendor preset stands for.
 ///
-/// The vendors publish the same four, and the numbers below are provisional until a vendor member reads them:
-/// check each against NGX's `NVSDK_NGX_PerfQuality_Value` table and FidelityFX's upscale ratios when dlss_rr and
-/// fsr_rr land, since a wrong ratio here is an image traced at the wrong size rather than an error.
+/// **Checked against NGX rather than against a published table**, because the SDK ships none: `nvsdk_ngx_defs.h`
+/// carries the `NVSDK_NGX_PerfQuality_Value` enum with no ratio beside it, and the numbers come from
+/// `NGX_DLSSD_GET_OPTIMAL_SETTINGS`, which asks the driver.
+/// Queried on an RTX 5070 Laptop GPU, driver 616.92, at 1920x1080, 2560x1440 and 3840x2160 — the ratio held across
+/// all three: MaxQuality 1.5, Balanced 1.724, MaxPerf 2.0, DLAA 1.0, UltraPerformance 3.0.
+/// They are the driver's rather than the SDK's, so a bump can move them; re-run that query rather than trusting this
+/// comment if an image starts arriving at a size nobody chose.
+///
+/// `scale` alone decides the extents here and `quality` only picks the network, so a caller may name any pair — these
+/// are what the preset NAMES mean, not a constraint NGX enforces.
 [[nodiscard]] f32 vendor_ratio(render_scale_preset p)
 {
     switch (p)
@@ -34,7 +42,8 @@ namespace
     case render_scale_preset::quality:
         return 1.5f;
     case render_scale_preset::balanced:
-        return 1.7f;
+        // 1.724 rather than 1.7: NGX renders 1114 of 1920.
+        return 1.7241379f;
     case render_scale_preset::performance:
         return 2.0f;
     }
@@ -133,9 +142,9 @@ denoise_guide_set denoise_inputs::present_guides() const
     return set;
 }
 
-bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
+bool denoise_history::_prepare(denoise_method method, tg::vec2i input_extent, tg::vec2i output_extent)
 {
-    auto const changed = _method != method || _extent != extent;
+    auto const changed = _method != method || _extent != input_extent || _output_extent != output_extent;
     auto const restarted = changed || _reset_requested;
     if (changed)
     {
@@ -145,8 +154,10 @@ bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
         // Built for another member or size, so nothing in it can be reused.
         for (auto& t : _state)
             t = {};
+
         _method = method;
-        _extent = extent;
+        _extent = input_extent;
+        _output_extent = output_extent;
         _frame = 0;
     }
     _reset_requested = false;
@@ -206,6 +217,7 @@ denoise_support query_denoise_support(sg::context const& ctx)
              && buildable(sr::shaders::svgf_variance.compute.main_cs)
              && buildable(sr::shaders::svgf_atrous.compute.main_cs),
         .oidn = oidn_denoise_routine::is_available(ctx),
+        .dlss_rr = dlss_rr_routine::is_available(ctx),
         .nrd = nrd_denoise_routine::is_available(ctx),
     };
 }
@@ -226,7 +238,8 @@ denoise_guide_set required_guides(denoise_method m)
     case denoise_method::dlss_rr:
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
-        return g::albedo | g::normal | g::roughness | g::depth | g::motion;
+        return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::hit_distance
+             | g::split_diffuse_specular;
     case denoise_method::nrd:
         // The albedo pair is required rather than optional: NRD asks for radiance with no material information in it,
         // and the member divides both out rather than handing it texture to filter as noise.
@@ -258,7 +271,7 @@ denoise_guide_set optional_guides(denoise_method m)
     case denoise_method::dlss_rr:
         return g::hit_distance;
     case denoise_method::fsr_rr:
-        return g::specular_albedo | g::hit_distance;
+        return {};
     case denoise_method::nrd:
         return {};
     case denoise_method::none:
@@ -272,38 +285,50 @@ denoise_guide_set optional_guides(denoise_method m)
 namespace
 {
 /// `resolve_denoise_method` against a support answer the caller already has.
-[[nodiscard]] denoise_method resolve_with(denoise_support const& support, denoise_settings const& settings)
+[[nodiscard]] denoise_method resolve_with(denoise_support const& support,
+                                          denoise_settings const& settings,
+                                          denoise_guide_set available_guides)
 {
     if (settings.method != denoise_method::automatic)
         return settings.method;
 
     auto const preference = settings.fresh_samples ? cc::span<denoise_method const>(temporal_preference)
                                                    : cc::span<denoise_method const>(spatial_preference);
+
+    // Both conditions, because a member that fails either one reports `unsupported` from `execute` and writes nothing.
+    // Skipping only the device check would pick the best member the hardware can run and then refuse it for a guide
+    // the caller never had, which leaves `automatic` denoising nothing at all.
     for (auto const m : preference)
-        if (support.supports(m))
+        if (support.supports(m) && required_guides(m).without(available_guides).is_empty())
             return m;
     return denoise_method::none;
 }
 } // namespace
 
-denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings)
+denoise_method resolve_denoise_method(sg::context const& ctx,
+                                      denoise_settings const& settings,
+                                      denoise_guide_set available_guides)
 {
     if (settings.method != denoise_method::automatic)
         return settings.method;
-    return resolve_with(query_denoise_support(ctx), settings);
+    return resolve_with(query_denoise_support(ctx), settings, available_guides);
 }
 
-tg::vec2i denoise_input_extent(sg::context const& ctx, denoise_settings const& settings, tg::vec2i output_extent)
+tg::vec2i denoise_input_extent(sg::context const& ctx,
+                               denoise_settings const& settings,
+                               tg::vec2i output_extent,
+                               denoise_guide_set available_guides)
 {
-    auto const m = resolve_denoise_method(ctx, settings);
+    auto const m = resolve_denoise_method(ctx, settings, available_guides);
 
-    // Only the vendor members upscale; every native member and OIDN works at one ratio.
-    if (m != denoise_method::dlss_rr && m != denoise_method::fsr_rr)
+    // Only `dlss_rr` upscales; every other member works at one ratio.
+    if (m != denoise_method::dlss_rr)
         return output_extent;
 
-    // A named member this context cannot run will be refused, and a caller that traced smaller for it would then
-    // composite a smaller image into its own output.
-    if (!query_denoise_support(ctx).supports(m))
+    // A member that will be refused answers the output's own size, and there are two ways to be refused: the device
+    // cannot run it, or the caller cannot supply a guide it requires.
+    // A caller that traced smaller for either would composite a smaller image into its own output.
+    if (!query_denoise_support(ctx).supports(m) || !required_guides(m).without(available_guides).is_empty())
         return output_extent;
 
     auto const ratio = vendor_ratio(settings.scale);
@@ -328,6 +353,8 @@ cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
         nrd_denoise_routine::prewarm(ctx);
     if (support.oidn)
         oidn_denoise_routine::prewarm(ctx);
+    if (support.dlss_rr)
+        dlss_rr_routine::prewarm(ctx); // nothing to compile, but the member is a routine like the others
     co_return;
 }
 
@@ -344,7 +371,7 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     auto& ctx = cmd.context();
     // Asked once and used twice, since the resolver and the support check want the same answer.
     auto const support = query_denoise_support(ctx);
-    auto const method = resolve_with(support, settings);
+    auto const method = resolve_with(support, settings, in.present_guides());
     if (method == denoise_method::none || !support.supports(method))
     {
         // The resolved method rather than what was asked for, so both refusal paths report a member rather than
@@ -372,6 +399,7 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     case denoise_method::oidn:
         return oidn_denoise_routine::execute(cmd, in, history, oidn_denoise_routine::options_for(settings));
     case denoise_method::dlss_rr:
+        return dlss_rr_routine::execute(cmd, in, history, dlss_rr_routine::options_for(settings));
     case denoise_method::fsr_rr:
     case denoise_method::none:
     case denoise_method::automatic:

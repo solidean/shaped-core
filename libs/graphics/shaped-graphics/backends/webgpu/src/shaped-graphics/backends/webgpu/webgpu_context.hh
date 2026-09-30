@@ -413,6 +413,7 @@ public:
     void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override { return int(_epochs.in_flight.size()); }
     void retire_completed_epochs() override;
+    void do_defer_until_retired(cc::unique_function<void()> fn) override;
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
     [[nodiscard]] bool are_transfers_drained() const override { return _readbacks.is_idle() && _streams.is_idle(); }
     [[nodiscard]] sg::submission_token last_issued_submission() override;

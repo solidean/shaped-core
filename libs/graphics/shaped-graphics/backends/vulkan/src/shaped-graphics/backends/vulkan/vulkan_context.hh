@@ -672,6 +672,7 @@ public:
     void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override;
     void retire_completed_epochs() override;
+    void do_defer_until_retired(cc::unique_function<void()> fn) override;
     void block_until_submissions_complete() override;
     void block_until_transfers_drained() override;
     void wait_for_epoch(sg::epoch e) override;

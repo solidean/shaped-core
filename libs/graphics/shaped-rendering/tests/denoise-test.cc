@@ -1,12 +1,15 @@
 #include "shader_fixtures.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/dlss_rr_routine.hh>
+#include <shaped-rendering/impl/dlss_ngx.hh>
 #include <shaped-rendering/impl/nrd_instance.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
@@ -142,11 +145,15 @@ void upload(sg::command_list& cmd, sg::texture_2d const& tex, cc::span<tg::vec4f
     cmd.upload.bytes_to_texture(tex.raw(), pixels.as_bytes());
 }
 
-/// Brings the à-trous member up before a list opens, so the first call does not decline.
+/// Brings the members up before a list opens, so the first call does not decline.
+///
+/// `dlss_rr` is here even though it compiles nothing: `try_acquire` reports rather than initializes, so a routine
+/// nothing has ticked reads as pending whatever its init does.
 cc::shared_async<cc::unit> prewarm(sg::context& ctx)
 {
     sr::atrous_denoise_routine::prewarm(ctx);
     sr::svgf_denoise_routine::prewarm(ctx);
+    sr::dlss_rr_routine::prewarm(ctx);
     sr::denoise_routine::prewarm(ctx);
     (void)co_await ctx.routines.idle_completion();
 }
@@ -247,36 +254,64 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member",
     auto const on_a_mean = sr::denoise_settings{.method = sr::denoise_method::automatic};
     auto const on_fresh_frames = sr::denoise_settings{.method = sr::denoise_method::automatic, .fresh_samples = true};
     CHECK(support.svgf);
-    CHECK(sr::resolve_denoise_method(ctx, on_a_mean) == sr::denoise_method::atrous);
+    CHECK(sr::resolve_denoise_method(ctx, on_a_mean, sr_test::every_guide()) == sr::denoise_method::atrous);
 
-    // WHICH temporal member depends on the machine, which is the whole point of `automatic`: NRD runs on every
-    // adapter where its sources were fetched and outranks svgf, which is what everything else gets.
+    // WHICH temporal member depends on the machine, which is the whole point of `automatic`: a vendor member outranks
+    // the native one where its SDK was fetched and the adapter carries it, and svgf is what everything else gets.
+    // Asserting `svgf` outright would have been a test that passes only where no vendor member is present.
     //
     // Written as the whole ORDER rather than as one name, because naming the runner-up is a test that passes only on
-    // the machines where no better member is present — this asserted `svgf` outright until NRD arrived.
-    auto const temporal = sr::resolve_denoise_method(ctx, on_fresh_frames);
-    CHECK(temporal == (support.nrd ? sr::denoise_method::nrd : sr::denoise_method::svgf))
-        .context(cc::format("supported: nrd {}", support.nrd));
+    // the machines where no better member is present.
+    auto const temporal = sr::resolve_denoise_method(ctx, on_fresh_frames, sr_test::every_guide());
+    auto const expected = support.dlss_rr ? sr::denoise_method::dlss_rr
+                        : support.fsr_rr  ? sr::denoise_method::fsr_rr
+                        : support.nrd     ? sr::denoise_method::nrd
+                                          : sr::denoise_method::svgf;
+    CHECK(temporal == expected)
+        .context(cc::format("supported: dlss_rr {}, fsr_rr {}, nrd {}", support.dlss_rr, support.fsr_rr, support.nrd));
     CHECK(sr::is_temporal(temporal));
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must
     // not be quietly exchanged for another.
     auto const dlss = sr::denoise_settings{.method = sr::denoise_method::dlss_rr};
-    CHECK(sr::resolve_denoise_method(ctx, dlss) == sr::denoise_method::dlss_rr);
+    CHECK(sr::resolve_denoise_method(ctx, dlss, sr_test::every_guide()) == sr::denoise_method::dlss_rr);
 
     // Only the vendor members trace smaller than they output; every other member answers the output's own size.
     auto const scaled
         = sr::denoise_settings{.method = sr::denoise_method::atrous, .scale = sr::render_scale_preset::performance};
-    CHECK(sr::denoise_input_extent(ctx, scaled, tg::vec2i(640, 480)) == tg::vec2i(640, 480));
+    CHECK(sr::denoise_input_extent(ctx, scaled, tg::vec2i(640, 480), sr_test::every_guide()) == tg::vec2i(640, 480));
 
-    // ...and an upscaling member this device cannot run answers the output's own size too.
-    // Otherwise a caller would trace at half resolution for a call that is about to be refused, and then composite
-    // that half-resolution image into a full-resolution output.
+    // ...and what an upscaling member answers depends on whether THIS device can run it, so both arms are pinned.
+    // Asserting `!support.dlss_rr` instead would be the same mistake the temporal order above avoids: a test that
+    // passes only on the machines where the SDK is absent, and fails on the ones it was written for.
     auto const dlss_scaled = sr::denoise_settings{.method = sr::denoise_method::dlss_rr,
                                                   .scale = sr::render_scale_preset::performance,
                                                   .fresh_samples = true};
-    CHECK(!support.dlss_rr);
-    CHECK(sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480)) == tg::vec2i(640, 480));
+    auto const dlss_extent = sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480), sr_test::every_guide());
+    if (support.dlss_rr)
+        CHECK(dlss_extent == tg::vec2i(320, 240)).context("performance halves each axis");
+    else
+        // A caller that traced smaller for a call about to be refused would composite a half-resolution image into a
+        // full-resolution output.
+        CHECK(dlss_extent == tg::vec2i(640, 480)).context("a member this device cannot run does not upscale");
+
+    // `automatic` walks what the CALLER can feed, not what the device can run.
+    // The guides here are what a caller with no specular pair has, which every vendor member requires and svgf does
+    // not — so the answer is svgf however good the hardware is.
+    // Resolving on device support alone would name a vendor member that `execute` then refuses for the missing
+    // guide, and the caller would get no denoising at all rather than the best member its inputs support.
+    using g = sr::denoise_guide;
+    auto const without_specular = g::albedo | g::normal | g::depth | g::motion;
+    CHECK(sr::resolve_denoise_method(ctx, on_fresh_frames, without_specular) == sr::denoise_method::svgf)
+        .context("a member whose required guides are missing is not what automatic picks");
+
+    // And the extent follows it: a member that will be refused answers the output's own size, whichever of the two
+    // reasons refuses it.
+    CHECK(sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480), without_specular) == tg::vec2i(640, 480))
+        .context("a member the caller cannot feed does not upscale either");
+
+    // Dropping motion as well leaves the spatial members, so the temporal ask degrades rather than failing.
+    CHECK(sr::resolve_denoise_method(ctx, on_fresh_frames, g::albedo | g::normal) == sr::denoise_method::atrous);
     co_return;
 }
 
@@ -809,4 +844,145 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide",
     CHECK(run.outcome.status == sr::denoise_status::unsupported);
     CHECK(run.outcome.method == sr::denoise_method::svgf);
     CHECK(run.output[0][0] == -7.0f);
+}
+
+// DLSS Ray Reconstruction, where it can run at all.
+//
+// A vendor member's test is gated on its hardware and SKIPs elsewhere rather than passing, because a green result on a
+// machine that cannot run it says nothing — see the `dlss_rr` paragraph in libs/graphics/shaped-rendering/docs/denoising.md.
+// So this runs on an RTX adapter with the SDK fetched, and reports "not run" on everything else.
+//
+// What it pins is the contract the front depends on, not the picture: a call carrying every required guide denoises,
+// and one missing a required guide refuses rather than running degraded.
+// The image itself is the driver's and changes with it, which is why no reference is committed.
+//
+// Holds sg-reload-generation: a reload another test signals makes the routine pending until the next tick, and the
+// calls below assume it stays ready from the prewarm to the last of them.
+ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call without its guides",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    if (!sr::query_denoise_support(ctx).dlss_rr)
+        SKIP("no DLSS Ray Reconstruction here — the SDK is fetched on request, and it needs an RTX adapter on dx12");
+
+    // The member opens NGX in its init, so it is a routine that has to be ticked up like any other before its first
+    // call — `try_acquire` reports readiness rather than establishing it.
+    co_await prewarm(ctx);
+
+    // Every guide it requires, all at the input extent.
+    // The values are a plausible surface rather than a rendered one: what is under test is that NGX accepts the set
+    // and writes the output, and a network's opinion of a synthetic image is not something to assert on.
+    auto const color = make_image(ctx);
+    auto const albedo = make_image(ctx);
+    auto const specular_albedo = make_image(ctx);
+    auto const normal = make_image(ctx);
+    auto const roughness = make_image(ctx);
+    auto const depth = make_image(ctx);
+    auto const motion = make_image(ctx);
+    auto const output = make_image(ctx);
+
+    auto const flat = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(0.5f, 0.5f, 0.5f, 1));
+    auto const zero = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(0, 0, 0, 0));
+    auto const ones = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(1, 1, 1, 1));
+    auto const sentinel = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(-7, -7, -7, -7));
+
+    auto const guides = sr::denoise_guides{.albedo = albedo,
+                                           .specular_albedo = specular_albedo,
+                                           .normal = normal,
+                                           .roughness = roughness,
+                                           .depth = depth,
+                                           .motion = motion};
+
+    {
+        auto cmd = ctx.create_command_list();
+        upload(*cmd, color, noisy_halves(0.5f));
+        upload(*cmd, albedo, flat);
+        upload(*cmd, specular_albedo, zero);
+        upload(*cmd, normal, ones);
+        upload(*cmd, roughness, ones);
+        upload(*cmd, depth, ones);
+        upload(*cmd, motion, zero);
+        upload(*cmd, output, sentinel);
+
+        auto history = sr::denoise_history();
+        auto const out
+            = sr::dlss_rr_routine::execute(*cmd, {.color = color, .guides = guides, .output = output}, history);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        CHECK(out.method == sr::denoise_method::dlss_rr);
+        CHECK(out.status == sr::denoise_status::denoised).context(cc::format("status {}", int(out.status)));
+
+        // The first call of a stream starts from no history, which is what tells a caller its result is the weakest
+        // one the stream will produce.
+        CHECK(out.restarted);
+
+        // What this block checks is that the feature is rebuilt when the output extent moves.
+        // A feature is built for a PAIR of extents, so an output that moves while the input stays put is a rebuild.
+        // Reachable rather than theoretical: the input is the output divided by a preset ratio and rounded, so more
+        // than one output extent maps to the same traced size — a window dragged one pixel does it at 1.5.
+        // Without the output extent in the history's identity this call reuses a feature whose InTargetWidth is stale.
+        CHECK(history.extent() == tg::vec2i(k_size, k_size));
+        CHECK(history.output_extent() == tg::vec2i(k_size, k_size));
+
+        auto const wider = ctx.persistent.create_texture_2d(
+            {.format = sg::pixel_format::rgba32_float, .width = k_size * 2, .height = k_size * 2, .usage = image_usage});
+        // Nothing is awaited since the first call, so the frame that evaluated the old feature may still be on the GPU
+        // when this call drops it.
+        auto const released_before = sr::impl::dlss_released_stream_count();
+        auto cmd2 = ctx.create_command_list();
+        auto const upscaled
+            = sr::dlss_rr_routine::execute(*cmd2, {.color = color, .guides = guides, .output = wider}, history);
+
+        // The drop happened inside that execute, and a release never runs inline.
+        // Checked here and nowhere later: once the GPU may have finished, "not yet released" is a race.
+        CHECK(sr::impl::dlss_released_stream_count() == released_before)
+            .context("a dropped stream waits for the epoch it was dropped in");
+        ctx.submit_command_list(cc::move(cmd2));
+        ctx.advance_epoch();
+
+        CHECK(upscaled.restarted).context("the output extent moved, so the feature is rebuilt");
+        CHECK(history.output_extent() == tg::vec2i(k_size * 2, k_size * 2));
+        (void)co_await ctx.idle_completion();
+        CHECK(sr::impl::dlss_released_stream_count() == released_before + 1);
+
+        // `quality` is fixed at creation like the extents, so a new one is a new stream rather than a no-op.
+        auto cmd3 = ctx.create_command_list();
+        auto const requalified = sr::dlss_rr_routine::execute(
+            *cmd3, {.color = color, .guides = guides, .output = wider}, history, {.quality = sr::denoise_quality::best});
+        ctx.submit_command_list(cc::move(cmd3));
+        ctx.advance_epoch();
+
+        CHECK(requalified.status == sr::denoise_status::denoised);
+        CHECK(requalified.restarted).context("the quality changed, so the stream is rebuilt");
+        (void)co_await ctx.idle_completion();
+    }
+
+    // A call without the specular guides is refused, not run degraded: NGX reads every one of them, and a member that
+    // quietly dropped to a subset would be a different denoiser wearing this one's name.
+    {
+        auto cmd = ctx.create_command_list();
+        upload(*cmd, output, sentinel);
+
+        auto thin = guides;
+        thin.specular_albedo = {};
+        thin.roughness = {};
+
+        auto history = sr::denoise_history();
+        auto const out = sr::dlss_rr_routine::execute(*cmd, {.color = color, .guides = thin, .output = output}, history);
+        auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        CHECK(out.status == sr::denoise_status::unsupported);
+
+        // And it wrote nothing, which is what lets a caller composite the raw image instead.
+        auto const pixels = co_await readback.data();
+        REQUIRE(pixels.size() == k_size * k_size);
+        CHECK(pixels[0][0] == -7.0f);
+    }
 }

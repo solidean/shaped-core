@@ -1,5 +1,6 @@
 #include <clean-core/common/utility.hh> // cc::move
-#include <clean-core/fwd.hh>            // cc::u64: epoch is an enum over u64
+#include <clean-core/container/vector.hh>
+#include <clean-core/fwd.hh> // cc::u64: epoch is an enum over u64
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <nexus/async-test.hh>
@@ -88,6 +89,31 @@ ASYNC_INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::conte
     co_await ctx->epochs_in_flight_completion(0);
     co_await ctx->idle_completion();
     CHECK(u64(ctx->completed_epoch()) <= u64(ctx->current_epoch()));
+}
+
+// The hook for state sg cannot see: it must wait for the epoch it was registered in, and it must never run inline, even
+// when nothing is in flight and a caller might expect "already retired" to mean "now".
+ASYNC_INVOCABLE_TEST("sg - defer_until_retired waits for the epoch it was registered in", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    co_await ctx->idle_completion();
+
+    auto ran = cc::vector<int>();
+    ctx->defer_until_retired([&ran] { ran.push_back(1); });
+    ctx->defer_until_retired([&ran] { ran.push_back(2); });
+    CHECK(ran.empty());
+
+    // Its epoch has not even closed, so a sweep must leave it alone.
+    ctx->process_completed_epochs();
+    CHECK(ran.empty());
+
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+    ctx->process_completed_epochs();
+    REQUIRE(ran.size() == 2);
+    CHECK(ran[0] == 1);
+    CHECK(ran[1] == 2);
 }
 
 // ctx.supports() is the single source for a capability, and the per-scope bools forward to it.

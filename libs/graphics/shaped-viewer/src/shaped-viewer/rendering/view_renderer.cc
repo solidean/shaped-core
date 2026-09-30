@@ -23,6 +23,18 @@ namespace sv
 {
 namespace
 {
+/// Every guide sv's raygen is able to write, which is what `automatic` is resolved against here.
+///
+/// The set a given frame HAS is smaller — a layer declares the specular pair only once something wants it, and the
+/// temporal slots arrive a frame later — but the calls below decide what to declare, so asking with this frame's set
+/// would answer "nothing needs the split", declare nothing, and keep answering that forever.
+/// `hit_distance` is absent because nothing writes one yet, so a member requiring it is correctly skipped.
+[[nodiscard]] sr::denoise_guide_set traceable_guides()
+{
+    using g = sr::denoise_guide;
+    return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::split_diffuse_specular;
+}
+
 /// Packs an affine placement into the TLAS instance's row-major 3x4 wire layout, translation in column 3.
 /// tg's linear part is column-major (`l[c, r]`), so the transpose happens here rather than in a mat4 round-trip.
 void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
@@ -565,7 +577,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         // The split signals are this frame's own samples, so it is the temporal member's answer that decides.
         auto fresh = l.settings.denoise;
         fresh.fresh_samples = true;
-        return sr::required_guides(sr::resolve_denoise_method(ctx, fresh)).has(sr::denoise_guide::split_diffuse_specular);
+        // Asked against what the tracer CAN write rather than what this frame has, because this is the call that
+        // decides what it writes — reading the slots here would say no on the first frame and no forever after.
+        return sr::required_guides(sr::resolve_denoise_method(ctx, fresh, traceable_guides()))
+            .has(sr::denoise_guide::split_diffuse_specular);
     }();
     auto const split_slot_of = [&](u64 id) { return splitting ? rec.temporal.get_ptr(id) : nullptr; };
     auto const ds = denoise_slots{
@@ -759,8 +774,9 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     if (settings.denoise.method != sr::denoise_method::automatic && sr::is_temporal(settings.denoise.method))
         schedule.spatial_settings.method = sr::denoise_method::automatic;
 
-    auto const may_run_temporally = ds.frame != nullptr && ds.motion != nullptr
-                                 && sr::is_temporal(sr::resolve_denoise_method(ctx, schedule.temporal_settings));
+    auto const may_run_temporally
+        = ds.frame != nullptr && ds.motion != nullptr
+       && sr::is_temporal(sr::resolve_denoise_method(ctx, schedule.temporal_settings, traceable_guides()));
 
     // 0 while the temporal member owns the frame, 1 once the spatial one does, and the fade in between — so the two
     // members are never both idle.

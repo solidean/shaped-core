@@ -144,6 +144,10 @@ struct sr::denoise_guides
     sg::texture_2d hit_distance;
 
     /// This frame's sub-pixel offset of the primary rays, in input pixels, in [-0.5, 0.5].
+    ///
+    /// **Nothing writes this yet** — no tracer in the repo jitters — so every member reads 0, which is the right
+    /// answer for an unjittered raygen rather than a placeholder.
+    /// Whoever lands jitter also settles whether `motion` carries the offset, which `dlss_rr` declares to NGX.
     tg::vec2f jitter = tg::vec2f(0, 0);
     tg::vec2f previous_jitter = tg::vec2f(0, 0);
 
@@ -232,6 +236,14 @@ public:
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
 
+    /// Dropping it hands member state to its deleter, and the GPU must be done with that state before it is released.
+    /// The member arranges that, through `ctx.defer_until_retired`, so a caller may drop a history mid-frame.
+    ///
+    /// **A history must still go before the context it was built on**, and a `dlss_rr` one before that member's routine.
+    /// Its stream is released under the NGX instance the routine opened, so one dropped after the routine closed that
+    /// instance is logged as an error, and its stream deleted without a call into NGX.
+    ~denoise_history() = default;
+
     /// How many images a member may keep here.
     /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
     static constexpr int state_slots = 8;
@@ -249,25 +261,43 @@ public:
     /// The input extent this was built for, or 0x0 while empty.
     [[nodiscard]] tg::vec2i extent() const { return _extent; }
 
+    /// The output extent this was built for, or 0x0 while empty.
+    /// Equal to `extent()` for every member that does not upscale, which is every member but `dlss_rr` today.
+    [[nodiscard]] tg::vec2i output_extent() const { return _output_extent; }
+
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
     friend class nrd_denoise_routine;
     friend class oidn_denoise_routine;
+    friend class dlss_rr_routine;
 
-    /// Brings this to `method` at `extent`, dropping everything if either changed.
+    /// Brings this to `method` at this pair of extents, dropping everything if any of the three changed.
     /// Returns whether the call starts from no history.
-    bool _prepare(denoise_method method, tg::vec2i extent);
-
-    /// A member's own per-stream object — for OIDN the network and its feature maps, for NRD its instance.
+    /// A `reset` alone keeps the member's state, which is still the right size, and only restarts its history.
     ///
-    /// Type-erased so this header names no member's type; `make_shared` captured the deleter that frees it.
-    /// It must hold only what is safe to drop mid-frame, as sg resources are.
-    /// `_prepare` drops it whenever it drops the rest, since the state is built for one extent.
+    /// An upscaling member passes both, because its per-stream state is built for the pair and a changed output with
+    /// an unchanged input is a real case — the input is the output rounded, so more than one output maps to it.
+    /// The two-argument form is for a member that writes its input's extent, and says so by passing it twice.
+    bool _prepare(denoise_method method, tg::vec2i input_extent, tg::vec2i output_extent);
+    bool _prepare(denoise_method method, tg::vec2i extent) { return _prepare(method, extent, extent); }
+
+    /// A member's own per-stream object — for OIDN the network and its feature maps, for a vendor member the SDK
+    /// handle it must release on a device the GPU is done with.
+    ///
+    /// Type-erased so this header names no member's type; the deleter is captured where the object is made, which is
+    /// what lets a member whose seam hands back a bare `void*` put its own release function in here.
+    ///
+    /// **A member whose state the GPU may still read releases it through `ctx.defer_until_retired`**, never in the
+    /// deleter itself.
+    /// `_prepare` drops the slot on any change of member or extent, which happens inside a member's `execute` while
+    /// the caller is recording, so frames that read the state may still be in flight.
+    /// sg's own resources need no such care, since sg already defers their destruction to an epoch the GPU has passed.
     std::shared_ptr<void> _member_state;
 
     denoise_method _method = denoise_method::none;
     tg::vec2i _extent = tg::vec2i(0, 0);
+    tg::vec2i _output_extent = tg::vec2i(0, 0);
     bool _reset_requested = false;
 
     /// How many calls this history has seen since it was last built, which is what a temporal member ping-pongs on.
@@ -308,12 +338,20 @@ namespace sr
 /// A supported member can still be `pending` for its first frames, and `failed` if its shader does not build.
 [[nodiscard]] denoise_support query_denoise_support(sg::context const& ctx);
 
-/// The member `settings.method` resolves to on `ctx`: itself when named, the best supported one for `automatic`.
-/// `none` when nothing is supported or nothing was asked for.
+/// The member `settings.method` resolves to on `ctx`: itself when named, the best one for `automatic`.
+/// `none` when nothing qualifies or nothing was asked for.
 ///
-/// A named member resolves to itself whether or not `ctx` supports it, so a comparison between two named members
-/// never silently compares one with itself; refusing it is `denoise_routine::execute`'s job.
-[[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings);
+/// **`available_guides` is what the caller can supply**, and `automatic` skips a member that needs more than that.
+/// Without it `automatic` would pick the best member the DEVICE can run, which `execute` then refuses for a guide the
+/// call does not carry — and the caller gets no denoising at all rather than the best member its inputs support.
+/// A caller that already has its textures passes `denoise_inputs::present_guides()`; one still planning its trace
+/// passes the set it intends to write.
+///
+/// A named member resolves to itself whether or not `ctx` supports it and whatever guides are named, so a comparison
+/// between two named members never silently compares one with itself; refusing it is `denoise_routine::execute`'s job.
+[[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx,
+                                                    denoise_settings const& settings,
+                                                    denoise_guide_set available_guides);
 
 /// Whether a member reads history, and so needs fresh per-frame samples and motion vectors rather than a converging mean.
 [[nodiscard]] bool is_temporal(denoise_method m);
@@ -327,11 +365,14 @@ namespace sr
 /// The input extent to trace so that the member `settings` resolves to produces `output_extent` under `settings.scale`.
 ///
 /// Always ask this rather than scaling by hand: a member supports only its own ratios, and a spatial one only 1.
-/// A member `ctx` cannot run answers `output_extent`, because the call will be refused and a caller that traced
+/// A member that will not run answers `output_extent`, because the call would be refused and a caller that traced
 /// smaller for it would composite a smaller image into its own output.
+/// `available_guides` is why that check is not just about the device: a member whose guides the caller cannot supply
+/// will be refused exactly as one the device cannot run, and both have to answer the same way.
 [[nodiscard]] tg::vec2i denoise_input_extent(sg::context const& ctx,
                                              denoise_settings const& settings,
-                                             tg::vec2i output_extent);
+                                             tg::vec2i output_extent,
+                                             denoise_guide_set available_guides);
 } // namespace sr
 
 /// The front routine: one call for every denoiser.

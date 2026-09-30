@@ -408,6 +408,14 @@ bool vulkan_context::is_submission_complete(sg::submission_token token) const
     return value >= u64(token);
 }
 
+void vulkan_context::do_defer_until_retired(cc::unique_function<void()> fn)
+{
+    // An expiring resource that owns no handle, the way an RTV slot's release rides the epoch.
+    auto expiring = vulkan_expiring_resource{};
+    expiring.finalizers.push_back(cc::move(fn));
+    schedule_deferred_deletion(cc::move(expiring));
+}
+
 void vulkan_context::schedule_deferred_deletion(vulkan_expiring_resource expiring)
 {
     // Attributed to whatever epoch is open now; moved into that epoch's payload at the next advance.

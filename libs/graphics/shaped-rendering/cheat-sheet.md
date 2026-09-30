@@ -339,12 +339,15 @@ out.method / out.restarted                             // the member that ran; w
 history.reset()                                        // a camera cut: the next call restarts
 
 sr::query_denoise_support(ctx)                         // -> sr::denoise_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd}
-sr::resolve_denoise_method(ctx, settings)              // -> the member `automatic` (or a named method) means here
-sr::denoise_input_extent(ctx, settings, out_extent)    // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
+sr::resolve_denoise_method(ctx, settings, guides)      // -> the member `automatic` (or a named method) means here; `guides` is what the CALLER can supply
+sr::denoise_input_extent(ctx, settings, out_extent, guides)  // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
+                                                       //    both skip a member whose required_guides the caller lacks, so automatic degrades instead of denoising nothing
 sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_set (cc::flags<sr::denoise_guide>)
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
+sr::dlss_rr_routine::execute(cmd, inputs, history, {.quality = sr::denoise_quality::best})  // NVIDIA Ray Reconstruction; temporal, UPSCALES; needs EVERY required guide; a new quality or hdr restarts the stream
+sr::dlss_rr_routine::is_available(ctx)                 // -> bool; SDK fetched (extern/dlss/fetch-dlss.py) + dx12 + RTX adapter. SR_HAS_DLSS
 sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal, split-signal, NO upscaling; needs hit_distance + specular + BOTH albedos (de-modulation)
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::oidn_denoise_routine::execute(cmd, inputs, history, {.network = sr::oidn_network_size::small})  // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP base, small ~1.6x faster; never `automatic`

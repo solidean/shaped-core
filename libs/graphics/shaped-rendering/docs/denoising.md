@@ -14,8 +14,8 @@ This is the design, including the parts not built yet.
 | `atrous` | spatial | dx12, vulkan (HLSL through DXC); WARP included | done |
 | `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
 | `oidn` | spatial, trained | dx12, vulkan (HLSL through DXC) | done; named only, not real-time |
-| `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
-| `fsr_rr` | temporal, upscales | dx12 | planned |
+| `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12 | done, SDK fetched on request |
+| `fsr_rr` | temporal, split-signal | dx12 | planned |
 | `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**
@@ -23,12 +23,32 @@ The temporal ones work from about one sample per pixel, but only if every pixel'
 
 **The vendor upscalers are not members.**
 DLSS Super Resolution, FSR 3.1 and FSR 4 are temporal upscalers, and on path-tracing noise they smear it rather than remove it.
-The vendor products that denoise are Ray Reconstruction and Ray Regeneration, and both upscale as part of it.
+The vendor product that denoises is DLSS Ray Reconstruction, which upscales as part of it.
+
+**`fsr_rr` is not the member this table first described, and the name is now the only part of "Ray Regeneration" that survives.**
+FidelityFX SDK 2.3.0 ships two separate effects, and neither is a single-image denoising upscaler.
+`ffx_upscale.h` takes colour, depth and motion and does not denoise.
+`ffx_denoiser.h` is **split-signal**: separate dispatches for direct diffuse, direct specular, indirect diffuse, indirect specular, ambient occlusion and specular occlusion.
+So the member is re-scoped to that denoiser: temporal, no upscaling, and requiring `split_diffuse_specular` and `hit_distance` on top of what `dlss_rr` needs.
+That is the same guide contract NRD wants, which is the argument for doing the tracer work once and getting both.
+It is not built, and what it waits for is the tracer rather than the SDK.
 
 **The native members are what CI tests, and `nrd` does not join them.**
 à-trous and SVGF are our own HLSL, so they run on WARP, and the front's policy is tested through them.
 CI never fetches NRD, so what it builds and runs is the null path: `SR_HAS_NRD` is 0, the member reports `unsupported`, and its own tests do not exist.
 They run only where somebody fetched the SDK, which is why a green CI here says nothing about whether NRD works.
+
+**`dlss_rr` is what CI tests least of all, and it needs more than NRD does to run at all.**
+CI never fetches the DLSS SDK, so it builds `SR_HAS_DLSS` 0, compiles `impl/dlss_null.cc` in place of the NGX seam, and the member reports `unsupported`.
+Where NRD needs only its sources fetched and then runs on any dx12 adapter, WARP included, Ray Reconstruction needs an RTX adapter and a driver new enough for the SDK on top of the fetch.
+So its own test SKIPs everywhere but one developer's machine, and a green check here says nothing about whether DLSS works.
+
+**`dlss_rr` is the member whose output is not its input's size**, and a caller must ask rather than divide.
+`sr::denoise_input_extent(ctx, settings, output_extent, available_guides)` answers what size to trace, and it is the only correct way to get that number.
+Asking matters most in the case that looks like it needs no answer: a member this device cannot run answers the output's own size.
+A caller who scaled by a ratio of their own would then trace at half resolution for a call about to be refused, and composite that half-resolution image into a full-resolution target.
+The ratio itself comes from `denoise_settings::scale`.
+`denoise_settings::quality` separately picks the network NGX runs, so the two are independent knobs here and `scale` alone decides the extents.
 
 **NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
 It compiles nothing at run time, owns no device memory and records nothing.
@@ -257,6 +277,11 @@ Whether a vendor member can honour this is open — it may write its own alpha a
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
 `dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
+
+**`automatic` walks what the caller can feed, not only what the device can run.**
+A member is skipped when its `required_guides` are not in the `available_guides` the caller passed, because `execute` would refuse it for exactly that and write nothing.
+Resolving on device support alone picks the best member the hardware has and then refuses it, so a caller with no specular pair gets no denoising rather than SVGF.
+`sr::denoise_input_extent` applies the same rule, since a member that will be refused must answer the output's own size whichever of the two reasons refuses it.
 `oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 A silent fallback would make a comparison between two named members compare one with itself, which is the failure the framework's three-state readiness exists to prevent.
@@ -330,7 +355,10 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
   Without it a vendor SDK would bypass sg's barrier tracking silently.
 - **OIDN needs nothing sg does not have either**, because the member runs the network rather than the library.
 - **The vendor SDKs are fetched on request, never by default.**
-  DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
+  A vendor SDK sits in sr behind its own `SR_HAS_<VENDOR>` define and links PRIVATE, the way SDL3 does — DLSS is one, and the set grows.
+  DLSS is wired: `extern/dlss/fetch-dlss.py` is a deliberate act nothing in dev.py performs, because its license is NVIDIA's own rather than one a build accepts on anyone's behalf.
+  Without it `SR_HAS_DLSS` is 0, the routine still exists, and `dlss_rr` reports `unsupported` — the shape `sr::window_system` takes without SDL3.
+  Whether OIDN is fetched by default — its CPU build is the one non-native member CI could run — waits on measuring its size.
   Intel's OIDN library is on request too, for the oracle test alone; its 2.5 MB of weights, two networks, are a default fetch, since the member runs them.
 
 ## Seeing it
