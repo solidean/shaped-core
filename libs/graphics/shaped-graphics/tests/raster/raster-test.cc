@@ -148,6 +148,162 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline declared in SGL draws what the hand-built 
     }
 }
 
+// A copy recorded inside an open rendering scope, which sg allows and vulkan, webgpu and metal can only do by closing the pass around it.
+// It is how a routine drawing into its caller's scope uploads its own geometry.
+// The second copy rewrites what the first draw already read, so the pass has to close after a draw and reopen keeping it.
+// A closed pass stays closed until the next draw, so the two copies ahead of the first draw cost one split between them.
+ASYNC_INVOCABLE_TEST("sg - a copy inside a rendering scope lands before the draw after it, and keeps what was drawn",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // Every backend but dx12 has to close its pass for the copies, which the split count below pins.
+    // The warning is only the context's first copy split, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a copy", "sg");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::quads.drawn);
+
+    auto const corner = [](float x, float y) { return shaders::quad::per_vertex{.corner = tg::vec3f(x, y, 0.0f)}; };
+    shaders::quad::per_vertex const quad[] = {
+        corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, -1), corner(0, 1), corner(-1, 1),
+    };
+    shaders::quad::per_instance const left_red[] = {{.offset = tg::vec3f(0, 0, 0), .tint = tg::vec4f(1, 0, 0, 1)}};
+    shaders::quad::per_instance const right_blue[] = {{.offset = tg::vec3f(1, 0, 0), .tint = tg::vec4f(0, 0, 1, 1)}};
+
+    auto const corners = ctx->persistent.create_buffer<shaders::quad::per_vertex>(
+        6, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto const instance = ctx->persistent.create_buffer<shaders::quad::per_instance>(
+        1, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto const image
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = 4,
+                                             .height = 4,
+                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto const before = ctx->metrics.stats();
+    auto cmd = ctx->create_command_list();
+    {
+        auto pass = cmd->raster.render_to(
+            shaders::target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 1, 0, 1))});
+        pass.bind_pipeline(*pipeline);
+        pass.bind_vertex_buffers(shaders::quad::buffers{.per_vertex = corners, .per_instance = instance}.views());
+
+        cmd->upload.data_to_buffer(corners, cc::span<shaders::quad::per_vertex const>(quad));
+        cmd->upload.data_to_buffer(instance, cc::span<shaders::quad::per_instance const>(left_red));
+        pass.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 1}});
+
+        cmd->upload.data_to_buffer(instance, cc::span<shaders::quad::per_instance const>(right_blue));
+        pass.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 1}});
+    }
+    auto const future = cmd->download.bytes_from_texture(image.raw());
+    ctx->submit_command_list(cc::move(cmd));
+    auto const d = ctx->metrics.stats() - before;
+
+    // dx12 copies without leaving the scope, and everyone else splits once per run of copies rather than per copy.
+    sg_test::require_counted(d, sg::stat::render_pass_splits);
+    CHECK(d[sg::stat::render_pass_splits] == (ctx->backend() == sg::backend_kind::dx12 ? 0 : 2));
+
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == 4 * 4 * 4);
+    auto const channel = [&](int x, int y, int c) { return int(pixels[(y * 4 + x) * 4 + c]); };
+    for (auto y = 0; y < 4; ++y)
+    {
+        // The first draw, which a reopen that cleared again would have erased.
+        CHECK(channel(0, y, 0) == 255);
+        CHECK(channel(0, y, 1) == 0);
+        // The second, drawn from the rewritten instance.
+        CHECK(channel(3, y, 2) == 255);
+        CHECK(channel(3, y, 1) == 0);
+    }
+}
+
+// The other half of the split accounting: a split is the reopen, not the suspend.
+// A copy after the scope's last draw reopens nothing and costs nothing, so no backend may count or report it — a
+// backend noting the suspend instead reports one here.
+ASYNC_INVOCABLE_TEST("sg - a copy after a rendering scope's last draw is not a split", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::quads.drawn);
+
+    auto const corner = [](float x, float y) { return shaders::quad::per_vertex{.corner = tg::vec3f(x, y, 0.0f)}; };
+    shaders::quad::per_vertex const quad[] = {
+        corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, -1), corner(0, 1), corner(-1, 1),
+    };
+    shaders::quad::per_instance const placed[] = {{.offset = tg::vec3f(0, 0, 0), .tint = tg::vec4f(1, 0, 0, 1)}};
+
+    // Both streams arrive filled, so the draw declares no access this list still has to transition: a barrier found
+    // at the draw is a split of its own, and this test is about the copy behind it.
+    auto const corners = ctx->persistent.create_buffer_from_data(quad, sg::buffer_usage::vertex_buffer);
+    auto const instance = ctx->persistent.create_buffer_from_data(placed, sg::buffer_usage::vertex_buffer);
+    auto const scratch = ctx->persistent.create_buffer<u32>(4, sg::buffer_usage::copy_dst);
+    auto const image
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = 4,
+                                             .height = 4,
+                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    u32 const words[] = {1, 2, 3, 4};
+
+    auto const before = ctx->metrics.stats();
+    auto cmd = ctx->create_command_list();
+    {
+        auto pass = cmd->raster.render_to(
+            shaders::target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 1, 0, 1))});
+        pass.bind_pipeline(*pipeline);
+        pass.bind_vertex_buffers(shaders::quad::buffers{.per_vertex = corners, .per_instance = instance}.views());
+        pass.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 1}});
+
+        // The scope's last draw is behind this, so it suspends a pass nothing reopens.
+        cmd->upload.data_to_buffer(scratch, cc::span<u32 const>(words));
+    }
+    auto const future = cmd->download.bytes_from_texture(image.raw());
+    ctx->submit_command_list(cc::move(cmd));
+    auto const d = ctx->metrics.stats() - before;
+
+    sg_test::require_counted(d, sg::stat::render_pass_splits);
+    CHECK(d[sg::stat::render_pass_splits] == 0);
+
+    // And the draw still landed: a pass suspended at the end of a scope must not lose what it drew.
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == 4 * 4 * 4);
+    for (auto y = 0; y < 4; ++y)
+        CHECK(int(pixels[(y * 4 + 0) * 4 + 0]) == 255);
+}
+
+// A copy naming a subresource the open scope renders into is refused rather than split around: a backend reopens the
+// suspended pass with the layouts its targets had, so nothing would transition the texture back out of the copy's.
+// Another mip of the same texture is another subresource, and stays legal.
+ASYNC_INVOCABLE_TEST("sg - a copy into the open rendering scope's own target is refused", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const image
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = 4,
+                                             .height = 4,
+                                             .mip_levels = 2,
+                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_dst});
+
+    byte const mip0[4 * 4 * 4] = {};
+    byte const mip1[2 * 2 * 4] = {};
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto pass = cmd->raster.render_to(
+            shaders::target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+
+        CHECK_ASSERTS(cmd->upload.bytes_to_texture(image.raw(), cc::span<byte const>(mip0)));
+        cmd->upload.bytes_to_texture(image.raw(), cc::span<byte const>(mip1), {.mip_level = 1});
+    }
+    ctx->submit_command_list(cc::move(cmd));
+    co_return;
+}
+
 ASYNC_INVOCABLE_TEST("sg - a pipeline built for one target set refuses a rendering of another, even where the formats "
                      "agree",
                      (sg::context_handle const& ctx))

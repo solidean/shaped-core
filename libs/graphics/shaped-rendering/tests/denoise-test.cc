@@ -238,7 +238,9 @@ TEST("sr - options_for at default settings equals the member's own defaults")
     CHECK(svgf.depth_similarity == svgf_default.depth_similarity);
 }
 
-ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context const& ctx = *ctx_h;
@@ -314,7 +316,8 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
 }
 
 ASYNC_INVOCABLE_TEST("sr - denoise refuses a named member it cannot run and writes nothing",
-                     (sg::context_handle const& ctx_h), )
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -334,7 +337,9 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses a named member it cannot run and writ
     CHECK(history.method() == sr::denoise_method::none);
 }
 
-ASYNC_INVOCABLE_TEST("sr - atrous keeps a flat image flat", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - atrous keeps a flat image flat",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -355,7 +360,9 @@ ASYNC_INVOCABLE_TEST("sr - atrous keeps a flat image flat", (sg::context_handle 
     CHECK(worst < 1e-5f);
 }
 
-ASYNC_INVOCABLE_TEST("sr - atrous removes noise without bleeding across a guide edge", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - atrous removes noise without bleeding across a guide edge",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -382,7 +389,9 @@ ASYNC_INVOCABLE_TEST("sr - atrous removes noise without bleeding across a guide 
     }
 }
 
-ASYNC_INVOCABLE_TEST("sr - atrous leaves a deep mean almost alone", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - atrous leaves a deep mean almost alone",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -439,7 +448,9 @@ namespace
 // A textured metal: its diffuse albedo is zero and its colour is all in the specular albedo.
 // à-trous filters unsplit radiance, so it must demodulate by the sum of the two; by the diffuse half alone the round trip
 // is a constant scale, and the checker is filtered as noise.
-ASYNC_INVOCABLE_TEST("sr - atrous demodulates by the specular albedo too", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - atrous demodulates by the specular albedo too",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -490,7 +501,9 @@ ASYNC_INVOCABLE_TEST("sr - atrous demodulates by the specular albedo too", (sg::
     CHECK(checker_contrast(output) > 0.95f * checker_contrast(checker));
 }
 
-ASYNC_INVOCABLE_TEST("sr - denoise history restarts on first use and after a reset", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - denoise history restarts on first use and after a reset",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -648,7 +661,9 @@ cc::shared_async<denoise_run> stream_frame(sg::context& ctx,
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -677,7 +692,9 @@ ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream", (sg::context_h
     CHECK(last_error < 0.25f * rmse_against_clean(noisy_frame(0, 0.1f)));
 }
 
-ASYNC_INVOCABLE_TEST("sr - svgf follows a moving image through its motion vectors", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - svgf follows a moving image through its motion vectors",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -741,7 +758,8 @@ ASYNC_INVOCABLE_TEST("sr - svgf follows a moving image through its motion vector
 }
 
 ASYNC_INVOCABLE_TEST("sr - svgf drops the history where the depth jumped, and after a reset",
-                     (sg::context_handle const& ctx_h), )
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -770,7 +788,9 @@ ASYNC_INVOCABLE_TEST("sr - svgf drops the history where the depth jumped, and af
     CHECK(max_distance_from(after_reset.output, 0.3f) < 1e-3f);
 }
 
-ASYNC_INVOCABLE_TEST("sr - a denoised image keeps the alpha it came in with", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - a denoised image keeps the alpha it came in with",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -805,7 +825,9 @@ ASYNC_INVOCABLE_TEST("sr - a denoised image keeps the alpha it came in with", (s
     CHECK(svgf_alpha_drift == 0.0f);
 }
 
-ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;

@@ -515,25 +515,17 @@ void vulkan_command_list::flush_barriers()
     _pending_barrier_buffers.clear();
     _pending_barrier_textures.clear();
 
-    // A barrier is illegal inside a dynamic-rendering instance, so an open one is closed around it and reopened.
+    // A barrier is illegal inside a dynamic-rendering instance, so an open one is suspended until the next draw.
     // Nothing here decides whether that is cheap: a frame that transitions its resources before the scope opens
     // never reaches this, and one that does not pays a tile flush on a tiler.
-    bool const suspend
-        = _in_render_pass && !(_pending_buffer_barriers.empty() && _pending_image_barriers.empty() && !has_global);
-    if (suspend)
-    {
-        vkCmdEndRendering(_buffer);
-        _stats.add(sg::stat::render_pass_splits);
-    }
+    if (!(_pending_buffer_barriers.empty() && _pending_image_barriers.empty() && !has_global))
+        suspend_rendering("a barrier");
 
     auto const globals = has_global ? cc::span<VkMemoryBarrier2 const>(&global, 1) : cc::span<VkMemoryBarrier2 const>();
     count_barriers(_stats, _pending_buffer_barriers, _pending_image_barriers, globals);
     submit_barriers(_buffer, _pending_buffer_barriers, _pending_image_barriers, globals);
     _pending_buffer_barriers.clear();
     _pending_image_barriers.clear();
-
-    if (suspend)
-        reopen_rendering();
 }
 
 namespace
@@ -596,6 +588,7 @@ void vulkan_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
 
     auto const dst_layout = track_texture_access(*dst, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
                                                  sg::access_flag::copy_write, sg::texture_layout::copy_dst);
+    suspend_rendering("a copy");
     flush_barriers();
 
     auto const copy = VkBufferImageCopy{
@@ -631,6 +624,7 @@ sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_textur
 
     auto const src_layout = track_texture_access(*src, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
                                                  sg::access_flag::copy_read, sg::texture_layout::copy_src);
+    suspend_rendering("a copy");
     flush_barriers();
 
     auto const copy = VkBufferImageCopy{
@@ -685,6 +679,7 @@ void vulkan_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
     cc::memcpy(staging.mapped, data.data(), size_t(data.size()));
 
     track_buffer_access(dst, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    suspend_rendering("a copy");
     flush_barriers();
 
     auto const region = VkBufferCopy{
@@ -727,6 +722,7 @@ sg::bytes_future vulkan_command_list::download_bytes_from_buffer(sg::raw_buffer_
     auto const staging = _ctx._download_inline.reserve(size_in_bytes);
 
     track_buffer_access(src, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    suspend_rendering("a copy");
     flush_barriers();
 
     auto const region = VkBufferCopy{
@@ -788,6 +784,7 @@ void vulkan_command_list::copy_buffer_region(sg::raw_buffer_handle src,
         track_buffer_access(*s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
         track_buffer_access(*d, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     }
+    suspend_rendering("a copy");
     flush_barriers();
 
     auto const region = VkBufferCopy{

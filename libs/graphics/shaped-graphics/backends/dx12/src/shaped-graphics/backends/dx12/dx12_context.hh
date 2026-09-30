@@ -600,7 +600,7 @@ public:
     [[nodiscard]] cc::result<sg::gpu_memory_usage> query_gpu_memory() const override;
     [[nodiscard]] cc::result<sg::gpu_counters> read_gpu_counters() const override;
 
-    // create_dx12_context fills this in once it has picked an adapter, like every other member here.
+    // create_dx12_context fills these in once it has picked an adapter, like every other member here.
     using sg::context::set_adapter_info;
 
     /// The context's stat totals, for the transfer systems that count into them.

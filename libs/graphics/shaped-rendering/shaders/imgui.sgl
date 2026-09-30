@@ -1,0 +1,48 @@
+// Dear ImGui's draw lists, in one triangle-list pass.
+// Paired with sr::imgui_routine.
+//
+// Positions arrive in imgui's display space (pixels, origin top-left) and reach clip space through the inline constants.
+// imgui only ever needs a 2D ortho projection, so scale + translate is the whole transform: a mat4 would be 48 further bytes of zeros.
+//
+// Colors are sRGB-encoded 8-bit and must reach the target unconverted, so the target must not be an _srgb format.
+// The routine asserts that; see its header for why compensating here would be worse.
+
+// Rewritten once per frame.
+@inline binding imgui_constants:
+    scale: float2
+    translate: float2
+
+// ImDrawVert, byte for byte: the routine binds imgui's own vertex buffer.
+@vertex struct imgui_vertex:
+    position: float2
+    uv: float2
+    // decoded to [0, 1] with no transfer function, which is right for colors that are already sRGB-encoded
+    @format(.rgba8_unorm) color: float4
+
+struct imgui_varyings:
+    @position position: hpos4
+    uv: float2
+    color: float4
+
+@pixel struct imgui_target:
+    color: float4
+
+binding imgui_atlas:
+    texture: texture_2d[float4]
+    // clamped so the atlas does not bleed across glyph edges
+    sampler texture_sampler:
+        filter = .linear
+        address = .clamp_edge
+
+@vertex fun main_vs(v: imgui_vertex){imgui_constants} -> imgui_varyings:
+    let p = v.position * imgui_constants.scale + imgui_constants.translate
+    return {
+        position = hpos4(p.x, p.y, 0.0, 1.0)
+        uv = v.uv
+        color = v.color
+    }
+
+@pixel fun main_ps(p: imgui_varyings){imgui_atlas} -> imgui_target:
+    return {
+        color = p.color * imgui_atlas.texture.sample(p.uv, imgui_atlas.texture_sampler)
+    }

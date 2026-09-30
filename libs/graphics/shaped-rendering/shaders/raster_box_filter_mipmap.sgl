@@ -1,0 +1,41 @@
+// Fills one mip level from the level above it with the 4-tap box filter box_filter_mipmap.hlsl applies,
+// through the raster pipeline rather than through an image.
+//
+// This is the path for a format that cannot be a storage image, which in practice means an sRGB one.
+// Loading decodes the transfer function and a render-target write encodes it again, so the average is taken over linear values.
+//
+// 2D non-array textures only: a render target is 2D-shaped, and every other shape stays on the compute path.
+// The routine binds the source as a single-mip view of level N and renders into level N+1, so no level is read and written by one pass.
+
+binding raster_mipmap_source:
+    level: texture_2d[float4]
+
+struct raster_mipmap_varyings:
+    @position position: hpos4
+
+@pixel struct raster_mipmap_target:
+    color: float4
+
+// Vertices 0, 1 and 2 land at (0,0), (2,0) and (0,2) before the mapping to clip space: one triangle covering the screen.
+@vertex fun main_vs(@vertex_index vertex: int) -> raster_mipmap_varyings:
+    let corner = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = corner * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return {
+        position = hpos4(clip.x, clip.y, 0.0, 1.0)
+    }
+
+@pixel fun main_ps(p: raster_mipmap_varyings){raster_mipmap_source} -> raster_mipmap_target:
+    // The position is the pixel's centre, so truncating it gives this texel's coordinate in the target level.
+    let base = int2(p.position.x as int, p.position.y as int) * int2(2, 2)
+    let size = raster_mipmap_source.level.size()
+
+    // An odd source extent is not exactly twice the target, and clamping the second tap keeps it inside the level.
+    let hi = int2(min(base.x + 1, size.x - 1), min(base.y + 1, size.y - 1))
+
+    let sum = raster_mipmap_source.level.load(base)
+        + raster_mipmap_source.level.load(int2(hi.x, base.y))
+        + raster_mipmap_source.level.load(int2(base.x, hi.y))
+        + raster_mipmap_source.level.load(hi)
+    return {
+        color = sum * 0.25
+    }

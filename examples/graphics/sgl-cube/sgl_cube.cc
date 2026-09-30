@@ -25,10 +25,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/capture.hh>
 #include <shaped-rendering/window.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
-#include <shaped-shader-library/compiler/metal_compiler.hh>
-#include <shaped-shader-library/compiler/sgl_compiler.hh>
-#include <shaped-shader-library/compiler/wgsl_compiler.hh>
+#include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -244,22 +241,11 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
     }
     auto const ctx = ctx_result->value();
 
-    // One SGL edge per format this build can compile, and the library picks: `acquire` walks the context's accepted
-    // formats and asks for an edge from the package's language, so the example never names a shader format itself.
-    // Each edge is SGL's pipeline in front of the compiler that was there already.
+    // Every edge this build can compile, and the library picks: `acquire` walks the context's accepted formats and asks
+    // for an edge from the package's language, so the example never names a shader format itself.
+    // An SGL edge is SGL's pipeline in front of the compiler that was there already, and SGL over WGSL needs no toolchain.
     auto lib = slib::shader_library();
-    lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler())); // needs no toolchain
-#if SLIB_HAS_DXC
-    auto dxil = slib::create_dxc_compiler();
-    auto spirv = slib::create_dxc_spirv_compiler();
-    if (dxil.has_value())
-        lib.add_compiler(slib::create_sgl_compiler(cc::move(dxil.value())));
-    if (spirv.has_value())
-        lib.add_compiler(slib::create_sgl_compiler(cc::move(spirv.value())));
-#endif
-#if SLIB_HAS_METAL
-    lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler())); // a metallib, or MSL the driver compiles
-#endif
+    slib::add_available_compilers(lib);
     lib.add_package(shaders::package());
 
     auto const building = build_pipeline(*ctx, color_format);

@@ -160,6 +160,10 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
 {
     auto& ctx = *handle;
 
+    // The barrier the draw needs on work recorded before its scope is found at the draw, so the scope is suspended for it.
+    // Pinned by the split count below; the warning is only the context's first barrier split, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
     auto target
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
                                             .width = k_extent,
@@ -237,6 +241,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
     REQUIRE(raster_group != nullptr);
 
     // One list: upload, dispatch, then a rendering scope whose draw reads what the dispatch wrote.
+    auto const before = ctx.metrics.stats();
     auto cmd = ctx.create_command_list();
     REQUIRE(cmd != nullptr);
     cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<vertex const>(vertices, 3)));
@@ -253,6 +258,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     ctx.submit_command_list(cc::move(cmd));
+    auto const splits = (ctx.metrics.stats() - before)[sg::stat::render_pass_splits];
+    CHECK(splits == 1).context(cc::format("the scope split {} time(s), expected once for the draw's barrier", splits));
 
     auto down = ctx.create_command_list();
     auto future = down->download.bytes_from_texture(target.raw());
@@ -317,6 +324,10 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw declares its array elements and reads w
 {
     auto& ctx = *handle;
 
+    // The barrier the draw needs on work recorded before its scope is found at the draw, so the scope is suspended for it.
+    // Pinned by the split count below; the warning is only the context's first barrier split, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
     constexpr u32 k_first_value = 6;
     constexpr u32 k_last_value = 9;
 
@@ -354,6 +365,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw declares its array elements and reads w
         {.index = 3, .access = sg::access_flag::shader_read},
     };
 
+    auto const before = ctx.metrics.stats();
     auto cmd = ctx.create_command_list();
     REQUIRE(cmd != nullptr);
     u32 const first_data[] = {k_first_value, 0, 0, 0};
@@ -370,6 +382,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw declares its array elements and reads w
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     ctx.submit_command_list(cc::move(cmd));
+    auto const splits = (ctx.metrics.stats() - before)[sg::stat::render_pass_splits];
+    CHECK(splits == 1).context(cc::format("the scope split {} time(s), expected once for the draw's barrier", splits));
 
     auto down = ctx.create_command_list();
     auto future = down->download.bytes_from_texture(target.raw());

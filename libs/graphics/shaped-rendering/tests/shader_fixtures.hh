@@ -10,11 +10,12 @@
 // One library for the whole binary removes that constraint rather than scheduling around it, and it also removes the
 // repeated work: sr's shaders compile once for the run instead of once per test.
 //
-// Only compiled where the GPU tests are (WIN32 + DXC), since a build without a compiler has nothing to register.
+// Compiled wherever a backend exists: which compiler edges the build has decides what a package acquires as, not
+// whether this fixture is here.
 
 namespace sr_test
 {
-/// sr's own shader package, with every compiler this build has, created on first use.
+/// sr's shader packages, with every compiler this build has, created on first use.
 /// Never destroyed before the run ends, so a shader compiled for one test is still there for the next.
 slib::shader_library& shader_fixtures();
 

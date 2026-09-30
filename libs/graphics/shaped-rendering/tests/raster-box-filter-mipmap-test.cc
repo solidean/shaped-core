@@ -53,10 +53,16 @@ constexpr auto raster_mip_usage = sg::texture_usage::texture | sg::texture_usage
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear space",
-                     (sg::context_handle const& ctx_h))
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
+
+    // Each level is sampled right after the pass before wrote it, and that barrier is found only at the draw, so a
+    // backend that cannot hold it inside a pass splits the scope for it.
+    // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
 
     // 2x2 down to 1x1: the whole filter in one pass, and one texel to read back.
@@ -120,10 +126,17 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linea
 
 // A chain deeper than one level, and one generated from partway down.
 // The streaming case is exactly this: the file supplied the first levels and only the tail needs filling.
-ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
+
+    // Each level is sampled right after the pass before wrote it, and that barrier is found only at the draw, so a
+    // backend that cannot hold it inside a pass splits the scope for it.
+    // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
 
     // 8x8 down to 1x1.

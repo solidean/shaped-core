@@ -557,6 +557,15 @@ It had been invisible for as long as the example existed, because the developer'
 **Open the image; do not infer it from the code.**
 Findings from an image live in that entry, and **offer the deferral**: an imperfect example is not a reason to hold a change.
 
+### A test's allowance can hide what an example trips
+
+**Run each example a change touches on every backend it builds for, not only the default one.**
+An example runs under the same log rule as a test and allows nothing it does not declare, while a test often allows exactly the warning in question.
+So a warning that every test allows can fail the example, and only the example's run shows it.
+A change made every render-pass split warn, and each routine test allowed the split its draw provoked, so the suite was green on every backend.
+The denoise playground's vulkan capture then failed with 192 undeclared split warnings, one per frame from the branch's own imgui and blit draws — the dx12 capture beside it was clean.
+`uv run dev.py example <name> --capture --example-backend vulkan` is the run; it builds into its own directory, so the default build is not touched.
+
 ### A test's comment is a claim about the test, checked the way a doc claim is
 
 Read what the test asserts, then read what its comment says it asserts.

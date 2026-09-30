@@ -55,11 +55,17 @@ struct imgui_fixture
         sr::imgui_routine::prewarm(*ctx, sg::pixel_format::rgba8_unorm);
         (void)co_await ctx->routines.idle_completion();
 
+        // prepare() records every copy before the scope, and what is left is the barrier the first draw needs for the
+        // geometry and any atlas update it uploaded: vulkan closes the scope for it.
+        // Nothing states a buffer's access before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+        nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
         auto cmd = ctx->create_command_list();
+        auto const prepared = sr::imgui_routine::prepare(*cmd, draw_data);
         {
             auto pass = cmd->raster.render_to(
                 {.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
-            CHECK(sr::imgui_routine::execute(pass, draw_data) == sg::routine_outcome::executed);
+            CHECK(sr::imgui_routine::execute(pass, prepared) == sg::routine_outcome::executed);
         }
         ctx->submit_command_list(cc::move(cmd));
 
@@ -80,12 +86,9 @@ struct imgui_fixture
     }
 };
 
-/// Builds a fixture over `ctx`, or null when it cannot run the test.
+/// Builds a fixture over `ctx`: imgui's shaders are SGL, so every backend runs it.
 std::unique_ptr<imgui_fixture> make_fixture(sg::context_handle const& ctx)
 {
-    if (ctx == nullptr || !ctx->accepts_shader_format(sg::shader_format::dxil))
-        return nullptr;
-
     auto fixture = std::make_unique<imgui_fixture>();
     fixture->ctx = ctx;
     fixture->imgui = sr::imgui_context::create();
@@ -125,11 +128,11 @@ void draw_test_window()
 
 ASYNC_INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target",
                      (sg::context_handle const& ctx),
-                     exclusive("sr-imgui-context"))
+                     exclusive("sr-imgui-context"),
+                     exclusive("sg-reload-generation"))
 {
+    REQUIRE(ctx != nullptr);
     auto const f = make_fixture(ctx);
-    if (f == nullptr)
-        SKIP("no device accepting DXIL, or no DXC");
 
     co_await f->frame(&draw_test_window);
     auto const pixels = co_await f->read_back();
@@ -147,14 +150,14 @@ ASYNC_INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen targe
 
 ASYNC_INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target",
                      (sg::context_handle const& ctx),
-                     exclusive("sr-imgui-context"))
+                     exclusive("sr-imgui-context"),
+                     exclusive("sg-reload-generation"))
 {
     // The multi-viewport path, which a single viewport at the origin never reaches:
     // geometry arrives in desktop coordinates and the target covers only part of the desktop, so the routine must subtract the window's origin.
     // Pinned end-to-end rather than only in compute_ortho_constants, because arithmetic being right is not the same as it reaching the draw.
+    REQUIRE(ctx != nullptr);
     auto const f = make_fixture(ctx);
-    if (f == nullptr)
-        SKIP("no device accepting DXIL, or no DXC");
 
     auto const draw_box = []
     {
@@ -179,9 +182,8 @@ ASYNC_INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing",
                      exclusive("sr-imgui-context"),
                      exclusive("sg-reload-generation"))
 {
+    REQUIRE(ctx != nullptr);
     auto const f = make_fixture(ctx);
-    if (f == nullptr)
-        SKIP("no device accepting DXIL, or no DXC");
 
     co_await f->frame(&draw_test_window);
     auto const before_reload = co_await f->read_back();
@@ -198,11 +200,11 @@ ASYNC_INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing",
 
 ASYNC_INVOCABLE_TEST("sr::imgui_routine - an empty frame records nothing and does not assert",
                      (sg::context_handle const& ctx),
-                     exclusive("sr-imgui-context"))
+                     exclusive("sr-imgui-context"),
+                     exclusive("sg-reload-generation"))
 {
+    REQUIRE(ctx != nullptr);
     auto const f = make_fixture(ctx);
-    if (f == nullptr)
-        SKIP("no device accepting DXIL, or no DXC");
 
     co_await f->frame([] {}); // no windows at all
 

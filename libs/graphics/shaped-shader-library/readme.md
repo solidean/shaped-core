@@ -20,7 +20,7 @@ sc_add_shader_package(
 
 ```cpp
 slib::shader_library lib;
-lib.add_compiler(slib::create_dxc_compiler().value());
+slib::add_available_compilers(lib);   // every edge this build can make
 lib.add_package(my::shaders::package());
 lib.start_hot_reload();
 

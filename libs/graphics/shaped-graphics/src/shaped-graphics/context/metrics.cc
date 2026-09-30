@@ -60,3 +60,13 @@ sg::stats sg::context_metrics_scope::stats() const
 {
     return _ctx._stats.snapshot();
 }
+
+bool sg::context_metrics_scope::render_pass_split_warnings() const
+{
+    return _ctx._render_pass_split_warnings.load(cc::memory_order_relaxed);
+}
+
+void sg::context_metrics_scope::set_render_pass_split_warnings(bool enabled)
+{
+    _ctx._render_pass_split_warnings.store(enabled, cc::memory_order_relaxed);
+}

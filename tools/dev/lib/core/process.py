@@ -132,11 +132,29 @@ def msvc_env(toolset: str | None = None, arch: str = "x64") -> dict[str, str] | 
 # Emscripten / emsdk environment setup
 # ---------------------------------------------------------------------------
 
+def default_emsdk_root() -> Path:
+    """Where `dev.py install emsdk` puts emsdk when nothing names another place, and the last place `find_emsdk_root` looks."""
+    return Path.home() / "tools" / "emsdk"
+
+
+def pinned_emsdk_version(repo_root: Path) -> str:
+    """The Emscripten version this repo builds with: `tools/emsdk.version`, which CI reads too."""
+    return (repo_root / "tools" / "emsdk.version").read_text(encoding="utf-8").strip()
+
+
+def installed_emsdk_version(root: Path) -> str | None:
+    """The Emscripten version an emsdk root has activated, or None when it has none."""
+    version_file = root / "upstream" / "emscripten" / "emscripten-version.txt"
+    if not version_file.is_file():
+        return None
+    return version_file.read_text(encoding="utf-8").strip().strip('"')
+
+
 def find_emsdk_root(emsdk_path: str | None = None) -> Path | None:
     """Locate an emsdk installation directory, or None if none is found.
 
-    First match wins, in order: the explicit `emsdk_path` (--emsdk-path), `SC_EMSDK_PATH`, an already activated `EMSDK`, then the root derived from `emcc` on PATH.
-    A bare emsdk checkout therefore works without permanent or --system activation.
+    First match wins, in order: the explicit `emsdk_path` (--emsdk-path), `SC_EMSDK_PATH`, an already activated `EMSDK`, the root derived from `emcc` on PATH, then `default_emsdk_root()`.
+    A bare emsdk checkout therefore works without permanent or --system activation, and one `dev.py install emsdk` made needs no variable at all.
     """
     env_script = "emsdk_env.bat" if platform.system() == "Windows" else "emsdk_env.sh"
 
@@ -152,6 +170,7 @@ def find_emsdk_root(emsdk_path: str | None = None) -> Path | None:
         parents = Path(emcc).resolve().parents
         if len(parents) >= 3:
             candidates.append(parents[2])
+    candidates.append(default_emsdk_root())
 
     for c in candidates:
         if (c / env_script).is_file():

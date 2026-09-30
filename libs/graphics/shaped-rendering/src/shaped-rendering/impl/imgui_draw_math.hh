@@ -12,14 +12,14 @@
 
 namespace sr::impl
 {
-/// The 16-byte inline-constants payload imgui.hlsl's `imgui_constants` expects.
-/// Layout must match the cbuffer exactly — two float2s packed into one 16-byte register.
+/// The 16-byte inline-constants payload imgui.sgl's `imgui_constants` expects.
+/// Layout must match the block exactly: two float2s, back to back.
 struct imgui_ortho_constants
 {
     tg::vec2f scale;
     tg::vec2f translate;
 };
-static_assert(sizeof(imgui_ortho_constants) == 16, "must match imgui.hlsl's imgui_constants cbuffer");
+static_assert(sizeof(imgui_ortho_constants) == 16, "must match imgui.sgl's imgui_constants block");
 
 /// Maps imgui's display space (pixels, origin top-left, y down) onto clip space (origin center, y up).
 /// The y axis flips, which is why scale.y is negative for a normal top-left display origin.

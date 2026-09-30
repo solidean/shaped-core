@@ -1,0 +1,29 @@
+// Fullscreen-triangle blit: sample a texture across the target of an open rendering scope.
+// Paired with sr::blit_routine, which draws 3 vertices and no vertex buffer.
+
+binding blit_source:
+    texture: texture_2d[float4]
+    sampler linear_clamp:
+        filter = .linear
+        address = .clamp_edge
+
+struct blit_varyings:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct blit_target:
+    color: float4
+
+// Vertices 0, 1 and 2 land at uv (0,0), (2,0) and (0,2): one triangle covering the screen.
+@vertex fun main_vs(@vertex_index vertex: int) -> blit_varyings:
+    let uv = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = uv * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return {
+        position = hpos4(clip.x, clip.y, 0.0, 1.0)
+        uv = uv
+    }
+
+@pixel fun main_ps(v: blit_varyings){blit_source} -> blit_target:
+    return {
+        color = blit_source.texture.sample(v.uv, blit_source.linear_clamp, level = 0.0)
+    }

@@ -234,7 +234,7 @@ private:
     /// A render pass needs the compute one closed first.
     void end_encoder();
 
-    /// The render encoder of the open rendering scope; null outside one.
+    /// The render encoder of the open rendering scope; null outside one, and while the scope is suspended.
     [[nodiscard]] MTL4::RenderCommandEncoder* render_encoder() const { return _render_encoder; }
 
     /// Declares every bound group's views at an op of `stages`, as `footprint` says the code touches them — the shape
@@ -291,9 +291,12 @@ private:
     /// needs, since the clear or discard the caller asked for already happened when the scope opened.
     void open_render_encoder(bool force_load);
 
-    /// Close the open render pass and open it again over the same targets, ordering the two halves at the boundary.
+    /// Close the open render pass, and leave it closed until a draw needs it again: the scope stays open, suspended.
+    /// Counts the split, names `cause` in its warning, and bumps `pass_reopens`.
     ///
-    /// **This is how a fragment-stage producer is ordered against a later draw.** A render encoder's
+    /// Two things need it.
+    /// A copy, because Metal has one encoder open at a time and a copy is recorded on the compute encoder.
+    /// And a fragment-stage producer ordered against a later draw, for which it is the only way: a render encoder's
     /// `barrierAfterEncoderStages` refuses `MTLStageFragment` as its source, so a shader write in one draw cannot be
     /// named as what the next draw waits on — and a barrier clamped down to the vertex stage orders nothing that
     /// matters.
@@ -301,8 +304,16 @@ private:
     /// one waits with `barrierAfterQueueStages`, which is the pair every encoder boundary here already uses.
     /// vulkan does the same thing for the same reason.
     ///
-    /// The encoder state is replayed, and the attachments reload rather than reclear.
-    void reopen_render_encoder();
+    /// Only a draw resumes, so several copies in a row cost one split rather than one each.
+    void suspend_render_encoder(cc::string_view cause, split_remedy remedy = split_remedy::record_outside_scope);
+
+    /// Reopens a suspended pass over the same targets: the attachments reload rather than reclear, and the encoder
+    /// state the scope set is replayed.
+    /// A no-op unless suspended.
+    void resume_render_encoder();
+
+    /// Inside a rendering scope, whether its encoder is open or suspended.
+    [[nodiscard]] bool in_rendering_scope() const { return _render_encoder != nullptr || _render_suspended; }
 
     /// Write a group's argument-buffer address into the table and remember what it names.
     /// Shared by the compute and raster bind paths, which differ only in which encoder is open.
@@ -380,6 +391,17 @@ private:
 
     MTL4::ArgumentTable* _argument_table = nullptr;
     MTL4::RenderCommandEncoder* _render_encoder = nullptr;
+
+    /// A rendering scope whose encoder a copy or a barrier closed, and no draw has reopened yet.
+    bool _render_suspended = false;
+
+    /// What closed the open scope's encoder, and what to do about it, named when its next draw reopens it.
+    cc::string_view _render_split_cause;
+    split_remedy _render_split_remedy = split_remedy::record_outside_scope;
+
+    /// Draws recorded on the open render encoder since it opened.
+    /// None means every fragment-stage write is in an earlier encoder, which the boundary pair already ordered.
+    isize _draws_in_render_encoder = 0;
 
     /// The pipeline of the open rendering scope, for the primitive type a draw is issued with.
     metal_raster_pipeline const* _bound_raster = nullptr;

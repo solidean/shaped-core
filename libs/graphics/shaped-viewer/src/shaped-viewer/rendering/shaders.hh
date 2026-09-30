@@ -13,7 +13,7 @@ namespace sv
 /// Register it with the shader library once at startup, before any routine runs — a routine acquires its shaders through the library, so without this it has nothing to compile:
 ///
 ///     slib::shader_library lib;
-///     lib.add_compiler(slib::create_dxc_compiler().value());
+///     slib::add_available_compilers(lib);
 ///     lib.add_package(sv::shader_package());
 ///     lib.start_hot_reload();
 ///

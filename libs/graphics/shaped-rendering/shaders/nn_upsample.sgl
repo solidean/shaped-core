@@ -1,0 +1,37 @@
+// The network's 2x nearest upsample, which is how the decoder climbs back up.
+//
+// Exactly OIDN's: one source texel written to the four destination texels under it, per channel.
+// Nearest rather than bilinear is not an approximation — it is what the weights were trained against, and a smoother
+// filter here would be a different network.
+//
+// Feature maps are HWC: index (y * width + x) * channels + c.
+
+// the SOURCE's extent, which is half the destination's
+@inline binding nn_upsample_constants:
+    width: int
+    height: int
+    channels: int
+
+binding nn_upsample_features:
+    source: buffer[float]
+    target: mut buffer[float]
+
+// One thread per source texel and channel, the channel fastest so a wave reads one contiguous run.
+@compute(64) fun main_cs(@thread_id id: int3){nn_upsample_features, nn_upsample_constants}:
+    let c = id.x
+    let x = id.y
+    let y = id.z
+    let channels = nn_upsample_constants.channels
+    let width = nn_upsample_constants.width
+    if c >= channels or x >= width or y >= nn_upsample_constants.height => return
+
+    let v = nn_upsample_features.source[(y * width + x) * channels + c]
+
+    let target_width = width * 2
+    let row0 = ((y * 2) * target_width + x * 2) * channels + c
+    let row1 = ((y * 2 + 1) * target_width + x * 2) * channels + c
+
+    nn_upsample_features.target[row0] = v
+    nn_upsample_features.target[row0 + channels] = v
+    nn_upsample_features.target[row1] = v
+    nn_upsample_features.target[row1 + channels] = v

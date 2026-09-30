@@ -57,6 +57,7 @@ public:
     /// Returns a bytes_future ready once the submitted list has finished on the GPU and the rows have been un-padded into host memory.
     /// The result layout matches bytes_to_texture — rows = height-in-blocks, row bytes = width-in-blocks × block-bytes.
     /// Precondition: a given `region` is in bounds and block-aligned.
+    /// The subresource must not be one an open rendering scope draws into — see bytes_to_texture for why.
     [[nodiscard]] bytes_future bytes_from_texture(raw_texture_handle texture,
                                                   subresource_index const& subresource = {},
                                                   cc::optional<texture_region> region = {});

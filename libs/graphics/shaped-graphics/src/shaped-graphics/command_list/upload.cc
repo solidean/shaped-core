@@ -18,6 +18,7 @@ void command_list_upload_scope::bytes_to_texture(raw_texture_handle texture,
     // No region copies the whole subresource.
     // A given region is used as-is and bounds-checked, and an empty one is a no-op.
     impl::assert_valid_subresource(texture, subresource);
+    _cmd.check_copy_outside_rendering_targets(texture.get(), subresource, "an upload into a texture");
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);
     if (box.is_empty())

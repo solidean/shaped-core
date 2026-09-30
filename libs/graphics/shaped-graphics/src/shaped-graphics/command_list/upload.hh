@@ -72,6 +72,9 @@ public:
     /// The source bytes are copied immediately, and the write is visible to later commands in the list.
     /// Preconditions: the subresource exists, and `region` is in bounds and block-aligned for a block-compressed format.
     /// `pixels.size()` equals the box's tightly-packed byte size — rows = height-in-blocks, row bytes = width-in-blocks × block-bytes.
+    /// The subresource must not be one an open rendering scope draws into: a backend reopens the pass it suspends for
+    /// this copy with the layouts its targets had, so nothing would transition the texture back out of the copy's.
+    /// Another mip or slice of the same texture is another subresource, and stays legal.
     void bytes_to_texture(raw_texture_handle texture,
                           cc::span<byte const> pixels,
                           subresource_index const& subresource = {},

@@ -131,7 +131,7 @@ Per-platform specifics:
   **The formula is versioned on purpose.**
   The unversioned `llvm` is whatever Homebrew ships today, so a build pinned to it breaks the day upstream moves — which it did, from 22 to 23, with nothing in the repo having changed.
   `--toolset 22` stays as the assertion that the formula is the version we think it is.
-- **WASM** uses the official `emscripten-core/setup-emsdk` action, pinned to a fixed Emscripten version (`EMSCRIPTEN_VERSION`) with the emsdk cached across runs.
+- **WASM** uses the official `emscripten-core/setup-emsdk` action, pinned to the Emscripten version `tools/emsdk.version` names (read into `EMSCRIPTEN_VERSION`), with the emsdk cached across runs.
   `dev.py` gets `--emsdk-path "$EMSDK"` on doctor, build and test; tests run under Node.
 - **Windows ARM** (`windows-11-arm`, native arm64) uses VS 2022's MSVC pinned with `--toolset 14.44`, like the x64 job.
   The `arm64-windows-msvc-*` preset sets the CMake architecture and host toolset to arm64, and `dev.py` threads the preset's arch into the vcvars `-arch`, so `cl` targets arm64 rather than x64.

@@ -70,6 +70,15 @@ void command_list::open_rendering(rendering_info const& info)
 {
     _rendering_target_set = info.target_set;
 
+    _rendering_targets.clear();
+    for (auto const& target : info.color_targets)
+        _rendering_targets.push_back({.texture = target.view.texture().get(), .range = target.view.range()});
+    if (info.depth_stencil_target.has_value())
+    {
+        auto const& view = info.depth_stencil_target.value().view;
+        _rendering_targets.push_back({.texture = view.texture().get(), .range = view.range()});
+    }
+
     auto formats = raster_target_formats();
     for (auto const& target : info.color_targets)
         formats.color.push_back(target.view.format());
@@ -88,6 +97,7 @@ void command_list::open_rendering(rendering_info const& info)
 void command_list::close_rendering()
 {
     _rendering_target_set.clear();
+    _rendering_targets.clear();
     _rendering_formats = {};
     // A rendering scope binds nothing the next one inherits.
     _raster_layout = nullptr;
@@ -97,6 +107,32 @@ void command_list::close_rendering()
         vb = nullptr;
     _index_buffer = nullptr;
     raster_end_rendering();
+}
+
+void command_list::check_copy_outside_rendering_targets(raw_texture const* texture,
+                                                        subresource_index const& subresource,
+                                                        cc::string_view what) const
+{
+    for (auto const& target : _rendering_targets)
+    {
+        if (target.texture != texture)
+            continue;
+        // Only the subresources the target actually renders to are refused, so a copy into another mip or slice of
+        // the same texture stays legal.
+        // The aspect axis is left out on purpose: a depth-stencil target holds both planes in one layout, and the two
+        // aspect numberings in play here disagree for depth formats.
+        if (subresource.mip_level < target.range.mip_range.start || subresource.mip_level >= target.range.mip_range.end)
+            continue;
+        if (subresource.array_layer < target.range.array_range.start
+            || subresource.array_layer >= target.range.array_range.end)
+            continue;
+
+        CC_ASSERTF(false,
+                   "{} names mip {}, slice {} of a texture the open rendering '{}' draws into. A backend reopens the "
+                   "suspended pass with the layouts its targets had, so nothing transitions the texture back out of "
+                   "the copy's. Record the copy before render_to, or after the scope closes",
+                   what, subresource.mip_level, subresource.array_layer, _rendering_target_set);
+    }
 }
 
 void command_list::bind_raster_group(int group_index, binding_group const& group)
