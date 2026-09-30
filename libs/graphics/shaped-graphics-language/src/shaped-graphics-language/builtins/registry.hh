@@ -7,6 +7,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/builtins/ids.hh>
+#include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
 
 /// Everything the compiler knows about a builtin, in ONE record per builtin.
@@ -177,7 +178,8 @@ struct sgl::builtins::type_record
 struct sgl::builtins::function_record
 {
     /// The signature as SGL source, without `@builtin`: `@pure fun mix(a: float3, b: float3, t: float) -> float3`.
-    /// `@pure` and `@operator("…")` stand in this text and nowhere else.
+    /// `@pure`, `@operator("…")`, `@stages(…)` and `@internal` stand in this text and nowhere else.
+    /// `@internal` marks a step only the prelude calls, which no lookup from the program finds (CHK-323).
     cc::string signature;
     /// Zero or more whole `///` lines, without the line break of the last one.
     cc::string doc;
@@ -204,9 +206,17 @@ struct sgl::builtins::function_record
     bool is_atomic = false;
     /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
     bool is_nonuniform_mark = false;
-    /// Takes one argument more than its signature names, of the type its first argument holds: a stream's `emit`,
-    /// whose vertex is a struct of the program (CHK-303).
+    /// Takes one argument more than its signature names, of a struct of the program: a stream's `emit` its vertex, of
+    /// the type the stream holds (CHK-303), and a trace its payload, which the call writes through (CHK-329).
     bool takes_element = false;
+    /// What a device needs to run a call of it: an entry point that reaches one needs it too, and declares it (CHK-322).
+    check::feature_set features;
+    /// Takes, past its signature, the position of its acceleration-structure argument among the acceleration members
+    /// of the entry point's binding list, which flatten appends as an int: the emulated trace's root (CHK-325).
+    bool takes_acceleration_index = false;
+    /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
+    /// The call itself writes nothing, and a local it initializes is never copied.
+    bool declares_only = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

@@ -5,6 +5,14 @@ An idea that may be far off, or that we may never want, belongs in the [spec inc
 What the compiler carries today is the [spec](spec/_index.md); a construct it does not carry yet is `unsupported-yet` there.
 `DEBUG_` in a name marks a stand-in for something listed here.
 
+- **A compile still copies the checked prelude.** A check behind `checked_prelude()` starts from a copy of the whole checker state, the prelude's side tables included.
+  With the whole-module passes that run over the prelude's part again, that is about 1.9 ms of the 2.9 ms a ten-line compute shader takes on `debug-linux-clang`.
+  Sharing the prelude's part read-only, and running those passes over the program's part alone, would leave the program's own check.
+  The test `sgl profile - checking a small program behind the prelude, sampled` measures both.
+- **A source that stands in for a prelude file checks the whole prelude.** Such a source is checked as that file of the prelude (`prelude_file_of`).
+  It is `prelude/core.sgl` open in an editor, or a user's `shaders/prelude/core.sgl`.
+  Such a check has no checked prelude to continue, so it takes the full pass, which is the 50 ms a compile took before.
+
 - **A debug build overflows its stack well inside `k_max_depth`.** A compute entry point whose store sums a 150-term chain (`x + 1.0 + … + 1.0`) crashes `sgl describe` on `debug-nopch-clang`.
   It did so before the footprint became a linear pass too.
   The recursive passes each guard their own depth at 200, which a release frame fits and a debug frame does not.
@@ -27,11 +35,35 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   The way out not taken yet: a `pipeline` numbers only the samplers its stages reach, and emits those stages with its numbers.
   It costs an entry point's text depending on its pipeline, and a stage shared by two pipelines compiling twice.
   A hand-assembled pipeline keeps declaration order.
+- **Textures, images and samplers in a test's bindings.** A test lists values, buffers and acceleration structures, and its driver binds them (CHK-333, EVAL-94).
+  A binding that holds a texture, an image or a sampler is `unsupported-yet` in a test, since the interpreter has no texel to read yet.
+  It needs a texture a driver can bind, `member_data` taking its texels, and the texture builtins' evaluators reading them.
+- **A watertight triangle test in the emulated trace.** Möller–Trumbore misses or doubles a ray through a shared edge ([raytracing-polyfill.md](raytracing-polyfill.md#traversal)).
+- **A spatial sort for the webgpu BVH.** sg builds the tree over the primitive order, so a triangle soup traces slowly ([raytracing-polyfill.md](raytracing-polyfill.md#building)).
+  A proper build sorts primitives along a space-filling curve on the GPU first, which wants a GPU sort sg does not have yet.
+- **Compacting sg's acceleration pool.** A freed region is reused first-fit, and the pool only grows, so a scene that rebuilds often fragments it.
+- **`prelude/raytracing.sgl` is ~1200 lines, and its three emulated traversals repeat one stack walk.** Triangles, boxes and both differ only in what a BLAS leaf does.
+  One walk taking the leaf as a function value (CHK-317) would carry all three, once the inliner's output of it is as tight as the copies are.
+- **Metal's pipeline falls short of DXR in four places** (the spec's raytracing file, "Per target"), none tested on hardware here.
+  A hit's instance transforms are the identity, since Metal hands them only under intersection tags sg's tables do not declare yet.
+  A closest hit's object ray is the world ray, for the same reason.
+  `accept_and_end_search` acts as `accept` in an intersection function, which can only accept or not.
+  A dispatch traces one TLAS: the closest hit's record comes from one buffer of instance offsets, which sg binds at buffer 5.
+- **A host's groups make a payload state the widest access.** A payload a `.host` pipeline traces is `read`/`write` for every stage on HLSL (EMIT-137).
+  A group compiled apart cannot agree with the module's inferred qualifiers otherwise.
+  The way out is compiling the host's groups against the module's inferred qualifiers, which slib would hand to `compile_hit_group`.
+  hlsl.cc writes `#pragma dxc diagnostic ignored "-Wpayload-access-perf"` into every ray-tracing stage, where only a stage of a widest payload needs it.
+- **Shared source for a host's hit groups.** `slib::compile_hit_group` compiles a group from SGL text the host concatenates with the ray set's declarations.
+  That is a stopgap for `use`: the group's file would import the module that declares the set.
+- **A generic struct's type parameter is not in scope in its methods.** `mixed_hit.procedural()` returns through the helper `procedural_of_mixed[A]`, since the method cannot name `A`.
+- **An enum does not convert to `int`.** `h.kind as int` is refused (CHK-150), so storing a `hit_kind` in a buffer takes a `case`; [enum-futures.md](spec/incubator/enum-futures.md) holds the cast.
+- **The matrix zoo, and `tg` types such as `quat`.** A hit's transforms are rows of `float4` because SGL has `mat4` alone; `mat3x4`, `mat3` and a quaternion would let a hit hand them over typed.
+- **A `misplaced-not` inside a `test` body was seen to pass silently**, while writing the ray-tracing tests.
+  It does not reproduce in a plain test body: `test:` ending in `not a and b` reports it, as a function body does.
+  The likelier case is a test with an `error` or `warning` expectation, which takes every diagnostic inside it as its own (CHK-232); pin whichever it was with a corpus test.
 - **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, and gathers of integer textures.
-- **Features used in a body.** Only an entry point's signature uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
-  A listed binding's member does, and so do a stage input, a member taken per sample and the stage itself (CHK-263).
-  The first builtin that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.
-  A `require` inside a nested block, and `if feature f:` to branch on one, wait for that too.
+- **A `require` inside a nested block, and `if feature f:` to branch on one.** A builtin's call counts its feature where the entry point reaches it (CHK-322), so a body uses features now.
+  What is missing is scoping a grant to a block, and a branch that leaves a use out on a device without the feature.
 - **Features used through another symbol.** A binding's `required` counts only the uses resolved while its members compile, and `checker::compile` clears the grant around any symbol they demand.
   No such symbol can hold a resource yet; once a type alias or a struct field can, its use has to reach every binding that names it.
 - **Features across a hot reload outside a `pipeline`.** A declared pipeline freezes its features, so a reload needing another one keeps what it had.

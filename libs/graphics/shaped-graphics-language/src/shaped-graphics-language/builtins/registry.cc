@@ -262,8 +262,13 @@ cc::string sgl::builtins::wrapped(written w, precedence needed)
 
 written sgl::builtins::write_infix(cc::string_view op, precedence own, written lhs, written rhs)
 {
-    auto const tighter = precedence(u8(own) + 1);
-    return {.text = cc::format("{} {} {}", wrapped(cc::move(lhs), own), op, wrapped(cc::move(rhs), tighter)),
+    // A bitwise operand is parenthesized unless it is unary: WGSL takes nothing looser, and DXC's
+    // `-Wbitwise-op-parentheses` refuses `a & b | c`.
+    // A comparison does not chain in WGSL, so a comparison under another one is parenthesized on either side.
+    auto const is_bitwise = own == precedence::bitwise;
+    auto const left = is_bitwise ? precedence::unary : own == precedence::comparison ? precedence(u8(own) + 1) : own;
+    auto const right = is_bitwise ? precedence::unary : precedence(u8(own) + 1);
+    return {.text = cc::format("{} {} {}", wrapped(cc::move(lhs), left), op, wrapped(cc::move(rhs), right)),
             .binds = own};
 }
 

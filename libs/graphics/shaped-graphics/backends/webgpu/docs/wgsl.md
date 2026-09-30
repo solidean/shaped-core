@@ -30,6 +30,7 @@ struct Constants {
   The pipeline layout's `inline_constants` binding gives the block size, which must be a multiple of 4 and match the struct.
   The parser reports this binding without a group index, the way SPIR-V reflection reports a push-constant block, so callers written against vulkan work unchanged.
 - **Register-bound samplers** from `pipeline_layout_description::static_samplers` land at `index + 1`, since binding 0 is the constants.
+- **The acceleration pool and roots** at bindings 17 and 18, where a layout holds an acceleration structure: see the readme.
 - **Anything else** in group 3 is refused by the parser.
 
 A **name-matched static sampler** — one named in `create_binding_group_layout`'s `static_samplers` — stays in the group that declares it.

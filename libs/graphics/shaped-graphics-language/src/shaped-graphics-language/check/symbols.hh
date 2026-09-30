@@ -38,7 +38,17 @@ enum class sgl::check::type_kind : sgl::u8
     image,
     /// A sampler, filtering or `is_comparison`; a resource like a texture, never a value.
     sampler,
-    // Tuples, function types and anonymous struct types come later, each as a kind that is deduplicated by structure.
+    /// `acceleration_structure[.triangles]`: what a trace runs against, a TLAS the host binds (CHK-320).
+    /// `format` is its geometry, a position in `k_geometry_kinds`; a resource, never a value.
+    acceleration_structure,
+    /// `(A, B) -> R`: a function a parameter takes, whose `members` are the parameter types and `element` the result.
+    /// Only a parameter holds one, and a call through it is inlined where the function was handed over (CHK-317).
+    function,
+    /// `A` of `fun f[A](…)` or of a generic prelude struct: a type nothing is known of, which a value of is handed on,
+    /// stored and returned, and nothing else (CHK-338).
+    /// A call deduces what it stands for, and inlining writes that in its place.
+    type_parameter,
+    // Tuples and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 
 namespace sgl::check
@@ -46,18 +56,19 @@ namespace sgl::check
 /// True for a kind that stands in a binding and is never a value: a buffer, a texture, an image or a sampler.
 [[nodiscard]] constexpr bool is_resource(type_kind k)
 {
-    return k == type_kind::buffer || k == type_kind::texture || k == type_kind::image || k == type_kind::sampler;
+    return k == type_kind::buffer || k == type_kind::texture || k == type_kind::image || k == type_kind::sampler
+        || k == type_kind::acceleration_structure;
 }
 } // namespace sgl::check
 
 namespace sgl::check
 {
 /// The bit of `s` in a set of stages, as `function_info::stages` holds one.
-[[nodiscard]] constexpr u8 stage_bit(stage s)
+[[nodiscard]] constexpr u16 stage_bit(stage s)
 {
-    return u8(1u << u8(s));
+    return u16(1u << u8(s));
 }
-inline constexpr u8 k_every_stage = 0xFF;
+inline constexpr u16 k_every_stage = 0xFFFF;
 } // namespace sgl::check
 
 /// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").
@@ -104,6 +115,18 @@ enum class sgl::check::stage : sgl::u8
     tessellation_control,
     /// A `@tessellation_evaluation` fun: it takes a patch, its factors and a point of the domain, and returns a vertex (CHK-306).
     tessellation_evaluation,
+    /// The ray-tracing stages (CHK-326): where a dispatch of rays starts, one invocation per launch index.
+    raygen,
+    /// What a ray that hit nothing runs, with its ray type's payload.
+    miss,
+    /// What the nearest accepted hit runs, once per trace.
+    closest_hit,
+    /// What decides a candidate the traversal could not decide alone.
+    any_hit,
+    /// What finds the hits in a procedural primitive's box.
+    intersection,
+    /// A function another ray-tracing stage calls through a table.
+    callable,
 };
 
 namespace sgl::check
@@ -125,6 +148,18 @@ namespace sgl::check
         return "tessellation_control";
     case stage::tessellation_evaluation:
         return "tessellation_evaluation";
+    case stage::raygen:
+        return "raygen";
+    case stage::miss:
+        return "miss";
+    case stage::closest_hit:
+        return "closest_hit";
+    case stage::any_hit:
+        return "any_hit";
+    case stage::intersection:
+        return "intersection";
+    case stage::callable:
+        return "callable";
     case stage::none:
         break;
     }
@@ -164,6 +199,9 @@ enum class sgl::check::stage_input : sgl::u8
     workgroup_id,
     /// Where in the tessellated domain the evaluation stage runs: barycentric for triangles, `(u, v)` otherwise.
     domain_location,
+    /// A ray-tracing stage's launch index, and the size of the launch (CHK-327).
+    launch_id,
+    launch_size,
 };
 
 /// What the checker knows of one stage input: the attribute, the stage that has it, its type and the feature it needs.
@@ -174,7 +212,7 @@ struct sgl::check::stage_input_info
     cc::string_view name;
     stage in_stage = stage::none;
     /// The other stages that have it, each without a feature: a `stage_bit` mask.
-    u8 also_in = 0;
+    u16 also_in = 0;
     /// The name of its builtin type.
     cc::string_view type;
     /// -1 for an input every device has; otherwise a `feature` (check/features.hh).
@@ -222,6 +260,10 @@ struct sgl::check::type_info
     bool is_comparison = false;
     /// How a resource type is written, `out image_2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
     cc::string spelled;
+    /// A generic struct of the prelude, `struct report[A]:`, whose `element` is its type parameter (CHK-339).
+    bool is_template = false;
+    /// An instance of one, `report[hit_attributes]`: the template, whose `element` this instance's argument replaces.
+    type_id generic = type_id::none;
 
     bool operator==(type_info const&) const = default;
 };
@@ -425,6 +467,8 @@ struct sgl::check::parameter
     bool is_named_only = false;
     /// The stage input its attribute marks it as, `none` for an ordinary parameter (CHK-271).
     stage_input input = stage_input::none;
+    /// `p: mut T`: the caller's place, which a call hands over as `mut x` and the body may assign (CHK-315).
+    bool is_mut = false;
 
     bool operator==(parameter const&) const = default;
 };
@@ -450,10 +494,12 @@ struct sgl::check::function_info
     tessellation_partitioning partitioning = tessellation_partitioning::integer;
     bool is_clockwise = true;
     /// The stages an entry point may be of to reach it, one bit per `stage` (`stage_bit`); every stage without `@stages`.
-    u8 stages = k_every_stage;
+    u16 stages = k_every_stage;
     /// For an entry point, the features a device needs to run it: what it uses, never what it merely declares (CHK-263).
     /// Empty for every other function.
     feature_set features;
+    /// `[A, B]`: a type of kind `type_parameter` each, in the order written; a range of `checked_module::type_lists`.
+    ast::range_of<type_id> type_parameters;
 
     constexpr bool operator==(function_info const&) const = default;
 };
@@ -527,6 +573,10 @@ enum class sgl::check::pipeline_kind : sgl::u8
     raster,
     compute,
     raytracing,
+    /// A `hit_group`: one row of a ray-tracing pipeline's table (CHK-330).
+    hit_group,
+    /// A `callables` table: callable shaders of one parameter type, which a stage calls by index (CHK-343).
+    callables,
 };
 
 /// A `pipeline` declaration that checked: its stages, its layout, and its configuration.
@@ -550,6 +600,26 @@ struct sgl::check::pipeline_info
     type_id target_set = type_id::none;
     /// In the order they apply, each over the ones before it and all over sg's defaults.
     ast::range_of<pipeline_setting> settings;
+
+    /// A ray-tracing pipeline's and a hit group's ray set, a `rays` declaration (CHK-330, CHK-331).
+    symbol_id ray_set = symbol_id::none;
+    symbol_id raygen = symbol_id::none;
+    /// A ray-tracing pipeline's miss per ray type, each `none` for a ray type without one; a range of `binding_lists`.
+    ast::range_of<symbol_id> misses;
+    /// A ray-tracing pipeline's listed hit groups, in table order; a range of `binding_lists`.
+    ast::range_of<symbol_id> hit_groups;
+    /// Whether the host appends hit groups of its own after the listed ones: `.host`, last in `hit_groups`.
+    bool has_host_hit_groups = false;
+    /// Derived from the trace graph where every hit group is listed, and declared as a bound with `.host`.
+    i32 max_recursion_depth = 0;
+    /// A hit group's closest hit and any hit per ray type, two by two, each `none` where it has none.
+    ast::range_of<symbol_id> records;
+    symbol_id intersection = symbol_id::none;
+    bool is_procedural = false;
+    /// A callables table's parameter type, and whether the host appends callables of its own after the listed ones,
+    /// which are its `records`.
+    type_id callable_parameter = type_id::none;
+    bool has_host_callables = false;
 
     constexpr bool operator==(pipeline_info const&) const = default;
 };
@@ -579,6 +649,9 @@ enum class sgl::check::target_kind : sgl::u8
     array_length,
     /// On a call: `T[N].filled(v)`, an array holding `v` in every element (CHK-289).
     array_filled,
+    /// On a call: the prelude's `undefined()`, a value of the type the parameter it meets has, which nobody reads
+    /// (CHK-341).
+    undefined_value,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.
@@ -591,6 +664,31 @@ struct sgl::check::target
     constexpr bool operator==(target const&) const = default;
 };
 
+/// `table[i](mut p)`: a call of callable `i` of a `callables` table (CHK-344).
+struct sgl::check::callable_call
+{
+    i32 file = 0;
+    ast::expr_id call = ast::expr_id::none;
+    symbol_id table = symbol_id::none;
+
+    constexpr bool operator==(callable_call const&) const = default;
+};
+
+/// `trace(world, r, set.ray, mut payload)`: a trace of a ray-tracing pipeline's ray type (CHK-329).
+struct sgl::check::ray_trace
+{
+    i32 file = 0;
+    ast::expr_id call = ast::expr_id::none;
+    /// The ray set, a `rays` declaration.
+    symbol_id set = symbol_id::none;
+    /// The ray type's position in its set, which is the trace's ray contribution and its miss index.
+    i32 ray = 0;
+    /// The function the trace stands in, whose ray type it is a trace graph's edge from.
+    symbol_id caller = symbol_id::none;
+
+    constexpr bool operator==(ray_trace const&) const = default;
+};
+
 /// One argument a call wrote, in the order it wrote them, which is the order they are evaluated in (EVAL-80).
 struct sgl::check::written_argument
 {
@@ -598,6 +696,11 @@ struct sgl::check::written_argument
     ast::expr_id expr = ast::expr_id::none;
     /// A splat is one written argument per field of its value; this is that field, and -1 for no splat.
     i32 splat_member = -1;
+    /// `mut x`: the caller's place, for a `mut` parameter (AST-149, CHK-316).
+    bool is_mut = false;
+    /// A function handed to a parameter of function type: a function's name, an arrow lambda, or such a parameter
+    /// handed on (CHK-318); what it stands for is its expression's target.
+    bool is_function = false;
 
     constexpr bool operator==(written_argument const&) const = default;
 };
@@ -609,6 +712,9 @@ struct sgl::check::call_record
     ast::range_of<written_argument> written;
     /// One per parameter of `callee`: a position in `written`, or -1 where the parameter takes its default.
     ast::range_of<i32> slots;
+    /// What a generic callee's type parameters stand for at this call, two by two: a parameter, then its argument
+    /// (CHK-340); a range of `checked_module::type_lists`.
+    ast::range_of<type_id> type_arguments;
 
     constexpr bool operator==(call_record const&) const = default;
 };
@@ -625,6 +731,8 @@ enum class sgl::check::miss_reason : sgl::u8
     missing_argument,
     /// Every argument bound, and `argument` does not convert to `parameter`.
     no_conversion,
+    /// `argument` is marked `mut` and `parameter` is no `mut` parameter, or the reverse (CHK-316).
+    mut_mismatch,
 };
 
 /// One candidate of a call that matched nothing, and why: what a "did you mean" is written from.

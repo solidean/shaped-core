@@ -188,15 +188,40 @@ cc::result<binding_group_handle> staging_binding_group::try_snapshot()
         if (use.buffer != nullptr)
             uses.push_back(use);
     impl::set_buffer_uses(*_snapshot, cc::move(uses));
+
+    auto tlases = cc::vector<tlas_handle>();
+    for (auto const& elements : _slot_tlases)
+        for (auto const& t : elements)
+            if (t != nullptr)
+                tlases.push_back(t);
+    impl::set_tlases(*_snapshot, cc::move(tlases));
     return _snapshot;
 }
 
-void staging_binding_group::record_use(binding_slot slot, cc::span<raw_view const> views)
+void staging_binding_group::record_use(binding_slot slot, int first_element, cc::span<raw_view const> views)
 {
-    auto const& b = *info_of(slot).declared;
-    if (!_records_buffer_uses || b.count != 1 || views.size() != 1)
+    if (!_records_buffer_uses)
         return;
+    auto const& b = *info_of(slot).declared;
     auto const index = isize(u32(slot));
+
+    // Every element that binds a tlas, arrays included, since a trace reaches each of them.
+    if (b.type == binding_type::acceleration_structure)
+    {
+        if (_slot_tlases.size() <= index)
+            _slot_tlases.resize_to_defaulted(index + 1);
+        auto& elements = _slot_tlases[index];
+        if (elements.empty())
+            elements.resize_to_defaulted(isize(b.count));
+        for (auto i = isize(0); i < views.size(); ++i)
+        {
+            auto const* const tlas = try_as_tlas_view(views[i]);
+            elements[first_element + i] = tlas != nullptr ? tlas->tlas : nullptr;
+        }
+    }
+
+    if (b.count != 1 || views.size() != 1)
+        return;
     if (_slot_uses.size() <= index)
         _slot_uses.resize_to_defaulted(index + 1);
     auto const* buffer = try_as_buffer_view(views[0]);
@@ -246,7 +271,7 @@ void staging_binding_group::write_run(binding_slot slot, int first_element, cc::
     }
 
     write_view_descriptors(info.first_descriptor + first_element, b, views);
-    record_use(slot, views);
+    record_use(slot, first_element, views);
     _dirty = true;
 }
 
@@ -262,8 +287,12 @@ void staging_binding_group::clear_run(binding_slot slot, int first_element, int 
         return;
 
     clear_view_descriptors(info.first_descriptor + first_element, b, count);
-    if (auto const index = isize(u32(slot)); index < _slot_uses.size())
+    auto const index = isize(u32(slot));
+    if (index < _slot_uses.size())
         _slot_uses[index] = {};
+    if (index < _slot_tlases.size() && !_slot_tlases[index].empty())
+        for (auto i = 0; i < count; ++i)
+            _slot_tlases[index][first_element + i] = nullptr;
     _dirty = true;
 }
 } // namespace sg

@@ -247,7 +247,10 @@ public:
     {
         switch (f)
         {
-        case sg::feature::raytracing:
+        // One probe answers both: DXC writes the RayQueryKHR capability into every ray-tracing SPIR-V module, so a
+        // device with the pipeline and without ray query could not load what the pipeline path compiles to.
+        case sg::feature::ray_query:
+        case sg::feature::raytracing_pipeline:
             return is_raytracing_supported();
         case sg::feature::timestamp_query:
             return _query_system.supports_timestamps();

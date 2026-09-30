@@ -36,6 +36,12 @@ public:
     cc::vector<sg::raw_buffer_handle> referenced_buffers;
     cc::vector<sg::raw_texture_handle> referenced_textures;
 
+    /// The bound TLASes, whose regions must outlive the group.
+    cc::vector<sg::tlas_handle> referenced_tlases;
+
+    /// Each acceleration member's root unit, in the layout's acceleration_slots() order; 0, the empty TLAS, for a null one.
+    cc::vector<u32> acceleration_roots;
+
     /// A bound buffer or texture, by identity, with the binding it sits at and the view it is bound through.
     /// What a draw orders against: WebGPU tracks usage itself, but never between two draws of one pass.
     struct bound_resource

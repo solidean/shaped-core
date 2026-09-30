@@ -8,15 +8,16 @@
 Six directions were agreed and left for later, and each builds on what is there without changing it.
 
 **Running tests on the GPU.**
-A test has no stage, no parameter and no binding, so it can be written as a compute shader of one thread.
+A test has no stage and no parameter, and binds only what it lists, so it can be written as a compute shader of one thread.
 Each check writes one bit into a buffer the toolchain reserves, the one [shader-logging.md](shader-logging.md) plans for `assert`.
 The same test then runs on the interpreter and on each backend, and a result that differs is a bug of the compiler or of a driver.
 That is the differential test that already compares the two forms of a flat tree, reaching the real targets.
 It needs `void` to be written everywhere, which it is, and a check to stay its own statement rather than a bare `bool`, which it does.
 
 **Resource values in tests.**
-A local binding gives a callee a constant, and never a texture or a buffer, since no test can write a resource.
-A test of a sampling function needs one, something like a resource literal that exists only on the interpreter: `buffer[float](1.0, 2.0)`, or a small inline image.
+A test lists its bindings, and a C++ driver gives their values, buffers and acceleration structures included (CHK-333, EVAL-94).
+A test that `sgl test` runs alone has no driver, and a test of a sampling function has no texture yet.
+Both want something like a resource literal that exists only on the interpreter: `buffer[float](1.0, 2.0)`, or a small inline image.
 The local binding of [binding-effects.md](binding-effects.md) is where it plugs in.
 
 **Capturing what is constant after inlining.**
@@ -41,7 +42,7 @@ A second argument that matches the message too is additive, and is worth buildin
 ## What it touches
 
 * The emitters and `sg`, for tests on the GPU: a compute entry point per test, and a buffer the host reads back.
-* The interpreter's `run_inputs`, for resource values.
+* The interpreter's `driver_bindings`, for textures.
 * The check pass, for captured constants and for message matching.
 
 ## Already fixed by the syntax

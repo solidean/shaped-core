@@ -1,0 +1,36 @@
+// Callables: a table of the module's two and the host's one, picked per thread by index.
+require raytracing_pipeline
+
+binding operands:
+    values: mut buffer[float4]
+
+struct operand:
+    x: float
+
+struct probe:
+    is_missed: bool
+
+rays probe_rays:
+    probe: probe
+
+@callable fun doubled(v: mut operand):
+    v.x = v.x * 2.0
+
+@callable fun negated(v: mut operand):
+    v.x = -v.x
+
+// the third, index 2, is the host's
+callables ops = (doubled, negated, .host)
+
+@raygen fun apply_ops(@launch_id id: int3){operands}:
+    let mut v = operand((id.x as float) + 1.0)
+    ops[id.x % 3](mut v)
+    operands.values[id.x] = float4(v.x, 0.0, 0.0, 0.0)
+
+@miss fun probe_miss(p: mut probe):
+    p.is_missed = true
+
+@raytracing pipeline apply:
+    rays = probe_rays
+    raygen = apply_ops
+    miss.probe = probe_miss

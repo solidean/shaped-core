@@ -1,5 +1,6 @@
 #include "../emit/emit-test-support.hh"
 
+#include <clean-core/sequence/sequence.hh>
 #include <shaped-graphics-language/driver/describe.hh>
 
 using namespace sgl_test;
@@ -95,7 +96,7 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
 TEST("sgl describe - an entry point and a pipeline name the sg features a device needs for them")
 {
     // Both stages may use the image format the file requires, and only the pixel stage lists what does.
-    auto const d = described(R"(require extended_image_formats, raytracing
+    auto const d = described(R"(require extended_image_formats, ray_query
 
 binding narrow:
     r: out image_2d[.r8_unorm]
@@ -562,4 +563,148 @@ TEST("sgl describe - a file-scope sampler a texture's @sampler names is one its 
     REQUIRE(d.pipelines.size() == 1);
     REQUIRE(d.pipelines[0].samplers.size() == 1);
     CHECK(d.pipelines[0].samplers[0] == "edge");
+}
+
+namespace
+{
+/// A procedural pipeline whose payload and attributes each hold an enum, and whose intersection alone needs a feature.
+constexpr auto k_procedural_pipeline = cc::string_view(R"(require raytracing_pipeline, extended_image_formats
+
+enum tag:
+    plain
+    glossy
+
+struct radiance:
+    v0: float
+    color: float
+    kind: tag
+
+struct sphere_attributes:
+    u: float
+    v: float
+    kind: tag
+
+rays rs:
+    primary: radiance
+
+binding frame:
+    world: acceleration_structure[.procedural]
+
+binding narrow:
+    r: out image_2d[.r8_unorm]
+
+@raygen fun start(@launch_id id: int3){frame}:
+    let mut p = radiance(0.0, 0.0, tag.plain)
+    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), rs.primary, mut p)
+
+@intersection fun sphere(b: procedural_box){frame, narrow} -> report[sphere_attributes]:
+    return report.none()
+
+@closest_hit fun shade(h: procedural_hit[sphere_attributes], p: mut radiance):
+    p.color = h.attributes.u
+
+hit_group round for rs:
+    geometry = .procedural
+    intersection = sphere
+    primary = (closest_hit = shade)
+
+@raytracing pipeline path:
+    rays = rs
+    raygen = start
+)");
+} // namespace
+
+TEST("sgl describe - a ray-tracing pipeline's sizes count an enum as a word, as the checker's cap does")
+{
+    auto const d = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round)\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    auto const& p = d.raytracing_pipelines[0];
+    // two floats and an enum, in the payload and in what the intersection reports
+    CHECK(p.max_payload_size == 12);
+    CHECK(p.max_attribute_size == 12);
+    // the intersection's needs are the pipeline's, though no record names it
+    CHECK(cc::sequence{p.features}.any([](cc::string const& f) { return f == "extended_image_formats"; }));
+}
+
+TEST("sgl describe - a pipeline with the host's hit groups takes the attribute cap")
+{
+    // a host group may be procedural, and what it reports is compiled apart from this file
+    auto const d
+        = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round, .host)\n    max_recursion_depth = 1\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    CHECK(d.raytracing_pipelines[0].max_attribute_size == 32);
+}
+
+TEST("sgl describe - a ray-tracing pipeline's frozen part names its payloads, its records and its sizes")
+{
+    auto const d = described(cc::string(k_procedural_pipeline) + "    hit_groups = (round)\n");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    REQUIRE(d.ray_sets.size() == 1);
+    auto const& set = d.ray_sets[0];
+    REQUIRE(set.payload_sizes.size() == 1);
+    CHECK(set.payload_sizes[0] == 12);
+    auto text = cc::string();
+    for (auto const& line : d.raytracing_pipelines[0].frozen)
+        text.appendf("{}\n", line);
+    CHECK(text.starts_with(cc::format("rays = rs: primary radiance@{} 12\n", set.payload_shapes[0])));
+    CHECK(text.contains("\nhit groups = round\nhit group round = sphere; primary: shade + -\n"));
+    CHECK(text.contains("\nmax recursion depth = 1\nmax payload size = 12\nmax attribute size = 12\n"));
+    CHECK(text.contains("\nlayout = frame@"));
+}
+
+TEST("sgl describe - a ray-tracing pipeline's layout carries every sampler its shaders reach")
+{
+    auto const d = described(R"(require raytracing_pipeline
+
+sampler unused:
+    filter = .nearest
+
+sampler clamped:
+    address = .clamp_edge
+
+struct operand:
+    x: float
+
+struct radiance:
+    color: float4
+
+rays rs:
+    primary: radiance
+
+binding frame:
+    world: acceleration_structure[.triangles]
+    tex: texture_2d[float4]
+
+@raygen fun start(@launch_id id: int3){frame}:
+    let mut p = radiance(float4(0.0, 0.0, 0.0, 0.0))
+    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), rs.primary, mut p)
+
+@closest_hit fun shade(h: triangle_hit, p: mut radiance){frame}:
+    p.color = frame.tex.sample(float2(0.5, 0.5), clamped, level = 0.0)
+
+@callable fun doubled(v: mut operand):
+    v.x = v.x * 2.0
+
+callables ops = (doubled, .host)
+
+hit_group lit for rs:
+    primary = (closest_hit = shade)
+
+@raytracing pipeline path:
+    rays = rs
+    raygen = start
+    hit_groups = (lit)
+)");
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    auto const& p = d.raytracing_pipelines[0];
+    // reached from the closest hit alone, at the index its declaration gives it
+    REQUIRE(p.samplers.size() == 1);
+    CHECK(p.samplers[0] == "clamped");
+    CHECK(cc::sequence{p.frozen}.any([](cc::string const& line) { return line.starts_with("samplers = clamped#1@"); }));
+    // what a host's callable must take, by name and shape
+    REQUIRE(d.callables.size() == 1);
+    CHECK(p.host_callable_parameter == "operand");
+    CHECK(p.host_callable_shape == d.callables[0].parameter_shape);
+    auto const callables = cc::format("callables = doubled, .host operand@{}", p.host_callable_shape);
+    CHECK(cc::sequence{p.frozen}.any([&](cc::string const& line) { return line == callables; }));
 }

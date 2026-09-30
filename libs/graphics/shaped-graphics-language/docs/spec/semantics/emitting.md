@@ -30,7 +30,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
 * **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
-  Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` and `tessellation_shader`.
+  Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
+  `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
 * **EMIT-67** A `print` is `unsupported`: no target writes one yet.
@@ -42,6 +43,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   That is the function a call is written as, and every name a writer of its own calls, declares or reaches into, which its record lists per target.
 * **EMIT-16** The reserved words of the target are taken in the mint before anything else is minted.
 * **EMIT-17** A struct, a binding or a local whose name is reserved in a target is minted from that name and a trailing underscore, in that target only.
+  Every target reserves each name that starts with `sgl_`, which is where an emitter's own names stand, so `sgl_data` is written `sgl_data_`.
+  An entry point the check pass adds under such a name keeps it (CHK-345).
 * **EMIT-96** Two structs of one name, which the program's file shadowing one of the prelude's gives ([CHK-188](checking.md#symbols)), are written under two names: the one written later is minted.
   The same holds for the cases of two enums of one name.
 * **EMIT-18** A member whose name is reserved gets trailing underscores until it is free among its siblings, in that target only.
@@ -211,6 +214,8 @@ A binding that is not `@inline` is a group.
   Its index i is its position among the module's file-scope samplers in declaration order, so every entry point and every stage states the same one.
   It stands where sg binds a pipeline layout's static sampler of index i: `register(s<i>, space10)` in `hlsl-dx12`, and `[[vk::binding(i + 1, 3)]]` in `hlsl-vulkan`.
   WGSL writes it as `@group(3) @binding(i + 1)`, since binding 0 of sg's own group is the inline constants', and MSL as the entry point's parameter `sampler name [[sampler(i)]]`.
+  A ray-tracing stage's is a `constexpr sampler` of its settings in MSL instead, since a visible or an intersection function has no sampler slot to read.
+  A `mip_lod_bias` other than 0 is `unsupported` there, since a `constexpr sampler` has no bias.
   Its type is EMIT-99's, and its settings reach the layout from `sgl describe` as a group's static sampler's do.
   An entry point that reaches one of index 16 or more is `too-many-samplers` on every target, since Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` hold 16.
   Every sampler declared above it counts toward that index, reached or not, so the limit is on the file and not on what one stage uses.
@@ -321,6 +326,7 @@ The rules above say HLSL and WGSL by name; these say what `msl` writes in the sa
 
 * **EMIT-56** After the comment of EMIT-47, the text is `#include <metal_stdlib>`, `using namespace metal;` and an empty line.
 * **EMIT-57** MSL's reserved words also hold every name the Metal toolchain declares at global scope or in `metal`, its macros included, and `main` ([why](why/emitting.md#emit-57)).
+  They hold the intersection tags `instancing` and `triangle_data` too, which a ray-tracing stage's `using namespace raytracing;` brings in.
 * **EMIT-58** An `@inline binding` is a struct of its members and the parameter `constant T& name [[buffer(4)]]` of the entry point ([why](why/emitting.md#emit-58)).
 * **EMIT-59** The entry point is a `vertex`, `fragment` or `kernel` function, and its SGL parameter carries `[[stage_in]]`.
   MSL has no spelling for a kernel's workgroup, so the text states none, and the shape reaches sg from what SGL states alone.
@@ -342,6 +348,44 @@ vertex pixel_input main_vs(cube_vertex v [[stage_in]], constant constants_data& 
 ```
 
 So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 on every target, as the layout rules say.
+
+## Ray tracing
+
+[raytracing](../raytracing.md) is the model; these say what each target writes of it.
+
+* **EMIT-138** A member whose name is the name of a struct type one of its struct's members has is minted with trailing underscores, on every target ([why](why/emitting.md#emit-138)).
+  In HLSL and MSL the member would hide the type from the members after it, so `ray: ray` is written `ray ray_;`.
+* **EMIT-135** A trace's native form is what HLSL and MSL write, and its emulated form what WGSL writes: the legalizer keeps the one its target has ([why](why/emitting.md#emit-135)).
+  An acceleration member is `RaytracingAccelerationStructure` in HLSL and `instance_acceleration_structure` in MSL, and WGSL declares none: it keeps its slot and takes no binding.
+  An entry point whose code reads sg's acceleration pool declares it and the dispatch's roots in sg's reserved group, beside the inline constants:
+  `@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;` and `@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;`.
+  The root of the entry point's k-th acceleration member (CHK-325) is `sg_acceleration_roots[k / 4][k % 4]`.
+  So WGSL traces the first 16 acceleration members, and a trace of a later one is `too-many-acceleration-structures`.
+* **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
+  A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
+  An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.
+  A trace of a ray type is `TraceRay` over a `RayDesc`, and a callable's call is `CallShader`.
+* **EMIT-137** A payload is a `[raypayload]` struct, and each field states which stages read and write it, `read(caller, closesthit) : write(miss)` ([why](why/emitting.md#emit-137)).
+  They are inferred from every entry point of the module: a stage reads and writes what its payload parameter does.
+  A caller reads and writes what every local of the payload's type does, in an entry point that traces the type: wider than the one local it traces with, and never narrower.
+  A payload a stage hands on to a trace or a callable is read and written by that stage, since what the nested shaders write must survive its exit.
+  A stage that writes a field reads it too, since a write on some paths keeps the rest, and whatever some stage writes the caller reads, and the reverse.
+  A payload type that a pipeline with `.host` groups traces, or that no pipeline of the module traces, states the widest access instead.
+  An intersection's report is `ReportHit(t, 0, attributes)` where it hits, and a procedural record's shaders take the attributes as a parameter of their own.
+* **EMIT-139** MSL writes a pipeline as a kernel that intersects and then calls through sg's tables ([why](why/emitting.md#emit-139)).
+  Every function of the pipeline agrees on the shapes below, since each is compiled apart.
+  * The raygen is a `kernel`, which takes the argument buffers, sg's tables at `[[buffer(3)]]` and each instance's hit-group offset at `[[buffer(5)]]`.
+  * A miss, a closest hit and a callable are `[[visible]]` functions of one signature: the payload as `uint4` words, a hit record but for a callable, and an `sgl_context`.
+    The context carries the argument buffers, the inline constants, the tables and the launch, and the function binds each to a local.
+  * An any hit is an `[[intersection(triangle, triangle_data, instancing)]]` function that answers whether it accepts, and writes the payload back into the ray data.
+    `accept_and_end_search` is `accept` there.
+  * A procedural record is its traversal entry point (CHK-345), an `[[intersection(bounding_box, triangle_data, instancing)]]` function.
+  * A trace is the kernel's own `intersector`, configured from the ray flags, then the miss or the closest hit through the tables.
+    The closest hit's record is the instance's offset plus the geometry index times the multiplier plus the contribution, as DXR finds it.
+  * The ray data holds as many words as the largest payload of the set, so every shader of a pipeline agrees on it.
+    The set is the one of the pipeline or the hit group holding the shader, and one it traces only where none holds it.
+    A shader that traces or stands in traversal, held by two whose sets' payloads differ, is `ray-data-conflict`, since one text cannot agree with both.
+  * A hit's instance transforms are the identity, since Metal hands them only under intersection tags sg's tables do not declare.
 
 ## Layout
 
@@ -387,6 +431,8 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 | `not-core` | EMIT-66 |
 | `too-many-groups` | EMIT-105 |
 | `too-many-samplers` | EMIT-133 |
+| `too-many-acceleration-structures` | EMIT-135 |
+| `ray-data-conflict` | EMIT-139 |
 | `target-lacks-feature` | EMIT-109 |
 
 ## Open

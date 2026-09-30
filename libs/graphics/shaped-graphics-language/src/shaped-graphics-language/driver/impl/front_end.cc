@@ -53,7 +53,9 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     auto modules = cc::vector<check::module_file>();
     for (auto i = isize(0); i < result.prelude.size(); ++i)
         modules.push_back({.file = *result.files[i], .ast = *result.asts[i]});
-    result.module = check::check(modules, {.file = *result.files.back(), .ast = *result.asts.back()});
+    auto const user = check::module_file{.file = *result.files.back(), .ast = *result.asts.back()};
+    auto const* const checked = own >= 0 ? nullptr : checked_prelude();
+    result.module = checked != nullptr ? check::check(*checked, user) : check::check(modules, user);
 
     // Every phase's diagnostics in one list, so a test's `@expect` can take one of any phase before it is written out.
     auto all = cc::vector<check::located_diagnostic>();

@@ -103,6 +103,10 @@ described_binding_member describe_resource(check::checked_module const& m,
         result.image_format = cc::string(check::k_image_formats[t.format].name);
         result.access = cc::string(access_name(t.access));
         break;
+    case check::type_kind::acceleration_structure:
+        result.kind = described_member_kind::acceleration_structure;
+        result.type = cc::string(m.name_of(member.type));
+        break;
     default:
         result.kind = described_member_kind::sampler;
         result.type = cc::string(m.name_of(member.type));
@@ -182,6 +186,232 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     result.footprint = check::footprint_of(m, legal);
     for (auto const id : driver::impl::file_samplers_of(legal))
         result.samplers.push_back(m.at(id).name);
+    if (e.entry_stage >= check::stage::raygen && check::is_valid(e.input))
+    {
+        result.payload = m.name_of(e.input);
+        result.payload_shape = check::hex_of(check::structural_hash(m, e.input));
+    }
+    return result;
+}
+
+/// A binding as a frozen line names it: by its name and its shape.
+cc::string bound_text(check::checked_module const& m, check::symbol_id b)
+{
+    return cc::format("{}@{}", m.at(b).name,
+                      check::hex_of(check::structural_hash(m, m.at(m.bindings[m.at(b).info].members))));
+}
+
+/// A binding list as a frozen line names it.
+cc::string layout_text(check::checked_module const& m, ast::range_of<check::symbol_id> layout)
+{
+    auto result = cc::string();
+    for (auto const b : m.at(layout))
+        result += cc::format("{}{}", result.empty() ? "" : ", ", bound_text(m, b));
+    return result;
+}
+
+/// The file samplers `is_reached` marks, parallel to `m.symbols`, each with its index among all the file's samplers
+/// and its settings' shape, which a layout bakes.
+cc::string baked_samplers(check::checked_module const& m, cc::span<u8 const> is_reached)
+{
+    auto result = cc::string();
+    auto sampler_index = 0;
+    for (auto i = isize(0); i < m.symbols.size(); ++i)
+    {
+        if (is_reached[i] != 0)
+            result += cc::format("{}{}#{}@{}", result.empty() ? "" : ", ", m.symbols[i].name, sampler_index,
+                                 check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
+        sampler_index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+    }
+    return result;
+}
+
+/// Marks in `is_reached`, parallel to `m.symbols`, the file samplers of every entry point whose function is `entry`.
+/// `legal` is parallel to `m.entry_points`.
+void mark_samplers(check::checked_module const& m,
+                   check::symbol_id entry,
+                   cc::span<check::flat_entry_point const> legal,
+                   cc::span<u8> is_reached)
+{
+    if (!check::is_valid(entry))
+        return;
+    for (auto i = isize(0); i < m.entry_points.size(); ++i)
+        if (m.entry_points[i].function == entry)
+            for (auto const id : driver::impl::file_samplers_of(legal[i]))
+                is_reached[index_of(id)] = 1;
+}
+
+/// A list of names as a frozen line spells it, an empty one as `-`.
+cc::string joined(cc::span<cc::string const> names)
+{
+    auto result = cc::string();
+    for (auto const& name : names)
+        result += cc::format("{}{}", result.empty() ? "" : ", ",
+                             name.empty() ? cc::string_view("-") : cc::string_view(name));
+    return result;
+}
+
+cc::string name_or_empty(check::checked_module const& m, check::symbol_id id)
+{
+    return check::is_valid(id) ? cc::string(m.at(id).name) : cc::string();
+}
+
+described_hit_group describe_hit_group(check::checked_module const& m, check::pipeline_info const& p)
+{
+    auto result = described_hit_group{.name = m.at(p.symbol).name,
+                                      .ray_set = m.at(p.ray_set).name,
+                                      .is_procedural = p.is_procedural,
+                                      .intersection = name_or_empty(m, p.intersection)};
+    auto const records = m.at(p.records);
+    auto const rays = m.at(m.at(m.at(p.ray_set).type).members);
+    for (auto i = isize(0); i < records.size(); i += 2)
+    {
+        result.closest_hits.push_back(name_or_empty(m, records[i]));
+        result.any_hits.push_back(name_or_empty(m, records[i + 1]));
+        result.traversals.push_back(p.is_procedural ? cc::format("sgl_{}_{}", m.at(p.symbol).name, rays[i / 2].name)
+                                                    : cc::string());
+    }
+    return result;
+}
+
+/// `legal` holds each entry point of the module legalized, parallel to `m.entry_points`.
+described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module const& m,
+                                                           check::pipeline_info const& p,
+                                                           cc::span<check::flat_entry_point const> legal)
+{
+    auto result = described_raytracing_pipeline{.name = m.at(p.symbol).name,
+                                                .ray_set = m.at(p.ray_set).name,
+                                                .raygen = m.at(p.raygen).name,
+                                                .has_host_hit_groups = p.has_host_hit_groups,
+                                                .max_recursion_depth = p.max_recursion_depth,
+                                                .inline_constants = name_or_empty(m, p.inline_constants)};
+    auto features = m.functions[m.at(p.raygen).info].features;
+    for (auto const miss : m.at(p.misses))
+    {
+        result.misses.push_back(name_or_empty(m, miss));
+        if (check::is_valid(miss))
+            features |= m.functions[m.at(miss).info].features;
+    }
+    for (auto const group : m.at(p.hit_groups))
+    {
+        auto const& g = m.pipelines[m.at(group).info];
+        result.hit_groups.push_back(m.at(group).name);
+        for (auto const entry : m.at(g.records))
+            if (check::is_valid(entry))
+                features |= m.functions[m.at(entry).info].features;
+        if (check::is_valid(g.intersection))
+            features |= m.functions[m.at(g.intersection).info].features;
+    }
+    for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
+        result.max_payload_size = cc::max(result.max_payload_size, m.ray_data_bytes(ray.type));
+    // a triangle's barycentrics, and what each procedural group's intersection reports
+    result.max_attribute_size = 8;
+    for (auto const group : m.at(p.hit_groups))
+        if (auto const& g = m.pipelines[m.at(group).info]; check::is_valid(g.intersection))
+            result.max_attribute_size = cc::max(
+                result.max_attribute_size, m.ray_data_bytes(m.at(m.functions[m.at(g.intersection).info].result).element));
+    // a host's group may be procedural, and what it reports is compiled apart, so only the cap bounds it
+    if (p.has_host_hit_groups)
+        result.max_attribute_size = check::checked_module::max_attribute_bytes;
+    for (auto const b : m.at(p.layout))
+        result.layout.push_back(m.at(b).name);
+    // CHK-343: every table of the module, packed in declaration order
+    auto tables = cc::vector<check::pipeline_info const*>();
+    for (auto const& t : m.pipelines)
+        if (t.kind == check::pipeline_kind::callables)
+            tables.push_back(&t);
+    for (auto i = isize(0); i < tables.size(); ++i)
+        for (auto j = i + 1; j < tables.size(); ++j)
+            if (index_of(tables[j]->symbol) < index_of(tables[i]->symbol))
+                cc::swap(tables[i], tables[j]);
+    for (auto const* const t : tables)
+    {
+        for (auto const entry : m.at(t->records))
+        {
+            result.callables.push_back(m.at(entry).name);
+            features |= m.functions[m.at(entry).info].features;
+        }
+        result.has_host_callables = result.has_host_callables || t->has_host_callables;
+        // CHK-343: only the module's last table takes the host's
+        if (t->has_host_callables)
+        {
+            result.host_callable_parameter = m.name_of(t->callable_parameter);
+            result.host_callable_shape = check::hex_of(check::structural_hash(m, t->callable_parameter));
+        }
+    }
+    result.features = feature_names(features);
+
+    // One layout serves every shader, so it carries what any of them reaches, in index order.
+    auto is_reached = cc::vector<u8>::create_filled(m.symbols.size(), 0);
+    mark_samplers(m, p.raygen, legal, is_reached);
+    for (auto const miss : m.at(p.misses))
+        mark_samplers(m, miss, legal, is_reached);
+    for (auto const group : m.at(p.hit_groups))
+    {
+        auto const& g = m.pipelines[m.at(group).info];
+        for (auto const entry : m.at(g.records))
+            mark_samplers(m, entry, legal, is_reached);
+        mark_samplers(m, g.intersection, legal, is_reached);
+    }
+    for (auto const* const t : tables)
+        for (auto const entry : m.at(t->records))
+            mark_samplers(m, entry, legal, is_reached);
+    for (auto i = isize(0); i < m.symbols.size(); ++i)
+        if (is_reached[i] != 0)
+            result.samplers.push_back(m.symbols[i].name);
+
+    // The frozen part: what the generated definition fixes, so a reload that moves it cannot follow.
+    auto rays = cc::string();
+    auto const members = m.at(m.at(m.at(p.ray_set).type).members);
+    for (auto const& ray : members)
+        rays += cc::format("{}{} {}@{} {}", rays.empty() ? "" : ", ", ray.name, m.name_of(ray.type),
+                           check::hex_of(check::structural_hash(m, ray.type)), m.ray_data_bytes(ray.type));
+    result.frozen.push_back(cc::format("rays = {}: {}", result.ray_set, rays));
+    result.frozen.push_back(cc::format("raygen = {}", result.raygen));
+    result.frozen.push_back(cc::format("misses = {}", joined(result.misses)));
+    auto groups = joined(result.hit_groups);
+    if (p.has_host_hit_groups)
+        groups += groups.empty() ? ".host" : ", .host";
+    result.frozen.push_back(cc::format("hit groups = {}", groups));
+    for (auto const group : m.at(p.hit_groups))
+    {
+        auto const& g = m.pipelines[m.at(group).info];
+        auto const records = m.at(g.records);
+        auto text = check::is_valid(g.intersection) ? cc::format("{}; ", m.at(g.intersection).name) : cc::string();
+        for (auto i = isize(0); i < records.size(); i += 2)
+            text += cc::format(
+                "{}{}: {} + {}", i == 0 ? "" : ", ", members[i / 2].name,
+                check::is_valid(records[i]) ? cc::string_view(m.at(records[i]).name) : cc::string_view("-"),
+                check::is_valid(records[i + 1]) ? cc::string_view(m.at(records[i + 1]).name) : cc::string_view("-"));
+        result.frozen.push_back(cc::format("hit group {} = {}", m.at(group).name, text));
+    }
+    auto callables = joined(result.callables);
+    if (result.has_host_callables)
+        callables += cc::format("{}.host {}@{}", callables.empty() ? "" : ", ", result.host_callable_parameter,
+                                result.host_callable_shape);
+    result.frozen.push_back(cc::format("callables = {}", callables));
+    result.frozen.push_back(cc::format("max recursion depth = {}", result.max_recursion_depth));
+    result.frozen.push_back(cc::format("max payload size = {}", result.max_payload_size));
+    result.frozen.push_back(cc::format("max attribute size = {}", result.max_attribute_size));
+    result.frozen.push_back(cc::format("layout = {}", layout_text(m, p.layout)));
+    result.frozen.push_back(cc::format("inline constants = {}",
+                                       check::is_valid(p.inline_constants) ? bound_text(m, p.inline_constants) : ""));
+    result.frozen.push_back(cc::format("samplers = {}", baked_samplers(m, is_reached)));
+    result.frozen.push_back(cc::format("features = {}", joined(result.features)));
+    return result;
+}
+
+described_callables describe_callables(check::checked_module const& m, check::pipeline_info const& p)
+{
+    auto result = described_callables{.name = m.at(p.symbol).name,
+                                      .parameter = cc::string(m.name_of(p.callable_parameter)),
+                                      .parameter_shape = check::hex_of(check::structural_hash(m, p.callable_parameter)),
+                                      .has_host = p.has_host_callables};
+    for (auto const entry : m.at(p.records))
+        result.entries.push_back(m.at(entry).name);
+    for (auto const& t : m.pipelines)
+        if (t.kind == check::pipeline_kind::callables && index_of(t.symbol) < index_of(p.symbol))
+            result.offset += i32(t.records.count);
     return result;
 }
 
@@ -207,10 +437,7 @@ described_pipeline describe_pipeline(check::checked_module const& m,
         {
             *s.name = m.at(s.entry).name;
             features |= m.functions[m.at(s.entry).info].features;
-            for (auto i = isize(0); i < m.entry_points.size(); ++i)
-                if (m.entry_points[i].function == s.entry)
-                    for (auto const id : driver::impl::file_samplers_of(legal[i]))
-                        is_reached[index_of(id)] = 1;
+            mark_samplers(m, s.entry, legal, is_reached);
         }
     // One layout serves every stage, so it carries what any of them reaches, in index order.
     for (auto i = isize(0); i < m.symbols.size(); ++i)
@@ -244,32 +471,15 @@ described_pipeline describe_pipeline(check::checked_module const& m,
     // The frozen part, which a reload compares line by line: a declaration by its name and its shape.
     auto const shaped = [&](check::type_id type)
     { return cc::format("{}@{}", m.name_of(type), check::hex_of(check::structural_hash(m, type))); };
-    auto const bound = [&](check::symbol_id b)
-    {
-        return cc::format("{}@{}", m.at(b).name,
-                          check::hex_of(check::structural_hash(m, m.at(m.bindings[m.at(b).info].members))));
-    };
-    auto layout = cc::string();
-    for (auto const b : m.at(p.layout))
-        layout += cc::format("{}{}", layout.empty() ? "" : ", ", bound(b));
-    result.frozen.push_back(cc::format("layout = {}", layout));
-    result.frozen.push_back(
-        cc::format("inline constants = {}", check::is_valid(p.inline_constants) ? bound(p.inline_constants) : ""));
+    result.frozen.push_back(cc::format("layout = {}", layout_text(m, p.layout)));
+    result.frozen.push_back(cc::format("inline constants = {}",
+                                       check::is_valid(p.inline_constants) ? bound_text(m, p.inline_constants) : ""));
     result.frozen.push_back(
         cc::format("vertex input = {}", check::is_valid(p.vertex_input) ? shaped(p.vertex_input) : cc::string()));
     result.frozen.push_back(
         cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
     // The samplers are baked into the layout too, each at its index among all the file's samplers.
-    auto baked = cc::string();
-    auto sampler_index = 0;
-    for (auto i = isize(0); i < m.symbols.size(); ++i)
-    {
-        if (is_reached[i] != 0)
-            baked += cc::format("{}{}#{}@{}", baked.empty() ? "" : ", ", m.symbols[i].name, sampler_index,
-                                check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
-        sampler_index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
-    }
-    result.frozen.push_back(cc::format("samplers = {}", baked));
+    result.frozen.push_back(cc::format("samplers = {}", baked_samplers(m, is_reached)));
     // The host's code holds a shader per stage, so a reload that adds or drops one has nothing to build it with.
     auto stages = cc::string();
     for (auto const* name : {&result.vertex, &result.tessellation_control, &result.tessellation_evaluation,
@@ -492,8 +702,36 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     }
 
     for (auto const& p : m.pipelines)
-        if (m.at(p.symbol).file == front.program_file())
+    {
+        if (m.at(p.symbol).file != front.program_file())
+            continue;
+        if (p.kind == check::pipeline_kind::hit_group)
+            result.hit_groups.push_back(describe_hit_group(m, p));
+        else if (p.kind == check::pipeline_kind::callables)
+            result.callables.push_back(describe_callables(m, p));
+        else if (p.kind == check::pipeline_kind::raytracing)
+            result.raytracing_pipelines.push_back(describe_raytracing_pipeline(m, p, legal));
+        else
             result.pipelines.push_back(describe_pipeline(m, p, legal));
+    }
+    // every ray set of the program, a pipeline naming it or not
+    for (auto const& s : m.symbols)
+        if (s.kind == check::symbol_kind::structure && s.file == front.program_file()
+            && s.state == check::symbol_state::checked && ast::is_valid(s.declaration))
+        {
+            auto const* const d = front.asts[s.file]->at(s.declaration).node.try_as<ast::struct_decl>();
+            if (d == nullptr || !d->is_ray_set)
+                continue;
+            auto set = described_ray_set{.name = s.name};
+            for (auto const& ray : m.at(m.at(s.type).members))
+            {
+                set.rays.push_back(ray.name);
+                set.payloads.push_back(m.name_of(ray.type));
+                set.payload_sizes.push_back(m.ray_data_bytes(ray.type));
+                set.payload_shapes.push_back(check::hex_of(check::structural_hash(m, ray.type)));
+            }
+            result.ray_sets.push_back(cc::move(set));
+        }
 
     if (!errors.empty())
     {

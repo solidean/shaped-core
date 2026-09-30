@@ -170,3 +170,29 @@ A target's compiler reflects the names the text declares, and those follow each 
 The host binds by the path instead, so whoever compiles the text renames what the compiler reflected, and needs the pairs to do it.
 slib does that as the compile settles, which is why no target's identifier rules ever reach sg.
 
+## EMIT-135
+
+WebGPU has no ray query, and a portable shader that traces is worth more than one refused on a whole platform.
+So the trace is SGL source the prelude holds twice, a native and an emulated form, and each target writes the one it can.
+The emulated form reads one pool per context rather than a binding per structure, since a traversal walks from a TLAS into BLASes nothing else binds.
+The acceleration member keeps its slot and takes no binding, so every other member's slot is what it is on the other targets, and one layout serves all four.
+
+## EMIT-137
+
+DXR's payload qualifiers are a promise the driver optimizes by: a field nobody writes after the caller need not travel back.
+Every shader of one pipeline must state the same qualifiers, so they are inferred from the whole module rather than per entry point.
+A host's hit group is compiled apart and cannot see the module, so a payload it may meet states the widest access, which DXC reads as a missed optimization and not an error.
+
+## EMIT-138
+
+A struct member named like a type, `ray: ray`, is legal in SGL, where a member lives in its struct's scope.
+In HLSL and MSL the member's declaration hides the type for the rest of the struct, so a later member of that type fails to compile.
+Renaming on every target keeps one member name across the texts, which is what a reader comparing them expects.
+
+## EMIT-139
+
+Metal has no shader table: a kernel intersects with its own intersector and calls what it found through function tables.
+One table holds the miss and closest-hit functions of every ray type, so they share one signature, and the payload travels as words each function reads as its own type.
+DXR finds a closest hit's record from the instance's hit-group offset, which Metal's intersection result does not carry, so sg binds each instance's offset beside the tables.
+A procedural group's intersection and its any hit are one function on metal, since Metal runs no any hit after a box's intersection, which is why CHK-345 fuses them.
+

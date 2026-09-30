@@ -262,9 +262,11 @@ protected:
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
-                                                                  sg::accel_build_flags flags) override;
+                                                                  sg::accel_build_flags flags,
+                                                                  int hit_record_stride) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
-                                                              sg::accel_build_flags flags) override;
+                                                              sg::accel_build_flags flags,
+                                                              int hit_record_stride) override;
     [[nodiscard]] sg::tlas_handle raytracing_build_tlas(cc::span<sg::tlas_instance const> instances,
                                                         sg::accel_build_flags flags) override;
 

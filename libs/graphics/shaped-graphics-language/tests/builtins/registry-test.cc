@@ -204,10 +204,11 @@ TEST("sgl builtins - a local may not hide a function a custom writer calls or a 
     // WGSL has no helpers: its custom writers' `countOneBits` and `bitcast`
     CHECK(wgsl.text.contains("let countOneBits_: u32 = countOneBits(asuint);"));
     CHECK(wgsl.text.contains("let bitcast_: f32 = as_type;"));
-    CHECK(wgsl.text.contains("let sgl_pack_half2x16: u32 = pack2x16float(vec2f(p.a, p.b));"));
+    // every target reserves the prefix of a helper, whether or not it declares one (EMIT-17)
+    CHECK(wgsl.text.contains("let sgl_pack_half2x16_: u32 = pack2x16float(vec2f(p.a, p.b));"));
     // a custom writer's `as_type`, and the helper `sgl_first_bit_high`
     CHECK(msl.text.contains("const float as_type_ = as_type<float>(sgl_first_bit_high_);"));
-    CHECK(msl.text.contains("const uint sgl_first_bit_high_ = sgl_first_bit_high(sgl_pack_half2x16 + countOneBits);"));
+    CHECK(msl.text.contains("const uint sgl_first_bit_high_ = sgl_first_bit_high(sgl_pack_half2x16_ + countOneBits);"));
 }
 
 namespace

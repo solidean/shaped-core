@@ -234,8 +234,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Placement is `heapAccelerationStructureSizeAndAlign` plus `MTL::Heap::newAccelerationStructure(size, offset)`.
   All three APIs support refitting in place and into a separate structure, so a refit call would not be a Metal shape the others get bent into.
 
-- **Raytracing pipeline.** The dx12 trace path is in — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
+- **Raytracing pipeline.** The trace path is in on dx12, vulkan and metal — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
   Still open: **local root signatures** and a **state-object cached blob**.
+  **metal traces one TLAS per dispatch**, because a kernel finds its closest hits through the one TLAS's hit-group offsets that `dispatch_rays` binds.
+  Lifting it means an offsets buffer per bound TLAS, and a way for the kernel to know which one it traced.
+  **webgpu's BVH has no spatial sort**: the tree follows the primitive order, which a proper build (a sort, then SAH or LBVH) would replace.
+  webgpu has no pipeline either, deliberately: a megakernel over the ray-query polyfill is the shape one would take, and a path tracer on ray queries is the better route there for now.
   Plus a **dedicated shader-table buffer**: `raytracing_shader_table` exists, but its records sit in a plain shader-readable buffer as a stand-in.
   [types.hh](../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately, so the storage needs a type of its own.
 - **`cc::shared_ptr`:** the `*_handle` typedefs still use `std::shared_ptr`.

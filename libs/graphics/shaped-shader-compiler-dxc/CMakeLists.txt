@@ -93,6 +93,7 @@ if(SC_BUILD_TESTS)
             tests/end-to-end-inline-constants-test.cc
             tests/end-to-end-inline-raytracing-test.cc
             tests/end-to-end-raytracing-test.cc
+            tests/end-to-end-hit-rows-test.cc
             tests/payload-packing-spike-test.cc
             tests/end-to-end-raster-test.cc
             tests/end-to-end-raster-stages-test.cc

@@ -231,3 +231,17 @@ The idea is in [structural types](../../incubator/structural-types.md).
 A `float` has no member to name, and a unit type has no member at all, and those are two statements.
 The first is a type whose inside the language cannot show, which only the floor of the language may be; the second is an ordinary struct.
 A function signature without a body already reads as "declared here, provided elsewhere", and a struct line without a block says the same.
+
+## AST-149
+
+The mark is a keyword form the form tree already builds, `mut` with one operand, so the syntax needed no new token.
+It is read in a paren call's list alone: in a type argument list, `buffer[mut float]`, it stays the error AST-128 and AST-130 make of it.
+Whether an argument may be marked, and whether the mark meets a mut parameter, is the check pass's, as every other question of a call is.
+
+## AST-150
+
+A ray set is a struct in every respect but its meaning: named members, each of a type, whose order is an address.
+Reading it as one lets every tool that shows a struct's members show a set's ray types, and costs the AST one flag.
+A hit group is a block of `name = value` lines, which is what a pipeline's block already is, so it reuses that reading too.
+`hit_group name for set:` spells which set a group belongs to where a reader looks first, and `for` is a keyword already.
+`callables` (AST-153) is a pipeline's short form for the same reason: a list of entry points is what that form holds.

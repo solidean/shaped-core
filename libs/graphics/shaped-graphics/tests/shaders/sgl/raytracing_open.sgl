@@ -1,0 +1,49 @@
+// A ray-tracing pipeline whose every hit group is the host's, compiled at run time against the ray set below.
+// Its payloads are declared with the widest access, since a hit group compiled apart must state the same.
+require raytracing_pipeline
+
+binding traced_open:
+    world: acceleration_structure[.triangles]
+    hits: mut buffer[float4]
+    ids: mut buffer[int4]
+
+struct radiance:
+    t: float
+    u: float
+    v: float
+    instance_id: int
+    primitive: int
+    is_hit: int
+    is_lit: int
+
+struct shadow:
+    is_lit: bool
+
+rays path_rays:
+    surface: radiance
+    occlusion: shadow
+
+@raygen fun primary(@launch_id id: int3){traced_open}:
+    let mut p = radiance(0.0, 0.0, 0.0, 0, 0, 0, 0)
+    let r = ray(
+        origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+    )
+    trace(traced_open.world, r, path_rays.surface, mut p)
+    let at = id.x + id.y * 8
+    traced_open.hits[at] = float4(p.t, p.u, p.v, 0.0)
+    traced_open.ids[at] = int4(p.is_hit, p.instance_id, p.primitive, p.is_lit)
+
+@miss fun sky(p: mut radiance):
+    p.is_hit = 0
+
+@miss fun open_sky(s: mut shadow):
+    s.is_lit = true
+
+@raytracing pipeline open_path:
+    rays = path_rays
+    raygen = primary
+    miss.surface = sky
+    miss.occlusion = open_sky
+    hit_groups = (.host)
+    max_recursion_depth = 2

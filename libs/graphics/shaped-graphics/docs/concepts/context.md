@@ -23,6 +23,9 @@ So the core has no factory that could name one, and each backend library exposes
 Code that branches on it is usually code that should have asked a capability question instead.
 
 The capability questions the context answers directly are `accepted_shader_formats()` / `accepts_shader_format()` (see [shaders](../shaders.md)) and `threading()` (see [threading](threading.md)).
+The rest go through `supports(sg::feature)`, one coarse answer per code path.
+`implementation_of(feature)` then says whether a feature is `native`, `emulated` in software or `absent`, which only a caller choosing an algorithm by cost needs.
+webgpu's `ray_query` is the one emulated feature today — see [raytracing-pipeline](raytracing-pipeline.md#two-features-because-webgpu-has-one-of-them).
 
 ## The scopes: where each create lives
 
