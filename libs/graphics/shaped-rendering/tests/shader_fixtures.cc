@@ -11,8 +11,9 @@ slib::shader_library& create_library()
     static slib::shader_library lib;
 
     // Every edge, so a test names no backend; which one runs follows from what the context accepts.
-    // A DXC that fails to create here is a broken install rather than a build without one — this file is compiled only
-    // where CMake found one — so it is left to fail the test that needed it.
+    // A DXC this build fetched and that then fails to load is a broken install, and warns here rather than erroring:
+    // the library is built on first use, so the warning lands in whichever test reached this fixture first, and the
+    // tests that need an HLSL shader fail on the missing edge.
     slib::add_available_compilers(lib);
     sr::add_shader_packages(lib);
     return lib;
