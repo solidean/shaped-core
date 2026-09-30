@@ -149,32 +149,35 @@ ASYNC_INVOCABLE_TEST("sg - a pixel stage traces inline, one ray per pixel", (sg:
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::raytracing.traced_pixels);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::pixel_scene>();
 
-    auto blas = sg::blas_handle();
-    auto tlas = sg::tlas_handle();
-    auto const pixels = co_await sg_test::draw_offscreen_passes(
-        *ctx,
-        {.width = grid,
-         .height = grid,
-         .colors = {sg::pixel_format::rgba32_float},
-         .target_set = shaders::traced_target::name,
-         .clear_color = tg::vec4f(-2, -2, -2, -2)},
-        [&](sg::command_list& cmd, sg_test::offscreen_targets const& targets)
-        {
-            auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
-            blas = cmd.raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1));
-            sg::tlas_instance const instances[] = {
-                {.blas = blas, .instance_id = 10},
-                {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20},
-            };
-            tlas = cmd.raytracing.build_tlas(instances);
-            auto const group
-                = ctx->transient.create_binding_group(cmd, layout, shaders::pixel_scene{.world = tlas->as_view()});
-            auto scope = cmd.raster.render_to(targets.cleared());
-            scope.bind_pipeline(*pipeline);
-            scope.bind_group(0, *group);
-            scope.bind_vertex_buffer(quad.as_vertex_buffer());
-            scope.draw({.vertex_range = {.offset = 0, .size = 6}});
-        });
+    // Built in a list of its own, so the draw's list meets a finished TLAS at submit.
+    // Built in the draw's list instead, its barrier would be found only at the draw, and vulkan would split the scope.
+    auto build = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
+    auto const blas = build->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1));
+    sg::tlas_instance const instances[] = {
+        {.blas = blas, .instance_id = 10},
+        {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20},
+    };
+    auto const tlas = build->raytracing.build_tlas(instances);
+    ctx->submit_command_list(cc::move(build));
+
+    auto const pixels
+        = co_await sg_test::draw_offscreen_passes(*ctx,
+                                                  {.width = grid,
+                                                   .height = grid,
+                                                   .colors = {sg::pixel_format::rgba32_float},
+                                                   .target_set = shaders::traced_target::name,
+                                                   .clear_color = tg::vec4f(-2, -2, -2, -2)},
+                                                  [&](sg::command_list& cmd, sg_test::offscreen_targets const& targets)
+                                                  {
+                                                      auto const group = ctx->transient.create_binding_group(
+                                                          cmd, layout, shaders::pixel_scene{.world = tlas->as_view()});
+                                                      auto scope = cmd.raster.render_to(targets.cleared());
+                                                      scope.bind_pipeline(*pipeline);
+                                                      scope.bind_group(0, *group);
+                                                      scope.bind_vertex_buffer(quad.as_vertex_buffer());
+                                                      scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                  });
 
     for (auto y = 0; y < grid; ++y)
         for (auto x = 0; x < grid; ++x)
