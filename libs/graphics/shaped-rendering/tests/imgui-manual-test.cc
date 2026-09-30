@@ -9,7 +9,7 @@
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/window.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
+#include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
 
 
@@ -92,12 +92,9 @@ ASYNC_TEST("sr - imgui window (manual)", nx::config::manual, exclusive("sr-windo
     REQUIRE(ctx_r.has_value());
     auto const ctx = ctx_r.value();
 
-    auto compiler = slib::create_dxc_compiler();
-    REQUIRE(compiler.has_value());
-
     slib::shader_library lib;
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    slib::add_available_compilers(lib);
+    sr::add_shader_packages(lib);
 
     // bgra8_unorm, not its _srgb sibling: imgui's colors are already sRGB-encoded and the routine refuses a target that would encode them twice.
     auto const sc = ctx->create_swapchain({.window = win->native_window(), .format = sg::pixel_format::bgra8_unorm});

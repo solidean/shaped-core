@@ -40,16 +40,25 @@ private:
 ///
 ///     auto imgui = sr::imgui_context::create();
 ///     // per frame, after imgui.end_frame():
+///     auto const frame = sr::imgui_routine::prepare(*cmd, ImGui::GetDrawData());
 ///     auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
-///     sr::imgui_routine::execute(pass, ImGui::GetDrawData());
+///     sr::imgui_routine::execute(pass, frame);
 ///
 /// The routine owns one raster pipeline for its target format; the GPU textures behind imgui's atlas belong to the
 /// texture routine above, which every format shares.
-/// execute() runs under acquire_exclusive for its whole length, so two threads recording imgui against the same context serialize rather than race.
+/// prepare() and execute() each take the texture routine's lock, so two threads recording imgui against the same context serialize rather than race.
+/// Only execute() holds this format's instance, for its whole length.
 /// The atlas deliberately survives a shader reload — it has nothing to do with our shaders.
 ///
-/// This frame's geometry is deliberately *not* state:
-/// it is allocated from the transient scope and lives on the stack for one execute(), so the call is re-entrant across imgui's viewports.
+/// **Two calls, because a rendering scope must not hold what imgui needs before it draws.**
+/// Its texture requests and its geometry are copies, and a copy inside a scope closes and reopens the pass on vulkan, webgpu and metal.
+/// So prepare() records them on the command list before the scope opens, and execute() only draws.
+/// On vulkan the first draw's barrier on that uploaded geometry still splits the scope once per frame, until sg can
+/// declare a buffer's access before a scope opens — libs/graphics/shaped-rendering/docs/imgui.md says it too, and
+/// libs/graphics/shaped-graphics/docs/TODO.md carries the declaration this waits on.
+///
+/// This frame's geometry is deliberately *not* routine state:
+/// it is allocated from the transient scope and travels in the prepared_frame, so the pair is re-entrant across imgui's viewports.
 ///
 /// `draw_data` is non-const because imgui's 1.92 texture protocol writes back into it:
 /// the backend reports each texture's new id and status on ImTextureData.
@@ -57,8 +66,28 @@ class sr::imgui_routine : public sg::render_routine<imgui_routine, sg::pixel_for
 {
     // per-frame
 public:
-    /// Draws one frame of imgui into an open rendering scope:
-    /// services its texture create / update / destroy requests, uploads this frame's geometry, and records the draws.
+    /// One frame of imgui ready to draw: its draw data, and its geometry already uploaded.
+    /// Valid on the command list prepare() recorded it on, until that list's epoch ends.
+    struct prepared_frame
+    {
+        ImDrawData* draw_data = nullptr;
+
+        /// The list prepare() recorded the uploads on; execute() asserts the scope it draws in belongs to it.
+        sg::command_list const* command_list = nullptr;
+
+        sg::buffer<ImDrawVert> vertices;
+
+        /// 32-bit, matching the `ImDrawIdx` our injected imgui config widens — an `ImDrawCmd`'s first index is
+        /// arbitrary, and a 16-bit one lands off the 4-byte boundary `sg::index_buffer_offset_alignment` requires.
+        sg::buffer<u32> indices;
+    };
+
+    /// Records on `cmd` everything a frame of imgui needs before it is drawn, and must be called before the rendering scope opens.
+    /// Services imgui's texture create / update / destroy requests, and uploads its geometry.
+    /// Texture requests are serviced whether or not a pipeline for the target exists yet: imgui's atlas has to keep up with imgui either way.
+    [[nodiscard]] static prepared_frame prepare(sg::command_list& cmd, ImDrawData* draw_data);
+
+    /// Draws a prepared frame into an open rendering scope on the command list prepare() recorded on, and records nothing else.
     /// Pass the `scope` that `cmd.raster.render_to(...)` returned — the target's color format and extent are read from it.
     ///
     /// The scope's color format must not be an sRGB format:
@@ -66,8 +95,7 @@ public:
     /// Bind a non-srgb view of the same resource instead.
     /// Compensating in the shader would cost a conversion per pixel to undo something the caller did not ask for.
     /// Declines while the shaders or this format's pipeline are still building, and after a compile that failed.
-    /// Texture requests are serviced either way — imgui's atlas has to keep up with imgui whether we can draw or not.
-    [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope, ImDrawData* draw_data);
+    [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope, prepared_frame const& frame);
 
     /// Draws and presents every imgui viewport except the main one, each into its own swapchain.
     ///
@@ -76,7 +104,7 @@ public:
     /// A main present that blocks on vsync in between stretches that gap to a full frame, and the contents of a window being dragged visibly lag the window.
     ///
     /// A viewport's swapchain is created here on first sight and follows its window's size by itself.
-    /// Unlike execute() this opens its own rendering scopes and submits its own command lists, so it must NOT be called inside one.
+    /// Unlike prepare() and execute() this opens its own rendering scopes and submits its own command lists, so it must NOT be called inside one.
     /// Nor while the main window's list is open: submitting a viewport's list then makes the two concurrent.
     /// The font atlas both sample is reverted to its canonical layout at every viewport submit, which is a barrier per frame for nothing.
     /// Record the main window's list after this returns — only the present order is load-bearing.
@@ -98,22 +126,6 @@ private:
     /// The one pipeline this instance is for — its color-target format is params().
     /// Built during init and only polled by execute, so nothing on the frame path waits for a compile.
     sg::async_raster_pipeline _pipeline;
-
-    /// One viewport's draw data, concatenated into a single buffer pair.
-    /// Lives on the stack for the length of one execute() — under multi-viewport that call runs once per viewport per frame,
-    /// and caching this on the routine would have each viewport overwrite the previous one's geometry.
-    struct geometry
-    {
-        sg::buffer<ImDrawVert> vertices;
-
-        /// 32-bit, matching the `ImDrawIdx` our injected imgui config widens — an `ImDrawCmd`'s first index is
-        /// arbitrary, and a 16-bit one lands off the 4-byte boundary `sg::index_buffer_offset_alignment` requires.
-        sg::buffer<u32> indices;
-    };
-
-    /// Allocates this frame's transient vertex + index buffers and records their inline uploads.
-    /// The buffers are epoch-scoped: the returned handles do not own them, and they expire with the frame.
-    [[nodiscard]] static geometry upload_geometry(sg::command_list& cmd, ImDrawData* draw_data);
 };
 
 namespace sr
@@ -127,7 +139,7 @@ namespace sr
 /// draws this frame's main viewport into `main`'s backbuffer (cleared to `clear_color`), updates and draws the secondary viewport windows, then presents `main` last.
 ///
 /// This owns `main`'s present, which is exactly why it cannot composite imgui over your own scene —
-/// for that, open your own rendering scope and call imgui_routine::execute(scope, ...) directly, then update_viewports + render_viewports yourself.
+/// for that, call imgui_routine::prepare, open your own rendering scope and call imgui_routine::execute in it, then update_viewports + render_viewports yourself.
 /// This is a thin facade over those primitives, not a replacement.
 ///
 /// The caller still drives input and the frame bracket (poll_events / process_events / begin_frame / the UI / end_frame) and skips a minimized window —

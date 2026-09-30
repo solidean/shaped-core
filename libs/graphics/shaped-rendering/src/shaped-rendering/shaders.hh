@@ -4,23 +4,21 @@
 
 namespace slib
 {
-struct shader_package;
+class shader_library;
 }
 
 namespace sr
 {
-/// The shader package backing shaped-rendering's routines.
-/// Register it with the shader library once at startup, before any routine runs —
-/// a routine acquires its shaders through the library, so without this it has nothing to compile:
+/// Adds the shader packages backing shaped-rendering's routines to `lib`.
+/// Call it once at startup, before any routine runs and before `start_hot_reload`.
+/// A routine acquires its shaders through the library, so without this it has nothing to compile:
 ///
 ///     slib::shader_library lib;
-///     lib.add_compiler(slib::create_dxc_compiler().value());
-///     lib.add_package(sr::shader_package());
+///     slib::add_available_compilers(lib);
+///     sr::add_shader_packages(lib);
 ///     lib.start_hot_reload();
 ///
-/// One package covers the whole library;
-/// routines added later contribute their entry points to it, so a caller never has to track which routine needs which package.
-///
-/// This re-exposes the generated package, whose own header is private to shaped-rendering's build.
-[[nodiscard]] slib::shader_package const& shader_package();
+/// The packages are SGL and HLSL, so `lib` needs SGL compiler edges as well as DXC ones; `add_available_compilers` has both.
+/// A caller never tracks which routine needs which package: this adds all of them.
+void add_shader_packages(slib::shader_library& lib);
 } // namespace sr

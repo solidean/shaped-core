@@ -174,7 +174,7 @@ public:
         shutdown_no_throw();
     }
 
-    // create_vulkan_context fills this in once it has picked a physical device.
+    // create_vulkan_context fills these in once it has picked a physical device.
     using sg::context::set_adapter_info;
 
     /// The context's stat totals, for the transfer systems that count into them.

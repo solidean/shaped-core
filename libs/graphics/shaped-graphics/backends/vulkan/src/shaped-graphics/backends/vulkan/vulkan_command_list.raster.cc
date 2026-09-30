@@ -192,10 +192,35 @@ void vulkan_command_list::reopen_rendering()
     vkCmdBeginRendering(_buffer, &rendering);
 }
 
+void vulkan_command_list::suspend_rendering(cc::string_view cause, split_remedy remedy)
+{
+    if (!_in_render_pass || _rendering_suspended)
+        return;
+
+    vkCmdEndRendering(_buffer);
+    _rendering_split_cause = cause;
+    _rendering_split_remedy = remedy;
+    _rendering_suspended = true;
+}
+
+void vulkan_command_list::resume_rendering()
+{
+    if (!_rendering_suspended)
+        return;
+
+    // The split is counted here rather than at the suspend: a scope whose last draw is behind it reopens nothing.
+    note_render_pass_split(_rendering_split_cause, _rendering_split_remedy);
+    _rendering_suspended = false;
+    reopen_rendering();
+}
+
 void vulkan_command_list::raster_end_rendering()
 {
     CC_ASSERT(_in_render_pass, "end_rendering called with no open rendering scope");
-    vkCmdEndRendering(_buffer);
+    // A suspended instance was ended already, and nothing reopened it since.
+    if (!_rendering_suspended)
+        vkCmdEndRendering(_buffer);
+    _rendering_suspended = false;
     _in_render_pass = false;
     _rendering_color_attachments.clear();
     _rendering_has_depth = false;
@@ -406,6 +431,7 @@ void vulkan_command_list::raster_draw(sg::draw_config const& config)
 
     declare_raster_draw_barriers(false);
     flush_barriers();
+    resume_rendering();
     vkCmdDraw(_buffer, u32(config.vertex_range.size), u32(config.instance_range.size), u32(config.vertex_range.offset),
               u32(config.instance_range.offset));
 }
@@ -429,6 +455,7 @@ void vulkan_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
 
     declare_raster_draw_barriers(true);
     flush_barriers();
+    resume_rendering();
     vkCmdDrawIndexed(_buffer, u32(config.index_range.size), u32(config.instance_range.size),
                      u32(config.index_range.offset), config.vertex_offset, u32(config.instance_range.offset));
 }

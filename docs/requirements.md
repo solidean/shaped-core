@@ -56,24 +56,22 @@ See [platforms.md](platforms.md) for the full tier matrix — which platforms ar
 WebAssembly builds use the [emsdk](https://github.com/emscripten-core/emsdk), which bundles `emcc`, the CMake toolchain file, and its own Node.js — so no separate Node install is needed.
 The `wasm-emscripten-*` configure presets reference the toolchain file via `$env{EMSDK}`.
 
-emsdk is a git checkout plus a downloader rather than a package, so installing it is the same three commands everywhere:
+emsdk is a git checkout plus a downloader rather than a package, and `dev.py` installs it:
 
 ```bash
-git clone https://github.com/emscripten-core/emsdk.git ~/tools/emsdk
-~/tools/emsdk/emsdk install 6.0.9      # or `latest`; this is what CI pins
-~/tools/emsdk/emsdk activate 6.0.9
+uv run dev.py install emsdk                     # into ~/tools/emsdk, at the version tools/emsdk.version pins
+uv run dev.py install emsdk --emsdk-path <dir>  # somewhere else, or an existing checkout to update
 ```
 
-It downloads its own clang, Node.js and Python into the checkout, so it needs nothing from the system beyond `git` and a Python to bootstrap with.
-`emsdk activate` writes the checkout's own config; it does **not** need `--permanent` or `--system`, because `dev.py` applies the environment to each configure, build and test subprocess itself.
+That clones emsdk (or pulls an existing checkout, so it knows the pin), then installs and activates the pinned version with emsdk's own script.
+`tools/emsdk.version` is the one pin: CI reads the same file, and `dev.py doctor` says when the emsdk it finds is at another version.
+emsdk downloads its own clang, Node.js and Python into the checkout, so it needs nothing from the system beyond `git`.
+Activation writes the checkout's own config; it needs neither `--permanent` nor `--system`, because `dev.py` applies the environment to each configure, build and test subprocess itself.
 
 **Do not put emsdk's directories on `PATH`.**
 They carry a clang, a node and a python that would shadow the system ones for every other build on the machine.
-Export `EMSDK` instead — the variable emsdk's own activation sets, and the third step of the resolution order below:
-
-```bash
-export EMSDK=$HOME/tools/emsdk
-```
+Nothing needs exporting for an emsdk in `~/tools/emsdk`, the last place `dev.py` looks.
+For one elsewhere, set `SC_EMSDK_PATH` or `EMSDK`, or pass `--emsdk-path`.
 
 **On SteamOS** this is the whole story, and it is easier than the rest of the toolchain there.
 `/usr` is read-only and replaced wholesale by every OS update, so anything `pacman` installs is temporary and `$HOME` is the only durable place.
@@ -86,7 +84,7 @@ Point `dev.py` at a checkout explicitly with `--emsdk-path`:
 uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsdk
 ```
 
-Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` → `emcc` on `PATH`.
+Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` → `emcc` on `PATH` → `~/tools/emsdk`.
 Tests run under Node by default: `-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code.
 Deno runs the same artifacts unchanged; `--runtime` picks between them, and [guides/building-and-testing.md](guides/building-and-testing.md#which-runtime-executes-the-artifact) is how.
 Threads and WebGPU are both wired, as the `emscripten-threads-*`, `emscripten-webgpu-*` and `emscripten-threads-webgpu-*` presets.

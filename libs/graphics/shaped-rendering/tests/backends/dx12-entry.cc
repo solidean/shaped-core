@@ -1,14 +1,14 @@
-#include "shader_fixtures.hh"
+#include "../shader_fixtures.hh"
+#include "sr_backends.hh"
 
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
-#include <nexus/tests/alias.hh>
-#include <nexus/tests/registry.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_expected_messages.hh>
 
-// Entry-point drivers for sr's GPU tests: each brings up ONE dx12 context and invokes every INVOCABLE_TEST taking an sg::context_handle against it.
+// dx12 entry-point drivers for sr's GPU tests: each brings up ONE dx12 context and invokes every INVOCABLE_TEST taking an sg::context_handle against it.
+// Compiled only where the dx12 backend builds, so Windows.
 // The adapter rules are libs/graphics/shaped-graphics/docs/testing.md, section "Devices and adapters":
 //   - hardware: the real GPU, and the default; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
@@ -21,10 +21,6 @@
 namespace
 {
 namespace dx12 = sg::backend::dx12;
-
-constexpr char const* warp_driver = "sr dx12 - warp";
-constexpr char const* hardware_driver = "sr dx12 - hardware";
-
 } // namespace
 
 // The debug-layer advisories sg provokes on purpose (dx12_expected_messages.hh), allowed in every test of this binary.
@@ -43,7 +39,7 @@ ASYNC_TEST("sr dx12 - warp")
     else
     {
         (void)sr_test::shader_fixtures(); // alive before any child acquires through it
-        co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("dx12-warp", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
@@ -67,7 +63,7 @@ ASYNC_TEST("sr dx12 - hardware")
     else
     {
         (void)sr_test::shader_fixtures();
-        co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("dx12-hw", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
@@ -80,21 +76,5 @@ ASYNC_TEST("sr dx12 - hardware")
     }
 }
 
-// One alias per invocable, so `dev.py test "sr - <name>"` still selects that one test, on both adapters.
-NX_TEST_SETUP(nx::setup& s)
-{
-    auto const* const warp = s.find_test(warp_driver);
-    auto const* const hardware = s.find_test(hardware_driver);
-
-    for (auto const* t : s.invocables_with<sg::context_handle>())
-    {
-        cc::vector<nx::alias_fragment> fragments;
-        if (warp != nullptr)
-            fragments.push_back(nx::alias_fragment{.driver = warp, .section_path = {"warp", t->name}});
-        if (hardware != nullptr)
-            fragments.push_back(nx::alias_fragment{.driver = hardware, .section_path = {"hardware", t->name}});
-
-        if (!fragments.empty())
-            s.define_alias(t->name, cc::move(fragments));
-    }
-}
+static bool const sr_dx12_warp_registered = sr_test::register_backend("sr dx12 - warp", "dx12-warp");
+static bool const sr_dx12_hw_registered = sr_test::register_backend("sr dx12 - hardware", "dx12-hw");

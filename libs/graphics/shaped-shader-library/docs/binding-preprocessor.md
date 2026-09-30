@@ -182,7 +182,11 @@ That space matters: an inline-constants block sharing a space with a group's `b`
 
 Q8 applies here too, which is why the attribute must write a `register()` at all — a constants block referenced by one stage of a two-stage pipeline gets a register only in that stage.
 
-`block_size` keeps coming from reflection, which is how a routine reads it today and is never wrong.
+`block_size` keeps coming from reflection, which is how a routine reads it today.
+**The two reflections disagree on a block that does not fill its last 16-byte row.**
+DXIL rounds a constant buffer up to a whole row, while a SPIR-V push-constant block ends at its last member, so `{11 floats}` is 48 bytes on dx12 and 44 on vulkan.
+The mirror rounds as DXIL does, so pushing it into that block trips sg's size check on vulkan alone.
+Until the pass pads such a block itself, its struct must end on a row, as `nn_output.hlsl`'s trailing `_pad0` does.
 The generator also emits the block's C++ mirror, from the struct the `ConstantBuffer` names, so `sizeof` is true rather than asserted.
 That struct must be declared in the same file, which is what a mirror needs and what every block in the tree already does.
 

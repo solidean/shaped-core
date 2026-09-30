@@ -93,7 +93,7 @@ void webgpu_command_list::place_constants(bound_state& state)
 void webgpu_command_list::open_compute_pass()
 {
     if (_render_pass)
-        end_open_pass();
+        end_open_pass("a dispatch");
     if (_compute_pass)
         return;
     auto const desc

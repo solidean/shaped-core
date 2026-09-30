@@ -34,9 +34,10 @@ struct nn_output_constants
     int read_offset_y;
 
     float input_scale; // the same one nn_input.hlsl applied; this divides by it
+
+    // To a whole row, because a push-constant block on SPIR-V ends at its last member where a cbuffer rounds up.
+    // A block that is not a multiple of 16 bytes then has two sizes, and the host mirror matches only one of them.
     float _pad0;
-    float _pad1;
-    float _pad2;
 };
 
 #pragma sc push_constants

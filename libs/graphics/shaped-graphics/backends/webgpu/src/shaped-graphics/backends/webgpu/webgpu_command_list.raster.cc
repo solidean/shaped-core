@@ -13,7 +13,7 @@ void webgpu_command_list::raster_begin_rendering(sg::rendering_info const& info)
     CC_ASSERT(!_in_rendering_scope, "a rendering scope is already open");
     CC_ASSERT(!info.color_targets.empty() || info.depth_stencil_target.has_value(), "a rendering scope needs at least "
                                                                                     "one target");
-    end_open_pass();
+    end_open_pass("a new rendering scope");
 
     _color_attachments.clear();
     auto size = tg::vec2i(0, 0);
@@ -105,11 +105,11 @@ void webgpu_command_list::open_render_pass(bool reopen)
 {
     CC_ASSERT(_in_rendering_scope, "no rendering scope to open a pass for");
     if (_compute_pass)
-        end_open_pass();
+        end_open_pass("a render pass opening");
 
     if (reopen)
     {
-        _stats.add(sg::stat::render_pass_splits);
+        note_render_pass_split(_split_cause, _split_remedy);
         for (auto& a : _color_attachments)
             a.attachment.loadOp = WGPULoadOp_Load;
         if (_has_depth)
@@ -157,7 +157,7 @@ void webgpu_command_list::raster_end_rendering()
 {
     CC_ASSERT(_in_rendering_scope, "end_rendering without an open rendering scope");
     if (_render_pass)
-        end_open_pass();
+        end_open_pass("the end of the rendering scope");
     _in_rendering_scope = false;
     _color_attachments.clear();
     _depth_view = {};
@@ -345,7 +345,8 @@ void webgpu_command_list::order_draw_within_pass(bool indexed)
         note(_index_resource, false);
 
     if (must_split && _render_pass)
-        end_open_pass(); // apply_raster_state reopens it, which is what orders this draw after the earlier ones
+        // apply_raster_state reopens it, which orders this draw after the earlier ones
+        end_open_pass("a hazard between two of its draws", split_remedy::split_scope_between_draws);
 
     // Recorded after the split, so the reopened pass orders what follows against this draw.
     auto const add_once = [](cc::vector<void const*>& into, void const* resource)

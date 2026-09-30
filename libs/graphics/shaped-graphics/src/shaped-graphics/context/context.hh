@@ -396,6 +396,10 @@ private:
 
     friend void impl::notify_transfer_drained(context& ctx);
 
+    /// Whether a split forced by `cause` should warn now: warnings are on, and no split on this context named `cause` before.
+    [[nodiscard]] bool claim_render_pass_split_warning(cc::string_view cause);
+    friend class command_list;
+
     cc::mutex<cc::vector<pending_completion>> _pending_completions;
     std::unique_ptr<completion_signals> _completion_signals;
 
@@ -752,6 +756,10 @@ protected:
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     bool _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
+    cc::atomic<bool> _render_pass_split_warnings = true;
+
+    // The split causes already warned about; command lists record on any thread.
+    cc::mutex<cc::vector<cc::string>> _warned_split_causes;
     cc::string _device_loss_reason;
 
     // Built-in pipeline/layout cache reached via ctx.cached.

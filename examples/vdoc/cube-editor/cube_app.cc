@@ -8,7 +8,8 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
+#include <shaped-shader-library/compiler/available_compilers.hh>
+#include <shaped-shader-library/shader_library.hh>
 #include <cube_shaders.hh>
 
 namespace cube_editor
@@ -59,15 +60,15 @@ cc::unique_ptr<app> app::create(cc::string_view title)
     }
     out->_ctx = cc::move(context.value());
 
-    auto compiler = slib::create_dxc_compiler();
-    if (compiler.has_error())
+    // The cube's shaders are HLSL, so without DXC there is nothing to draw.
+    slib::add_available_compilers(out->_lib);
+    if (out->_lib.supported_formats(slib::shader_language::hlsl).empty())
     {
-        cc::eprintln("no shader compiler: {}", compiler.error().to_string());
+        cc::eprintln("no shader compiler for HLSL: DXC did not load, and the warning above says why");
         return nullptr;
     }
-    out->_lib.add_compiler(cc::move(compiler.value()));
-    out->_lib.add_package(sr::shader_package()); // imgui's shaders
-    out->_lib.add_package(shaders::package());   // ours
+    sr::add_shader_packages(out->_lib);        // imgui's shaders
+    out->_lib.add_package(shaders::package()); // ours
 
     // bgra8_unorm rather than its _srgb sibling: imgui's colors are already sRGB-encoded and the routine refuses a
     // target that would encode them twice.
@@ -173,13 +174,15 @@ cc::shared_async<cc::unit> app::draw_and_present(vdoc::document const& doc,
         // Declines while the cube shaders are still building, which on the first frames is ordinary.
         (void)cube_routine::execute(pass, doc, this->view_projection(cam), selected);
     }
+    // imgui's copies are recorded before its scope opens, which a copy inside one would close and reopen.
+    auto const imgui_frame = sr::imgui_routine::prepare(*cmd, ImGui::GetDrawData());
     {
         // imgui gets its own scope, with no depth target: a pipeline bakes in the formats it was built against, and
         // imgui's carries no depth format at all — binding one here would not match the pipeline the routine uses.
         // `preserved()` is what keeps the scene that the scope above just drew.
         auto pass = cmd->raster.render_to({.color_targets = {rt.preserved()}});
         // Declines while the imgui shaders are still building, which on the first frames is ordinary.
-        (void)sr::imgui_routine::execute(pass, ImGui::GetDrawData());
+        (void)sr::imgui_routine::execute(pass, imgui_frame);
     }
     if (!_capture.active)
     {

@@ -1,13 +1,18 @@
-"""`install` — install a developer tool of this repo into the machine's own tools, as a link into the checkout.
+"""`install` — install a developer tool of this repo into the machine's own tools.
 
-A link rather than a copy, so a `git pull` or a rebuild updates what is installed.
-Every install is undone by `--uninstall`, which removes only links into this checkout: never a folder of the user's, and never another checkout's link.
+Two kinds.
+An editor extension is a link into the checkout, so a `git pull` or a rebuild updates what is installed.
+`--uninstall` removes only links into this checkout: never a folder of the user's, and never another checkout's link.
+emsdk, the Emscripten SDK the WASM presets build with, is a checkout of its own outside this one, at the version `tools/emsdk.version` pins.
+It is a folder rather than a link, so `--uninstall` names it and leaves deleting it to the user.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +59,10 @@ _INSTALLABLES = [
 ]
 
 
+_EMSDK = "emsdk"
+_EMSDK_REPO = "https://github.com/emscripten-core/emsdk.git"
+
+
 def _editors() -> list[_editor]:
     home = Path.home()
     return [
@@ -73,6 +82,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Only this editor, repeatable; default: every editor whose extensions folder exists")
     p.add_argument("--uninstall", action="store_true", help="Remove the links instead of making them")
     p.add_argument("--no-build", action="store_true", help="Link only, and build nothing first")
+    a.emsdk(p)
     return p
 
 
@@ -138,12 +148,87 @@ def _list(ctx: Context) -> None:
             else:
                 state = console.dim("not installed")
             print(f"  {editor.name:<9} {state}")
-    print(console.dim(f"\n  uv run dev.py {NAME} <name> [--editor <e>] [--uninstall]"))
+    _list_emsdk(ctx)
+    print(console.dim(f"\n  uv run dev.py {NAME} <name> [--editor <e>] [--emsdk-path <dir>] [--uninstall]"))
+
+
+def _emsdk_target(args: argparse.Namespace) -> Path:
+    """The emsdk to install or update: the one named, else the one dev.py already uses, else the default place."""
+    if args.emsdk_path:
+        return Path(args.emsdk_path).expanduser().resolve()
+    return dev.find_emsdk_root() or dev.default_emsdk_root()
+
+
+def _list_emsdk(ctx: Context) -> None:
+    pinned = dev.pinned_emsdk_version(ctx.root)
+    print(f"{console.bold(_EMSDK)}  the Emscripten SDK the WASM presets build with, pinned to {pinned} in tools/emsdk.version")
+    root = dev.find_emsdk_root()
+    if root is None:
+        print(f"  {console.dim('not installed')}")
+        return
+    installed = dev.installed_emsdk_version(root)
+    if installed == pinned:
+        state = console.green(f"{installed} at {root}")
+    elif installed is None:
+        state = console.yellow(f"no version activated at {root}")
+    else:
+        state = console.yellow(f"{installed} at {root}, not the pinned {pinned}")
+    print(f"  {state}")
+
+
+def _run_emsdk(emsdk_dir: Path, *command: str) -> bool:
+    """emsdk's own script, under the Python dev.py runs in, so it needs no python on PATH; its output streams, since it downloads.
+
+    Every line printed ahead of a child process is flushed, or it lands after the child's own output.
+    """
+    print(console.dim(f"  emsdk {' '.join(command)}"), flush=True)
+    return subprocess.run([sys.executable, str(emsdk_dir / "emsdk.py"), *command], cwd=emsdk_dir).returncode == 0
+
+
+def _install_emsdk(args: argparse.Namespace, ctx: Context) -> None:
+    target = _emsdk_target(args)
+    if args.uninstall:
+        print(f"  emsdk is a folder rather than a link, so nothing here deletes it; remove {target} to uninstall it")
+        return
+
+    pinned = dev.pinned_emsdk_version(ctx.root)
+    git = shutil.which("git")
+    if git is None:
+        ctx.die("emsdk installs from its git repository, and git is not on PATH")
+
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        print(console.dim(f"  git clone {_EMSDK_REPO} {target}"), flush=True)
+        if subprocess.run([git, "clone", _EMSDK_REPO, str(target)]).returncode != 0:
+            ctx.die(f"cloning emsdk into {target} failed")
+    elif not (target / "emsdk.py").is_file():
+        ctx.die(f"{target} exists and is not an emsdk checkout; pass --emsdk-path to install elsewhere")
+    else:
+        # emsdk learns which versions exist from its own checkout, so an old one does not know a newer pin.
+        print(console.dim(f"  git -C {target} pull --ff-only"), flush=True)
+        if subprocess.run([git, "-C", str(target), "pull", "--ff-only"]).returncode != 0:
+            print(f"  {console.yellow('warning')}: updating {target} failed; installing with what it knows", file=sys.stderr)
+
+    if not _run_emsdk(target, "install", pinned) or not _run_emsdk(target, "activate", pinned):
+        ctx.die(f"emsdk could not install and activate {pinned} in {target}")
+
+    installed = dev.installed_emsdk_version(target)
+    if installed != pinned:
+        ctx.die(f"emsdk reports {installed} in {target} after activating {pinned}")
+    print(f"  {console.green('installed')} Emscripten {pinned} at {target}")
+
+    if dev.find_emsdk_root() == target:
+        print(console.dim("  dev.py finds it there by itself; the emscripten-* presets need nothing else"))
+    else:
+        print(console.dim(f"  dev.py does not look there by itself: pass --emsdk-path {target}, or set SC_EMSDK_PATH to it"))
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     if not args.name:
         _list(ctx)
+        return
+    if args.name == _EMSDK:
+        _install_emsdk(args, ctx)
         return
     item = next((i for i in _INSTALLABLES if i.name == args.name), None)
     if item is None:

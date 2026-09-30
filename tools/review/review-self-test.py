@@ -1615,6 +1615,19 @@ def test_a_reference_resolves_three_ways(root: Path) -> None:
         assert not tokens[0].problem
 
 
+def test_a_long_suffix_resolves_whole(root: Path) -> None:
+    """A suffix longer than the usual three letters is still the whole suffix, never a cut of it.
+
+    The matcher capped a suffix at six characters, so `tools/emsdk.version` matched as `tools/emsdk.versio` and
+    failed as a missing file that nobody wrote.
+    """
+    paths = REPO_FILES + ["tools/emsdk.version"]
+    tokens = _tokens(root, "See `tools/emsdk.version` for the pin.", paths)
+    assert len(tokens) == 1, tokens
+    assert tokens[0].path == "tools/emsdk.version", tokens[0]
+    assert not tokens[0].problem, tokens[0].problem
+
+
 def test_raw_opts_a_link_destination_out_the_way_it_opts_a_span_out(root: Path) -> None:
     """A relative link quoted out of another file resolves against that file, never against the repository root.
 

@@ -325,6 +325,9 @@ ASYNC_INVOCABLE_TEST("sg - a draw that writes a buffer and reads it as a vertex 
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
+    // The split this test provokes on purpose warns on every backend but dx12, as many times as that backend splits.
+    nx::allow_warnings("was closed and reopened around", "sg");
+
     // `counting` writes `shared` through a group.
     // One draw that also reads `shared` as a vertex buffer is refused, as WebGPU refuses it.
     // A later draw reading it is not: the backend splits the pass between the two, and WebGPU's scope ends there.

@@ -23,6 +23,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/capture.hh>
 #include <shaped-rendering/window.hh>
+#include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -32,13 +33,10 @@
 
 #if ROTATING_CUBE_BACKEND_WEBGPU
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
-#include <shaped-shader-library/compiler/wgsl_compiler.hh>
 #elif ROTATING_CUBE_BACKEND_DX12
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #else
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #endif
 
 using namespace cc::primitive_defines;
@@ -332,19 +330,12 @@ ASYNC_EXAMPLE("shaped-graphics/rotating-cube")
     // Every compiler this build has is registered and the library picks: `acquire` walks the context's accepted
     // formats and asks each compiler whether it can produce one, so the example never names a shader format itself.
     auto lib = slib::shader_library();
-#if ROTATING_CUBE_BACKEND_WEBGPU
-    // WGSL needs no toolchain — WebGPU compiles the source itself — so this one cannot fail to be there.
-    lib.add_compiler(slib::create_wgsl_compiler());
-#else
-    auto dxil = slib::create_dxc_compiler();
-    auto spirv = slib::create_dxc_spirv_compiler();
-    if (dxil.has_value())
-        lib.add_compiler(cc::move(dxil.value()));
-    if (spirv.has_value())
-        lib.add_compiler(cc::move(spirv.value()));
-    if (dxil.has_error() && spirv.has_error())
+    slib::add_available_compilers(lib);
+#if !ROTATING_CUBE_BACKEND_WEBGPU
+    // WGSL needs no toolchain, but the HLSL half needs DXC.
+    if (lib.supported_formats(slib::shader_language::hlsl).empty())
     {
-        cc::eprintln("no shader compiler: {}", dxil.error().to_string());
+        cc::eprintln("no shader compiler for HLSL: DXC did not load, and the warning above says why");
         co_return;
     }
 #endif

@@ -21,10 +21,15 @@ Bigger design intent lives in [structure.md](structure.md).
   What the memory buys is a larger tile, and tile size is the lever that still pays.
 - à-trous estimates noise from the sample count alone, assuming one noise width per sample equal to the pixel's luminance.
   A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.
-- Port the native denoise members to SGL once it is feature-complete enough for them.
-  They are HLSL today, so `sr::query_denoise_support` answers false on webgpu and metal — SGL is what reaches those backends.
-  It also removes the four hand-written "find the constants_buffer binding" loops the members and the playground example use to build their pipeline layouts.
-  An SGL package generates `inline_binding()` for its constants instead.
+- Port the rest of sr's HLSL to SGL; blit, imgui, the raster mip filter and the network's pool and upsample are ported.
+  What holds each remaining shader back is SGL's, and none of it is a blocker so much as a workaround to mark:
+  - à-trous and the SVGF passes want vector comparisons with `any`/`all`, integer-vector `min`/`max`/`clamp`, `const` arrays, and `use` for the shared SVGF helpers;
+  - `nn_input` and `nn_output` want `is_nan`/`is_inf`, and `nn_conv` an unroll hint before its tuned loop is trusted to SGL's HLSL;
+  - the compute box-filter mipmap writes whatever format its texture has, which an SGL image cannot say without a type parameterized on the format.
+  Every denoise member also writes the caller's `output` as an image, whose format an SGL image must name, so porting them means pinning that format.
+  Until the network is whole in SGL, `sr::query_denoise_support` answers false on webgpu and metal.
+  Porting also removes the hand-written "find the constants_buffer binding" loops the members and the playground example use to build their pipeline layouts,
+  since an SGL entry point states its layout (`acquire_layout`).
 - Two denoise tests worth having and not written yet.
   A method switch on one history — à-trous then SVGF on the same `sr::denoise_history` — which is the one branch of `denoise_history::_prepare` nothing covers.
   And `options_for` on both members, which maps `quality` and `sharpness` onto pass counts and sigmas and is what any settings UI drives.
@@ -58,8 +63,6 @@ Bigger design intent lives in [structure.md](structure.md).
 - imgui viewports: `ImGuiBackendFlags_HasMouseHoveredViewport` is not set, so imgui infers the hovered viewport from the mouse position rather than asking the platform.
   That is wrong when another application's window sits on top of a viewport — SDL would have to report the window under the cursor.
 - imgui: an Alpha8 atlas path (the shader samples `.rgba`, so `TexDesiredFormat` is pinned to RGBA32).
-- Concrete routines currently need dx12 + DXC (Windows) for a real shader; the framework itself is cross-platform.
-  Broaden once a non-Windows shader path exists.
 - The routine library watches `std::shared_ptr<slib::shader_library>`; `add_shader_library` accepts any number, though slib currently allows one alive at a time.
 - Settle the module layout once the first routines land, and grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) accordingly.
 

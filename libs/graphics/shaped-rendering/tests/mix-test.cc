@@ -71,7 +71,9 @@ cc::shared_async<cc::vector<tg::vec4f>> mix_once(sg::context& ctx, tg::vec4f des
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
@@ -94,7 +96,9 @@ ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly", (sg::co
         CHECK(tg::abs(replaced[0][c] - b[c]) < 1e-6f);
 }
 
-ASYNC_INVOCABLE_TEST("sr - a mix interpolates every channel on its own", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - a mix interpolates every channel on its own",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
