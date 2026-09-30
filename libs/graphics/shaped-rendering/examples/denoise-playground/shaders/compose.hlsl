@@ -3,6 +3,9 @@
 // Side by side rather than a toggle, because the whole question a denoiser answers is "compared to what". A viewer
 // that flips between two images asks its reader to remember one of them; this one does not.
 //
+// The raw image may be smaller than the output, traced for an upscaler; it is then shown pixel for pixel, blocky, since
+// that is what the upscaler was handed.
+//
 // It also tonemaps, which is where the HDR radiance the tracer produces becomes something a bgra8 back buffer can
 // show. Without it the linear values clip and the image reads as washed out rather than bright.
 //
@@ -23,7 +26,7 @@ ConstantBuffer<compose_constants> gConstants;
 namespace compose_bindings
 {
     Texture2D<float4> gRaw;      // the tracer's own output
-    Texture2D<float4> gDenoised; // what the denoiser made of it
+    Texture2D<float4> gDenoised; // what the denoiser made of it, at the output's size when it upscaled
     RWTexture2D<float4> gTarget;
 }
 
@@ -58,7 +61,15 @@ float3 to_srgb(float3 c)
     float split_x = gConstants.split * float(size.x);
     bool left = gConstants.show_split != 0 && float(p.x) < split_x;
 
-    float3 c = left ? gRaw.Load(int3(p, 0)).rgb : gDenoised.Load(int3(p, 0)).rgb;
+    // Each side is read at its own size: a call that did not upscale hands the raw image to both.
+    uint2 raw_size;
+    gRaw.GetDimensions(raw_size.x, raw_size.y);
+    uint2 denoised_size;
+    gDenoised.GetDimensions(denoised_size.x, denoised_size.y);
+    int2 raw_p = int2(float2(p) * float2(raw_size) / float2(size));
+    int2 denoised_p = int2(float2(p) * float2(denoised_size) / float2(size));
+
+    float3 c = left ? gRaw.Load(int3(raw_p, 0)).rgb : gDenoised.Load(int3(denoised_p, 0)).rgb;
     float3 out_color = to_srgb(tonemap(c * gConstants.exposure));
 
     // A one-pixel divider, so the seam is a deliberate line rather than something to look for.

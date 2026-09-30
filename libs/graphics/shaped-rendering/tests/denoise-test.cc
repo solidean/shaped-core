@@ -254,8 +254,9 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     auto const dlss = sr::reconstruct_settings{.denoiser = sr::denoise_method::dlss_rr};
     CHECK(sr::resolve_denoise_method(ctx, dlss) == sr::denoise_method::dlss_rr);
 
-    // Only the vendor members trace smaller than they output; every other member answers the output's own size.
+    // A denoiser works at one ratio: with no upscaler behind it, it answers the output's own size at every preset.
     auto const scaled = sr::reconstruct_settings{.denoiser = sr::denoise_method::atrous,
+                                                 .upscaler = sr::upscale_method::none,
                                                  .scale = sr::render_scale_preset::performance};
     CHECK(sr::reconstruct_input_extent(ctx, scaled, tg::vec2i(640, 480)) == tg::vec2i(640, 480));
 

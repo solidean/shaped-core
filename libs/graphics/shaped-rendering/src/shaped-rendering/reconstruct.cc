@@ -7,6 +7,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
+#include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/reconstruct.hh>
@@ -103,6 +104,22 @@ cc::string_view to_string(denoise_method m)
     return "?";
 }
 
+cc::string_view to_string(upscale_method m)
+{
+    switch (m)
+    {
+    case upscale_method::none:
+        return "none";
+    case upscale_method::automatic:
+        return "automatic";
+    case upscale_method::fsr:
+        return "fsr";
+    case upscale_method::count_:
+        break;
+    }
+    return "?";
+}
+
 cc::string_view to_string(reconstruct_status s)
 {
     switch (s)
@@ -151,6 +168,35 @@ bool reconstruct_history::_prepare(denoise_method method, tg::vec2i extent)
     }
     _reset_requested = false;
     return restarted;
+}
+
+bool upscale_history::_prepare(tg::vec2i input_extent, tg::vec2i output_extent)
+{
+    auto const changed = _input_extent != input_extent || _output_extent != output_extent;
+    auto const restarted = changed || _reset_requested;
+    if (changed)
+    {
+        // The upscaler's state is built for one pair of extents, so it goes with them.
+        _state = nullptr;
+        _input_extent = input_extent;
+        _output_extent = output_extent;
+    }
+    _reset_requested = false;
+    return restarted;
+}
+
+bool reconstruct_support::supports(upscale_method m) const
+{
+    switch (m)
+    {
+    case upscale_method::fsr:
+        return fsr;
+    case upscale_method::none:
+    case upscale_method::automatic:
+    case upscale_method::count_:
+        return false;
+    }
+    return false;
 }
 
 bool reconstruct_support::supports(denoise_method m) const
@@ -204,6 +250,7 @@ reconstruct_support query_reconstruct_support(sg::context const& ctx)
              && buildable(sr::shaders::svgf_variance.compute.main_cs)
              && buildable(sr::shaders::svgf_atrous.compute.main_cs),
         .oidn = oidn_denoise_routine::is_available(ctx),
+        .fsr = fsr_upscale_routine::is_available(ctx),
     };
 }
 
@@ -273,81 +320,69 @@ namespace
             return m;
     return denoise_method::none;
 }
-} // namespace
 
-denoise_method resolve_denoise_method(sg::context const& ctx, reconstruct_settings const& settings)
+/// Whether a denoiser upscales by itself, so that no upscaler runs behind it.
+[[nodiscard]] bool upscales_itself(denoise_method m)
 {
-    if (settings.denoiser != denoise_method::automatic)
-        return settings.denoiser;
-    return resolve_with(query_reconstruct_support(ctx), settings);
+    return m == denoise_method::dlss_rr || m == denoise_method::fsr_rr;
 }
 
-tg::vec2i reconstruct_input_extent(sg::context const& ctx, reconstruct_settings const& settings, tg::vec2i output_extent)
+/// `resolve_upscale_method` against a support answer and a resolved denoiser the caller already has.
+[[nodiscard]] upscale_method resolve_upscaler_with(reconstruct_support const& support,
+                                                   reconstruct_settings const& settings,
+                                                   denoise_method denoiser)
 {
-    auto const m = resolve_denoise_method(ctx, settings);
+    if (upscales_itself(denoiser))
+        return upscale_method::none;
+    if (settings.upscaler != upscale_method::automatic)
+        return settings.upscaler;
 
-    // Only the vendor members upscale; every native member and OIDN works at one ratio.
-    if (m != denoise_method::dlss_rr && m != denoise_method::fsr_rr)
-        return output_extent;
+    // Automatic upscales only when there is something to upscale.
+    if (settings.scale == render_scale_preset::native)
+        return upscale_method::none;
+    return support.fsr ? upscale_method::fsr : upscale_method::none;
+}
 
-    // A named member this context cannot run will be refused, and a caller that traced smaller for it would then
-    // composite a smaller image into its own output.
-    if (!query_reconstruct_support(ctx).supports(m))
-        return output_extent;
+/// The ratio the upscaler runs `preset` at.
+[[nodiscard]] f32 upscaler_ratio(upscale_method m, render_scale_preset preset)
+{
+    switch (m)
+    {
+    case upscale_method::fsr:
+        return fsr_upscale_routine::ratio_of(preset);
+    case upscale_method::none:
+    case upscale_method::automatic:
+    case upscale_method::count_:
+        break;
+    }
+    return 1.0f;
+}
 
-    auto const ratio = vendor_ratio(settings.scale);
+[[nodiscard]] tg::vec2i scaled_down(tg::vec2i output_extent, f32 ratio)
+{
     auto const scaled = [&](int v) { return cc::max(1, int(f32(v) / ratio + 0.5f)); };
     return tg::vec2i(scaled(output_extent[0]), scaled(output_extent[1]));
 }
 
-cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scope)
+/// The same once-per-process refusal log as the denoisers', for the upscalers.
+static_assert(u32(upscale_method::count_) * u32(refusal_reason::count_) <= 32, "the refusal bitset no longer fits");
+auto g_upscaler_refusals_logged = cc::atomic<u32>(0);
+
+void log_upscaler_refusal_once(upscale_method m, refusal_reason reason, cc::string_view why)
 {
-    // The front holds nothing of its own.
-    // Its init registers every supported member, so prewarming the front starts their compiles on the next tick
-    // rather than on the first call.
-    // Through prewarm rather than dependency tokens: a token would hold the front pending until every member is ready,
-    // and one member this device cannot initialize would then hold every other member hostage.
-    auto& ctx = scope.context();
-    auto const support = query_reconstruct_support(ctx);
-    if (support.atrous)
-        atrous_denoise_routine::prewarm(ctx);
-    if (support.svgf)
-        svgf_denoise_routine::prewarm(ctx);
-    if (support.oidn)
-        oidn_denoise_routine::prewarm(ctx);
-    co_return;
+    auto const bit = u32(1) << (u32(m) * u32(refusal_reason::count_) + u32(reason));
+    if ((g_upscaler_refusals_logged.fetch_or(bit, cc::memory_order_relaxed) & bit) != 0)
+        return;
+    CC_LOG_WARNING("upscaler '{}' did not run: {}", to_string(m), why);
 }
 
-reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
-                                                 reconstruct_inputs const& in,
-                                                 reconstruct_history& history,
-                                                 reconstruct_settings const& settings)
+/// The denoiser forwarded to, writing `in.output`.
+[[nodiscard]] reconstruct_outcome run_denoiser(sg::command_list& cmd,
+                                               reconstruct_inputs const& in,
+                                               reconstruct_history& history,
+                                               reconstruct_settings const& settings,
+                                               denoise_method method)
 {
-    CC_ASSERT(settings.denoiser != denoise_method::none, "a caller with denoising off does not call the denoiser");
-
-    // Registers the front on first use, so its init prewarms the members; its own readiness gates nothing.
-    (void)try_acquire(cmd);
-
-    auto& ctx = cmd.context();
-    // Asked once and used twice, since the resolver and the support check want the same answer.
-    auto const support = query_reconstruct_support(ctx);
-    auto const method = resolve_with(support, settings);
-    if (method == denoise_method::none || !support.supports(method))
-    {
-        // The resolved method rather than what was asked for, so both refusal paths report a member rather than
-        // `automatic`, which is not one.
-        log_refusal_once(method, refusal_reason::unsupported, "not supported by this build or device");
-        return {.status = reconstruct_status::unsupported, .denoiser = method};
-    }
-
-    auto const missing = required_guides(method).without(in.present_guides());
-    if (!missing.is_empty())
-    {
-        log_refusal_once(method, refusal_reason::missing_guide,
-                         "the call is missing a guide buffer this member requires");
-        return {.status = reconstruct_status::unsupported, .denoiser = method};
-    }
-
     switch (method)
     {
     case denoise_method::atrous:
@@ -365,5 +400,159 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
     }
     // Reached only by a member query_reconstruct_support calls supported and this switch does not forward yet.
     CC_UNREACHABLE("a supported denoise member has no case in reconstruct_routine::execute");
+}
+} // namespace
+
+denoise_method resolve_denoise_method(sg::context const& ctx, reconstruct_settings const& settings)
+{
+    if (settings.denoiser != denoise_method::automatic)
+        return settings.denoiser;
+    return resolve_with(query_reconstruct_support(ctx), settings);
+}
+
+upscale_method resolve_upscale_method(sg::context const& ctx, reconstruct_settings const& settings)
+{
+    auto const support = query_reconstruct_support(ctx);
+    return resolve_upscaler_with(support, settings, resolve_with(support, settings));
+}
+
+tg::vec2i reconstruct_input_extent(sg::context const& ctx, reconstruct_settings const& settings, tg::vec2i output_extent)
+{
+    auto const support = query_reconstruct_support(ctx);
+    auto const m = resolve_with(support, settings);
+
+    // A member that upscales by itself maps the preset onto its own ratios.
+    // A named member this context cannot run will be refused, and a caller that traced smaller for it would then
+    // composite a smaller image into its own output.
+    if (upscales_itself(m))
+        return support.supports(m) ? scaled_down(output_extent, vendor_ratio(settings.scale)) : output_extent;
+
+    // Any other denoiser runs at one ratio, and the upscaler behind it maps the preset, under the same refusal rule.
+    auto const u = resolve_upscaler_with(support, settings, m);
+    if (u == upscale_method::none || !support.supports(u))
+        return output_extent;
+    return scaled_down(output_extent, upscaler_ratio(u, settings.scale));
+}
+
+tg::vec2f reconstruct_jitter(sg::context const& ctx,
+                             reconstruct_settings const& settings,
+                             tg::vec2i output_extent,
+                             u32 frame_index)
+{
+    auto const support = query_reconstruct_support(ctx);
+    auto const u = resolve_upscaler_with(support, settings, resolve_with(support, settings));
+    if (u != upscale_method::fsr || !support.supports(u))
+        return tg::vec2f(0, 0);
+    return fsr_upscale_routine::jitter(frame_index, reconstruct_input_extent(ctx, settings, output_extent),
+                                       output_extent);
+}
+
+cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scope)
+{
+    // The front holds nothing of its own.
+    // Its init registers every supported member, so prewarming the front starts their compiles on the next tick
+    // rather than on the first call.
+    // Through prewarm rather than dependency tokens: a token would hold the front pending until every member is ready,
+    // and one member this device cannot initialize would then hold every other member hostage.
+    auto& ctx = scope.context();
+    auto const support = query_reconstruct_support(ctx);
+    if (support.atrous)
+        atrous_denoise_routine::prewarm(ctx);
+    if (support.svgf)
+        svgf_denoise_routine::prewarm(ctx);
+    if (support.oidn)
+        oidn_denoise_routine::prewarm(ctx);
+    if (support.fsr)
+        fsr_upscale_routine::prewarm(ctx);
+    co_return;
+}
+
+reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
+                                                 reconstruct_inputs const& in,
+                                                 reconstruct_history& history,
+                                                 reconstruct_settings const& settings)
+{
+    // Registers the front on first use, so its init prewarms the members; its own readiness gates nothing.
+    (void)try_acquire(cmd);
+
+    auto& ctx = cmd.context();
+    // Asked once and used throughout, since every resolver and support check wants the same answer.
+    auto const support = query_reconstruct_support(ctx);
+    auto const method = resolve_with(support, settings);
+    auto const upscaler = resolve_upscaler_with(support, settings, method);
+    CC_ASSERT(settings.denoiser != denoise_method::none || upscaler != upscale_method::none,
+              "a caller with denoising and upscaling both off does not call the front");
+
+    auto const denoising = settings.denoiser != denoise_method::none;
+    if (denoising)
+    {
+        if (method == denoise_method::none || !support.supports(method))
+        {
+            // The resolved method rather than what was asked for, so both refusal paths report a member rather than
+            // `automatic`, which is not one.
+            log_refusal_once(method, refusal_reason::unsupported, "not supported by this build or device");
+            return {.status = reconstruct_status::unsupported, .denoiser = method, .upscaler = upscaler};
+        }
+        if (!required_guides(method).without(in.present_guides()).is_empty())
+        {
+            log_refusal_once(method, refusal_reason::missing_guide,
+                             "the call is missing a guide buffer this member requires");
+            return {.status = reconstruct_status::unsupported, .denoiser = method, .upscaler = upscaler};
+        }
+    }
+
+    if (upscaler == upscale_method::none)
+        return run_denoiser(cmd, in, history, settings, method);
+
+    if (!support.supports(upscaler))
+    {
+        log_upscaler_refusal_once(upscaler, refusal_reason::unsupported, "not supported by this build or device");
+        return {.status = reconstruct_status::unsupported, .denoiser = method, .upscaler = upscaler};
+    }
+    if (!is_set(in.guides.depth) || !is_set(in.guides.motion))
+    {
+        log_upscaler_refusal_once(upscaler, refusal_reason::missing_guide,
+                                  "an upscaler needs the depth and motion guides");
+        return {.status = reconstruct_status::unsupported, .denoiser = method, .upscaler = upscaler};
+    }
+
+    // The denoiser writes a scratch image at the input extent, and the upscaler reads that.
+    auto source = in.color;
+    auto denoised = reconstruct_outcome{.status = reconstruct_status::denoised};
+    if (denoising)
+    {
+        impl::ensure_image(ctx, history._upscale_source, impl::extent_of(in.color), sg::pixel_format::rgba32_float);
+        auto scratch_inputs = in;
+        scratch_inputs.output = history._upscale_source;
+        denoised = run_denoiser(cmd, scratch_inputs, history, settings, method);
+        if (!denoised.is_denoised())
+        {
+            denoised.upscaler = upscaler;
+            return denoised;
+        }
+        source = history._upscale_source;
+    }
+
+    // A different denoiser than last time is a different image to accumulate, so the upscaler starts over with it.
+    auto const source_denoiser = denoising ? method : denoise_method::none;
+    if (history._upscale._source_denoiser != source_denoiser)
+    {
+        history._upscale.reset();
+        history._upscale._source_denoiser = source_denoiser;
+    }
+
+    auto const upscaled = fsr_upscale_routine::execute(cmd,
+                                                       {.color = source,
+                                                        .depth = in.guides.depth,
+                                                        .motion = in.guides.motion,
+                                                        .jitter = in.guides.jitter,
+                                                        .view_to_clip = in.guides.view_to_clip,
+                                                        .exposure = settings.exposure,
+                                                        .output = in.output},
+                                                       history._upscale);
+    return {.status = upscaled.status,
+            .denoiser = source_denoiser,
+            .upscaler = upscaler,
+            .restarted = denoised.restarted || upscaled.restarted};
 }
 } // namespace sr

@@ -1,9 +1,13 @@
-// sr's denoising, with every knob on screen.
+// sr's reconstruction — its denoisers, and FSR 3.1 upscaling behind them — with every knob on screen.
 //
 // A small path tracer draws three spheres on a checkered floor and hands `sr::reconstruct_routine` the noisy result plus
 // the guides it wrote — albedo, normal, depth, motion.
-// The panel switches the member, the quality, the sharpness and the guides while it runs, so the difference between
-// two settings is something you look at rather than something you remember between two runs.
+// The panel switches the member, the scale, the quality, the sharpness and the guides while it runs, so the difference
+// between two settings is something you look at rather than something you remember between two runs.
+//
+// A scale below native traces smaller and hands the denoised image to an upscaler; the tracer then jitters every
+// sample of a frame by one offset from `sr::reconstruct_jitter`, and the left of the split shows what it traced.
+// Turning `denoise` off while upscaling shows what an upscaler alone does to path-tracing noise.
 //
 // The two halves of libs/graphics/shaped-rendering/docs/reconstruction.md's "meeting a progressive path tracer":
 //
@@ -64,6 +68,7 @@ struct controls
     /// Turning it off switches to the accumulating half, where the mean converges and a spatial member backs off.
     sr::reconstruct_settings denoise = {.fresh_samples = true};
     bool denoise_enabled = true;
+    bool fsr_sharpening = false;
     int spp = 1;
     float light_size = 0.6f;
     bool orbiting = false;
@@ -80,15 +85,27 @@ struct controls
             || use_albedo != o.use_albedo || use_normal != o.use_normal || use_depth != o.use_depth
             || denoise.denoiser != o.denoise.denoiser || denoise.quality != o.denoise.quality
             || denoise.sharpness != o.denoise.sharpness || denoise.fresh_samples != o.denoise.fresh_samples
-            || denoise.temporal_responsiveness != o.denoise.temporal_responsiveness;
+            || denoise.temporal_responsiveness != o.denoise.temporal_responsiveness || denoise.scale != o.denoise.scale
+            || denoise.upscaler != o.denoise.upscaler;
+    }
+
+    /// The settings the front is called with: denoising off still upscales when a scale asks for it.
+    [[nodiscard]] sr::reconstruct_settings settings() const
+    {
+        auto out = denoise;
+        if (!denoise_enabled)
+            out.denoiser = sr::denoise_method::none;
+        return out;
     }
 };
 
-/// The images one view holds: the tracer's output and its guides, plus the denoiser's target.
-/// Recreated on a resize, which is also one of the things that restarts the mean.
+/// The images one view holds: the tracer's output and its guides at the traced extent, plus the denoiser's target
+/// and the composed frame at the output's.
+/// Recreated when either extent changes, which is also one of the things that restarts the mean.
 struct view_images
 {
     tg::vec2i extent = tg::vec2i(0, 0);
+    tg::vec2i traced = tg::vec2i(0, 0);
     sg::texture_2d color;
     sg::texture_2d albedo;
     sg::texture_2d normal;
@@ -106,14 +123,15 @@ struct view_images
                                              .usage = sg::texture_usage::texture | sg::texture_usage::image});
 }
 
-void resize_images(sg::context& ctx, view_images& v, tg::vec2i extent)
+void resize_images(sg::context& ctx, view_images& v, tg::vec2i extent, tg::vec2i traced)
 {
     v.extent = extent;
-    v.color = make_image(ctx, extent);
-    v.albedo = make_image(ctx, extent);
-    v.normal = make_image(ctx, extent);
-    v.depth = make_image(ctx, extent);
-    v.motion = make_image(ctx, extent);
+    v.traced = traced;
+    v.color = make_image(ctx, traced);
+    v.albedo = make_image(ctx, traced);
+    v.normal = make_image(ctx, traced);
+    v.depth = make_image(ctx, traced);
+    v.motion = make_image(ctx, traced);
     v.denoised = make_image(ctx, extent);
     v.composed = make_image(ctx, extent);
 }
@@ -149,6 +167,20 @@ struct camera
     [[nodiscard]] tg::vec3f right() const { return tg::normalize(cross3(tg::vec3f(0, 1, 0), this->forward())); }
     [[nodiscard]] tg::vec3f up() const { return cross3(this->forward(), this->right()); }
 
+    [[nodiscard]] tg::mat4f projection(float aspect) const
+    {
+        auto const z_near = 0.1f;
+        auto const z_far = 500.0f;
+        auto const t = 1.0f / tg::tan(vertical_fov / 2.0f);
+        auto proj = tg::mat4f::zero;
+        proj[0, 0] = t / aspect;
+        proj[1, 1] = t;
+        proj[2, 2] = z_far / (z_far - z_near);
+        proj[3, 2] = -z_near * z_far / (z_far - z_near);
+        proj[2, 3] = 1.0f;
+        return proj;
+    }
+
     [[nodiscard]] tg::mat4f view_projection(float aspect) const
     {
         auto const f = this->forward();
@@ -166,17 +198,7 @@ struct camera
         view[3, 0] = -tg::dot(r, to_eye);
         view[3, 1] = -tg::dot(u, to_eye);
         view[3, 2] = -tg::dot(f, to_eye);
-
-        auto const z_near = 0.1f;
-        auto const z_far = 500.0f;
-        auto const t = 1.0f / tg::tan(vertical_fov / 2.0f);
-        auto proj = tg::mat4f::zero;
-        proj[0, 0] = t / aspect;
-        proj[1, 1] = t;
-        proj[2, 2] = z_far / (z_far - z_near);
-        proj[3, 2] = -z_near * z_far / (z_far - z_near);
-        proj[2, 3] = 1.0f;
-        return proj * view;
+        return this->projection(aspect) * view;
     }
 };
 
@@ -186,7 +208,9 @@ struct camera
                                                            tg::vec2i extent,
                                                            controls const& c,
                                                            u32 frame,
-                                                           u32 accum_frame)
+                                                           u32 accum_frame,
+                                                           tg::vec2f jitter,
+                                                           bool upscaling)
 {
     auto const e = cam.eye();
     auto const f = cam.forward();
@@ -223,6 +247,9 @@ struct camera
     out.accum_frame = accum_frame;
     out.spp = c.spp;
     out.light_size = c.light_size;
+    out.frame_jitter[0] = jitter[0];
+    out.frame_jitter[1] = jitter[1];
+    out.use_frame_jitter = upscaling ? 1 : 0;
     return out;
 }
 
@@ -232,6 +259,10 @@ constexpr sr::denoise_method k_method_values[] = {
     sr::denoise_method::oidn,      sr::denoise_method::dlss_rr, sr::denoise_method::fsr_rr,
 };
 constexpr char const* k_quality_names[] = {"fast", "balanced", "best"};
+constexpr char const* k_scale_names[] = {"native", "quality (1.5x)", "balanced (1.7x)", "performance (2x)"};
+constexpr char const* k_upscaler_names[] = {"automatic", "none", "fsr"};
+constexpr sr::upscale_method k_upscaler_values[]
+    = {sr::upscale_method::automatic, sr::upscale_method::none, sr::upscale_method::fsr};
 
 /// Draws the panel, editing `ui` in place.
 void draw_panel(controls& ui,
@@ -239,10 +270,11 @@ void draw_panel(controls& ui,
                 sr::reconstruct_outcome const& outcome,
                 sr::reconstruct_history& history,
                 u32 sample_count,
+                tg::vec2i traced,
                 bool& restart_requested)
 {
     ImGui::SetNextWindowPos(ImVec2(16, 16), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(370, 790), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(370, 868), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("denoise"))
     {
         ImGui::End();
@@ -251,7 +283,7 @@ void draw_panel(controls& ui,
 
     ImGui::Checkbox("denoise", &ui.denoise_enabled);
     ImGui::SameLine();
-    ImGui::TextDisabled("(off = the raw image)");
+    ImGui::TextDisabled("(off = raw, still upscaled)");
 
     auto method_index = 0;
     for (auto i = 0; i < 6; ++i)
@@ -273,6 +305,20 @@ void draw_panel(controls& ui,
     ImGui::SliderFloat("sharpness", &ui.denoise.sharpness, 0.0f, 1.0f);
     if (ui.denoise.fresh_samples)
         ImGui::SliderFloat("responsiveness", &ui.denoise.temporal_responsiveness, 0.0f, 1.0f);
+
+    ImGui::SeparatorText("upscale");
+    auto scale_index = int(ui.denoise.scale);
+    if (ImGui::Combo("scale", &scale_index, k_scale_names, 4))
+        ui.denoise.scale = sr::render_scale_preset(scale_index);
+    auto upscaler_index = 0;
+    for (auto i = 0; i < 3; ++i)
+        if (k_upscaler_values[i] == ui.denoise.upscaler)
+            upscaler_index = i;
+    if (ImGui::Combo("upscaler", &upscaler_index, k_upscaler_names, 3))
+        ui.denoise.upscaler = k_upscaler_values[upscaler_index];
+    if (ui.denoise.upscaler == sr::upscale_method::fsr && !support.supports(sr::upscale_method::fsr))
+        ImGui::TextDisabled("not in this build: the call is refused");
+    ImGui::Checkbox("fsr sharpening", &ui.fsr_sharpening);
 
     ImGui::SeparatorText("guides");
     ImGui::Checkbox("albedo", &ui.use_albedo);
@@ -304,10 +350,13 @@ void draw_panel(controls& ui,
     // A cc::string_view is not null-terminated, so it goes through ImGui as a counted string rather than %s.
     auto const status = sr::to_string(outcome.status);
     auto const member = sr::to_string(outcome.denoiser);
+    auto const upscaler = sr::to_string(outcome.upscaler);
     ImGui::Text("status     %.*s", int(status.size()), status.data());
     ImGui::Text("member     %.*s", int(member.size()), member.data());
+    ImGui::Text("upscaler   %.*s", int(upscaler.size()), upscaler.data());
     ImGui::Text("restarted  %s", outcome.restarted ? "yes" : "no");
     ImGui::Text("samples    %u", sample_count);
+    ImGui::Text("traced     %d x %d", traced[0], traced[1]);
     ImGui::Text("%.1f fps", double(ImGui::GetIO().Framerate));
     ImGui::TextDisabled("turn `fresh samples` off and `samples`");
     ImGui::TextDisabled("climbs: a spatial member then backs off");
@@ -491,7 +540,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
         auto const sample_count = ui.denoise.fresh_samples ? u32(ui.spp) : (accum_frame + 1) * u32(ui.spp);
         auto restart_requested = false;
-        draw_panel(ui, support, last_outcome, history, sample_count, restart_requested);
+        draw_panel(ui, support, last_outcome, history, sample_count, images.traced, restart_requested);
 
         // A camera that moved, a setting that changed what is traced, or a resize: each restarts the mean, because
         // averaging across any of them would be averaging two different images.
@@ -508,11 +557,17 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         if (ui.denoise.fresh_samples)
             accum_frame = 0;
 
-        if (images.extent != viewport)
+        // The front answers what to trace: smaller while an upscaler runs behind the denoiser, the output's own size
+        // otherwise.
+        auto const settings = ui.settings();
+        auto const upscaling = sr::resolve_upscale_method(ctx, settings) != sr::upscale_method::none;
+        auto const traced = sr::reconstruct_input_extent(ctx, settings, viewport);
+        if (images.extent != viewport || images.traced != traced)
         {
-            resize_images(ctx, images, viewport);
+            resize_images(ctx, images, viewport, traced);
             accum_frame = 0;
         }
+        auto const jitter = sr::reconstruct_jitter(ctx, settings, viewport, frame);
 
         // Closed before anything below suspends: `begin_frame` opened a record scope on this thread, and a co_await
         // with it still open is a scope that crossed a suspension.
@@ -534,8 +589,8 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
             cmd->compute.bind_pipeline(**scene_pipeline);
             cmd->compute.bind<shaders::scene_bindings>(*group);
             cmd->compute.set_inline_constants(
-                scene_constants_for(cam, prev_view_projection, viewport, ui, frame, accum_frame));
-            cmd->compute.dispatch_threads(viewport[0], viewport[1], 1);
+                scene_constants_for(cam, prev_view_projection, traced, ui, frame, accum_frame, jitter, upscaling));
+            cmd->compute.dispatch_threads(traced[0], traced[1], 1);
         }
 
         // -- denoise
@@ -543,7 +598,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         // A guide is handed over only when the panel says so, and an empty texture is how the API says "I do not
         // have this one" — which is what lets the checkboxes turn a guide off with no second code path.
         auto shown = images.color;
-        if (ui.denoise_enabled)
+        if (settings.denoiser != sr::denoise_method::none || upscaling)
         {
             auto inputs
                 = sr::reconstruct_inputs{.color = images.color, .output = images.denoised, .sample_count = sample_count};
@@ -553,9 +608,11 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
                 inputs.guides.normal = images.normal;
             if (ui.use_depth)
                 inputs.guides.depth = images.depth;
-            inputs.guides.motion = images.motion; // always written by the tracer; svgf requires it
+            inputs.guides.motion = images.motion; // always written by the tracer; svgf and the upscalers require it
+            inputs.guides.jitter = jitter;
+            inputs.guides.view_to_clip = cam.projection(float(traced[0]) / float(traced[1]));
 
-            last_outcome = sr::reconstruct_routine::execute(*cmd, inputs, history, ui.denoise);
+            last_outcome = sr::reconstruct_routine::execute(*cmd, inputs, history, settings);
 
             // Nothing was written unless the outcome says so, which is why a refusal shows the raw image rather than
             // whatever `denoised` happened to be holding from an earlier frame.
@@ -564,7 +621,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         }
         else
         {
-            last_outcome = {.status = sr::reconstruct_status::denoised, .denoiser = sr::denoise_method::none};
+            last_outcome = {.status = sr::reconstruct_status::denoised};
         }
 
         // -- compose: the raw image and the denoised one either side of the divider, tonemapped
@@ -622,7 +679,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
             }
         }
 
-        prev_view_projection = cam.view_projection(float(viewport[0]) / float(viewport[1]));
+        prev_view_projection = cam.view_projection(float(traced[0]) / float(traced[1]));
         ++frame;
         if (!ui.denoise.fresh_samples)
             ++accum_frame;

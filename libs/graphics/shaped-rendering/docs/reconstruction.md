@@ -1,11 +1,11 @@
 # Reconstruction
 
-One call turns a path-traced frame into the image a caller shows: it denoises, whichever denoiser runs behind it, and will upscale and generate frames.
-`sr::reconstruct_routine` is the front: a caller names a denoiser, or `automatic`, and the front forwards to the member routine that implements it.
+One call turns a path-traced frame into the image a caller shows: it denoises, upscales behind the denoiser, and will generate frames.
+`sr::reconstruct_routine` is the front: a caller names a denoiser and an upscaler, or `automatic`, and the front forwards to the member routines that implement them.
 Every member is a routine of its own too, callable directly with its full options.
 
 This is the design, including the parts not built yet.
-[reconstruct.hh](../src/shaped-rendering/reconstruct.hh) is the API, and [structure.md](structure.md#denoising-in-progress) says what exists.
+[reconstruct.hh](../src/shaped-rendering/reconstruct.hh) is the API, and [structure.md](structure.md#reconstruction-in-progress) says what exists.
 
 ## The members
 
@@ -15,19 +15,71 @@ This is the design, including the parts not built yet.
 | `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
 | `oidn` | spatial, trained | dx12, vulkan (HLSL through DXC) | done; named only, not real-time |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
-| `fsr_rr` | temporal, upscales | AMD RDNA 4; dx12 | planned |
+| `fsr_rr` | temporal, upscales | AMD RDNA 4 (Ray Regeneration); dx12 | planned |
+
+| upscaler | kind | where it runs | status |
+|---|---|---|---|
+| `fsr` | temporal, upscales, does not denoise | any GPU; dx12 on Windows builds; not WARP, not vulkan yet | done |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**
 The temporal ones work from about one sample per pixel, but only if every pixel's motion is known.
 
-**The vendor upscalers are not members.**
+**An upscaler is not a denoise member; it runs behind one.**
 DLSS Super Resolution, FSR 3.1 and FSR 4 are temporal upscalers, and on path-tracing noise they smear it rather than remove it.
-The vendor products that denoise are Ray Reconstruction and Ray Regeneration, and both upscale as part of it.
+AMD's own guidance places denoisers before the upscaler, at the traced resolution, and that is the order the front runs them in.
+The vendor products that denoise are Ray Reconstruction and Ray Regeneration, and both upscale as part of it, so no upscaler runs behind them.
 
 **The native members are what CI tests.**
 à-trous and SVGF are our own HLSL, so they run on WARP, and the front's policy is tested through them.
 NRD — vendor-neutral, real-time, compute shaders — stays on the roadmap, and what it waits for is the tracer rather than the denoiser.
 It wants radiance split into diffuse and specular, with hit distances.
+
+## The FSR upscaler
+
+**FSR 3.1's analytic upscaler, which runs on any GPU.**
+FSR 2 is no more portable: both are compute shaders on Shader Model 6.2, and only AMD's ML generation — FSR 4, Ray Regeneration, Radiance Cache — needs AMD hardware.
+FSR 3.1 is FSR 2 continued with the same inputs, and both sit in one folder of the FidelityFX SDK.
+
+**AMD's host code, our backend.**
+The SDK's host C++ decides every frame: which of its passes run, their constants, which of its images each reads and writes, and which get cleared.
+It reaches the GPU only through the `FfxInterface` table, and [impl/fsr_backend.cc](../src/shaped-rendering/impl/fsr_backend.cc) fills that table over sg.
+Resources become sg images, pipelines become the passes compiled through slib, and scheduled jobs are recorded into the caller's command list, with sg inferring every barrier.
+So there is no signed DLL, no native scope, and nothing sg's barrier tracking cannot see.
+The public SDK does not carry what the host code includes from `amdinternal/` — a debug watermark and a git hash — so extern/fidelityfx supplies stand-ins that do nothing.
+
+**The passes are ours to compile, in one permutation.**
+AMD's precompiled shader headers, and the FidelityFX_SC tool that makes them, are not in the public tree.
+Each pass is compiled through slib instead, from a wrapper that states the permutation's defines and includes AMD's pass.
+The context flags are fixed — linear HDR in, low-resolution motion, inverted infinite depth — so one variant of each pass is all the host code ever asks for, and the backend refuses any other.
+The portable path is the one built: fp32, no forced wave64, no Lanczos lookup table.
+The fp16 and wave64 variants AMD tunes for are a follow-up that needs sg to report 16-bit support; [TODO.md](TODO.md) has it.
+
+**The inputs meet FSR's conventions in the backend, and sr's guides stay as they are.**
+- Depth: sr's linear view depth is converted to an inverted, infinite-far device depth by a small pass, `near / depth`, which FSR reads back as the same view depth.
+- Motion: sr's motion is this frame's pixel minus last frame's, and FSR's the way back, so `motionVectorScale` flips the sign.
+- Jitter: FSR's offset is the one a rasterizer adds to its projection, the opposite of where the sample lands, so it is negated.
+  A test pins the sign: the flipped one reconstructs visibly worse.
+- Exposure: `reconstruct_settings::exposure` is the value FSR's exposure image holds.
+
+**One offset per frame.**
+An upscaler reconstructs from where each frame's samples landed, so every sample of a frame has to land at the same offset from its pixel's centre.
+`sr::reconstruct_jitter` hands out FSR's Halton sequence, and a tracer uses it in place of a random position inside the pixel while an upscaler runs.
+It answers (0, 0) when nothing upscales, so a tracer may always ask.
+
+**An upscaled image's alpha is the upscaler's.**
+The alpha rule below holds for every denoise member; an upscaled output's alpha cannot be `color`'s, which is at the other extent.
+
+**Its history sits beside the denoiser's.**
+`reconstruct_history` holds a second history for the upscaler, and the denoiser's output at the traced extent, so neither one's rebuild drops the other.
+A different denoiser is a different image to accumulate, so switching it restarts the upscaler too.
+FSR keeps two full images at the output extent and about a dozen at the traced one: roughly 80 MiB for 720p in and 1080p out.
+
+**Where it runs today.**
+- It builds where extern/fidelityfx was fetched, which is Windows: the host code calls MSVC's secure C runtime and uses `__declspec` unconditionally.
+- It runs on the hardware adapter.
+  WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass, and the FSR image tests skip there; [TODO.md](TODO.md) records what bisecting it established.
+- On vulkan the passes compile, and their pipelines are refused: AMD numbers each register class from zero, which a vulkan descriptor set cannot tell apart.
+  The call reports `failed`, and [TODO.md](TODO.md) has what closing it takes.
 
 ## The OIDN member
 
@@ -143,15 +195,15 @@ It is the only test that can catch a self-consistent mistake: every other one ch
 
 ## The contract
 
-**Reconstruction from day one, named for what it does today.**
-The API admits an output larger than the input, so a vendor member can upscale without the front changing shape.
+**Reconstruction from day one.**
+The output may be larger than the input: a vendor member upscales by itself, and any other member has an upscaler behind it.
 
 - Everything the tracer produces is at the **input** extent, in input pixels: the colour, every guide, motion vectors and jitter.
   Only `reconstruct_inputs::output` is at the output extent.
 - A caller never computes a ratio.
   It picks a `render_scale_preset` and asks `sr::reconstruct_input_extent` what to trace.
-  A spatial member answers every preset with the output's own extent, so a caller cannot ask for a ratio a member would reject.
-  So does an upscaling member this device cannot run: the call is about to be refused, and a caller that traced smaller for it would composite a smaller image into its own output.
+  A denoiser with no upscaler behind it answers every preset with the output's own extent, so a caller cannot ask for a ratio a member would reject.
+  So does an upscaler or an upscaling member this device cannot run: the call is about to be refused, and a caller that traced smaller for it would composite a smaller image into its own output.
   A free ratio can join later as one more way to ask.
 - A change of either extent restarts the history, like a resize.
 
@@ -177,9 +229,10 @@ It sits in the struct rather than beside each call because planning a frame and 
 A caller that said yes to one and nothing to another would have traced for a member the call then does not use.
 
 **A denoised image keeps the alpha it came in with.**
-Every member copies `reconstruct_inputs::color`'s alpha into `output` and writes only rgb, so a caller compositing with alpha gets the same channel whichever member ran.
+Every denoise member copies `reconstruct_inputs::color`'s alpha into `output` and writes only rgb, so a caller compositing with alpha gets the same channel whichever member ran.
 SVGF carries a per-pixel variance in alpha between its own passes and swaps it for the caller's on the last one.
-Whether a vendor member can honour this is open — it may write its own alpha and leave us no say — and that is the point at which the rule is either kept by a copy pass or relaxed in writing.
+An upscaled output is the written exception: its alpha is the upscaler's, since `color`'s is at the other extent.
+Whether a vendor member can honour the rule is open — it may write its own alpha and leave us no say — and that is the point at which the rule is either kept by a copy pass or relaxed in writing.
 
 ## Selection and refusal
 
@@ -188,6 +241,11 @@ Naming a member this build or device cannot run reports `unsupported`, logs once
 Only `automatic` chooses, walking the members best first:
 `dlss_rr`, `fsr_rr`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
 `oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
+
+The upscaler resolves after the denoiser, and the same way.
+`automatic` is `fsr` where it runs and the scale is below native, and `none` otherwise; a named upscaler runs at a native scale too, as anti-aliasing.
+A denoiser that upscales by itself has no upscaler behind it, and `denoiser = none` with an upscaler set upscales alone.
+An upscaler requires the depth and motion guides, and a call without them reports `unsupported`.
 
 A silent fallback would make a comparison between two named members compare one with itself, which is the failure the framework's three-state readiness exists to prevent.
 
@@ -259,14 +317,19 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
   Closing it only forgets the list's cached bindings, which the caller rebinds before its next draw or dispatch.
   Without it a vendor SDK would bypass sg's barrier tracking silently.
 - **OIDN needs nothing sg does not have either**, because the member runs the network rather than the library.
-- **The vendor SDKs are fetched on request, never by default.**
-  DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
+- **Neither does the FSR upscaler**, because sr implements the backend AMD's host code calls.
+- **A vendor SDK under NVIDIA's own license is fetched on request, never by default.**
+  DLSS sits in sr behind `SR_HAS_<VENDOR>` and links PRIVATE, like SDL3.
   Intel's OIDN library is on request too, for the oracle test alone; its 2.5 MB of weights, two networks, are a default fetch, since the member runs them.
+  FSR 3.1's sources are MIT, under 1 MB, and what the upscaler runs, so they are a default fetch as well: a pinned file-by-file subset of AMD's repository, behind `SR_HAS_FSR`.
 
 ## Seeing it
 
 `uv run dev.py example shaped-rendering/denoise-playground` is the whole thing on screen.
-A small analytic path tracer writes the noisy colour and the guides beside it, the panel switches member, quality, sharpness and guides live, and a split puts the raw image next to the denoised one.
+A small analytic path tracer writes the noisy colour and the guides beside it.
+The panel switches member, scale, upscaler, quality, sharpness and guides live, and a split puts the raw image next to the reconstructed one.
+At a scale below native the tracer traces smaller, with `reconstruct_jitter`'s offset, and the raw side shows the smaller image pixel for pixel.
+Turning `denoise` off while upscaling shows what an upscaler alone does to path-tracing noise.
 
 It opens on the temporal half — one sample a pixel, svgf, permanently noisy on the left of the split — because that is the half that shows what a denoiser is for.
 Turning `fresh samples` off switches to the accumulating half, where `samples` climbs and a spatial member backs off as the mean converges.
@@ -280,6 +343,10 @@ Turning `fresh samples` off switches to the accumulating half, where `samples` c
   The moving test is the one that pins reprojection at all.
   It runs the same shifting image twice — once with an honest motion vector, once told nothing moved — and requires the honest one to converge substantially further.
   A stream of zero motion alone would pass with the sign flipped, the half-pixel offset missing, or the motion texture bound to the wrong slot.
+- FSR: its ratios and jitter sequence, how the front resolves it, and two conventions pinned by comparison.
+  The jitter's sign — a static scene reconstructs visibly worse with it flipped — and its motion: a drifting scene with honest motion beats the same scene told nothing moved.
+  Neither is a threshold on one run, since FSR renders something plausible under either convention.
+  The front's composition — denoiser, then upscaler, restarting when the denoiser changes — and its refusal without depth and motion are tested beside them.
 - Every member, once it exists, gets the same property test: the error against a converged reference falls.
   A vendor member's version is gated on its hardware and reports "not run" elsewhere rather than passing.
   Reference images from vendor members are never committed, since they change with the driver.

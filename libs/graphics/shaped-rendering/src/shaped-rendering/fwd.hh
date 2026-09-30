@@ -23,8 +23,9 @@ class raster_box_filter_mipmap_routine; // the same, through the raster pipeline
 enum class mipmap_variant : u8;         // which entry point a texture shape mips through (the routine's parameter)
 struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
 
-// Denoising (see denoise.hh): one front routine over several members.
+// Reconstruction (see reconstruct.hh): one front routine over denoise and upscale members.
 enum class denoise_method : u8;      // which member runs, or automatic
+enum class upscale_method : u8;      // which upscaler runs behind it, or automatic
 enum class denoise_quality : u8;     // the coarse knob every member maps
 enum class render_scale_preset : u8; // how much smaller than the output the caller traces
 enum class reconstruct_guide : u8;   // one guide buffer beside the noisy color
@@ -43,6 +44,11 @@ struct svgf_options;                 // its own options
 class oidn_denoise_routine;          // the OIDN trained member, run as our own shaders (oidn_denoise_routine.hh)
 struct oidn_options;                 // its own options
 enum class oidn_network_size : u8;   // which of OIDN's trained networks it runs
+struct upscale_inputs;               // one upscale call's images
+struct upscale_outcome;              // status + whether history restarted
+class upscale_history;               // the caller-owned state of one upscaled stream
+class fsr_upscale_routine;           // AMD FSR 3.1's upscaler, run through sg (fsr_upscale_routine.hh)
+struct fsr_options;                  // its own options
 
 class mix_routine; // one image faded into another, in place (mix_routine.hh)
 

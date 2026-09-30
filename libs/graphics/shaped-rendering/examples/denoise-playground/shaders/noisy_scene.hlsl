@@ -33,6 +33,12 @@ struct scene_constants
     uint accum_frame; // 0 restarts the running mean, >0 folds this frame into it
     int spp;          // samples per pixel this frame
     float light_size; // area light radius: bigger is softer and noisier
+
+    // While an upscaler runs, every sample of the frame lands at this one offset from the pixel's centre, in
+    // [-0.5, 0.5], rather than at a random spot inside the pixel: the upscaler reconstructs from where they landed.
+    float2 frame_jitter;
+    int use_frame_jitter;
+    int _pad;
 };
 
 #pragma sc push_constants
@@ -223,8 +229,11 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
     int spp = max(1, gConstants.spp);
     for (int s = 0; s < spp; ++s)
     {
-        // Jittered inside the pixel, so more samples anti-alias as well as converge.
+        // Jittered inside the pixel, so more samples anti-alias as well as converge — or, while an upscaler runs, all
+        // at the frame's one offset, which the upscaler turns into resolution instead.
         float2 jitter = float2(rand_next(rng), rand_next(rng));
+        if (gConstants.use_frame_jitter != 0)
+            jitter = 0.5 + gConstants.frame_jitter;
         float2 ndc = (float2(px) + jitter) / float2(size) * 2.0 - 1.0;
         float3 d = normalize(gConstants.forward.xyz + gConstants.right.xyz * (ndc.x * tan_half * aspect)
                              - gConstants.up.xyz * (ndc.y * tan_half));
