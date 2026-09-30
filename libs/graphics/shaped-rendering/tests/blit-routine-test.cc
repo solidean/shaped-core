@@ -53,8 +53,8 @@ constexpr auto extent = 4;
     sr::blit_routine::prewarm(ctx, format);
     (void)co_await ctx.routines.idle_completion();
 
-    // The source is uploaded in this list and first sampled inside the scope, so vulkan and webgpu split the scope
-    // for its transition.
+    // The source is uploaded in this list and first sampled inside the scope, so its barrier is found only at the draw,
+    // and a backend that cannot hold it inside a pass splits the scope for it.
     // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 

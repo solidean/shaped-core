@@ -59,8 +59,8 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linea
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    // Each level is sampled right after the pass before wrote it, and that transition is found inside the scope, so
-    // vulkan and webgpu split it.
+    // Each level is sampled right after the pass before wrote it, and that barrier is found only at the draw, so a
+    // backend that cannot hold it inside a pass splits the scope for it.
     // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
@@ -133,8 +133,8 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    // Each level is sampled right after the pass before wrote it, and that transition is found inside the scope, so
-    // vulkan and webgpu split it.
+    // Each level is sampled right after the pass before wrote it, and that barrier is found only at the draw, so a
+    // backend that cannot hold it inside a pass splits the scope for it.
     // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 

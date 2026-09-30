@@ -89,7 +89,9 @@ public:
 
     /// Whether a rendering scope that a backend has to close and reopen mid-scope says so, as a warning.
     /// **On by default**: a split stores and reloads every target, which on a tiler is the most expensive thing a frame does by accident.
-    /// vulkan, webgpu and metal split around a copy recorded inside a scope and around a hazard between two of its draws; dx12 never splits.
+    /// A backend whose native pass cannot hold an operation splits around it: a copy, a barrier found only at a draw, or a hazard between two draws.
+    /// vulkan splits for all three; dx12 has no such pass and never splits.
+    /// **Once per context and cause**, so a split every frame reports on the first and the stat carries the rest.
     /// A program that splits knowingly turns it off in its backend's creation config; the `render_pass_split_warnings` field is the same in each.
     /// The `render_pass_splits` stat counts them either way.
     /// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
@@ -392,6 +394,10 @@ private:
     void rearm_completion_signal(cc::vector<pending_completion> const& pending);
 
     friend void impl::notify_transfer_drained(context& ctx);
+
+    /// Whether a split forced by `cause` should warn now: warnings are on, and no split on this context named `cause` before.
+    [[nodiscard]] bool claim_render_pass_split_warning(cc::string_view cause);
+    friend class command_list;
 
     cc::mutex<cc::vector<pending_completion>> _pending_completions;
     std::unique_ptr<completion_signals> _completion_signals;
@@ -750,6 +756,9 @@ protected:
     bool _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
     bool _render_pass_split_warnings = true; // fixed before the context is handed out, so read without a lock
+
+    // The split causes already warned about; command lists record on any thread.
+    cc::mutex<cc::vector<cc::string>> _warned_split_causes;
     cc::string _device_loss_reason;
 
     // Built-in pipeline/layout cache reached via ctx.cached.

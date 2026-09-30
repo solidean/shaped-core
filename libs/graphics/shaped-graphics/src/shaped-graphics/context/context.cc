@@ -203,6 +203,22 @@ cc::vector<device_error> context::take_pending_errors()
         });
 }
 
+bool context::claim_render_pass_split_warning(cc::string_view cause)
+{
+    if (!_render_pass_split_warnings)
+        return false;
+
+    return _warned_split_causes.lock(
+        [&](cc::vector<cc::string>& warned)
+        {
+            for (auto const& w : warned)
+                if (w == cause)
+                    return false;
+            warned.push_back(cc::string(cause));
+            return true;
+        });
+}
+
 void context::report_device_error(device_error error)
 {
     _pending_errors.lock([&](cc::vector<device_error>& pending) { pending.push_back(cc::move(error)); });

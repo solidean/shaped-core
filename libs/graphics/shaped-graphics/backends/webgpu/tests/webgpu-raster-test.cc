@@ -1,5 +1,6 @@
 #include "webgpu-test-common.hh"
 
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -81,8 +82,9 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a rendering scope clears, draws, and survives 
 {
     auto& ctx = *handle;
 
-    // The copy the test records inside the scope is the split it pins, and every split says so.
-    nx::expect_warning("was closed and reopened around a copy", {.domain = "sg"});
+    // The copy the test records inside the scope is the split it pins, through the stat: the warning is the context's
+    // first copy split, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a copy", "sg");
 
     auto target
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
@@ -109,6 +111,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a rendering scope clears, draws, and survives 
     REQUIRE(pipeline != nullptr);
 
     auto const rtv = target.as_render_target_view();
+    auto const before = ctx.metrics.stats();
     auto cmd = ctx.create_command_list();
     {
         auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 1, 1))}});
@@ -124,6 +127,8 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a rendering scope clears, draws, and survives 
     }
     auto const future = cmd->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(cmd));
+    auto const splits = (ctx.metrics.stats() - before)[sg::stat::render_pass_splits];
+    CHECK(splits == 1).context(cc::format("the scope split {} time(s), expected once for the copy", splits));
 
     auto const pixels = co_await future.bytes();
     REQUIRE(pixels.size() == isize(k_extent) * k_extent * 4);

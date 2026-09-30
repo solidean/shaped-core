@@ -159,9 +159,9 @@ ASYNC_INVOCABLE_TEST("sg - a copy inside a rendering scope lands before the draw
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    // Every backend but dx12 has to close its pass for the copies, and says so.
-    if (ctx->backend() != sg::backend_kind::dx12)
-        nx::expect_warning("was closed and reopened around a copy", {.domain = "sg"});
+    // Every backend but dx12 has to close its pass for the copies, which the split count below pins.
+    // The warning is only the context's first copy split, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a copy", "sg");
 
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::quads.drawn);
 

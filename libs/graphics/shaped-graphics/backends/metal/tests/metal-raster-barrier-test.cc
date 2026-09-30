@@ -283,8 +283,8 @@ ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrot
 
     // **Checked before the pixels are**, because the pixels can come out right by timing alone.
     // This is the mechanism itself: one reopen, between the two draws.
-    // Every reopen warns, and this one is the mechanism under test.
-    nx::expect_warning("was closed and reopened around a barrier after a fragment-stage write", {.domain = "sg"});
+    // The reopen is pinned by its count; its warning is only the context's first, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a barrier after a fragment-stage write", "sg");
     auto const reopens = mtl_cmd.pass_reopens();
     CHECK(reopens == 1).context(cc::format("the pass was reopened {} time(s), expected once", reopens));
 
@@ -382,8 +382,8 @@ ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state"
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
 
-    // Every reopen warns, and this one is the mechanism under test.
-    nx::expect_warning("was closed and reopened around a barrier after a fragment-stage write", {.domain = "sg"});
+    // The reopen is pinned by its count; its warning is only the context's first, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a barrier after a fragment-stage write", "sg");
     auto const reopens = mtl_cmd.pass_reopens();
     CHECK(reopens == 1).context(cc::format("the pass was reopened {} time(s), expected once", reopens));
 

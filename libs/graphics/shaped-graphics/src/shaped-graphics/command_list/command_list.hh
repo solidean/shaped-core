@@ -215,7 +215,7 @@ protected:
     impl::stat_counts _stats;
 
     /// A backend closed the open rendering scope's pass and reopened it, forced by `cause`: "a copy", "a barrier", ….
-    /// Counts `render_pass_splits`, and warns unless the context was created without (context::render_pass_split_warnings).
+    /// Counts `render_pass_splits`, and warns the first time the context sees `cause` (context::render_pass_split_warnings).
     void note_render_pass_split(cc::string_view cause);
 
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);

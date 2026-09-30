@@ -177,8 +177,8 @@ ASYNC_INVOCABLE_TEST("sg - a draw pays for the buffer its vertex stage reads, an
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    // The draw reads what the dispatch before the scope wrote, and that barrier is found only at the draw, so vulkan
-    // and webgpu split the scope for it.
+    // The draw reads what the dispatch before the scope wrote, and that barrier is found only at the draw, so a backend
+    // that cannot hold it inside a pass splits the scope for it.
     // Nothing states a buffer's access before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 

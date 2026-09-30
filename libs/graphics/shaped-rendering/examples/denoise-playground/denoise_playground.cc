@@ -322,6 +322,11 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     // Showing what a refusal does is a thing this example is FOR, and it would otherwise fail the moment it is used.
     nx::allow_warnings("did not run: not supported by this build or device");
 
+    // The blit samples what the denoiser computed this frame, and imgui draws the geometry prepare() uploaded, so each
+    // draw's barrier is found inside its scope, and vulkan splits the scope for it.
+    // Nothing states a scope's accesses before it opens yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
     auto const capture = sr::capture_request::from_environment();
     if (capture.active && !capture.name.empty())
     {
@@ -357,7 +362,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     slib::add_available_compilers(lib);
     if (lib.supported_formats(slib::shader_language::hlsl).empty())
     {
-        cc::eprintln("no shader compiler: DXC did not load");
+        cc::eprintln("no shader compiler for HLSL: DXC did not load, and the warning above says why");
         co_return;
     }
     sr::add_shader_packages(lib);        // imgui, blit and the denoise members
