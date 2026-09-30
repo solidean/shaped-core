@@ -96,7 +96,7 @@ void webgpu_command_list::finalize_queries()
     for (auto* const lease : _query_leases)
     {
         auto const bytes = isize(lease->used) * isize(sizeof(u64));
-        end_open_pass();
+        end_open_pass("a query resolve");
         wgpuCommandEncoderResolveQuerySet(encoder(), lease->query_set.get(), 0, u32(lease->used), lease->resolve.get(),
                                           0);
         auto readback = _ctx._readbacks.acquire(bytes);

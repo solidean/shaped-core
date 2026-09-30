@@ -80,7 +80,7 @@ void webgpu_command_list::end_open_pass(cc::string_view split_cause)
 wgpu_command_buffer webgpu_command_list::finish()
 {
     CC_ASSERT(!_in_rendering_scope, "a rendering scope is still open at submit");
-    end_open_pass();
+    end_open_pass("the end of the command list");
     auto const desc = WGPUCommandBufferDescriptor{.nextInChain = nullptr, .label = to_wgpu("sg command list")};
     auto buffer = wgpu_command_buffer(wgpuCommandEncoderFinish(encoder(), &desc));
     _encoder = {};

@@ -29,7 +29,8 @@ public:
 
     /// Ends whichever pass is open, so the encoder can take a command of its own.
     /// A rendering scope stays logically open and reopens at its next draw, which counts the split and names `split_cause`.
-    void end_open_pass(cc::string_view split_cause = "an operation a render pass cannot hold");
+    /// Every caller names what it ends the pass for, since any of them can be the one a split warning reports.
+    void end_open_pass(cc::string_view split_cause);
 
     /// Finishes the encoder into a command buffer; the list records nothing afterwards.
     [[nodiscard]] wgpu_command_buffer finish();

@@ -13,7 +13,7 @@ void webgpu_command_list::raster_begin_rendering(sg::rendering_info const& info)
     CC_ASSERT(!_in_rendering_scope, "a rendering scope is already open");
     CC_ASSERT(!info.color_targets.empty() || info.depth_stencil_target.has_value(), "a rendering scope needs at least "
                                                                                     "one target");
-    end_open_pass();
+    end_open_pass("a new rendering scope");
 
     _color_attachments.clear();
     auto size = tg::vec2i(0, 0);
@@ -105,7 +105,7 @@ void webgpu_command_list::open_render_pass(bool reopen)
 {
     CC_ASSERT(_in_rendering_scope, "no rendering scope to open a pass for");
     if (_compute_pass)
-        end_open_pass();
+        end_open_pass("a render pass opening");
 
     if (reopen)
     {
@@ -157,7 +157,7 @@ void webgpu_command_list::raster_end_rendering()
 {
     CC_ASSERT(_in_rendering_scope, "end_rendering without an open rendering scope");
     if (_render_pass)
-        end_open_pass();
+        end_open_pass("the end of the rendering scope");
     _in_rendering_scope = false;
     _color_attachments.clear();
     _depth_view = {};
