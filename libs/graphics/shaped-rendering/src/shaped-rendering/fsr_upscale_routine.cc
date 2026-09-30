@@ -30,6 +30,19 @@ struct pass_request
             return &b;
     return nullptr;
 }
+
+/// Whether `ctx` renders through WARP, whose shader compiler crashes on FSR's shading-change pyramid pass.
+/// libs/graphics/shaped-rendering/docs/TODO.md records what bisecting it established.
+///
+/// TEMPORARY: a Microsoft-vendor adapter that DXGI does not flag as software, which a GPU-less CI runner exposes, renders
+/// through WARP too, and sg's `is_software` misses it.
+/// sg's adapter_info reporting such an adapter is what replaces the vendor check.
+[[nodiscard]] bool renders_through_warp(sg::context const& ctx)
+{
+    constexpr auto k_microsoft_vendor_id = u32(0x1414);
+    auto const& adapter = ctx.metrics.adapter();
+    return adapter.is_software || adapter.vendor_id == k_microsoft_vendor_id;
+}
 } // namespace
 
 f32 fsr_upscale_routine::ratio_of(render_scale_preset preset)
@@ -65,9 +78,7 @@ fsr_options fsr_upscale_routine::options_for(reconstruct_settings const& setting
 
 bool fsr_upscale_routine::is_available(sg::context const& ctx)
 {
-    // WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass.
-    // libs/graphics/shaped-rendering/docs/TODO.md records what bisecting it established.
-    if (ctx.metrics.adapter().is_software)
+    if (renders_through_warp(ctx))
         return false;
     if (!impl::fsr_passes_available(ctx))
         return false;
@@ -176,7 +187,7 @@ upscale_outcome fsr_upscale_routine::execute(sg::command_list& cmd,
     CC_ASSERT(output_extent[0] >= input_extent[0] && output_extent[1] >= input_extent[1],
               "FSR upscales: the output must be at least the input's extent");
 
-    if (cmd.context().metrics.adapter().is_software || !impl::fsr_passes_available(cmd.context()))
+    if (renders_through_warp(cmd.context()) || !impl::fsr_passes_available(cmd.context()))
         return {.status = reconstruct_status::unsupported};
 
     auto const self = try_acquire(cmd);

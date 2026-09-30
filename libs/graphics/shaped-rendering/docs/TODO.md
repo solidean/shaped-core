@@ -10,7 +10,10 @@ Bigger design intent lives in [structure.md](structure.md).
   sg's declared native scope and DLSS Ray Reconstruction next; then FSR Ray Regeneration, which is RDNA 4 only.
   NRD waits for a tracer that splits diffuse from specular radiance and writes hit distances.
 - **WARP crashes executing FSR 3.1's shading-change pyramid pass**, inside `d3d10warp`'s own worker thread; the hardware runs it correctly.
-  The FSR image tests skip on a software adapter until this is understood.
+  `fsr_upscale_routine` refuses a software adapter until this is understood, so the FSR image tests skip there.
+  It also refuses any Microsoft-vendor adapter, since a GPU-less CI runner exposes one that DXGI does not flag as software and that renders through WARP all the same.
+  That vendor check is temporary: sg's `adapter_info::is_software` reporting such an adapter is what replaces it.
+  It is a question for sg's CI legs first, since the dx12 "hardware" leg is that adapter on those runners.
   What bisecting it established, each by running it:
   - Skipping that one pass, and only that one, avoids the crash; an empty entry point avoids it too.
   - Its stores into FSR's downsample image are what trigger it: with them removed the pass runs.
