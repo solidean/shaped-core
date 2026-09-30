@@ -59,7 +59,7 @@ struct slib::reload_config
 /// Everything after that goes through the generated package symbols:
 ///
 ///   slib::shader_library lib;
-///   lib.add_compiler(slib::create_dxc_compiler().value());
+///   slib::add_available_compilers(lib);
 ///   lib.add_package(my::shaders::package());
 ///   ...
 ///   auto cs = my::shaders::vignette.compute.main->acquire(ctx);

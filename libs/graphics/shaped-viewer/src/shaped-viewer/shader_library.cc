@@ -2,8 +2,8 @@
 
 #include <clean-core/platform/leak_annotations.hh> // cc::leak_scope — this library is never freed, by design
 #include <clean-core/thread/mutex.hh>
-#include <shaped-rendering/shaders.hh> // sr::shader_package (the blit the compositor drives)
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
+#include <shaped-rendering/shaders.hh> // sr::add_shader_packages (the blit the compositor drives)
+#include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/rendering/shaders.hh>
 
@@ -33,19 +33,13 @@ cc::result<slib::shader_library*> impl::acquire_default_shader_library()
 
     auto* const lib = new slib::shader_library();
 
-#if SLIB_HAS_DXC
-    // Both formats, so a shader resolves for whichever backend acquires it: shader_asset picks by asking the context
-    // what it accepts, so registering both is what makes one library serve a dx12 and a vulkan context alike.
+    // Every edge, so a shader resolves for whichever backend acquires it: shader_asset picks by asking the context what it accepts.
     // Each registration is best-effort — a format this build cannot produce simply is not offered.
-    if (auto dxil = slib::create_dxc_compiler(); dxil.has_value())
-        lib->add_compiler(cc::move(dxil.value()));
-    if (auto spirv = slib::create_dxc_spirv_compiler(); spirv.has_value())
-        lib->add_compiler(cc::move(spirv.value()));
-#endif
+    slib::add_available_compilers(*lib);
 
-    // Both packages, always: sv's routines trace with theirs, and the compositor places every view with sr's blit.
+    // Every package, always: sv's routines trace with theirs, and the compositor places every view with sr's blit.
     lib->add_package(sv::shader_package());
-    lib->add_package(sr::shader_package());
+    sr::add_shader_packages(*lib);
     return lib;
 }
 

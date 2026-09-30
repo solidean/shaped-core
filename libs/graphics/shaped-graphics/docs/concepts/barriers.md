@@ -98,8 +98,16 @@ What it does not order is two draws of one render pass: a pixel shader writing a
 So the webgpu backend ends the pass before a draw that touches what an earlier draw of the open pass wrote, or writes what one read, and reopens it with its targets loaded.
 A vertex or index fetch is a read like any other, so a draw fetching a buffer an earlier draw of the pass wrote splits too.
 Which draws write is the bound pipeline's footprint; draws that only read split nothing.
-`render_pass_splits` counts every end and reopen in the middle of a rendering scope, whatever forced it — on webgpu a copy recorded inside the scope counts as much as this hazard.
-Vulkan and metal count theirs in the same stat.
+`render_pass_splits` counts every end and reopen in the middle of a rendering scope, whatever forced it.
+A backend whose native pass cannot hold an operation splits around it — a copy recorded inside the scope, a barrier found only at a draw, or this hazard.
+dx12 has no such pass and never splits; every backend that does counts its splits in the same stat.
+The first split for each cause on a context also warns, naming the cause and what gets the caller out of it; `ctx.metrics.set_render_pass_split_warnings(false)` is the switch.
+A copy or a barrier moves out of the scope, and a hazard between two of the scope's own draws does not — there the scope itself has to split between them.
+
+One copy is refused rather than split around: one naming a subresource the open scope itself renders into.
+A reopen begins the pass again with the layouts its targets had, and only opening a rendering scope tracks a target into `render_target`.
+So nothing would transition the texture back out of the copy's layout.
+`cmd.upload.bytes_to_texture` and `cmd.download.bytes_from_texture` assert on it, per overlapping subresource, so uploading mip 1 while rendering into mip 0 stays legal.
 
 ## Minimal barriers: the three-timeline state
 

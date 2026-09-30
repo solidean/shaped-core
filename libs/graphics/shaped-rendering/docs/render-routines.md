@@ -28,7 +28,8 @@ protected:
 `sr` depends on **shaped-shader-library** because a concrete routine acquires its shaders through it in `init` — a routine-author dependency.
 The framework in `sg` needs no shader library; reload tracking is `sg`'s own generation counter.
 
-Register `sr::shader_package()` with your `slib::shader_library` once at startup, or every routine here acquires nothing and draws nothing.
+Call `sr::add_shader_packages(lib)` once at startup, or every routine here acquires nothing and draws nothing.
+sr's packages are SGL and HLSL, so the library needs SGL compiler edges beside DXC's, which `slib::add_available_compilers` registers.
 
 ## A routine holds state — and the framework guards it
 

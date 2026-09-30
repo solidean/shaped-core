@@ -283,6 +283,8 @@ ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrot
 
     // **Checked before the pixels are**, because the pixels can come out right by timing alone.
     // This is the mechanism itself: one reopen, between the two draws.
+    // The reopen is pinned by its count; its warning is only the context's first, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a barrier after a fragment-stage write", "sg");
     auto const reopens = mtl_cmd.pass_reopens();
     CHECK(reopens == 1).context(cc::format("the pass was reopened {} time(s), expected once", reopens));
 
@@ -380,6 +382,8 @@ ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state"
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
 
+    // The reopen is pinned by its count; its warning is only the context's first, which may be another test's.
+    nx::allow_warnings("was closed and reopened around a barrier after a fragment-stage write", "sg");
     auto const reopens = mtl_cmd.pass_reopens();
     CHECK(reopens == 1).context(cc::format("the pass was reopened {} time(s), expected once", reopens));
 
@@ -411,4 +415,86 @@ ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state"
     CHECK(wrong_left == 0).context(cc::format("{} left-half texels lost the pre-reopen draw", wrong_left));
     CHECK(wrong_right == 0)
         .context(cc::format("{} right-half texels were not what the replayed scissor allows", wrong_right));
+}
+
+ASYNC_TEST("sg metal - a scope reading what an earlier scope's fragment shader wrote reopens nothing")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // The same write and read as the hazard test above, in two scopes rather than one.
+    // Each scope is its own render encoder, and the first one's publish is what the second one's open waits on, so the
+    // fragment-stage write is already ordered — a reopen here would store and reload the target for nothing.
+    // This is the shape of every post-process pass: render into a texture, then sample it in the next scope.
+    auto group_layout = one_binding_layout(ctx, "results", sg::binding_type::buffer, sg::access_mode::read_write);
+    REQUIRE(group_layout.has_value());
+
+    auto layout_desc = sg::pipeline_layout_description{};
+    layout_desc.groups.push_back(group_layout.value());
+    auto pipeline_layout = ctx->create_metal_pipeline_layout(layout_desc, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline_layout.has_value());
+
+    auto const layout = sg::pipeline_layout_handle(pipeline_layout.value());
+    auto writer = make_hazard_pipeline(ctx, layout, "hazard_write_main");
+    REQUIRE(writer.has_value()).context(writer.has_error() ? writer.error().to_string() : cc::string());
+    auto reader = make_hazard_pipeline(ctx, layout, "hazard_read_main");
+    REQUIRE(reader.has_value()).context(reader.has_error() ? reader.error().to_string() : cc::string());
+
+    auto const results = ctx->persistent.create_raw_buffer(k_hazard_count * isize(sizeof(u32)),
+                                                           k_copy_both | sg::buffer_usage::readwrite_buffer);
+    auto const nv = sg::named_view{
+        .name = "results",
+        .view = results->as_raw_readwrite({.offset = 0, .size = results->size_in_bytes()}, isize(sizeof(u32)))};
+    auto group = ctx->create_metal_binding_group(group_layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
+                                                 sg::lifetime_scope::persistent);
+    REQUIRE(group.has_value());
+
+    auto const scratch = make_color_target(ctx);
+    auto const target = make_color_target(ctx);
+
+    auto cmd = ctx->create_command_list();
+    auto& mtl_cmd = static_cast<mtl::metal_command_list&>(*cmd);
+
+    auto const zeros = cc::vector<u32>::create_filled(k_hazard_count, u32(0));
+    cmd->upload.bytes_to_buffer(results, cc::as_bytes(cc::span<u32 const>(zeros)));
+
+    {
+        auto info = sg::rendering_info{};
+        info.color_targets.push_back(scratch.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*writer.value());
+        scope.bind_group(0, *group.value());
+        scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+    }
+    {
+        auto info = sg::rendering_info{};
+        info.color_targets.push_back(target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*reader.value());
+        scope.bind_group(0, *group.value());
+        scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+    }
+
+    auto const reopens = mtl_cmd.pass_reopens();
+    CHECK(reopens == 0).context(cc::format("the second scope was reopened {} time(s), expected never", reopens));
+
+    auto future = cmd->download.bytes_from_texture(target.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    co_await ctx->idle_completion();
+
+    auto const bytes = future.try_get_bytes();
+    REQUIRE(bytes.has_value());
+    auto const pixels = bytes.value();
+
+    // Texel i reads back as i + 1, as in the hazard test: a read the encoder boundary failed to order reads 0.
+    auto wrong = 0;
+    for (auto i = 0; i < k_hazard_count; ++i)
+    {
+        auto const delta = int(u8(pixels[i * 4])) - (i + 1);
+        if ((delta < 0 ? -delta : delta) > 1)
+            ++wrong;
+    }
+    CHECK(wrong == 0).context(cc::format("{} of {} texels wrong", wrong, k_hazard_count));
 }

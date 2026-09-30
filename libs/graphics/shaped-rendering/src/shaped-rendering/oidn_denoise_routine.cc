@@ -5,6 +5,7 @@
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
+#include <sr_sgl_shaders.hh>
 #include <sr_shaders.hh>
 
 namespace sr
@@ -25,11 +26,11 @@ bool oidn_denoise_routine::is_available(sg::context const& ctx)
     if (!impl::oidn_weights_present())
         return false;
 
-    // The shaders are HLSL, so on a backend its compiler does not serve the member is unsupported however many
+    // Three of the shaders are HLSL, so on a backend its compiler does not serve the member is unsupported however many
     // weights were fetched.
     for (auto const& asset :
          {shaders::nn_conv.compute.main_cs, shaders::nn_input.compute.main_cs, shaders::nn_output.compute.main_cs,
-          shaders::nn_pool.compute.main_cs, shaders::nn_upsample.compute.main_cs})
+          sgl_shaders::nn_pool.main_cs.asset, sgl_shaders::nn_upsample.main_cs.asset})
         if (asset == nullptr || !asset->can_acquire(ctx))
             return false;
     return true;

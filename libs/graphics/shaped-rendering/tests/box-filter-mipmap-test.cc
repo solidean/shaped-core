@@ -38,7 +38,9 @@ cc::shared_async<cc::unit> prewarm_every_variant(sg::context& ctx)
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -131,7 +133,9 @@ constexpr auto readback_usage = mip_usage | sg::texture_usage::copy_src;
 
 // The shapes rather than the sizes are what this covers: a cube and a 1D array both index their slice on an axis a
 // 2D-only test never exercises, and getting that axis wrong writes one slice and leaves the rest untouched.
-ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -206,7 +210,9 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
 
 // An odd extent is where the halving rule stops being obvious: the second tap clamps to the level's edge rather
 // than running past it, and the level below is the floor of the halved size rather than the ceiling.
-ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;

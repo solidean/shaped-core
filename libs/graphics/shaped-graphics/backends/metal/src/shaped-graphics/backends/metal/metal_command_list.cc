@@ -371,9 +371,11 @@ void metal_command_list::flush_barriers()
     //
     // Only a fragment source reaches this: a dispatch or a copy clamps to nothing here too, but it sits in another
     // encoder and is already ordered by the boundary it crossed.
-    if ((after & MTL::StageFragment) != 0)
+    // So does a fragment write from an earlier render encoder — an earlier scope, or this one before a split — which
+    // is every fragment source while this encoder has drawn nothing yet.
+    if ((after & MTL::StageFragment) != 0 && _draws_in_render_encoder > 0)
     {
-        reopen_render_encoder();
+        suspend_render_encoder("a barrier after a fragment-stage write", split_remedy::split_scope_between_draws);
         return;
     }
 
@@ -452,6 +454,8 @@ void metal_command_list::upload_bytes_to_buffer(raw_buffer_handle buffer, cc::sp
     // The CPU write happens now, at record time, into memory the GPU reads when the copy runs.
     cc::memcpy(staging.bytes().data(), data.data(), size_t(data.size()));
 
+    suspend_render_encoder("a copy");
+
     declare_buffer(buffer, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     flush_barriers();
 
@@ -484,6 +488,8 @@ void metal_command_list::upload_bytes_to_texture(raw_texture_handle texture,
     adopt_overflow_staging(staging);
 
     cc::memcpy(staging.bytes().data(), pixels.data(), size_t(layout.size_in_bytes));
+
+    suspend_render_encoder("a copy");
 
     declare_texture(texture, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     flush_barriers();
@@ -519,6 +525,8 @@ sg::bytes_future metal_command_list::download_bytes_from_buffer(raw_buffer_handl
     }
 
     adopt_overflow_staging(staging);
+
+    suspend_render_encoder("a copy");
 
     declare_buffer(buffer, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
     flush_barriers();
@@ -577,6 +585,8 @@ sg::bytes_future metal_command_list::download_bytes_from_texture(raw_texture_han
     }
     adopt_overflow_staging(staging);
 
+    suspend_render_encoder("a copy");
+
     declare_texture(texture, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
     flush_barriers();
 
@@ -630,6 +640,8 @@ void metal_command_list::copy_buffer_region(raw_buffer_handle src,
         CC_ASSERT(dst_offset_in_bytes + size_in_bytes <= src_offset_in_bytes
                       || src_offset_in_bytes + size_in_bytes <= dst_offset_in_bytes,
                   "source and destination ranges overlap in a same-buffer copy");
+
+    suspend_render_encoder("a copy");
 
     // A self-copy reads and writes one resource, so it declares a single combined access and produces one barrier.
     //
@@ -950,7 +962,7 @@ void metal_command_list::declare_array_accesses(sg::impl::pipeline_footprint con
 
 void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views)
 {
-    CC_ASSERT(_render_encoder != nullptr, "binding vertex buffers needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "binding vertex buffers needs an open rendering scope");
     CC_ASSERT(first_slot >= 0, "a vertex buffer slot must be non-negative");
     CC_ASSERT(first_slot + views.size() <= sg::max_vertex_buffers, "vertex buffer slot is past sg's budget");
 
@@ -987,7 +999,7 @@ void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<ver
 void metal_command_list::raster_declare_array_buffer_access(cc::string_view binding_name,
                                                             cc::span<array_buffer_access const> elements)
 {
-    CC_ASSERT(_render_encoder != nullptr, "declare_array_buffer_access requires an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "declare_array_buffer_access requires an open rendering scope");
     CC_ASSERT(!binding_name.empty(), "declare_array_buffer_access requires a binding name");
 
     auto declare = array_buffer_declare{.name = cc::string(binding_name), .elements = {}};
@@ -998,7 +1010,7 @@ void metal_command_list::raster_declare_array_buffer_access(cc::string_view bind
 void metal_command_list::raster_declare_array_texture_access(cc::string_view binding_name,
                                                              cc::span<array_texture_access const> elements)
 {
-    CC_ASSERT(_render_encoder != nullptr, "declare_array_texture_access requires an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "declare_array_texture_access requires an open rendering scope");
     CC_ASSERT(!binding_name.empty(), "declare_array_texture_access requires a binding name");
 
     auto declare = array_texture_declare{.name = cc::string(binding_name), .elements = {}};
@@ -1008,7 +1020,7 @@ void metal_command_list::raster_declare_array_texture_access(cc::string_view bin
 
 void metal_command_list::raster_bind_index_buffer(index_buffer_view const& view)
 {
-    CC_ASSERT(_render_encoder != nullptr, "binding an index buffer needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "binding an index buffer needs an open rendering scope");
     CC_ASSERT(view.buffer != nullptr, "an index_buffer_view always binds a buffer");
     CC_ASSERT(view.buffer->usage().has(sg::buffer_usage::index_buffer), "the bound buffer lacks index usage");
     CC_ASSERT(view.offset_in_bytes >= 0 && view.offset_in_bytes <= view.buffer->size_in_bytes(),
@@ -1034,14 +1046,14 @@ void metal_command_list::raster_bind_index_buffer(index_buffer_view const& view)
 
 void metal_command_list::raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)
 {
-    CC_ASSERT(_render_encoder != nullptr, "setting inline constants needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "setting inline constants needs an open rendering scope");
     set_inline_constants(data, offset);
 }
 
 
 void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
 {
-    CC_ASSERT(_render_encoder != nullptr, "an indexed draw needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "an indexed draw needs an open rendering scope");
     CC_ASSERT(_bound_raster != nullptr, "an indexed draw needs a bound raster pipeline");
     CC_ASSERT(_bound_index_buffer != nullptr, "an indexed draw needs a bound index buffer");
     CC_ASSERT(config.index_range.offset >= 0 && config.index_range.size >= 0, "the index range must be non-negative");
@@ -1066,6 +1078,7 @@ void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
         return;
 
     declare_raster_draw(true);
+    resume_render_encoder();
 
     // The address and the length are the range left from the first index, which is what Metal bounds-checks against.
     _render_encoder->drawIndexedPrimitives(
@@ -1073,6 +1086,7 @@ void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
         index_type_of(_index_format), MTL::GPUAddress(_index_address + u64(first_byte)),
         NS::UInteger(_index_size_in_bytes - first_byte), NS::UInteger(config.instance_range.size),
         NS::Integer(config.vertex_offset), NS::UInteger(config.instance_range.offset));
+    ++_draws_in_render_encoder;
 }
 
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint)
@@ -1139,7 +1153,7 @@ void metal_command_list::declare_raster_draw(bool indexed)
 
 void metal_command_list::raster_begin_rendering(rendering_info const& info)
 {
-    CC_ASSERT(_render_encoder == nullptr, "a rendering scope is already open");
+    CC_ASSERT(!in_rendering_scope(), "a rendering scope is already open");
 
     // Declare and flush BEFORE the render encoder opens.
     //
@@ -1147,7 +1161,7 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
     // on a render encoder refuses `MTLStageFragment`, which is what `clamp_to_render_source` enforces.
     // The target transitions have no such source, so flushing them here is what keeps them out of that narrow form.
     // A dependency that does need a fragment source closes and reopens the pass instead, which costs every load op
-    // being forced to LOAD — see `reopen_render_encoder`.
+    // being forced to LOAD — see `suspend_render_encoder`.
     for (auto const& target : info.color_targets)
         declare_texture(target.view.texture(), sg::pipeline_stage_flag::render_target, sg::access_flag::color_write);
     if (info.depth_stencil_target.has_value())
@@ -1242,6 +1256,7 @@ void metal_command_list::open_render_encoder(bool force_load)
     _render_encoder = _buffer->renderCommandEncoder(descriptor)->retain();
     descriptor->release();
     CC_ASSERT(_render_encoder != nullptr, "metal refused a render command encoder");
+    _draws_in_render_encoder = 0;
 
     // Every encoder is ordered against the queue on open, the same as the compute one.
     _render_encoder->barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
@@ -1267,9 +1282,10 @@ void metal_command_list::open_render_encoder(bool force_load)
     _render_encoder->setScissorRect(_scope_scissor);
 }
 
-void metal_command_list::reopen_render_encoder()
+void metal_command_list::suspend_render_encoder(cc::string_view cause, split_remedy remedy)
 {
-    CC_ASSERT(_render_encoder != nullptr, "reopening a pass needs one to be open");
+    if (_render_encoder == nullptr)
+        return;
 
     // Publish what the pass has recorded so far, so the encoder opened next has a producer to wait on.
     // This is the same pair `raster_end_rendering` and `barrierAfterQueueStages` form at every other boundary.
@@ -1277,9 +1293,23 @@ void metal_command_list::reopen_render_encoder()
     _render_encoder->endEncoding();
     _render_encoder->release();
     _render_encoder = nullptr;
+    _render_suspended = true;
+    _render_split_cause = cause;
+    _render_split_remedy = remedy;
+}
 
+void metal_command_list::resume_render_encoder()
+{
+    if (!_render_suspended)
+        return;
+
+    // The reopen is what the split costs, and what is counted: a scope whose last draw is behind it reopens nothing.
     ++_pass_reopens;
-    _stats.add(sg::stat::render_pass_splits);
+    note_render_pass_split(_render_split_cause, _render_split_remedy);
+
+    // Whatever the copies recorded sits on the compute encoder, and only one encoder may be open.
+    end_encoder();
+    _render_suspended = false;
     open_render_encoder(true);
 
     // Encoder state does not survive the boundary, so everything the scope set is replayed onto the new encoder.
@@ -1312,13 +1342,18 @@ void metal_command_list::reopen_render_encoder()
 
 void metal_command_list::raster_end_rendering()
 {
-    CC_ASSERT(_render_encoder != nullptr, "no rendering scope is open");
+    CC_ASSERT(in_rendering_scope(), "no rendering scope is open");
 
     // Publish this pass to whatever is committed after it — the producer half of the queue barrier pair.
-    _render_encoder->barrierAfterStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
-    _render_encoder->endEncoding();
-    _render_encoder->release();
-    _render_encoder = nullptr;
+    // A suspended pass published when it closed, and nothing reopened it since.
+    if (_render_encoder != nullptr)
+    {
+        _render_encoder->barrierAfterStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
+        _render_encoder->endEncoding();
+        _render_encoder->release();
+        _render_encoder = nullptr;
+    }
+    _render_suspended = false;
     _bound_raster = nullptr;
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
@@ -1335,7 +1370,7 @@ void metal_command_list::raster_end_rendering()
 
 void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
 {
-    CC_ASSERT(_render_encoder != nullptr, "binding a raster pipeline needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "binding a raster pipeline needs an open rendering scope");
 
     auto const& mtl_pipeline = static_cast<metal_raster_pipeline const&>(pipeline);
 
@@ -1348,6 +1383,10 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     rebind_inline_constants(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     bind_layout_samplers(static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get()));
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
+
+    // A suspended scope's resume replays all of the below from `_bound_raster`.
+    if (_render_encoder == nullptr)
+        return;
 
     _render_encoder->setRenderPipelineState(mtl_pipeline.state());
     if (mtl_pipeline.depth_stencil_state() != nullptr)
@@ -1367,52 +1406,58 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
 
 void metal_command_list::raster_bind_group(int group_index, binding_group const& group)
 {
-    CC_ASSERT(_render_encoder != nullptr, "binding a group needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "binding a group needs an open rendering scope");
     bind_group_to_table(group_index, group);
 }
 
 void metal_command_list::raster_set_viewport(viewport const& vp)
 {
-    CC_ASSERT(_render_encoder != nullptr, "setting the viewport needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "setting the viewport needs an open rendering scope");
     _scope_viewport = MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
-    _render_encoder->setViewport(_scope_viewport);
+    if (_render_encoder != nullptr)
+        _render_encoder->setViewport(_scope_viewport);
 }
 
 void metal_command_list::raster_set_scissor(tg::aabb2i const& rect)
 {
-    CC_ASSERT(_render_encoder != nullptr, "setting the scissor needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "setting the scissor needs an open rendering scope");
     _scope_scissor = MTL::ScissorRect{NS::UInteger(rect.min[0]), NS::UInteger(rect.min[1]),
                                       NS::UInteger(rect.max[0] - rect.min[0]), NS::UInteger(rect.max[1] - rect.min[1])};
-    _render_encoder->setScissorRect(_scope_scissor);
+    if (_render_encoder != nullptr)
+        _render_encoder->setScissorRect(_scope_scissor);
 }
 
 void metal_command_list::raster_set_stencil_reference(u32 reference)
 {
-    CC_ASSERT(_render_encoder != nullptr, "setting the stencil reference needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "setting the stencil reference needs an open rendering scope");
     _scope_stencil_reference = reference;
-    _render_encoder->setStencilReferenceValue(reference);
+    if (_render_encoder != nullptr)
+        _render_encoder->setStencilReferenceValue(reference);
 }
 
 void metal_command_list::raster_set_blend_constants(tg::vec4f constants)
 {
-    CC_ASSERT(_render_encoder != nullptr, "setting the blend constants needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "setting the blend constants needs an open rendering scope");
     _scope_blend_constants = constants;
-    _render_encoder->setBlendColor(constants[0], constants[1], constants[2], constants[3]);
+    if (_render_encoder != nullptr)
+        _render_encoder->setBlendColor(constants[0], constants[1], constants[2], constants[3]);
 }
 
 void metal_command_list::raster_draw(draw_config const& config)
 {
-    CC_ASSERT(_render_encoder != nullptr, "a draw needs an open rendering scope");
+    CC_ASSERT(in_rendering_scope(), "a draw needs an open rendering scope");
     CC_ASSERT(_bound_raster != nullptr, "a draw needs a bound raster pipeline");
 
     if (config.vertex_range.size == 0 || config.instance_range.size == 0)
         return;
 
     declare_raster_draw(false);
+    resume_render_encoder();
 
     _render_encoder->drawPrimitives(primitive_type_of(_bound_raster->topology()),
                                     NS::UInteger(config.vertex_range.offset), NS::UInteger(config.vertex_range.size),
                                     NS::UInteger(config.instance_range.size), NS::UInteger(config.instance_range.offset));
+    ++_draws_in_render_encoder;
 }
 
 void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pipeline)

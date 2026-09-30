@@ -197,7 +197,7 @@ void webgpu_command_list::bring_pool_writes_forward()
         if (write.generation == pool.generation())
             continue;
         auto const& current = pool.buffer();
-        end_open_pass();
+        end_open_pass("a copy");
         wgpuCommandEncoderCopyBufferToBuffer(encoder(), write.buffer.get(), u64(write.unit) * acceleration_unit_bytes,
                                              current.get(), u64(write.unit) * acceleration_unit_bytes,
                                              u64(write.units) * acceleration_unit_bytes);
@@ -221,7 +221,7 @@ void webgpu_command_list::write_acceleration_region(u32 unit, isize units, cc::s
     auto const& pool = _ctx._acceleration.buffer();
     auto const bytes = cc::as_bytes(cpu_part);
     auto const span = stage_upload(bytes, bytes.size());
-    end_open_pass();
+    end_open_pass("a copy");
     wgpuCommandEncoderCopyBufferToBuffer(encoder(), span.buffer, u64(span.offset), pool.get(),
                                          u64(unit) * acceleration_unit_bytes, u64(bytes.size()));
     if (span.overflow)
@@ -298,7 +298,7 @@ sg::bytes_future webgpu_command_list::download_acceleration_pool()
     auto const& pool = _ctx._acceleration.buffer();
     auto const bytes = _ctx._acceleration.capacity_units() * acceleration_unit_bytes;
     auto readback = _ctx._readbacks.acquire(bytes);
-    end_open_pass();
+    end_open_pass("a copy");
     wgpuCommandEncoderCopyBufferToBuffer(encoder(), pool.get(), 0, readback.staging.get(), 0, u64(bytes));
 
     auto destination = cc::pinned_data<byte>::create_uninitialized(bytes);

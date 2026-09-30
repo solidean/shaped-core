@@ -224,7 +224,7 @@ imgui_context imgui_context::create(imgui_context_description const& desc)
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
     io.BackendRendererName = "shaped-rendering";
 
-    // imgui.hlsl samples .rgba unconditionally; an Alpha8 atlas would come out red-on-transparent.
+    // imgui.sgl samples .rgba unconditionally; an Alpha8 atlas would come out red-on-transparent.
     io.Fonts->TexDesiredFormat = ImTextureFormat_RGBA32;
 
     io.BackendPlatformName = "shaped-rendering (sr::window)";

@@ -206,6 +206,16 @@ public:
     /// Current as of each call that caused it: a list's counts once its submit returns, a transfer's bytes once its enqueue does.
     [[nodiscard]] sg::stats stats() const;
 
+    /// Whether a rendering scope that a backend has to close and reopen mid-scope says so, as a warning.
+    /// **On by default**: a split stores and reloads every target, which on a tiler is the most expensive thing a frame does by accident.
+    /// A backend whose native pass cannot hold an operation splits around it — vulkan and a copy recorded inside the scope is the plain case.
+    /// dx12 has no such pass and never splits.
+    /// **Once per context and cause**, so a split every frame reports on the first and the `render_pass_splits` stat carries the rest.
+    /// A program that splits knowingly turns it off, at any time; the stat counts them either way.
+    /// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
+    [[nodiscard]] bool render_pass_split_warnings() const;
+    void set_render_pass_split_warnings(bool enabled);
+
     // Pinned to its owning context: neither copyable nor movable.
     context_metrics_scope(context_metrics_scope const&) = delete;
     context_metrics_scope(context_metrics_scope&&) = delete;

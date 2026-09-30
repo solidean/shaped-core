@@ -179,9 +179,10 @@ else()
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_FSR=0)
 endif()
 
-# sr's own shader package.
+# sr's own shader packages, one per language: a package has one.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
-# Routines that need shaders add their entry points to this one package.
+# A routine's shaders go in the SGL package, which reaches dx12, vulkan, webgpu and metal from one source.
+# The HLSL package holds the shaders not yet ported; docs/TODO.md says what holds each back.
 #
 # Deliberately not gated on a compiler existing.
 # Package generation needs none — it emits C++ descriptors and embeds the sources;
@@ -203,24 +204,30 @@ endif()
 
 sc_add_shader_package(
     TARGET     shaped-rendering
+    NAME       sr_sgl_shaders
+    NAMESPACE  sr::sgl_shaders
+    SOURCE_DIR shaders
+    LANGUAGE   sgl
+    SHADERS
+        blit.sgl:*
+        imgui.sgl:*
+        raster_box_filter_mipmap.sgl:*
+        nn_pool.sgl:*
+        nn_upsample.sgl:*
+)
+
+sc_add_shader_package(
+    TARGET     shaped-rendering
     NAME       sr_shaders
     NAMESPACE  sr::shaders
     SOURCE_DIR shaders
     LANGUAGE   hlsl
     SHADERS
-        imgui.hlsl:vertex:main_vs
-        imgui.hlsl:fragment:main_ps
-        imgui.hlsl:binding:imgui_bindings
-        imgui.hlsl:constants:gConstants
-        blit.hlsl:vertex:main_vs
-        blit.hlsl:fragment:main_ps
         box_filter_mipmap.hlsl:compute:main_1d_cs
         box_filter_mipmap.hlsl:compute:main_1d_array_cs
         box_filter_mipmap.hlsl:compute:main_2d_cs
         box_filter_mipmap.hlsl:compute:main_2d_array_cs
         box_filter_mipmap.hlsl:compute:main_3d_cs
-        raster_box_filter_mipmap.hlsl:vertex:main_vs
-        raster_box_filter_mipmap.hlsl:fragment:main_ps
         atrous_denoise.hlsl:compute:main_cs
         atrous_denoise.hlsl:binding:atrous_bindings
         atrous_denoise.hlsl:constants:gConstants
@@ -256,12 +263,6 @@ sc_add_shader_package(
         nn_output.hlsl:compute:main_cs
         nn_output.hlsl:binding:nn_output_bindings
         nn_output.hlsl:constants:gConstants
-        nn_pool.hlsl:compute:main_cs
-        nn_pool.hlsl:binding:nn_pool_bindings
-        nn_pool.hlsl:constants:gConstants
-        nn_upsample.hlsl:compute:main_cs
-        nn_upsample.hlsl:binding:nn_upsample_bindings
-        nn_upsample.hlsl:constants:gConstants
 )
 
 # Test executable.
@@ -311,16 +312,52 @@ if(SC_BUILD_TESTS)
         sc_stage_runtime_dlls(shaped-rendering-test DLLS "$<TARGET_RUNTIME_DLLS:shaped-rendering-test>")
     endif()
 
-    # The GPU tests run on the dx12 contexts tests/dx12-entry.cc brings up, and compile their shaders through DXC, so they need both the dx12 backend and a compiler.
-    # The tests above need neither and run everywhere.
-    if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
+    # The GPU tests run once per backend this build has: tests/backends/ holds one entry driver per backend, each
+    # invoking every sg::context_handle test on one context of it.
+    # The tests above need no device and run everywhere.
+    set(_sr_test_backends "")
+    if(TARGET shaped-graphics-dx12)
+        target_sources(shaped-rendering-test PRIVATE tests/backends/dx12-entry.cc)
+        list(APPEND _sr_test_backends shaped-graphics-dx12)
+    endif()
+    if(TARGET shaped-graphics-vulkan)
+        target_sources(shaped-rendering-test PRIVATE tests/backends/vulkan-entry.cc)
+        list(APPEND _sr_test_backends shaped-graphics-vulkan)
+    endif()
+    if(TARGET shaped-graphics-metal)
+        target_sources(shaped-rendering-test PRIVATE tests/backends/metal-entry.cc)
+        list(APPEND _sr_test_backends shaped-graphics-metal)
+        # main() arms Metal's validation layer, which is read from the environment before the framework initializes.
+        target_compile_definitions(shaped-rendering-test PRIVATE SR_TEST_HAS_METAL)
+    endif()
+    if(TARGET shaped-graphics-webgpu)
+        target_sources(shaped-rendering-test PRIVATE tests/backends/webgpu-entry.cc)
+        list(APPEND _sr_test_backends shaped-graphics-webgpu)
+    endif()
+
+    # The routines whose shaders are SGL, which every backend compiles with no toolchain beyond slib's own.
+    if(_sr_test_backends)
         target_sources(shaped-rendering-test PRIVATE
-            tests/dx12-entry.cc
+            tests/backends/backends.cc
             tests/shader_fixtures.cc
+            tests/blit-routine-test.cc
             tests/imgui-routine-test.cc
-            tests/imgui-manual-test.cc
-            tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
+            tests/nn-resample-test.cc
+        )
+        target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
+    endif()
+
+    # A person looks at this one, through a dx12 window.
+    if(TARGET shaped-graphics-dx12)
+        target_sources(shaped-rendering-test PRIVATE tests/imgui-manual-test.cc)
+    endif()
+
+    # The routines whose shaders are still HLSL need DXC, which reaches dx12 and vulkan and nothing else.
+    # A build with DXC has no other backend, so these never meet a context their shaders cannot reach.
+    if(_sr_test_backends AND SC_HAS_DXC_COMPILER)
+        target_sources(shaped-rendering-test PRIVATE
+            tests/box-filter-mipmap-test.cc
             tests/denoise-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
@@ -330,7 +367,6 @@ if(SC_BUILD_TESTS)
             tests/nn-ops-test.cc
             tests/oidn-network-test.cc
         )
-        target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
         # Intel's own filter, as the oracle the OIDN member is measured against, where it was fetched on request.
         # Linked here and nowhere else: the member runs the weights in its own shaders and never calls the library.
@@ -345,9 +381,11 @@ if(SC_BUILD_TESTS)
         else()
             target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
         endif()
+    endif()
 
-        # These import dxcompiler.dll, so the binary does not start without it, and dxil.dll signs what it emits.
-        # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
+    # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.
+    # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
+    if(WIN32 AND SC_HAS_DXC_COMPILER)
         sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
     endif()
 
@@ -357,7 +395,6 @@ if(SC_BUILD_TESTS)
     # SDL is what hands out the CAMetalLayer, so it needs a window backend as well as the metal one.
     if(APPLE AND SC_HAS_SDL3 AND TARGET shaped-graphics-metal)
         target_sources(shaped-rendering-test PRIVATE tests/metal-window-manual-test.cc)
-        target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-metal)
     endif()
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

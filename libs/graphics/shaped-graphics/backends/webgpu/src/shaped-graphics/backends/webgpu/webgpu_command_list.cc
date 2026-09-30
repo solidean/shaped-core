@@ -56,7 +56,7 @@ cc::result<std::unique_ptr<webgpu_command_list>> webgpu_context::create_webgpu_c
     return std::make_unique<webgpu_command_list>(*this, current_epoch(), cc::move(encoder));
 }
 
-void webgpu_command_list::end_open_pass()
+void webgpu_command_list::end_open_pass(cc::string_view split_cause, split_remedy remedy)
 {
     if (_compute_pass)
     {
@@ -66,6 +66,8 @@ void webgpu_command_list::end_open_pass()
     }
     if (_render_pass)
     {
+        _split_cause = split_cause;
+        _split_remedy = remedy;
         wgpuRenderPassEncoderEnd(render_pass());
         _render_pass = {};
         _raster.needs_full_apply = true;
@@ -79,7 +81,7 @@ void webgpu_command_list::end_open_pass()
 wgpu_command_buffer webgpu_command_list::finish()
 {
     CC_ASSERT(!_in_rendering_scope, "a rendering scope is still open at submit");
-    end_open_pass();
+    end_open_pass("the end of the command list");
     auto const desc = WGPUCommandBufferDescriptor{.nextInChain = nullptr, .label = to_wgpu("sg command list")};
     auto buffer = wgpu_command_buffer(wgpuCommandEncoderFinish(encoder(), &desc));
     _encoder = {};
@@ -242,7 +244,7 @@ void webgpu_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
 
     auto const words = word_span(dst, offset_in_bytes, data.size(), true);
     auto const span = stage_upload(data, words);
-    end_open_pass();
+    end_open_pass("a copy");
     wgpuCommandEncoderCopyBufferToBuffer(encoder(), span.buffer, u64(span.offset), dst.raw(), u64(offset_in_bytes),
                                          u64(words));
     if (span.overflow)
@@ -282,7 +284,7 @@ void webgpu_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
     };
     auto const extent = copy_extent_of(dst.format(), region.size);
 
-    end_open_pass();
+    end_open_pass("a copy");
     wgpuCommandEncoderCopyBufferToTexture(encoder(), &source, &destination, &extent);
     if (span.overflow)
         _keep_alive.push_back(std::make_shared<wgpu_buffer>(span.overflow));
@@ -322,7 +324,7 @@ sg::bytes_future webgpu_command_list::download_bytes_from_buffer(sg::raw_buffer_
     auto const words = align_up(skip + size_in_bytes, buffer_word_bytes);
 
     auto readback = _ctx._readbacks.acquire(words);
-    end_open_pass();
+    end_open_pass("a copy");
     wgpuCommandEncoderCopyBufferToBuffer(encoder(), src.raw(), u64(start), readback.staging.get(), 0, u64(words));
     touch(buffer);
 
@@ -360,7 +362,7 @@ sg::bytes_future webgpu_command_list::download_bytes_from_texture(sg::raw_textur
     };
     auto const extent = copy_extent_of(src.format(), region.size);
 
-    end_open_pass();
+    end_open_pass("a copy");
     wgpuCommandEncoderCopyTextureToBuffer(encoder(), &source, &destination, &extent);
     touch(texture);
 
@@ -402,7 +404,7 @@ void webgpu_command_list::copy_buffer_region(sg::raw_buffer_handle src,
 
     // WebGPU refuses a copy within one buffer outright, so that goes through a temporary buffer.
     auto const words = word_span(d, dst_offset_in_bytes, size_in_bytes, true);
-    end_open_pass();
+    end_open_pass("a copy");
     if (&s == &d)
     {
         auto const desc = WGPUBufferDescriptor{

@@ -165,6 +165,14 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     Pure quality of implementation: the bytes are unobservable either way, and what it buys is releasing a large source sooner.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
+  - declaring a scope's accesses **up front**, before the rendering scope opens or at its start, so their barriers are emitted outside it.
+    A backend cannot always emit a barrier inside a rendering scope: vulkan never can, and metal cannot for a fragment-stage source.
+    Each one found only at its draw suspends the scope, stores and reloads every target, and warns once per context (`ctx.metrics.render_pass_split_warnings`).
+    A resource a draw samples for the first time in the scope is the usual case: its transition is known before the scope.
+    `cmd.ensure_layout` is not that declaration, and must not be used as one: it declares no access, so its barrier has an empty destination and the tracker drops the write before it.
+    An access later in the same list then goes unordered against that write, which is a race on dx12 today (`resource_access_state::flush`).
+    It is safe only for a consumer after the submit, which is every use it has.
+    Not every transition is even legal inside a scope, so the declaration has to reach the barrier before the scope opens, not just avoid the split.
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
   - **indirect draws** — `draw_indirect` and count buffers;

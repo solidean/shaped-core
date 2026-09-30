@@ -71,6 +71,9 @@ ASYNC_INVOCABLE_TEST("sg - a draw sees what the previous draw's fragment shader 
     if (vertex_compiled == nullptr || writer_compiled == nullptr || reader_compiled == nullptr)
         SKIP("this context accepts no format the hazard shaders compile to");
 
+    // The split this test provokes on purpose warns on every backend but dx12.
+    nx::allow_warnings("was closed and reopened around", "sg");
+
     // The bindings are the fragment stage's: the vertex stage reads nothing.
     auto const group_layout = ctx.cached.acquire_binding_group_layout(writer_compiled->bindings);
     auto const layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});

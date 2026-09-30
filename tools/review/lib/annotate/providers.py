@@ -26,8 +26,10 @@ DIFF = "diff"
 
 # A path: at least one dot-suffixed segment, optionally `:line` or `:line-line`.
 # The `new:` and `old:` prefixes are how an author says a path is not supposed to be there yet, or not any more.
+# The suffix never ends inside a word: a cap alone cut `emsdk.version` to `emsdk.versio` and reported that as missing.
 _PREFIXES = ("new:", "old:")
-_PATH_RE = re.compile(r"(?:\b|^|(?<=/))((?:new:|old:)?/?[\w./+-]*[\w+-]\.[A-Za-z0-9]{1,6})(?::(\d+)(?:-(\d+))?)?")
+_PATH_RE = re.compile(
+    r"(?:\b|^|(?<=/))((?:new:|old:)?/?[\w./+-]*[\w+-]\.[A-Za-z0-9]{1,16}(?![A-Za-z0-9]))(?::(\d+)(?:-(\d+))?)?")
 
 # What a reference asserts about the repository, which is what `validate` checks it against.
 PLAIN, NEW, OLD = "plain", "new", "old"

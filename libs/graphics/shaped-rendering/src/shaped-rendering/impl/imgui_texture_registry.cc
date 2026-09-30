@@ -53,7 +53,7 @@ void imgui_texture_registry::service_requests(sg::command_list& cmd, ImDrawData*
 
 void imgui_texture_registry::create_texture(sg::context& ctx, ImTextureData* tex)
 {
-    // imgui.hlsl samples .rgba unconditionally, so an Alpha8 atlas would render as red-on-transparent.
+    // imgui.sgl samples .rgba unconditionally, so an Alpha8 atlas would render as red-on-transparent.
     // imgui_context pins TexDesiredFormat to RGBA32; this catches anyone changing it.
     CC_ASSERT(tex->Format == ImTextureFormat_RGBA32, "imgui atlas must be RGBA32 — see io.Fonts->TexDesiredFormat in "
                                                      "sr::imgui_context");
