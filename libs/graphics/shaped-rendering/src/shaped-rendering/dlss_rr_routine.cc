@@ -3,10 +3,10 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/dlss_rr_routine.hh>
-
-#include <memory> // std::shared_ptr, which is what denoise_history::_member_state is
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/dlss_ngx.hh>
+
+#include <memory> // std::shared_ptr, which is what denoise_history::_member_state is
 
 namespace sr
 {
