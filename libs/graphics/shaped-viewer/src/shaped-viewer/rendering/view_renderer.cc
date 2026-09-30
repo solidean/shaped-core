@@ -752,6 +752,13 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
         .spatial_settings = with_fresh_samples(false),
     };
 
+    // A NAMED temporal member names the temporal phase and nothing else.
+    // Carrying it into the spatial phase asks a temporal member to run on the converging mean, with no motion and no
+    // split — which the front refuses, so the layer presents the raw mean from the hand-off onward.
+    // `automatic` is what the spatial phase wanted in the first place: it walks the spatial members.
+    if (settings.denoise.method != sr::denoise_method::automatic && sr::is_temporal(settings.denoise.method))
+        schedule.spatial_settings.method = sr::denoise_method::automatic;
+
     auto const may_run_temporally = ds.frame != nullptr && ds.motion != nullptr
                                  && sr::is_temporal(sr::resolve_denoise_method(ctx, schedule.temporal_settings));
 

@@ -31,9 +31,10 @@ using namespace cc::primitive_defines;
 // little and still means something: the log rule fails it on any validation message, and reaching the end means the
 // whole frame recorded and ran.
 //
-// It needs no particular adapter.
-// NRD's dispatches are ordinary compute, so unlike DLSS this runs on WARP too — which is the whole reason this member
-// is the one CI could test.
+// It needs no particular dx12 adapter.
+// NRD's dispatches are ordinary compute, so unlike DLSS this runs on WARP too — which is what lets it be tested
+// without the hardware that shipped it.
+// Not by CI, though: nothing there fetches the SDK, so CI builds the null path and every test in this file is absent.
 #if SR_HAS_NRD
 ASYNC_INVOCABLE_TEST("sr - an NRD frame's dispatches build and run", (sg::context_handle const& ctx_h))
 {
@@ -147,9 +148,9 @@ constexpr auto k_specular_albedo = 0.04f;
 /// `radiance` empty means `albedo * k_irradiance`; give it a value per pixel where the radiance must not follow the
 /// albedo, as a sky pixel's does not.
 [[nodiscard]] cc::shared_async<cc::vector<tg::vec4f>> denoise_lit_surface(sg::context& ctx,
-                                                                         cc::vector<tg::vec4f> albedo,
-                                                                         cc::vector<f32> depth_values = {},
-                                                                         cc::vector<tg::vec4f> radiance = {})
+                                                                          cc::vector<tg::vec4f> albedo,
+                                                                          cc::vector<f32> depth_values = {},
+                                                                          cc::vector<tg::vec4f> radiance = {})
 {
     auto const make = [&](sg::pixel_format format)
     {
@@ -785,8 +786,7 @@ ASYNC_INVOCABLE_TEST("sr - NRD leaves the sky exactly as the tracer wrote it", (
             }
         }
 
-    CHECK(worst < 0.01f)
-        .context(cc::format("sky changed by {} at {},{}", worst, worst_at[0], worst_at[1]));
+    CHECK(worst < 0.01f).context(cc::format("sky changed by {} at {},{}", worst, worst_at[0], worst_at[1]));
 
     // And the surface half still denoises, so the range did not simply switch the member off.
     auto const surface = out[(k_size / 2) * k_size + k_size / 4];

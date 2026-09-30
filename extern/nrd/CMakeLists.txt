@@ -71,8 +71,11 @@ add_subdirectory("${NRD_INSTALL}/NRD" "${CMAKE_CURRENT_BINARY_DIR}/nrd" EXCLUDE_
 # So our shader includes NRD's own header instead, and NRDConfig.hlsli comes with it because that is where the two
 # encoding choices above land.
 #
+# TEMPORARY, and the only place in this repository where configure writes into the source tree.
 # It is copied rather than included in place because sc_add_shader_package resolves every #include under one
 # SOURCE_DIR: the package embeds its sources, so an include reaching outside that directory has nothing to embed.
+# libs/graphics/shaped-shader-library/docs/TODO.md holds the gap this works around — an INCLUDE_DIRS list whose files
+# are embedded like the package's own — and what it would take to close it.
 # The copy is gitignored, and configure refreshes it, so the header can never be staler than the library it describes.
 file(COPY "${NRD_INSTALL}/NRD/Shaders/NRD.hlsli" "${NRD_INSTALL}/NRD/Shaders/NRDConfig.hlsli"
      DESTINATION "${CMAKE_SOURCE_DIR}/libs/graphics/shaped-rendering/shaders/nrd")

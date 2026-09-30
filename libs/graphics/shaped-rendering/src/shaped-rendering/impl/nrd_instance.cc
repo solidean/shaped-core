@@ -3,10 +3,11 @@
 #include <clean-core/string/string.hh>
 #include <shaped-rendering/impl/nrd_instance.hh>
 
-// NRD, confined to this one TU.
+// NRD, reached by this TU and `impl/nrd_session.cc` and no other.
 //
 // The seam above names no NRD type, so nothing of the library reaches a public header of ours or a consumer's
 // translation unit — the same confinement `impl/dlss_ngx.cc` gives NGX.
+// `.shaped-lint.yml` scopes the `<NRD.h>` allowance to exactly those two files, so a third would fail the lint.
 
 namespace sr::impl
 {

@@ -25,8 +25,10 @@ The temporal ones work from about one sample per pixel, but only if every pixel'
 DLSS Super Resolution, FSR 3.1 and FSR 4 are temporal upscalers, and on path-tracing noise they smear it rather than remove it.
 The vendor products that denoise are Ray Reconstruction and Ray Regeneration, and both upscale as part of it.
 
-**The native members are what CI tests, and `nrd` joins them.**
+**The native members are what CI tests, and `nrd` does not join them.**
 à-trous and SVGF are our own HLSL, so they run on WARP, and the front's policy is tested through them.
+CI never fetches NRD, so what it builds and runs is the null path: `SR_HAS_NRD` is 0, the member reports `unsupported`, and its own tests do not exist.
+They run only where somebody fetched the SDK, which is why a green CI here says nothing about whether NRD works.
 
 **NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
 It compiles nothing at run time, owns no device memory and records nothing.
@@ -77,6 +79,20 @@ That is why `albedo` and `specular_albedo` are REQUIRED guides for this member r
 It is partial by construction, because NRD floors both factors well above zero and calls the specular half a biased solution.
 On a checkerboard albedo under one flat normal, the case where nothing but the albedo says there is an edge, the member keeps about nine tenths of the contrast.
 Feeding radiance straight through keeps under one tenth of it.
+
+**Known limit: a lobe no path sampled reaches REBLUR as contact rather than as absent.**
+One path carries one lobe, so a pixel whose paths all went diffuse has no specular hit distance, and the tracer reports 0 — which is NRD's own "this lobe was not sampled here".
+`nrd_repack.hlsl` then passes it through `REBLUR_FrontEnd_GetNormHitDist`, whose `max(hitDist, NRD_EPS)` turns that 0 into the smallest non-zero distance.
+REBLUR reads a distance that small as a reflection of something touching the surface.
+Closing it takes three things together, per `NRDSettings.h`'s `HitDistanceReconstructionMode`.
+The primary hit's diffuse/specular choice clamped to [1/4, 3/4] and drawn with Bayer dithering rather than white noise, so every 3x3 area holds a sample of each lobe.
+A raw 0 passed through the repack as 0 rather than floored.
+And `reblur.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3`.
+That is a tracer change of its own, so it is recorded here rather than done.
+
+An escaped secondary ray is a different case and is handled.
+The tracer counts escapes apart from hits and reports the mean over the paths that hit.
+Where every path of a lobe escaped it reports the ray's own `TMax`, which the normalization saturates, so it reads as "far".
 
 **Two conventions run the other way round from ours, and both are carried in settings rather than in a repack.**
 NRD reads a motion vector as `pixelUvPrev = pixelUv + mv`, so its units are UV and its direction is previous minus current, where ours is pixels and current minus previous.

@@ -30,7 +30,7 @@ struct sr::nrd_options
 ///
 /// **dx12 only today**, because NRD embeds DXIL alone and this member hands sg exactly that; `is_available` asks the
 /// context rather than assuming, so a vulkan context reports `unsupported`.
-/// docs/denoising.md has the two routes that would widen it.
+/// libs/graphics/shaped-rendering/docs/denoising.md has the two routes that would widen it.
 ///
 /// It requires every guide `sr::required_guides(denoise_method::nrd)` names, `split_diffuse_specular` among them: the
 /// denoiser's whole premise is that the two lobes blur differently, so a call carrying one radiance texture reports
