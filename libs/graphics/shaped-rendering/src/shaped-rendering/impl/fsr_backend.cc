@@ -251,6 +251,15 @@ public:
     /// code keeps stays valid while later ones are added.
     cc::vector<cc::vector<u32>> staged_constants;
 
+    /// Where the frame's constants live on the GPU: one block per constant buffer a job binds, in job order.
+    /// Persistent rather than a transient buffer per job, since sg tracks a persistent buffer from frame to frame and so
+    /// orders this frame's copy after the last frame's reads; a transient window recycled across epochs is not tracked.
+    sg::buffer<fsr_constants_block> constants;
+    isize constants_capacity = 0;
+
+    /// The next block of `constants` a job binds, while the frame's jobs record.
+    isize constants_cursor = 0;
+
     /// The three images FSR 3.1 has the application allocate, and sr's own depth conversion and exposure.
     sg::texture_2d reconstructed_previous_depth;
     sg::texture_2d dilated_depth;
@@ -704,13 +713,11 @@ bool fsr_stream::record_compute(sg::command_list& cmd, FfxComputeJobDescription 
     for (auto i = isize(0); i < record.cb_names.size(); ++i)
     {
         auto const& cb = job.cbs[i];
-        auto const bytes = isize(cb.num32BitEntries) * 4;
-        CC_ASSERT(bytes <= isize(sizeof(fsr_constants_block)), "an FSR constant buffer outgrew the block it travels "
-                                                               "in");
-        auto const block = ctx->transient.create_buffer<fsr_constants_block>(
-            1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.bytes_to_buffer(block.raw(), cc::span<byte const>(reinterpret_cast<byte const*>(cb.data), bytes));
-        views.push_back({.name = record.cb_names[i], .view = block.as_constants_buffer()});
+        CC_ASSERT(isize(cb.num32BitEntries) * 4 <= isize(sizeof(fsr_constants_block)), "an FSR constant buffer outgrew "
+                                                                                       "the block it travels in");
+        CC_ASSERT(constants_cursor < constants_capacity, "a job binds more constant buffers than record_jobs uploaded");
+        views.push_back({.name = record.cb_names[i], .view = constants.as_constants_buffer(constants_cursor)});
+        ++constants_cursor;
     }
 
     auto samplers = cc::vector<sg::named_sampler>();
@@ -759,6 +766,31 @@ bool fsr_stream::record_clear(sg::command_list& cmd, FfxClearFloatJobDescription
 
 bool fsr_stream::record_jobs(sg::command_list& cmd)
 {
+    // Every job's constants first, in one copy, so the frame's dispatches read them with no copy between them.
+    auto blocks = cc::vector<fsr_constants_block>();
+    for (auto const& job : jobs)
+    {
+        if (job.jobType != FFX_GPU_JOB_COMPUTE)
+            continue;
+        auto const& compute = job.computeJobDescriptor;
+        auto const index = isize(reinterpret_cast<uintptr_t>(compute.pipeline->pipeline)) - 1;
+        for (auto i = isize(0); i < pipelines[index].cb_names.size(); ++i)
+        {
+            auto& block = blocks.emplace_back();
+            auto const bytes = cc::min(isize(compute.cbs[i].num32BitEntries) * 4, isize(sizeof(fsr_constants_block)));
+            cc::memcpy(&block, compute.cbs[i].data, bytes);
+        }
+    }
+    if (blocks.size() > constants_capacity)
+    {
+        constants = ctx->persistent.create_buffer<fsr_constants_block>(
+            blocks.size(), sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+        constants_capacity = blocks.size();
+    }
+    if (!blocks.empty())
+        cmd.upload.bytes_to_buffer(constants.raw(), cc::span<fsr_constants_block const>(blocks).as_bytes());
+    constants_cursor = 0;
+
     for (auto const& job : jobs)
     {
         switch (job.jobType)

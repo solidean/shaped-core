@@ -239,7 +239,9 @@ ASYNC_INVOCABLE_TEST("sr - an upscaler resolves behind a denoiser, and traces sm
     co_return;
 }
 
-ASYNC_INVOCABLE_TEST("sr - fsr reconstructs from the jitter the right way round", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - fsr reconstructs from the jitter the right way round",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -261,7 +263,9 @@ ASYNC_INVOCABLE_TEST("sr - fsr reconstructs from the jitter the right way round"
     CHECK(fsr_error < 0.8f * flipped_error).context(cc::format("fsr {}, flipped jitter {}", fsr_error, flipped_error));
 }
 
-ASYNC_INVOCABLE_TEST("sr - fsr follows a moving image through its motion vectors", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - fsr follows a moving image through its motion vectors",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -285,7 +289,8 @@ ASYNC_INVOCABLE_TEST("sr - fsr follows a moving image through its motion vectors
 }
 
 ASYNC_INVOCABLE_TEST("sr - the front upscales behind a denoiser, and restarts the upscaler when the denoiser changes",
-                     (sg::context_handle const& ctx_h), )
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -332,7 +337,8 @@ ASYNC_INVOCABLE_TEST("sr - the front upscales behind a denoiser, and restarts th
 }
 
 ASYNC_INVOCABLE_TEST("sr - an upscaler without depth and motion is refused and writes nothing",
-                     (sg::context_handle const& ctx_h), )
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -367,7 +373,8 @@ ASYNC_INVOCABLE_TEST("sr - an upscaler without depth and motion is refused and w
 
 // Needs no FSR, so it runs on every build: automatic at a native scale resolves to no upscaler anywhere.
 ASYNC_INVOCABLE_TEST("sr - upscaling alone with nothing to upscale is refused and writes nothing",
-                     (sg::context_handle const& ctx_h), )
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -398,7 +405,9 @@ ASYNC_INVOCABLE_TEST("sr - upscaling alone with nothing to upscale is refused an
 }
 
 // WARP crashes executing FSR, so a software adapter must never be offered it; CI's WARP leg is what runs this.
-ASYNC_INVOCABLE_TEST("sr - fsr is refused on a software adapter", (sg::context_handle const& ctx_h), )
+ASYNC_INVOCABLE_TEST("sr - fsr is refused on a software adapter",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
