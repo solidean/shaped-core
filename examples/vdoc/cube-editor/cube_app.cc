@@ -64,7 +64,7 @@ cc::unique_ptr<app> app::create(cc::string_view title)
     slib::add_available_compilers(out->_lib);
     if (out->_lib.supported_formats(slib::shader_language::hlsl).empty())
     {
-        cc::eprintln("no shader compiler: DXC did not load");
+        cc::eprintln("no shader compiler for HLSL: DXC did not load, and the warning above says why");
         return nullptr;
     }
     sr::add_shader_packages(out->_lib);        // imgui's shaders

@@ -165,7 +165,7 @@ lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));  // 
 #include <shaped-shader-library/compiler/available_compilers.hh>
 slib::add_available_compilers(lib) // every edge this build can make: wgsl, dxil + spirv where DXC is, metal_lib on Apple,
                                    //   and SGL over each; what a library serving any backend registers instead of the list above
-                                   //   a DXC that fails to create is left out silently; check lib.supported_formats(language)
+                                   //   a DXC that fails to create is left out, with a warning naming why; lib.supported_formats(language) says what is left
 
 #include <shaped-shader-library/binding/wgsl_declarations.hh>
 slib::parse_wgsl_declarations(src) // -> cc::result<wgsl_declarations>; { stage; entry_point; workgroup_size; bindings }

@@ -88,7 +88,7 @@ Once, at startup:
 
 ```cpp
 slib::shader_library lib;
-lib.add_compiler(slib::create_dxc_compiler().value());   // hlsl -> dxil
+slib::add_available_compilers(lib);                      // every edge this build can make
 lib.add_package(my::shaders::package());                 // fills in the symbols above
 lib.start_hot_reload();                                  // after every package
 ```
@@ -96,10 +96,11 @@ lib.start_hot_reload();                                  // after every package
 Nothing else touches the library; call sites go through the generated symbols.
 It is not a singleton, but the generated symbols *are* process-wide globals, so only one library may exist at a time.
 
-`create_dxc_compiler()` exists only where slib was built with DXC — Windows, with `extern/dxc` fetched.
+`slib::add_available_compilers` registers what the build has: WGSL and SGL over it everywhere, metal on Apple, and SGL over each.
+The DXC edges exist only where slib was built with DXC — Windows, with `extern/dxc` fetched.
 `SLIB_HAS_DXC` (1 or 0, defined for anything linking slib) is the guard.
 Packages, mounts, reload and the whole test suite build and run everywhere without it.
-But HLSL→DXIL is the only compiler that exists today, so off Windows there is nothing to register and every `acquire` returns the error above.
+An HLSL package off Windows has no edge to a format the context accepts, so every `acquire` of it returns the error above.
 
 ## Hot reload
 

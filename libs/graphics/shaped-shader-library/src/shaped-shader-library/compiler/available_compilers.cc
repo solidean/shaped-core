@@ -1,3 +1,4 @@
+#include <clean-core/record/log.hh>
 #include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
@@ -17,15 +18,27 @@ void slib::add_available_compilers(shader_library& lib)
     lib.add_compiler(create_sgl_compiler(create_wgsl_compiler()));
 
 #if SLIB_HAS_DXC
+    // This build fetched DXC, so a DXC that does not create is a broken install, and its reason is the one diagnostic.
     // Each edge needs its own inner compiler, since the SGL one takes ownership of it.
-    if (auto dxil = create_dxc_compiler(); dxil.has_value())
+    auto dxil = create_dxc_compiler();
+    if (dxil.has_error())
+        CC_LOG_WARNING("DXC did not load, so no HLSL or SGL shader compiles to DXIL: {}", dxil.error().to_string());
+    else
+    {
         lib.add_compiler(cc::move(dxil.value()));
-    if (auto spirv = create_dxc_spirv_compiler(); spirv.has_value())
+        if (auto sgl_dxil = create_dxc_compiler(); sgl_dxil.has_value())
+            lib.add_compiler(create_sgl_compiler(cc::move(sgl_dxil.value())));
+    }
+
+    auto spirv = create_dxc_spirv_compiler();
+    if (spirv.has_error())
+        CC_LOG_WARNING("DXC did not load, so no HLSL or SGL shader compiles to SPIR-V: {}", spirv.error().to_string());
+    else
+    {
         lib.add_compiler(cc::move(spirv.value()));
-    if (auto dxil = create_dxc_compiler(); dxil.has_value())
-        lib.add_compiler(create_sgl_compiler(cc::move(dxil.value())));
-    if (auto spirv = create_dxc_spirv_compiler(); spirv.has_value())
-        lib.add_compiler(create_sgl_compiler(cc::move(spirv.value())));
+        if (auto sgl_spirv = create_dxc_spirv_compiler(); sgl_spirv.has_value())
+            lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value())));
+    }
 #endif
 
 #if SLIB_HAS_METAL
