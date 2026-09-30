@@ -224,6 +224,7 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
     float3 primary_normal = float3(0, 0, 0);
     float primary_depth = 0;
     float3 primary_position = float3(0, 0, 0);
+    float2 primary_sample = float2(0, 0);
     bool primary_hit = false;
 
     int spp = max(1, gConstants.spp);
@@ -254,6 +255,7 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
             primary_albedo = h.albedo;
             primary_normal = h.normal;
             primary_position = h.position;
+            primary_sample = float2(px) + jitter;
             primary_depth = dot(h.position - o, gConstants.forward.xyz);
         }
 
@@ -280,6 +282,8 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
 
     // Where this pixel's surface was last frame, in pixels — what a temporal denoiser reprojects along.
     // A pixel that hit nothing has no surface to follow, so it carries no motion.
+    // Measured from where the primary sample was traced rather than the pixel centre, so the motion carries no jitter:
+    // a still camera reports zero, which is what an upscaler reading the jitter separately requires.
     float2 motion = float2(0, 0);
     if (primary_hit)
     {
@@ -290,7 +294,7 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
         {
             float2 prev_ndc = prev_clip.xy / prev_clip.w;
             float2 prev_px = (float2(prev_ndc.x, -prev_ndc.y) * 0.5 + 0.5) * float2(size);
-            motion = (float2(px) + 0.5) - prev_px;
+            motion = primary_sample - prev_px;
         }
     }
 
