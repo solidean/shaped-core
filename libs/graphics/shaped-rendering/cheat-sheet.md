@@ -370,7 +370,7 @@ sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = ler
 - **A denoised image keeps `color`'s alpha.** Every denoise member writes rgb and copies the alpha; an upscaled image's alpha is the upscaler's.
 - **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream, and FSR about 80 MiB for 720p in, 1080p out.
   Drop the history of a view nobody is looking at.
-- **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 hardware; WARP crashes executing it, and vulkan refuses its layouts — see docs/TODO.md.
+- **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — see docs/TODO.md.
 - **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
   knob live, a scale selector, and the raw image beside the reconstructed one.
 

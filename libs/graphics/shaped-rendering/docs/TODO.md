@@ -25,12 +25,10 @@ Bigger design intent lives in [structure.md](structure.md).
   A force-included compat header would widen it, and nothing here has built it against another C runtime yet.
 - FSR runs its portable permutation only: fp32, no forced wave64, no Lanczos table.
   AMD tunes the 16-bit and wave64 variants for speed; the backend reports neither because sg has no 16-bit capability to read yet — the same gap the OIDN half-precision item below names.
-- **FSR on vulkan fails to initialize**, and reports `failed`.
-  AMD's HLSL numbers each register class from zero — `b0`, `t0`, `u0` — and a vulkan descriptor set numbers every binding in one namespace.
-  So `cbFSR3Upscaler` and `r_input_motion_vectors` both land at binding 0, and sg refuses the layout rather than guess.
-  sr's own shaders never meet this, because slib's binding preprocessor assigns their addresses.
-  Closing it is per-class binding shifts for SPIR-V (DXC's `-fvk-b-shift` and siblings) on a foreign shader, which slib has no way to ask for today.
-  Everything else is ready: the passes compile to SPIR-V, and the two samplers are bound per group rather than as static samplers, which the vulkan backend refuses.
+- FSR's SPIR-V bindings come from a patch to AMD's `ffx_core_hlsl.h`, applied as extern/fidelityfx flattens it.
+  AMD numbers each register class from zero, and SPIR-V would put `b0`, `t0`, `u0` and `s0` all at binding 0.
+  Under `__spirv__` the patch prefixes each class with its own digit instead — `t` becomes `1N`, `u` `2N`, `s` `3N` — which holds while no constant buffer index reaches 10.
+  The real fix is per-class binding shifts (DXC's `-fvk-b-shift` and siblings) that a shader package can ask slib for, and the patch goes once slib has them.
 - FSR's reactive and transparency masks are not passed; it builds a default when none is given.
   They matter once a tracer has transparent surfaces to report.
 - `reconstruct_status::denoised` is also what an upscale-only call reports when it wrote its output; a neutral name would read better once the front's other uses of "denoise" settle.

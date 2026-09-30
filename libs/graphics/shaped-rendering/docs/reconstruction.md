@@ -20,7 +20,7 @@ This is the design, including the parts not built yet.
 
 | upscaler | kind | where it runs | status |
 |---|---|---|---|
-| `fsr` | temporal, upscales, does not denoise | any GPU; dx12 on Windows builds; not WARP, not vulkan yet | done |
+| `fsr` | temporal, upscales, does not denoise | any GPU; dx12 and vulkan on Windows builds; not WARP | done |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**
 The temporal ones work from about one sample per pixel, but only if every pixel's motion is known.
@@ -148,8 +148,7 @@ FSR keeps two full images at the output extent and about a dozen at the traced o
 - It builds where extern/fidelityfx was fetched, which is Windows: the host code calls MSVC's secure C runtime and uses `__declspec` unconditionally.
 - It runs on the hardware adapter.
   WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass, and the FSR image tests skip there; [TODO.md](TODO.md) records what bisecting it established.
-- On vulkan the passes compile, and their pipelines are refused: AMD numbers each register class from zero, which a vulkan descriptor set cannot tell apart.
-  The call reports `failed`, and [TODO.md](TODO.md) has what closing it takes.
+- It runs on vulkan too, through a patch that gives each of AMD's register classes its own SPIR-V binding range; [TODO.md](TODO.md) has what replaces it.
 
 ## The OIDN member
 

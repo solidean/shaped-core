@@ -55,6 +55,28 @@ foreach(_source IN LISTS _fsr_shader_sources)
     get_filename_component(_name "${_source}" NAME)
     file(READ "${_source}" _text)
     string(REGEX REPLACE "#include \"[^\"]*/([^\"/]+)\"" "#include \"\\1\"" _text "${_text}")
+    # TEMPORARY: AMD numbers each register class from zero, and SPIR-V maps `t0`, `u0`, `b0` and `s0` all onto binding 0.
+    # Under __spirv__ each class gets its own decimal prefix instead — b stays `N`, t becomes `1N`, u `2N`, s `3N` — so
+    # the bindings are distinct while no constant buffer index reaches 10.
+    # The real fix is per-class binding shifts (DXC's `-fvk-*-shift`) that a shader package can ask slib for.
+    if(_name STREQUAL "ffx_core_hlsl.h")
+        foreach(_class IN ITEMS "SRV;t;1" "UAV;u;2" "SAMPLER;s;3")
+            list(GET _class 0 _macro)
+            list(GET _class 1 _reg)
+            list(GET _class 2 _prefix)
+            set(_line "#define DECLARE_${_macro}_REGISTER(regIndex) ${_reg}##regIndex")
+            if(_macro STREQUAL "SAMPLER")
+                set(_line "#define DECLARE_SAMPLER_REGISTER(regIndex)  s##regIndex")
+            endif()
+            string(FIND "${_text}" "${_line}" _at)
+            if(_at EQUAL -1)
+                message(FATAL_ERROR "fidelityfx: ffx_core_hlsl.h no longer declares `${_line}`; the SPIR-V binding patch needs updating")
+            endif()
+            string(REPLACE "${_line}"
+                "#if defined(__spirv__)\n#define DECLARE_${_macro}_REGISTER(regIndex) ${_reg}${_prefix}##regIndex\n#else\n${_line}\n#endif"
+                _text "${_text}")
+        endforeach()
+    endif()
     # Through a staging file, so an unchanged source keeps its timestamp and regenerates nothing.
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/fsr3-staging/${_name}" "${_text}")
     file(COPY_FILE "${CMAKE_CURRENT_BINARY_DIR}/fsr3-staging/${_name}" "${_fsr_shader_dir}/${_name}" ONLY_IF_DIFFERENT)

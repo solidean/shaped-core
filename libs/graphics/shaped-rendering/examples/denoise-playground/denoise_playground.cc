@@ -254,11 +254,15 @@ struct camera
     return out;
 }
 
-constexpr char const* k_method_names[] = {"automatic", "atrous", "svgf", "oidn", "dlss_rr", "fsr_rr"};
+// The members with an implementation; dlss_rr and fsr_rr are planned, and would only ever be refused.
+constexpr char const* k_method_names[] = {"automatic", "atrous", "svgf", "oidn"};
 constexpr sr::denoise_method k_method_values[] = {
-    sr::denoise_method::automatic, sr::denoise_method::atrous,  sr::denoise_method::svgf,
-    sr::denoise_method::oidn,      sr::denoise_method::dlss_rr, sr::denoise_method::fsr_rr,
+    sr::denoise_method::automatic,
+    sr::denoise_method::atrous,
+    sr::denoise_method::svgf,
+    sr::denoise_method::oidn,
 };
+constexpr auto k_method_count = int(sizeof(k_method_values) / sizeof(k_method_values[0]));
 constexpr char const* k_quality_names[] = {"fast", "balanced", "best"};
 constexpr char const* k_scale_names[] = {"native", "quality (1.5x)", "balanced (1.7x)", "performance (2x)"};
 constexpr char const* k_upscaler_names[] = {"automatic", "none", "fsr"};
@@ -287,10 +291,10 @@ void draw_panel(controls& ui,
     ImGui::TextDisabled("(off = raw, still upscaled)");
 
     auto method_index = 0;
-    for (auto i = 0; i < 6; ++i)
+    for (auto i = 0; i < k_method_count; ++i)
         if (k_method_values[i] == ui.denoise.denoiser)
             method_index = i;
-    if (ImGui::Combo("method", &method_index, k_method_names, 6))
+    if (ImGui::Combo("method", &method_index, k_method_names, k_method_count))
         ui.denoise.denoiser = k_method_values[method_index];
     if (ui.denoise.denoiser != sr::denoise_method::automatic && !support.supports(ui.denoise.denoiser))
         ImGui::TextDisabled("not in this build: the call is refused");
