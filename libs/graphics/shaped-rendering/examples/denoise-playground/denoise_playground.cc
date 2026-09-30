@@ -66,7 +66,8 @@ struct controls
     /// `fresh_samples` on by default, which is what opens the example on the interesting half: one sample a pixel,
     /// permanently noisy on the left of the split, and svgf holding it together on the right.
     /// Turning it off switches to the accumulating half, where the mean converges and a spatial member backs off.
-    sr::reconstruct_settings denoise = {.fresh_samples = true};
+    /// `quality` traces at 1/1.5 of the window, so the upscaler behind the denoiser is on screen from the first frame.
+    sr::reconstruct_settings denoise = {.scale = sr::render_scale_preset::quality, .fresh_samples = true};
     bool denoise_enabled = true;
     bool fsr_sharpening = false;
     int spp = 1;
