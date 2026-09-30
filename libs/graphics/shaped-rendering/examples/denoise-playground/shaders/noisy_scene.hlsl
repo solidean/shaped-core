@@ -6,12 +6,18 @@
 // cosine-sampled indirect light and a stochastically sampled area light, which is exactly the signal sr's denoisers
 // are built for. Turning `spp` down makes it worse in the way a real tracer gets worse.
 //
-// It writes five images in one dispatch:
-//   gColor      the noisy radiance, and the running mean when the caller is accumulating
-//   gAlbedo     the primary hit's diffuse reflectance, so the denoiser can filter lighting and keep texture
-//   gNormal     the primary hit's world normal
-//   gDepth      linear view depth, 0 where the ray escaped
-//   gMotion     this pixel minus where the same surface was last frame, in pixels
+// It writes seven images in one dispatch:
+//   gColor           the noisy radiance, and the running mean when the caller is accumulating
+//   gAlbedo          the primary hit's diffuse reflectance, so the denoiser can filter lighting and keep texture
+//   gNormal          the primary hit's world normal
+//   gDepth           linear view depth, 0 where the ray escaped
+//   gMotion          this pixel minus where the same surface was last frame, in pixels
+//   gSpecularAlbedo  the primary hit's specular reflectance, which this scene has none of
+//   gRoughness       the primary hit's roughness, which this scene is fully rough
+//
+// The last two exist because the vendor members require them, and a member that cannot have them cannot be shown.
+// They are not padding: this scene really is Lambertian, so zero specular reflectance and maximal roughness is what
+// it has, and a denoiser told so correctly does nothing to a specular lobe that is not there.
 //
 // Every address below is written by slib's binding pass; see shaped-shader-library/docs/binding-preprocessor.md.
 
@@ -46,6 +52,8 @@ namespace scene_bindings
     RWTexture2D<float4> gNormal;
     RWTexture2D<float4> gDepth;
     RWTexture2D<float4> gMotion;
+    RWTexture2D<float4> gSpecularAlbedo;
+    RWTexture2D<float4> gRoughness;
 }
 
 using namespace scene_bindings;
@@ -290,4 +298,10 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
     gNormal[id.xy] = float4(primary_normal, 0.0);
     gDepth[id.xy] = float4(primary_depth, 0, 0, 0);
     gMotion[id.xy] = float4(motion, 0, 0);
+
+    // A Lambertian scene: nothing reflects specularly, and every surface is maximally rough.
+    // A ray that escaped is the sky, which is not a surface at all — the same answer serves, since there is no
+    // specular lobe to preserve either way.
+    gSpecularAlbedo[id.xy] = float4(0, 0, 0, 1);
+    gRoughness[id.xy] = float4(1, 0, 0, 0);
 }

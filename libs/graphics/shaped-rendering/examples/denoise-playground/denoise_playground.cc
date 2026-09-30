@@ -94,6 +94,8 @@ struct view_images
     sg::texture_2d normal;
     sg::texture_2d depth;
     sg::texture_2d motion;
+    sg::texture_2d specular_albedo;
+    sg::texture_2d roughness;
     sg::texture_2d denoised;
     sg::texture_2d composed;
 };
@@ -114,6 +116,8 @@ void resize_images(sg::context& ctx, view_images& v, tg::vec2i extent)
     v.normal = make_image(ctx, extent);
     v.depth = make_image(ctx, extent);
     v.motion = make_image(ctx, extent);
+    v.specular_albedo = make_image(ctx, extent);
+    v.roughness = make_image(ctx, extent);
     v.denoised = make_image(ctx, extent);
     v.composed = make_image(ctx, extent);
 }
@@ -226,11 +230,14 @@ struct camera
     return out;
 }
 
-constexpr char const* k_method_names[] = {"automatic", "atrous", "svgf", "oidn", "dlss_rr", "fsr_rr"};
+/// The dropdown, and what `--capture <name>` selects.
+/// One entry per member the front carries, so a member missing here is one nobody can look at.
+constexpr char const* k_method_names[] = {"automatic", "atrous", "svgf", "oidn", "dlss_rr", "fsr_rr", "nrd"};
 constexpr sr::denoise_method k_method_values[] = {
-    sr::denoise_method::automatic, sr::denoise_method::atrous,  sr::denoise_method::svgf,
-    sr::denoise_method::oidn,      sr::denoise_method::dlss_rr, sr::denoise_method::fsr_rr,
+    sr::denoise_method::automatic, sr::denoise_method::atrous, sr::denoise_method::svgf, sr::denoise_method::oidn,
+    sr::denoise_method::dlss_rr,   sr::denoise_method::fsr_rr, sr::denoise_method::nrd,
 };
+constexpr int k_method_count = int(sizeof(k_method_names) / sizeof(k_method_names[0]));
 constexpr char const* k_quality_names[] = {"fast", "balanced", "best"};
 
 /// Draws the panel, editing `ui` in place.
@@ -254,10 +261,10 @@ void draw_panel(controls& ui,
     ImGui::TextDisabled("(off = the raw image)");
 
     auto method_index = 0;
-    for (auto i = 0; i < 6; ++i)
+    for (auto i = 0; i < k_method_count; ++i)
         if (k_method_values[i] == ui.denoise.method)
             method_index = i;
-    if (ImGui::Combo("method", &method_index, k_method_names, 6))
+    if (ImGui::Combo("method", &method_index, k_method_names, k_method_count))
         ui.denoise.method = k_method_values[method_index];
     if (ui.denoise.method != sr::denoise_method::automatic && !support.supports(ui.denoise.method))
         ImGui::TextDisabled("not in this build: the call is refused");
@@ -322,11 +329,30 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     // Showing what a refusal does is a thing this example is FOR, and it would otherwise fail the moment it is used.
     nx::allow_warnings("did not run: not supported by this build or device");
 
+    // The other refusal: `nrd` needs a hit distance and a split radiance signal that this tracer does not write, and
+    // showing a refusal is a thing this example is FOR — so naming that member has to be a picture rather than a
+    // failed run.
+    nx::allow_warnings("did not run: the call is missing a guide buffer this member requires");
+
+    // A named capture selects the member, so the harness can walk every one of them rather than photographing
+    // whichever `automatic` happened to resolve to on the machine that ran it.
+    // The unnamed capture stays `automatic`, which is the view a reader wants first.
     auto const capture = sr::capture_request::from_environment();
+    auto captured_method = sr::denoise_method::automatic;
     if (capture.active && !capture.name.empty())
     {
-        cc::eprintln("this example offers only the default view, so it cannot take {}", capture.name);
-        co_return;
+        auto found = false;
+        for (auto i = 0; i < k_method_count; ++i)
+            if (capture.name == k_method_names[i])
+            {
+                captured_method = k_method_values[i];
+                found = true;
+            }
+        if (!found)
+        {
+            cc::eprintln("no denoise member is called {}", capture.name);
+            co_return;
+        }
     }
 
     auto wsys = sr::window_system::try_create({.headless = capture.active});
@@ -460,6 +486,12 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     auto prev_view_projection = tg::mat4f::identity;
 
     auto ui = controls();
+    ui.denoise.method = captured_method;
+    // A temporal member has no history to show from a single frame, and every vendor member is temporal — so a
+    // named capture feeds fresh samples, which is the mode those members exist for.
+    // `automatic` keeps the default, since that is the view the unnamed capture and the windowed run both want.
+    if (captured_method != sr::denoise_method::automatic)
+        ui.denoise.fresh_samples = sr::is_temporal(captured_method);
     auto applied = ui;
     auto frame = u32(0);
     auto accum_frame = u32(0);
@@ -523,14 +555,17 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
         // -- trace
         {
-            auto const group = ctx.transient.create_binding_group(*cmd, scene_layout,
-                                                                  shaders::scene_bindings{
-                                                                      .gColor = images.color.as_any_image_view(),
-                                                                      .gAlbedo = images.albedo.as_any_image_view(),
-                                                                      .gNormal = images.normal.as_any_image_view(),
-                                                                      .gDepth = images.depth.as_any_image_view(),
-                                                                      .gMotion = images.motion.as_any_image_view(),
-                                                                  });
+            auto const group
+                = ctx.transient.create_binding_group(*cmd, scene_layout,
+                                                     shaders::scene_bindings{
+                                                         .gColor = images.color.as_any_image_view(),
+                                                         .gAlbedo = images.albedo.as_any_image_view(),
+                                                         .gNormal = images.normal.as_any_image_view(),
+                                                         .gDepth = images.depth.as_any_image_view(),
+                                                         .gMotion = images.motion.as_any_image_view(),
+                                                         .gSpecularAlbedo = images.specular_albedo.as_any_image_view(),
+                                                         .gRoughness = images.roughness.as_any_image_view(),
+                                                     });
             cmd->compute.bind_pipeline(**scene_pipeline);
             cmd->compute.bind<shaders::scene_bindings>(*group);
             cmd->compute.set_inline_constants(
@@ -554,6 +589,15 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
             if (ui.use_depth)
                 inputs.guides.depth = images.depth;
             inputs.guides.motion = images.motion; // always written by the tracer; svgf requires it
+
+            // The specular pair rides with albedo rather than getting checkboxes of its own: it is what the vendor
+            // members require on top of the three the panel toggles, and a scene with no specular lobe has nothing
+            // to show by turning it off.
+            if (ui.use_albedo)
+            {
+                inputs.guides.specular_albedo = images.specular_albedo;
+                inputs.guides.roughness = images.roughness;
+            }
 
             last_outcome = sr::denoise_routine::execute(*cmd, inputs, history, ui.denoise);
 
