@@ -41,9 +41,6 @@ struct sg::backend::webgpu::webgpu_config
 
     /// The most bytes one streaming window moves.
     isize stream_window_bytes = 4 * 1024 * 1024;
-
-    /// Whether a rendering scope this context has to close and reopen mid-scope warns; see sg::context::render_pass_split_warnings.
-    bool render_pass_split_warnings = true;
 };
 
 /// Everything a WebGPU callback reaches the context through.

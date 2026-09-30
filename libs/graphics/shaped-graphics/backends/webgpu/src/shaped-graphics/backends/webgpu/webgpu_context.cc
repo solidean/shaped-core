@@ -72,7 +72,6 @@ void webgpu_context::set_limits(isize uniform_offset_alignment, granted_features
     _extended_image_formats = features.extended_image_formats;
     _limits.max_sample_count = 4;
 
-    set_render_pass_split_warnings(_config.render_pass_split_warnings);
     _upload_ring.initialize(*this, _config.upload_ring_bytes);
     _readbacks.initialize(*this);
     _constant_pages.initialize(*this, _config.constant_page_bytes, _uniform_offset_alignment);

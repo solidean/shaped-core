@@ -110,9 +110,6 @@ struct sg::backend::dx12::dx12_config
     /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
     sg::execution_model execution = sg::execution_model::may_block;
 
-    /// Whether a rendering scope this context has to close and reopen mid-scope warns; see sg::context::render_pass_split_warnings.
-    bool render_pass_split_warnings = true;
-
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
     isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;
@@ -604,7 +601,6 @@ public:
 
     // create_dx12_context fills these in once it has picked an adapter, like every other member here.
     using sg::context::set_adapter_info;
-    using sg::context::set_render_pass_split_warnings;
 
     /// The context's stat totals, for the transfer systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }

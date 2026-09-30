@@ -375,7 +375,7 @@ void metal_command_list::flush_barriers()
     // is every fragment source while this encoder has drawn nothing yet.
     if ((after & MTL::StageFragment) != 0 && _draws_in_render_encoder > 0)
     {
-        suspend_render_encoder("a barrier after a fragment-stage write");
+        suspend_render_encoder("a barrier after a fragment-stage write", split_remedy::split_scope_between_draws);
         return;
     }
 
@@ -1282,7 +1282,7 @@ void metal_command_list::open_render_encoder(bool force_load)
     _render_encoder->setScissorRect(_scope_scissor);
 }
 
-void metal_command_list::suspend_render_encoder(cc::string_view cause)
+void metal_command_list::suspend_render_encoder(cc::string_view cause, split_remedy remedy)
 {
     if (_render_encoder == nullptr)
         return;
@@ -1294,15 +1294,18 @@ void metal_command_list::suspend_render_encoder(cc::string_view cause)
     _render_encoder->release();
     _render_encoder = nullptr;
     _render_suspended = true;
-
-    ++_pass_reopens;
-    note_render_pass_split(cause);
+    _render_split_cause = cause;
+    _render_split_remedy = remedy;
 }
 
 void metal_command_list::resume_render_encoder()
 {
     if (!_render_suspended)
         return;
+
+    // The reopen is what the split costs, and what is counted: a scope whose last draw is behind it reopens nothing.
+    ++_pass_reopens;
+    note_render_pass_split(_render_split_cause, _render_split_remedy);
 
     // Whatever the copies recorded sits on the compute encoder, and only one encoder may be open.
     end_encoder();

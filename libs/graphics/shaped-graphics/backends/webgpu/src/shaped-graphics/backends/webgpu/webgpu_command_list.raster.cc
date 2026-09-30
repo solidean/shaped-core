@@ -109,7 +109,7 @@ void webgpu_command_list::open_render_pass(bool reopen)
 
     if (reopen)
     {
-        note_render_pass_split(_split_cause);
+        note_render_pass_split(_split_cause, _split_remedy);
         for (auto& a : _color_attachments)
             a.attachment.loadOp = WGPULoadOp_Load;
         if (_has_depth)
@@ -345,8 +345,8 @@ void webgpu_command_list::order_draw_within_pass(bool indexed)
         note(_index_resource, false);
 
     if (must_split && _render_pass)
-        end_open_pass(
-            "a hazard between two of its draws"); // apply_raster_state reopens it, which orders this draw after the earlier ones
+        // apply_raster_state reopens it, which orders this draw after the earlier ones
+        end_open_pass("a hazard between two of its draws", split_remedy::split_scope_between_draws);
 
     // Recorded after the split, so the reopened pass orders what follows against this draw.
     auto const add_once = [](cc::vector<void const*>& into, void const* resource)

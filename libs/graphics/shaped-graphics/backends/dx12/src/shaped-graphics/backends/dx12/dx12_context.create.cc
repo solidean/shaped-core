@@ -488,7 +488,6 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // Bring up the inline transfer ring buffers; each system creates + maps its own heap (colocated
     // with its logic) off the now-populated device.
     ctx->_execution = config.execution;
-    ctx->set_render_pass_split_warnings(config.render_pass_split_warnings);
     CC_RETURN_IF_ERROR(ctx->_upload_inline.initialize(config.upload_ring_bytes));
     CC_RETURN_IF_ERROR(ctx->_download_inline.initialize(config.download_ring_bytes));
 

@@ -16,6 +16,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/query/gpu_timestamp.hh>
 #include <shaped-graphics/raster/raster_target_formats.hh>
+#include <shaped-graphics/resource/subresource.hh> // subresource_range (the open rendering's targets)
 
 /// Records GPU work, and is submitted through the context that created it.
 /// Single-use and single-threaded: recorded by one thread, then submitted or dropped exactly once, in the epoch it was opened in.
@@ -221,9 +222,19 @@ protected:
     // A backend adds the barriers it emits; the scopes add draws, dispatches and inline transfers.
     impl::stat_counts _stats;
 
+    /// What gets a caller out of a split, which the warning names.
+    enum class split_remedy
+    {
+        /// The operation can leave the scope: a copy, or a barrier for an access first declared at a draw.
+        record_outside_scope,
+        /// Nothing outside the scope helps — the hazard is between two of its own draws, so the scope itself splits.
+        split_scope_between_draws,
+    };
+
     /// A backend closed the open rendering scope's pass and reopened it, forced by `cause`: "a copy", "a barrier", ….
-    /// Counts `render_pass_splits`, and warns the first time the context sees `cause` (context::render_pass_split_warnings).
-    void note_render_pass_split(cc::string_view cause);
+    /// Called at the reopen, which is what a split costs: a scope whose last draw is behind it splits nothing.
+    /// Counts `render_pass_splits`, and warns the first time the context sees `cause` (ctx.metrics.render_pass_split_warnings).
+    void note_render_pass_split(cc::string_view cause, split_remedy remedy = split_remedy::record_outside_scope);
 
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
 
@@ -233,6 +244,20 @@ private:
 
     cc::string _rendering_target_set;                       // of the open rendering, or empty
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
+
+    // One entry per color and depth-stencil target of the open rendering, the subresources a copy inside the scope
+    // must not name; the backend keeps each target alive for the recording, so the pointers stay valid.
+    struct rendering_target
+    {
+        raw_texture const* texture = nullptr;
+        subresource_range range = {};
+    };
+    cc::vector<rendering_target> _rendering_targets;
+
+    // Asserts `subresource` of `texture` is none of the open scope's targets; `what` names the copy in the message.
+    void check_copy_outside_rendering_targets(raw_texture const* texture,
+                                              subresource_index const& subresource,
+                                              cc::string_view what) const;
 
     // What is bound, by slot; the backend keeps each bound object alive for the recording, so the pointers stay valid.
     // A pipeline over another layout unbinds the groups, and one over the same layout keeps them, as webgpu does.

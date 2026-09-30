@@ -167,7 +167,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - declaring a scope's accesses **up front**, before the rendering scope opens or at its start, so their barriers are emitted outside it.
     A backend cannot always emit a barrier inside a rendering scope: vulkan never can, and metal cannot for a fragment-stage source.
-    Each one found only at its draw suspends the scope, stores and reloads every target, and warns once per context (`context::render_pass_split_warnings`).
+    Each one found only at its draw suspends the scope, stores and reloads every target, and warns once per context (`ctx.metrics.render_pass_split_warnings`).
     A resource a draw samples for the first time in the scope is the usual case: its transition is known before the scope.
     `cmd.ensure_layout` is not that declaration, and must not be used as one: it declares no access, so its barrier has an empty destination and the tracker drops the write before it.
     An access later in the same list then goes unordered against that write, which is a race on dx12 today (`resource_access_state::flush`).

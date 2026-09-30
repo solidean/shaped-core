@@ -192,13 +192,14 @@ void vulkan_command_list::reopen_rendering()
     vkCmdBeginRendering(_buffer, &rendering);
 }
 
-void vulkan_command_list::suspend_rendering(cc::string_view cause)
+void vulkan_command_list::suspend_rendering(cc::string_view cause, split_remedy remedy)
 {
     if (!_in_render_pass || _rendering_suspended)
         return;
 
     vkCmdEndRendering(_buffer);
-    note_render_pass_split(cause);
+    _rendering_split_cause = cause;
+    _rendering_split_remedy = remedy;
     _rendering_suspended = true;
 }
 
@@ -207,6 +208,8 @@ void vulkan_command_list::resume_rendering()
     if (!_rendering_suspended)
         return;
 
+    // The split is counted here rather than at the suspend: a scope whose last draw is behind it reopens nothing.
+    note_render_pass_split(_rendering_split_cause, _rendering_split_remedy);
     _rendering_suspended = false;
     reopen_rendering();
 }

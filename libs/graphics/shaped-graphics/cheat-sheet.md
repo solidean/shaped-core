@@ -289,6 +289,7 @@ cmd.upload.pod_to_buffer(buf, value, offset_in_elements=0)    // void — single
                                                               //   PREFER passing a buffer<T> as `buf`: the data param is then span<T const> and value is T — one T, no static_assert needed. .raw() in a transfer call = a missing overload
                                                               //   (typed form takes span<T const>, so vector / C array / {1,2,3} all convert; only the raw form accepts any contiguous_range)
 cmd.upload.bytes_to_texture(tex, bytes, subresource={}, region={})  // void — inline upload tightly-packed pixels into one texture (sub)region (needs copy_dst); drives the copy_dst layout barrier; visible to later cmds in the list
+                                                              //   ASSERTS on a subresource an OPEN rendering scope draws into (record it before render_to, or after the scope) — another mip or slice is fine; same for cmd.download.bytes_from_texture
 cmd.download.bytes_from_buffer(buf, offset_in_bytes, size)    // -> sg::bytes_future (needs copy_src); size 0 = ready empty future
 cmd.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_future<T>; offset AND count in ELEMENTS of T
 cmd.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_future<T> — T deduced from buffer<T>; no args past the buffer = whole buffer

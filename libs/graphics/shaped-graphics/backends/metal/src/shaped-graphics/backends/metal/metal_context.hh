@@ -51,9 +51,6 @@ struct sg::backend::metal::metal_config
 
     /// Capacity of the readback ring behind cmd.download, in bytes.
     isize download_ring_bytes = 16 * 1024 * 1024;
-
-    /// Whether a rendering scope this context has to close and reopen mid-scope warns; see sg::context::render_pass_split_warnings.
-    bool render_pass_split_warnings = true;
 };
 
 /// Metal implementation of sg::context, on Metal 4.
@@ -83,7 +80,6 @@ public:
     // create_metal_context fills this in once it has picked a device.
     using sg::context::set_adapter_info;
     using sg::context::set_counted_stats;
-    using sg::context::set_render_pass_split_warnings;
 
     /// The context's stat totals, for the systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }

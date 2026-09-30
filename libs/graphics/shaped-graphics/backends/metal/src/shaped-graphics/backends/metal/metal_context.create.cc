@@ -128,7 +128,6 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
     // A refusal here is the device declining an allocation, not a broken contract — so it reaches the caller as an
     // error, and the half-built context unwinds through its own shutdown as this handle drops.
     CC_RETURN_IF_ERROR(ctx->create_systems(config.upload_ring_bytes, config.download_ring_bytes));
-    ctx->set_render_pass_split_warnings(config.render_pass_split_warnings);
 
     CC_LOG_INFO("metal context on '{}'", ctx->metrics.adapter().name);
 

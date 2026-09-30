@@ -70,9 +70,6 @@ struct sg::backend::vulkan::vulkan_config
     /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
     sg::execution_model execution = sg::execution_model::may_block;
 
-    /// Whether a rendering scope this context has to close and reopen mid-scope warns; see sg::context::render_pass_split_warnings.
-    bool render_pass_split_warnings = true;
-
     /// Capacity of the staging ring behind cmd.upload, in bytes.
     /// One epoch's inline uploads must fit, since the ring is only reclaimed when an epoch retires.
     /// Matches the dx12 backend's default.
@@ -179,7 +176,6 @@ public:
 
     // create_vulkan_context fills these in once it has picked a physical device.
     using sg::context::set_adapter_info;
-    using sg::context::set_render_pass_split_warnings;
 
     /// The context's stat totals, for the transfer systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }

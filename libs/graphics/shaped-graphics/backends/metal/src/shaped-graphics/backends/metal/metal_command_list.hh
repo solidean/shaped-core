@@ -305,7 +305,7 @@ private:
     /// vulkan does the same thing for the same reason.
     ///
     /// Only a draw resumes, so several copies in a row cost one split rather than one each.
-    void suspend_render_encoder(cc::string_view cause);
+    void suspend_render_encoder(cc::string_view cause, split_remedy remedy = split_remedy::record_outside_scope);
 
     /// Reopens a suspended pass over the same targets: the attachments reload rather than reclear, and the encoder
     /// state the scope set is replayed.
@@ -394,6 +394,10 @@ private:
 
     /// A rendering scope whose encoder a copy or a barrier closed, and no draw has reopened yet.
     bool _render_suspended = false;
+
+    /// What closed the open scope's encoder, and what to do about it, named when its next draw reopens it.
+    cc::string_view _render_split_cause;
+    split_remedy _render_split_remedy = split_remedy::record_outside_scope;
 
     /// Draws recorded on the open render encoder since it opened.
     /// None means every fragment-stage write is in an earlier encoder, which the boundary pair already ordered.

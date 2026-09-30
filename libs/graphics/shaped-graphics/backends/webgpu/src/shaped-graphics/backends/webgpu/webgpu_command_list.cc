@@ -56,7 +56,7 @@ cc::result<std::unique_ptr<webgpu_command_list>> webgpu_context::create_webgpu_c
     return std::make_unique<webgpu_command_list>(*this, current_epoch(), cc::move(encoder));
 }
 
-void webgpu_command_list::end_open_pass(cc::string_view split_cause)
+void webgpu_command_list::end_open_pass(cc::string_view split_cause, split_remedy remedy)
 {
     if (_compute_pass)
     {
@@ -67,6 +67,7 @@ void webgpu_command_list::end_open_pass(cc::string_view split_cause)
     if (_render_pass)
     {
         _split_cause = split_cause;
+        _split_remedy = remedy;
         wgpuRenderPassEncoderEnd(render_pass());
         _render_pass = {};
         _raster.needs_full_apply = true;

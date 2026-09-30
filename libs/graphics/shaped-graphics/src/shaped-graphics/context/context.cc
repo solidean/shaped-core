@@ -205,7 +205,7 @@ cc::vector<device_error> context::take_pending_errors()
 
 bool context::claim_render_pass_split_warning(cc::string_view cause)
 {
-    if (!_render_pass_split_warnings)
+    if (!_render_pass_split_warnings.load(cc::memory_order_relaxed))
         return false;
 
     return _warned_split_causes.lock(
