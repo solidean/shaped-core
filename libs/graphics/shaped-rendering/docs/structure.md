@@ -79,14 +79,14 @@ The exact module layout settles as more routines land; keep this roadmap updated
 
 ## Denoising **[in progress]**
 
-One front routine over several members; [denoising.md](denoising.md) is the design.
+One front routine over several members; [reconstruction.md](reconstruction.md) is the design.
 
 ```text
-sr::denoise_routine          [done]     the front: resolves automatic, refuses what it cannot run, forwards
-sr::denoise_history          [done]     caller-owned, move-only, one per image stream
+sr::reconstruct_routine          [done]     the front: resolves automatic, refuses what it cannot run, forwards
+sr::reconstruct_history          [done]     caller-owned, move-only, one per image stream
 sr::atrous_denoise_routine   [done]     spatial, native; backs off with the input's sample count
 sr::svgf_denoise_routine     [done]     temporal, native; temporal, variance and à-trous passes, history in the caller's
-                                        denoise_history; the member that proves the moving-camera path in CI
+                                        reconstruct_history; the member that proves the moving-camera path in CI
 sr::oidn_denoise_routine     [done]     spatial, trained; Intel's weights in our own shaders, named only
                                         (far too slow for `automatic`)
 dlss_rr                      [planned]  needs sg's declared native scope

@@ -2,8 +2,8 @@
 
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/reconstruct.hh>
 
 /// Options only the SVGF member has.
 struct sr::svgf_options
@@ -45,7 +45,7 @@ struct sr::svgf_options
 ///
 /// Temporal and native.
 /// It needs fresh samples every call — this frame's own, not a running mean — plus normal, depth and motion guides, and
-/// a history carried from the call before in the caller's `denoise_history`.
+/// a history carried from the call before in the caller's `reconstruct_history`.
 /// Albedo is optional, and divided out before anything accumulates, so texture detail survives both halves.
 ///
 /// Three kinds of pass, one dispatch each:
@@ -56,7 +56,7 @@ struct sr::svgf_options
 ///
 /// The colour history it carries is the integrated, unfiltered one, which is simpler than feeding a filtered pass back
 /// and keeps the filter from compounding across frames.
-/// A `restarted` call, or a `denoise_history::reset`, starts every pixel from this frame's samples alone.
+/// A `restarted` call, or a `reconstruct_history::reset`, starts every pixel from this frame's samples alone.
 class sr::svgf_denoise_routine : public sg::render_routine<svgf_denoise_routine>
 {
 public:
@@ -65,14 +65,14 @@ public:
     /// `in.output` must match `in.color`'s extent and carry `image` usage; SVGF does not upscale.
     /// The normal, depth and motion guides are required, and asserted on.
     /// `pending` while the shaders compile, `failed` after a compile that did not build.
-    [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
-                                                 denoise_inputs const& in,
-                                                 denoise_history& history,
-                                                 svgf_options const& options = {});
+    [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
+                                                     reconstruct_inputs const& in,
+                                                     reconstruct_history& history,
+                                                     svgf_options const& options = {});
 
     /// What the shared knobs map onto: `quality` picks the pass count, `sharpness` the luminance sigma, and
     /// `temporal_responsiveness` the history's floor weight.
-    [[nodiscard]] static svgf_options options_for(denoise_settings const& settings);
+    [[nodiscard]] static svgf_options options_for(reconstruct_settings const& settings);
 
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;

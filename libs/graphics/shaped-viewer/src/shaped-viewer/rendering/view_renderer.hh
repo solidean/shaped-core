@@ -3,7 +3,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-rendering/fwd.hh> // sr::denoise_status
+#include <shaped-rendering/fwd.hh> // sr::reconstruct_status
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
 #include <shaped-viewer/stable_id.hh>
@@ -120,8 +120,8 @@ private:
     {
         /// The layer's settings as each member runs them: `fresh_samples` set for the temporal one, clear for the
         /// spatial one.
-        sr::denoise_settings temporal_settings;
-        sr::denoise_settings spatial_settings;
+        sr::reconstruct_settings temporal_settings;
+        sr::reconstruct_settings spatial_settings;
 
         /// `crossfade_weight` at the mean's frame count after this frame's trace.
         f32 blend = 1.0f;
@@ -138,12 +138,12 @@ private:
 
     /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
     /// at once across the hand-off — and points `presented` at what its parent should sample.
-    [[nodiscard]] static sr::denoise_status _denoise(sg::command_list& cmd,
-                                                     render_settings const& settings,
-                                                     denoise_schedule const& schedule,
-                                                     impl::temporal_slot const& accumulator,
-                                                     denoise_slots const& ds,
-                                                     sg::texture_2d& presented);
+    [[nodiscard]] static sr::reconstruct_status _denoise(sg::command_list& cmd,
+                                                         render_settings const& settings,
+                                                         denoise_schedule const& schedule,
+                                                         impl::temporal_slot const& accumulator,
+                                                         denoise_slots const& ds,
+                                                         sg::texture_2d& presented);
 
     /// Bumped every time the routine initializes, which is once per shader reload.
     ///

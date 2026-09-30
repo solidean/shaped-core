@@ -6,7 +6,7 @@ Bigger design intent lives in [structure.md](structure.md).
 - First routines on the framework: texture compression, tonemapping.
 - The OIDN weights are found through a compile-time path, which is fine for a test and not for a shipped binary.
   `SR_OIDN_WEIGHTS_DIR` points into the source tree; the member will want the blob staged beside the executable the way OIDN's own runtime is, or embedded.
-- Denoising, beyond à-trous, SVGF and OIDN — [denoising.md](denoising.md) is the design and the order:
+- Denoising, beyond à-trous, SVGF and OIDN — [reconstruction.md](reconstruction.md) is the design and the order:
   sg's declared native scope and DLSS Ray Reconstruction next; then FSR Ray Regeneration.
   NRD waits for a tracer that splits diffuse from specular radiance and writes hit distances.
 - Half precision for the OIDN network, which is the one acceleration it could take that is portable.
@@ -22,11 +22,11 @@ Bigger design intent lives in [structure.md](structure.md).
 - à-trous estimates noise from the sample count alone, assuming one noise width per sample equal to the pixel's luminance.
   A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.
 - Port the native denoise members to SGL once it is feature-complete enough for them.
-  They are HLSL today, so `sr::query_denoise_support` answers false on webgpu and metal — SGL is what reaches those backends.
+  They are HLSL today, so `sr::query_reconstruct_support` answers false on webgpu and metal — SGL is what reaches those backends.
   It also removes the four hand-written "find the constants_buffer binding" loops the members and the playground example use to build their pipeline layouts.
   An SGL package generates `inline_binding()` for its constants instead.
 - Two denoise tests worth having and not written yet.
-  A method switch on one history — à-trous then SVGF on the same `sr::denoise_history` — which is the one branch of `denoise_history::_prepare` nothing covers.
+  A method switch on one history — à-trous then SVGF on the same `sr::reconstruct_history` — which is the one branch of `reconstruct_history::_prepare` nothing covers.
   And `options_for` on both members, which maps `quality` and `sharpness` onto pass counts and sigmas and is what any settings UI drives.
 - SVGF feeds back its integrated, unfiltered colour, where the paper feeds back the first à-trous pass's output.
   That is simpler and never compounds the filter across frames, at the price of a noisier history.

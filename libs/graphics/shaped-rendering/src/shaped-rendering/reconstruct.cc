@@ -7,9 +7,9 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 #include <sr_shaders.hh>
 
@@ -103,37 +103,37 @@ cc::string_view to_string(denoise_method m)
     return "?";
 }
 
-cc::string_view to_string(denoise_status s)
+cc::string_view to_string(reconstruct_status s)
 {
     switch (s)
     {
-    case denoise_status::denoised:
+    case reconstruct_status::denoised:
         return "denoised";
-    case denoise_status::pending:
+    case reconstruct_status::pending:
         return "pending";
-    case denoise_status::unsupported:
+    case reconstruct_status::unsupported:
         return "unsupported";
-    case denoise_status::failed:
+    case reconstruct_status::failed:
         return "failed";
     }
     return "?";
 }
 
-denoise_guide_set denoise_inputs::present_guides() const
+reconstruct_guide_set reconstruct_inputs::present_guides() const
 {
-    auto set = denoise_guide_set();
-    set.set(denoise_guide::albedo, is_set(guides.albedo));
-    set.set(denoise_guide::specular_albedo, is_set(guides.specular_albedo));
-    set.set(denoise_guide::normal, is_set(guides.normal));
-    set.set(denoise_guide::roughness, is_set(guides.roughness));
-    set.set(denoise_guide::depth, is_set(guides.depth));
-    set.set(denoise_guide::motion, is_set(guides.motion));
-    set.set(denoise_guide::hit_distance, is_set(guides.hit_distance));
-    set.set(denoise_guide::split_diffuse_specular, is_set(specular));
+    auto set = reconstruct_guide_set();
+    set.set(reconstruct_guide::albedo, is_set(guides.albedo));
+    set.set(reconstruct_guide::specular_albedo, is_set(guides.specular_albedo));
+    set.set(reconstruct_guide::normal, is_set(guides.normal));
+    set.set(reconstruct_guide::roughness, is_set(guides.roughness));
+    set.set(reconstruct_guide::depth, is_set(guides.depth));
+    set.set(reconstruct_guide::motion, is_set(guides.motion));
+    set.set(reconstruct_guide::hit_distance, is_set(guides.hit_distance));
+    set.set(reconstruct_guide::split_diffuse_specular, is_set(specular));
     return set;
 }
 
-bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
+bool reconstruct_history::_prepare(denoise_method method, tg::vec2i extent)
 {
     auto const changed = _method != method || _extent != extent;
     auto const restarted = changed || _reset_requested;
@@ -153,7 +153,7 @@ bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
     return restarted;
 }
 
-bool denoise_support::supports(denoise_method m) const
+bool reconstruct_support::supports(denoise_method m) const
 {
     switch (m)
     {
@@ -177,17 +177,17 @@ bool denoise_support::supports(denoise_method m) const
 
 // ---------------------------------------------------------------------------------------------------------------
 // Adding a member touches exactly the three places below, in this order, and nothing else in this file:
-//   1. query_denoise_support  — whether this build and device can run it
-//   2. denoise_routine::init  — prewarming it, so its shaders compile before the first call
-//   3. denoise_routine::execute's switch — forwarding to it
+//   1. query_reconstruct_support  — whether this build and device can run it
+//   2. reconstruct_routine::init  — prewarming it, so its shaders compile before the first call
+//   3. reconstruct_routine::execute's switch — forwarding to it
 // They are kept together so a member behind a build option is one contiguous block of `#if` rather than three.
 // ---------------------------------------------------------------------------------------------------------------
 
-denoise_support query_denoise_support(sg::context const& ctx)
+reconstruct_support query_reconstruct_support(sg::context const& ctx)
 {
     // The native members are HLSL, and slib builds HLSL only through DXC — so a context whose library has no compiler
     // reaching a format it accepts cannot run them, whatever the backend.
-    // Asking the assets rather than assuming is what keeps the promise `denoise_status::unsupported` makes: without
+    // Asking the assets rather than assuming is what keeps the promise `reconstruct_status::unsupported` makes: without
     // it, `automatic` picks a member whose init then fails, and every call reports `failed` instead.
     //
     // A handle is null until its package has been added to a library, which is the same answer as "cannot build".
@@ -212,9 +212,9 @@ bool is_temporal(denoise_method m)
     return m == denoise_method::svgf || m == denoise_method::dlss_rr || m == denoise_method::fsr_rr;
 }
 
-denoise_guide_set required_guides(denoise_method m)
+reconstruct_guide_set required_guides(denoise_method m)
 {
-    using g = denoise_guide;
+    using g = reconstruct_guide;
     switch (m)
     {
     case denoise_method::svgf:
@@ -235,9 +235,9 @@ denoise_guide_set required_guides(denoise_method m)
     return {};
 }
 
-denoise_guide_set optional_guides(denoise_method m)
+reconstruct_guide_set optional_guides(denoise_method m)
 {
-    using g = denoise_guide;
+    using g = reconstruct_guide;
     switch (m)
     {
     case denoise_method::atrous:
@@ -261,10 +261,10 @@ denoise_guide_set optional_guides(denoise_method m)
 namespace
 {
 /// `resolve_denoise_method` against a support answer the caller already has.
-[[nodiscard]] denoise_method resolve_with(denoise_support const& support, denoise_settings const& settings)
+[[nodiscard]] denoise_method resolve_with(reconstruct_support const& support, reconstruct_settings const& settings)
 {
-    if (settings.method != denoise_method::automatic)
-        return settings.method;
+    if (settings.denoiser != denoise_method::automatic)
+        return settings.denoiser;
 
     auto const preference = settings.fresh_samples ? cc::span<denoise_method const>(temporal_preference)
                                                    : cc::span<denoise_method const>(spatial_preference);
@@ -275,14 +275,14 @@ namespace
 }
 } // namespace
 
-denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings)
+denoise_method resolve_denoise_method(sg::context const& ctx, reconstruct_settings const& settings)
 {
-    if (settings.method != denoise_method::automatic)
-        return settings.method;
-    return resolve_with(query_denoise_support(ctx), settings);
+    if (settings.denoiser != denoise_method::automatic)
+        return settings.denoiser;
+    return resolve_with(query_reconstruct_support(ctx), settings);
 }
 
-tg::vec2i denoise_input_extent(sg::context const& ctx, denoise_settings const& settings, tg::vec2i output_extent)
+tg::vec2i reconstruct_input_extent(sg::context const& ctx, reconstruct_settings const& settings, tg::vec2i output_extent)
 {
     auto const m = resolve_denoise_method(ctx, settings);
 
@@ -292,7 +292,7 @@ tg::vec2i denoise_input_extent(sg::context const& ctx, denoise_settings const& s
 
     // A named member this context cannot run will be refused, and a caller that traced smaller for it would then
     // composite a smaller image into its own output.
-    if (!query_denoise_support(ctx).supports(m))
+    if (!query_reconstruct_support(ctx).supports(m))
         return output_extent;
 
     auto const ratio = vendor_ratio(settings.scale);
@@ -300,7 +300,7 @@ tg::vec2i denoise_input_extent(sg::context const& ctx, denoise_settings const& s
     return tg::vec2i(scaled(output_extent[0]), scaled(output_extent[1]));
 }
 
-cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
+cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scope)
 {
     // The front holds nothing of its own.
     // Its init registers every supported member, so prewarming the front starts their compiles on the next tick
@@ -308,7 +308,7 @@ cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
     // Through prewarm rather than dependency tokens: a token would hold the front pending until every member is ready,
     // and one member this device cannot initialize would then hold every other member hostage.
     auto& ctx = scope.context();
-    auto const support = query_denoise_support(ctx);
+    auto const support = query_reconstruct_support(ctx);
     if (support.atrous)
         atrous_denoise_routine::prewarm(ctx);
     if (support.svgf)
@@ -318,26 +318,26 @@ cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
     co_return;
 }
 
-denoise_outcome denoise_routine::execute(sg::command_list& cmd,
-                                         denoise_inputs const& in,
-                                         denoise_history& history,
-                                         denoise_settings const& settings)
+reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
+                                                 reconstruct_inputs const& in,
+                                                 reconstruct_history& history,
+                                                 reconstruct_settings const& settings)
 {
-    CC_ASSERT(settings.method != denoise_method::none, "a caller with denoising off does not call the denoiser");
+    CC_ASSERT(settings.denoiser != denoise_method::none, "a caller with denoising off does not call the denoiser");
 
     // Registers the front on first use, so its init prewarms the members; its own readiness gates nothing.
     (void)try_acquire(cmd);
 
     auto& ctx = cmd.context();
     // Asked once and used twice, since the resolver and the support check want the same answer.
-    auto const support = query_denoise_support(ctx);
+    auto const support = query_reconstruct_support(ctx);
     auto const method = resolve_with(support, settings);
     if (method == denoise_method::none || !support.supports(method))
     {
         // The resolved method rather than what was asked for, so both refusal paths report a member rather than
         // `automatic`, which is not one.
         log_refusal_once(method, refusal_reason::unsupported, "not supported by this build or device");
-        return {.status = denoise_status::unsupported, .method = method};
+        return {.status = reconstruct_status::unsupported, .denoiser = method};
     }
 
     auto const missing = required_guides(method).without(in.present_guides());
@@ -345,7 +345,7 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     {
         log_refusal_once(method, refusal_reason::missing_guide,
                          "the call is missing a guide buffer this member requires");
-        return {.status = denoise_status::unsupported, .method = method};
+        return {.status = reconstruct_status::unsupported, .denoiser = method};
     }
 
     switch (method)
@@ -363,7 +363,7 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     case denoise_method::count_:
         break;
     }
-    // Reached only by a member query_denoise_support calls supported and this switch does not forward yet.
-    CC_UNREACHABLE("a supported denoise member has no case in denoise_routine::execute");
+    // Reached only by a member query_reconstruct_support calls supported and this switch does not forward yet.
+    CC_UNREACHABLE("a supported denoise member has no case in reconstruct_routine::execute");
 }
 } // namespace sr

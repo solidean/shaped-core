@@ -1,6 +1,6 @@
 #pragma once
 
-#include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
 
 namespace sv
@@ -44,14 +44,14 @@ struct sv::render_settings
     /// reaches the trace hash — turning it on, off or to another member keeps a converged image converged.
     /// While the mean is young a temporal member denoises this frame's own samples, then a spatial one takes over on
     /// the mean — see `temporal_denoise_frames`.
-    sr::denoise_settings denoise = {.method = sr::denoise_method::none};
+    sr::reconstruct_settings reconstruct = {.denoiser = sr::denoise_method::none};
 
     /// For how many accumulated frames after a restart a temporal member denoises this frame's own samples, before the
     /// spatial one takes over on the mean.
     ///
     /// A young mean is barely less noisy than one frame, which is where a temporal member's history pays; an old one
     /// has converged past anything that history could add, and only a spatial member keeps it unbiased.
-    /// Only a layer whose `denoise.method` may run temporally reads it.
+    /// Only a layer whose `reconstruct.denoiser` may run temporally reads it.
     u32 temporal_denoise_frames = 16;
 
     /// Over how many accumulated frames the hand-off from the temporal member to the spatial one is crossfaded.

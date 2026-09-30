@@ -3,7 +3,7 @@
 Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
-- **Denoising: both halves run; what is left**, in order — shaped-rendering's [denoising.md](../../shaped-rendering/docs/denoising.md) is the design:
+- **Denoising: both halves run; what is left**, in order — shaped-rendering's [reconstruction.md](../../shaped-rendering/docs/reconstruction.md) is the design:
   - **Measure what the guides' and the split's payload growth costs.**
     `PtPayload` went from 27 to 38 scalar components: 3 for the diffuse albedo, 4 for the specular pair, and 4 more for the split
     (`direct_specular` and `lobe`) — on every ray rather than only primary ones.
@@ -11,7 +11,7 @@ Bigger design intent lives in [structure.md](structure.md).
     That is two textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
   - **A per-frame Halton jitter** while a vendor temporal member runs; SVGF does not need one, DLSS Ray Reconstruction does.
   - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
-  - **`render_settings::render_scale`**, once a member upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.
+  - **`render_settings::render_scale`**, once a member upscales: the plan traces at `sr::reconstruct_input_extent` instead of the view's own size.
     Inert until then, which is why it is not there yet.
   - **`render_settings::exposure`**, for the tonemap when it lands; the denoisers already read `denoise.exposure`.
   - **`view_renderer::execute`** — the single-view entry point — does not denoise; only the plan path does.

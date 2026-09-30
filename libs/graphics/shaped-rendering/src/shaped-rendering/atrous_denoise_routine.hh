@@ -2,8 +2,8 @@
 
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/reconstruct.hh>
 
 /// Options only the à-trous member has.
 struct sr::atrous_options
@@ -39,7 +39,7 @@ struct sr::atrous_options
 /// conservative: a real integrator's per-sample noise is usually larger, so real detail survives with margin.
 /// That is what lets it sit on an accumulating mean without blurring the converged result.
 ///
-/// Holds its two ping-pong images in the caller's `denoise_history`, so a steady stream allocates nothing.
+/// Holds its two ping-pong images in the caller's `reconstruct_history`, so a steady stream allocates nothing.
 /// It keeps no history in the temporal sense, so a `restarted` call looks exactly like any other.
 class sr::atrous_denoise_routine : public sg::render_routine<atrous_denoise_routine>
 {
@@ -48,13 +48,13 @@ public:
     ///
     /// `in.output` must match `in.color`'s extent — à-trous does not upscale — and carry `image` usage.
     /// `pending` while the shader compiles, `failed` after a compile that did not build.
-    [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
-                                                 denoise_inputs const& in,
-                                                 denoise_history& history,
-                                                 atrous_options const& options = {});
+    [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
+                                                     reconstruct_inputs const& in,
+                                                     reconstruct_history& history,
+                                                     atrous_options const& options = {});
 
     /// What the shared knobs map onto: `quality` picks the pass count, `sharpness` the luminance sigma.
-    [[nodiscard]] static atrous_options options_for(denoise_settings const& settings);
+    [[nodiscard]] static atrous_options options_for(reconstruct_settings const& settings);
 
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;

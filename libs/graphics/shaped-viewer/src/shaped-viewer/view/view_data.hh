@@ -66,7 +66,7 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
 
 /// A traced layer's own samples of the current frame, before they are blended into the accumulator — what a temporal
 /// denoiser reads.
-/// Its `sr::denoise_history` is the temporal member's, kept apart from the spatial one's so each survives the other.
+/// Its `sr::reconstruct_history` is the temporal member's, kept apart from the spatial one's so each survives the other.
 [[nodiscard]] constexpr u64 frame_samples(u8 layer)
 {
     return (u64(6) << kind_shift) | u64(layer);

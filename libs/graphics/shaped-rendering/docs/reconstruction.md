@@ -1,11 +1,11 @@
-# Denoising
+# Reconstruction
 
-One call denoises a path-traced image, whichever denoiser runs behind it.
-`sr::denoise_routine` is the front: a caller names a method, or `automatic`, and the front forwards to the member routine that implements it.
+One call turns a path-traced frame into the image a caller shows: it denoises, whichever denoiser runs behind it, and will upscale and generate frames.
+`sr::reconstruct_routine` is the front: a caller names a denoiser, or `automatic`, and the front forwards to the member routine that implements it.
 Every member is a routine of its own too, callable directly with its full options.
 
 This is the design, including the parts not built yet.
-[denoise.hh](../src/shaped-rendering/denoise.hh) is the API, and [structure.md](structure.md#denoising-in-progress) says what exists.
+[reconstruct.hh](../src/shaped-rendering/reconstruct.hh) is the API, and [structure.md](structure.md#denoising-in-progress) says what exists.
 
 ## The members
 
@@ -41,7 +41,7 @@ They are HLSL today, so it runs where the other native members do, on dx12 and v
 **It is correct and portable, and far too slow for a frame loop** — roughly 0.2 s per megapixel, which is why `automatic` never picks it.
 Two networks are fetched, both `rt_hdr_alb_nrm`: HDR radiance with an albedo and a normal, the guides the tracer writes.
 The base one is what OIDN's balanced quality runs, and the small one what its fast quality runs: the same topology with every encoder at 32 channels, at half the compute.
-`denoise_settings::quality` picks between them the same way, `fast` running the small one; there is no large network for these guides.
+`reconstruct_settings::quality` picks between them the same way, `fast` running the small one; there is no large network for these guides.
 
 ### How it runs
 
@@ -147,9 +147,9 @@ It is the only test that can catch a self-consistent mistake: every other one ch
 The API admits an output larger than the input, so a vendor member can upscale without the front changing shape.
 
 - Everything the tracer produces is at the **input** extent, in input pixels: the colour, every guide, motion vectors and jitter.
-  Only `denoise_inputs::output` is at the output extent.
+  Only `reconstruct_inputs::output` is at the output extent.
 - A caller never computes a ratio.
-  It picks a `render_scale_preset` and asks `sr::denoise_input_extent` what to trace.
+  It picks a `render_scale_preset` and asks `sr::reconstruct_input_extent` what to trace.
   A spatial member answers every preset with the output's own extent, so a caller cannot ask for a ratio a member would reject.
   So does an upscaling member this device cannot run: the call is about to be refused, and a caller that traced smaller for it would composite a smaller image into its own output.
   A free ratio can join later as one more way to ask.
@@ -167,17 +167,17 @@ A member filtering unsplit radiance — à-trous and SVGF — demodulates by the
 OIDN is the follow-up: its own documentation wants a metal's albedo to be its specular colour and glass's to be about 1, and `oidn_network::execute` takes only `albedo` today.
 
 **Settings are one flat struct of knobs named for what they do.**
-Each field in `sr::denoise_settings` says which members read it, and a member ignores the rest, so switching members keeps every knob that still means something.
+Each field in `sr::reconstruct_settings` says which members read it, and a member ignores the rest, so switching members keeps every knob that still means something.
 A member's own options — the full vendor surface — live on the member, never in the shared struct.
 
 **Whether a call carries fresh samples is one of those knobs, not an argument.**
-`denoise_settings::fresh_samples` is what tells `automatic` to pick among the temporal members.
-`sr::denoise_input_extent`, `sr::resolve_denoise_method` and `sr::denoise_routine::execute` all read that one answer.
+`reconstruct_settings::fresh_samples` is what tells `automatic` to pick among the temporal members.
+`sr::reconstruct_input_extent`, `sr::resolve_denoise_method` and `sr::reconstruct_routine::execute` all read that one answer.
 It sits in the struct rather than beside each call because planning a frame and running it are three calls apart.
 A caller that said yes to one and nothing to another would have traced for a member the call then does not use.
 
 **A denoised image keeps the alpha it came in with.**
-Every member copies `denoise_inputs::color`'s alpha into `output` and writes only rgb, so a caller compositing with alpha gets the same channel whichever member ran.
+Every member copies `reconstruct_inputs::color`'s alpha into `output` and writes only rgb, so a caller compositing with alpha gets the same channel whichever member ran.
 SVGF carries a per-pixel variance in alpha between its own passes and swaps it for the caller's on the last one.
 Whether a vendor member can honour this is open — it may write its own alpha and leave us no say — and that is the point at which the rule is either kept by a copy pass or relaxed in writing.
 
@@ -197,7 +197,7 @@ Instead the front's `init` prewarms every supported member, so prewarming the fr
 
 ## History belongs to the caller
 
-`sr::denoise_history` is the images a member keeps between calls for one image stream: a temporal member's history, and the scratch a spatial member ping-pongs through.
+`sr::reconstruct_history` is the images a member keeps between calls for one image stream: a temporal member's history, and the scratch a spatial member ping-pongs through.
 It is move-only, since a copy would fork a history, and the caller holds one per stream.
 
 **It holds textures, plus one object of the member's own.**

@@ -49,7 +49,7 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; sr::denoise_settings denoise; } — per-layer integration controls (no light/sky: those are on the view)
+sv::render_settings              // { int samples_per_pixel, max_bounces; sr::reconstruct_settings denoise; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   denoise defaults to method none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns denoise.fresh_samples and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
@@ -914,7 +914,7 @@ scene.add_light("id", sv::light) -> light_ref               // the id is hashed 
 scene.add_point_light / add_spot_light / add_rect_light / add_directional_light / add_sun_light("id", ...) -> light_ref
 scene.fallback_light(optional<light>)                        // traced when the layer has none; a sun by default, nullopt for none
 scene.background(bg) / .settings(render_settings)
-scene.settings({.samples_per_pixel = 4, .denoise = {.method = sr::denoise_method::automatic}})  // a denoised layer
+scene.settings({.samples_per_pixel = 4, .reconstruct = {.denoiser = sr::denoise_method::automatic}})  // a denoised layer
 mesh_ref.transform(t);  light_ref.light(l);  light_ref.id();  light_ref.candela(800).color(c)   // light_ref takes light's setters
 ```
 

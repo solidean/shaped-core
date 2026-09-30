@@ -63,7 +63,7 @@ denoising                                [in progress]  render_settings::denoise
                                                         blends beside it; the parent samples the denoised image. Nothing in it reaches the trace hash.
                                                         While the mean is young SVGF runs on the frame's own samples and camera motion vectors, then à-trous on the mean.
                                                         The hand-off is crossfaded, and view_ref::camera_cut() drops the history on a teleport. Still to come: render_scale.
-                                                        shaped-rendering's docs/denoising.md is the design
+                                                        shaped-rendering's docs/reconstruction.md is the design
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
                                                         Follow-up steps (mip generation through whichever sr mipmap routine the format admits) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
                                                         Still to come: async streaming, placeholders while pending, and mapping visibility onto sg's stream priorities

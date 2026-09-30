@@ -79,7 +79,7 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
         scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
         // The loop may run one more body after the close request; it then keeps the last phase's setting.
         auto const method = phase < phase_methods.size() ? phase_methods[phase] : phase_methods.back();
-        scene.settings({.samples_per_pixel = 1, .denoise = {.method = method}});
+        scene.settings({.samples_per_pixel = 1, .reconstruct = {.denoiser = method}});
 
         auto const accumulated = view.accumulated_frames();
         // Bounded: a loop that never converges runs thousands of frames, and the first few hundred say what went wrong.
@@ -156,7 +156,7 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx, sr::denoise_method meth
         // sampled directly, so from above the box is lit through its lamp mesh alone and comes out nearly black.
         // Moderate, because nothing tone-maps and a bright box clips to flat white; either way the noise would hide.
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
-        scene.settings({.samples_per_pixel = 1, .denoise = {.method = method}});
+        scene.settings({.samples_per_pixel = 1, .reconstruct = {.denoiser = method}});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
         // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.
@@ -345,7 +345,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
         scene.add_mesh(mesh);
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
         scene.settings({.samples_per_pixel = 1,
-                        .denoise = {.method = sr::denoise_method::automatic},
+                        .reconstruct = {.denoiser = sr::denoise_method::automatic},
                         .temporal_denoise_frames = window,
                         .temporal_denoise_fade_frames = fade});
 

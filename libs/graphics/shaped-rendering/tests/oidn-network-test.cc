@@ -364,7 +364,7 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
 
 // The member, through the framework rather than through the network directly.
 //
-// What this adds over the tests above is everything between `sr::denoise_routine` and the shaders: that the method
+// What this adds over the tests above is everything between `sr::reconstruct_routine` and the shaders: that the method
 // resolves, that the guide contract is enforced, that the network lands in the caller's history and is reused, and
 // that a second call on the same history does not rebuild it.
 ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", (sg::context_handle const& ctx_h))
@@ -374,15 +374,15 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    if (!sr::query_denoise_support(ctx).oidn)
+    if (!sr::query_reconstruct_support(ctx).oidn)
         SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
 
     // A named member resolves to itself; `automatic` never picks it, being far too slow for a frame loop.
-    auto const settings = sr::denoise_settings{.method = sr::denoise_method::oidn};
+    auto const settings = sr::reconstruct_settings{.denoiser = sr::denoise_method::oidn};
     CHECK(sr::resolve_denoise_method(ctx, settings) == sr::denoise_method::oidn);
     CHECK(!sr::is_temporal(sr::denoise_method::oidn));
-    CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic}) != sr::denoise_method::oidn);
-    CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic, .fresh_samples = true})
+    CHECK(sr::resolve_denoise_method(ctx, {.denoiser = sr::denoise_method::automatic}) != sr::denoise_method::oidn);
+    CHECK(sr::resolve_denoise_method(ctx, {.denoiser = sr::denoise_method::automatic, .fresh_samples = true})
           != sr::denoise_method::oidn);
 
     // `quality` picks the network the way OIDN's own setting does.
@@ -429,7 +429,7 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
             normal_pixels.push_back(tg::vec4f(0, 0, 1, 0));
         }
 
-    auto history = sr::denoise_history();
+    auto history = sr::reconstruct_history();
 
     auto const run = [&](sg::command_list& cmd)
     {
@@ -437,12 +437,12 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
         cmd.upload.bytes_to_texture(albedo.raw(), cc::span<tg::vec4f const>(albedo_pixels).as_bytes());
         cmd.upload.bytes_to_texture(normal.raw(), cc::span<tg::vec4f const>(normal_pixels).as_bytes());
 
-        auto const in = sr::denoise_inputs{
+        auto const in = sr::reconstruct_inputs{
             .color = color,
             .guides = {.albedo = albedo, .normal = normal},
             .output = output,
         };
-        return sr::denoise_routine::execute(cmd, in, history, settings);
+        return sr::reconstruct_routine::execute(cmd, in, history, settings);
     };
 
     // With everything built, the very first call denoises: a member that answered `pending` here would leave a real
@@ -454,9 +454,9 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
 
     REQUIRE(outcome.is_denoised()).context(cc::format("the first call's status was {}", int(outcome.status)));
     auto const first_restarted = outcome.restarted;
-    CHECK(outcome.method == sr::denoise_method::oidn);
+    CHECK(outcome.denoiser == sr::denoise_method::oidn);
     CHECK(first_restarted).context("the first call on a fresh history starts from nothing");
-    CHECK(history.method() == sr::denoise_method::oidn);
+    CHECK(history.denoiser() == sr::denoise_method::oidn);
     CHECK(history.extent() == tg::vec2i(k_width, k_height));
 
     // A second call reuses what the first built, which is the whole reason the network lives in the history.

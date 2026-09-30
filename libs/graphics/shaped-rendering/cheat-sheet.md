@@ -317,29 +317,29 @@ Those belong in routines of their own rather than behind a flag here.
 
 ## Denoising
 
-One front over several members; the design is [docs/denoising.md](docs/denoising.md).
+One front over several members; the design is [docs/reconstruction.md](docs/reconstruction.md).
 
 ```cpp
-#include <shaped-rendering/denoise.hh>                 // the front, the vocabulary, the history
+#include <shaped-rendering/reconstruct.hh>                 // the front, the vocabulary, the history
 #include <shaped-rendering/atrous_denoise_routine.hh>  // the native spatial member
 
-auto history = sr::denoise_history();                  // caller-owned, MOVE-ONLY, one per image stream
-auto const out = sr::denoise_routine::execute(cmd,     // -> sr::denoise_outcome
+auto history = sr::reconstruct_history();                  // caller-owned, MOVE-ONLY, one per image stream
+auto const out = sr::reconstruct_routine::execute(cmd,     // -> sr::reconstruct_outcome
     {.color = noisy,                                   // linear HDR, input extent; its ALPHA rides through to output
      .guides = {.albedo = a, .normal = n, .depth = d}, // all optional for atrous; empty texture = not there
      .output = denoised,                               // image usage, never the same texture as color
      .sample_count = spp * accumulated_frames},        // spatial members back off as it grows; 0 means 1
     history,
-    {.method = sr::denoise_method::automatic,          // sr::denoise_settings: flat knobs, each says who reads it
+    {.denoiser = sr::denoise_method::automatic,          // sr::reconstruct_settings: flat knobs, each says who reads it
      .fresh_samples = false});                         // true only when feeding this frame's own samples + motion
 out.status                                             // denoised | pending | unsupported | failed — output untouched unless denoised
 out.method / out.restarted                             // the member that ran; whether it started from no history
 history.reset()                                        // a camera cut: the next call restarts
 
-sr::query_denoise_support(ctx)                         // -> sr::denoise_support {atrous, svgf, oidn, dlss_rr, fsr_rr}
+sr::query_reconstruct_support(ctx)                         // -> sr::reconstruct_support {atrous, svgf, oidn, dlss_rr, fsr_rr}
 sr::resolve_denoise_method(ctx, settings)              // -> the member `automatic` (or a named method) means here
-sr::denoise_input_extent(ctx, settings, out_extent)    // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
-sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_set (cc::flags<sr::denoise_guide>)
+sr::reconstruct_input_extent(ctx, settings, out_extent)    // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
+sr::required_guides(m) / sr::optional_guides(m)        // -> sr::reconstruct_guide_set (cc::flags<sr::reconstruct_guide>)
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
@@ -352,7 +352,7 @@ sr::mix_routine::execute(cmd, dst, src, w)             // -> bool; dst = lerp(ds
 - **History is the caller's**, because a routine cannot know which stream a call belongs to.
   One per view or layer, dropped with it.
 - **The front's readiness gates nothing.** Acquiring it registers it, and its init prewarms every supported member.
-  `sr::denoise_routine::prewarm(ctx)` at startup starts their compiles before the first call.
+  `sr::reconstruct_routine::prewarm(ctx)` at startup starts their compiles before the first call.
 - **`fresh_samples` lives in the settings, not beside the call**, so planning a frame and running it read one answer.
   False (the default) is a converging mean and picks among the spatial members; true is this frame's own samples plus motion vectors.
 - **A denoised image keeps `color`'s alpha.** Every member writes rgb and copies the alpha, so switching members never changes what you composite with.

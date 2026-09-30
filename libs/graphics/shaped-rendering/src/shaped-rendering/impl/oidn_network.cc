@@ -141,7 +141,7 @@ constexpr int k_conv_texels = 8;
 
 bool oidn_weights_present()
 {
-    // Asked once per process, because `query_denoise_support` asks on every denoise call, whichever member runs.
+    // Asked once per process, because `query_reconstruct_support` asks on every denoise call, whichever member runs.
     // Opened rather than merely tested for: the path is baked in at configure time, and an install removed since
     // then has to answer `false`.
     static auto const present = []

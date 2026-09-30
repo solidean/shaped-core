@@ -1,11 +1,11 @@
 // sr's denoising, with every knob on screen.
 //
-// A small path tracer draws three spheres on a checkered floor and hands `sr::denoise_routine` the noisy result plus
+// A small path tracer draws three spheres on a checkered floor and hands `sr::reconstruct_routine` the noisy result plus
 // the guides it wrote — albedo, normal, depth, motion.
 // The panel switches the member, the quality, the sharpness and the guides while it runs, so the difference between
 // two settings is something you look at rather than something you remember between two runs.
 //
-// The two halves of libs/graphics/shaped-rendering/docs/denoising.md's "meeting a progressive path tracer":
+// The two halves of libs/graphics/shaped-rendering/docs/reconstruction.md's "meeting a progressive path tracer":
 //
 //   fresh samples OFF — the tracer keeps a running mean, `sample_count` climbs, and a SPATIAL member backs off as it
 //   converges.
@@ -29,9 +29,9 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/blit_routine.hh>
 #include <shaped-rendering/capture.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/imgui_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/window.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
@@ -62,7 +62,7 @@ struct controls
     /// `fresh_samples` on by default, which is what opens the example on the interesting half: one sample a pixel,
     /// permanently noisy on the left of the split, and svgf holding it together on the right.
     /// Turning it off switches to the accumulating half, where the mean converges and a spatial member backs off.
-    sr::denoise_settings denoise = {.fresh_samples = true};
+    sr::reconstruct_settings denoise = {.fresh_samples = true};
     bool denoise_enabled = true;
     int spp = 1;
     float light_size = 0.6f;
@@ -78,7 +78,7 @@ struct controls
     {
         return denoise_enabled != o.denoise_enabled || spp != o.spp || light_size != o.light_size
             || use_albedo != o.use_albedo || use_normal != o.use_normal || use_depth != o.use_depth
-            || denoise.method != o.denoise.method || denoise.quality != o.denoise.quality
+            || denoise.denoiser != o.denoise.denoiser || denoise.quality != o.denoise.quality
             || denoise.sharpness != o.denoise.sharpness || denoise.fresh_samples != o.denoise.fresh_samples
             || denoise.temporal_responsiveness != o.denoise.temporal_responsiveness;
     }
@@ -235,9 +235,9 @@ constexpr char const* k_quality_names[] = {"fast", "balanced", "best"};
 
 /// Draws the panel, editing `ui` in place.
 void draw_panel(controls& ui,
-                sr::denoise_support const& support,
-                sr::denoise_outcome const& outcome,
-                sr::denoise_history& history,
+                sr::reconstruct_support const& support,
+                sr::reconstruct_outcome const& outcome,
+                sr::reconstruct_history& history,
                 u32 sample_count,
                 bool& restart_requested)
 {
@@ -255,11 +255,11 @@ void draw_panel(controls& ui,
 
     auto method_index = 0;
     for (auto i = 0; i < 6; ++i)
-        if (k_method_values[i] == ui.denoise.method)
+        if (k_method_values[i] == ui.denoise.denoiser)
             method_index = i;
     if (ImGui::Combo("method", &method_index, k_method_names, 6))
-        ui.denoise.method = k_method_values[method_index];
-    if (ui.denoise.method != sr::denoise_method::automatic && !support.supports(ui.denoise.method))
+        ui.denoise.denoiser = k_method_values[method_index];
+    if (ui.denoise.denoiser != sr::denoise_method::automatic && !support.supports(ui.denoise.denoiser))
         ImGui::TextDisabled("not in this build: the call is refused");
 
     ImGui::Checkbox("fresh samples", &ui.denoise.fresh_samples);
@@ -303,7 +303,7 @@ void draw_panel(controls& ui,
     ImGui::SeparatorText("what happened");
     // A cc::string_view is not null-terminated, so it goes through ImGui as a counted string rather than %s.
     auto const status = sr::to_string(outcome.status);
-    auto const member = sr::to_string(outcome.method);
+    auto const member = sr::to_string(outcome.denoiser);
     ImGui::Text("status     %.*s", int(status.size()), status.data());
     ImGui::Text("member     %.*s", int(member.size()), member.data());
     ImGui::Text("restarted  %s", outcome.restarted ? "yes" : "no");
@@ -371,7 +371,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
     // Every supported member starts compiling now rather than on the first call that wants one, so switching the
     // method in the panel does not cost a frame of `pending`.
-    sr::denoise_routine::prewarm(ctx);
+    sr::reconstruct_routine::prewarm(ctx);
 
     auto swapchain = sg::swapchain_handle();
     auto capture_target = sg::texture_2d();
@@ -452,10 +452,10 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         co_return;
     }
 
-    auto const support = sr::query_denoise_support(ctx);
+    auto const support = sr::query_reconstruct_support(ctx);
 
     auto images = view_images();
-    auto history = sr::denoise_history();
+    auto history = sr::reconstruct_history();
     auto cam = camera();
     auto prev_view_projection = tg::mat4f::identity;
 
@@ -465,7 +465,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     auto accum_frame = u32(0);
     auto captured_frames = 0;
     auto last_time = cc::current_time_steady_secs();
-    auto last_outcome = sr::denoise_outcome();
+    auto last_outcome = sr::reconstruct_outcome();
 
     while (true)
     {
@@ -546,7 +546,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         if (ui.denoise_enabled)
         {
             auto inputs
-                = sr::denoise_inputs{.color = images.color, .output = images.denoised, .sample_count = sample_count};
+                = sr::reconstruct_inputs{.color = images.color, .output = images.denoised, .sample_count = sample_count};
             if (ui.use_albedo)
                 inputs.guides.albedo = images.albedo;
             if (ui.use_normal)
@@ -555,7 +555,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
                 inputs.guides.depth = images.depth;
             inputs.guides.motion = images.motion; // always written by the tracer; svgf requires it
 
-            last_outcome = sr::denoise_routine::execute(*cmd, inputs, history, ui.denoise);
+            last_outcome = sr::reconstruct_routine::execute(*cmd, inputs, history, ui.denoise);
 
             // Nothing was written unless the outcome says so, which is why a refusal shows the raw image rather than
             // whatever `denoised` happened to be holding from an earlier frame.
@@ -564,7 +564,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         }
         else
         {
-            last_outcome = {.status = sr::denoise_status::denoised, .method = sr::denoise_method::none};
+            last_outcome = {.status = sr::reconstruct_status::denoised, .denoiser = sr::denoise_method::none};
         }
 
         // -- compose: the raw image and the denoised one either side of the divider, tonemapped

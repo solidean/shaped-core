@@ -12,7 +12,7 @@ namespace sr
 using impl::extent_of;
 using impl::is_set;
 
-oidn_options oidn_denoise_routine::options_for(denoise_settings const& settings)
+oidn_options oidn_denoise_routine::options_for(reconstruct_settings const& settings)
 {
     return {
         .input_scale = settings.exposure,
@@ -48,28 +48,28 @@ cc::shared_async<cc::unit> oidn_denoise_routine::init(sg::routine_init_scope sco
     co_return;
 }
 
-denoise_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
-                                              denoise_inputs const& in,
-                                              denoise_history& history,
-                                              oidn_options const& options)
+reconstruct_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
+                                                  reconstruct_inputs const& in,
+                                                  reconstruct_history& history,
+                                                  oidn_options const& options)
 {
     CC_ASSERT(is_set(in.color), "a denoise call needs a colour texture");
     CC_ASSERT(is_set(in.output), "a denoise call needs an output texture");
     CC_ASSERT(extent_of(in.output) == extent_of(in.color), "OIDN does not upscale: output and input extents differ");
 
-    auto const outcome_of = [](denoise_status s, bool restarted = false)
-    { return denoise_outcome{.status = s, .method = denoise_method::oidn, .restarted = restarted}; };
+    auto const outcome_of = [](reconstruct_status s, bool restarted = false)
+    { return reconstruct_outcome{.status = s, .denoiser = denoise_method::oidn, .restarted = restarted}; };
 
     // The network has nine input channels and six of them are the albedo and the normal, so a call without them is
     // `unsupported` rather than a run with zeros — zeros are a surface the network would believe.
     if (!required_guides(denoise_method::oidn).without(in.present_guides()).is_empty())
-        return outcome_of(denoise_status::unsupported);
+        return outcome_of(reconstruct_status::unsupported);
 
     auto const self = try_acquire(cmd);
     if (self.is_pending())
-        return outcome_of(denoise_status::pending);
+        return outcome_of(reconstruct_status::pending);
     if (self.is_failed())
-        return outcome_of(denoise_status::failed);
+        return outcome_of(reconstruct_status::failed);
 
     auto& ctx = cmd.context();
     auto const extent = extent_of(in.color);
@@ -88,7 +88,7 @@ denoise_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
     {
         auto fresh = std::make_shared<impl::oidn_network>();
         if (!fresh->create(ctx, extent, tile, impl::oidn_network::k_tile_overlap, options.network))
-            return outcome_of(denoise_status::failed);
+            return outcome_of(reconstruct_status::failed);
         history._member_state = cc::move(fresh);
     }
 
@@ -96,11 +96,11 @@ denoise_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
 
     // The pipelines are built from shaders `init` already compiled, so this is a tick rather than a wait.
     if (!network.prepare())
-        return outcome_of(denoise_status::pending, restarted);
+        return outcome_of(reconstruct_status::pending, restarted);
 
     if (!network.execute(cmd, in.color, in.guides.albedo, in.guides.normal, in.output, options.input_scale))
-        return outcome_of(denoise_status::failed, restarted);
+        return outcome_of(reconstruct_status::failed, restarted);
 
-    return outcome_of(denoise_status::denoised, restarted);
+    return outcome_of(reconstruct_status::denoised, restarted);
 }
 } // namespace sr

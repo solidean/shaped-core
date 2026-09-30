@@ -32,7 +32,7 @@ TEST("sr - the OIDN dependency links and reports its version")
 // Skipped rather than failed where OIDN was not fetched, because that is a legitimate build; where it WAS fetched,
 // a device that does not come up is a broken install rather than an absent one.
 // How long Intel's CPU device takes over a 1080p frame, the number set beside the member's in
-// libs/graphics/shaped-rendering/docs/denoising.md.
+// libs/graphics/shaped-rendering/docs/reconstruction.md.
 //
 // Manual because it is a measurement rather than a check, and it takes seconds.
 TEST("sr - OIDN's CPU device timed at 1080p", nx::config::manual)

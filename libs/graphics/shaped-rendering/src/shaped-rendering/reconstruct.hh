@@ -12,12 +12,12 @@
 
 #include <memory>
 
-/// Denoising — and, once a member supports it, upscaling — behind one call.
+/// Reconstruction — denoising, and once a member supports it, upscaling — behind one call.
 ///
-/// `sr::denoise_routine` is the front: a caller names a method (or `automatic`) and the front forwards to the
+/// `sr::reconstruct_routine` is the front: a caller names a denoiser (or `automatic`) and the front forwards to the
 /// member routine that implements it.
 /// Every member is also a routine of its own, callable directly with its full options.
-/// libs/graphics/shaped-rendering/docs/denoising.md is the design: which members exist, how they meet a progressive path tracer, and why.
+/// libs/graphics/shaped-rendering/docs/reconstruction.md is the design: which members exist, how they meet a progressive path tracer, and why.
 
 /// Which denoiser runs.
 ///
@@ -47,7 +47,7 @@ enum class sr::denoise_quality : sg::u8
 
 /// How much smaller than the output the caller traces.
 ///
-/// Named presets only: each member maps them onto a ratio it supports, and a caller asks `denoise_input_extent` for
+/// Named presets only: each member maps them onto a ratio it supports, and a caller asks `reconstruct_input_extent` for
 /// the size to trace rather than computing one — so no caller can ask for a ratio a member would reject.
 /// A spatial member supports exactly 1, and answers every preset with the output's own extent.
 enum class sr::render_scale_preset : sg::u8
@@ -59,7 +59,7 @@ enum class sr::render_scale_preset : sg::u8
 };
 
 /// One guide buffer a member may read beside the noisy color.
-enum class sr::denoise_guide : sg::u8
+enum class sr::reconstruct_guide : sg::u8
 {
     /// Diffuse reflectance at the primary hit, so zero on a metal.
     /// A member reading split radiance reads it and `specular_albedo` separately; one reading unsplit radiance
@@ -74,11 +74,11 @@ enum class sr::denoise_guide : sg::u8
 
     split_diffuse_specular, ///< radiance arrives as two textures (`color` diffuse, `specular` specular) rather than one
 };
-CC_FLAG_ENUM_INDEXED(sr, denoise_guide, u16);
+CC_FLAG_ENUM_INDEXED(sr, reconstruct_guide, u16);
 
 namespace sr
 {
-using denoise_guide_set = cc::flags<denoise_guide>;
+using reconstruct_guide_set = cc::flags<reconstruct_guide>;
 }
 
 /// The knobs a caller sets once for every member.
@@ -86,17 +86,17 @@ using denoise_guide_set = cc::flags<denoise_guide>;
 /// Flat on purpose: each field is named for what it does, not for who reads it, and says which members read it.
 /// A member ignores what it has no use for, so switching members keeps every knob that still means something.
 /// A member's own options — the full vendor surface — are on the member routine, never here.
-struct sr::denoise_settings
+struct sr::reconstruct_settings
 {
     /// `automatic` because a caller reaching this struct wants something denoised; a caller holding a setting that is
     /// off by default (sv's per-layer one) says `none` itself.
-    denoise_method method = denoise_method::automatic;
+    denoise_method denoiser = denoise_method::automatic;
     render_scale_preset scale = render_scale_preset::native;
 
     /// Whether this call carries fresh per-frame samples — this frame's own, with motion vectors — rather than a
     /// converging mean.
     /// It lives here rather than beside each call so that planning and running a frame cannot disagree about it:
-    /// `denoise_input_extent`, `resolve_denoise_method` and `denoise_routine::execute` all read this one answer.
+    /// `reconstruct_input_extent`, `resolve_denoise_method` and `reconstruct_routine::execute` all read this one answer.
     /// False means `automatic` picks among the spatial members only, since a temporal member's history would
     /// double-count what the mean already averaged.
     bool fresh_samples = false;
@@ -126,9 +126,9 @@ struct sr::denoise_settings
 
 /// Everything beside the noisy color that a member may read.
 ///
-/// All of it is at the INPUT extent and in input pixels; only `denoise_inputs::output` is at the output's.
+/// All of it is at the INPUT extent and in input pixels; only `reconstruct_inputs::output` is at the output's.
 /// A texture left empty is a guide the caller does not have; a member that requires it reports `unsupported`.
-struct sr::denoise_guides
+struct sr::reconstruct_guides
 {
     sg::texture_2d albedo;
     sg::texture_2d specular_albedo;
@@ -146,7 +146,7 @@ struct sr::denoise_guides
 };
 
 /// One denoise call's images.
-struct sr::denoise_inputs
+struct sr::reconstruct_inputs
 {
     /// The noisy radiance, linear and HDR, at the input extent.
     /// Diffuse radiance alone when the guides carry `split_diffuse_specular`.
@@ -156,14 +156,14 @@ struct sr::denoise_inputs
     /// Specular radiance, only under `split_diffuse_specular`.
     sg::texture_2d specular;
 
-    denoise_guides guides;
+    reconstruct_guides guides;
 
     /// Where the result goes: needs `image` usage, and must not be `color`.
-    /// Its extent is the output extent; any ratio to the input other than 1 must be one `denoise_input_extent` produced.
+    /// Its extent is the output extent; any ratio to the input other than 1 must be one `reconstruct_input_extent` produced.
     ///
     /// Its rgb is the denoised radiance and **its alpha is `color`'s, carried through untouched** — every member
     /// keeps it rather than writing one of its own, so switching members never changes what a caller composites with.
-    /// Whether a vendor member can honour that is open; see libs/graphics/shaped-rendering/docs/denoising.md.
+    /// Whether a vendor member can honour that is open; see libs/graphics/shaped-rendering/docs/reconstruction.md.
     sg::texture_2d output;
 
     /// How many samples per pixel `color` already averages — an accumulated mean passes its frame count times its
@@ -172,11 +172,11 @@ struct sr::denoise_inputs
     u32 sample_count = 0;
 
     /// The guides this call carries, derived from which textures are set — `specular` included.
-    [[nodiscard]] denoise_guide_set present_guides() const;
+    [[nodiscard]] reconstruct_guide_set present_guides() const;
 };
 
 /// What one denoise call did.
-enum class sr::denoise_status : sg::u8
+enum class sr::reconstruct_status : sg::u8
 {
     denoised,    ///< `output` holds the result
     pending,     ///< the member is still initializing; `output` untouched
@@ -184,17 +184,17 @@ enum class sr::denoise_status : sg::u8
     failed,      ///< the member failed to initialize; `output` untouched until a reload
 };
 
-struct sr::denoise_outcome
+struct sr::reconstruct_outcome
 {
-    denoise_status status = denoise_status::pending;
+    reconstruct_status status = reconstruct_status::pending;
 
     /// The member that ran, or was asked to.
-    denoise_method method = denoise_method::none;
+    denoise_method denoiser = denoise_method::none;
 
     /// Whether the call started from no history — a first call, a new extent, a new member, or a `reset`.
     bool restarted = false;
 
-    [[nodiscard]] bool is_denoised() const { return status == denoise_status::denoised; }
+    [[nodiscard]] bool is_denoised() const { return status == reconstruct_status::denoised; }
 };
 
 /// Everything a denoiser keeps between calls, for one image stream.
@@ -212,14 +212,14 @@ struct sr::denoise_outcome
 /// views should do.
 ///
 /// It holds images, plus at most one object of the member's own for state that is not a texture.
-class sr::denoise_history
+class sr::reconstruct_history
 {
 public:
-    denoise_history() = default;
-    denoise_history(denoise_history&&) noexcept = default;
-    denoise_history& operator=(denoise_history&&) noexcept = default;
-    denoise_history(denoise_history const&) = delete;
-    denoise_history& operator=(denoise_history const&) = delete;
+    reconstruct_history() = default;
+    reconstruct_history(reconstruct_history&&) noexcept = default;
+    reconstruct_history& operator=(reconstruct_history&&) noexcept = default;
+    reconstruct_history(reconstruct_history const&) = delete;
+    reconstruct_history& operator=(reconstruct_history const&) = delete;
 
     /// How many images a member may keep here.
     /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
@@ -233,7 +233,7 @@ public:
     [[nodiscard]] bool is_reset_pending() const { return _reset_requested; }
 
     /// The member that built what this holds, or `none` while empty.
-    [[nodiscard]] denoise_method method() const { return _method; }
+    [[nodiscard]] denoise_method denoiser() const { return _method; }
 
     /// The input extent this was built for, or 0x0 while empty.
     [[nodiscard]] tg::vec2i extent() const { return _extent; }
@@ -267,7 +267,7 @@ private:
 };
 
 /// Which members this context can run.
-struct sr::denoise_support
+struct sr::reconstruct_support
 {
     bool atrous = false;
     bool svgf = false;
@@ -285,7 +285,7 @@ namespace sr
 [[nodiscard]] cc::string_view to_string(denoise_method m);
 
 /// What a call did, for the same use.
-[[nodiscard]] cc::string_view to_string(denoise_status s);
+[[nodiscard]] cc::string_view to_string(reconstruct_status s);
 
 /// Which members `ctx` can run: compiled in, buildable by the shader library this process registered, and present
 /// on its device.
@@ -293,50 +293,50 @@ namespace sr
 /// The native members are HLSL, so their answer depends on the compilers the library has — adding one can change it.
 ///
 /// A supported member can still be `pending` for its first frames, and `failed` if its shader does not build.
-[[nodiscard]] denoise_support query_denoise_support(sg::context const& ctx);
+[[nodiscard]] reconstruct_support query_reconstruct_support(sg::context const& ctx);
 
-/// The member `settings.method` resolves to on `ctx`: itself when named, the best supported one for `automatic`.
+/// The member `settings.denoiser` resolves to on `ctx`: itself when named, the best supported one for `automatic`.
 /// `none` when nothing is supported or nothing was asked for.
 ///
 /// A named member resolves to itself whether or not `ctx` supports it, so a comparison between two named members
-/// never silently compares one with itself; refusing it is `denoise_routine::execute`'s job.
-[[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings);
+/// never silently compares one with itself; refusing it is `reconstruct_routine::execute`'s job.
+[[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx, reconstruct_settings const& settings);
 
 /// Whether a member reads history, and so needs fresh per-frame samples and motion vectors rather than a converging mean.
 [[nodiscard]] bool is_temporal(denoise_method m);
 
 /// The guides `m` requires; a call missing one reports `unsupported`.
-[[nodiscard]] denoise_guide_set required_guides(denoise_method m);
+[[nodiscard]] reconstruct_guide_set required_guides(denoise_method m);
 
 /// The guides `m` reads when they are there.
-[[nodiscard]] denoise_guide_set optional_guides(denoise_method m);
+[[nodiscard]] reconstruct_guide_set optional_guides(denoise_method m);
 
 /// The input extent to trace so that the member `settings` resolves to produces `output_extent` under `settings.scale`.
 ///
 /// Always ask this rather than scaling by hand: a member supports only its own ratios, and a spatial one only 1.
 /// A member `ctx` cannot run answers `output_extent`, because the call will be refused and a caller that traced
 /// smaller for it would composite a smaller image into its own output.
-[[nodiscard]] tg::vec2i denoise_input_extent(sg::context const& ctx,
-                                             denoise_settings const& settings,
-                                             tg::vec2i output_extent);
+[[nodiscard]] tg::vec2i reconstruct_input_extent(sg::context const& ctx,
+                                                 reconstruct_settings const& settings,
+                                                 tg::vec2i output_extent);
 } // namespace sr
 
 /// The front routine: one call for every denoiser.
 ///
-/// Resolves `settings.method` against this context, then forwards to the member's own routine.
+/// Resolves `settings.denoiser` against this context, then forwards to the member's own routine.
 /// Members are acquired when the call runs rather than through dependency tokens, so a member this machine cannot
 /// initialize never holds the front pending.
 /// Prewarming the front prewarms every supported member, so their shaders compile before the first call.
-class sr::denoise_routine : public sg::render_routine<denoise_routine>
+class sr::reconstruct_routine : public sg::render_routine<reconstruct_routine>
 {
 public:
     /// Denoises `in.color` into `in.output`, carrying `history` from call to call.
     ///
     /// Nothing is written unless the outcome is `denoised`, so a caller composites the raw image otherwise.
-    [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
-                                                 denoise_inputs const& in,
-                                                 denoise_history& history,
-                                                 denoise_settings const& settings);
+    [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
+                                                     reconstruct_inputs const& in,
+                                                     reconstruct_history& history,
+                                                     reconstruct_settings const& settings);
 
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;

@@ -5,8 +5,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/mix_routine.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -548,7 +548,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
     // temporal ones only when the layer may denoise temporally.
-    auto const denoising = l.settings.denoise.method != sr::denoise_method::none;
+    auto const denoising = l.settings.reconstruct.denoiser != sr::denoise_method::none;
     auto const slot_of = [&](u64 id) { return denoising ? rec.temporal.get_ptr(id) : nullptr; };
     auto const ds = denoise_slots{
         .normal = slot_of(temporal_id::normal_guide(tr.layer)),
@@ -669,7 +669,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         // A denoiser still compiling declines the frame, as a tracer still compiling does: a capture that saved it
         // would hold the raw mean where the caller asked for a denoised image.
         // The trace itself landed, so the accumulation above stands.
-        if (_denoise(cmd, l.settings, schedule, *slot, ds, res.traces[trace_index]) == sr::denoise_status::pending)
+        if (_denoise(cmd, l.settings, schedule, *slot, ds, res.traces[trace_index]) == sr::reconstruct_status::pending)
             return sg::routine_outcome::declined;
     }
     return sg::routine_outcome::executed;
@@ -701,7 +701,7 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     // running it cannot disagree — so each member takes its own settings value rather than a flag per call.
     auto const with_fresh_samples = [&settings](bool fresh)
     {
-        auto copy = settings.denoise;
+        auto copy = settings.reconstruct;
         copy.fresh_samples = fresh;
         return copy;
     };
@@ -722,15 +722,15 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     return schedule;
 }
 
-sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
-                                           render_settings const& settings,
-                                           denoise_schedule const& schedule,
-                                           impl::temporal_slot const& accumulator,
-                                           denoise_slots const& ds,
-                                           sg::texture_2d& presented)
+sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
+                                               render_settings const& settings,
+                                               denoise_schedule const& schedule,
+                                               impl::temporal_slot const& accumulator,
+                                               denoise_slots const& ds,
+                                               sg::texture_2d& presented)
 {
     auto& denoised = *ds.denoised;
-    auto const guides = sr::denoise_guides{
+    auto const guides = sr::reconstruct_guides{
         .albedo = ds.albedo->texture,
         .specular_albedo = ds.specular_albedo->texture,
         .normal = ds.normal->texture,
@@ -744,19 +744,19 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
     // Mid-fade both members run, so the frame carries two denoises.
     // That is the whole price of the fade, and it is why the window is counted in frames rather than seconds: it is
     // bounded by the accumulation, which a still view leaves behind within a second of settling.
-    auto outcome = sr::denoise_outcome();
+    auto outcome = sr::reconstruct_outcome();
     if (temporal)
     {
         auto temporal_guides = guides;
         temporal_guides.motion = ds.motion->texture;
-        auto const inputs = sr::denoise_inputs{
+        auto const inputs = sr::reconstruct_inputs{
             .color = ds.frame->texture,
             .guides = temporal_guides,
             .output = denoised.texture,
         };
         // Its own history, not the spatial member's: each would otherwise throw the other's away on every switch, and
         // the temporal one must survive a still period to be worth anything when the camera moves again.
-        outcome = sr::denoise_routine::execute(cmd, inputs, ds.frame->denoise, schedule.temporal_settings);
+        outcome = sr::reconstruct_routine::execute(cmd, inputs, ds.frame->denoise, schedule.temporal_settings);
     }
 
     if (spatial)
@@ -766,21 +766,21 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         // Into the crossfade slot while the temporal image still holds `denoised`, and straight into `denoised` once it
         // does not — so the fade costs a texture and the steady state costs nothing.
         auto const& target = temporal ? ds.crossfade->texture : denoised.texture;
-        auto const inputs = sr::denoise_inputs{
+        auto const inputs = sr::reconstruct_inputs{
             .color = accumulator.texture,
             .guides = guides,
             .output = target,
             .sample_count = u32(cc::max(1, settings.samples_per_pixel)) * accumulator.accum_frame,
         };
         auto const spatial_outcome
-            = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
+            = sr::reconstruct_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
 
         // Mid-fade the frame is only as good as its worse half: a spatial member that declined leaves the crossfade
         // slot holding an older image, and mixing that in would be a visible jump backwards.
         if (!temporal || !spatial_outcome.is_denoised())
             outcome = spatial_outcome;
         else if (!sr::mix_routine::execute(cmd, denoised.texture, ds.crossfade->texture, schedule.blend))
-            outcome.status = sr::denoise_status::pending; // the mix is still compiling, so the fade cannot be applied
+            outcome.status = sr::reconstruct_status::pending; // the mix is still compiling, so the fade cannot be applied
     }
 
     // Presented only when this frame produced it.

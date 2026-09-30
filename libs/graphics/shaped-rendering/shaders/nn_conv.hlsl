@@ -67,7 +67,7 @@ using namespace nn_conv_bindings;
 // 8 was swept rather than picked, over a whole 256x256 tile: 4 is 5.8 ms, 8 is 5.3, 12 is 6.3, 16 is 7.2 and 24 is
 // 9.1.
 // Re-sweep it whenever the reads change width, since the window a thread holds in registers grows with them.
-// Blocking the output channels as well does not pay; denoising.md has the measurement.
+// Blocking the output channels as well does not pay; reconstruction.md has the measurement.
 //
 // `sr::impl::oidn_network` dispatches against this, and the two must agree; a mismatch is a wrong image, which the
 // oracle test against OIDN's own filter catches immediately.
