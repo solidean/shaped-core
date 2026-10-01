@@ -44,7 +44,6 @@ target_sources(typed-geometry
     src/typed-geometry/linalg/vec.hh
     src/typed-geometry/linalg/vec_ops.hh
     src/typed-geometry/linalg/pos.hh
-    src/typed-geometry/linalg/pos_ops.hh
     src/typed-geometry/linalg/bivec.hh
     src/typed-geometry/linalg/cross.hh
     src/typed-geometry/linalg/mat.hh
@@ -75,6 +74,21 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/primitives/sphere.hh
     src/typed-geometry/geometry/primitives/ellipsoid.hh
     src/typed-geometry/geometry/primitives/primitives.hh
+    src/typed-geometry/geometry/query/closest_points.hh
+    src/typed-geometry/geometry/query/contains.hh
+    src/typed-geometry/geometry/query/distance.hh
+    src/typed-geometry/geometry/query/impl/kernels.hh
+    src/typed-geometry/geometry/query/impl/kernels/aabb.hh
+    src/typed-geometry/geometry/query/impl/kernels/linear.hh
+    src/typed-geometry/geometry/query/impl/kernels/plane.hh
+    src/typed-geometry/geometry/query/impl/kernels/pos.hh
+    src/typed-geometry/geometry/query/impl/kernels/sphere.hh
+    src/typed-geometry/geometry/query/impl/kernels/triangle.hh
+    src/typed-geometry/geometry/query/impl/ops.hh
+    src/typed-geometry/geometry/query/impl/special_case.hh
+    src/typed-geometry/geometry/query/intersects.hh
+    src/typed-geometry/geometry/query/project.hh
+    src/typed-geometry/geometry/query/query.hh
     src/typed-geometry/geometry/geometry.hh
     src/typed-geometry/geometry/all.hh
 )
@@ -98,10 +112,19 @@ target_link_libraries(typed-geometry PUBLIC clean-core)
 if(NOT DEFINED SC_CHECK_WIDE_ARITH)
     set(SC_CHECK_WIDE_ARITH OFF)
 endif()
-# The input define; scalar/fixed_int/fwd.hh turns it into TG_CHECK_WIDE_ARITH (always 0 or 1).
+# The input define; scalar/fixed_int/impl/core.hh turns it into TG_CHECK_WIDE_ARITH (always 0 or 1).
 target_compile_definitions(typed-geometry
     PUBLIC
     $<$<BOOL:${SC_CHECK_WIDE_ARITH}>:TG_CHECK_WIDE_ARITH_REQUESTED>
+)
+
+# Same pattern for SC_CHECK_GEOMETRY_SPECIAL_CASES; geometry/query/impl/special_case.hh turns it into TG_CHECK_SPECIAL_CASES.
+if(NOT DEFINED SC_CHECK_GEOMETRY_SPECIAL_CASES)
+    set(SC_CHECK_GEOMETRY_SPECIAL_CASES OFF)
+endif()
+target_compile_definitions(typed-geometry
+    PUBLIC
+    $<$<BOOL:${SC_CHECK_GEOMETRY_SPECIAL_CASES}>:TG_CHECK_SPECIAL_CASES_REQUESTED>
 )
 
 # Enable conforming preprocessor for MSVC
@@ -152,6 +175,9 @@ if(SC_BUILD_TESTS)
         tests/geometry/line-test.cc
         tests/geometry/plane-test.cc
         tests/geometry/object-traits-test.cc
+        tests/geometry/query/ladder-test.cc
+        tests/geometry/query/point-queries-test.cc
+        tests/geometry/query/special-case-test.cc
     )
     sc_nexus_binary(typed-geometry-test KINDS tests)
 

@@ -75,9 +75,9 @@ p == q;                                    // component-wise
 ```
 
 ```cpp
-#include <typed-geometry/linalg/pos_ops.hh>
-tg::distance_sqr(p, q);                    // T  — squared distance (any scalar)
-tg::distance(p, q);                        // T  — requires has_sqrt<T>
+#include <typed-geometry/geometry/query/distance.hh>   // a pos is a geometric object; see "geometric queries"
+p.distance_sqr_to(q);                      // T  — squared distance (any scalar)
+p.distance_to(q);                          // T  — requires has_sqrt<T>
 ```
 
 ## comp — neutral component container (raw component-wise arithmetic)
@@ -303,6 +303,25 @@ obj.transformed(t);   // every primitive; which transforms it accepts is a geome
 //   triangle, segment   affine, projective
 //   plane               affine, projective        (normal picks up the cofactor, not the linear part)
 //   ray, line           affine ONLY               (a projected ray is a bounded segment)
+```
+
+## geometric queries (members; definitions per verb)
+
+```cpp
+#include <typed-geometry/geometry/query/query.hh>     // or one verb: query/distance.hh, query/project.hh, …
+p.project_to(obj);          // obj's nearest point to p; for a solid, p itself when inside
+a.closest_points_to(b);     // cc::pair{point of a, point of b}
+a.closest_point_to(b);      // the point of a nearest b;  obj.closest_point_to(p) == p.project_to(obj)
+a.distance_sqr_to(b);  a.distance_to(b);   // distance_to needs has_sqrt
+p.signed_distance_to(obj);  // negative inside (plane: on the normal's far side)
+a.contains(b);              // every point of b is in a — not symmetric
+a.intersects(b);            // they share a point
+// a member used without its verb's header: "function with deduced return type cannot be used before it is defined"
+// an unsupported pair: a static_assert naming the probe — tg::has_distance_sqr_to<A, B>, tg::has_intersects<A, B>, …
+// kernels: tg::impl::<verb>_op<A, B> specializations; each verb also tries (B, A), then derives
+//   (distance from closest points, closest points from a projection, contains/intersects for a pos from a projection)
+// special cases are assumed away: NaN/inf propagate, nothing asserts. SC_CHECK_GEOMETRY_SPECIAL_CASES logs each one.
+// exact scalars (tg::traits::is_exact: ints, bool, fixed_int) get only exact kernels: no projection onto a segment.
 ```
 
 ## object_traits (point-set classification seam)

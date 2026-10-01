@@ -106,7 +106,6 @@ linalg/
   vec.hh           [done]     + zero, make_unit
   vec_ops.hh       [done]     dot, normalize
   pos.hh           [done]     + zero
-  pos_ops.hh       [done]     distance, distance_sqr
   comp.hh          [done]     storage + access + full component-wise arithmetic
   comp_ops.hh      [done]     component-wise min/max
   bivec.hh         [done]     + zero; C(D,2) components (3D order {yz, zx, xy})
@@ -279,7 +278,7 @@ geometry/
     ellipsoid.hh    [done]     solid ellipsoid {center + sum_i u_i * semi_axes[i] : |u| <= 1}; ellipsoid_boundary the surface
     primitives.hh   [done]
     # planned: halfspace, box, capsule, cylinder, cone, ... — see plans/old-tg-carryover.md
-  query/            [planned]  # the member verbs' definitions: one header per verb, plus GJK / EPA in impl/
+  query/            [in progress]  # the member verbs' definitions, one header per verb; kernels and GJK / EPA in impl/
   construct/        [planned]  # hull, fitting, primitives_from_points
   geometry.hh       [done]
   all.hh            [done]

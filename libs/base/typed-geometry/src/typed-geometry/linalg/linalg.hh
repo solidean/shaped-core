@@ -8,7 +8,6 @@
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
-#include <typed-geometry/linalg/pos_ops.hh>
 #include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh>

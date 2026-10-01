@@ -178,12 +178,12 @@ nexus fails a passing test that logs an undeclared warning, so a test that feeds
 ## 7. Exact scalars
 
 A verb compiles for an exact scalar only where a kernel is exact on it, and GJK is refused there (§4).
-`aabb3i.intersects(aabb3i)` works through its closed form; a pair with no exact kernel is a constraint failure on `int`.
+`aabb3i.intersects(aabb3i)` works through its closed form; a pair with no exact kernel has no answer on `int`, and the capability concept says so.
 
 ## 8. Discoverability
 
 - **Capability concepts** — `has_distance_sqr<A, B>`, `has_intersection<A, B>` — are the machine-readable registry: true exactly when a kernel or a ladder rung serves the pair.
-  An unsupported pair is a constraint failure naming the concept, not an error deep in the dispatch.
+  Calling a member for an unsupported pair is a `static_assert` at the bottom of the verb's ladder, naming the concept to probe instead.
 - **A support matrix** in [old-tg-carryover.md](old-tg-carryover.md): rows × columns × verbs, each cell a closed form, the GJK floor, a derivation, or unsupported.
 
 ## Layout

@@ -92,6 +92,7 @@ cc::string tg::impl::fixed_integer<Bits, Signed>::to_string() const
 template <int Bits, bool Signed>
 struct tg::scalar_traits<tg::impl::fixed_integer<Bits, Signed>>
 {
+    static constexpr bool is_exact = true;
     using T = tg::impl::fixed_integer<Bits, Signed>;
 
     static constexpr bool has_sqrt = false;

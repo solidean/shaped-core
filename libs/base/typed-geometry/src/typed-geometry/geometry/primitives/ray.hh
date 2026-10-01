@@ -52,6 +52,25 @@ public:
                                  "so transform the endpoints of the piece you care about instead.");
     }
 
+    // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
+public:
+    template <class Obj>
+    [[nodiscard]] constexpr auto project_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_points_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_point_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_sqr_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto signed_distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto contains(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+
     // comparison
 public:
     [[nodiscard]] friend constexpr bool operator==(ray const&, ray const&) = default;
