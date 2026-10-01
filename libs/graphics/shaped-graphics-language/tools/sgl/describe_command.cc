@@ -164,6 +164,9 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const n : e.workgroup)
             grid.write(n);
     }
+    // CHK-371: only an entry point that asks for a size says so
+    if (e.preferred_subgroup_size > 0)
+        o.write("preferred_subgroup_size", e.preferred_subgroup_size);
     {
         auto list = o.write_array("bindings", babel::json::layout::compact);
         for (auto const& name : e.bindings)

@@ -493,6 +493,8 @@ struct checker
     [[nodiscard]] interpolation interpolation_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
+    /// `@preferred_subgroup_size(n)`'s `n` (CHK-371); 0 without the attribute, and after a bad one, which it reports.
+    [[nodiscard]] i32 preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute);
     /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
     [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
     struct tessellation_mode
@@ -622,7 +624,13 @@ struct checker
     /// where the call names none (CHK-279).
     void judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments);
     /// CHK-280: a texel offset and a gather's component are constants, and a compare's level is the literal 0.0.
+    /// CHK-378: so is a subgroup operation's lane.
     void judge_constant_arguments(i32 file, ast::expr_id id);
+    /// CHK-374: false, having reported, where `candidates` are the uniform load's and its argument is no member of
+    /// workgroup memory; true for every other call, which overload resolution goes on to judge.
+    [[nodiscard]] bool judge_uniform_load(i32 file,
+                                          cc::span<symbol_id const> candidates,
+                                          ast::range_of<ast::argument> arguments);
     void judge_offset_range(i32 file, ast::expr_id expr);
     void index_builtin_symbols();
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.

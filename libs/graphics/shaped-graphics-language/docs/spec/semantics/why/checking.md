@@ -592,3 +592,10 @@ One feature is the shape WebGPU's own has, and splitting quad operations out wou
 Every target defines a subgroup operation over the invocations active at the call, and they disagree on what is active after a divergent branch.
 Requiring uniform control flow is sound on every target with no new analysis, and it relaxes additively, where a permissive rule could not be taken back.
 A result is non-uniform for SGL's pass because uniform across a subgroup is not uniform across a workgroup.
+
+## CHK-380
+
+HLSL forms a compute stage's quads from its threads' ids, as it forms the quads a derivative compares: four consecutive ones of a workgroup that is one row, and 2x2 squares of one that is not.
+DXC writes them for vulkan in the same derivative groups, which is why sg's vulkan grants `subgroups` only with linear compute derivatives.
+WGSL and MSL form quads of four consecutive invocations of a subgroup, which agree with the row and with no square.
+One row whose length is a multiple of 4 is the one shape every target forms alike, and it is the shape a single-pass reduction already takes.

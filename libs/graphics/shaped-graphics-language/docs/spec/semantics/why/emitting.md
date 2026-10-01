@@ -211,6 +211,12 @@ A text is per target, never per device (EMIT-13), so dx12's has to be right on e
 The exact form, `[WaveSize(64)]`, fails the pipeline on such a device; the range form runs everywhere and prefers `n` where it can.
 SM 6.8, which the range form needs, is already the profile SGL's DXC edge compiles.
 
+## EMIT-149
+
+The value is uniform only if no thread stores to `m` between the first thread's read and the last one's.
+The barrier ahead of the read publishes what was stored before it, and the one after it keeps every later store behind every read.
+Tint writes WGSL's own load for HLSL the same way.
+
 ## EMIT-154
 
 A host struct written with no knowledge of HLSL places a `float3` in 12 bytes and starts the next value right behind it.

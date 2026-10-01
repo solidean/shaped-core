@@ -71,6 +71,10 @@ struct sg::compiled_shader
 
     /// Compute workgroup size, present only for a compute `stage`.
     cc::optional<compute_dimensions> workgroup_size;
+    /// The subgroup size a compute shader runs best at, which a backend asks the device for where it can and ignores
+    /// where it cannot: a preference, never a requirement, so no pipeline is refused for it.
+    /// The shader itself must be correct at any size.
+    cc::optional<i32> preferred_subgroup_size;
 
     compiler_info compiler;
 

@@ -1,0 +1,30 @@
+// Subgroup and quad operations and the uniform load, as the GPU runs them: each holds whatever size the subgroup is.
+
+require subgroups
+
+binding wave_io:
+    values: buffer[uint]
+    swapped: mut buffer[uint]
+    sums: mut buffer[uint]
+
+@workgroup binding wave_tally:
+    partial: atomic[uint]
+    total: uint
+
+// Each subgroup sums its values and its first invocation adds that to the workgroup's, which every thread then loads.
+@compute(64) @preferred_subgroup_size(32) fun reduce(@thread_id id: int3, @local_thread_index local: int, @subgroup_invocation_id lane: int){wave_io, wave_tally}:
+    if local == 0 => wave_tally.partial.store(0u)
+    workgroup_barrier()
+    // a quad's horizontal neighbour is the invocation whose index differs in its lowest bit
+    let own = lane as uint
+    wave_io.swapped[id.x] = quad_swap_x(own) ^ own
+    let sum = subgroup_add(wave_io.values[id.x])
+    let leader = subgroup_broadcast_first(lane)
+    if lane == leader => wave_tally.partial.add(sum)
+    workgroup_barrier()
+    if local == 0 => wave_tally.total = wave_tally.partial.load()
+    let total = workgroup_uniform_load(wave_tally.total)
+    // a branch on the loaded value is uniform, so a barrier may stand in it
+    if total > 0u:
+        workgroup_barrier()
+    wave_io.sums[id.x] = total

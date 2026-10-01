@@ -215,6 +215,30 @@ cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute cons
     return result;
 }
 
+/// `@preferred_subgroup_size(64)`: a power of two from 4 to 128, on a compute entry point alone.
+sgl::i32 checker::preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute)
+{
+    if (a == nullptr)
+        return 0;
+    auto const arguments = ast_of(file).at(a->arguments);
+    // CHK-371: an int literal, or the name of an int const
+    auto const value = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                            && ast::is_valid(arguments[0].value)
+                         ? constant_count(file, arguments[0].value)
+                         : cc::optional<i32>();
+    auto const n = value.has_value() ? value.value() : 0;
+    if (!is_compute)
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "@preferred_subgroup_size asks for the subgroups of a compute entry point, and stands on one alone");
+    else if (n < 4 || n > 128 || (n & (n - 1)) != 0)
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "a preferred subgroup size is a power of two from 4 to 128, written as an int literal or the name of "
+               "an int const");
+    else
+        return n;
+    return 0;
+}
+
 /// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
 cc::string checker::name_argument_of(i32 file, ast::attribute const* a)
 {
@@ -1300,6 +1324,7 @@ void checker::compile_function(symbol_id id)
                                      "vertex",
                                      "pixel",
                                      "compute",
+                                     "preferred_subgroup_size",
                                      "geometry",
                                      "tessellation_control",
                                      "tessellation_evaluation",
@@ -1517,6 +1542,8 @@ void checker::compile_function(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     auto const* const compute = find_attribute(file, d.attributes, "compute");
     auto const workgroup = workgroup_of(file, compute);
+    auto const preferred_subgroup_size = preferred_subgroup_size_of(
+        file, find_attribute(file, d.attributes, "preferred_subgroup_size"), compute != nullptr);
     auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : 0;
     auto const tessellation = control != nullptr ? tessellation_of(file, *control) : tessellation_mode();
 
@@ -1530,6 +1557,7 @@ void checker::compile_function(symbol_id id)
                                                 : stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr,
                                                            control != nullptr, is_evaluation),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
+        .preferred_subgroup_size = preferred_subgroup_size,
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
         .max_vertices = max_vertices,
         .partitioning = tessellation.partitioning,
@@ -1873,6 +1901,21 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
          .also_in = u16(stage_bit(stage::miss) | stage_bit(stage::closest_hit) | stage_bit(stage::any_hit)
                         | stage_bit(stage::intersection) | stage_bit(stage::callable)),
          .type = "int3"},
+        // CHK-272: a subgroup is a feature in every stage that has one
+        {.input = stage_input::subgroup_size,
+         .name = "subgroup_size",
+         .in_stage = stage::pixel,
+         .also_in = u16(stage_bit(stage::compute)),
+         .type = "int",
+         .feature = i32(feature::subgroups),
+         .needs_feature_everywhere = true},
+        {.input = stage_input::subgroup_invocation_id,
+         .name = "subgroup_invocation_id",
+         .in_stage = stage::pixel,
+         .also_in = u16(stage_bit(stage::compute)),
+         .type = "int",
+         .feature = i32(feature::subgroups),
+         .needs_feature_everywhere = true},
     };
     return k_inputs;
 }

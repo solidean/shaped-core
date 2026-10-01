@@ -62,6 +62,9 @@ struct sgl::builtins::call_context
     u32 data = 0;
     /// A fresh name of the text, for a local that `written::lines` declares; none where no text is being written.
     cc::function_ref<cc::string(cc::string_view)> mint = {};
+    /// The call's result type as the target spells it, for such a local; empty where no text is being written, and
+    /// for a result of no builtin type.
+    cc::string_view result_type;
 };
 
 /// What a helper writer is given: the target, and each argument's type as the target spells it.
@@ -204,6 +207,15 @@ struct sgl::builtins::function_record
     /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
     /// the other arguments, and gives what the atomic holds after; the call gives what it held before, or nothing.
     bool is_atomic = false;
+    /// Exchanges values between the invocations of a subgroup, so every one of them reaches the call or none does, and
+    /// what it gives differs within a workgroup (CHK-377).
+    bool is_subgroup_operation = false;
+    /// A subgroup operation within a quad, which a compute stage forms along one axis (CHK-380).
+    bool is_quad_operation = false;
+    /// `workgroup_uniform_load`: a barrier whose argument is workgroup memory and whose result is uniform (CHK-374).
+    bool is_uniform_load = false;
+    /// The last argument is a lane, a constant `int` from 0 to below this (CHK-378); 0 for a call without one.
+    i32 constant_lane_below = 0;
     /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
     bool is_nonuniform_mark = false;
     /// Takes one argument more than its signature names, of a struct of the program: a stream's `emit` its vertex, of
@@ -238,7 +250,10 @@ struct sgl::builtins::function_record
 
     /// Whether where a call of it stands is constrained, so an editor shows it as it shows a control keyword.
     /// A flag that adds such a constraint joins here.
-    [[nodiscard]] bool constrains_control_flow() const { return uses_derivatives || is_barrier || is_atomic; }
+    [[nodiscard]] bool constrains_control_flow() const
+    {
+        return uses_derivatives || is_barrier || is_atomic || is_subgroup_operation;
+    }
 };
 
 /// One piece of the generated file, in the order it was registered.

@@ -576,6 +576,8 @@ public:
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
+            if (!spelled.hlsl_read.empty())
+                continue;
             parameters.push_back(
                 cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
             // EMIT-128: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
@@ -614,6 +616,9 @@ public:
         if (p.e.entry_stage == stage::compute)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
+            // EMIT-148: the range form, which every dx12 device runs, prefers the size where the device has it
+            if (!_is_vulkan && p.e.preferred_subgroup_size > 0)
+                out.appendf("[WaveSize(4, 128, {})]\n", p.e.preferred_subgroup_size);
             out.appendf("void {}({})\n{{\n", p.entry_name, list);
         }
         else

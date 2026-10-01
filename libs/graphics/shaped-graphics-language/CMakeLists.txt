@@ -37,6 +37,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_bit_math.cc
     src/shaped-graphics-language/builtins/register_math.cc
     src/shaped-graphics-language/builtins/register_sync.cc
+    src/shaped-graphics-language/builtins/register_subgroups.cc
     src/shaped-graphics-language/builtins/register_raytracing.cc
     src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
@@ -357,6 +358,7 @@ if(SC_BUILD_TESTS)
         tests/check/binding-check-test.cc
         tests/check/texture-check-test.cc
         tests/check/uniformity-check-test.cc
+        tests/check/subgroup-check-test.cc
         tests/check/case-check-test.cc
         tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc
@@ -394,6 +396,7 @@ if(SC_BUILD_TESTS)
         tests/emit/buffer-emit-test.cc
         tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc
+        tests/emit/subgroup-emit-test.cc
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
         tests/emit/raytracing-emit-test.cc

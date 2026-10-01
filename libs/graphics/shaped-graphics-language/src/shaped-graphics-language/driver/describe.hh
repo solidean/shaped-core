@@ -173,6 +173,8 @@ struct sgl::described_entry_point
     check::stage stage = check::stage::none;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
+    /// The subgroup size a compute entry point prefers (CHK-371); 0 where it prefers none.
+    i32 preferred_subgroup_size = 0;
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
     /// A `@workgroup` binding is left out, since the host binds nothing for it.
     cc::vector<cc::string> bindings;

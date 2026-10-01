@@ -27,8 +27,10 @@ void register_textures(registry& r);
 void register_bit_math(registry& r);
 /// Transcendentals, rounding, derivatives, geometry, integer bit functions, packing and reinterpreting bits.
 void register_math(registry& r);
-/// The barriers of a compute workgroup.
+/// The barriers of a compute workgroup, its uniform load, the atomics and a geometry stage's streams.
 void register_sync(registry& r);
+/// The subgroup and quad operations.
+void register_subgroups(registry& r);
 /// The steps of an inline ray query, `ray_flags`, and the emulated trace's view of sg's acceleration pool.
 void register_raytracing(registry& r);
 } // namespace sgl::builtins

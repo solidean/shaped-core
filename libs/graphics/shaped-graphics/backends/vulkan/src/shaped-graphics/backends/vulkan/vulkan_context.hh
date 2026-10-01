@@ -827,6 +827,16 @@ public:
     bool _shader_f16 = false;
     bool _shader_int16 = false;
     bool _subgroups = false;
+    /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.
+    struct subgroup_size_control
+    {
+        u32 min_size = 0;
+        u32 max_size = 0;
+        /// A workgroup of a required size holds at most this many subgroups.
+        u32 max_workgroup_subgroups = 0;
+        VkShaderStageFlags stages = 0;
+    };
+    subgroup_size_control _subgroup_size_control;
     /// Without it every sampler is created with anisotropy off; with it, maxAnisotropy is clamped to the device limit.
     bool _sampler_anisotropy = false;
 

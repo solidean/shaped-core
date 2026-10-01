@@ -56,6 +56,33 @@ written write_barrier(call_context const& ctx)
     }
     return {};
 }
+// ---- the uniform load ----------------------------------------------------------------------------------------------
+
+constexpr cc::string_view k_uniform_load_wgsl[] = {"workgroupUniformLoad"};
+
+/// EMIT-149: WGSL's own; elsewhere the workgroup barrier, the read into a local, and the barrier again, so no thread
+/// stores to the memory before every one has read it.
+written write_uniform_load(call_context const& ctx)
+{
+    auto const& m = ctx.arguments[0].text;
+    if (ctx.target == language::wgsl)
+        return {.text = cc::format("workgroupUniformLoad(&{})", m)};
+    auto const barrier = ctx.target == language::hlsl
+                           ? cc::string_view("GroupMemoryBarrierWithGroupSync();")
+                           : cc::string_view("threadgroup_barrier(mem_flags::mem_threadgroup);");
+    auto const loaded = ctx.mint.is_valid() ? ctx.mint("uniform_load") : cc::string("uniform_load");
+    auto result = written{.text = loaded};
+    result.lines.push_back(cc::string(barrier));
+    result.lines.push_back(cc::format("{} {} = {};", ctx.result_type, loaded, m));
+    result.lines.push_back(cc::string(barrier));
+    return result;
+}
+
+/// A test runs one invocation, whose load is a plain read.
+void loaded(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
+{
+    out.push_back_range(in);
+}
 // ---- atomics ------------------------------------------------------------------------------------------------------
 
 enum class atomic_op : u8
@@ -269,6 +296,24 @@ void sgl::builtins::register_sync(registry& r)
                       .wgsl_names = k_barriers_wgsl,
                       .msl_names = k_barriers_msl},
             .is_barrier = true,
+        });
+
+    r.add_comment("// The uniform load, a barrier that then reads workgroup memory and gives every thread the same "
+                  "value "
+                  "(CHK-374).");
+    for (auto const type : {"float", "float2", "float3", "float4", "int", "int2", "int3", "int4", "uint", "uint2",
+                            "uint3", "uint4", "bool", "bool2", "bool3", "bool4", "vec3", "pos3", "hpos4"})
+        r.add(function_record{
+            .signature = cc::format("@stages(.compute) fun workgroup_uniform_load(m: {0}) -> {0}", type),
+            .doc = "/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.",
+            .evaluate = loaded,
+            .write = {.kind = spelling_kind::custom,
+                      .custom = write_uniform_load,
+                      .hlsl_names = k_barriers_hlsl,
+                      .wgsl_names = k_uniform_load_wgsl,
+                      .msl_names = k_barriers_msl},
+            .is_barrier = true,
+            .is_uniform_load = true,
         });
 
     r.add_comment("// Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.\n"

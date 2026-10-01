@@ -82,6 +82,8 @@ struct sgl::emitted_source
     cc::vector<interface_binding> bindings;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
+    /// The subgroup size a compute entry point prefers, which the host asks the device for; 0 where it prefers none.
+    i32 preferred_subgroup_size = 0;
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;
     cc::string target_struct;

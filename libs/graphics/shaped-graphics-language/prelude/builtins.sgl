@@ -1625,6 +1625,46 @@
 /// Waits for every thread of the workgroup, after which each sees what the others stored to images.
 @builtin @stages(.compute) fun texture_barrier()
 
+// The uniform load, a barrier that then reads workgroup memory and gives every thread the same value (CHK-374).
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: float) -> float
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: float2) -> float2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: float3) -> float3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: float4) -> float4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: int) -> int
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: int2) -> int2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: int3) -> int3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: int4) -> int4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: uint) -> uint
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: uint2) -> uint2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: uint3) -> uint3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: uint4) -> uint4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: bool) -> bool
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: bool2) -> bool2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: bool3) -> bool3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: bool4) -> bool4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: vec3) -> vec3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: pos3) -> pos3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: hpos4) -> hpos4
+
 // Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.
 // Each is relaxed, and each but a store gives the value before; a vertex stage has none (CHK-296).
 /// Adds `v`, wrapping, and gives the value before.
@@ -1667,6 +1707,496 @@
 @builtin @stages(.pixel, .compute) fun load(a: atomic[int]) -> int
 /// Stores `v` in one step.
 @builtin @stages(.pixel, .compute) fun store(a: out atomic[int], v: int)
+
+// Subgroup operations, which exchange values between the invocations the hardware runs together.
+// Each needs `subgroups`, stands only in uniform control flow, and gives a value that differs
+// within a workgroup (CHK-376, CHK-377).
+/// Whether `b` holds in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_all(b: bool) -> bool
+/// Whether `b` holds in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_any(b: bool) -> bool
+/// Bit `i` set where invocation `i`'s `b` holds.
+@builtin @stages(.pixel, .compute) fun subgroup_ballot(b: bool) -> uint4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: float) -> float
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: float2) -> float2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: float3) -> float3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: float4) -> float4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: int) -> int
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: int2) -> int2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: int3) -> int3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: int4) -> int4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint) -> uint
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint2) -> uint2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint3) -> uint3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint4) -> uint4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float) -> float
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float2) -> float2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float3) -> float3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float4) -> float4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int) -> int
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int2) -> int2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int3) -> int3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int4) -> int4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint) -> uint
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint2) -> uint2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint3) -> uint3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint4) -> uint4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: float) -> float
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: float2) -> float2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: float3) -> float3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: float4) -> float4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: int) -> int
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: int2) -> int2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: int3) -> int3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: int4) -> int4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint) -> uint
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint2) -> uint2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint3) -> uint3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint4) -> uint4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: float) -> float
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: float2) -> float2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: float3) -> float3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: float4) -> float4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: int) -> int
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: int2) -> int2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: int3) -> int3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: int4) -> int4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint) -> uint
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint2) -> uint2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint3) -> uint3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint4) -> uint4
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int) -> int
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int2) -> int2
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int3) -> int3
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int4) -> int4
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint) -> uint
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint2) -> uint2
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint3) -> uint3
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint4) -> uint4
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int) -> int
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int2) -> int2
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int3) -> int3
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int4) -> int4
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint) -> uint
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint2) -> uint2
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint3) -> uint3
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint4) -> uint4
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int) -> int
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int2) -> int2
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int3) -> int3
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int4) -> int4
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint) -> uint
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint2) -> uint2
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint3) -> uint3
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint4) -> uint4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float) -> float
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float2) -> float2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float3) -> float3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float4) -> float4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int) -> int
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int2) -> int2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int3) -> int3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int4) -> int4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint) -> uint
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint2) -> uint2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint3) -> uint3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint4) -> uint4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float) -> float
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float2) -> float2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float3) -> float3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float4) -> float4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int) -> int
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int2) -> int2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int3) -> int3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int4) -> int4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint) -> uint
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint2) -> uint2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint3) -> uint3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint4) -> uint4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float) -> float
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float2) -> float2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float3) -> float3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float4) -> float4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int) -> int
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int2) -> int2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int3) -> int3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int4) -> int4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint) -> uint
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint2) -> uint2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint3) -> uint3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint4) -> uint4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float) -> float
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float2) -> float2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float3) -> float3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float4) -> float4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int) -> int
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int2) -> int2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int3) -> int3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int4) -> int4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint) -> uint
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint2) -> uint2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint3) -> uint3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint4) -> uint4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float, lane: int) -> float
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float2, lane: int) -> float2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float3, lane: int) -> float3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float4, lane: int) -> float4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int, lane: int) -> int
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int2, lane: int) -> int2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int3, lane: int) -> int3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int4, lane: int) -> int4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint, lane: int) -> uint
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint2, lane: int) -> uint2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint3, lane: int) -> uint3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint4, lane: int) -> uint4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float) -> float
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float2) -> float2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float3) -> float3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float4) -> float4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int) -> int
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int2) -> int2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int3) -> int3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int4) -> int4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint) -> uint
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint2) -> uint2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint3) -> uint3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint4) -> uint4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float, lane: int) -> float
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float2, lane: int) -> float2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float3, lane: int) -> float3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float4, lane: int) -> float4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int, lane: int) -> int
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int2, lane: int) -> int2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int3, lane: int) -> int3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int4, lane: int) -> int4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint, lane: int) -> uint
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint2, lane: int) -> uint2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint3, lane: int) -> uint3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint4, lane: int) -> uint4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float, mask: int) -> float
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float2, mask: int) -> float2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float3, mask: int) -> float3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float4, mask: int) -> float4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int, mask: int) -> int
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int2, mask: int) -> int2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int3, mask: int) -> int3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int4, mask: int) -> int4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint, mask: int) -> uint
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint2, mask: int) -> uint2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint3, mask: int) -> uint3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint4, mask: int) -> uint4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float, delta: int) -> float
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float2, delta: int) -> float2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float3, delta: int) -> float3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float4, delta: int) -> float4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int, delta: int) -> int
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int2, delta: int) -> int2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int3, delta: int) -> int3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int4, delta: int) -> int4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint, delta: int) -> uint
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint2, delta: int) -> uint2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint3, delta: int) -> uint3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint4, delta: int) -> uint4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float, delta: int) -> float
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float2, delta: int) -> float2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float3, delta: int) -> float3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float4, delta: int) -> float4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int, delta: int) -> int
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int2, delta: int) -> int2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int3, delta: int) -> int3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int4, delta: int) -> int4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint, delta: int) -> uint
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint2, delta: int) -> uint2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint3, delta: int) -> uint3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint4, delta: int) -> uint4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: float) -> float
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: float2) -> float2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: float3) -> float3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: float4) -> float4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: int) -> int
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: int2) -> int2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: int3) -> int3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: int4) -> int4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: uint) -> uint
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: uint2) -> uint2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: uint3) -> uint3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: uint4) -> uint4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: float) -> float
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: float2) -> float2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: float3) -> float3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: float4) -> float4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: int) -> int
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: int2) -> int2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: int3) -> int3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: int4) -> int4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: uint) -> uint
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: uint2) -> uint2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: uint3) -> uint3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: uint4) -> uint4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: float) -> float
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: float2) -> float2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: float3) -> float3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: float4) -> float4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: int) -> int
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: int2) -> int2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: int3) -> int3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: int4) -> int4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: uint) -> uint
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: uint2) -> uint2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: uint3) -> uint3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: uint4) -> uint4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: float, lane: int) -> float
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: float2, lane: int) -> float2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: float3, lane: int) -> float3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: float4, lane: int) -> float4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: int, lane: int) -> int
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: int2, lane: int) -> int2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: int3, lane: int) -> int3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: int4, lane: int) -> int4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: uint, lane: int) -> uint
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: uint2, lane: int) -> uint2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: uint3, lane: int) -> uint3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: uint4, lane: int) -> uint4
 
 // Ray tracing: what a ray is traced with, and what a trace reads.
 // A shader calls `trace` of raytracing.sgl, never these: each is a step of HLSL's `RayQuery` and MSL's `intersection_query`.

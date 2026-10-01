@@ -1154,6 +1154,8 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         report(diagnostic_kind::unknown_name, file, callee_where, text);
         return error_type;
     }
+    if (!judge_uniform_load(file, candidates, call.arguments))
+        return error_type;
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
     if (result != error_type)
     {
@@ -1161,6 +1163,66 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         judge_constant_arguments(file, id);
     }
     return result;
+}
+
+bool checker::judge_uniform_load(i32 file, cc::span<symbol_id const> candidates, ast::range_of<ast::argument> arguments)
+{
+    auto is_load = !candidates.empty();
+    for (auto const c : candidates)
+    {
+        auto const* const record = out.builtin_function(out.at(c).intrinsic);
+        is_load = is_load && record != nullptr && record->is_uniform_load;
+    }
+    auto const& ast = ast_of(file);
+    auto const written = ast.at(arguments);
+    // a call of another shape matches no overload, which resolution says
+    if (!is_load || written.size() != 1 || !written[0].name.empty() || written[0].is_splat
+        || !ast::is_valid(written[0].value))
+        return true;
+    auto const& tables = out.files[file];
+    auto const refuse = [&](ast::expr_id at)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, at),
+               "workgroup_uniform_load reads a member of a @workgroup binding, or a field of one");
+        return false;
+    };
+    // the path down to the member it starts from, which decides whether the argument is workgroup memory at all
+    auto index = ast::expr_id::none;
+    auto component = ast::expr_id::none;
+    for (auto expr = written[0].value; ast::is_valid(expr);)
+    {
+        auto const& node = ast.at(expr).node;
+        if (auto const* const i = node.try_as<ast::index>())
+        {
+            index = expr;
+            expr = i->object;
+            continue;
+        }
+        auto const* const member = node.try_as<ast::member>();
+        if (member == nullptr)
+            return refuse(written[0].value);
+        auto const& where = tables.target_at(expr);
+        if (where.kind == target_kind::binding_member)
+        {
+            auto const& binding = out.bindings[out.at(where.symbol).info];
+            auto const type = tables.type_at(expr);
+            if (!binding.is_workgroup || (is_valid(type) && out.at(type).kind == type_kind::atomic))
+                return refuse(written[0].value);
+            if (ast::is_valid(index))
+                unsupported(file, span_of(file, index), "an index on the way to the memory workgroup_uniform_load reads");
+            // WGSL takes no pointer to a vector's component
+            else if (ast::is_valid(component))
+                unsupported(file, span_of(file, component), "a component of a vector, read by workgroup_uniform_load");
+            return !ast::is_valid(index) && !ast::is_valid(component);
+        }
+        if ((where.kind == target_kind::field || where.kind == target_kind::swizzle)
+            && out.builtin_type_of(tables.type_at(member->object)) != nullptr)
+            component = expr;
+        else if (where.kind != target_kind::field)
+            return refuse(written[0].value);
+        expr = member->object;
+    }
+    return refuse(written[0].value);
 }
 
 type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::call const& call)

@@ -28,6 +28,25 @@ bool is_usable_pipeline_cache_blob(vulkan_context const& ctx, cc::span<byte cons
     return true;
 }
 
+u32 subgroup_size_to_require(vulkan_context const& ctx, sg::compiled_shader const& shader)
+{
+    if (!shader.preferred_subgroup_size.has_value() || !shader.workgroup_size.has_value())
+        return 0;
+    auto const& control = ctx._subgroup_size_control;
+    auto const n = shader.preferred_subgroup_size.value();
+    if (n <= 0 || (n & (n - 1)) != 0 || (control.stages & VK_SHADER_STAGE_COMPUTE_BIT) == 0)
+        return 0;
+    auto const size = u32(n);
+    if (size < control.min_size || size > control.max_size)
+        return 0;
+    // A required size bounds the workgroup to that many subgroups of it.
+    auto const& w = shader.workgroup_size.value();
+    auto const invocations = u64(w.x) * u64(w.y) * u64(w.z);
+    if (invocations > u64(control.max_workgroup_subgroups) * u64(size))
+        return 0;
+    return size;
+}
+
 cc::result<vulkan_compute_pipeline_handle> vulkan_compute_pipeline::create(vulkan_context& ctx,
                                                                            vulkan_pipeline_layout_handle layout,
                                                                            sg::compiled_shader const& shader,
@@ -73,11 +92,17 @@ cc::result<vulkan_compute_pipeline_handle> vulkan_compute_pipeline::create(vulka
 
     // Vulkan takes the entry point as a C string, and it must outlive the create call below.
     auto const entry_point = cc::string::create_copy_c_str_materialized(shader.entry_point);
+    pipeline->_required_subgroup_size = subgroup_size_to_require(ctx, shader);
+    auto const required_size = VkPipelineShaderStageRequiredSubgroupSizeCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO,
+        .requiredSubgroupSize = pipeline->_required_subgroup_size,
+    };
     auto const info = VkComputePipelineCreateInfo{
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         // A pipeline built against a descriptor-buffer set layout has to say so, and may not be used with sets.
         .flags = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT,
         .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                  .pNext = pipeline->_required_subgroup_size > 0 ? &required_size : nullptr,
                   .stage = VK_SHADER_STAGE_COMPUTE_BIT,
                   .module = module,
                   .pName = entry_point.c_str_if_terminated()},

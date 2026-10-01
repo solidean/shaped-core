@@ -405,7 +405,13 @@ struct optional_shader_features
     VkBool32 storage_buffer_16bit = VK_FALSE;
     VkBool32 uniform_and_storage_buffer_16bit = VK_FALSE;
     VkBool32 subgroup_size_control = VK_FALSE;
+    /// DXC writes a compute stage's quad operations in a derivative group, linear along one axis or of 2x2 threads.
+    /// Both are VK_KHR_compute_shader_derivatives', which creation enables wherever the device has it.
+    bool has_compute_derivatives = false;
+    VkBool32 compute_derivative_group_linear = VK_FALSE;
+    VkBool32 compute_derivative_group_quads = VK_FALSE;
     bool subgroups = false;
+    VkPhysicalDeviceVulkan13Properties vk13_properties = {};
 
     /// A 16-bit type is used in registers and in buffers alike, so each kind needs both storage bits too.
     [[nodiscard]] bool has_16bit_storage() const
@@ -418,7 +424,12 @@ struct optional_shader_features
 
 optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
 {
-    auto vk13 = VkPhysicalDeviceVulkan13Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    char const* const derivative_names[] = {VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME};
+    auto const has_compute_derivatives = device_extensions_available(dev, derivative_names);
+    auto derivatives = VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
+    auto vk13 = VkPhysicalDeviceVulkan13Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+                                                 .pNext = has_compute_derivatives ? &derivatives : nullptr};
     auto vk12 = VkPhysicalDeviceVulkan12Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
                                                  .pNext = &vk13};
     auto vk11 = VkPhysicalDeviceVulkan11Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
@@ -426,7 +437,10 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
     auto features = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk11};
     vkGetPhysicalDeviceFeatures2(dev, &features);
 
-    auto subgroup = VkPhysicalDeviceSubgroupProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+    auto vk13_properties
+        = VkPhysicalDeviceVulkan13Properties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES};
+    auto subgroup = VkPhysicalDeviceSubgroupProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
+                                                       .pNext = &vk13_properties};
     auto properties
         = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
     vkGetPhysicalDeviceProperties2(dev, &properties);
@@ -438,14 +452,20 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT
         | VK_SUBGROUP_FEATURE_QUAD_BIT);
 
+    auto const linear = has_compute_derivatives ? derivatives.computeDerivativeGroupLinear : VK_FALSE;
     return {
         .shader_float16 = vk12.shaderFloat16,
         .shader_int16 = features.features.shaderInt16,
         .storage_buffer_16bit = vk11.storageBuffer16BitAccess,
         .uniform_and_storage_buffer_16bit = vk11.uniformAndStorageBuffer16BitAccess,
         .subgroup_size_control = vk13.subgroupSizeControl,
-        .subgroups
-        = (subgroup.supportedStages & stages) == stages && (subgroup.supportedOperations & operations) == operations,
+        .has_compute_derivatives = has_compute_derivatives,
+        .compute_derivative_group_linear = linear,
+        .compute_derivative_group_quads = has_compute_derivatives ? derivatives.computeDerivativeGroupQuads : VK_FALSE,
+        // a quad operation of a compute stage is the one DXC writes in a linear derivative group
+        .subgroups = (subgroup.supportedStages & stages) == stages
+                  && (subgroup.supportedOperations & operations) == operations && linear == VK_TRUE,
+        .vk13_properties = vk13_properties,
     };
 }
 
@@ -642,6 +662,10 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // A point is one pixel in sg, as WebGPU has it, and SGL's vertex stages write no point size.
     // Vulkan draws a point list only from a stage that writes one, unless maintenance5 makes an unwritten size 1.0.
     // Optional, since it is above the 1.3 floor: without it a point list drawn with such a shader fails validation.
+    auto const shader_features = query_optional_shader_features(best_device);
+    if (shader_features.has_compute_derivatives)
+        device_extensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
+
     char const* const maintenance5_names[] = {VK_KHR_MAINTENANCE_5_EXTENSION_NAME};
     bool const maintenance5_supported = device_extensions_available(best_device, maintenance5_names);
     if (maintenance5_supported)
@@ -660,8 +684,6 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         // The graphics family already spends one queue on rendering, so only what is left over is available.
         transfer_queue_count = transfer_family_queue_count >= 3 ? 2u : (transfer_family_queue_count >= 2 ? 1u : 0u);
     }
-
-    auto const shader_features = query_optional_shader_features(best_device);
 
     float const queue_priority = 1.0f;
     auto const queue_info = VkDeviceQueueCreateInfo{
@@ -692,9 +714,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         // returns, which sg does not promise and which costs performance to guarantee.
         .nullDescriptor = VK_TRUE,
     };
+    auto derivative_features = VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
+        .pNext = &robustness2_features,
+        .computeDerivativeGroupQuads = shader_features.compute_derivative_group_quads,
+        .computeDerivativeGroupLinear = shader_features.compute_derivative_group_linear,
+    };
     auto descriptor_buffer_features = VkPhysicalDeviceDescriptorBufferFeaturesEXT{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
-        .pNext = &robustness2_features,
+        .pNext = shader_features.has_compute_derivatives ? static_cast<void*>(&derivative_features)
+                                                         : static_cast<void*>(&robustness2_features),
         .descriptorBuffer = VK_TRUE,
     };
     auto vk13_features = VkPhysicalDeviceVulkan13Features{
@@ -876,6 +905,13 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_shader_f16 = shader_features.has_f16();
     ctx->_shader_int16 = shader_features.has_int16();
     ctx->_subgroups = shader_features.subgroups;
+    if (shader_features.subgroup_size_control == VK_TRUE)
+        ctx->_subgroup_size_control = {
+            .min_size = shader_features.vk13_properties.minSubgroupSize,
+            .max_size = shader_features.vk13_properties.maxSubgroupSize,
+            .max_workgroup_subgroups = shader_features.vk13_properties.maxComputeWorkgroupSubgroups,
+            .stages = shader_features.vk13_properties.requiredSubgroupSizeStages,
+        };
     ctx->_group_pool.initialize(*ctx);
     // Required at the floor, so device creation would have failed without it.
     ctx->set_host_query_reset(true);

@@ -256,6 +256,8 @@ struct stage_input_spelling
     cc::string_view wgsl_builtin;
     cc::string_view msl_type;
     cc::string_view msl_attribute;
+    /// What HLSL reads instead of a parameter, for an input it has no semantic for: `WaveGetLaneCount()` (EMIT-147).
+    cc::string_view hlsl_read = {};
 };
 [[nodiscard]] stage_input_spelling const& spelling_of(check::stage_input input);
 

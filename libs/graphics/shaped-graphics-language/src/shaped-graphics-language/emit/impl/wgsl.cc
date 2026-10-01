@@ -195,6 +195,17 @@ public:
         for (auto const& input : p.e.stage_inputs)
             if (input.input == check::stage_input::primitive_id)
                 out += "enable primitive_index;\n\n";
+        // EMIT-141: so are the subgroup operations and the subgroup's stage inputs
+        auto has_subgroups = false;
+        for (auto const& input : p.e.stage_inputs)
+            has_subgroups = has_subgroups || input.input == check::stage_input::subgroup_size
+                         || input.input == check::stage_input::subgroup_invocation_id;
+        for (auto const& x : p.e.exprs)
+            if (auto const* const call = x.node.try_as<flat_call>())
+                if (auto const* const record = p.m.builtin_function(call->intrinsic))
+                    has_subgroups = has_subgroups || record->is_subgroup_operation;
+        if (has_subgroups)
+            out += "enable subgroups;\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
         // EMIT-135: the emulated trace reads sg's acceleration pool and the roots of the dispatch's structures, which sg

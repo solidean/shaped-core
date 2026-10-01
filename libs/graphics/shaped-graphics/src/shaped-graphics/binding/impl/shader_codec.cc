@@ -251,6 +251,8 @@ cc::vector<byte> encode_compiled_shader(compiled_shader const& shader)
     put_u32(out, u32(workgroup.x));
     put_u32(out, u32(workgroup.y));
     put_u32(out, u32(workgroup.z));
+    put_bool(out, shader.preferred_subgroup_size.has_value());
+    put_u32(out, u32(shader.preferred_subgroup_size.value_or(0)));
 
     put_string(out, shader.compiler.name);
     put_string(out, shader.compiler.version);
@@ -311,6 +313,10 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
     auto const z = i32(r.get_u32());
     if (has_workgroup)
         shader.workgroup_size = compute_dimensions{.x = x, .y = y, .z = z};
+    auto const has_subgroup_size = r.get_bool();
+    auto const subgroup_size = i32(r.get_u32());
+    if (has_subgroup_size)
+        shader.preferred_subgroup_size = subgroup_size;
 
     shader.compiler.name = r.get_string();
     shader.compiler.version = r.get_string();

@@ -91,11 +91,15 @@ TEST("sgl classify - control flow words are their own class, and so is the name 
 
 TEST("sgl classify - a call of a builtin that constrains control flow says so, by the overload it chose")
 {
-    // a barrier, a derivative and an atomic `max`, and a plain `max` that shares the atomic's name
+    // a barrier, a derivative, an atomic `max`, a subgroup operation and the uniform load, and a plain `max` that
+    // shares the atomic's name
     constexpr auto source = "@workgroup binding counters:\n"
                             "    slots: atomic[uint][4]\n"
+                            "    done: uint\n"
                             "fun sync():\n"
                             "    workgroup_barrier()\n"
+                            "fun reduce(x: float){counters} -> float:\n"
+                            "    return subgroup_add(x) + (workgroup_uniform_load(counters.done) as float)\n"
                             "fun edge(x: float) -> float => ddx(x)\n"
                             "fun raise(){counters} -> uint => counters.slots[2].max(3)\n"
                             "fun larger(a: float, b: float) -> float => max(a, b)\n";
@@ -106,7 +110,9 @@ TEST("sgl classify - a call of a builtin that constrains control flow says so, b
          sgl::classify(checked.user, checked.user_ast, {.module = &checked.module, .file_index = checked.user_file()}))
         if (s.constrains_control_flow)
             out.appendf("{}:{} ", checked.user.text_of(s.where), sgl::to_string(s.cls));
-    CHECK(out == "workgroup_barrier:function ddx:function max:function ");
+    CHECK(out
+          == "workgroup_barrier:function subgroup_add:function workgroup_uniform_load:function ddx:function "
+             "max:function ");
 }
 
 TEST("sgl classify - spans are in source order and never overlap, on the extension's whole sample")

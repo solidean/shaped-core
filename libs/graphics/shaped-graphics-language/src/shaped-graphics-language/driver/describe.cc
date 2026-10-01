@@ -215,6 +215,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     auto result = described_entry_point{.name = e.name, .stage = e.entry_stage};
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
+    result.preferred_subgroup_size = e.preferred_subgroup_size;
     for (auto const id : e.bindings)
         if (!m.bindings[m.at(id).info].is_workgroup)
             result.bindings.push_back(m.at(id).name);

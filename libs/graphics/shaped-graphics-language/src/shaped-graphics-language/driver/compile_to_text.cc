@@ -127,6 +127,7 @@ cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
                                       .layouts = cc::move(emitted.layouts)};
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
+    result.preferred_subgroup_size = e.preferred_subgroup_size;
     return result;
 }
 } // namespace

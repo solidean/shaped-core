@@ -65,7 +65,8 @@ void checker::judge_entry_features(symbol_id id)
     // natively needs none
     for (auto const& parameter : out.at(info.parameters))
         if (parameter.input != stage_input::none && info_of(parameter.input).feature >= 0
-            && info_of(parameter.input).in_stage == info.entry_stage)
+            && (info_of(parameter.input).in_stage == info.entry_stage
+                || info_of(parameter.input).needs_feature_everywhere))
             needed.set(feature(info_of(parameter.input).feature));
     // CHK-301, CHK-304, CHK-306: the geometry and the tessellation stages are features a device grants
     if (info.entry_stage == stage::geometry)

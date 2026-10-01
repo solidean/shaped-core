@@ -93,6 +93,9 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **A subgroup size a shader requires.** `@preferred_subgroup_size` asks and promises nothing (CHK-371), which is what a tuning hint on code correct at any size means.
   A shader correct at one size alone needs a separate spelling, behind a feature, which a device that cannot run that size refuses.
   It lands once a shader needs one; turning the preference into a requirement instead would refuse shaders that work today.
+- **Quads of a two-dimensional compute workgroup.** CHK-380 holds a compute stage's quad operations to a workgroup of one row, the one shape whose quads every target forms alike.
+  HLSL forms 2x2 squares of the threads' ids in any other, which WGSL and MSL can only reach by shuffling with lanes computed from `@local_thread_id`.
+  It lands once a shader wants square quads, written as such a shuffle wherever the target's own quads are lanes.
 - **A format-less storage image, `image_2d[.host]`.** An `out` image written as `float4` and bound to whatever float format the host has, one compile for every format.
   dx12 and MSL have it, vulkan needs `shaderStorageImageWriteWithoutFormat`, and WGSL can never have it, so it is a feature.
   Reading one is vulkan's separate `shaderStorageImageReadWithoutFormat`, so a `mut` or read-only `.host` image waits for a shader that wants it.

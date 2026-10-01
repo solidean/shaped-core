@@ -187,15 +187,25 @@ struct uniformity_pass
 
     divergence call(flat_expr_id id, flat_call const& c, divergence const& flow)
     {
+        auto const* const record = record_of(c);
+        // CHK-374: the load reads workgroup memory once every thread has arrived, and hands each the same value
+        if (record != nullptr && record->is_uniform_load)
+        {
+            if (flow.is && is_reporting)
+                violations.push_back({.call = id, .flow = flow});
+            return {};
+        }
         auto result = divergence::none();
         auto const arguments = e.at(c.arguments);
         for (auto const a : arguments)
             result = first_of(result, value(a, flow));
-        auto const* const record = record_of(c);
         if (record == nullptr)
             return result;
-        if ((record->is_barrier || record->uses_derivatives) && flow.is && is_reporting)
+        if ((record->is_barrier || record->uses_derivatives || record->is_subgroup_operation) && flow.is && is_reporting)
             violations.push_back({.call = id, .flow = flow});
+        // CHK-377: what the subgroup agrees on may still differ between the subgroups of a workgroup
+        if (record->is_subgroup_operation && !result.is)
+            result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
         // what another thread did to it first is what an atomic gives
         if (record->is_atomic && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
@@ -398,7 +408,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
     {
         if (auto const* const c = x.node.try_as<flat_call>())
             if (auto const* const record = out.builtin_function(c->intrinsic))
-                asks = asks || record->is_barrier || record->uses_derivatives;
+                asks = asks || record->is_barrier || record->uses_derivatives || record->is_subgroup_operation;
         if (x.node.is<flat_element>())
             asks = asks || is_resource(out.at(x.type).kind);
     }
@@ -469,6 +479,9 @@ void checker::judge_uniformity(flat_entry_point const& structured)
             diagnostic_kind::non_uniform_control_flow, call.from.file, where,
             record->is_barrier
                 ? cc::format("{} waits for every thread of the workgroup, and not every one reaches it here", record->name)
+            : record->is_subgroup_operation
+                ? cc::format("{} exchanges values within the subgroup, and not every invocation of it reaches it here",
+                             record->name)
                 : cc::format("{} takes derivatives across a quad of pixels, and not every pixel of the "
                              "quad reaches it here{}",
                              record->name,

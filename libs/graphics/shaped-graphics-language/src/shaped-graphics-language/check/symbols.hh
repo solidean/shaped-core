@@ -202,6 +202,9 @@ enum class sgl::check::stage_input : sgl::u8
     /// A ray-tracing stage's launch index, and the size of the launch (CHK-327).
     launch_id,
     launch_size,
+    /// How many invocations the subgroup holds, and this one's index in it (CHK-271).
+    subgroup_size,
+    subgroup_invocation_id,
 };
 
 /// What the checker knows of one stage input: the attribute, the stage that has it, its type and the feature it needs.
@@ -211,12 +214,14 @@ struct sgl::check::stage_input_info
     /// The attribute without its `@`, which is also the input's name in a diagnostic.
     cc::string_view name;
     stage in_stage = stage::none;
-    /// The other stages that have it, each without a feature: a `stage_bit` mask.
+    /// The other stages that have it, each without a feature unless `needs_feature_everywhere`: a `stage_bit` mask.
     u16 also_in = 0;
     /// The name of its builtin type.
     cc::string_view type;
     /// -1 for an input every device has; otherwise a `feature` (check/features.hh).
     i32 feature = -1;
+    /// The feature is needed in the stages of `also_in` too, not in `in_stage` alone (CHK-272).
+    bool needs_feature_everywhere = false;
 };
 
 namespace sgl::check
@@ -508,6 +513,8 @@ struct sgl::check::function_info
     stage entry_stage = stage::none;
     /// The grid a `@compute` entry point is dispatched in, from `@compute(x, y, z)`; 1 for an axis nobody wrote.
     i32 workgroup[3] = {1, 1, 1};
+    /// The subgroup size a `@compute` entry point asks for by `@preferred_subgroup_size(n)`; 0 where it asks none.
+    i32 preferred_subgroup_size = 0;
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;

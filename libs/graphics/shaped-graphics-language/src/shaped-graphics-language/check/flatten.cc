@@ -77,6 +77,10 @@ struct flattener
     cc::vector<stage_violation> stage_violations;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
+    /// A test's calls of a subgroup operation, which a run of one invocation has no subgroup for (CHK-379).
+    cc::vector<stage_violation> subgroup_calls;
+    /// A compute entry point's calls of a quad operation, whose workgroup then forms its quads along one axis (CHK-380).
+    cc::vector<stage_violation> quad_calls;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
@@ -119,6 +123,8 @@ struct flattener
             auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
             if (record != nullptr && record->uses_derivatives)
                 stage_violations.push_back({.file = file(), .call = call, .callee = callee});
+            if (record != nullptr && record->is_subgroup_operation)
+                subgroup_calls.push_back({.file = file(), .call = call, .callee = callee});
             auto const ray_stages = stage_bit(stage::raygen) | stage_bit(stage::miss) | stage_bit(stage::closest_hit)
                                   | stage_bit(stage::any_hit) | stage_bit(stage::intersection)
                                   | stage_bit(stage::callable);
@@ -128,6 +134,9 @@ struct flattener
         }
         if (entry.entry_stage == stage::none)
             return;
+        if (auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+            record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
+            quad_calls.push_back({.file = file(), .call = call, .callee = callee});
         auto const& s = c.out.at(callee);
         if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
             stage_violations.push_back({.file = file(), .call = call, .callee = callee});
@@ -2678,9 +2687,13 @@ void checker::flatten_test(i32 index)
     for (auto const& v : f.ray_stage_calls)
         unsupported(v.file, span_of(v.file, v.call),
                     cc::format("a test that reaches {}, which only the ray-tracing stages run", out.at(v.callee).name));
+    for (auto const& v : f.subgroup_calls)
+        unsupported(
+            v.file, span_of(v.file, v.call),
+            cc::format("a test that reaches {}: a run is one invocation, and has no subgroup", out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
-    if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty())
+    if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty() || !f.subgroup_calls.empty())
         return;
     f.entry.body = f.add_list(f.block);
     judge_constants(f.entry);
@@ -2726,6 +2739,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];
+    f.entry.preferred_subgroup_size = info.preferred_subgroup_size;
     f.entry.features = info.features;
     for (auto const binding : out.at(info.bindings))
         f.entry.bindings.push_back(binding);
@@ -2878,6 +2892,13 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
                           check::stage_name(info.entry_stage), out.at(v.callee).name));
+    // CHK-380: HLSL forms a compute stage's quads from its threads' ids, which only one axis keeps consecutive
+    auto const is_linear = info.workgroup[0] % 4 == 0 && info.workgroup[1] == 1 && info.workgroup[2] == 1;
+    for (auto const& q : is_linear ? cc::span<stage_violation const>() : cc::span<stage_violation const>(f.quad_calls))
+        report(diagnostic_kind::invalid_entry_point, q.file, span_of(q.file, q.call),
+               cc::format("{} forms quads along one axis, so a compute entry point that reaches it has a workgroup of "
+                          "(x, 1, 1) whose x is a multiple of 4, and {}'s is ({}, {}, {})",
+                          out.at(q.callee).name, s.name, info.workgroup[0], info.workgroup[1], info.workgroup[2]));
     auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
     for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
         report(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
@@ -2891,7 +2912,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                     cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));
-    if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0)
+    if (f.is_failed || !f.stage_violations.empty() || reaches_discard
+        || (info.stages & stage_bit(info.entry_stage)) == 0 || (!is_linear && !f.quad_calls.empty()))
         return;
     f.entry.body = f.add_list(f.block);
 

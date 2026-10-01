@@ -423,6 +423,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 
 * **EMIT-146** A subgroup operation is the target's own, by the table below, with its lane converted to the target's lane type.
   HLSL writes an inclusive prefix as the exclusive one combined with the invocation's own value, and a shuffle by an offset as `WaveReadLaneAt` of the lane it computes.
+  Its bitwise reductions take unsigned integers alone, so one of `int`s reduces them as `uint`s and converts back.
   MSL's ballot is 64 bits, which fill the low two components of the `uint4`.
 * **EMIT-147** `@subgroup_size` and `@subgroup_invocation_id` are `WaveGetLaneCount()` and `WaveGetLaneIndex()` in HLSL, read into locals at the top of the entry point.
   WGSL takes them as `@builtin(subgroup_size)` and `@builtin(subgroup_invocation_id)`, and MSL as `[[threads_per_simdgroup]]` and `[[thread_index_in_simdgroup]]`.
@@ -430,7 +431,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   No other text states it: the preference reaches the host beside the text, as a kernel's shape does in MSL (EMIT-59).
   sg's vulkan backend asks the pipeline for subgroups of `n` where the device runs that size in a compute stage, and WGSL and MSL have no way to ask.
 * **EMIT-149** `workgroup_uniform_load(m)` is `workgroupUniformLoad(&m)` in WGSL.
-  HLSL and MSL write the workgroup barrier of EMIT-131, then read `m` into a local.
+  HLSL and MSL write the workgroup barrier of EMIT-131, read `m` into a local, and write the barrier again ([why](why/emitting.md#emit-149)).
 * **EMIT-150** A `@coherent` member is `globallycoherent` in HLSL, which DXC writes as SPIR-V's `Coherent` for vulkan, and its declaration carries `coherent(device)` in MSL, from MSL 3.2.
   The barrier that publishes its writes is EMIT-131's, which is device-scoped in HLSL and MSL; WGSL lacks `device_coherence` (EMIT-109).
 * **EMIT-151** An image subscript is the `load` or the `store` it stands for (CHK-367), and a compound assignment through one loads the texel once into a local.

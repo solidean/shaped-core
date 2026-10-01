@@ -432,6 +432,7 @@ if(SC_BUILD_TESTS)
                 sampling.sgl:*
                 shapes.sgl:*
                 stages.sgl:*
+                subgroups.sgl:*
         )
     endif()
 

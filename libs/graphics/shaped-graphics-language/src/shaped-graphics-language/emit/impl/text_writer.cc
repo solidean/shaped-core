@@ -476,7 +476,7 @@ struct writer
     }
 
     /// Every call is written from its registry record; nothing here knows one builtin from another.
-    rendered call(flat_call const& c)
+    rendered call(flat_call const& c, check::type_id type)
     {
         auto const& record = *p.m.builtin_function(c.intrinsic);
         auto arguments = cc::vector<rendered>();
@@ -496,7 +496,12 @@ struct writer
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
             auto result = how.custom(
-                {.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins, .data = how.data, .mint = mint});
+                {.target = d.language(),
+                 .arguments = arguments,
+                 .builtins = *p.m.builtins,
+                 .data = how.data,
+                 .mint = mint,
+                 .result_type = p.m.builtin_type_of(type) != nullptr ? type_text(p, d, type) : cc::string_view()});
             // the statements its value needs, ahead of the one that holds it
             for (auto const& l : result.lines)
                 line(l);
@@ -603,7 +608,7 @@ struct writer
                 result = {.text = cc::format("{}.{}", object, planned.members[planned.member_of[member.member]].name)};
             },
             [&](flat_construct const&) { result = construct(x, is_broken); },
-            [&](flat_call const& c) { result = call(c); }, [&](flat_not const& n)
+            [&](flat_call const& c) { result = call(c, x.type); }, [&](flat_not const& n)
             { result = {.text = cc::format("!{}", wrapped(expr(n.operand), level::primary)), .binds = level::unary}; },
             [&](flat_and const& a) { result = logical("&&", level::logical_and, expr(a.lhs), expr(a.rhs)); },
             [&](flat_or const& o) { result = logical("||", level::logical_or, expr(o.lhs), expr(o.rhs)); },

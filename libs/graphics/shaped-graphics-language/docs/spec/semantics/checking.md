@@ -861,6 +861,8 @@ Its rules start from WGSL's, but refusing all that Tint refuses is no goal; wher
   A `discard` changes nothing, as in WGSL, where the pixel goes on as a helper of its quad.
 * **CHK-374** `workgroup_uniform_load(m)` waits at a workgroup barrier, then reads `m`, and its result is uniform ([why](why/checking.md#chk-374)).
   `m` is a member of a `@workgroup` binding, or a field of one at any depth; an index on the way is `unsupported-yet`, and an atomic or anything else is `wrong-kind-of-name`.
+  A component of a vector on the way is `unsupported-yet` too, since WGSL takes no pointer to one.
+  Its value is of a builtin type, as each argument of `select` is, until SGL has generics.
   It is a barrier, so it stands only in uniform control flow (CHK-282), and it is `@stages(.compute)`.
 
 ```sgl sketch
@@ -883,9 +885,13 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
 * **CHK-376** The **subgroup operations** are the builtins of the table below; each needs `subgroups` (CHK-322) and is `@stages(.pixel, .compute)` ([why](why/checking.md#chk-376)).
   A number is a numeric scalar of the prelude, and every operation that takes a number takes a vector of numbers too, componentwise.
 * **CHK-377** A subgroup operation stands only in uniform control flow, judged as CHK-282 judges a barrier, and its result is non-uniform ([why](why/checking.md#chk-377)).
-* **CHK-378** The lane of `subgroup_broadcast` is a constant `int`, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.
+* **CHK-378** The lane of `subgroup_broadcast` is a constant `int` from 0 to 127, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.
+  A constant is an `int` literal or the name of an `int` `const`; 128 is the most invocations a subgroup holds on any target, and WGSL refuses a lane past it.
   A lane that names no invocation of the subgroup, at run time, gives a value the language does not specify.
 * **CHK-379** A test whose run reaches a subgroup operation is `unsupported-yet` at the call: a run is one invocation, and has no subgroup.
+* **CHK-380** A compute entry point whose inlined body reaches a quad operation has a workgroup of one row, `(x, 1, 1)` with `x` a multiple of 4 ([why](why/checking.md#chk-380)).
+  Any other workgroup makes each such call `invalid-entry-point`.
+  That is the one shape whose quads HLSL forms of four consecutive invocations, as WGSL and MSL form every compute stage's.
 
 | operation | gives |
 |---|---|
@@ -1280,7 +1286,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-298, CHK-329, CHK-344 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380 |
 | `nesting-too-deep` | CHK-268 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |

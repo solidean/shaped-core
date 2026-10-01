@@ -690,6 +690,8 @@ struct sgl::check::flat_entry_point
     cc::vector<symbol_id> bindings;
     /// The grid a `compute` entry point is dispatched in; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
+    /// `function_info::preferred_subgroup_size`, which the host asks the device for and no text but dx12's states.
+    i32 preferred_subgroup_size = 0;
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
     /// The options it reaches, each once, in declaration order (CHK-355); empty for a test.
@@ -739,11 +741,12 @@ struct sgl::check::flat_entry_point
         return entry_stage == rhs.entry_stage && name == rhs.name && function == rhs.function && input == rhs.input
             && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
             && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
-            && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
-            && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
-            && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
-            && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
-            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names
-            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes && is_equal(options, rhs.options);
+            && preferred_subgroup_size == rhs.preferred_subgroup_size && is_equal(stage_inputs, rhs.stage_inputs)
+            && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels) && root == rhs.root
+            && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists)
+            && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites)
+            && is_equal(check_sites, rhs.check_sites) && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body
+            && names == rhs.names && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes
+            && is_equal(options, rhs.options);
     }
 };
