@@ -52,8 +52,8 @@ Add entries as we discover them, and remove them as they land.
 
 ## geometry
 
-- **`obb`.**
-  Missing, and it is what a rotated `aabb` becomes — until it exists, that combination is a deliberate compile error.
+- **A rotated `aabb`.**
+  It becomes the oriented `box` once that lands in wave 1 of [plans/old-tg-carryover.md](plans/old-tg-carryover.md); until then it is a deliberate compile error.
 - **The affine image of an embedded `sphere`.**
   It is an `ellipsoid<D, DAmbient, T>`, but building one means turning the circle's normal into an orthonormal basis of its plane, which `linalg` has no routine for.
   What is missing is a `tg::any_orthogonal(vec)` / `tg::orthonormal_basis(vec)`.
@@ -62,5 +62,3 @@ Add entries as we discover them, and remove them as they land.
   What a `sphere` or `ellipsoid` becomes under a projective map, so those pairs are unregistered rather than approximated.
 - **A clipped / half-open segment.**
   What a `ray` becomes under a projective map, for the same reason.
-- **`ball`.**
-  The solid counterpart to `sphere`, reusing the same `{center, radius}` encoding, the way the planned `halfspace` will reuse `plane`'s.

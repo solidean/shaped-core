@@ -6,17 +6,15 @@
 
 `geometry/` holds the geometric primitive *types* — `aabb`, `triangle`, `segment`, `ray`, `line`, `plane` — and the `object_traits` seam that classifies them.
 It depends on `linalg/`, since the primitives are phrased in `pos`/`vec`, and on `scalar/`.
-Geometric *queries* (containment, distance, closest point, intersection) and *measures* (area, centroid, bounds) are planned siblings: `geometry/query/`, `geometry/measure/`, ….
-They deliberately do **not** exist yet — the representations get to settle first.
-[plans/geometry-query-matrix.md](../plans/geometry-query-matrix.md) is the agreed shape of that query layer.
+Geometric *queries* (containment, distance, closest point, intersection) are member functions whose definitions live in `geometry/query/`, one header per verb.
+[plans/geometry-query-matrix.md](../plans/geometry-query-matrix.md) is that layer, and [plans/old-tg-carryover.md](../plans/old-tg-carryover.md) the object roster and the per-type verbs.
 
 ## What belongs here
 
-- Primitive **data** types under `primitives/`, each its own header, with cheap intrinsic members
-  only (storage, construction, equality). No pairwise queries on the types.
+- Primitive **data** types under `primitives/`, each its own header: storage, construction, equality, the per-type unary members, and the declarations of the query members.
 - The `object_traits<ObjT>` seam (`traits.hh`) and its `tg::traits::*` helpers.
-- Later: `query/`, `measure/`, `construct/` as separate subfolders (free functions over the
-  primitives).
+- `query/`: the definitions of the query members, plus GJK and EPA.
+- Later: `construct/` (hulls, fitting).
 
 ## What does NOT belong here
 
@@ -63,7 +61,14 @@ Two objects can share an encoding yet denote different sets.
 The planned `halfspace` will reuse the **exact same** `{normal, dist}` representation but denote `{x : dot(normal, x) <= dist}`, one side of the plane.
 The point-set framing is what makes that distinction explicit instead of accidental.
 So the interpretation lives in the type and its `object_traits`, never implicitly in the storage.
-`sphere` and the planned `ball` are the same pairing — `sphere` is the surface, so its `intrinsic_dim` is `D - 1`.
+The boundary types are the same pairing: `sphere` and `sphere_boundary` share `{center, radius}` and denote the ball and its surface.
+
+### Maximal by default, boundaries as types of their own
+
+An object type denotes the **largest** set its representation can mean: `aabb3` is the solid box, `sphere3` the ball.
+Its boundary is a separate struct per family — `aabb_boundary<D, T>`, `sphere_boundary<D, DAmbient, T>`, with `aabb3_surface`-style typedefs in 3D — and `.boundary()` / `.solid()` convert explicitly.
+A type in a diagnostic is then exactly the set its doc states, and passing a surface where a solid was meant does not compile.
+A *mantle* is a boundary without its flat caps (`cylinder_mantle`), and is a type of its own too.
 
 ### `sphere` and `ellipsoid` carry an embedding dimension
 
@@ -75,10 +80,8 @@ A `sphere`'s `{center, radius}` does not say which plane the circle lies in, so 
 Its primary template is therefore left undefined and each supported pair is a specialization: `sphere<D, D, T>` is `{center, radius}`, and `sphere<2, 3, T>` adds the plane's normal.
 A pair with no specialization is an incomplete type, which is the same "opt in per case, never a silent default" stance `object_traits` takes.
 
-### Minimal surface, no queries yet
+### Named vertex members
 
-The primitives carry only storage, constructors and a defaulted `operator==`.
-No `contains`, `distance`, `at(t)`, area or `make_*` factories: those are deferred until the representations have settled, so no API gets baked in that we would then rework.
 Named vertex members (`pos0`/`pos1`/`pos2`) are used instead of the `data[]`/`operator[]` storage of the linalg types.
 A triangle's vertices are distinct sub-objects rather than interchangeable components, so the linalg "no `.x/.y`, index only" rule does not apply here.
 

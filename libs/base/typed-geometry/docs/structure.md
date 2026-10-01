@@ -275,12 +275,11 @@ geometry/
     ray.hh          [done]     {origin + t*dir : t >= 0}
     line.hh         [done]     {origin + t*dir : t in R}
     plane.hh        [done]     hyperplane {x : dot(normal,x) == dist}
-    sphere.hh       [done]     sphere surface {x : distance(x, center) == radius}
-    ellipsoid.hh    [done]     ellipsoid surface {center + sum_i u_i * semi_axes[i] : |u| == 1}
+    sphere.hh       [done]     ball {x : distance(x, center) <= radius}; sphere_boundary is the surface
+    ellipsoid.hh    [done]     solid ellipsoid {center + sum_i u_i * semi_axes[i] : |u| <= 1}; ellipsoid_boundary the surface
     primitives.hh   [done]
-    # planned: obb, ball, quadric, polygon, ...
-  query/            [planned]  # distance, projection, closest, intersection, intersects, containment, ...
-  measure/          [planned]  # area, volume, centroid, bounds, moments
+    # planned: halfspace, box, capsule, cylinder, cone, ... — see plans/old-tg-carryover.md
+  query/            [planned]  # the member verbs' definitions: one header per verb, plus GJK / EPA in impl/
   construct/        [planned]  # hull, fitting, primitives_from_points
   geometry.hh       [done]
   all.hh            [done]
@@ -292,10 +291,9 @@ Every primitive denotes a **set of points**, classified by an `object_traits` sp
 Each primitive also registers what it becomes under a transform.
 [modules/transform.md](modules/transform.md) carries the registration table and why its gaps are missing types rather than skipped work.
 
-Queries are intentionally **not** implemented yet — the representations settle first.
-When they land, members stay intrinsic and cheap (`ray.at(t)`, `aabb.center()`, `triangle.area()`).
-Symmetric or cross-type queries are free functions: `distance(a, b)`, `intersection(a, b)`.
-[plans/geometry-query-matrix.md](plans/geometry-query-matrix.md) is the agreed shape for that layer.
+Every query is a member — `a.intersects(b)`, `p.distance_to(seg)`, `tri.area()` — declared per type and defined per verb under `query/`.
+Measures are per-type inline members rather than a `measure/` module.
+[plans/geometry-query-matrix.md](plans/geometry-query-matrix.md) is the query layer, and [plans/old-tg-carryover.md](plans/old-tg-carryover.md) the object roster and verb tables.
 
 ## curves/ [planned]
 

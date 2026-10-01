@@ -1,185 +1,208 @@
-# Plan: organizing the geometric query matrix (distance / closest / intersects / …)
+# Plan: the geometric query layer (distance / closest / intersects / …)
 
-Status: **proposal** — no code yet.
-This is the agreed shape for `geometry/query/`, settled before any binary query gets implemented.
+Status: **agreed, being built** — the infrastructure lands first, then the objects in waves.
+This is the shape of `geometry/query/`: the verbs, how a verb finds the code for a pair, the convex floor, and what a verb promises on a special case.
 Background: [structure.md](../structure.md) for the `geometry/` roadmap, [modules/geometry.md](../modules/geometry.md) for the set-of-points model and `object_traits`.
+[old-tg-carryover.md](old-tg-carryover.md) is the object roster and the per-verb tables.
 
-## Context — the problem
+## The problem
 
-Binary geometric queries are inherently O(object_types²) in pairs, times the number of verbs.
-The verbs: `distance`, `distance_sqr`, `closest_points`, `intersects`, `intersection`, `contains`, `project`.
-Written naively that is a large, ever-growing pile of hand-written functions.
-It is tedious to author, error-prone for symmetry (`distance(a,b)` vs `distance(b,a)`), and hard to discover — "which pairs actually support `intersection` today?".
-The primitives that already landed (`aabb`, `triangle`, `segment`, `ray`, `line`, `plane`) make it concrete and imminent.
+Binary geometric queries are O(object_types²) in pairs, times the number of verbs.
+Written naively that is a large, ever-growing pile of hand-written functions: tedious, error-prone for symmetry, and hard to discover.
+The old tg had about 8k lines of verbs, 3.7k of them in one `intersection.hh`, every mirrored pair a hand-written forwarder — two of which were misspelled and silently dead.
 
-The goal: keep the *hand-written* surface close to O(n), let the rest fall out generically, and make "what do we have?" answerable from one place.
+The goal: the hand-written surface grows with the number of objects rather than its square, and "what do we have?" has one answer.
 
 ## Decision summary
 
-1. **Files are organized by operation**, one header per verb under `geometry/query/`.
-2. **Kernels vs. derived**: hand-write a minimal kernel per pair, and derive the other verbs once, generically.
-3. **A generic convex kernel via support functions (GJK)** collapses the kernel matrix from O(n²) to ~O(n) support functions.
-   It is a permanent floor, not a placeholder.
-4. **Symmetry is handled once**, via a canonical argument order (`object_order` in `object_traits`) plus a generic swap.
-5. **Discoverability** comes from compile-time capability concepts plus a maintained support matrix in the query module doc.
+1. **Every query is a member**, declared per type and defined per verb (`geometry/query/<verb>.hh`).
+2. **One class template per verb is the seam**, specialized per pair; the verb's one generic function walks a fixed ladder of fallbacks.
+3. **Symmetry by probing both orders**: a kernel is written once, in either order.
+4. **A generic convex kernel via support functions (GJK)** collapses the kernel matrix to ~O(n) support functions, and EPA on top of it gives penetration.
+5. **Realtime first**: the verbs assume special cases away, never assert, and let `inf` / `NaN` propagate; an opt-in build flag logs each assumption that is violated.
 
-## 1. Organize by operation
+## 1. The verbs, as members
+
+| member | returns |
+|---|---|
+| `a.intersects(b)` | `bool` |
+| `a.contains(b)` | `bool` — every point of `b` is in `a` |
+| `a.intersection_with(b)` | `cc::optional<X>`, X the generic-case shape (see §5) |
+| `a.closest_points_to(b)` | `cc::pair<pos, pos>`, the point of `a` first |
+| `a.closest_point_to(b)` | the point of `a` nearest `b`; `obj.closest_point_to(p) == p.project_to(obj)` |
+| `a.distance_to(b)` / `a.distance_sqr_to(b)` | `T` |
+| `a.signed_distance_to(b)` | `T`, negative inside `b`; only for `b` with an inside |
+| `a.project_to(b)` | `a` mapped onto `b`: a `pos` for a `pos`, a segment for a segment onto a plane |
+| `r.intersection_parameter_with(b)` | `tg::hits<N, T>` for a surface, `cc::optional<tg::hit_interval<T>>` for a solid |
+| `r.closest_intersection_parameter_with(b)` | `cc::optional<T>` — the first hit, or the interval's start (0 from inside) |
+| `a.separation_from(b)` | `cc::optional<tg::separation<D, T>>`, `{normal, depth}`; bounded convex solids only |
+| `a.intersects(b, eps)`, `a.contains(b, eps)` | `bool`, the bracket contract of §6; only where a kernel can give it cheaply |
+
+The suffix rule: a preposition where the relation reads from the subject (`_to`, `_with`, `_from`), bare names for predicates.
+The unary verbs — measures, bounds, parameters, sampling — are per-type members and live in [old-tg-carryover.md](old-tg-carryover.md).
+
+## 2. Declarations per type, definitions per verb
+
+Each type header declares the verbs it supports, by hand, in one commented block:
+
+```cpp
+template <int D, class T>
+struct tg::aabb
+{
+    // …
+
+    // queries — defined in geometry/query/, see docs/plans/geometry-query-matrix.md
+public:
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_to(Obj const& obj) const;
+    // … one line per verb
+};
+```
+
+Each verb's header defines that member for every type as a forwarding block into one generic function:
+
+```cpp
+// geometry/query/distance.hh
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb<D, T>::distance_to(Obj const& obj) const { return tg::impl::distance_to(*this, obj); }
+```
+
+Including `distance.hh` makes `distance_to` callable on every type and pulls in nothing else.
+Hand-written declarations cost a few lines per type and buy a header that says what the type can be asked.
+A shared base declaring every verb once was considered and rejected for that reason.
+
+## 3. The seam, the ladder, symmetry
+
+**A kernel is a specialization** of the verb's op template, whose primary is left undefined:
+
+```cpp
+template <class A, class B> struct tg::impl::distance_sqr_op;   // undefined
+
+template <int D, class T>
+struct tg::impl::distance_sqr_op<tg::pos<D, T>, tg::aabb<D, T>>
+{
+    static constexpr T apply(pos<D, T> const& p, aabb<D, T> const& b) { /* clamp per axis */ }
+};
+```
+
+A specialization declared after the generic function is still found when it is instantiated.
+A *qualified* overloaded call (`tg::impl::distance_sqr(a, b)`) would not be: its name lookup happens where the template is written.
+ADL would find later overloads, but only in namespace `tg` itself and only for unqualified calls, which the tg guidelines rule out.
+
+**The ladder** in each verb's generic function is an ordered `if constexpr` probe, and its order is the priority:
+
+```cpp
+if constexpr (has_op<distance_sqr_op, A, B>)       return distance_sqr_op<A, B>::apply(a, b);
+else if constexpr (has_op<distance_sqr_op, B, A>)  return distance_sqr_op<B, A>::apply(b, a);
+else if constexpr (/* a is a pos and b projects */) return (a - a.project_to(b)).length_sqr();
+else { auto const [pa, pb] = a.closest_points_to(b); return (pb - pa).length_sqr(); }   // GJK at the bottom
+```
+
+`has_op` detects a complete specialization through a `requires` on its `apply`.
+
+**Symmetry is the second rung.**
+A kernel is written once in whichever order is natural, and a verb returning per-argument data (`closest_points_to`) swaps its result back.
+A ranking (`object_order`) was considered and dropped: a synthetic TU with 40 types and all 1,600 ordered pair calls compiled in the same median time either way.
+**A pair with a kernel in both orders is an error**, which a test checks, because the first rung would silently shadow the second.
+
+A concept's result is cached per TU, so `has_op<A, B>` evaluated before the kernel's header and again after is ill-formed with no diagnostic required.
+Each verb header includes its kernels before it defines anything, which is what keeps a call site from seeing both answers.
+
+**Fast paths beat the floor by partial ordering.**
+`distance_sqr_op<pos<D, T>, aabb<D, T>>` is more specialized by type than the constrained `<A, B>` GJK specialization, and constraints only break ties.
+
+## 4. The convex floor: GJK and EPA
+
+Most objects are convex: point, segment, triangle, aabb, box, sphere, capsule, cylinder, cone, ellipsoid, tetrahedron.
+For convex sets `closest_points` / `intersects` is one algorithm — GJK over the Minkowski difference — parameterized only by a **support function**, the point of an object farthest along a direction.
+Support is `tg::impl::support_op<Obj>`, a kernel like any other, and not a public member until a caller needs one.
+
+- **It is a permanent floor**, not scaffolding: a new convex type writes one support function and gets distance, closest points and intersects against every other.
+  Closed forms are added top-down by profiled call frequency, and GJK is their test oracle.
+- **The unbounded types** (ray, line, plane, halfspace) have support functions that run off to infinity, so they get closed forms from day one.
+- **GJK iterates to a relative tolerance and carries an iteration cap**; hitting the cap returns its current best answer.
+- **EPA** extends a GJK simplex that contains the origin to the penetration depth and normal: `a.separation_from(b)`.
+- **`intersection_with` is not a GJK derivative.**
+  It is defined only where the overlap is a representable primitive, and a pair whose overlap has no type has no `intersection_with` at all.
+
+**Boundary types are not convex**: a sphere's surface is not a convex set.
+They derive `intersects` from their solid: a boundary meets `b` exactly when the solid meets `b` and does not swallow it, `solid.intersects(b) && !solid.contains(b)`.
+Distance from inside a solid to its boundary needs one kernel per family.
+
+### What a scalar must provide for GJK
+
+GJK is refused only where `tg::traits::is_exact<T>` is true — the integers, `bool`, `tg::fixed_int` — because an exact type's caller wants an exact answer or a compile error, never a tolerance.
+Every other scalar is supported by default, wrappers included (an autodiff or an error-tracking float), as long as it upholds:
+- **a total order** through `<`, consistent with subtraction (a NaN may break it, as it does for floats);
+- **field operations** `+ - * /` with the usual identities up to rounding;
+- **a relative tolerance can be formed** from the scalar's own values (`tol * max(|a|, |b|)`), so no global epsilon is needed.
+
+An interval scalar whose `<` is not a total order cannot uphold the first, and should set `is_exact` or simply not be passed to a GJK pair.
+
+## 5. Results
+
+- **`cc::optional<X>`** for `intersection_with`, X the shape the overlap has when nothing is tangent, coincident or parallel.
+  `sphere3_surface ∩ sphere3_surface → optional<circle3>`, `aabb ∩ aabb → optional<aabb>`, `segment ∩ plane → optional<pos>`.
+  A special case lands inside X as whatever the formula gives; exact shapes are a later `_safe` verb's job.
+- **`tg::hits<N, T>`** for a ray or line against a surface: at most `N` parameters, sorted along the ray.
+- **`cc::optional<tg::hit_interval<T>>`** for a ray or line against a solid: `{start, end}`, the part of the ray inside.
+  Under the maximal default this is what `ray.intersection_parameter_with(sphere3)` returns; a ray tracer asks for the surface by type, `s.boundary()`.
+- **`cc::optional<tg::separation<D, T>>`** from EPA: `{normal, depth}`, empty when the solids do not overlap.
+
+## 6. Special cases
+
+The verbs are realtime first, and they **assume special cases away**: two 3D lines do not meet, a ray is never coplanar with the triangle it is tested against.
+- **No assert** on a data-dependent special case, ever.
+- **`inf` and `NaN` propagate.** A verb returns whatever its straight-line formula gives.
+  Plain arithmetic produces non-finite values once inputs are large enough (a `det` of a `mat4` with entries near 10^10), so guarding is the caller's job at its own boundaries.
+- **No UB and bounded iteration**: no computed index out of range, no integer division by zero, an iteration cap on every iterative kernel.
+- **Exact comparisons**, through `tg::traits::is_zero` and plain `<`; GJK's tolerance is internal to it.
+
+**The epsilon overloads** `a.intersects(b, eps)` and `a.contains(b, eps)` exist only for pairs where a kernel can give this bracket cheaply:
+- `true` if `a` and `b` share a point;
+- `false` if `a.distance_to(b) > eps`;
+- either, in between.
+
+It holds up to rounding — a pair within an ulp or two of either edge may land on the wrong side — and `eps` must be `>= 0`.
+Each kernel pads in whatever way is cheap for it (slab padding, a barycentric margin), which is why the in-between is left open.
+The exact meaning is already spelled `a.distance_to(b) <= eps`.
+
+**The opt-in check.**
+`SC_CHECK_GEOMETRY_SPECIAL_CASES` (default off, on in the `debug-nopch` presets) reaches C++ as `TG_CHECK_SPECIAL_CASES`.
+Each assumption a kernel makes is a `TG_SPECIAL_CASE(cond, "what")`, which logs a warning in the `tg` recording domain when the flag is on and compiles to nothing otherwise.
+nexus fails a passing test that logs an undeclared warning, so a test that feeds a special case by accident fails, and one that does so on purpose declares it with `nx::expect_warning`.
+
+**`_safe` verbs** that handle every special case exactly are later work, and their shape — a suffix, a policy argument or a namespace — is decided when the first one is written.
+
+## 7. Exact scalars
+
+A verb compiles for an exact scalar only where a kernel is exact on it, and GJK is refused there (§4).
+`aabb3i.intersects(aabb3i)` works through its closed form; a pair with no exact kernel is a constraint failure on `int`.
+
+## 8. Discoverability
+
+- **Capability concepts** — `has_distance_sqr<A, B>`, `has_intersection<A, B>` — are the machine-readable registry: true exactly when a kernel or a ladder rung serves the pair.
+  An unsupported pair is a constraint failure naming the concept, not an error deep in the dispatch.
+- **A support matrix** in [old-tg-carryover.md](old-tg-carryover.md): rows × columns × verbs, each cell a closed form, the GJK floor, a derivation, or unsupported.
+
+## Layout
 
 ```
 geometry/query/
-  closest_points.hh   # the kernel most others derive from
-  distance.hh         # distance / distance_sqr (derived)
-  intersects.hh       # bool (derived)
-  intersection.hh     # the actual hit set / parameters (mostly bespoke — see below)
-  contains.hh         # for solids (aabb, triangle area, halfspace, …)
-  project.hh          # closest_point(p, obj)
-  impl/               # generic machinery: support<>, gjk<>, simplex
+  intersects.hh  contains.hh  intersection.hh  closest_points.hh
+  distance.hh    project.hh   parameter.hh     separation.hh
+  hits.hh                     # tg::hits, tg::hit_interval, tg::separation
+  query.hh  all.hh
+  impl/
+    ops.hh                    # the op primaries, has_op, capability concepts
+    special_case.hh           # TG_SPECIAL_CASE
+    support.hh  gjk.hh  epa.hh
+    kernels/                  # closed forms, one header per object family they are written for
 ```
-
-Per-type-pair files (`segment_triangle.hh`) are literally O(n²) files, and they split symmetric operations across two homes.
-Per-single-type files (`segment_ops.hh`) have the same split problem.
-Per-operation means "where are all the `distance`s?" has exactly one answer.
-
-## 2. Kernels vs. derived — only the kernels are hand-written
-
-The verbs are not independent; the dependency graph collapses:
-
-```
-closest_points(a,b)  ──►  distance_sqr  ──►  distance      (sqrt, gated on has_sqrt)
-                                        └─►  intersects     (distance_sqr <= 0 for solids)
-intersection(a,b)    ──►  intersects    (= bool(intersection))
-contains / signed_distance  ──►  intersects for halfspace/plane/aabb
-```
-
-So each pair provides exactly one minimal kernel — usually `closest_points`, or `distance_sqr` when
-there is a cheaper closed form, or an `intersection_parameter` for ray-vs-X — and the derivations are
-written *once*:
-
-```cpp
-// distance.hh — derived layer
-template <class A, class B>
-    requires has_closest_points<A, B>
-[[nodiscard]] auto distance_sqr(A const& a, B const& b)
-{
-    auto const [pa, pb] = closest_points(a, b);
-    return (pb - pa).length_sqr();
-}
-
-template <class A, class B>
-    requires (has_distance_sqr<A, B> && traits::has_sqrt<scalar_of<A>>)
-[[nodiscard]] auto distance(A const& a, B const& b) { return tg::sqrt(distance_sqr(a, b)); }
-```
-
-A pair gets `distance` / `distance_sqr` / `intersects` for free the moment its kernel exists.
-The generic derivations must be *less specialized* than any explicit fast-path overload, so partial ordering picks the fast path where one is present.
-
-## 3. The lever: one generic convex kernel via support functions
-
-Almost everything here is a **convex** point set: point, segment, ray, line, triangle, aabb, plane, halfspace.
-For convex sets `closest_points` / `intersects` is *one* algorithm — GJK over the Minkowski difference.
-It is parameterized only by a **support function** `support(obj, dir) -> pos`, the farthest point of the object along `dir`:
-
-```cpp
-template <class A, class B>
-    requires (has_support<A> && has_support<B>)
-[[nodiscard]] auto closest_points(A const& a, B const& b) { /* GJK, in impl/ */ }
-```
-
-This turns the kernel matrix from O(n²) into **~O(n) support functions**.
-A new convex primitive writes one `support()` and immediately gets distance, closest and intersects against every existing convex type.
-Hand-written closed forms are then added as more-specialized overloads, only where they pay off.
-
-### How good is GJK out of the box? (the efficiency question)
-
-Short answer: **a genuinely good deal immediately, and a permanent floor** — not throwaway scaffolding we expect to replace everywhere.
-
-- **Support functions are tiny and fully inlinable.**
-  `aabb` picks min or max per axis by the sign of the `dir` component, branchless.
-  `triangle` and `segment` are an `argmax` of dot over 3 or 2 vertices, and `point` is itself.
-  With GJK monomorphized per pair these inline straight into the loop, and `if constexpr` on the dimension unrolls the simplex sizes.
-- **What does *not* vanish** is GJK's own control flow: the iterate-until-converge loop, the simplex and sub-distance update, and a convergence tolerance.
-  For our low-complexity primitives that is a handful of iterations, often 1–3.
-  It is still a loop with branches and an epsilon, where a closed form is straight-line and exact.
-- **Rough cost model.**
-  Box–box via GJK is a few iterations × (2 support evals + simplex update), so tens to low hundreds of compares and flops.
-  A closed-form box–box is about a dozen ops, making GJK roughly 5–10×.
-  point–aabb has a ~6-op closed form, so GJK is overkill there at ~20–50×.
-  segment–segment and point–triangle closed forms are a few dot products and beat GJK by ~5–20×.
-- **So which pairs get replaced over time?**
-  The **hot head** of the call distribution, conveniently also the simplest closed forms to write: point, segment, triangle and aabb combinations.
-  The **cold tail stays on GJK forever** — correct, allocation-free, and fast *enough* off the hot path.
-  We do **not** expect to replace almost every pairing.
-- **GJK is also the only long-term answer for genuine convex hulls and polytopes**, a future primitive where a closed form may not even exist.
-  So the machinery is not disposable.
-
-Caveats that shape where closed forms are *mandatory* rather than optional:
-
-- **Unbounded objects** (`ray`, `line`, `plane`, `halfspace`) have support functions that run off to infinity in some directions, which vanilla GJK does not handle.
-  They want closed forms regardless, and they are exactly the easy ones — ray–plane, point–plane and segment–plane are a few dot products.
-  So GJK's clean domain is the **bounded** convex primitives (point, segment, triangle, aabb), and the unbounded ones are bespoke from day one.
-- **`intersection`, meaning the constructed overlap geometry, is not what GJK gives you.**
-  GJK yields closest points, a boolean, and with EPA a penetration depth — not "the segment where these two overlap".
-  So `intersection.hh` is inherently more per-pair than `distance`/`intersects`: a separate, mostly hand-written verb rather than a GJK derivative.
-  **It is fine for `intersection` to stay partial by design.**
-  It is defined only for pairs whose overlap is itself a representable primitive: segment∩plane → a point, aabb∩aabb → an aabb, ray∩triangle → a point.
-  A pair whose overlap has no type we can name — a general triangle∩triangle region, or any non-convex result — simply has no `intersection` overload.
-  That is a deliberate boundary rather than a gap to backfill, and `has_intersection<A,B>` makes it explicit instead of a silent omission.
-  `intersects` and `distance` stay total across the convex matrix via GJK regardless; only the *constructive* verb is selective.
-
-Bottom line for the rollout: ship GJK as the convex floor, so the *whole* bounded-convex matrix lights up at once and correctly.
-Treat it as permanent infrastructure, and add closed forms top-down by profiled call frequency — immediately for the unbounded primitives.
-Use GJK results as the oracle to test the closed forms against.
-
-## 4. Symmetry — write one order, auto-swap
-
-Add a total ordering key to `object_traits`, called `object_order`.
-`intrinsic_dim` alone is not total: `segment` and `ray` tie.
-Implement kernels in canonical order, lower rank first, and one generic swap covers the mirror:
-
-```cpp
-template <class A, class B>
-    requires (object_order<A> > object_order<B> && has_closest_points<B, A>)
-[[nodiscard]] auto closest_points(A const& a, B const& b)
-{
-    auto const [pb, pa] = closest_points(b, a); // swap the result pair back into (a,b) order
-    return cc::pair{pa, pb};
-}
-```
-
-Symmetric scalar and bool verbs (`distance`, `intersects`, `intersection`) are even simpler.
-This halves the matrix and removes the "did I implement both orders?" footgun.
-
-## 5. Discoverability
-
-- **Capability concepts** — `has_closest_points<A,B>`, `has_intersection<A,B>`, `has_support<A>`, … — are the machine-readable registry.
-  Call sites, the swap layer and `static_assert`s all query them.
-  An unsupported pair then yields a clean `static_assert` ("no `distance()` for `plane`×`plane`") instead of a deep template error.
-- **A maintained support matrix** in the query module doc: rows × cols × verbs, each cell marking generic-via-GJK, a hand-written fast path, or unsupported.
-  Because most cells are "convex ⇒ all via support function", the table stays short.
-  List the support-enabled types once, then the handful of explicit fast paths and the non-convex or unbounded exceptions, kept current like the cheat-sheets.
-
-## Suggested rollout order
-
-1. `object_traits`: add `object_order` (a total order) plus a `point`/`pos` entry, so `pos` participates as a primitive.
-2. `query/impl/`: the `support<>` concept and support functions for the bounded primitives (point, segment, triangle, aabb), the GJK kernel, and the canonical-order swap.
-3. `closest_points.hh` (generic convex) plus the derived `distance.hh` / `intersects.hh` layer.
-   The whole bounded-convex matrix lights up.
-4. Unbounded primitives (`ray`/`line`/`plane`/`halfspace`): closed-form kernels.
-5. `intersection.hh` / `contains.hh`, per pair, starting with the most-used.
-   `intersection` stays partial by design: implement it only where the overlap is a representable primitive, and leave the rest to `has_intersection<A,B>` reporting "unsupported".
-6. Profile, then add closed-form fast paths for the hot pairs.
-   Write the support matrix doc and the capability concepts as the public discoverability surface.
-
-## Open questions
-
-- Where does `pos`/point sit — a real primitive with `object_traits` and `support`, or special-cased?
-  Leaning towards a real primitive, since it makes point–X fall out of the same machinery.
-- Penetration depth: EPA for overlapping convex now, or defer until a caller needs it?
-- Exact and symbolic scalars through GJK: the convergence tolerance assumes floating point, so closed forms are the exact-scalar path.
-  The matrix should mark which verbs are exact-safe.
 
 ## See also
 
-- [structure.md](../structure.md) — the `geometry/` roadmap (`query/`, `measure/`, `construct/`).
-- [modules/geometry.md](../modules/geometry.md) — set-of-points model, `object_traits`.
-- [traits.hh](../../src/typed-geometry/geometry/traits.hh) — where `object_order` would land.
+- [old-tg-carryover.md](old-tg-carryover.md) — the roster, the unary verbs, measures, parameters, sampling, and what was left out.
+- [modules/geometry.md](../modules/geometry.md) — the set-of-points model, `object_traits`, maximal objects and boundary types.
+- [coding-guidelines.md](../coding-guidelines.md) — members vs free functions, and the special-case rule.

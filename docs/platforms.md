@@ -187,6 +187,17 @@ The asserts themselves are tested where the switch is on.
 Like `SC_THREADS` it is whole-build, never per-target: an inline function compiled with and without the check in one program is an ODR violation.
 The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
 
+## Geometry special-case checks (`SC_CHECK_GEOMETRY_SPECIAL_CASES`)
+
+`SC_CHECK_GEOMETRY_SPECIAL_CASES` (default `OFF`) reports typed-geometry's special-case assumptions at runtime; it reaches C++ as `TG_CHECK_SPECIAL_CASES`, 0 or 1.
+The geometric queries assume special cases away — parallel lines, a zero-length segment, a ray in a triangle's plane — and return whatever their formula gives there.
+Checked, each such assumption that an input violates logs a warning in the `tg` recording domain; unchecked, nothing is paid for.
+
+A warning rather than an assert, because a test that feeds a special case on purpose has to be writable.
+nexus fails a passing test that logs an undeclared warning, so in a test it is a failure unless declared with `nx::expect_warning`; in an application it is a log line.
+
+Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on by the same `debug-nopch` presets.
+
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
 `SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
