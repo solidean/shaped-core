@@ -42,7 +42,8 @@ cc::vector<sgl_corpus_file> corpus_files()
     {
         if (!e.is_regular_file() || e.path().extension() != ".sgl")
             continue;
-        auto const relative = fs::relative(e.path(), root, ec).generic_string();
+        // lexical: every entry lies under root, and canonicalizing breaks where wasm reads a Windows host's paths
+        auto const relative = e.path().lexically_relative(root).generic_string();
         out.push_back({.path = cc::string(e.path().string().c_str()), .relative_path = cc::string(relative.c_str())});
     }
     cc::sort(out, [](sgl_corpus_file const& a, sgl_corpus_file const& b) { return a.relative_path < b.relative_path; });

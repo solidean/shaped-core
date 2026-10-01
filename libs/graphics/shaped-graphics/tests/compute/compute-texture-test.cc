@@ -285,6 +285,10 @@ namespace
 /// at its centre, and the first half of each axis clamps to texel 0.
 cc::shared_async<int> clamped_copy_mismatches(sg::context_handle ctx, sg::compute_pipeline_handle pipeline)
 {
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampled>();
     auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::texture);
     auto const dst = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::image);
