@@ -84,6 +84,9 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/primitives/tetrahedron.hh
     src/typed-geometry/geometry/primitives/quad.hh
     src/typed-geometry/geometry/query/impl/kernels/polytope.hh
+    src/typed-geometry/geometry/primitives/infinite.hh
+    src/typed-geometry/geometry/primitives/frustum.hh
+    src/typed-geometry/geometry/query/impl/kernels/unbounded.hh
     src/typed-geometry/geometry/primitives/primitives.hh
     src/typed-geometry/geometry/query/closest_points.hh
     src/typed-geometry/geometry/query/contains.hh
@@ -203,6 +206,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/halfspace-test.cc
         tests/geometry/box-test.cc
         tests/geometry/object-traits-test.cc
+        tests/geometry/wave3-test.cc
         tests/geometry/polytope-test.cc
         tests/geometry/capped-test.cc
         tests/geometry/round-test.cc

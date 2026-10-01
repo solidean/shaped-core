@@ -5,6 +5,7 @@
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
+#include <typed-geometry/geometry/primitives/infinite.hh>
 #include <typed-geometry/geometry/primitives/segment.hh>
 #include <typed-geometry/geometry/primitives/sphere.hh>
 #include <typed-geometry/geometry/traits.hh>
@@ -64,6 +65,11 @@ public:
 public:
     [[nodiscard]] constexpr cylinder_boundary<D, T> boundary() const { return cylinder_boundary<D, T>(axis, radius); }
     [[nodiscard]] constexpr cylinder_mantle<D, T> mantle() const { return cylinder_mantle<D, T>(axis, radius); }
+    /// the infinite cylinder around the axis's line.
+    [[nodiscard]] constexpr inf_cylinder<D, T> unbounded() const
+    {
+        return inf_cylinder<D, T>(axis.unbounded(), radius);
+    }
     /// the two end disks, at pos0 and at pos1, both facing along the axis.
     [[nodiscard]] constexpr cc::fixed_array<sphere<2, 3, T>, 2> caps() const
         requires(tg::traits::has_sqrt<T>)

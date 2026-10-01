@@ -497,3 +497,87 @@ constexpr bool tg::quad<D, T>::intersects(Obj const& obj, T eps) const
 {
     return tg::impl::intersects_within(*this, obj, eps);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cylinder<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cylinder_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cone<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cone_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::frustum<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::frustum_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}

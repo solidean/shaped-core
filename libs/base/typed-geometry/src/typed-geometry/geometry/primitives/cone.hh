@@ -6,6 +6,7 @@
 #include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/primitives/cylinder.hh>
+#include <typed-geometry/geometry/primitives/infinite.hh>
 #include <typed-geometry/geometry/primitives/sphere.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
@@ -43,6 +44,12 @@ public:
     [[nodiscard]] constexpr cone_boundary<D, T> boundary() const { return cone_boundary<D, T>(apex, axis, radius); }
     [[nodiscard]] constexpr cone_mantle<D, T> mantle() const { return cone_mantle<D, T>(apex, axis, radius); }
     [[nodiscard]] constexpr pos<D, T> base_center() const { return apex + axis; }
+    /// the infinite cone the slant extends to: opening angle twice atan(radius / height).
+    [[nodiscard]] constexpr inf_cone<D, T> unbounded() const
+        requires(tg::traits::has_sqrt<T> && tg::traits::has_trigonometry<T>)
+    {
+        return inf_cone<D, T>(apex, axis.normalized(), tg::atan(radius / axis.length()) * T(2));
+    }
     /// the base disk, facing away from the apex.
     [[nodiscard]] constexpr cc::fixed_array<sphere<2, 3, T>, 1> caps() const
         requires(tg::traits::has_sqrt<T>)

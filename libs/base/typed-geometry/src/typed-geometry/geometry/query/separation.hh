@@ -239,3 +239,45 @@ constexpr auto tg::quad<D, T>::separation_from(Obj const& obj) const
 {
     return tg::impl::separation_from(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}

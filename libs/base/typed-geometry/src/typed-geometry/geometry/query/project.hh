@@ -235,3 +235,45 @@ constexpr auto tg::quad<D, T>::project_to(Obj const& obj) const
 {
     return tg::impl::project_to(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}

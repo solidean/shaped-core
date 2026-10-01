@@ -282,6 +282,10 @@ tg::hemisphere<3,T> {pos center; T radius; vec normal}  // the half ball the nor
 tg::tetrahedron<3,T> {pos pos0..pos3}         // solid hull; tetrahedron_boundary; .faces()[i] opposite vertex i
 tg::quad<D,T>     {pos00, pos10, pos11, pos01}  // BILINEAR patch (need not be planar): at(comp2), bounds, edges,
                                               //   ray crossings; no area / support / sampling (not convex, not flat)
+tg::inf_cylinder<D,T> {line axis; T radius}  // unbounded tube (2D: a slab); _boundary. cylinder.unbounded() gives one
+tg::inf_cone<D,T> {pos apex; vec dir; angle opening_angle}  // single nappe, dir unit, opening < 180deg; _boundary
+tg::frustum<3,T>  {plane planes[6]}           // left right bottom top near far, normals OUTWARD (inside: <= dist);
+                                              //   .vertices() 8 corners (bit0 right, bit1 top, bit2 far); _boundary
 tg::triangle<D,T> {pos pos0, pos1, pos2}      // filled triangle (hull of 3 verts), 2D patch  — finite
 tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,1]}, 1D        — finite
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite

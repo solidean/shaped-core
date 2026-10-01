@@ -483,3 +483,87 @@ constexpr auto tg::quad<D, T>::closest_point_to(Obj const& obj) const
 {
     return tg::impl::closest_point_to(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}

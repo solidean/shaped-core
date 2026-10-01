@@ -1,6 +1,6 @@
 # Plan: carrying the old typed-geometry over
 
-Status: **agreed, being built** — waves 1 and 2 have landed; wave 3 is next.
+Status: **landed** for waves 1–3; polygon and polyline, and the items under *Left out*, remain.
 The old typed-geometry is the reference for *what* the surface was, never for *how*: every geometric algorithm is reimplemented.
 [geometry-query-matrix.md](geometry-query-matrix.md) is the binary-query machinery this builds on.
 
@@ -104,7 +104,30 @@ The ball is that case: rejection from the enclosing cube measured 2.5x faster in
 
 ## Support matrix
 
-Filled in as kernels land: rows × columns × verbs, each cell a closed form (**C**), the GJK floor (**G**), a derivation (**D**) or unsupported.
+How each object answers, by query.
+**C** is a closed form, **G** the GJK / EPA floor (any two objects marked G answer each other), **D** a derivation from another verb, **–** unsupported.
+"Point" columns are a `pos` against the object; "Line" is a line, ray or segment against it.
+
+| object | point project | point contains | convex pair (G) | Line parameters | notes |
+|---|---|---|---|---|---|
+| `pos`, `segment`, `triangle` | C | D | G | C (triangle; 2D linear pairs) | segment–segment closest points C |
+| `ray`, `line` | C | D | – (unbounded) | – | |
+| `plane`, `halfspace` | C | D | – (unbounded) | C | against anything with a support: intersects C, halfspace contains C |
+| `aabb` | C | D | G | C | aabb–aabb, ball–aabb C; `aabb_boundary` project / parameters C |
+| `box` | – (not orthogonal) | C | G | C (own frame) | box–box intersects C (SAT) |
+| `sphere` (ball) | C | D | G | C | ball–ball C; surface, disk, circle C |
+| `ellipsoid` | – | C | G | C (unit-ball frame) | |
+| `capsule` | C | D | G | C | |
+| `cylinder` | C | D | G | C | surface and tube C |
+| `cone` | C (profile) | D | G | C | surface and mantle C |
+| `hemisphere` | C | D | G | C | surface and dome C |
+| `tetrahedron` | C | C | G | C | faces C |
+| `quad` | – | – | – (not convex) | C | |
+| `inf_cylinder`, `inf_cone` | C | D / C | – (unbounded) | C | inf_cylinder–ball intersects C |
+| `frustum` | – | C | G | C | |
+
+`distance_to` derives from closest points, which derive from a projection for a point and from GJK otherwise; `intersects` and `contains` for a point derive from the projection.
+A boundary type meets an object when its solid does without containing it, wherever both of those answer.
 
 ## Left out
 

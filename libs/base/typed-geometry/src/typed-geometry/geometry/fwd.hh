@@ -129,6 +129,30 @@ struct tetrahedron_boundary;
 template <int D, class T>
 struct quad;
 
+/// every point within radius of a line; in 2D the slab between two lines.
+/// Infinite, intrinsic_dim D.
+template <int D, class T>
+struct inf_cylinder;
+/// the surface of an infinite cylinder.
+template <int D, class T>
+struct inf_cylinder_boundary;
+
+/// every ray from an apex within half the opening angle of a unit direction; convex below 180 degrees.
+/// Infinite, intrinsic_dim D.
+template <int D, class T>
+struct inf_cone;
+/// the surface of an infinite cone.
+template <int D, class T>
+struct inf_cone_boundary;
+
+/// the solid between six outward-facing planes: left, right, bottom, top, near, far; 3D only.
+/// Finite, intrinsic_dim 3.
+template <int D, class T>
+struct frustum;
+/// the six faces of a frustum.
+template <int D, class T>
+struct frustum_boundary;
+
 //
 // Query results
 //
@@ -447,5 +471,36 @@ using quad2f = quad<2, f32>;
 using quad3f = quad<3, f32>;
 using quad2d = quad<2, f64>;
 using quad3d = quad<3, f64>;
+
+
+template <class T>
+using inf_cylinder2 = inf_cylinder<2, T>;
+template <class T>
+using inf_cylinder3 = inf_cylinder<3, T>;
+template <class T>
+using inf_cylinder3_boundary = inf_cylinder_boundary<3, T>;
+template <class T>
+using inf_tube3 = inf_cylinder_boundary<3, T>;
+template <class T>
+using inf_cone2 = inf_cone<2, T>;
+template <class T>
+using inf_cone3 = inf_cone<3, T>;
+template <class T>
+using inf_cone3_boundary = inf_cone_boundary<3, T>;
+template <class T>
+using frustum3 = frustum<3, T>;
+template <class T>
+using frustum3_boundary = frustum_boundary<3, T>;
+template <class T>
+using frustum3_surface = frustum_boundary<3, T>;
+
+using inf_cylinder3f = inf_cylinder<3, f32>;
+using inf_cylinder3d = inf_cylinder<3, f64>;
+using inf_cone3f = inf_cone<3, f32>;
+using inf_cone3d = inf_cone<3, f64>;
+using frustum3f = frustum<3, f32>;
+using frustum3d = frustum<3, f64>;
+using frustum3f_surface = frustum_boundary<3, f32>;
+using frustum3d_surface = frustum_boundary<3, f64>;
 
 } // namespace tg

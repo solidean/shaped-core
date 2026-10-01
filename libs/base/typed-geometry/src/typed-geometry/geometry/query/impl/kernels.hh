@@ -18,6 +18,7 @@
 #include <typed-geometry/geometry/query/impl/kernels/round.hh>
 #include <typed-geometry/geometry/query/impl/kernels/sphere.hh>
 #include <typed-geometry/geometry/query/impl/kernels/triangle.hh>
+#include <typed-geometry/geometry/query/impl/kernels/unbounded.hh>
 
 // the generic floor, after every closed form
 #include <typed-geometry/geometry/query/impl/epa.hh>

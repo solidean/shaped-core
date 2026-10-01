@@ -14,10 +14,10 @@ namespace tg::impl
 {
 /// the parameters of a linear object within distance r of the infinite line a + s u, unclipped.
 /// A direction along the axis is handled exactly: all of it or nothing.
-template <class T>
-[[nodiscard]] constexpr cc::optional<hit_interval<T>> infinite_cylinder(linear_view<3, T> const& v,
-                                                                        pos<3, T> const& a,
-                                                                        vec<3, T> const& u,
+template <int D, class T>
+[[nodiscard]] constexpr cc::optional<hit_interval<T>> infinite_cylinder(linear_view<D, T> const& v,
+                                                                        pos<D, T> const& a,
+                                                                        vec<D, T> const& u,
                                                                         T r)
 {
     auto const uu = tg::dot(u, u);

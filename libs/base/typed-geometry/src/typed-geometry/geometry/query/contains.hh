@@ -240,3 +240,45 @@ constexpr auto tg::quad<D, T>::contains(Obj const& obj) const
 {
     return tg::impl::contains(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}

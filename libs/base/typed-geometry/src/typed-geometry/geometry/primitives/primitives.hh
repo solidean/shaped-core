@@ -8,8 +8,10 @@
 #include <typed-geometry/geometry/primitives/cone.hh>
 #include <typed-geometry/geometry/primitives/cylinder.hh>
 #include <typed-geometry/geometry/primitives/ellipsoid.hh>
+#include <typed-geometry/geometry/primitives/frustum.hh>
 #include <typed-geometry/geometry/primitives/halfspace.hh>
 #include <typed-geometry/geometry/primitives/hemisphere.hh>
+#include <typed-geometry/geometry/primitives/infinite.hh>
 #include <typed-geometry/geometry/primitives/line.hh>
 #include <typed-geometry/geometry/primitives/plane.hh>
 #include <typed-geometry/geometry/primitives/quad.hh>

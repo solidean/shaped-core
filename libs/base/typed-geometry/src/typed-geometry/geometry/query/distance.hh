@@ -936,3 +936,171 @@ constexpr bool tg::quad<D, T>::contains(Obj const& obj, T eps) const
 {
     return tg::impl::contains_within(*this, obj, eps);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cylinder<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cylinder_boundary<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cone<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cone_boundary<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::frustum<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::frustum_boundary<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}

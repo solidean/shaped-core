@@ -271,3 +271,45 @@ constexpr auto tg::quad<D, T>::intersection_with(Obj const& obj) const
 {
     return tg::impl::intersection_with(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cylinder_boundary<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::inf_cone_boundary<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::frustum_boundary<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
