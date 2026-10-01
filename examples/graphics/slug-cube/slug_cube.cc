@@ -442,6 +442,8 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         }
     }
 
+    // The atlas's textures are the context's, so they go before it shuts down rather than with the font afterwards.
+    font.atlas() = sr::slug_atlas();
     ctx->advance_epoch();
     co_await ctx->idle_completion();
     ctx->shutdown();
