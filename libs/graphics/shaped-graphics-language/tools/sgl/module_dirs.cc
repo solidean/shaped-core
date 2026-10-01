@@ -39,3 +39,17 @@ cc::result<sgl_tool::module_library, cc::string> sgl_tool::read_module_dirs(cc::
         result.files.push_back({.name = result.names[i], .source = result.sources[i]});
     return result;
 }
+
+cc::vector<sgl::library_file> sgl_tool::files_but(module_library const& library, cc::string_view source)
+{
+    namespace fs = std::filesystem;
+    auto const source_path = fs::path(cc::string(source).c_str_materialize());
+    auto result = cc::vector<sgl::library_file>();
+    for (auto const& f : library.files)
+    {
+        auto ec = std::error_code();
+        if (!fs::equivalent(fs::path(cc::string(f.name).c_str_materialize()), source_path, ec))
+            result.push_back(f);
+    }
+    return result;
+}

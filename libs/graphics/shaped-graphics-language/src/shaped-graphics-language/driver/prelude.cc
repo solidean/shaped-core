@@ -51,27 +51,51 @@ sgl::check::checked_prelude const* sgl::checked_prelude()
 
 namespace
 {
-/// `path` spelled one way: a `file://` uri decoded to its path, `/` as the separator, and lower case on Windows.
+/// `path` spelled one way: a `file://` uri decoded to its path, `/` as the separator, no `.`, `..` or empty segment
+/// that a lexical reading removes, and lower case on Windows.
+/// A uri that does not decode stays as written, so it matches only itself.
 [[nodiscard]] cc::string normalized(cc::string_view path)
 {
-    auto out = cc::string(path);
+    auto text = cc::string(path);
     if (constexpr auto scheme = cc::string_view("file://"); path.starts_with(scheme))
     {
-        auto decoded = cc::percent_decode(path.subview(scheme.size()));
-        if (!decoded.has_value())
-            return {};
-        out = cc::move(decoded.value());
-        // `/c:/x` is the Windows path `c:/x`
-        if (out.size() >= 3 && out[0] == '/' && out[2] == ':')
-            out = out.substring(1);
+        if (auto decoded = cc::percent_decode(path.subview(scheme.size())); decoded.has_value())
+        {
+            text = cc::move(decoded.value());
+            // `/c:/x` is the Windows path `c:/x`
+            if (text.size() >= 3 && text[0] == '/' && text[2] == ':')
+                text = text.substring(1);
+        }
     }
-    for (auto i = sgl::isize(0); i < out.size(); ++i)
+    for (auto i = sgl::isize(0); i < text.size(); ++i)
     {
-        if (out[i] == '\\')
-            out[i] = '/';
+        if (text[i] == '\\')
+            text[i] = '/';
 #ifdef CC_OS_WINDOWS
-        out[i] = cc::to_lower(out[i]);
+        text[i] = cc::to_lower(text[i]);
 #endif
+    }
+
+    auto segments = cc::vector<cc::string_view>();
+    auto rest = cc::string_view(text);
+    while (!rest.empty())
+    {
+        auto const end = rest.find('/');
+        auto const segment = end < 0 ? rest : rest.subview({.offset = 0, .size = end});
+        rest = end < 0 ? cc::string_view() : rest.subview(end + 1);
+        if (segment.empty() || segment == ".")
+            continue;
+        if (segment == ".." && !segments.empty() && segments.back() != "..")
+            segments.remove_back();
+        else
+            segments.push_back(segment);
+    }
+    auto out = cc::string(text.starts_with("/") ? "/" : "");
+    for (auto i = sgl::isize(0); i < segments.size(); ++i)
+    {
+        if (i > 0)
+            out += '/';
+        out += segments[i];
     }
     return out;
 }

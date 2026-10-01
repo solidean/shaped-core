@@ -1,6 +1,7 @@
 #include "analysis.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/string/uri.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
@@ -16,11 +17,13 @@ cc::mutex<cc::vector<cc::string>>& configured_module_dirs()
 }
 
 /// The `file://` uri of an absolute path, which a location in a module's file names.
+/// Percent-encoded as a uri path, so a space or `#` stays in the path.
 cc::string uri_of_path(cc::string_view path)
 {
-    auto uri = cc::string(path);
-    uri.replace_all("\\", "/");
-    return uri.starts_with("/") ? cc::format("file://{}", uri) : cc::format("file:///{}", uri);
+    auto slashed = cc::string(path);
+    slashed.replace_all("\\", "/");
+    auto const encoded = cc::percent_encode(slashed, cc::uri_component::path);
+    return encoded.starts_with("/") ? cc::format("file://{}", encoded) : cc::format("file:///{}", encoded);
 }
 } // namespace
 
@@ -163,6 +166,15 @@ cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document>
         a->diagnostics.push_back({.what = d, .file = user});
     for (auto const& d : a->ast.diagnostics)
         a->diagnostics.push_back({.what = d, .file = user});
+    // a reached module's own parse errors, which the check did not see
+    for (auto i = isize(0); i < a->library_parsed.size(); ++i)
+    {
+        auto const file = a->module.prelude_file_count() + i32(i);
+        for (auto const& d : a->library_parsed[i]->diagnostics)
+            a->diagnostics.push_back({.what = d, .file = file});
+        for (auto const& d : a->library_asts[i]->diagnostics)
+            a->diagnostics.push_back({.what = d, .file = file});
+    }
     for (auto const& d : a->module.diagnostics)
         a->diagnostics.push_back(d);
     sgl::test::contain_expected(a->module, a->diagnostics);

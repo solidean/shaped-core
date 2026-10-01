@@ -67,7 +67,7 @@ COMMAND("emit")
 
     auto const text = sgl::compile_to_text({.source = source.value(),
                                             .source_name = path,
-                                            .library = library.value().files,
+                                            .library = sgl_tool::files_but(library.value(), path),
                                             .entry_point = entry,
                                             .target = target,
                                             .run_tests = run_tests});

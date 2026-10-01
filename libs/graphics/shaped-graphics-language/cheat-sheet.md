@@ -42,7 +42,8 @@ r.value().library_files                    // the names of the library files the
 sgl::library_file{.name = "modules/view.sgl", .source = text}
                                            // a file the source may `use` a module of; every request takes a span of them
                                            // grouped by their `module` line; one without it, or named like the source, is left out
-sgl::is_same_path(a, b)                    // one file? a path or a file:// uri, either separator, any case on Windows
+sgl::is_same_path(a, b)                    // one path? a path or a file:// uri, either separator, `.`/`..` read lexically,
+                                           // any case on Windows; nothing is opened, so relative vs absolute differ
 
 #include <shaped-graphics-language/driver/test_source.hh>
 auto const t = sgl::test_source(text, "colors.sgl", library);   // library optional

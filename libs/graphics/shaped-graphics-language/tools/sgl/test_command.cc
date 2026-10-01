@@ -48,7 +48,7 @@ COMMAND("test")
             code = exit_usage;
             continue;
         }
-        auto const tested = sgl::test_source(source.value(), path, library.value().files);
+        auto const tested = sgl::test_source(source.value(), path, sgl_tool::files_but(library.value(), path));
         cc::eprint(tested.errors);
         cc::eprint(tested.warnings);
         auto line = cc::format("{}: {} of {} tests passed", path, tested.tests_passed, tested.tests_run);

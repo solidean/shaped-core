@@ -465,7 +465,7 @@ COMMAND("describe")
     }
 
     auto const described = sgl::describe(
-        {.source = source.value(), .source_name = path, .library = library.value().files, .module = module});
+        {.source = source.value(), .source_name = path, .library = sgl_tool::files_but(library.value(), path), .module = module});
     if (described.has_error())
     {
         cc::eprint(described.error());

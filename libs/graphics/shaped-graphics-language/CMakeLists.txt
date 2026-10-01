@@ -327,7 +327,8 @@ if(SC_BUILD_TOOLS)
     sc_nexus_binary(sgl KINDS tool tests)
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
     target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
-    target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples")
+    target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
+        SGL_LSP_TEST_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/sgl/lsp/tests/modules")
 endif()
 
 # Test executable

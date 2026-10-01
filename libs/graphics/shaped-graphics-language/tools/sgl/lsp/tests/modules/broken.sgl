@@ -1,0 +1,4 @@
+// A module that does not check, for the language server to report on the `use` that reaches it.
+module broken
+
+fun f() -> float => nope

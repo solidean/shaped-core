@@ -118,3 +118,14 @@ TEST("sgl driver - every test is run or fails, and none is ever left out")
     CHECK(nested.test_count == 2);
     CHECK(nested.errors.contains("declaration-not-allowed-here"));
 }
+
+TEST("sgl driver - is_same_path reads a path lexically, and a uri that does not decode matches only itself")
+{
+    CHECK(sgl::is_same_path("shaders/a.sgl", "./shaders//a.sgl"));
+    CHECK(sgl::is_same_path("shaders/a.sgl", "shaders/sub/../a.sgl"));
+    CHECK(sgl::is_same_path("shaders/a.sgl", R"(shaders\a.sgl)"));
+    CHECK(sgl::is_same_path("/src/a.sgl", "file:///src/a.sgl"));
+    CHECK(!sgl::is_same_path("shaders/a.sgl", "/abs/shaders/a.sgl"));
+    CHECK(!sgl::is_same_path("file:///a%zz.sgl", "file:///b%zz.sgl"));
+    CHECK(!sgl::is_same_path("file:///a%zz.sgl", ""));
+}
