@@ -73,7 +73,8 @@ A *mantle* is a boundary without its flat caps (`cylinder_mantle`), and is a typ
 ### `sphere` and `ellipsoid` carry an embedding dimension
 
 Both take **two** dimensions, `<D, DAmbient, T>`: the flat the object curves in, and the space that flat sits in.
-They coincide for the everyday cases (`sphere3f`, `ellipsoid2f`) and part when the object is embedded above its own dimension — `sphere2in3f` is a circle lying in 3D, `ellipsoid2in3f` an ellipse.
+They coincide for the everyday cases (`sphere3f`, `ellipsoid2f`) and part when the object is embedded above its own dimension.
+`sphere2in3f` (`disk3f`) is a disk lying in 3D, `ellipsoid2in3f` a filled ellipse.
 
 An `ellipsoid`'s semi-axes span its flat, so one general template covers every pair and the embedded case stores nothing extra.
 A `sphere`'s `{center, radius}` does not say which plane the circle lies in, so what it stores depends on the pair.

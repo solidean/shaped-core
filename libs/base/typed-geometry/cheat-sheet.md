@@ -272,24 +272,32 @@ tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite
 tg::line<D,T>     {pos origin; vec dir}       // {origin + t*dir : t in R}, 1D                 — infinite
 tg::plane<D,T>    {vec normal; T dist}        // hyperplane {x : dot(normal,x) == dist}        — infinite
-tg::sphere<D,DA,T>    {pos center; T radius}          // SURFACE {x : distance(x,center) == radius}    — finite
-tg::ellipsoid<D,DA,T> {pos center; vec semi_axes[D]}  // SURFACE {center + sum_i u_i*semi_axes[i] : |u| == 1} — finite
+tg::sphere<D,DA,T>    {pos center; T radius}          // SOLID ball {x : distance(x,center) <= radius}  — finite
+tg::ellipsoid<D,DA,T> {pos center; vec semi_axes[D]}  // SOLID {center + sum_i u_i*semi_axes[i] : |u| <= 1} — finite
+tg::sphere_boundary<D,DA,T>, tg::ellipsoid_boundary<D,DA,T>  // the SURFACE: same storage, == instead of <=
+// an object type is MAXIMAL: the plain name is the solid. Its boundary is a separate type, never implicit:
+//   s.boundary() -> sphere3f_surface;  b.solid() -> sphere3f.   3D also spells it _surface (sphere3f_surface).
+//   a boundary transforms as its solid does: b.transformed(t) == b.solid().transformed(t).boundary()
 // sphere/ellipsoid take TWO dims: D = the flat the object curves in, DA = the space that flat sits in.
-//   equal for the everyday case (sphere3f == sphere<3,3,f32>); apart when EMBEDDED: sphere2in3f is a circle in 3D.
+//   equal for the everyday case (sphere3f == sphere<3,3,f32>); apart when EMBEDDED: disk3f (= sphere2in3f) is a
+//   disk in 3D, circle3f (= sphere2in3f_boundary) its rim.
 //   ellipsoid ctor takes D axis vectors (or a vec[D] array): tg::ellipsoid3f(center, axis0, axis1, axis2).
 //     the axes need not be orthogonal, and they span the flat — so the embedded case stores nothing extra.
 //   sphere's {center,radius} does NOT pin down the plane, so what it stores depends on the pair: the PRIMARY
 //     template is undefined and each pair is a specialization — sphere<D,D,T> is {center,radius},
-//     sphere<2,3,T> adds the plane's normal: tg::sphere2in3f(center, radius, normal).
-//     A pair with no specialization (a circle in 4D) is an incomplete type, not a silently wrong encoding.
+//     sphere<2,3,T> adds the plane's normal: tg::disk3f(center, radius, normal).
+//     A pair with no specialization (a disk in 4D) is an incomplete type, not a silently wrong encoding.
 // members are public + named (pos0/min/normal/…), not data[]; default-ctor zero-inits; explicit ctors;
-//   defaulted operator==. No queries/measures/factories yet (representations still settling).
+//   defaulted operator==. Queries are MEMBERS (a.intersects(b), p.distance_to(seg)) — being built,
+//   see docs/plans/geometry-query-matrix.md.
 // dimensional aliases: aabb2/3, triangle2/3, …   concrete: aabb3f triangle3f segment2i ray3f plane3d
 //   (aabb/triangle/segment get f/d/i; ray/line/plane/sphere/ellipsoid get f/d — they carry real values)
-//   the embedded pair spells both dims: sphere2in3/ellipsoid2in3 (+ …2in3f / …2in3d)
+//   the embedded pair spells both dims: sphere2in3/ellipsoid2in3 (+ …2in3f / …2in3d), and disk3/circle3
+//   boundaries: sphere3f_boundary == sphere3f_surface, sphere2f_boundary, ellipsoid3d_surface, circle3f, …
 
 obj.transformed(t);   // every primitive; which transforms it accepts is a geometric statement:
 //   sphere              similarity -> sphere      |  affine -> ELLIPSOID (unless embedded: needs a basis of the flat)
+//   *_boundary          whatever its solid becomes, then .boundary()
 //   ellipsoid           affine     -> ellipsoid   (embedded or not — the map is one of the ambient space)
 //   aabb                scaling + translation ONLY (a rotated aabb needs obb, which does not exist)
 //   triangle, segment   affine, projective

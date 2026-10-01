@@ -34,16 +34,26 @@ struct line;
 template <int D, class T>
 struct plane;
 
-/// sphere surface {x : distance(x, center) == radius}. Finite, intrinsic_dim D-1.
+/// solid sphere (ball) {x : distance(x, center) <= radius}. Finite, intrinsic_dim D.
 /// D is the dimension of the flat it curves in, DAmbient the space that flat sits in.
 /// The primary template is undefined — each supported pair is a specialization, since the embedded case also has to name its flat.
 template <int D, int DAmbient, class T>
 struct sphere;
 
-/// ellipsoid surface {center + sum_i u_i * semi_axes[i] : |u| == 1}. Finite, intrinsic_dim D-1.
+/// sphere surface {x : distance(x, center) == radius}, the boundary of a sphere.
+/// Finite, intrinsic_dim D-1.
+template <int D, int DAmbient, class T>
+struct sphere_boundary;
+
+/// solid ellipsoid {center + sum_i u_i * semi_axes[i] : |u| <= 1}. Finite, intrinsic_dim D.
 /// Same dimension pair as sphere — the D semi-axes span the flat, so nothing else is stored when embedded.
 template <int D, int DAmbient, class T>
 struct ellipsoid;
+
+/// ellipsoid surface {center + sum_i u_i * semi_axes[i] : |u| == 1}, the boundary of an ellipsoid.
+/// Finite, intrinsic_dim D-1.
+template <int D, int DAmbient, class T>
+struct ellipsoid_boundary;
 
 //
 // Dimensional aliases
@@ -89,12 +99,37 @@ using ellipsoid2 = ellipsoid<2, 2, T>;
 template <class T>
 using ellipsoid3 = ellipsoid<3, 3, T>;
 
+// a boundary is spelled "_boundary"; in 3D it is also "_surface"
+template <class T>
+using sphere2_boundary = sphere_boundary<2, 2, T>;
+template <class T>
+using sphere3_boundary = sphere_boundary<3, 3, T>;
+template <class T>
+using sphere3_surface = sphere_boundary<3, 3, T>;
+
+template <class T>
+using ellipsoid2_boundary = ellipsoid_boundary<2, 2, T>;
+template <class T>
+using ellipsoid3_boundary = ellipsoid_boundary<3, 3, T>;
+template <class T>
+using ellipsoid3_surface = ellipsoid_boundary<3, 3, T>;
+
 // sphere and ellipsoid also come embedded above their own dimension, spelled "<D>in<DAmbient>":
-// a circle or an ellipse lying in 3D.
+// a disk or an elliptic patch lying in 3D, and their boundary curves.
 template <class T>
 using sphere2in3 = sphere<2, 3, T>;
 template <class T>
+using sphere2in3_boundary = sphere_boundary<2, 3, T>;
+template <class T>
 using ellipsoid2in3 = ellipsoid<2, 3, T>;
+template <class T>
+using ellipsoid2in3_boundary = ellipsoid_boundary<2, 3, T>;
+
+// the embedded sphere pair under its everyday names
+template <class T>
+using disk3 = sphere<2, 3, T>;
+template <class T>
+using circle3 = sphere_boundary<2, 3, T>;
 
 //
 // Concrete typedefs (2D and 3D; suffix f = f32, d = f64, i = i32)
@@ -143,15 +178,38 @@ using sphere3f = sphere<3, 3, f32>;
 using sphere2d = sphere<2, 2, f64>;
 using sphere3d = sphere<3, 3, f64>;
 
+using sphere2f_boundary = sphere_boundary<2, 2, f32>;
+using sphere3f_boundary = sphere_boundary<3, 3, f32>;
+using sphere2d_boundary = sphere_boundary<2, 2, f64>;
+using sphere3d_boundary = sphere_boundary<3, 3, f64>;
+using sphere3f_surface = sphere_boundary<3, 3, f32>;
+using sphere3d_surface = sphere_boundary<3, 3, f64>;
+
 using sphere2in3f = sphere<2, 3, f32>;
 using sphere2in3d = sphere<2, 3, f64>;
+using sphere2in3f_boundary = sphere_boundary<2, 3, f32>;
+using sphere2in3d_boundary = sphere_boundary<2, 3, f64>;
+
+using disk3f = sphere<2, 3, f32>;
+using disk3d = sphere<2, 3, f64>;
+using circle3f = sphere_boundary<2, 3, f32>;
+using circle3d = sphere_boundary<2, 3, f64>;
 
 using ellipsoid2f = ellipsoid<2, 2, f32>;
 using ellipsoid3f = ellipsoid<3, 3, f32>;
 using ellipsoid2d = ellipsoid<2, 2, f64>;
 using ellipsoid3d = ellipsoid<3, 3, f64>;
 
+using ellipsoid2f_boundary = ellipsoid_boundary<2, 2, f32>;
+using ellipsoid3f_boundary = ellipsoid_boundary<3, 3, f32>;
+using ellipsoid2d_boundary = ellipsoid_boundary<2, 2, f64>;
+using ellipsoid3d_boundary = ellipsoid_boundary<3, 3, f64>;
+using ellipsoid3f_surface = ellipsoid_boundary<3, 3, f32>;
+using ellipsoid3d_surface = ellipsoid_boundary<3, 3, f64>;
+
 using ellipsoid2in3f = ellipsoid<2, 3, f32>;
 using ellipsoid2in3d = ellipsoid<2, 3, f64>;
+using ellipsoid2in3f_boundary = ellipsoid_boundary<2, 3, f32>;
+using ellipsoid2in3d_boundary = ellipsoid_boundary<2, 3, f64>;
 
 } // namespace tg

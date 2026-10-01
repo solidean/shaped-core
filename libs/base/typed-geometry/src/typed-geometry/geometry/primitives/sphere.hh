@@ -10,29 +10,34 @@
 
 namespace tg
 {
-/// Sphere surface, stored as a center and a radius.
+/// Solid sphere — a ball — stored as a center and a radius.
 ///
-/// Represents {x : distance(x, center) == radius} inside the flat it lives in — the surface itself, not the solid interior, so intrinsic_dim is D - 1.
+/// Represents {x : distance(x, center) <= radius} inside the flat it lives in, interior included, so intrinsic_dim is D.
 /// D is the dimension of that flat, DAmbient the dimension of the space the flat sits in.
-/// `sphere<2, 2, T>` is a circle in the plane, `sphere<3, 3, T>` the ordinary sphere, `sphere<2, 3, T>` that same circle lying in 3D.
+/// `sphere<2, 2, T>` is a disk in the plane, `sphere<3, 3, T>` the ordinary ball, `sphere<2, 3, T>` that same disk lying in 3D.
 /// The radius should not be negative.
 ///
 /// The primary template is left **undefined**: what a sphere has to store depends on the pair, so every supported pair is its own specialization.
 /// A sphere that spans its ambient space is {center, radius}; one that does not needs the flat named as well, which {center, radius} alone does not do.
-/// Asking for a pair that has no specialization — a circle in 4D, say — is an incomplete type, not a silently wrong encoding.
+/// Asking for a pair that has no specialization — a disk in 4D, say — is an incomplete type, not a silently wrong encoding.
 ///
-/// Representation vs. interpretation: a future tg::ball will reuse this exact {center, radius}
-/// encoding but denote the solid {x : distance(x, center) <= radius}, the same way plane and the
-/// future halfspace share theirs.
+/// tg::sphere_boundary shares this encoding and denotes the surface; `.boundary()` and `.solid()` convert between them.
 template <int D, int DAmbient, class T>
 struct sphere;
 
+/// The boundary of a tg::sphere: {x : distance(x, center) == radius} inside its flat, so intrinsic_dim is D - 1.
+/// `sphere_boundary<3, 3, T>` is the sphere surface, `sphere_boundary<2, 2, T>` a circle, `sphere_boundary<2, 3, T>` a circle lying in 3D.
+/// Same specializations and storage as tg::sphere.
+template <int D, int DAmbient, class T>
+struct sphere_boundary;
+
 } // namespace tg
 
-/// A sphere spanning its ambient space: an ordinary sphere in 3D, a circle in 2D.
+/// A ball spanning its ambient space: an ordinary ball in 3D, a disk in 2D.
 ///
 ///     auto const s = tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f);
 ///     auto const e = s.transformed(some_affine);   // an ellipsoid, not a sphere
+///     auto const surface = s.boundary();          // a tg::sphere3f_surface
 template <int D, class T>
 struct tg::sphere<D, D, T>
 {
@@ -46,6 +51,13 @@ public:
     sphere() = default;
 
     explicit constexpr sphere(pos<D, T> const& center, T radius) : center(center), radius(radius) {}
+
+    // readings
+public:
+    [[nodiscard]] constexpr sphere_boundary<D, D, T> boundary() const
+    {
+        return sphere_boundary<D, D, T>(center, radius);
+    }
 
     // transformation
 public:
@@ -94,12 +106,12 @@ public:
     [[nodiscard]] friend constexpr bool operator==(sphere const&, sphere const&) = default;
 };
 
-/// A circle lying in 3D, which is a plane's worth of circle plus the plane.
+/// A disk lying in 3D, which is a plane's worth of disk plus the plane.
 ///
-/// {center, radius} says nothing about which plane the circle lies in, so this case carries the plane's normal on top.
-/// The normal is expected to be unit-length; its sign is a convention, both orientations name the same circle.
+/// {center, radius} says nothing about which plane the disk lies in, so this case carries the plane's normal on top.
+/// The normal is expected to be unit-length; its sign is a convention, both orientations name the same disk.
 ///
-///     auto const c = tg::sphere2in3f(tg::pos3f(0, 0, 0), 1.0f, tg::vec3f(0, 0, 1));   // unit circle in the xy-plane
+///     auto const d = tg::disk3f(tg::pos3f(0, 0, 0), 1.0f, tg::vec3f(0, 0, 1));   // unit disk in the xy-plane
 template <class T>
 struct tg::sphere<2, 3, T>
 {
@@ -116,6 +128,13 @@ public:
     {
     }
 
+    // readings
+public:
+    [[nodiscard]] constexpr sphere_boundary<2, 3, T> boundary() const
+    {
+        return sphere_boundary<2, 3, T>(center, radius, normal);
+    }
+
     // transformation
 public:
     /// A similarity carries the plane along with the circle, and the linear part is its uniform scale times a rotation —
@@ -123,7 +142,7 @@ public:
     /// A signed scale flips the normal, which names the same plane.
     ///
     /// The affine image is an ellipse in space — an ellipsoid<2, 3, T> — but naming its semi-axes needs an orthonormal
-    /// basis of the circle's plane, which linalg has no routine for yet, so that pair is a compile error for now.
+    /// basis of the disk's plane, which linalg has no routine for yet, so that pair is a compile error for now.
     template <class TransformT>
     [[nodiscard]] constexpr auto transformed(TransformT const& t) const
     {
@@ -153,8 +172,89 @@ public:
     [[nodiscard]] friend constexpr bool operator==(sphere const&, sphere const&) = default;
 };
 
+/// The surface of a ball spanning its ambient space: the sphere surface in 3D, a circle in 2D.
+template <int D, class T>
+struct tg::sphere_boundary<D, D, T>
+{
+    static_assert(D > 0, "sphere_boundary requires a positive dimension");
+
+    pos<D, T> center;
+    T radius = {};
+
+    // construction
+public:
+    sphere_boundary() = default;
+
+    explicit constexpr sphere_boundary(pos<D, T> const& center, T radius) : center(center), radius(radius) {}
+
+    // readings
+public:
+    [[nodiscard]] constexpr sphere<D, D, T> solid() const { return sphere<D, D, T>(center, radius); }
+
+    // transformation
+public:
+    /// Whatever the solid becomes, this is the boundary of that: a sphere surface, or an ellipsoid surface.
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        if constexpr (requires { t.custom_transform(*this); })
+            return t.custom_transform(*this);
+        else
+            return this->solid().transformed(t).boundary();
+    }
+
+    // comparison
+public:
+    [[nodiscard]] friend constexpr bool operator==(sphere_boundary const&, sphere_boundary const&) = default;
+};
+
+/// A circle lying in 3D: the boundary of a tg::disk3, with the same {center, radius, normal}.
+template <class T>
+struct tg::sphere_boundary<2, 3, T>
+{
+    pos<3, T> center;
+    T radius = {};
+    vec<3, T> normal;
+
+    // construction
+public:
+    sphere_boundary() = default;
+
+    explicit constexpr sphere_boundary(pos<3, T> const& center, T radius, vec<3, T> const& normal)
+      : center(center), radius(radius), normal(normal)
+    {
+    }
+
+    // readings
+public:
+    [[nodiscard]] constexpr sphere<2, 3, T> solid() const { return sphere<2, 3, T>(center, radius, normal); }
+
+    // transformation
+public:
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        if constexpr (requires { t.custom_transform(*this); })
+            return t.custom_transform(*this);
+        else
+            return this->solid().transformed(t).boundary();
+    }
+
+    // comparison
+public:
+    [[nodiscard]] friend constexpr bool operator==(sphere_boundary const&, sphere_boundary const&) = default;
+};
+
 template <int D, int DAmbient, class T>
 struct tg::object_traits<tg::sphere<D, DAmbient, T>>
+{
+    static constexpr int intrinsic_dim = D;
+    static constexpr int ambient_dim = DAmbient;
+    static constexpr bool is_finite = true;
+};
+
+template <int D, int DAmbient, class T>
+struct tg::object_traits<tg::sphere_boundary<D, DAmbient, T>>
 {
     static constexpr int intrinsic_dim = D - 1;
     static constexpr int ambient_dim = DAmbient;

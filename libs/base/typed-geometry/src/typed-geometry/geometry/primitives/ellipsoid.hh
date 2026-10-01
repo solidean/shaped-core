@@ -7,12 +7,13 @@
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
-/// Ellipsoid surface, stored as a center and its D semi-axis vectors.
+/// Solid ellipsoid, stored as a center and its D semi-axis vectors.
 ///
-/// Represents {center + sum_i u_i * semi_axes[i] : |u| == 1} — the surface itself, not the solid interior, so intrinsic_dim is D - 1.
+/// Represents {center + sum_i u_i * semi_axes[i] : |u| <= 1}, interior included, so intrinsic_dim is D.
+/// tg::ellipsoid_boundary shares this encoding and denotes the surface, |u| == 1.
 /// D is the dimension of the flat the ellipsoid curves in, DAmbient the dimension of the space that flat sits in, and D <= DAmbient.
 /// The two differ exactly when the object is embedded above its own dimension:
-/// `ellipsoid<2, 2, T>` is an ellipse in the plane, `ellipsoid<2, 3, T>` that same ellipse lying in 3D, `ellipsoid<3, 3, T>` the ordinary 3D ellipsoid.
+/// `ellipsoid<2, 2, T>` is a filled ellipse in the plane, `ellipsoid<2, 3, T>` that same ellipse lying in 3D, `ellipsoid<3, 3, T>` the ordinary 3D ellipsoid.
 ///
 /// The semi-axes need not be orthogonal, so this also covers a sheared image of a sphere.
 /// They also span the flat, which is why the embedded case needs no separate orientation — unlike tg::sphere, which carries a normal there.
@@ -65,6 +66,13 @@ public:
             semi_axes[i] = axes[i];
     }
 
+    // readings
+public:
+    [[nodiscard]] constexpr ellipsoid_boundary<D, DAmbient, T> boundary() const
+    {
+        return ellipsoid_boundary<D, DAmbient, T>(center, semi_axes);
+    }
+
     // transformation
 public:
     /// An affine map sends an ellipsoid to an ellipsoid: each semi-axis is carried along as a displacement.
@@ -96,8 +104,62 @@ public:
     [[nodiscard]] friend constexpr bool operator==(ellipsoid const&, ellipsoid const&) = default;
 };
 
+/// The boundary of a tg::ellipsoid: {center + sum_i u_i * semi_axes[i] : |u| == 1}, so intrinsic_dim is D - 1.
+/// `ellipsoid_boundary<3, 3, T>` is the ellipsoid surface, `ellipsoid_boundary<2, 2, T>` an ellipse curve.
+template <int D, int DAmbient, class T>
+struct tg::ellipsoid_boundary
+{
+    static_assert(D > 0, "ellipsoid_boundary requires a positive dimension");
+    static_assert(D <= DAmbient, "an ellipsoid cannot curve in more dimensions than the space it is embedded in");
+
+    pos<DAmbient, T> center;
+    vec<DAmbient, T> semi_axes[D] = {};
+
+    // construction
+public:
+    ellipsoid_boundary() = default;
+
+    /// the semi-axes in order; the solid's per-dimension constructors are reached through `.boundary()`.
+    explicit constexpr ellipsoid_boundary(pos<DAmbient, T> const& center, vec<DAmbient, T> const (&axes)[D])
+      : center(center)
+    {
+        for (int i = 0; i < D; ++i)
+            semi_axes[i] = axes[i];
+    }
+
+    // readings
+public:
+    [[nodiscard]] constexpr ellipsoid<D, DAmbient, T> solid() const
+    {
+        return ellipsoid<D, DAmbient, T>(center, semi_axes);
+    }
+
+    // transformation
+public:
+    template <class TransformT>
+    [[nodiscard]] constexpr auto transformed(TransformT const& t) const
+    {
+        if constexpr (requires { t.custom_transform(*this); })
+            return t.custom_transform(*this);
+        else
+            return this->solid().transformed(t).boundary();
+    }
+
+    // comparison
+public:
+    [[nodiscard]] friend constexpr bool operator==(ellipsoid_boundary const&, ellipsoid_boundary const&) = default;
+};
+
 template <int D, int DAmbient, class T>
 struct tg::object_traits<tg::ellipsoid<D, DAmbient, T>>
+{
+    static constexpr int intrinsic_dim = D;
+    static constexpr int ambient_dim = DAmbient;
+    static constexpr bool is_finite = true;
+};
+
+template <int D, int DAmbient, class T>
+struct tg::object_traits<tg::ellipsoid_boundary<D, DAmbient, T>>
 {
     static constexpr int intrinsic_dim = D - 1;
     static constexpr int ambient_dim = DAmbient;

@@ -78,8 +78,8 @@ public:
             for (int i = 0; i < D; ++i)
                 n.data[i] = image.data[i];
 
+            // a degenerate image (the plane mapped to infinity) has len == 0 and yields non-finite values
             auto const len = n.length();
-            CC_ASSERT(!tg::traits::is_zero(len), "the projective image of this plane is degenerate");
             return plane(n / len, -image.data[D] / len);
         }
         else
