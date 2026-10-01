@@ -1,16 +1,16 @@
 // The lit cube of sgl-cube, with one face carrying a Slug shape drawn by the cube's own pixel shader.
 //
-// That face's vertices carry an em coordinate like a UV, and the pixel shader asks the prelude's `slug_coverage` how
-// much of the shape covers the pixel: the shape is part of the surface, not a quad on top of it.
+// That face's vertices carry an em coordinate like a UV, and the pixel shader asks module `slug` how much of the shape
+// covers the pixel: the shape is part of the surface, not a quad on top of it.
 // The labels on the other faces are sr::slug_routine's quads, drawn after the cube against its depth.
+
+use slug
 
 @inline binding constants:
     view_projection: mat4
 
-// The shape the decal face shows, as the atlas placed it.
+// The shape the decal face shows, as the atlas placed it; its textures are the atlas's, bound as `slug.tables`.
 binding decal:
-    curves: texture_2d[float4]
-    bands: texture_2d[uint4]
     banding: float4
     glyph: int4
     color: float4
@@ -48,9 +48,9 @@ fun shade(color: float3, normal: vec3) -> float3:
     let light = 0.3 + 0.75 * lambert(n, vec3(0.45, 0.8, -0.4)) + 0.25 * lambert(n, vec3(-0.7, 0.15, 0.6))
     return color * min(light, 1.0)
 
-@pixel fun main_ps(p: pixel_input){decal} -> target:
+@pixel fun main_ps(p: pixel_input){slug.tables, decal} -> target:
     // Taken on every face, in uniform control flow, since its footprint comes from derivatives; only the decal face keeps it.
-    let coverage = slug_coverage(decal.curves, decal.bands, p.em, decal.banding, decal.glyph, false) * p.decal
+    let coverage = slug.coverage(p.em, decal.banding, decal.glyph, false) * p.decal
     let lit = shade(p.color, p.normal)
     let shaded = float3(mix(lit.x, decal.color.x, coverage), mix(lit.y, decal.color.y, coverage), mix(lit.z, decal.color.z, coverage))
     return {

@@ -4,7 +4,7 @@
 // Three ways a shape reaches the screen, all from one atlas:
 //   - each side face's label is a run of glyph quads sr::slug_routine draws with that face's matrix, depth-tested
 //     against the cube and pulled a hair toward the camera, so it lies on the face rather than fighting it;
-//   - the top face's star is no quad at all: the cube's pixel shader calls the prelude's `slug_coverage` with an em
+//   - the top face's star is no quad at all: the cube's pixel shader calls module `slug`'s `coverage` with an em
 //     coordinate the face's vertices carry, so the shape is part of the surface;
 //   - the caption is the same routine with a pixel-space matrix at depth zero, so nothing covers it.
 //
@@ -33,6 +33,7 @@
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/angle.hh>
+#include <sgl_modules/slug.hh>
 #include <slug_cube_shaders.hh>
 
 #if SLUG_CUBE_BACKEND_DX12
@@ -270,6 +271,8 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         cc::eprintln("the cube's pipeline did not build: {}", error != nullptr ? error->underlying().to_string() : cc::string("never ran"));
         co_return;
     }
+    // The atlas's textures as module `slug`'s binding, the one group sr's routine binds as well.
+    auto const tables_layout = ctx->cached.acquire_binding_group_layout<sgl_modules::slug::tables>();
     auto const decal_layout = ctx->cached.acquire_binding_group_layout<shaders::decal>();
 
     auto const vertices = ctx->persistent.create_buffer_from_data(build_cube_mesh(star.em_bounds), sg::buffer_usage::vertex_buffer);
@@ -380,24 +383,27 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         // Uploads first, on the list but outside the pass: the atlas's new glyphs and both instance arrays.
         auto const labels_prepared = sr::slug_routine::prepare(*cmd, font.atlas(), instances);
         auto const overlay_prepared = sr::slug_routine::prepare(*cmd, font.atlas(), overlay);
+        auto const tables = ctx->transient.create_binding_group(
+            *cmd, tables_layout,
+            sgl_modules::slug::tables{.curves = font.atlas().curve_texture().as_texture_view(),
+                                      .bands = font.atlas().band_texture().as_texture_view()});
         auto const decal = ctx->transient.create_binding_group(
             *cmd, decal_layout,
-            shaders::decal{.curves = font.atlas().curve_texture().as_texture_view(),
-                           .bands = font.atlas().band_texture().as_texture_view(),
-                           .banding = star.banding,
+            shaders::decal{.banding = star.banding,
                            .glyph = tg::vec4i(i32(star.glyph_location & 0xffff), i32(star.glyph_location >> 16), i32(star.band_info & 0xffff),
                                               i32(star.band_info >> 16)),
                            .color = tg::vec4f(0.96f, 0.80f, 0.30f, 1.0f)});
         {
             auto const depth = ctx->transient.create_texture_2d(
                 {.format = depth_format, .width = rt.width(), .height = rt.height(), .usage = sg::texture_usage::depth_stencil});
-            // A plain rendering rather than the cube's generated target: the routine's pipelines name slug.sgl's target set,
+            // A plain rendering rather than the cube's generated target: the routine's pipelines name slug_quads.sgl's target set,
             // and sg checks a named one against every pipeline bound in it.
             auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0.07f, 0.08f, 0.10f, 1.0f))},
                                                .depth_stencil_target = depth.as_depth_stencil_view().cleared(1.0f)});
 
             pass.bind_pipeline(**pipeline);
-            pass.bind_group(0, *decal);
+            pass.bind_group(0, *tables);
+            pass.bind_group(1, *decal);
             pass.bind_vertex_buffers({vertices.as_vertex_buffer()});
             pass.bind_index_buffer(indices.as_index_buffer());
             pass.set_inline_constants(shaders::constants{.view_projection = view_projection}.to_block());

@@ -246,14 +246,20 @@ sc_add_shader_package(
     NAMESPACE  sr::sgl_shaders
     SOURCE_DIR shaders
     LANGUAGE   sgl
+    MODULE_DIRS shaders/modules
     SHADERS
+        module:slug
         blit.sgl:*
         imgui.sgl:*
         raster_box_filter_mipmap.sgl:*
         nn_pool.sgl:*
         nn_upsample.sgl:*
-        slug.sgl:*
+        slug_quads.sgl:*
 )
+
+# sr's SGL modules, which another package `use`s by naming this directory in its own MODULE_DIRS.
+# Module `slug` is Slug's coverage: a mesh's own pixel shader draws a shape on its surface through it.
+set(SR_SGL_MODULE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders/modules" CACHE INTERNAL "sr's SGL module directory")
 
 sc_add_shader_package(
     TARGET     shaped-rendering
@@ -320,6 +326,7 @@ if(SC_BUILD_TESTS)
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
         tests/shader-package-test.cc
+        tests/slug-module-test.cc
         tests/slug-shape-test.cc
         tests/tza-test.cc
         tests/oidn-tiling-test.cc
@@ -330,7 +337,9 @@ if(SC_BUILD_TESTS)
         PRIVATE
         shaped-rendering
         nexus
+        shaped-graphics-language # the slug module's own tests run on SGL's interpreter
     )
+    target_compile_definitions(shaped-rendering-test PRIVATE SR_SGL_MODULE_DIR="${SR_SGL_MODULE_DIR}")
 
     sc_target_pch(shaped-rendering-test SG NEXUS) # 0.44
 

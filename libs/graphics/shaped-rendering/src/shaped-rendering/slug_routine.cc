@@ -2,6 +2,7 @@
 #include <clean-core/fwd.hh> // offsetof
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <sgl_modules/slug.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -12,18 +13,21 @@
 #include <shaped-rendering/slug_routine.hh>
 #include <sr_sgl_shaders.hh>
 
-// slug.sgl's instance stream reaches C++ as a generated struct; the public one has to be it byte for byte.
+// slug_quads.sgl's instance stream reaches C++ as a generated struct; the public one has to be it byte for byte.
 using generated_instance = sr::sgl_shaders::slug_vertex::per_instance;
-static_assert(sizeof(sr::slug_instance) == sizeof(generated_instance), "slug_instance is not slug.sgl's instance stream");
+static_assert(sizeof(sr::slug_instance) == sizeof(generated_instance),
+              "slug_instance is not slug_quads.sgl's instance stream");
 static_assert(offsetof(sr::slug_instance, em_to_object) == offsetof(generated_instance, em_to_object),
-              "em_to_object moved in slug.sgl");
-static_assert(offsetof(sr::slug_instance, origin) == offsetof(generated_instance, origin), "origin moved in slug.sgl");
+              "em_to_object moved in slug_quads.sgl");
+static_assert(offsetof(sr::slug_instance, origin) == offsetof(generated_instance, origin),
+              "origin moved in slug_quads.sgl");
 static_assert(offsetof(sr::slug_instance, em_bounds) == offsetof(generated_instance, em_bounds),
-              "em_bounds moved in slug.sgl");
-static_assert(offsetof(sr::slug_instance, banding) == offsetof(generated_instance, banding), "banding moved in slug.sgl");
+              "em_bounds moved in slug_quads.sgl");
+static_assert(offsetof(sr::slug_instance, banding) == offsetof(generated_instance, banding),
+              "banding moved in slug_quads.sgl");
 static_assert(offsetof(sr::slug_instance, glyph_location) == offsetof(generated_instance, glyph),
-              "glyph moved in slug.sgl");
-static_assert(offsetof(sr::slug_instance, color) == offsetof(generated_instance, color), "color moved in slug.sgl");
+              "glyph moved in slug_quads.sgl");
+static_assert(offsetof(sr::slug_instance, color) == offsetof(generated_instance, color), "color moved in slug_quads.sgl");
 static_assert(sizeof(tg::vec2f) == sizeof(sr::sgl_shaders::slug_vertex::per_vertex), "the corner stream is one float2");
 
 namespace sr
@@ -32,8 +36,8 @@ cc::shared_async<cc::unit> slug_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    auto const vs = sgl_shaders::slug.main_vs->acquire(ctx);
-    auto const ps = sgl_shaders::slug.main_ps->acquire(ctx);
+    auto const vs = sgl_shaders::slug_quads.main_vs->acquire(ctx);
+    auto const ps = sgl_shaders::slug_quads.main_ps->acquire(ctx);
     co_await cc::async_settled(vs);
     co_await cc::async_settled(ps);
 
@@ -55,8 +59,8 @@ cc::shared_async<cc::unit> slug_routine::init(sg::routine_init_scope scope)
         _corners = ctx.persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
     }
 
-    _group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::slug_tables>();
-    auto const layout = ctx.cached.acquire_pipeline_layout<sgl_shaders::slug_tables, sgl_shaders::slug_draw>();
+    _group_layout = ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>();
+    auto const layout = ctx.cached.acquire_pipeline_layout<sgl_modules::slug::tables, sgl_shaders::slug_draw>();
 
     // Both windings reach the screen: a shape's axes may flip it, and a quad is never seen from behind on purpose.
     auto desc = sg::raster_pipeline_description{
@@ -131,10 +135,10 @@ sg::routine_outcome slug_routine::execute(sg::rendering_scope& scope,
                                                       "atlas.prepare first");
 
     auto& ctx = cmd.context();
-    auto const group
-        = ctx.transient.create_binding_group(cmd, self->_group_layout,
-                                             sgl_shaders::slug_tables{.curves = atlas.curve_texture().as_texture_view(),
-                                                                      .bands = atlas.band_texture().as_texture_view()});
+    auto const group = ctx.transient.create_binding_group(
+        cmd, self->_group_layout,
+        sgl_modules::slug::tables{.curves = atlas.curve_texture().as_texture_view(),
+                                  .bands = atlas.band_texture().as_texture_view()});
 
     auto const size = scope.render_target_size();
     auto const& m = view.object_to_clip;

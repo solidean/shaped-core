@@ -1,4 +1,4 @@
-// Slug shapes, one quad per shape instance, covered by the prelude's `slug_coverage`.
+// Slug shapes, one quad per shape instance, covered by module `slug`.
 // Paired with sr::slug_routine.
 //
 // A shape lives in its own em space; `em_to_object` and `origin` place it on the object's xy plane, and the per-draw rows
@@ -7,6 +7,8 @@
 // antialiased edges are never clipped: Lengyel's dynamic dilation, perspective included.
 //
 // Colors arrive sRGB-encoded in 8 bits and leave linear and premultiplied, so the target blends premultiplied.
+
+use slug
 
 // The object-to-clip matrix as four rows, the viewport in pixels, and the per-draw knobs.
 @inline binding slug_draw:
@@ -17,10 +19,6 @@
     viewport: float2
     depth_bias: float
     weight_boost: int
-
-binding slug_tables:
-    curves: texture_2d[float4]
-    bands: texture_2d[uint4]
 
 // `corner` is a corner of the unit square, six of them per quad; everything else is the shape instance.
 @vertex struct slug_vertex:
@@ -94,8 +92,8 @@ fun srgb_to_linear(c: float) -> float:
         glyph = int4((v.glyph.x & 0xffff) as int, (v.glyph.x >> 16) as int, (v.glyph.y & 0xffff) as int, (v.glyph.y >> 16) as int)
     }
 
-@pixel fun main_ps(p: slug_varyings){slug_tables, slug_draw} -> slug_target:
-    let coverage = slug_coverage(slug_tables.curves, slug_tables.bands, p.em, p.banding, p.glyph, slug_draw.weight_boost != 0)
+@pixel fun main_ps(p: slug_varyings){slug.tables, slug_draw} -> slug_target:
+    let coverage = slug.coverage(p.em, p.banding, p.glyph, slug_draw.weight_boost != 0)
     return {
         color = p.color * coverage
     }

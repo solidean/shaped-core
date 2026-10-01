@@ -28,7 +28,7 @@ sr::slug_outline         shaped-rendering  closed contours of quadratic curves, 
 sr::compile_slug_shape   shaped-rendering  outline -> curve and band tables, device-free
 sr::slug_atlas           shaped-rendering  caller-owned textures many shapes share, plus a CPU copy of them
 sr::slug_routine         shaped-rendering  draws shape instances from an atlas, one pipeline per (colour, depth) format
-slug_coverage            SGL prelude       the coverage itself, which any pixel shader may call
+module slug              shaped-rendering  the coverage itself, in SGL: any pixel shader that `use`s it may call it
 sr::slug_font            shaped-rendering  a face's glyphs compiled on demand, and a one-line advance-only layout
 ```
 
@@ -71,17 +71,22 @@ SGL has no preprocessor, and both are a branch after the curve loops, uniform wi
 
 ## A shape on any surface
 
-`slug_coverage` lives in SGL's prelude rather than in the routine's shader, so a mesh's own pixel shader can draw a shape as part of its surface.
-The mesh's vertices carry an em coordinate like a UV, and the pixel shader asks for the coverage at it.
+The coverage is SGL module `slug` (`shaders/modules/slug.sgl`) rather than part of the routine's shader, so a mesh's own pixel shader can draw a shape as part of its surface.
+The mesh's vertices carry an em coordinate like a UV, and the pixel shader asks the module for the coverage at it.
 
 ```sgl sketch
-let coverage = slug_coverage(decal.curves, decal.bands, p.em, decal.banding, decal.glyph, false)
+use slug
+
+@pixel fun main_ps(p: pixel_input){slug.tables, decal} -> target:
+    let coverage = slug.coverage(p.em, decal.banding, decal.glyph, false)
 ```
+
+The module declares the atlas's two textures as its binding `slug.tables`, since an SGL function of a module may not take a texture.
+sr exports the module, so the host binds one group of `sgl_modules::slug::tables` and every pipeline listing `slug.tables` takes it, the routine's included.
+Another package reaches the module by naming `SR_SGL_MODULE_DIR` in its `MODULE_DIRS`.
 
 The core takes the pixel footprint as an argument, and an overload takes it from `ddx` and `ddy`, so it must be called in uniform control flow.
 A ray-traced hit has no derivatives, and will pass a footprint from its ray cone instead; that waits for shaped-viewer's tracer to move to SGL.
-
-The prelude is a stopgap for SGL's missing `use`: the core moves out to a library file once a shader can import one.
 
 ## Using it
 
@@ -100,7 +105,7 @@ auto pass = cmd->raster.render_to({.color_targets = {target.preserved()}});
 
 ## How it is held to the reference
 
-- **Corpus tests** pin the pure helpers of the prelude — the root code, both root solves, the band wrap, the fill rules — on SGL's interpreter.
+- **The module's own tests** pin its pure helpers — the root code, both root solves, the band wrap, the fill rules — on SGL's interpreter, run by sr's test binary.
 - **A C++ reference** of the whole pixel shader (`impl/slug_reference.hh`) reads the atlas's CPU copy, so compilation is tested with no device.
 - **Readback** compares every pixel the routine draws against that reference, on every backend the tests run.
 
@@ -110,7 +115,7 @@ auto pass = cmd->raster.render_to({.color_targets = {target.preserved()}});
 SGL: int2..4 / uint2..4 min, max, clamp; int2..4 abs      [done]
 babel::font: TrueType glyf, cmap 4 and 12, hmtx            [done]
 sr: outline, compilation, atlas, CPU reference             [done]
-SGL prelude: slug_coverage, both overloads                 [done]
+SGL module slug: coverage, both overloads, exported by sr  [done]
 sr::slug_routine: quads, dilation, depth, both draw forms  [done]
 sr::slug_font: glyphs on demand, one-line layout           [done]
 examples: graphics/slug-cube, shaped-viewer/text           [done]

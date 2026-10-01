@@ -72,7 +72,7 @@ Bigger design intent lives in [structure.md](structure.md).
   - `sr::slug_font` lays a line out by advance widths alone: no kerning, no ligatures, no shaping, which needs a design of its own.
   - `sr::slug_font::load_system_ui_font` reads a font the operating system ships, because shaped-core vendors none.
   - `slug_font.cc` decodes UTF-8 itself, since clean-core has no code-point iteration yet.
-  - The routine's pipelines carry slug.sgl's target set, so a scope opened with another shader's generated target refuses them.
+  - The routine's pipelines carry slug_quads.sgl's target set, so a scope opened with another shader's generated target refuses them.
 - Get imgui off stb.
   It bundles stb rect-pack, truetype and textedit; we scope them with `IMGUI_STB_NAMESPACE` so they cannot collide with anyone else's stb, but scoping is containment, not a fix.
   stb is hobby-grade — no release process, known robustness gaps parsing malformed fonts — and it sits on the path that loads user-supplied font files.

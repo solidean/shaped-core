@@ -120,7 +120,7 @@ One-liner per library:
   Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
   Hosts **Slug**: shapes and text drawn on the GPU from their outlines — `sr::slug_routine` over a caller-owned `sr::slug_atlas`, depth-tested where the scope has depth.
-  Its coverage is the SGL prelude's `slug_coverage`, so any pixel shader can draw a shape on a surface — [docs/slug.md](libs/graphics/shaped-rendering/docs/slug.md).
+  Its coverage is SGL module `slug`, which sr exports, so any pixel shader that `use`s it can draw a shape on a surface — [docs/slug.md](libs/graphics/shaped-rendering/docs/slug.md).
   Hosts **reconstruction**: `sr::reconstruct_routine` denoises, then upscales with AMD FSR 3.1 on any GPU.
   AMD's host code is driven through sg — [docs/reconstruction.md](libs/graphics/shaped-rendering/docs/reconstruction.md) is the design.
   sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.

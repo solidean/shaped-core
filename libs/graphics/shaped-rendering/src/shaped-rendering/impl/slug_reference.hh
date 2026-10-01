@@ -6,7 +6,7 @@
 
 namespace sr::impl
 {
-/// The coverage prelude/slug.sgl's `slug_coverage` computes, computed on the CPU from the atlas's own copy of its textures.
+/// The coverage module `slug`'s `coverage` computes (shaders/modules/slug.sgl), computed on the CPU from the atlas's own copy of its textures.
 ///
 /// The same arithmetic in the same order, in f32: what the GPU's result is held to, within the rounding the targets differ by.
 /// It also tests glyph compilation on its own, since a wrongly sorted band shows here before any GPU runs.

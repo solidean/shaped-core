@@ -47,11 +47,10 @@ cc::string sum_source(int terms)
 TEST("sgl driver - the prelude is the generated builtins and the hand-written files, and each matches its file")
 {
     auto const files = sgl::prelude_files();
-    REQUIRE(files.size() == 4);
+    REQUIRE(files.size() == 3);
     CHECK(files[0].name == "builtins.sgl");
     CHECK(files[1].name == "core.sgl");
     CHECK(files[2].name == "raytracing.sgl");
-    CHECK(files[3].name == "slug.sgl");
 
     // The committed builtins.sgl is what the registry generates, byte for byte: `uv run dev.py check sgl-prelude --fix` rewrites it.
     // That is also what makes a diagnostic's line and column right in the committed file, which the compiler never opens.
@@ -59,7 +58,6 @@ TEST("sgl driver - the prelude is the generated builtins and the hand-written fi
     // core.sgl is embedded when CMake configures, and editing it re-runs the configure.
     CHECK(files[1].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/core.sgl"));
     CHECK(files[2].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/raytracing.sgl"));
-    CHECK(files[3].source == read_text(cc::string(SGL_PRELUDE_DIR) + "/slug.sgl"));
 }
 
 TEST("sgl driver - a line and a column are 1-based, and end of file is a place")

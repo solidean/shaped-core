@@ -306,9 +306,10 @@ font.line_width("text", size);  font.atlas();  font.glyph(g);
 
 - **Output is linear and premultiplied**, blended premultiplied; an instance's colour is 8-bit sRGB, straight alpha.
 - **A scope with depth tests and never writes it**; `depth_bias` keeps a shape on a surface in front of it.
-- **The routine's pipelines name slug.sgl's target set**: open the scope with a plain `rendering_info`, not another shader's generated target.
-- **Any pixel shader can cover a shape**: the SGL prelude's `slug_coverage(curves, bands, em, banding, glyph, weight_boost)`.
+- **The routine's pipelines name slug_quads.sgl's target set**: open the scope with a plain `rendering_info`, not another shader's generated target.
+- **Any pixel shader can cover a shape**: `use slug`, list `{slug.tables}` and call `slug.coverage(em, banding, glyph, weight_boost)`.
   It takes its footprint from `ddx` / `ddy`, so call it in uniform control flow; the other overload takes `em_per_pixel`.
+  The host binds `sgl_modules::slug::tables` (`<sgl_modules/slug.hh>`) from the atlas; another package lists `SR_SGL_MODULE_DIR` in its `MODULE_DIRS`.
 - `impl::slug_reference_coverage(atlas, instance, em, em_per_pixel, weight_boost)` is the pixel shader on the CPU, for tests.
 
 ## Box-filter mipmap routine

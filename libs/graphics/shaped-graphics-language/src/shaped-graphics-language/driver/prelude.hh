@@ -23,7 +23,7 @@ struct sgl::parsed_prelude_file
 
 namespace sgl
 {
-/// The prelude, in the order its files stand in a module: `builtins.sgl`, `core.sgl`, `raytracing.sgl`, then `slug.sgl`.
+/// The prelude, in the order its files stand in a module: `builtins.sgl`, `core.sgl`, then `raytracing.sgl`.
 ///
 /// `builtins.sgl` is `builtins::default_registry().prelude_text()`: generated in memory, so the library never opens the committed file.
 /// The committed `prelude/builtins.sgl` is byte-identical, which is why a diagnostic's line and column are right in it.
@@ -61,8 +61,6 @@ namespace sgl::impl
 [[nodiscard]] cc::string_view embedded_core_prelude();
 /// `prelude/raytracing.sgl`: the types and the functions of a trace, and the software traversal webgpu runs.
 [[nodiscard]] cc::string_view embedded_raytracing_prelude();
-/// `prelude/slug.sgl`: Slug's coverage of a shape bounded by quadratic curves, which any pixel shader may call.
-[[nodiscard]] cc::string_view embedded_slug_prelude();
 /// The absolute path of the source tree's `prelude/` directory, with `/` separators.
 [[nodiscard]] cc::string_view prelude_directory();
 } // namespace sgl::impl

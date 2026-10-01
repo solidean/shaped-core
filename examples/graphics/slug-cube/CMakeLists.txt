@@ -1,5 +1,5 @@
-# Slug shapes on a spinning cube, and a caption over it: sr::slug_routine's quads, and a mesh shader calling the
-# prelude's slug_coverage directly.
+# Slug shapes on a spinning cube, and a caption over it.
+# The labels are sr::slug_routine's quads, and the star is a mesh shader calling module slug's coverage directly.
 #
 # Gated like sgl-cube: it needs a backend to create a context on and a compiler for that backend's format.
 # No webgpu arm, because its text comes from a font file the operating system has, and a page has no filesystem.
@@ -52,6 +52,7 @@ sc_add_shader_package(
     NAMESPACE  shaders
     SOURCE_DIR shaders
     LANGUAGE   sgl
+    MODULE_DIRS ${SR_SGL_MODULE_DIR} # sr exports module `slug`; the cube's shader `use`s it
     SHADERS
         slug_cube.sgl:*
 )
