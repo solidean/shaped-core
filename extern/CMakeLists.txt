@@ -86,9 +86,16 @@ option(SC_USE_VENDORED_SDL3 "Build the fetched SDL3 in extern/sdl3/.install (OFF
 # babel-serializer keeps its sqlite API always available and reports an unfetched backend at runtime.
 option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.install (OFF expects an external `sqlite` target)" ON)
 
+# DLSS is fetched ON REQUEST rather than on demand: no configure step fetches it, because its license is NVIDIA's own
+# and accepting one is a person's decision rather than a build's.
+# So the normal state of this directory is absent, and that is not a failure — shaped-rendering gates its Ray
+# Reconstruction member on the `dlss` target existing and reports `unsupported` without it.
+option(SC_USE_VENDORED_DLSS "Wrap the fetched NVIDIA DLSS SDK in extern/dlss/.install (OFF expects an external `dlss` target)" ON)
+
 # NRD is fetched ON REQUEST like DLSS, and for the same reason: the NVIDIA RTX SDKs license names the NRD SDK too.
 # Unlike DLSS it is SOURCE, and its build compiles its own shaders with the dxc.exe extern/dxc pins.
 option(SC_USE_VENDORED_NRD "Build the fetched NRD in extern/nrd/.install (OFF expects an external `NRD` target)" ON)
+
 # The OIDN library is only the reference shaped-rendering-test's oracle compares sr::denoise_method::oidn against, and nothing we ship links it.
 # So it is fetched ON REQUEST — `uv run extern/oidn/fetch-oidn.py` — rather than on every configure, and the oracle tests SKIP without the `oidn` target.
 option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/.install (OFF expects an external `oidn` target)" ON)
@@ -209,4 +216,8 @@ endif()
 if(_sc_host_side_deps AND WIN32 AND SC_USE_VENDORED_FIDELITYFX
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fidelityfx/.install/pin.txt")
     add_subdirectory(fidelityfx)
+endif()
+
+if(_sc_host_side_deps AND SC_USE_VENDORED_DLSS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dlss/.install/pin.txt")
+    add_subdirectory(dlss)
 endif()

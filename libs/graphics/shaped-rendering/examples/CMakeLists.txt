@@ -55,3 +55,11 @@ sc_add_shader_package(
         compose.hlsl:binding:compose_bindings
         compose.hlsl:constants:gConstants
 )
+
+# NGX loads its network runtime from the directory of the binary that initialized it, and it arrives through an
+# IMPORTED target that $<TARGET_RUNTIME_DLLS> cannot see — so it is staged by the path sr published.
+# Without this the example is the one place with the SDK installed that still reports `unsupported`, which makes the
+# per-member capture of dlss_rr a picture of a refusal rather than of the member.
+if(SC_DLSS_RUNTIME)
+    sc_stage_runtime_dlls(shaped-rendering-denoise-playground-example DLLS "${SC_DLSS_RUNTIME}" TAG dlss)
+endif()

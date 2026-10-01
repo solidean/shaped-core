@@ -7,6 +7,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
+#include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/nrd_denoise_routine.hh>
@@ -35,7 +36,8 @@ namespace
     case render_scale_preset::quality:
         return 1.5f;
     case render_scale_preset::balanced:
-        return 1.7f;
+        // 1.724 rather than 1.7: NGX renders 1114 of 1920.
+        return 1.7241379f;
     case render_scale_preset::performance:
         return 2.0f;
     }
@@ -150,9 +152,9 @@ reconstruct_guide_set reconstruct_inputs::present_guides() const
     return set;
 }
 
-bool reconstruct_history::_prepare(denoise_method method, tg::vec2i extent)
+bool reconstruct_history::_prepare(denoise_method method, tg::vec2i input_extent, tg::vec2i output_extent)
 {
-    auto const changed = _method != method || _extent != extent;
+    auto const changed = _method != method || _extent != input_extent || _output_extent != output_extent;
     auto const restarted = changed || _reset_requested;
     if (changed)
     {
@@ -162,8 +164,10 @@ bool reconstruct_history::_prepare(denoise_method method, tg::vec2i extent)
         // Built for another member or size, so nothing in it can be reused.
         for (auto& t : _state)
             t = {};
+
         _method = method;
-        _extent = extent;
+        _extent = input_extent;
+        _output_extent = output_extent;
         _frame = 0;
     }
     _reset_requested = false;
@@ -252,6 +256,7 @@ reconstruct_support query_reconstruct_support(sg::context const& ctx)
              && buildable(sr::shaders::svgf_variance.compute.main_cs)
              && buildable(sr::shaders::svgf_atrous.compute.main_cs),
         .oidn = oidn_denoise_routine::is_available(ctx),
+        .dlss_rr = dlss_rr_routine::is_available(ctx),
         .nrd = nrd_denoise_routine::is_available(ctx),
         .fsr = fsr_upscale_routine::is_available(ctx),
     };
@@ -273,7 +278,8 @@ reconstruct_guide_set required_guides(denoise_method m)
     case denoise_method::dlss_rr:
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
-        return g::albedo | g::normal | g::roughness | g::depth | g::motion;
+        return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::hit_distance
+             | g::split_diffuse_specular;
     case denoise_method::nrd:
         // The albedo pair is required rather than optional: NRD asks for radiance with no material information in it,
         // and the member divides both out rather than handing it texture to filter as noise.
@@ -305,7 +311,7 @@ reconstruct_guide_set optional_guides(denoise_method m)
     case denoise_method::dlss_rr:
         return g::hit_distance;
     case denoise_method::fsr_rr:
-        return g::specular_albedo | g::hit_distance;
+        return {};
     case denoise_method::nrd:
         return {};
     case denoise_method::none:
@@ -319,15 +325,21 @@ reconstruct_guide_set optional_guides(denoise_method m)
 namespace
 {
 /// `resolve_denoise_method` against a support answer the caller already has.
-[[nodiscard]] denoise_method resolve_with(reconstruct_support const& support, reconstruct_settings const& settings)
+[[nodiscard]] denoise_method resolve_with(reconstruct_support const& support,
+                                          reconstruct_settings const& settings,
+                                          reconstruct_guide_set available_guides)
 {
     if (settings.denoiser != denoise_method::automatic)
         return settings.denoiser;
 
     auto const preference = settings.fresh_samples ? cc::span<denoise_method const>(temporal_preference)
                                                    : cc::span<denoise_method const>(spatial_preference);
+
+    // Both conditions, because a member that fails either one reports `unsupported` from `execute` and writes nothing.
+    // Skipping only the device check would pick the best member the hardware can run and then refuse it for a guide
+    // the caller never had, which leaves `automatic` denoising nothing at all.
     for (auto const m : preference)
-        if (support.supports(m))
+        if (support.supports(m) && required_guides(m).without(available_guides).is_empty())
             return m;
     return denoise_method::none;
 }
@@ -335,7 +347,7 @@ namespace
 /// Whether a denoiser upscales by itself, so that no upscaler runs behind it.
 [[nodiscard]] bool upscales_itself(denoise_method m)
 {
-    return m == denoise_method::dlss_rr || m == denoise_method::fsr_rr;
+    return m == denoise_method::dlss_rr;
 }
 
 /// `resolve_upscale_method` against a support answer and a resolved denoiser the caller already has.
@@ -370,15 +382,22 @@ namespace
 }
 
 /// The upscaler a call with `settings` actually runs, which is what planning a frame must follow.
-/// `none` when the denoiser in front of it will be refused, since `execute` then refuses the whole call, and when the
-/// upscaler itself cannot run here.
-[[nodiscard]] upscale_method planned_upscaler(reconstruct_support const& support, reconstruct_settings const& settings)
+/// `none` whenever `execute` would refuse the call: the denoiser in front of it will not run, or the upscaler cannot
+/// run here, or the caller lacks a guide either one requires.
+[[nodiscard]] upscale_method planned_upscaler(reconstruct_support const& support,
+                                              reconstruct_settings const& settings,
+                                              reconstruct_guide_set available_guides)
 {
-    auto const denoiser = resolve_with(support, settings);
-    if (settings.denoiser != denoise_method::none && (denoiser == denoise_method::none || !support.supports(denoiser)))
+    using g = reconstruct_guide;
+    auto const denoiser = resolve_with(support, settings, available_guides);
+    if (settings.denoiser != denoise_method::none
+        && (denoiser == denoise_method::none || !support.supports(denoiser)
+            || !required_guides(denoiser).without(available_guides).is_empty()))
         return upscale_method::none;
     auto const u = resolve_upscaler_with(support, settings, denoiser);
-    return u != upscale_method::none && support.supports(u) ? u : upscale_method::none;
+    if (u == upscale_method::none || !support.supports(u))
+        return upscale_method::none;
+    return (g::depth | g::motion).without(available_guides).is_empty() ? u : upscale_method::none;
 }
 
 [[nodiscard]] tg::vec2i scaled_down(tg::vec2i output_extent, f32 ratio)
@@ -417,6 +436,7 @@ void log_upscaler_refusal_once(upscale_method m, refusal_reason reason, cc::stri
     case denoise_method::oidn:
         return oidn_denoise_routine::execute(cmd, in, history, oidn_denoise_routine::options_for(settings));
     case denoise_method::dlss_rr:
+        return dlss_rr_routine::execute(cmd, in, history, dlss_rr_routine::options_for(settings));
     case denoise_method::fsr_rr:
     case denoise_method::none:
     case denoise_method::automatic:
@@ -428,32 +448,42 @@ void log_upscaler_refusal_once(upscale_method m, refusal_reason reason, cc::stri
 }
 } // namespace
 
-denoise_method resolve_denoise_method(sg::context const& ctx, reconstruct_settings const& settings)
+denoise_method resolve_denoise_method(sg::context const& ctx,
+                                      reconstruct_settings const& settings,
+                                      reconstruct_guide_set available_guides)
 {
     if (settings.denoiser != denoise_method::automatic)
         return settings.denoiser;
-    return resolve_with(query_reconstruct_support(ctx), settings);
+    return resolve_with(query_reconstruct_support(ctx), settings, available_guides);
 }
 
-upscale_method resolve_upscale_method(sg::context const& ctx, reconstruct_settings const& settings)
+upscale_method resolve_upscale_method(sg::context const& ctx,
+                                      reconstruct_settings const& settings,
+                                      reconstruct_guide_set available_guides)
 {
     auto const support = query_reconstruct_support(ctx);
-    return resolve_upscaler_with(support, settings, resolve_with(support, settings));
+    return resolve_upscaler_with(support, settings, resolve_with(support, settings, available_guides));
 }
 
-tg::vec2i reconstruct_input_extent(sg::context const& ctx, reconstruct_settings const& settings, tg::vec2i output_extent)
+tg::vec2i reconstruct_input_extent(sg::context const& ctx,
+                                   reconstruct_settings const& settings,
+                                   tg::vec2i output_extent,
+                                   reconstruct_guide_set available_guides)
 {
     auto const support = query_reconstruct_support(ctx);
-    auto const m = resolve_with(support, settings);
+    auto const m = resolve_with(support, settings, available_guides);
 
     // A member that upscales by itself maps the preset onto its own ratios.
-    // A named member this context cannot run will be refused, and a caller that traced smaller for it would then
-    // composite a smaller image into its own output.
+    // One that will be refused, for the device or for a guide the caller cannot supply, answers the output's own size:
+    // a caller that traced smaller for it would composite a smaller image into its output.
     if (upscales_itself(m))
-        return support.supports(m) ? scaled_down(output_extent, vendor_ratio(settings.scale)) : output_extent;
+    {
+        auto const runs = support.supports(m) && required_guides(m).without(available_guides).is_empty();
+        return runs ? scaled_down(output_extent, vendor_ratio(settings.scale)) : output_extent;
+    }
 
     // Any other denoiser runs at one ratio, and the upscaler behind it maps the preset, under the same refusal rule.
-    auto const u = planned_upscaler(support, settings);
+    auto const u = planned_upscaler(support, settings, available_guides);
     if (u == upscale_method::none)
         return output_extent;
     return scaled_down(output_extent, upscaler_ratio(u, settings.scale));
@@ -462,12 +492,13 @@ tg::vec2i reconstruct_input_extent(sg::context const& ctx, reconstruct_settings 
 tg::vec2f reconstruct_jitter(sg::context const& ctx,
                              reconstruct_settings const& settings,
                              tg::vec2i output_extent,
-                             u32 frame_index)
+                             u32 frame_index,
+                             reconstruct_guide_set available_guides)
 {
-    if (planned_upscaler(query_reconstruct_support(ctx), settings) != upscale_method::fsr)
+    if (planned_upscaler(query_reconstruct_support(ctx), settings, available_guides) != upscale_method::fsr)
         return tg::vec2f(0, 0);
-    return fsr_upscale_routine::jitter(frame_index, reconstruct_input_extent(ctx, settings, output_extent),
-                                       output_extent);
+    return fsr_upscale_routine::jitter(
+        frame_index, reconstruct_input_extent(ctx, settings, output_extent, available_guides), output_extent);
 }
 
 cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scope)
@@ -487,6 +518,8 @@ cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scop
         nrd_denoise_routine::prewarm(ctx);
     if (support.oidn)
         oidn_denoise_routine::prewarm(ctx);
+    if (support.dlss_rr)
+        dlss_rr_routine::prewarm(ctx); // nothing to compile, but the member is a routine like the others
     if (support.fsr)
         fsr_upscale_routine::prewarm(ctx);
     co_return;
@@ -503,7 +536,7 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
     auto& ctx = cmd.context();
     // Asked once and used throughout, since every resolver and support check wants the same answer.
     auto const support = query_reconstruct_support(ctx);
-    auto const method = resolve_with(support, settings);
+    auto const method = resolve_with(support, settings, in.present_guides());
     auto const upscaler = resolve_upscaler_with(support, settings, method);
     CC_ASSERT(settings.denoiser != denoise_method::none || settings.upscaler != upscale_method::none,
               "a caller with denoising and upscaling both off does not call the front");

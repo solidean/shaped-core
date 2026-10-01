@@ -206,26 +206,26 @@ ASYNC_INVOCABLE_TEST("sr - an upscaler resolves behind a denoiser, and traces sm
     auto const out = tg::vec2i(640, 480);
     auto const performance = sr::reconstruct_settings{.denoiser = sr::denoise_method::atrous,
                                                       .scale = sr::render_scale_preset::performance};
-    CHECK(sr::resolve_upscale_method(ctx, performance) == sr::upscale_method::fsr);
-    CHECK(sr::reconstruct_input_extent(ctx, performance, out) == tg::vec2i(320, 240));
-    CHECK(sr::reconstruct_jitter(ctx, performance, out, 5) != tg::vec2f(0, 0));
+    CHECK(sr::resolve_upscale_method(ctx, performance, sr_test::every_guide()) == sr::upscale_method::fsr);
+    CHECK(sr::reconstruct_input_extent(ctx, performance, out, sr_test::every_guide()) == tg::vec2i(320, 240));
+    CHECK(sr::reconstruct_jitter(ctx, performance, out, 5, sr_test::every_guide()) != tg::vec2f(0, 0));
 
     // Automatic at a native scale has nothing to upscale, so a caller traces the output's size and does not jitter.
     auto const native = sr::reconstruct_settings{.denoiser = sr::denoise_method::atrous};
-    CHECK(sr::resolve_upscale_method(ctx, native) == sr::upscale_method::none);
-    CHECK(sr::reconstruct_input_extent(ctx, native, out) == out);
-    CHECK(sr::reconstruct_jitter(ctx, native, out, 5) == tg::vec2f(0, 0));
+    CHECK(sr::resolve_upscale_method(ctx, native, sr_test::every_guide()) == sr::upscale_method::none);
+    CHECK(sr::reconstruct_input_extent(ctx, native, out, sr_test::every_guide()) == out);
+    CHECK(sr::reconstruct_jitter(ctx, native, out, 5, sr_test::every_guide()) == tg::vec2f(0, 0));
 
     // Named explicitly, FSR runs at a native scale too, as anti-aliasing.
     auto const named
         = sr::reconstruct_settings{.denoiser = sr::denoise_method::atrous, .upscaler = sr::upscale_method::fsr};
-    CHECK(sr::resolve_upscale_method(ctx, named) == sr::upscale_method::fsr);
-    CHECK(sr::reconstruct_input_extent(ctx, named, out) == out);
+    CHECK(sr::resolve_upscale_method(ctx, named, sr_test::every_guide()) == sr::upscale_method::fsr);
+    CHECK(sr::reconstruct_input_extent(ctx, named, out, sr_test::every_guide()) == out);
 
     // A denoiser that upscales by itself has no upscaler behind it.
     auto const vendor = sr::reconstruct_settings{.denoiser = sr::denoise_method::dlss_rr,
                                                  .scale = sr::render_scale_preset::performance};
-    CHECK(sr::resolve_upscale_method(ctx, vendor) == sr::upscale_method::none);
+    CHECK(sr::resolve_upscale_method(ctx, vendor, sr_test::every_guide()) == sr::upscale_method::none);
 
     // A denoiser this context cannot run gets the whole call refused, so a caller must not trace smaller or jitter for
     // the upscaler behind it.
@@ -233,8 +233,8 @@ ASYNC_INVOCABLE_TEST("sr - an upscaler resolves behind a denoiser, and traces sm
     {
         auto const refused = sr::reconstruct_settings{.denoiser = sr::denoise_method::nrd,
                                                       .scale = sr::render_scale_preset::performance};
-        CHECK(sr::reconstruct_input_extent(ctx, refused, out) == out);
-        CHECK(sr::reconstruct_jitter(ctx, refused, out, 5) == tg::vec2f(0, 0));
+        CHECK(sr::reconstruct_input_extent(ctx, refused, out, sr_test::every_guide()) == out);
+        CHECK(sr::reconstruct_jitter(ctx, refused, out, 5, sr_test::every_guide()) == tg::vec2f(0, 0));
     }
     co_return;
 }

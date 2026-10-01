@@ -361,6 +361,14 @@ bool dx12_context::is_submission_complete(sg::submission_token token) const
     return _submission_fence->GetCompletedValue() >= u64(token);
 }
 
+void dx12_context::do_defer_until_retired(cc::unique_function<void()> fn)
+{
+    // An expiring resource that owns no handle, the way an RTV slot's release rides the epoch.
+    auto expiring = dx12_expiring_resource{};
+    expiring.finalizers.push_back(cc::move(fn));
+    schedule_deferred_deletion(cc::move(expiring));
+}
+
 void dx12_context::schedule_deferred_deletion(dx12_expiring_resource expiring)
 {
     // Attributed to whatever epoch is open now; moved into that epoch's payload at the next advance.

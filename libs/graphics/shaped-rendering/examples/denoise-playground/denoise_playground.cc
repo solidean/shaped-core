@@ -89,6 +89,21 @@ struct controls
             || denoise.upscaler != o.denoise.upscaler;
     }
 
+    /// The guides the panel hands the front, which is what planning a frame has to ask with.
+    /// The specular pair rides with albedo; motion is always written.
+    [[nodiscard]] sr::reconstruct_guide_set guides() const
+    {
+        using g = sr::reconstruct_guide;
+        auto set = sr::reconstruct_guide_set(g::motion);
+        if (use_albedo)
+            set |= g::albedo | g::specular_albedo | g::roughness;
+        if (use_normal)
+            set |= g::normal;
+        if (use_depth)
+            set |= g::depth;
+        return set;
+    }
+
     /// The settings the front is called with: denoising off still upscales when a scale asks for it.
     [[nodiscard]] sr::reconstruct_settings settings(f32 frame_time_ms) const
     {
@@ -112,6 +127,8 @@ struct view_images
     sg::texture_2d normal;
     sg::texture_2d depth;
     sg::texture_2d motion;
+    sg::texture_2d specular_albedo;
+    sg::texture_2d roughness;
     sg::texture_2d denoised;
     sg::texture_2d composed;
 };
@@ -133,6 +150,8 @@ void resize_images(sg::context& ctx, view_images& v, tg::vec2i extent, tg::vec2i
     v.normal = make_image(ctx, traced);
     v.depth = make_image(ctx, traced);
     v.motion = make_image(ctx, traced);
+    v.specular_albedo = make_image(ctx, traced);
+    v.roughness = make_image(ctx, traced);
     v.denoised = make_image(ctx, extent);
     v.composed = make_image(ctx, extent);
 }
@@ -254,15 +273,14 @@ struct camera
     return out;
 }
 
-// The members with an implementation; dlss_rr and fsr_rr are planned, and would only ever be refused.
-constexpr char const* k_method_names[] = {"automatic", "atrous", "svgf", "oidn"};
+/// The dropdown, and what `--capture <name>` selects.
+/// One entry per member the front carries, so a member missing here is one nobody can look at.
+constexpr char const* k_method_names[] = {"automatic", "atrous", "svgf", "oidn", "dlss_rr", "fsr_rr", "nrd"};
 constexpr sr::denoise_method k_method_values[] = {
-    sr::denoise_method::automatic,
-    sr::denoise_method::atrous,
-    sr::denoise_method::svgf,
-    sr::denoise_method::oidn,
+    sr::denoise_method::automatic, sr::denoise_method::atrous, sr::denoise_method::svgf, sr::denoise_method::oidn,
+    sr::denoise_method::dlss_rr,   sr::denoise_method::fsr_rr, sr::denoise_method::nrd,
 };
-constexpr auto k_method_count = int(sizeof(k_method_values) / sizeof(k_method_values[0]));
+constexpr int k_method_count = int(sizeof(k_method_names) / sizeof(k_method_names[0]));
 constexpr char const* k_quality_names[] = {"fast", "balanced", "best"};
 constexpr char const* k_scale_names[] = {"native", "quality (1.5x)", "balanced (1.7x)", "performance (2x)"};
 constexpr char const* k_upscaler_names[] = {"automatic", "none", "fsr"};
@@ -375,16 +393,35 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     // Showing what a refusal does is a thing this example is FOR, and it would otherwise fail the moment it is used.
     nx::allow_warnings("did not run: not supported by this build or device");
 
+    // The other refusal: `nrd` needs a hit distance and a split radiance signal that this tracer does not write, and
+    // showing a refusal is a thing this example is FOR — so naming that member has to be a picture rather than a
+    // failed run.
+    nx::allow_warnings("did not run: the call is missing a guide buffer this member requires");
+
     // The blit samples what the denoiser computed this frame, and imgui draws the geometry prepare() uploaded, so each
     // draw's barrier is found inside its scope, and vulkan splits the scope for it.
     // Nothing states a scope's accesses before it opens yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
+    // A named capture selects the member, so the harness can walk every one of them rather than photographing
+    // whichever `automatic` happened to resolve to on the machine that ran it.
+    // The unnamed capture stays `automatic`, which is the view a reader wants first.
     auto const capture = sr::capture_request::from_environment();
+    auto captured_method = sr::denoise_method::automatic;
     if (capture.active && !capture.name.empty())
     {
-        cc::eprintln("this example offers only the default view, so it cannot take {}", capture.name);
-        co_return;
+        auto found = false;
+        for (auto i = 0; i < k_method_count; ++i)
+            if (capture.name == k_method_names[i])
+            {
+                captured_method = k_method_values[i];
+                found = true;
+            }
+        if (!found)
+        {
+            cc::eprintln("no denoise member is called {}", capture.name);
+            co_return;
+        }
     }
 
     auto wsys = sr::window_system::try_create({.headless = capture.active});
@@ -512,6 +549,12 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     auto prev_view_projection = tg::mat4f::identity;
 
     auto ui = controls();
+    ui.denoise.denoiser = captured_method;
+    // A temporal member has no history to show from a single frame, and every vendor member is temporal — so a
+    // named capture feeds fresh samples, which is the mode those members exist for.
+    // `automatic` keeps the default, since that is the view the unnamed capture and the windowed run both want.
+    if (captured_method != sr::denoise_method::automatic)
+        ui.denoise.fresh_samples = sr::is_temporal(captured_method);
     auto applied = ui;
     auto frame = u32(0);
     auto accum_frame = u32(0);
@@ -563,14 +606,14 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         // The front answers what to trace: smaller while an upscaler runs behind the denoiser, the output's own size
         // otherwise.
         auto const settings = ui.settings(dt * 1000.0f);
-        auto const upscaling = sr::resolve_upscale_method(ctx, settings) != sr::upscale_method::none;
-        auto const traced = sr::reconstruct_input_extent(ctx, settings, viewport);
+        auto const upscaling = sr::resolve_upscale_method(ctx, settings, ui.guides()) != sr::upscale_method::none;
+        auto const traced = sr::reconstruct_input_extent(ctx, settings, viewport, ui.guides());
         if (images.extent != viewport || images.traced != traced)
         {
             resize_images(ctx, images, viewport, traced);
             accum_frame = 0;
         }
-        auto const jitter = sr::reconstruct_jitter(ctx, settings, viewport, frame);
+        auto const jitter = sr::reconstruct_jitter(ctx, settings, viewport, frame, ui.guides());
 
         // Closed before anything below suspends: `begin_frame` opened a record scope on this thread, and a co_await
         // with it still open is a scope that crossed a suspension.
@@ -581,14 +624,17 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
         // -- trace
         {
-            auto const group = ctx.transient.create_binding_group(*cmd, scene_layout,
-                                                                  shaders::scene_bindings{
-                                                                      .gColor = images.color.as_any_image_view(),
-                                                                      .gAlbedo = images.albedo.as_any_image_view(),
-                                                                      .gNormal = images.normal.as_any_image_view(),
-                                                                      .gDepth = images.depth.as_any_image_view(),
-                                                                      .gMotion = images.motion.as_any_image_view(),
-                                                                  });
+            auto const group
+                = ctx.transient.create_binding_group(*cmd, scene_layout,
+                                                     shaders::scene_bindings{
+                                                         .gColor = images.color.as_any_image_view(),
+                                                         .gAlbedo = images.albedo.as_any_image_view(),
+                                                         .gNormal = images.normal.as_any_image_view(),
+                                                         .gDepth = images.depth.as_any_image_view(),
+                                                         .gMotion = images.motion.as_any_image_view(),
+                                                         .gSpecularAlbedo = images.specular_albedo.as_any_image_view(),
+                                                         .gRoughness = images.roughness.as_any_image_view(),
+                                                     });
             cmd->compute.bind_pipeline(**scene_pipeline);
             cmd->compute.bind<shaders::scene_bindings>(*group);
             cmd->compute.set_inline_constants(
@@ -614,6 +660,15 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
             inputs.guides.motion = images.motion; // always written by the tracer; svgf and the upscalers require it
             inputs.guides.jitter = jitter;
             inputs.guides.view_to_clip = cam.projection(float(traced[0]) / float(traced[1]));
+
+            // The specular pair rides with albedo rather than getting checkboxes of its own: it is what the vendor
+            // members require on top of the three the panel toggles, and a scene with no specular lobe has nothing
+            // to show by turning it off.
+            if (ui.use_albedo)
+            {
+                inputs.guides.specular_albedo = images.specular_albedo;
+                inputs.guides.roughness = images.roughness;
+            }
 
             last_outcome = sr::reconstruct_routine::execute(*cmd, inputs, history, settings);
 

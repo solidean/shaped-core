@@ -333,8 +333,8 @@ auto const settings = sr::reconstruct_settings{
     .fresh_samples = true,                                 // true only when feeding this frame's own samples + motion
     .upscale_sharpness = 0.3f,                             // [0, 1], 0 = off; fsr's RCAS on the upscaled image
     .frame_time_ms = dt_ms};                               // time since the previous call; fsr decays its history by it
-auto const traced = sr::reconstruct_input_extent(ctx, settings, out_extent);  // -> tg::vec2i to trace; ALWAYS ask
-auto const jitter = sr::reconstruct_jitter(ctx, settings, out_extent, frame); // -> one offset for EVERY sample; (0,0) when nothing upscales
+auto const traced = sr::reconstruct_input_extent(ctx, settings, out_extent, guides);  // -> tg::vec2i to trace; ALWAYS ask
+auto const jitter = sr::reconstruct_jitter(ctx, settings, out_extent, frame, guides); // -> one offset for EVERY sample; (0,0) when nothing upscales
 
 auto history = sr::reconstruct_history();                  // caller-owned, MOVE-ONLY, one per image stream
 auto const out = sr::reconstruct_routine::execute(cmd,     // -> sr::reconstruct_outcome
@@ -348,12 +348,15 @@ out.denoiser / out.upscaler / out.restarted                // what ran; whether 
 history.reset()                                            // a camera cut: the denoiser's and the upscaler's history restart
 
 sr::query_reconstruct_support(ctx)                         // -> sr::reconstruct_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd, fsr}
-sr::resolve_denoise_method(ctx, settings)                  // -> the member `automatic` (or a named method) means here
-sr::resolve_upscale_method(ctx, settings)                  // -> the upscaler behind it; none for dlss_rr / fsr_rr, which upscale themselves
+sr::resolve_denoise_method(ctx, settings, guides)          // -> the member `automatic` (or a named method) means here; `guides` is what the CALLER can supply
+sr::resolve_upscale_method(ctx, settings, guides)          // -> the upscaler behind it; none for dlss_rr, which upscales itself
+                                                           //    every planner takes `guides`, so automatic degrades instead of denoising nothing
 sr::required_guides(m) / sr::optional_guides(m)            // -> sr::reconstruct_guide_set (cc::flags<sr::reconstruct_guide>)
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
+sr::dlss_rr_routine::execute(cmd, inputs, history, {.quality = sr::denoise_quality::best})  // NVIDIA Ray Reconstruction; temporal, UPSCALES; needs EVERY required guide; a new quality or hdr restarts the stream
+sr::dlss_rr_routine::is_available(ctx)                 // -> bool; SDK fetched (extern/dlss/fetch-dlss.py) + dx12 + RTX adapter. SR_HAS_DLSS
 sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal, split-signal, NO upscaling; needs hit_distance + specular + BOTH albedos (de-modulation)
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::oidn_denoise_routine::execute(cmd, inputs, history, {.network = sr::oidn_network_size::small})  // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP base, small ~1.6x faster; never `automatic`

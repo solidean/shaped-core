@@ -382,10 +382,12 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front",
 
     // A named member resolves to itself; `automatic` never picks it, being far too slow for a frame loop.
     auto const settings = sr::reconstruct_settings{.denoiser = sr::denoise_method::oidn};
-    CHECK(sr::resolve_denoise_method(ctx, settings) == sr::denoise_method::oidn);
+    CHECK(sr::resolve_denoise_method(ctx, settings, sr_test::every_guide()) == sr::denoise_method::oidn);
     CHECK(!sr::is_temporal(sr::denoise_method::oidn));
-    CHECK(sr::resolve_denoise_method(ctx, {.denoiser = sr::denoise_method::automatic}) != sr::denoise_method::oidn);
-    CHECK(sr::resolve_denoise_method(ctx, {.denoiser = sr::denoise_method::automatic, .fresh_samples = true})
+    CHECK(sr::resolve_denoise_method(ctx, {.denoiser = sr::denoise_method::automatic}, sr_test::every_guide())
+          != sr::denoise_method::oidn);
+    CHECK(sr::resolve_denoise_method(ctx, {.denoiser = sr::denoise_method::automatic, .fresh_samples = true},
+                                     sr_test::every_guide())
           != sr::denoise_method::oidn);
 
     // `quality` picks the network the way OIDN's own setting does.

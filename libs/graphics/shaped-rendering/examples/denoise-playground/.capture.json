@@ -2,13 +2,24 @@
     // The default view: the split and the panel, and enough frames to fill SVGF's history on the default
     // fresh-samples view — which `svgf_options::max_history` caps at 32, so 96 is comfortably past it.
     // Nothing accumulates here: `fresh_samples` forces `accum_frame` to 0.
+    //
+    // One capture per member on top of it, named exactly as the panel's dropdown names them, so the harness walks
+    // the whole front rather than photographing whichever member `automatic` resolved to on the machine that ran it.
+    // A member this machine cannot run is still worth a picture: the panel says `unsupported` and the split shows
+    // the raw image on both sides, which is what a refusal actually looks like.
     "shaped-rendering/denoise-playground": {
         "mechanism": "custom",
         "size": "1600x900",
         "format": "jpg",
         "accumulate": 96,
         "captures": [
-            {}
+            {},
+            {"name": "atrous"},
+            {"name": "svgf"},
+            {"name": "oidn"},
+            {"name": "dlss_rr"},
+            {"name": "fsr_rr"},
+            {"name": "nrd"}
         ]
     }
 }

@@ -50,6 +50,8 @@ class upscale_history;               // the caller-owned state of one upscaled s
 class fsr_upscale_routine;           // AMD FSR 3.1's upscaler, run through sg (fsr_upscale_routine.hh)
 struct fsr_options;                  // its own options
 
+class dlss_rr_routine;     // the NVIDIA Ray Reconstruction member (dlss_rr_routine.hh)
+struct dlss_options;       // its own options
 class nrd_denoise_routine; // the NRD split-signal member (nrd_denoise_routine.hh)
 struct nrd_options;        // its own options
 

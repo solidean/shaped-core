@@ -244,6 +244,9 @@ ctx.current_epoch()                     // sg::epoch — epoch new work records 
 ctx.completed_epoch()                   // sg::epoch — latest fully-finished epoch (reclaimable)
 ctx.advance_epoch()                     // void — close current epoch, open next. NEVER waits; bound the depth below
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
+ctx.defer_until_retired(fn)             // void — run fn once the GPU is done with every epoch up to the current one;
+                                        //   never inline (except past shutdown), in registration order, and before the
+                                        //   device goes at shutdown. For foreign state sg cannot see (a vendor SDK's handle)
 ctx.is_submission_complete(token)       // bool — has that one command list finished?
 ctx.take_pending_errors()               // -> cc::vector<sg::device_error> — failures that arrived AFTER their call:
                                         //   device_lost | creation_failed | validation. Drain once a frame; entries
