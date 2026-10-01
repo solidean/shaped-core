@@ -55,6 +55,9 @@ struct sgl::classified_span
     bool is_declaration = false;
     /// Declared in the prelude: a builtin type, a builtin function, `true`.
     bool is_from_prelude = false;
+    /// A call of a builtin whose record `constrains_control_flow`: a derivative, a barrier, an atomic.
+    /// Only a checked module knows it, since an atomic's name is also an ordinary function's.
+    bool constrains_control_flow = false;
 
     constexpr bool operator==(classified_span const&) const = default;
 };

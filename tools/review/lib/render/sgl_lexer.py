@@ -24,6 +24,11 @@ _DECLARATION_KEYWORDS = frozenset({
 _TYPE_QUALIFIERS = frozenset({"mut", "out"})
 _CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "discard", "break",
                                "case"})
+# Builtins whose name alone says they constrain control flow, drawn as control keywords as the VS Code grammar draws them.
+# An atomic's `max` or an implicit-derivative `sample` shares its name with an ordinary function, so neither is here.
+_CONTROL_BUILTINS = frozenset({"ddx", "ddy", "fwidth", "workgroup_barrier", "storage_barrier", "texture_barrier",
+                               "workgroup_uniform_load"})
+_CONTROL_BUILTIN_PREFIXES = ("subgroup_", "quad_")
 _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
 _CONSTANTS = frozenset({"true", "false"})
 # A symbol directly after one of these names a function or a type.
@@ -231,7 +236,11 @@ def _classify(word: str, previous_symbol: str, expects_type: bool, fused_call: b
         return Operator.Word
     if word in _CONSTANTS:
         return Keyword.Constant
-    if previous_symbol in _NAMES_FUNCTION or fused_call:
+    if previous_symbol in _NAMES_FUNCTION:
+        return Name.Function
+    if word in _CONTROL_BUILTINS or word.startswith(_CONTROL_BUILTIN_PREFIXES):
+        return Keyword.Namespace
+    if fused_call:
         return Name.Function
     if previous_symbol in _NAMES_TYPE or expects_type:
         return Name.Class

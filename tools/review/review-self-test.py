@@ -926,6 +926,12 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     lexed = sgl_lexer._DECLARATION_KEYWORDS | sgl_lexer._CONTROL_KEYWORDS
     assert lexed == keywords, f"the lexer draws {sorted(lexed - keywords)} and misses {sorted(keywords - lexed)}"
 
+    # A builtin whose name alone says it constrains control flow is drawn as a control keyword.
+    called = "fun f():\n    workgroup_barrier()\n    let d = ddx(v) + subgroup_add(v)\n    return max(a, b)\n"
+    drawn_calls = {value: str(kind) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(called)}
+    assert drawn_calls["workgroup_barrier"] == drawn_calls["ddx"] == drawn_calls["subgroup_add"] == drawn_calls["return"]
+    assert drawn_calls["max"] == "Token.Name.Function", "an atomic's name is an ordinary function's too, so only the server tells"
+
     declared = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed("pipeline shadow:\n")]
     assert ("Token.Keyword.Declaration", "pipeline") in declared or ("Token.Keyword", "pipeline") in declared
     assert ("Token.Name.Class", "shadow") in declared, "a pipeline's name is drawn like a declared type's"

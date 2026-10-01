@@ -235,6 +235,10 @@ struct sgl::builtins::function_record
     [[nodiscard]] cc::span<cc::string_view const> names_in(language l) const;
     /// True for the name a `call` has in `l`, and for every name of `names_in(l)`: a name of the program must not be it.
     [[nodiscard]] bool writes_name(language l, cc::string_view name) const;
+
+    /// Whether where a call of it stands is constrained, so an editor shows it as it shows a control keyword.
+    /// A flag that adds such a constraint joins here.
+    [[nodiscard]] bool constrains_control_flow() const { return uses_derivatives || is_barrier || is_atomic; }
 };
 
 /// One piece of the generated file, in the order it was registered.

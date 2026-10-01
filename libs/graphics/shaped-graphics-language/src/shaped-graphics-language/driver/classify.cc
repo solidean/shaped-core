@@ -350,10 +350,15 @@ struct classifier
             case check::target_kind::overload:
             case check::target_kind::constructor:
                 if (check::is_valid(target.symbol))
+                {
                     set(t,
                         target.kind == check::target_kind::constructor ? token_class::struct_
                                                                        : class_of_symbol(m.at(target.symbol)),
                         is_declaration, symbol_prelude());
+                    // the overload a call chose, which is how an atomic `max` differs from a plain one
+                    auto const* const record = m.builtin_function(m.at(target.symbol).intrinsic);
+                    by_token[t].constrains_control_flow = record != nullptr && record->constrains_control_flow();
+                }
                 break;
             case check::target_kind::field:
                 set(t, token_class::field, is_declaration, symbol_prelude());

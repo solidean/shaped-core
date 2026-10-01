@@ -13,6 +13,9 @@ This page is for whoever works on the server.
   So an edit of `core.sgl` is checked as the prelude it is.
   A user's file of the same name elsewhere is an ordinary document.
 * **Semantic tokens**, the whole document at once: what `sgl::classify` says every token is, mapped onto LSP's standard names.
+  A call of a builtin that constrains control flow — a derivative, a barrier, an atomic — is the one custom type, `controlBuiltin`.
+  The extension maps it to `keyword.control.sgl`, since a `keyword` token or a modifier on `function` takes the theme's plain keyword or function colour.
+  Only the server can tell an atomic `max` from a plain one, so the grammar colours just the names that are unique.
 * **Inlay hints**: ` : type` after every `let` that writes no type, and `-> type` before the `=>` of every function or property whose return type is inferred.
   Each inserts itself when accepted, except on a property of a type body, which takes no `-> type`.
 * **Tests**: after every check the server runs the document's tests itself.

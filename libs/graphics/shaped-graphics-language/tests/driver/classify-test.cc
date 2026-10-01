@@ -89,6 +89,26 @@ TEST("sgl classify - control flow words are their own class, and so is the name 
               .contains("lo:argument 1.0:number hi:argument"));
 }
 
+TEST("sgl classify - a call of a builtin that constrains control flow says so, by the overload it chose")
+{
+    // a barrier, a derivative and an atomic `max`, and a plain `max` that shares the atomic's name
+    constexpr auto source = "@workgroup binding counters:\n"
+                            "    slots: atomic[uint][4]\n"
+                            "fun sync():\n"
+                            "    workgroup_barrier()\n"
+                            "fun edge(x: float) -> float => ddx(x)\n"
+                            "fun raise(){counters} -> uint => counters.slots[2].max(3)\n"
+                            "fun larger(a: float, b: float) -> float => max(a, b)\n";
+    auto const checked = check_sources(read_prelude(), source);
+    REQUIRE(reports_of(checked) == "");
+    auto out = cc::string();
+    for (auto const& s :
+         sgl::classify(checked.user, checked.user_ast, {.module = &checked.module, .file_index = checked.user_file()}))
+        if (s.constrains_control_flow)
+            out.appendf("{}:{} ", checked.user.text_of(s.where), sgl::to_string(s.cls));
+    CHECK(out == "workgroup_barrier:function ddx:function max:function ");
+}
+
 TEST("sgl classify - spans are in source order and never overlap, on the extension's whole sample")
 {
     auto const source = read_text(cc::string(SGL_SAMPLES_DIR) + "/../../tools/vscode-extension/examples/sample.sgl");

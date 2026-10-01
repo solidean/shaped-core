@@ -6,8 +6,9 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// The legend: LSP's standard types, so every theme colours them.
-// A custom type would go uncoloured until a theme opted in; the one custom modifier is styled by the extension instead.
+// The legend: LSP's standard types, so every theme colours them, and one custom type.
+// A custom type goes uncoloured until something styles it, so the extension maps `controlBuiltin` to the grammar's
+// `keyword.control.sgl` scope, and styles the one custom modifier itself.
 enum token_type : u32
 {
     t_type,
@@ -25,12 +26,15 @@ enum token_type : u32
     t_comment,
     t_operator,
     t_decorator,
+    /// Not LSP's: a call of a builtin that constrains control flow, coloured as a control keyword.
+    /// A `keyword` type, or a modifier on `function`, would take the theme's plain keyword or function colour instead.
+    t_control_builtin,
     token_type_count,
 };
 
 constexpr cc::string_view token_type_names[]
-    = {"type",      "struct",  "enum",   "enumMember", "function", "method",   "property", "variable",
-       "parameter", "keyword", "number", "string",     "comment",  "operator", "decorator"};
+    = {"type",      "struct",  "enum",   "enumMember", "function", "method",   "property",  "variable",
+       "parameter", "keyword", "number", "string",     "comment",  "operator", "decorator", "controlBuiltin"};
 static_assert(sizeof(token_type_names) / sizeof(token_type_names[0]) == token_type_count);
 
 enum token_modifier : u32
@@ -59,6 +63,8 @@ struct mapped
 [[nodiscard]] mapped map_class(sgl::classified_span const& s)
 {
     using sgl::token_class;
+    if (s.constrains_control_flow)
+        return {true, t_control_builtin, 0};
     switch (s.cls)
     {
     case token_class::keyword:
