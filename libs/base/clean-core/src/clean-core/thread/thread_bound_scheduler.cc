@@ -6,6 +6,10 @@
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
 
+#if defined(__EMSCRIPTEN__) && CC_HAS_THREADS
+#include <emscripten/proxying.h>
+#endif
+
 using namespace cc::primitive_defines;
 
 namespace
@@ -333,6 +337,9 @@ bool cc::pump_main_thread(double max_ms)
 
     auto const cycle = [&](double deadline_secs)
     {
+#if defined(__EMSCRIPTEN__) && CC_HAS_THREADS
+        emscripten_proxy_execute_queue(emscripten_proxy_get_system_queue());
+#endif
         auto more = home.pump_cycle(deadline_secs);
         more |= cc::impl::thread_pump_registry(); // not thread_pump_all: that would run the home again, past the budget
         auto* const compute = async_scheduler::compute_or_null();
