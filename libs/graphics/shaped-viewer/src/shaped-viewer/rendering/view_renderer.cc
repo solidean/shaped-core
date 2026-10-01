@@ -5,8 +5,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/mix_routine.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -29,9 +29,9 @@ namespace
 /// temporal slots arrive a frame later — but the calls below decide what to declare, so asking with this frame's set
 /// would answer "nothing needs the split", declare nothing, and keep answering that forever.
 /// `hit_distance` is absent because nothing writes one yet, so a member requiring it is correctly skipped.
-[[nodiscard]] sr::denoise_guide_set traceable_guides()
+[[nodiscard]] sr::reconstruct_guide_set traceable_guides()
 {
-    using g = sr::denoise_guide;
+    using g = sr::reconstruct_guide;
     return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::split_diffuse_specular;
 }
 
@@ -560,7 +560,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
     // temporal ones only when the layer may denoise temporally.
-    auto const denoising = l.settings.denoise.method != sr::denoise_method::none;
+    auto const denoising = l.settings.reconstruct.denoiser != sr::denoise_method::none;
     auto const slot_of = [&](u64 id) { return denoising ? rec.temporal.get_ptr(id) : nullptr; };
 
     // Whether the member that will actually run reads the two lobes apart.
@@ -575,12 +575,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         if (!denoising)
             return false;
         // The split signals are this frame's own samples, so it is the temporal member's answer that decides.
-        auto fresh = l.settings.denoise;
+        auto fresh = l.settings.reconstruct;
         fresh.fresh_samples = true;
         // Asked against what the tracer CAN write rather than what this frame has, because this is the call that
         // decides what it writes — reading the slots here would say no on the first frame and no forever after.
         return sr::required_guides(sr::resolve_denoise_method(ctx, fresh, traceable_guides()))
-            .has(sr::denoise_guide::split_diffuse_specular);
+            .has(sr::reconstruct_guide::split_diffuse_specular);
     }();
     auto const split_slot_of = [&](u64 id) { return splitting ? rec.temporal.get_ptr(id) : nullptr; };
     auto const ds = denoise_slots{
@@ -726,7 +726,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         };
 
         if (_denoise(cmd, l.settings, schedule, *slot, ds, cameras, res.traces[trace_index])
-            == sr::denoise_status::pending)
+            == sr::reconstruct_status::pending)
             return sg::routine_outcome::declined;
     }
     return sg::routine_outcome::executed;
@@ -758,8 +758,11 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     // running it cannot disagree — so each member takes its own settings value rather than a flag per call.
     auto const with_fresh_samples = [&settings](bool fresh)
     {
-        auto copy = settings.denoise;
+        auto copy = settings.reconstruct;
         copy.fresh_samples = fresh;
+        // sv traces at the view's own size and does not jitter, so an upscaler here would run 1:1 on a mean it cannot
+        // reconstruct from; sv's TODO item for `render_settings::render_scale` is what lifts this.
+        copy.upscaler = sr::upscale_method::none;
         return copy;
     };
     auto schedule = denoise_schedule{
@@ -771,8 +774,8 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     // Carrying it into the spatial phase asks a temporal member to run on the converging mean, with no motion and no
     // split — which the front refuses, so the layer presents the raw mean from the hand-off onward.
     // `automatic` is what the spatial phase wanted in the first place: it walks the spatial members.
-    if (settings.denoise.method != sr::denoise_method::automatic && sr::is_temporal(settings.denoise.method))
-        schedule.spatial_settings.method = sr::denoise_method::automatic;
+    if (settings.reconstruct.denoiser != sr::denoise_method::automatic && sr::is_temporal(settings.reconstruct.denoiser))
+        schedule.spatial_settings.denoiser = sr::denoise_method::automatic;
 
     auto const may_run_temporally
         = ds.frame != nullptr && ds.motion != nullptr
@@ -787,16 +790,16 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     return schedule;
 }
 
-sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
-                                           render_settings const& settings,
-                                           denoise_schedule const& schedule,
-                                           impl::temporal_slot const& accumulator,
-                                           denoise_slots const& ds,
-                                           denoise_cameras const& cameras,
-                                           sg::texture_2d& presented)
+sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
+                                               render_settings const& settings,
+                                               denoise_schedule const& schedule,
+                                               impl::temporal_slot const& accumulator,
+                                               denoise_slots const& ds,
+                                               denoise_cameras const& cameras,
+                                               sg::texture_2d& presented)
 {
     auto& denoised = *ds.denoised;
-    auto const guides = sr::denoise_guides{
+    auto const guides = sr::reconstruct_guides{
         .albedo = ds.albedo->texture,
         .specular_albedo = ds.specular_albedo->texture,
         .normal = ds.normal->texture,
@@ -820,7 +823,7 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
     // Mid-fade both members run, so the frame carries two denoises.
     // That is the whole price of the fade, and it is why the window is counted in frames rather than seconds: it is
     // bounded by the accumulation, which a still view leaves behind within a second of settling.
-    auto outcome = sr::denoise_outcome();
+    auto outcome = sr::reconstruct_outcome();
     if (temporal)
     {
         auto temporal_guides = guides;
@@ -832,7 +835,7 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         if (split)
             temporal_guides.hit_distance = ds.hit_distance->texture;
 
-        auto const inputs = sr::denoise_inputs{
+        auto const inputs = sr::reconstruct_inputs{
             .color = split ? ds.frame_diffuse->texture : ds.frame->texture,
             .specular = split ? ds.frame_specular->texture : sg::texture_2d(),
             .guides = temporal_guides,
@@ -840,7 +843,7 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         };
         // Its own history, not the spatial member's: each would otherwise throw the other's away on every switch, and
         // the temporal one must survive a still period to be worth anything when the camera moves again.
-        outcome = sr::denoise_routine::execute(cmd, inputs, ds.frame->denoise, schedule.temporal_settings);
+        outcome = sr::reconstruct_routine::execute(cmd, inputs, ds.frame->denoise, schedule.temporal_settings);
     }
 
     if (spatial)
@@ -850,21 +853,21 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         // Into the crossfade slot while the temporal image still holds `denoised`, and straight into `denoised` once it
         // does not — so the fade costs a texture and the steady state costs nothing.
         auto const& target = temporal ? ds.crossfade->texture : denoised.texture;
-        auto const inputs = sr::denoise_inputs{
+        auto const inputs = sr::reconstruct_inputs{
             .color = accumulator.texture,
             .guides = guides,
             .output = target,
             .sample_count = u32(cc::max(1, settings.samples_per_pixel)) * accumulator.accum_frame,
         };
         auto const spatial_outcome
-            = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
+            = sr::reconstruct_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
 
         // Mid-fade the frame is only as good as its worse half: a spatial member that declined leaves the crossfade
         // slot holding an older image, and mixing that in would be a visible jump backwards.
         if (!temporal || !spatial_outcome.is_denoised())
             outcome = spatial_outcome;
         else if (!sr::mix_routine::execute(cmd, denoised.texture, ds.crossfade->texture, schedule.blend))
-            outcome.status = sr::denoise_status::pending; // the mix is still compiling, so the fade cannot be applied
+            outcome.status = sr::reconstruct_status::pending; // the mix is still compiling, so the fade cannot be applied
     }
 
     // Presented only when this frame produced it.

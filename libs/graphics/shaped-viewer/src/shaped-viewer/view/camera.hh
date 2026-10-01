@@ -30,7 +30,7 @@ struct sv::camera_gpu
 /// A camera's two matrices, in `tg`'s convention — column-major, and a vector is a column.
 ///
 /// sv traces rays rather than rasterizing, so nothing in the viewer needs these; they exist for a denoiser that
-/// reprojects in world space, which is what `sr::denoise_guides` asks for.
+/// reprojects in world space, which is what `sr::reconstruct_guides` asks for.
 struct sv::camera_matrices
 {
     tg::mat4f world_to_view = tg::mat4f::identity;

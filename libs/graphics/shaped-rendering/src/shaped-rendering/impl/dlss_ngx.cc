@@ -293,14 +293,8 @@ dlss_stream* dlss_create_stream(sg::command_list& cmd,
     if (desc.hdr)
         flags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
 
-    // PROVISIONAL, and untestable until a tracer jitters: nothing writes `denoise_guides::jitter` today, so every
-    // call here passes 0 and the flag cannot change a picture.
-    // MVJittered says the motion vectors CARRY the jitter offset.
-    // Whether ours will depends on how sv's raygen projects the previous camera, which is not written yet.
-    // So whoever lands jitter settles this and states the contract on `sr::denoise_guides::motion`, rather than
-    // leaving it to be discovered from a smeared image.
-    // TODO: decide MVJittered against sv's jitter once it exists.
-    flags |= NVSDK_NGX_DLSS_Feature_Flags_MVJittered;
+    // No MVJittered: `reconstruct_guide::motion` is measured from where the jittered sample was traced, so it carries
+    // no jitter offset, and a still camera reports zero.
     create.InFeatureCreateFlags = flags;
 
     return ngx().lock(

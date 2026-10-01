@@ -3,21 +3,22 @@
 Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
-- **Denoising: both halves run; what is left**, in order — shaped-rendering's [denoising.md](../../shaped-rendering/docs/denoising.md) is the design:
+- **Denoising: both halves run; what is left**, in order — shaped-rendering's [reconstruction.md](../../shaped-rendering/docs/reconstruction.md) is the design:
   - **Measure what the guides' and the split's payload growth costs.**
     `PtPayload` went from 27 to 38 scalar components: 3 for the diffuse albedo, 4 for the specular pair, and 4 more for the split
     (`direct_specular` and `lobe`) — on every ray rather than only primary ones.
   - **The specular and split guides are declared for `automatic` whatever the device supports**, because `build_render_plan` is a pure function with no context to ask.
     That is five textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
     Only the declaration, though: the tracer writes the split lobes only when the member that resolves on this device reads them.
-  - **A per-frame Halton jitter** while a vendor temporal member runs; SVGF does not need one, DLSS Ray Reconstruction does.
-    Distinct from the per-pixel random offset the raygen already applies, whose mean is the pixel centre and which is why `denoise_guides::jitter` is correctly zero today.
+  - **A per-frame Halton jitter** while an upscaler runs; SVGF does not need one, FSR and DLSS Ray Reconstruction do.
+    `sr::reconstruct_jitter` hands it out, one offset per frame.
+    Distinct from the per-pixel random offset the raygen already applies, whose mean is the pixel centre and which is why `reconstruct_guides::jitter` is correctly zero today.
     What is missing is one offset shared by every pixel of a frame, which is what a temporal upscaler reconstructs sub-pixel detail from.
     So it lands with `render_settings::render_scale` rather than before it.
   - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
-  - **`render_settings::render_scale`**, now that `dlss_rr` upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.
-    Inert until then, which is why it is not there yet.
-  - **`render_settings::exposure`**, for the tonemap when it lands; `dlss_rr` already reads `denoise.exposure`, and NRD deliberately does not.
+  - **`render_settings::render_scale`**, which plugs sv into FSR and `dlss_rr`: the plan traces at `sr::reconstruct_input_extent` instead of the view's own size.
+    Until then `_schedule_denoise` sets `reconstruct.upscaler` to `none`, which is what this item lifts.
+  - **`render_settings::exposure`**, for the tonemap when it lands; `dlss_rr` and the fsr upscaler already read `reconstruct.exposure`, and NRD deliberately does not.
   - **`view_renderer::execute`** — the single-view entry point — does not denoise; only the plan path does.
 
 - **Nothing tests the pump sweep in `viewer::finish_frame`, and no test shape reached it.**
@@ -77,7 +78,7 @@ What is left is the interaction on top of it, in dependency order:
   Reprojecting the history through the previous camera and rejecting per pixel is the classical answer and was tried;
   it cost a G-buffer, a ping-pong pair, a disocclusion heuristic and a per-pixel sample count, and it capped the mean.
   A denoiser buys the same smoothness without touching the estimator, and that is the direction taken: the spatial half
-  exists (`render_settings::denoise`), and the moving-camera half is the denoising entry at the top of this list.
+  exists (`render_settings::reconstruct`), and the moving-camera half is the denoising entry at the top of this list.
 - **The GPU tests may still be passing vacuously.** `pathtrace_routine`'s init used to drive its shader compiles
   with a throwaway single-threaded scheduler, which could not complete a node the ambient pool already owned — so the
   routine ended up with no pipeline and `execute` silently no-opped.

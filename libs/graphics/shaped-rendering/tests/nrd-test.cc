@@ -93,7 +93,7 @@ ASYNC_INVOCABLE_TEST("sr - an NRD frame's dispatches build and run", (sg::contex
 
 // The shared quality knob reaches REBLUR, rather than being accepted and dropped.
 //
-// `denoise_settings::quality` says every member reads it, and a member that quietly ignores it is a setting that
+// `reconstruct_settings::quality` says every member reads it, and a member that quietly ignores it is a setting that
 // looks live and does nothing — which is how `nrd_options::exposure` got written before NRD's own contract turned out
 // to forbid it.
 // Checked at the mapping rather than on an image: how long a history may grow is not visible in two frames of a
@@ -194,7 +194,7 @@ constexpr auto k_specular_albedo = 0.04f;
         cmd.upload.bytes_to_texture(t.raw(), cc::span<tg::vec4f const>(pixels).as_bytes());
     };
 
-    auto history = sr::denoise_history();
+    auto history = sr::reconstruct_history();
 
     // Past REBLUR's `historyFixFrameNum` of 3, because that pass is a wide blur meant to carry a young history and
     // stops once there is one — measuring inside it would be measuring the transient rather than the member.
@@ -217,7 +217,7 @@ constexpr auto k_specular_albedo = 0.04f;
             cmd->upload.bytes_to_texture(hit_distance.raw(), cc::span<tg::vec2f const>(pixels).as_bytes());
         }
 
-        auto const in = sr::denoise_inputs{
+        auto const in = sr::reconstruct_inputs{
             .color = diffuse,
             .specular = specular,
             .guides = {.albedo = albedo_texture,
@@ -231,8 +231,8 @@ constexpr auto k_specular_albedo = 0.04f;
         };
 
         auto const outcome = sr::nrd_denoise_routine::execute(*cmd, in, history);
-        REQUIRE(outcome.status != sr::denoise_status::unsupported);
-        REQUIRE(outcome.status != sr::denoise_status::failed);
+        REQUIRE(outcome.status != sr::reconstruct_status::unsupported);
+        REQUIRE(outcome.status != sr::reconstruct_status::failed);
         if (outcome.is_denoised())
             ++denoised_frames;
 
@@ -274,7 +274,7 @@ ASYNC_INVOCABLE_TEST("sr - NRD returns a uniformly lit surface unchanged", (sg::
     auto& ctx = *ctx_h;
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
-    if (!sr::query_denoise_support(ctx).nrd)
+    if (!sr::query_reconstruct_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
     sr::nrd_denoise_routine::prewarm(ctx);
@@ -313,7 +313,7 @@ ASYNC_INVOCABLE_TEST("sr - NRD keeps a surface's texture rather than filtering i
     auto& ctx = *ctx_h;
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
-    if (!sr::query_denoise_support(ctx).nrd)
+    if (!sr::query_reconstruct_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
     sr::nrd_denoise_routine::prewarm(ctx);
@@ -415,7 +415,7 @@ constexpr auto k_motion_albedo = 0.5f;
         cmd.upload.bytes_to_texture(t.raw(), cc::span<tg::vec4f const>(pixels).as_bytes());
     };
 
-    auto history = sr::denoise_history();
+    auto history = sr::reconstruct_history();
 
     auto denoised_frames = 0;
     for (auto attempt = 0; attempt < 24 && denoised_frames < k_motion_frames; ++attempt)
@@ -456,7 +456,7 @@ constexpr auto k_motion_albedo = 0.5f;
             cmd->upload.bytes_to_texture(hit_distance.raw(), cc::span<tg::vec2f const>(pixels).as_bytes());
         }
 
-        auto const in = sr::denoise_inputs{
+        auto const in = sr::reconstruct_inputs{
             .color = diffuse,
             .specular = specular,
             .guides = {.albedo = albedo_texture,
@@ -470,8 +470,8 @@ constexpr auto k_motion_albedo = 0.5f;
         };
 
         auto const outcome = sr::nrd_denoise_routine::execute(*cmd, in, history);
-        REQUIRE(outcome.status != sr::denoise_status::unsupported);
-        REQUIRE(outcome.status != sr::denoise_status::failed);
+        REQUIRE(outcome.status != sr::reconstruct_status::unsupported);
+        REQUIRE(outcome.status != sr::reconstruct_status::failed);
         if (outcome.is_denoised())
             ++denoised_frames;
 
@@ -521,7 +521,7 @@ ASYNC_INVOCABLE_TEST("sr - NRD follows a moving image through its motion vectors
     auto& ctx = *ctx_h;
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
-    if (!sr::query_denoise_support(ctx).nrd)
+    if (!sr::query_reconstruct_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
     sr::nrd_denoise_routine::prewarm(ctx);
@@ -555,7 +555,7 @@ ASYNC_INVOCABLE_TEST("sr - NRD follows a moving image through its motion vectors
         .context(cc::format("error with motion {}, without {}, never moved {}", with_motion, without_motion, never_moved));
 }
 
-// Moving a history that owns a vendor object, which is the reason `denoise_history` stopped being defaulted.
+// Moving a history that owns a vendor object, which is the reason `reconstruct_history` stopped being defaulted.
 //
 // The slot pairs a `void*` with the function that frees it, and losing it is silent in every way a status flag can see.
 // `_prepare` decides `restarted` from the method and the extent alone.
@@ -600,7 +600,7 @@ constexpr auto k_move_dark = 0.1f;
     auto const specular_albedo = make(sg::pixel_format::rgba32_float);
     auto const output = make(sg::pixel_format::rgba32_float);
 
-    auto const in = sr::denoise_inputs{
+    auto const in = sr::reconstruct_inputs{
         .color = diffuse,
         .specular = specular,
         .guides = {.albedo = albedo_texture,
@@ -620,7 +620,7 @@ constexpr auto k_move_dark = 0.1f;
     };
 
     // One frame at irradiance `lit`, against whichever history it is handed.
-    auto const run_one = [&](sr::denoise_history& history, f32 lit) -> cc::shared_async<sr::denoise_outcome>
+    auto const run_one = [&](sr::reconstruct_history& history, f32 lit) -> cc::shared_async<sr::reconstruct_outcome>
     {
         auto cmd = ctx.create_command_list();
 
@@ -648,19 +648,19 @@ constexpr auto k_move_dark = 0.1f;
         co_return outcome;
     };
 
-    auto history = sr::denoise_history();
+    auto history = sr::reconstruct_history();
     auto denoised = 0;
     for (auto attempt = 0; attempt < 24 && denoised < k_move_warmup; ++attempt)
     {
         auto const outcome = co_await run_one(history, k_move_bright);
-        REQUIRE(outcome.status != sr::denoise_status::failed);
+        REQUIRE(outcome.status != sr::reconstruct_status::failed);
         if (outcome.is_denoised())
             ++denoised;
     }
     REQUIRE(denoised == k_move_warmup).context("the bright stream never got going");
 
     // Both move operations, on a history whose NRD instance is now carrying six frames of bright.
-    auto moved = sr::denoise_history();
+    auto moved = sr::reconstruct_history();
     if (move_between)
     {
         auto intermediate = cc::move(history); // move construction
@@ -690,7 +690,7 @@ ASYNC_INVOCABLE_TEST("sr - a denoise history carries its vendor state through a 
     auto& ctx = *ctx_h;
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
-    if (!sr::query_denoise_support(ctx).nrd)
+    if (!sr::query_reconstruct_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
     sr::nrd_denoise_routine::prewarm(ctx);
@@ -733,7 +733,7 @@ ASYNC_INVOCABLE_TEST("sr - NRD leaves the sky exactly as the tracer wrote it", (
     auto& ctx = *ctx_h;
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
-    if (!sr::query_denoise_support(ctx).nrd)
+    if (!sr::query_reconstruct_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
     sr::nrd_denoise_routine::prewarm(ctx);

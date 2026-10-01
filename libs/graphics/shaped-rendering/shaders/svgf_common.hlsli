@@ -1,7 +1,7 @@
 #pragma once
 
 // What the three SVGF passes share: the flag bits, the albedo round trip and the edge-stopping tests.
-// Paired with sr::svgf_denoise_routine; see docs/denoising.md for how the passes fit together.
+// Paired with sr::svgf_denoise_routine; see docs/reconstruction.md for how the passes fit together.
 
 static const uint k_svgf_has_albedo = 1u << 0;
 static const uint k_svgf_reset = 1u << 1;         // the temporal pass ignores the history: a first frame, or a cut

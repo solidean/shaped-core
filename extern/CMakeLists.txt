@@ -104,6 +104,12 @@ option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/
 # Two files and 2.5 MB of weights instead of 53 MB of runtime, fetched on every configure since the member cannot run without them.
 option(SC_USE_VENDORED_OIDN_WEIGHTS "Use the fetched OIDN weights in extern/oidn-weights/.install" ON)
 
+# AMD FSR 3.1's upscaler sources: its host code, which shaped-rendering drives through its own backend over sg, and the
+# HLSL passes that backend compiles.
+# Fetched on every configure on Windows, since the upscaler routine has nothing to run without them; the host code is
+# not built against another C runtime yet, so elsewhere sr builds without FSR.
+option(SC_USE_VENDORED_FIDELITYFX "Build the fetched FSR 3.1 sources in extern/fidelityfx/.install" ON)
+
 # Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
 # dead weight in exactly the sanitizer builds that are already the slowest.
 if(SC_USE_VENDORED_MIMALLOC AND SC_MIMALLOC)
@@ -205,6 +211,11 @@ if(_sc_host_side_deps AND SC_USE_VENDORED_OIDN_WEIGHTS AND EXISTS "${CMAKE_CURRE
     add_subdirectory(oidn-weights)
 else()
     unset(OIDN_WEIGHTS_DIR CACHE)
+endif()
+
+if(_sc_host_side_deps AND WIN32 AND SC_USE_VENDORED_FIDELITYFX
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fidelityfx/.install/pin.txt")
+    add_subdirectory(fidelityfx)
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_DLSS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dlss/.install/pin.txt")

@@ -1,11 +1,12 @@
 """External prerequisites that must exist before CMake configures.
 
-Five deps are fetched rather than committed — DXC, Zydis, SDL3, SQLite and the OIDN weights — so every configure runs their fetch script.
+Some deps are fetched rather than committed — DXC, Zydis, SDL3, SQLite, the OIDN weights and the FSR 3.1 sources among them — so every configure runs their fetch script.
 That is seconds on a cold install and a cheap pin-file check after, and `SC_SKIP_<NAME>=1` opts out of one.
-A cross-target preset skips all five, since these are host-side dependencies.
+A cross-target preset skips them all, since these are host-side dependencies.
 None of them is fatal: a failure leaves the dependent target unbuilt and configure proceeds.
 
-Zydis is Windows-only; DXC is fetched on Windows and Linux, while SDL3, SQLite and the OIDN weights run everywhere — which is what makes a cold Linux or macOS configure do real work.
+Zydis and the FSR sources are Windows-only, and DXC is fetched on Windows and Linux.
+SDL3, SQLite and the OIDN weights run everywhere, which is what makes a cold Linux or macOS configure do real work.
 An `install: on-request` dependency has no `ensure_*` here at all: a person runs its fetch script by hand, and OIDN itself is one.
 Each dep's own docs own its pin, its size and what is missing without it — for Zydis that is tools/instruction-tracer/readme.md, not a libs/ doc.
 """
@@ -163,6 +164,24 @@ def ensure_oidn_weights(root: Path, preset_name: str = "") -> None:
         windows_only=False,
         doing="downloading the pinned Open Image Denoise weights for sr::denoise_method::oidn",
         dependent="shaped-rendering's OIDN denoise member",
+    )
+
+
+def ensure_fidelityfx(root: Path, preset_name: str = "") -> None:
+    """Download the pinned FSR 3.1 upscaler sources into extern/fidelityfx/.install when they are missing or at the wrong pin.
+
+    A failure leaves shaped-rendering's FSR upscaler reporting `unsupported`.
+    """
+    _ensure(
+        root,
+        preset_name,
+        name="fidelityfx",
+        directory="fidelityfx",
+        script_name="fetch-fidelityfx.py",
+        skip_env="SC_SKIP_FIDELITYFX",
+        windows_only=True,
+        doing="downloading the pinned FSR 3.1 upscaler sources for sr::fsr_upscale_routine",
+        dependent="shaped-rendering's FSR upscaler",
     )
 
 

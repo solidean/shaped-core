@@ -1,6 +1,6 @@
 #pragma once
 
-#include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
 
 namespace sv
@@ -49,14 +49,17 @@ struct sv::render_settings
     /// `automatic`'s choice.
     /// A temporal member cannot run the spatial phase at all: it would be handed the converging mean with no motion
     /// guide, and would report `unsupported`.
-    sr::denoise_settings denoise = {.method = sr::denoise_method::none};
+    ///
+    /// Its `upscaler`, `scale`, `upscale_sharpness` and `frame_time_ms` are not read yet: sv traces at the view's own
+    /// size, so nothing upscales.
+    sr::reconstruct_settings reconstruct = {.denoiser = sr::denoise_method::none};
 
     /// For how many accumulated frames after a restart a temporal member denoises this frame's own samples, before the
     /// spatial one takes over on the mean.
     ///
     /// A young mean is barely less noisy than one frame, which is where a temporal member's history pays; an old one
     /// has converged past anything that history could add, and only a spatial member keeps it unbiased.
-    /// Only a layer whose `denoise.method` may run temporally reads it.
+    /// Only a layer whose `reconstruct.denoiser` may run temporally reads it.
     u32 temporal_denoise_frames = 16;
 
     /// Over how many accumulated frames the hand-off from the temporal member to the spatial one is crossfaded.

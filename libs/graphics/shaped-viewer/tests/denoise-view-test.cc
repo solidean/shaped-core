@@ -18,7 +18,7 @@ using namespace cc::primitive_defines;
 
 // A denoised layer, end to end through the headless viewer.
 //
-// What this pins is the promise `render_settings::denoise` makes: turning denoising on, off or to another member never
+// What this pins is the promise `render_settings::reconstruct` makes: turning denoising on, off or to another member never
 // restarts accumulation.
 // The guides and the denoised image are written beside the mean, never into it, so the count a capture waits on keeps
 // climbing across every change — while the denoiser's own guides restart on a count of their own.
@@ -79,7 +79,7 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
         scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
         // The loop may run one more body after the close request; it then keeps the last phase's setting.
         auto const method = phase < phase_methods.size() ? phase_methods[phase] : phase_methods.back();
-        scene.settings({.samples_per_pixel = 1, .denoise = {.method = method}});
+        scene.settings({.samples_per_pixel = 1, .reconstruct = {.denoiser = method}});
 
         auto const accumulated = view.accumulated_frames();
         // Bounded: a loop that never converges runs thousands of frames, and the first few hundred say what went wrong.
@@ -162,7 +162,7 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
         // sampled directly, so from above the box is lit through its lamp mesh alone and comes out nearly black.
         // Moderate, because nothing tone-maps and a bright box clips to flat white; either way the noise would hide.
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
-        scene.settings({.samples_per_pixel = 1, .denoise = {.method = method}});
+        scene.settings({.samples_per_pixel = 1, .reconstruct = {.denoiser = method}});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
         // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.
@@ -269,7 +269,7 @@ ASYNC_INVOCABLE_TEST("sv - the viewer drives the split-signal denoiser", (sg::co
 
     if (!sv_test::shared_env().has_compiler)
         SKIP("no DXC compiler to build the path-tracing shaders");
-    if (!sr::query_denoise_support(ctx).nrd)
+    if (!sr::query_reconstruct_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
     auto const raw_path = cc::format("{}/sv-denoise-split-raw.png", cc::temp_directory_path());
@@ -288,7 +288,7 @@ ASYNC_INVOCABLE_TEST("sv - the viewer drives the split-signal denoiser", (sg::co
 
 // A layer that NAMES a temporal member, captured past the hand-off.
 //
-// `render_settings::denoise.method` names the temporal phase; the spatial phase that takes over once the mean has
+// `render_settings::reconstruct.denoiser` names the temporal phase; the spatial phase that takes over once the mean has
 // `temporal_denoise_frames + temporal_denoise_fade_frames` frames is a different call, on the mean rather than on this
 // frame's samples.
 // Carrying the named temporal member into it hands a temporal member the converging mean with no motion guide, which
@@ -316,7 +316,7 @@ ASYNC_INVOCABLE_TEST("sv - a named temporal member still denoises past the hand-
     // Both members that `is_temporal` names and this build can run: svgf always, nrd where its SDK was fetched.
     // svgf is the one that shows this predates the NRD member.
     auto methods = cc::vector<sr::denoise_method>{sr::denoise_method::svgf};
-    if (sr::query_denoise_support(ctx).nrd)
+    if (sr::query_reconstruct_support(ctx).nrd)
         methods.push_back(sr::denoise_method::nrd);
 
     constexpr auto k_past_handoff = 30;
@@ -444,7 +444,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
         scene.add_mesh(mesh);
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
         scene.settings({.samples_per_pixel = 1,
-                        .denoise = {.method = sr::denoise_method::automatic},
+                        .reconstruct = {.denoiser = sr::denoise_method::automatic},
                         .temporal_denoise_frames = window,
                         .temporal_denoise_fade_frames = fade});
 

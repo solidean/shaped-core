@@ -2,8 +2,8 @@
 
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/reconstruct.hh>
 
 /// Options only the NRD member has.
 ///
@@ -30,28 +30,28 @@ struct sr::nrd_options
 ///
 /// **dx12 only today**, because NRD embeds DXIL alone and this member hands sg exactly that; `is_available` asks the
 /// context rather than assuming, so a vulkan context reports `unsupported`.
-/// libs/graphics/shaped-rendering/docs/denoising.md has the two routes that would widen it.
+/// libs/graphics/shaped-rendering/docs/reconstruction.md has the two routes that would widen it.
 ///
 /// It requires every guide `sr::required_guides(denoise_method::nrd)` names, `split_diffuse_specular` among them: the
 /// denoiser's whole premise is that the two lobes blur differently, so a call carrying one radiance texture reports
 /// `unsupported` rather than denoising the sum as if it were diffuse.
 ///
 /// **Temporal, so it wants this frame's own samples** rather than a converging mean.
-/// Its NRD instance is the history, and lives in the caller's `sr::denoise_history`.
+/// Its NRD instance is the history, and lives in the caller's `sr::reconstruct_history`.
 class sr::nrd_denoise_routine : public sg::render_routine<nrd_denoise_routine>
 {
 public:
     /// Denoises `in.color` (diffuse) and `in.specular` into `in.output`, carrying `history` from call to call.
     ///
     /// Does not upscale: REBLUR is a denoiser, so `in.output` must be the input's extent.
-    [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
-                                                 denoise_inputs const& in,
-                                                 denoise_history& history,
-                                                 nrd_options const& options = {});
+    [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
+                                                     reconstruct_inputs const& in,
+                                                     reconstruct_history& history,
+                                                     nrd_options const& options = {});
 
-    [[nodiscard]] static nrd_options options_for(denoise_settings const& settings);
+    [[nodiscard]] static nrd_options options_for(reconstruct_settings const& settings);
 
-    /// Whether this build can run it, which is what `sr::query_denoise_support` reports.
+    /// Whether this build can run it, which is what `sr::query_reconstruct_support` reports.
     /// It asks nothing of the device, so this is really "were the sources fetched".
     [[nodiscard]] static bool is_available(sg::context const& ctx);
 

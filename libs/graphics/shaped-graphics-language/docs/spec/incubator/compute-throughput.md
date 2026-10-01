@@ -4,7 +4,7 @@
 
 A compute-bound kernel written in SGL can tile through workgroup memory today, and still cannot reach the throughput its hardware has.
 The case that brought it here is shaped-rendering's OIDN member: a U-Net of sixteen 3x3 convolutions, run in HLSL at about 3.2 TFLOP/s against a 20-25 fp32 peak.
-Its route to speed is [denoising.md's "Getting faster"](../../../../shaped-rendering/docs/denoising.md#getting-faster).
+Its route to speed is [reconstruction.md's "Getting faster"](../../../../shaped-rendering/docs/reconstruction.md#getting-faster).
 The first step, implicit-GEMM tiling, needs only the [`@workgroup` bindings and barriers](../bindings.md#workgroup-memory) SGL already has.
 The steps after it ask two things of SGL, in order of what they buy for the portability they cost:
 

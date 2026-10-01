@@ -103,7 +103,7 @@ using namespace svgf_atrous_bindings;
 
     // Between passes the alpha is the variance this filter carries forward.
     // What lands in the CALLER's output is their own input's alpha instead: a denoised image keeps the alpha it came
-    // in with, which is what sr::denoise_inputs::output promises and what a-trous does too.
+    // in with, which is what sr::reconstruct_inputs::output promises and what a-trous does too.
     float out_alpha = variance;
     if ((flags & k_svgf_remodulate_out) != 0)
     {

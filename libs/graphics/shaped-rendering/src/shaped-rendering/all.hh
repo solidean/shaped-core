@@ -9,8 +9,8 @@
 #include <shaped-rendering/blit_routine.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-rendering/capture.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/dlss_rr_routine.hh>
+#include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/imgui_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
@@ -18,6 +18,7 @@
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/mix_routine.hh>
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 #include <shaped-rendering/window.hh>

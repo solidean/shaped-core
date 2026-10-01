@@ -6,14 +6,14 @@
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/dlss_ngx.hh>
 
-#include <memory> // std::shared_ptr, which is what denoise_history::_member_state is
+#include <memory> // std::shared_ptr, which is what reconstruct_history::_member_state is
 
 namespace sr
 {
 using impl::extent_of;
 using impl::is_set;
 
-dlss_options dlss_rr_routine::options_for(denoise_settings const& settings)
+dlss_options dlss_rr_routine::options_for(reconstruct_settings const& settings)
 {
     return {.quality = settings.quality, .exposure = settings.exposure};
 }
@@ -37,16 +37,17 @@ cc::shared_async<cc::unit> dlss_rr_routine::init(sg::routine_init_scope scope)
     co_return;
 }
 
-denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
-                                         denoise_inputs const& in,
-                                         denoise_history& history,
-                                         dlss_options const& options)
+reconstruct_outcome dlss_rr_routine::execute(sg::command_list& cmd,
+                                             reconstruct_inputs const& in,
+                                             reconstruct_history& history,
+                                             dlss_options const& options)
 {
     CC_ASSERT(is_set(in.color), "a denoise call needs a colour texture");
     CC_ASSERT(is_set(in.output), "a denoise call needs an output texture");
     CC_ASSERT(in.output.raw() != in.color.raw(), "DLSS needs an output texture other than its input");
 
-    auto const unsupported = denoise_outcome{.status = denoise_status::unsupported, .method = denoise_method::dlss_rr};
+    auto const unsupported
+        = reconstruct_outcome{.status = reconstruct_status::unsupported, .denoiser = denoise_method::dlss_rr};
 
     if (!impl::dlss_is_available(cmd.context()))
         return unsupported;
@@ -61,12 +62,12 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
     //
     // It declines until a tick has brought it up, exactly as every other member does, even though its init compiles
     // nothing: `try_acquire` reports readiness and never establishes it.
-    // `denoise_routine::init` prewarms this member, so a caller going through the front pays that tick once.
+    // `reconstruct_routine::init` prewarms this member, so a caller going through the front pays that tick once.
     auto const self = try_acquire(cmd);
     if (self.is_pending())
-        return {.status = denoise_status::pending, .method = denoise_method::dlss_rr};
+        return {.status = reconstruct_status::pending, .denoiser = denoise_method::dlss_rr};
     if (self.is_failed() || self->_instance == nullptr)
-        return {.status = denoise_status::failed, .method = denoise_method::dlss_rr};
+        return {.status = reconstruct_status::failed, .denoiser = denoise_method::dlss_rr};
 
     auto const input_extent = extent_of(in.color);
     auto const output_extent = extent_of(in.output);
@@ -90,7 +91,7 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
             cmd, self->_instance,
             {.input_extent = input_extent, .output_extent = output_extent, .quality = options.quality, .hdr = options.hdr});
         if (stream == nullptr)
-            return {.status = denoise_status::failed, .method = denoise_method::dlss_rr, .restarted = restarted};
+            return {.status = reconstruct_status::failed, .denoiser = denoise_method::dlss_rr, .restarted = restarted};
 
         // Dropped while the caller is still recording — `_prepare` and the rebuild above both do it — so the release
         // waits for the epoch current at the drop, and every frame that evaluated the stream has finished by then.
@@ -113,9 +114,9 @@ denoise_outcome dlss_rr_routine::execute(sg::command_list& cmd,
                                                 .reset = restarted,
                                                 .exposure = options.exposure});
     if (!evaluated)
-        return {.status = denoise_status::failed, .method = denoise_method::dlss_rr, .restarted = restarted};
+        return {.status = reconstruct_status::failed, .denoiser = denoise_method::dlss_rr, .restarted = restarted};
 
     ++history._frame;
-    return {.status = denoise_status::denoised, .method = denoise_method::dlss_rr, .restarted = restarted};
+    return {.status = reconstruct_status::denoised, .denoiser = denoise_method::dlss_rr, .restarted = restarted};
 }
 } // namespace sr

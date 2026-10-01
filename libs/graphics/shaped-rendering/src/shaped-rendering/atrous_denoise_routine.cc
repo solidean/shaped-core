@@ -28,8 +28,8 @@ constexpr u32 k_has_specular_albedo = 1u << 5;
 constexpr int k_scratch = 0; // 0, 1: the passes' ping-pong
 constexpr int k_slots_used = 2;
 
-static_assert(k_scratch + k_slots_used <= denoise_history::state_slots,
-              "a-trous reaches past the slots denoise_history has");
+static_assert(k_scratch + k_slots_used <= reconstruct_history::state_slots,
+              "a-trous reaches past the slots reconstruct_history has");
 
 /// Each pass averages what the last one left, so the noise it has to see through shrinks.
 /// Halving the variance per pass is the usual approximation when no variance estimate is carried along.
@@ -37,7 +37,7 @@ constexpr f32 k_per_pass_noise_falloff = 0.70710678f;
 
 } // namespace
 
-atrous_options atrous_denoise_routine::options_for(denoise_settings const& settings)
+atrous_options atrous_denoise_routine::options_for(reconstruct_settings const& settings)
 {
     auto options = atrous_options{};
     switch (settings.quality)
@@ -107,10 +107,10 @@ cc::shared_async<cc::unit> atrous_denoise_routine::init(sg::routine_init_scope s
     co_return;
 }
 
-denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
-                                                denoise_inputs const& in,
-                                                denoise_history& history,
-                                                atrous_options const& options)
+reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
+                                                    reconstruct_inputs const& in,
+                                                    reconstruct_history& history,
+                                                    atrous_options const& options)
 {
     CC_ASSERT(is_set(in.color), "a denoise call needs a colour texture");
     CC_ASSERT(is_set(in.output), "a denoise call needs an output texture");
@@ -121,9 +121,9 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     // Read-only: execute touches nothing init did not publish, and the ping-pong images are the caller's.
     auto const self = try_acquire(cmd);
     if (self.is_pending())
-        return {.status = denoise_status::pending, .method = denoise_method::atrous};
+        return {.status = reconstruct_status::pending, .denoiser = denoise_method::atrous};
     if (self.is_failed())
-        return {.status = denoise_status::failed, .method = denoise_method::atrous};
+        return {.status = reconstruct_status::failed, .denoiser = denoise_method::atrous};
 
     auto& ctx = cmd.context();
     auto const extent = extent_of(in.color);
@@ -199,6 +199,6 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
         luminance_scale *= k_per_pass_noise_falloff;
     }
 
-    return {.status = denoise_status::denoised, .method = denoise_method::atrous, .restarted = restarted};
+    return {.status = reconstruct_status::denoised, .denoiser = denoise_method::atrous, .restarted = restarted};
 }
 } // namespace sr

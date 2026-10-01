@@ -2,8 +2,8 @@
 
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/reconstruct.hh>
 
 /// Which of OIDN's trained networks runs: the same topology, at two widths.
 enum class sr::oidn_network_size : sg::u8
@@ -28,7 +28,7 @@ struct sr::oidn_options
     ///
     /// A cap rather than the size used, and 0 takes the network's own default of 512.
     /// It never changes the image.
-    /// libs/graphics/shaped-rendering/docs/denoising.md has the measured time and memory per cap.
+    /// libs/graphics/shaped-rendering/docs/reconstruction.md has the measured time and memory per cap.
     i32 max_tile = 0;
 
     /// Which trained network runs.
@@ -39,7 +39,7 @@ struct sr::oidn_options
 ///
 /// **The weights are Intel's and the inference is ours**, so it needs no vendor SDK and no particular GPU.
 /// Its output is held to Intel's own filter by a test.
-/// libs/graphics/shaped-rendering/docs/denoising.md has why it runs this way, and what it costs.
+/// libs/graphics/shaped-rendering/docs/reconstruction.md has why it runs this way, and what it costs.
 ///
 /// **Far too slow for a frame loop** — roughly 0.2 s per megapixel — so `automatic` never picks it; name it.
 ///
@@ -55,16 +55,16 @@ public:
     ///
     /// Does not upscale: `in.output` must be the input's extent.
     /// The image may be any size; the network pads its own tensors up to what four pools need.
-    [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
-                                                 denoise_inputs const& in,
-                                                 denoise_history& history,
-                                                 oidn_options const& options = {});
+    [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
+                                                     reconstruct_inputs const& in,
+                                                     reconstruct_history& history,
+                                                     oidn_options const& options = {});
 
     /// What the shared knobs map onto.
     ///
     /// `exposure` becomes the input scale, which is the one shared knob this member genuinely wants.
     /// `quality` picks the network the way OIDN's own setting does: `fast` runs the small one, the rest the base one.
-    [[nodiscard]] static oidn_options options_for(denoise_settings const& settings);
+    [[nodiscard]] static oidn_options options_for(reconstruct_settings const& settings);
 
     /// Whether this build and context can run it: the weights were fetched, and its shaders build here.
     [[nodiscard]] static bool is_available(sg::context const& ctx);

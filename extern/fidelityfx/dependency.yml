@@ -1,0 +1,148 @@
+# Pin and license for the upstream fetched here.
+# fetch-fidelityfx.py reads its pin from this file.
+# tools/dev/lib/pipeline/prereqs.py scans this file for the `pin_hash:` line to decide whether .install/ is current,
+# without paying to start Python — keep that key on a line of its own.
+
+upstreams:
+  - name: FidelityFX-SDK
+    homepage: https://gpuopen.com/amd-fsr-sdk/
+    install: fetched
+    source: github-files
+    repo: https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
+    track: default-branch
+    version: 60f4ea81
+    tag: 60f4ea81909200d8542eca14dccb2628b763a9a3
+    digest_algo: sha256
+
+    # The pin over the whole set: the sha256 of the `path sha256` lines below, in order.
+    # One hash to compare against .install/pin.txt, while every file is still verified on its own.
+    pin_hash: 2df086c80257f937e55e7510e9ba4fd08ea822d5496f98b80b6f871c3640aa7f
+
+    license: MIT
+    license_files: [.install/Kits/FidelityFX/docs/license.md]
+    used_by: shaped-rendering — sr::fsr_upscale_routine, AMD FSR 3.1's upscaler run through sg
+    unavailable_on: [linux, macos]
+    files:
+      - path: Kits/FidelityFX/api/include/ffx_api.h
+        sha256: e1a9d1b559eaf75f4cb401f1c43a66e2f3dc9621abfeb58b9c6fac56443177fd
+      - path: Kits/FidelityFX/api/include/ffx_api.hpp
+        sha256: e1fab07fa9ab489db74813e6b754fc91dad6ded68870ab558002e92b6a32566a
+      - path: Kits/FidelityFX/api/include/ffx_api_types.h
+        sha256: cc0adc0ffc804dd7cd03c39c15581b575e416383177ffe95060201d52cc0fc49
+      - path: Kits/FidelityFX/api/internal/ffx_api_helper.h
+        sha256: a6c83a35f0268aabaa7757ad0ef9b32a740202ccb54da56085fd06df540144a4
+      - path: Kits/FidelityFX/api/internal/ffx_assert.h
+        sha256: 6da2b0dce28ef6c9433d7cf74d12ba60ba70d20d2424f796f0074089e24f72ed
+      - path: Kits/FidelityFX/api/internal/ffx_backends.h
+        sha256: 36595345af24366f05f8d4a1bf56b7101e786a52c84b557cf0ba3dc90709d73e
+      - path: Kits/FidelityFX/api/internal/ffx_error.h
+        sha256: 2afbd90bf097c2438bb7cf7ccf87eee8f9a85d8479b3c6fa6cdfd2ba67089aaa
+      - path: Kits/FidelityFX/api/internal/ffx_interface.h
+        sha256: 9377a94813a65683354f4a8219c4b97290b62be667be4f6a0990ababc19ff89e
+      - path: Kits/FidelityFX/api/internal/ffx_internal_types.h
+        sha256: 3f72acabc56fb1ffab57dd08c5ca8db23d61a045c86043a6b17c1d74dac9ed79
+      - path: Kits/FidelityFX/api/internal/ffx_message.h
+        sha256: 1febaa648b19e41a580b7cf767ea5da40e0c86ac60b7c6ed8b1f70a8bc238b4b
+      - path: Kits/FidelityFX/api/internal/ffx_object_management.cpp
+        sha256: 8185e6d15daecadf2d50e179acdfdbc1e4322d036d2ed82e5f7602fc19940e18
+      - path: Kits/FidelityFX/api/internal/ffx_object_management.h
+        sha256: 62424c85f937b290a0a434d57d22f50783cd5fe399bb96f46b20e987efcc4567
+      - path: Kits/FidelityFX/api/internal/ffx_provider.h
+        sha256: 541041cd9727460d4c2a922fdac0c1dd2d7895077314f8c7eecc171ef8a4b5a0
+      - path: Kits/FidelityFX/api/internal/ffx_util.h
+        sha256: 8670a8cb1ccbcaa9b006e4bff3297b18fb9c05a323438b40b871eadb1994f898
+      - path: Kits/FidelityFX/upscalers/include/ffx_upscale.h
+        sha256: 65be36d5653eb71c10379e0204f7bb7cd6a8aeec96e6f8cffc5f59ffeb1f89bf
+      - path: Kits/FidelityFX/upscalers/fsr3/include/ffx_fsr3upscaler.h
+        sha256: 10218982d65986079c13d84f6ca3bfc9fbbb1742f24a94e0afa83ed225510e95
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler.cpp
+        sha256: 0fd97a1016043cf3ec1b50c2112fc16f6f8702930ed54a166649a1d956a41e1a
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_private.h
+        sha256: 807f07590e7aa9a3969f0c3125cce16b1dc7b8d6bc92dd81ec3539dee9c10fc1
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/ffx_fsr3upscaler_shaderblobs.h
+        sha256: 403a2d855ada4df51f1890235731971a457032010054df3b081a932143736788
+      - path: Kits/FidelityFX/docs/license.md
+        sha256: 6757f2fec461238da6f84f83536ec195e8c036b1773a06f6f34301b9ed8c0963
+      - path: Kits/FidelityFX/api/internal/gpu/ffx_common_types.h
+        sha256: 30b4f299e48eddaa64d9ad56c259fc13688fa5bc5735475c84d9ae10fd94907c
+      - path: Kits/FidelityFX/api/internal/gpu/ffx_core.h
+        sha256: db3268fc71b7663ca4b51504998602dde9e91262385efbf81acdc9a790133a4d
+      - path: Kits/FidelityFX/api/internal/gpu/ffx_core_cpu.h
+        sha256: f22644d3942e7ae05c9986d93e8c1527effb9741e4f6e4766d15a6be40cee96f
+      - path: Kits/FidelityFX/api/internal/gpu/ffx_core_gpu_common.h
+        sha256: 2df061c94b04bb4dedb6931a9e8241c1aa94eae826c506a75851a7f72ea4f4e8
+      - path: Kits/FidelityFX/api/internal/gpu/ffx_core_gpu_common_half.h
+        sha256: 1f7368a8cd327c87c6b8031cf8c2aa32a6c46bb39d8fadf151212dcfd5d61900
+      - path: Kits/FidelityFX/api/internal/gpu/ffx_core_hlsl.h
+        sha256: c14a6bcb12f40284412b54c584bc86d424e5231fc579211008bcda547c3d5d05
+      - path: Kits/FidelityFX/api/internal/gpu/ffx_core_portability.h
+        sha256: 217281792d09b88ad122055a6361a9303ccbce22238172fa6b30df7978d38968
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr1/ffx_fsr1.h
+        sha256: 328ee880b26f400f7d8e59ffcdf55b83ae71d6de759e72f106a3c8cfc0d4cc8e
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/spd/ffx_spd.h
+        sha256: 4d3b02d58b215f7d0d3fcdc4cabfa8f2cd03a8efdde12f770c2142b1ccc81033
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_accumulate.h
+        sha256: d3d47fbf9c83bddbeb6f0d0f05f648b739a7edfaee287ea38fb18bf53ed478a3
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_hlsl.h
+        sha256: 61bf134d78b72ab81a7e39ce9481d73027f91941137bb6d69e4354830b476901
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_common.h
+        sha256: b4ee5b5dbf10df0e81d704cfff92507231fb3e3b93f06b9bfa8490f316e7bb66
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_debug_view.h
+        sha256: ba26bd4a2edb46853b7206a32f744fe0f28529264cf0fb7dbabfcb5242f8fd3e
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_luma_instability.h
+        sha256: ea921c3af883fa5ef20d214749b269d793668ea916d97a749dd86c3320ad1d46
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_luma_pyramid.h
+        sha256: 3f3362c5115688ad5a868c497c4ce45d0e0019cac51dac277e2f918dac76c242
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_prepare_inputs.h
+        sha256: 12e14745f8da1df56546873726c6f5ea10e26a944ebaff982fa10f18084280bb
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_prepare_reactivity.h
+        sha256: 1346c7dd03c39430bcac4e482fb4a33b3e45af76ecfb214cd61b833b036c59ee
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_rcas.h
+        sha256: 7942c22fdaafaaf7648c20877104160e76d3fa2ab810a7f763e906bf7e3c36ba
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_reproject.h
+        sha256: bca57070feb074ecb352c15f7588a2b7d1c00690ca221bf8d35f51badf94baae
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_resources.h
+        sha256: 4190a25578ed28f56a83b1ed3c1cbd239cf73b622ff4819b8e8fc89e3eade433
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_sample.h
+        sha256: 4446848fedae924d28235839c5d2884c3daaa9f02d34f64912a96b670d285f03
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_shading_change.h
+        sha256: 09097c77256ce5a0a43c286eb3d6e2a5568be7905d9b7374058135df18c2210e
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_shading_change_pyramid.h
+        sha256: 69c7d21737ff16affe10fe27053b762debe535f304a451832dc20beadfe56301
+      - path: Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr3upscaler/ffx_fsr3upscaler_upsample.h
+        sha256: ccff9b22f7051b864d46d1d11a8efd0a0b8dd96d0cb2b94515e61df579deaf60
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_accumulate_pass.hlsl
+        sha256: a9970dd929cda29a15acf1546a999db2ad2c49d8bf5a58a93797db09cbaf4fb1
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_autogen_reactive_pass.hlsl
+        sha256: aca5c8f4ea09bd799a907319b4f8b57db254f085a48a3968e83d0e3f548bf199
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_debug_view_pass.hlsl
+        sha256: caced71013be1806fb595b619bc7221a07cc057e395d9a866beeba744c8d57ac
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_luma_instability_pass.hlsl
+        sha256: 5f2d50ea07bc46d9d27adc508ab013c6dc5137d4be67626ffaf4ef2593f5698a
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_luma_pyramid_pass.hlsl
+        sha256: 3d5be83c9d7ec601af52708788a8fc991c529a2e29fe4e340dc4b840a7154bc4
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_prepare_inputs_pass.hlsl
+        sha256: 5312aed3cb16d0d639b33b9d36476d253e58342df2d7d2030ba5690a982f40d6
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_prepare_reactivity_pass.hlsl
+        sha256: 27b2f4ee4aca425d4e7b60925e80a4aae7057781044d08db4cacae3d183565d3
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_rcas_pass.hlsl
+        sha256: 699fb6c19ceb57ebdffaedb2c50d9b1a6d4e9990ddd383056e70346aa484079d
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_shading_change_pass.hlsl
+        sha256: 30ae2b27d3a3fc520510be169e50a1a5ec937b505ee0a169fa82293e81c0e0eb
+      - path: Kits/FidelityFX/upscalers/fsr3/internal/shaders/ffx_fsr3upscaler_shading_change_pyramid_pass.hlsl
+        sha256: 76b0e8fb9b9ead2516db1efb4239116c2ca0973c1c589d86f25a5adc6f8c17e4
+    notes: |
+      AMD FSR 3.1's analytic upscaler, from the FidelityFX SDK 2.3 tree: its host C++, its HLSL passes, and the support
+      headers both include — 54 files and under 1 MB, where the repository around them carries samples, media and signed DLLs.
+      Every file here is MIT; docs/license.md lists them among its MIT exceptions, while other parts of the SDK are under
+      AMD's binary-only license, which is why this takes named files rather than the tree.
+
+      WE RUN AMD'S HOST CODE AND OUR OWN BACKEND.
+      The host code reaches the GPU only through its `FfxInterface` table, and shaped-rendering implements that table over
+      sg, compiling the passes itself through slib.
+      AMD's precompiled shader headers and the FidelityFX_SC tool that makes them are not in the public tree at all, and
+      neither is `amdinternal/`, which the host code includes for a debug watermark and a git hash.
+      fetch-fidelityfx.py installs two no-op stand-ins for those from shim/, so the fetched tree builds as it stands.
+
+      Windows only, for now: the host code calls MSVC's secure CRT (`wcscpy_s`, `getenv_s`, `strncpy_s`) and uses
+      `__declspec` unconditionally, and nothing here has been built against another C runtime yet.

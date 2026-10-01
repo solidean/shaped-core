@@ -39,6 +39,12 @@ struct scene_constants
     uint accum_frame; // 0 restarts the running mean, >0 folds this frame into it
     int spp;          // samples per pixel this frame
     float light_size; // area light radius: bigger is softer and noisier
+
+    // While an upscaler runs, every sample of the frame lands at this one offset from the pixel's centre, in
+    // [-0.5, 0.5], rather than at a random spot inside the pixel: the upscaler reconstructs from where they landed.
+    float2 frame_jitter;
+    int use_frame_jitter;
+    int _pad;
 };
 
 #pragma sc push_constants
@@ -226,13 +232,17 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
     float3 primary_normal = float3(0, 0, 0);
     float primary_depth = 0;
     float3 primary_position = float3(0, 0, 0);
+    float2 primary_sample = float2(0, 0);
     bool primary_hit = false;
 
     int spp = max(1, gConstants.spp);
     for (int s = 0; s < spp; ++s)
     {
-        // Jittered inside the pixel, so more samples anti-alias as well as converge.
+        // Jittered inside the pixel, so more samples anti-alias as well as converge — or, while an upscaler runs, all
+        // at the frame's one offset, which the upscaler turns into resolution instead.
         float2 jitter = float2(rand_next(rng), rand_next(rng));
+        if (gConstants.use_frame_jitter != 0)
+            jitter = 0.5 + gConstants.frame_jitter;
         float2 ndc = (float2(px) + jitter) / float2(size) * 2.0 - 1.0;
         float3 d = normalize(gConstants.forward.xyz + gConstants.right.xyz * (ndc.x * tan_half * aspect)
                              - gConstants.up.xyz * (ndc.y * tan_half));
@@ -253,6 +263,7 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
             primary_albedo = h.albedo;
             primary_normal = h.normal;
             primary_position = h.position;
+            primary_sample = float2(px) + jitter;
             primary_depth = dot(h.position - o, gConstants.forward.xyz);
         }
 
@@ -279,6 +290,8 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
 
     // Where this pixel's surface was last frame, in pixels — what a temporal denoiser reprojects along.
     // A pixel that hit nothing has no surface to follow, so it carries no motion.
+    // Measured from where the primary sample was traced rather than the pixel centre, so the motion carries no jitter:
+    // a still camera reports zero, which is what an upscaler reading the jitter separately requires.
     float2 motion = float2(0, 0);
     if (primary_hit)
     {
@@ -289,7 +302,7 @@ float3 direct_light(float3 p, float3 n, inout uint rng)
         {
             float2 prev_ndc = prev_clip.xy / prev_clip.w;
             float2 prev_px = (float2(prev_ndc.x, -prev_ndc.y) * 0.5 + 0.5) * float2(size);
-            motion = (float2(px) + 0.5) - prev_px;
+            motion = primary_sample - prev_px;
         }
     }
 

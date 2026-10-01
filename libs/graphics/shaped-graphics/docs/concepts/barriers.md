@@ -78,7 +78,7 @@ A texture's layout follows from the access through `native_layout_for`, rather t
 Under-declaring corrupts the tracker — sg then believes a state the GPU is not in — so the scope hands out a native
 resource only for a handle it declared, and the debug layer catches the rest.
 dx12 today; vulkan when a member needs it.
-See [shaped-rendering's denoising doc](../../../shaped-rendering/docs/denoising.md), which is what asked for it.
+See [shaped-rendering's denoising doc](../../../shaped-rendering/docs/reconstruction.md), which is what asked for it.
 
 ## The vocabulary is backend-neutral
 

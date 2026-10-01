@@ -1,6 +1,6 @@
 #pragma once
 
-#include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-shader-library/fwd.hh>
 
 // The one shader library sr's GPU tests acquire through.
@@ -24,9 +24,9 @@ slib::shader_library& shader_fixtures();
 /// What a resolution test passes when it means to vary DEVICE support alone: `sr::resolve_denoise_method` skips a
 /// member whose required guides the caller cannot supply, so a narrower set here would silently test both at once.
 /// A test about the guides names its own set instead.
-[[nodiscard]] inline sr::denoise_guide_set every_guide()
+[[nodiscard]] inline sr::reconstruct_guide_set every_guide()
 {
-    using g = sr::denoise_guide;
+    using g = sr::reconstruct_guide;
     return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::hit_distance
          | g::split_diffuse_specular;
 }

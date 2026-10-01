@@ -26,10 +26,10 @@ constexpr int k_scratch = 0;      // 0, 1: the à-trous passes' ping-pong
 constexpr int k_color = 2;        // 2, 3: demodulated colour, history length in alpha
 constexpr int k_moments = 4;      // 4, 5: luminance mean and mean square
 constexpr int k_normal_depth = 6; // 6, 7: the guides as the frame that wrote the history saw them
-constexpr int k_slots_used = denoise_history::state_slots; // svgf fills the history, so a ninth would grow it
+constexpr int k_slots_used = reconstruct_history::state_slots; // svgf fills the history, so a ninth would grow it
 
 static_assert(k_normal_depth + 2 == k_slots_used, "svgf's slot map leaves a gap or runs past the history's state");
-static_assert(k_slots_used == denoise_history::state_slots, "svgf no longer fills the history it was sized against");
+static_assert(k_slots_used == reconstruct_history::state_slots, "svgf no longer fills the history it was sized against");
 
 /// Where a pass's compiled pieces come from, and where they land.
 struct pass_request
@@ -48,7 +48,7 @@ struct pass_request
 }
 } // namespace
 
-svgf_options svgf_denoise_routine::options_for(denoise_settings const& settings)
+svgf_options svgf_denoise_routine::options_for(reconstruct_settings const& settings)
 {
     auto options = svgf_options{};
     switch (settings.quality)
@@ -127,10 +127,10 @@ cc::shared_async<cc::unit> svgf_denoise_routine::init(sg::routine_init_scope sco
     co_return;
 }
 
-denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
-                                              denoise_inputs const& in,
-                                              denoise_history& history,
-                                              svgf_options const& options)
+reconstruct_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
+                                                  reconstruct_inputs const& in,
+                                                  reconstruct_history& history,
+                                                  svgf_options const& options)
 {
     CC_ASSERT(is_set(in.color) && is_set(in.output), "a denoise call needs a colour and an output texture");
     CC_ASSERT(in.output.raw() != in.color.raw(), "SVGF needs an output texture other than its input");
@@ -142,9 +142,9 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
     // Read-only: execute touches nothing init did not publish, and every image it writes is the caller's.
     auto const self = try_acquire(cmd);
     if (self.is_pending())
-        return {.status = denoise_status::pending, .method = denoise_method::svgf};
+        return {.status = reconstruct_status::pending, .denoiser = denoise_method::svgf};
     if (self.is_failed())
-        return {.status = denoise_status::failed, .method = denoise_method::svgf};
+        return {.status = reconstruct_status::failed, .denoiser = denoise_method::svgf};
 
     auto& ctx = cmd.context();
     auto const extent = extent_of(in.color);
@@ -256,6 +256,6 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
     }
 
     ++history._frame;
-    return {.status = denoise_status::denoised, .method = denoise_method::svgf, .restarted = reset};
+    return {.status = reconstruct_status::denoised, .denoiser = denoise_method::svgf, .restarted = reset};
 }
 } // namespace sr

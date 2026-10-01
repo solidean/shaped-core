@@ -23,19 +23,20 @@ class raster_box_filter_mipmap_routine; // the same, through the raster pipeline
 enum class mipmap_variant : u8;         // which entry point a texture shape mips through (the routine's parameter)
 struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
 
-// Denoising (see denoise.hh): one front routine over several members.
+// Reconstruction (see reconstruct.hh): one front routine over denoise and upscale members.
 enum class denoise_method : u8;      // which member runs, or automatic
+enum class upscale_method : u8;      // which upscaler runs behind it, or automatic
 enum class denoise_quality : u8;     // the coarse knob every member maps
 enum class render_scale_preset : u8; // how much smaller than the output the caller traces
-enum class denoise_guide : u8;       // one guide buffer beside the noisy color
-enum class denoise_status : u8;      // what one call did
-struct denoise_settings;             // the knobs shared by every member
-struct denoise_guides;               // the guide textures and camera values of one call
-struct denoise_inputs;               // one call's images
-struct denoise_outcome;              // status + which member + whether history restarted
-struct denoise_support;              // which members a context can run
-class denoise_history;               // the caller-owned state of one image stream
-class denoise_routine;               // the front: resolves the method and forwards
+enum class reconstruct_guide : u8;   // one guide buffer beside the noisy color
+enum class reconstruct_status : u8;  // what one call did
+struct reconstruct_settings;         // the knobs shared by every member
+struct reconstruct_guides;           // the guide textures and camera values of one call
+struct reconstruct_inputs;           // one call's images
+struct reconstruct_outcome;          // status + which member + whether history restarted
+struct reconstruct_support;          // which members a context can run
+class reconstruct_history;           // the caller-owned state of one image stream
+class reconstruct_routine;           // the front: resolves the method and forwards
 class atrous_denoise_routine;        // the native spatial member (atrous_denoise_routine.hh)
 struct atrous_options;               // its own options
 class svgf_denoise_routine;          // the native temporal member (svgf_denoise_routine.hh)
@@ -43,6 +44,11 @@ struct svgf_options;                 // its own options
 class oidn_denoise_routine;          // the OIDN trained member, run as our own shaders (oidn_denoise_routine.hh)
 struct oidn_options;                 // its own options
 enum class oidn_network_size : u8;   // which of OIDN's trained networks it runs
+struct upscale_inputs;               // one upscale call's images
+struct upscale_outcome;              // status + whether history restarted
+class upscale_history;               // the caller-owned state of one upscaled stream
+class fsr_upscale_routine;           // AMD FSR 3.1's upscaler, run through sg (fsr_upscale_routine.hh)
+struct fsr_options;                  // its own options
 
 class dlss_rr_routine;     // the NVIDIA Ray Reconstruction member (dlss_rr_routine.hh)
 struct dlss_options;       // its own options

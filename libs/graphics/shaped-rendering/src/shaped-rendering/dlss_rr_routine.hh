@@ -2,8 +2,8 @@
 
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/reconstruct.hh>
 
 #include <memory> // std::shared_ptr, which is how the routine shares its NGX instance with every stream
 
@@ -40,9 +40,9 @@ struct sr::dlss_options
 /// It requires every guide `sr::required_guides(denoise_method::dlss_rr)` names, the specular albedo and roughness
 /// included; a call missing one reports `unsupported` rather than running degraded.
 ///
-/// **Temporal, so it wants this frame's own samples** rather than a converging mean — see `sr::denoise_routine`, which
+/// **Temporal, so it wants this frame's own samples** rather than a converging mean — see `sr::reconstruct_routine`, which
 /// picks between the two.
-/// Its per-stream feature lives in the caller's `sr::denoise_history`.
+/// Its per-stream feature lives in the caller's `sr::reconstruct_history`.
 /// A new extent, `quality` or `hdr` builds a new one, and a `reset` restarts the one it has.
 class sr::dlss_rr_routine : public sg::render_routine<dlss_rr_routine>
 {
@@ -50,17 +50,17 @@ public:
     /// Denoises `in.color` into `in.output`, carrying `history` from call to call.
     ///
     /// `in.output` may be larger than `in.color` — this is the first member that upscales — and any ratio between them
-    /// must be one `sr::denoise_input_extent` produced.
-    [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
-                                                 denoise_inputs const& in,
-                                                 denoise_history& history,
-                                                 dlss_options const& options = {});
+    /// must be one `sr::reconstruct_input_extent` produced.
+    [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
+                                                     reconstruct_inputs const& in,
+                                                     reconstruct_history& history,
+                                                     dlss_options const& options = {});
 
     /// What the shared knobs map onto: `quality` picks the NGX preset, `exposure` becomes NGX's pre-exposure.
     /// `exposure` is read per call; `quality` and `hdr` are creation parameters, and changing one restarts the stream.
-    [[nodiscard]] static dlss_options options_for(denoise_settings const& settings);
+    [[nodiscard]] static dlss_options options_for(reconstruct_settings const& settings);
 
-    /// Whether this build and this device can run it, which is what `sr::query_denoise_support` reports.
+    /// Whether this build and this device can run it, which is what `sr::query_reconstruct_support` reports.
     [[nodiscard]] static bool is_available(sg::context const& ctx);
 
     /// Closes NGX for the device once the GPU is done with it, through `ctx.defer_until_retired`.

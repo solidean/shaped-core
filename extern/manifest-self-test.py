@@ -175,6 +175,12 @@ def test_real_oidn_weights_manifest_loads() -> None:
     check("OIDN-Weights pin_hash matches its files", weights.pin_hash, deps_manifest.files_pin(weights.files))
 
 
+def test_real_fidelityfx_manifest_pins_its_files() -> None:
+    # Read raw rather than through `one`: the upstream is unavailable off Windows, where its pin resolves empty.
+    raw = yaml.safe_load((EXTERN / "fidelityfx" / "dependency.yml").read_text(encoding="utf-8"))["upstreams"][0]
+    check("FidelityFX-SDK pin_hash matches its files", raw["pin_hash"], deps_manifest.files_pin(raw["files"]))
+
+
 def _manifest_with(unavailable_on: list[str]) -> Path:
     directory = Path(tempfile.mkdtemp())
     entry = {"name": "Probe", "source": "git", "track": "tags", "digest_algo": "sha256",

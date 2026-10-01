@@ -40,7 +40,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Closing it is the ordinary optional-feature shape: probe it at device creation, enable it where present, and report it so a caller can ask.
   The other half belongs to the caller rather than here: NRD declares two register spaces, which are two descriptor sets, and `nrd_session` builds one binding group.
   So this entry does not close that member on its own.
-  See libs/graphics/shaped-rendering/docs/denoising.md.
+  See libs/graphics/shaped-rendering/docs/reconstruction.md.
 
 - **The metal backend serializes no pipeline blob.**
   `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a

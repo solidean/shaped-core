@@ -16,7 +16,7 @@
 /// So the pipelines are sg compute pipelines built from the DXIL NRD embeds, the scratch textures are sg textures, and
 /// the dispatches are ours — which is why this member needs no native scope and runs on any dx12 adapter.
 ///
-/// Held in the caller's `sr::denoise_history`, because an NRD instance carries the temporal history and a stream is
+/// Held in the caller's `sr::reconstruct_history`, because an NRD instance carries the temporal history and a stream is
 /// what owns one.
 namespace sr::impl
 {

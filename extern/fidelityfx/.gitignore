@@ -1,0 +1,3 @@
+# The fetched sources; hydrate them with fetch-fidelityfx.py.
+.install/
+.install.staging/

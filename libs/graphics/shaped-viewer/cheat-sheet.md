@@ -49,9 +49,9 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; sr::denoise_settings denoise; } — per-layer integration controls (no light/sky: those are on the view)
-                                 //   denoise defaults to method none; NOTHING in it restarts accumulation (see "Denoising" below)
-                                 //   sv owns denoise.fresh_samples and overwrites whatever a caller set: each half of the hand-off runs with its own value
+sv::render_settings              // { int samples_per_pixel, max_bounces; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+                                 //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
+                                 //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
@@ -764,7 +764,7 @@ Every path is traced; a point or a parallel light is a delta and has next-event 
 The pick probability `1/N` is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced whatever N is.
 A layer with no lights falls back to `layer::fallback_light` — `sv::default_fallback_light()`, a sun — which `scene.fallback_light(cc::nullopt)` turns off.
 
-**Denoising.** A layer with `render_settings::denoise` on is denoised right after its trace, and its parent samples the result.
+**Denoising.** A layer with `render_settings::reconstruct` on is denoised right after its trace, and its parent samples the result.
 - **Temporal while the mean is young, spatial after.** For `render_settings::temporal_denoise_frames` (16) frames after a restart, a temporal
   member (SVGF under `automatic`) denoises this frame's own samples; then à-trous takes over on the mean, backing off with its sample count.
   A named spatial member (`atrous`) never takes the temporal branch.
@@ -783,9 +783,9 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **A split-signal member adds three more**: `temporal_id::frame_diffuse`, `frame_specular` and `hit_distance_guide`, all three or none.
   The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
   Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them, and only on the frames it runs.
-- **`sv::matrices_of(camera_gpu, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::denoise_guides` asks for.
+- **`sv::matrices_of(camera_gpu, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
   sv rasterizes nothing, so these exist for a denoiser that reprojects in world space; `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
-  `denoise_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  `reconstruct_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
   The per-frame offset a temporal upscaler reconstructs from is the other kind, and sv has none.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
@@ -918,7 +918,7 @@ scene.add_light("id", sv::light) -> light_ref               // the id is hashed 
 scene.add_point_light / add_spot_light / add_rect_light / add_directional_light / add_sun_light("id", ...) -> light_ref
 scene.fallback_light(optional<light>)                        // traced when the layer has none; a sun by default, nullopt for none
 scene.background(bg) / .settings(render_settings)
-scene.settings({.samples_per_pixel = 4, .denoise = {.method = sr::denoise_method::automatic}})  // a denoised layer
+scene.settings({.samples_per_pixel = 4, .reconstruct = {.denoiser = sr::denoise_method::automatic}})  // a denoised layer
 mesh_ref.transform(t);  light_ref.light(l);  light_ref.id();  light_ref.candela(800).color(c)   // light_ref takes light's setters
 ```
 

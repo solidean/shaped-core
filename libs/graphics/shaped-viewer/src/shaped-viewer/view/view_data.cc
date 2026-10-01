@@ -49,7 +49,7 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         // moving a couple of thousand frames in — right where an uncapped estimate is still converging.
         out.push_back({.id = temporal_id::accumulation(u8(i)), .format = sg::pixel_format::rgba32_float});
 
-        if (v.layers[i].settings.denoise.method == sr::denoise_method::none)
+        if (v.layers[i].settings.reconstruct.denoiser == sr::denoise_method::none)
             continue;
 
         // The guides blend like the accumulator but never need its precision: they converge in a few frames, and a half
@@ -68,7 +68,7 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
 
         // A layer that may denoise temporally also keeps this frame's own samples and the motion vectors.
         // `automatic` may, because it picks a temporal member while the mean is young whenever one is supported.
-        auto const method = v.layers[i].settings.denoise.method;
+        auto const method = v.layers[i].settings.reconstruct.denoiser;
         if (method == sr::denoise_method::automatic || sr::is_temporal(method))
         {
             out.push_back({.id = temporal_id::frame_samples(u8(i)), .format = sg::pixel_format::rgba16_float});
@@ -84,9 +84,9 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
             // The split signal, for a method that filters the two lobes apart.
             // `automatic` counts for the reason it counts above: what it resolves to depends on the device, and this
             // declaration is made before any device is consulted.
-            auto const may_read_split
-                = method == sr::denoise_method::automatic
-               || (sr::required_guides(method) | sr::optional_guides(method)).has(sr::denoise_guide::split_diffuse_specular);
+            auto const may_read_split = method == sr::denoise_method::automatic
+                                     || (sr::required_guides(method) | sr::optional_guides(method))
+                                            .has(sr::reconstruct_guide::split_diffuse_specular);
             if (may_read_split)
             {
                 out.push_back({.id = temporal_id::frame_diffuse(u8(i)), .format = sg::pixel_format::rgba16_float});

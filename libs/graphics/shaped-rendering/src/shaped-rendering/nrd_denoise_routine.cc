@@ -6,7 +6,7 @@
 #include <shaped-rendering/impl/nrd_instance.hh>
 #include <shaped-rendering/nrd_denoise_routine.hh>
 
-#include <memory> // std::make_shared, which is what denoise_history::_member_state holds
+#include <memory> // std::make_shared, which is what reconstruct_history::_member_state holds
 
 #if SR_HAS_NRD
 #include <shaped-rendering/impl/nrd_session.hh>
@@ -19,10 +19,7 @@
 
 namespace sr
 {
-using impl::extent_of;
-using impl::is_set;
-
-nrd_options nrd_denoise_routine::options_for(denoise_settings const& settings)
+nrd_options nrd_denoise_routine::options_for(reconstruct_settings const& settings)
 {
     // Quality is how long a history may grow: a fast preset reacts sooner and stays noisier, a best one averages more
     // frames and smears a moving highlight further.
@@ -45,7 +42,7 @@ bool nrd_denoise_routine::is_available(sg::context const& ctx)
 
     // NRD embeds DXIL alone, and `nrd_session::create` hands sg exactly that.
     // A context that cannot build from it would assert inside the backend on the first pipeline, which is the case
-    // `query_denoise_support` exists to keep `automatic` away from.
+    // `query_reconstruct_support` exists to keep `automatic` away from.
     if (!ctx.accepts_shader_format(sg::shader_format::dxil))
         return false;
 
@@ -62,6 +59,9 @@ bool nrd_denoise_routine::is_available(sg::context const& ctx)
 }
 
 #if SR_HAS_NRD
+using impl::extent_of;
+using impl::is_set;
+
 namespace
 {
 /// Which `history._state` slot holds what.
@@ -145,28 +145,28 @@ cc::shared_async<cc::unit> nrd_denoise_routine::init(sg::routine_init_scope scop
     co_return;
 }
 
-denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
-                                             denoise_inputs const& in,
-                                             denoise_history& history,
-                                             nrd_options const& options)
+reconstruct_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
+                                                 reconstruct_inputs const& in,
+                                                 reconstruct_history& history,
+                                                 nrd_options const& options)
 {
     CC_ASSERT(is_set(in.color), "a denoise call needs a colour texture");
     CC_ASSERT(is_set(in.output), "a denoise call needs an output texture");
     CC_ASSERT(extent_of(in.output) == extent_of(in.color), "NRD does not upscale: output and input extents differ");
 
-    auto const outcome_of = [](denoise_status s, bool restarted = false)
-    { return denoise_outcome{.status = s, .method = denoise_method::nrd, .restarted = restarted}; };
+    auto const outcome_of = [](reconstruct_status s, bool restarted = false)
+    { return reconstruct_outcome{.status = s, .denoiser = denoise_method::nrd, .restarted = restarted}; };
 
     // A guide this member requires but the call does not carry is `unsupported` rather than a degraded run: REBLUR
     // reprojects against every one of them, and a missing one is a wrong image with no diagnostic.
     if (!required_guides(denoise_method::nrd).without(in.present_guides()).is_empty())
-        return outcome_of(denoise_status::unsupported);
+        return outcome_of(reconstruct_status::unsupported);
 
     auto const self = try_acquire(cmd);
     if (self.is_pending())
-        return outcome_of(denoise_status::pending);
+        return outcome_of(reconstruct_status::pending);
     if (self.is_failed())
-        return outcome_of(denoise_status::failed);
+        return outcome_of(reconstruct_status::failed);
 
     auto& ctx = cmd.context();
     auto const extent = extent_of(in.color);
@@ -183,10 +183,10 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
 
     if (history._member_state == nullptr)
     {
-        // `make_shared` captures the deleter, so the history frees an `nrd_session` without `denoise.hh` naming one.
+        // `make_shared` captures the deleter, so the history frees an `nrd_session` without `reconstruct.hh` naming one.
         auto fresh = std::make_shared<impl::nrd_session>();
         if (!fresh->create(ctx, impl::nrd_denoiser::reblur_diffuse_specular, extent))
-            return outcome_of(denoise_status::failed);
+            return outcome_of(reconstruct_status::failed);
 
         history._member_state = cc::move(fresh);
     }
@@ -199,9 +199,9 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
     // The session is kept either way: its pipelines come from the context's cache, so a fresh one gets the same
     // failed build back.
     if (session.has_failed())
-        return outcome_of(denoise_status::failed, restarted);
+        return outcome_of(reconstruct_status::failed, restarted);
     if (!session.is_ready())
-        return outcome_of(denoise_status::pending, restarted);
+        return outcome_of(reconstruct_status::pending, restarted);
 
     // Everything the tracer produces, in NRD's encodings.
     // The motion guide is NOT repacked: NRD reads ours untouched, with the sign and scale on its common settings.
@@ -271,7 +271,7 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
     };
 
     if (!session.execute(cmd, frame, resources))
-        return outcome_of(denoise_status::failed, restarted);
+        return outcome_of(reconstruct_status::failed, restarted);
 
     auto const resolve_group = ctx.transient.create_binding_group(
         cmd, self->_resolve_layout,
@@ -291,7 +291,7 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
     cmd.compute.dispatch_threads(extent[0], extent[1], 1);
 
     ++history._frame;
-    return outcome_of(denoise_status::denoised, restarted);
+    return outcome_of(reconstruct_status::denoised, restarted);
 }
 
 #else
@@ -302,16 +302,16 @@ cc::shared_async<cc::unit> nrd_denoise_routine::init(sg::routine_init_scope scop
     co_return;
 }
 
-denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
-                                             denoise_inputs const& in,
-                                             denoise_history& history,
-                                             nrd_options const& options)
+reconstruct_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
+                                                 reconstruct_inputs const& in,
+                                                 reconstruct_history& history,
+                                                 nrd_options const& options)
 {
     (void)cmd;
     (void)in;
     (void)history;
     (void)options;
-    return {.status = denoise_status::unsupported, .method = denoise_method::nrd};
+    return {.status = reconstruct_status::unsupported, .denoiser = denoise_method::nrd};
 }
 
 #endif

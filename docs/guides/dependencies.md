@@ -62,7 +62,7 @@ Mixing them up fails in both directions — `raw` serves an LFS file's pointer t
 So adding or removing a file changes the pin as surely as changing one does.
 Loading the manifest refuses a `pin_hash` that does not match that list, so every tool that reads the pin sees the same refusal.
 It also requires `path` and `sha256` on every entry, and refuses a `path` that is absolute or climbs out with `..`.
-extern/oidn-weights is the one `github-files` upstream.
+extern/oidn-weights is a `github-files` upstream, and extern/fidelityfx is another, a named subset of a repository much of which we must not take.
 
 **`tag_pattern` filters what counts as a version**, for `track: tags` only.
 Upstreams tag far more than they release, and GitHub's tags endpoint has no useful order, so tags are filtered by this pattern and then sorted numerically.
@@ -100,7 +100,7 @@ The split is that the manifest owns *what we are on*, and the script owns *how i
 ### Skipping a fetch
 
 Every configure runs the fetch script of each `fetched` dependency, and `SC_SKIP_<NAME>=1` in the environment opts out of one:
-`SC_SKIP_DXC`, `SC_SKIP_ZYDIS`, `SC_SKIP_SDL3`, `SC_SKIP_SQLITE` and `SC_SKIP_OIDN_WEIGHTS`.
+`SC_SKIP_DXC`, `SC_SKIP_ZYDIS`, `SC_SKIP_SDL3`, `SC_SKIP_SQLITE`, `SC_SKIP_OIDN_WEIGHTS` and `SC_SKIP_FIDELITYFX`.
 Skipping leaves the dependent feature unbuilt or reporting `unsupported`, never a failed configure.
 An `on-request` dependency has no such variable, because nothing fetches it in the first place — `uv run extern/oidn/fetch-oidn.py` is how the OIDN oracle gets its library.
 

@@ -6,9 +6,35 @@ Bigger design intent lives in [structure.md](structure.md).
 - First routines on the framework: texture compression, tonemapping.
 - The OIDN weights are found through a compile-time path, which is fine for a test and not for a shipped binary.
   `SR_OIDN_WEIGHTS_DIR` points into the source tree; the member will want the blob staged beside the executable the way OIDN's own runtime is, or embedded.
-- Denoising, beyond à-trous, SVGF and OIDN — [denoising.md](denoising.md) is the design and the order:
-  sg's declared native scope and DLSS Ray Reconstruction next; then FSR Ray Regeneration.
+- Denoising, beyond à-trous, SVGF and OIDN — [reconstruction.md](reconstruction.md) is the design and the order:
+  sg's declared native scope and DLSS Ray Reconstruction next; then FSR Ray Regeneration, which is RDNA 4 only.
   NRD waits for a tracer that splits diffuse from specular radiance and writes hit distances.
+- **WARP crashes executing FSR 3.1's shading-change pyramid pass**, inside `d3d10warp`'s own worker thread; the hardware runs it correctly.
+  `fsr_upscale_routine` refuses a software adapter until this is understood, so the FSR image tests skip there.
+  It also refuses any Microsoft-vendor adapter, since a GPU-less CI runner exposes one that DXGI does not flag as software and that renders through WARP all the same.
+  That vendor check is temporary: sg's `adapter_info::is_software` reporting such an adapter is what replaces it.
+  It is a question for sg's CI legs first, since the dx12 "hardware" leg is that adapter on those runners.
+  What bisecting it established, each by running it:
+  - Skipping that one pass, and only that one, avoids the crash; an empty entry point avoids it too.
+  - Its stores into FSR's downsample image are what trigger it: with them removed the pass runs.
+  - It is not an out-of-bounds write: a bounds check on the store does not help.
+  - Nor is it the SPD wave path (`FFX_SPD_NO_WAVE_OPERATIONS` does not help) or the image's format (`rg32_float` does not help).
+  - Nor the view clamp below 64 pixels: a 128-pixel input crashes the same.
+  - Declaring the mip views `float4` rather than `float2` avoided it only while other parts of the pass were stubbed out.
+
+  So the fault is in WARP compiling this particular shader, and the next step is a reduced shader outside FSR that still crashes, to report or to route around.
+- FSR builds on Windows only.
+  AMD's host code calls MSVC's secure C runtime (`wcscpy_s`, `getenv_s`, `strncpy_s`) and uses `__declspec` unconditionally.
+  A force-included compat header would widen it, and nothing here has built it against another C runtime yet.
+- FSR runs its portable permutation only: fp32, no forced wave64, no Lanczos table.
+  AMD tunes the 16-bit and wave64 variants for speed; the backend reports neither because sg has no 16-bit capability to read yet — the same gap the OIDN half-precision item below names.
+- FSR's SPIR-V bindings come from a patch to AMD's `ffx_core_hlsl.h`, applied as extern/fidelityfx flattens it.
+  AMD numbers each register class from zero, and SPIR-V would put `b0`, `t0`, `u0` and `s0` all at binding 0.
+  Under `__spirv__` the patch prefixes each class with its own digit instead — `t` becomes `1N`, `u` `2N`, `s` `3N` — which holds while no constant buffer index reaches 10.
+  The real fix is per-class binding shifts (DXC's `-fvk-b-shift` and siblings) that a shader package can ask slib for, and the patch goes once slib has them.
+- FSR's reactive and transparency masks are not passed; it builds a default when none is given.
+  They matter once a tracer has transparent surfaces to report.
+- `reconstruct_status::denoised` is also what an upscale-only call reports when it wrote its output; a neutral name would read better once the front's other uses of "denoise" settle.
 - Half precision for the OIDN network, which is the one acceleration it could take that is portable.
   DX12 has it as SM 6.2 with `-enable-16bit-types`, Vulkan as `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, Metal has `half` outright, and WebGPU has the optional `shader-f16` feature.
   Optional on all four rather than guaranteed, so it wants a feature level rather than an assumption — but a shipped one, unlike the matrix instructions this network would really like.
@@ -27,11 +53,11 @@ Bigger design intent lives in [structure.md](structure.md).
   - `nn_input` and `nn_output` want `is_nan`/`is_inf`, and `nn_conv` an unroll hint before its tuned loop is trusted to SGL's HLSL;
   - the compute box-filter mipmap writes whatever format its texture has, which an SGL image cannot say without a type parameterized on the format.
   Every denoise member also writes the caller's `output` as an image, whose format an SGL image must name, so porting them means pinning that format.
-  Until the network is whole in SGL, `sr::query_denoise_support` answers false on webgpu and metal.
+  Until the network is whole in SGL, `sr::query_reconstruct_support` answers false on webgpu and metal.
   Porting also removes the hand-written "find the constants_buffer binding" loops the members and the playground example use to build their pipeline layouts,
   since an SGL entry point states its layout (`acquire_layout`).
 - Two denoise tests worth having and not written yet.
-  A method switch on one history — à-trous then SVGF on the same `sr::denoise_history` — which is the one branch of `denoise_history::_prepare` nothing covers.
+  A method switch on one history — à-trous then SVGF on the same `sr::reconstruct_history` — which is the one branch of `reconstruct_history::_prepare` nothing covers.
   And `options_for` on both members, which maps `quality` and `sharpness` onto pass counts and sigmas and is what any settings UI drives.
 - SVGF feeds back its integrated, unfiltered colour, where the paper feeds back the first à-trous pass's output.
   That is simpler and never compounds the filter across frames, at the price of a noisier history.

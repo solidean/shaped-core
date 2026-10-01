@@ -4,7 +4,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/resource/texture.hh>
-#include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -45,7 +45,7 @@ struct temporal_slot
     ///
     /// Here rather than on a routine because a routine cannot know which layer a call belongs to, and here rather than
     /// beside the view because it lives and dies with the image it produces.
-    sr::denoise_history denoise;
+    sr::reconstruct_history denoise;
 
     /// The camera this slot's layer was last traced from, held only by a `temporal_id::motion_guide` slot.
     /// The next frame's motion vectors reproject into it.

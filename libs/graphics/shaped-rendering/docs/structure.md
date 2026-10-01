@@ -78,21 +78,22 @@ common shader utilities   [planned]
 
 The exact module layout settles as more routines land; keep this roadmap updated as it does.
 
-## Denoising **[in progress]**
+## Reconstruction **[in progress]**
 
-One front routine over several members; [denoising.md](denoising.md) is the design.
+One front routine over denoise members and the upscaler behind them; [reconstruction.md](reconstruction.md) is the design.
 
 ```text
-sr::denoise_routine          [done]     the front: resolves automatic, refuses what it cannot run, forwards
-sr::denoise_history          [done]     caller-owned, move-only, one per image stream
+sr::reconstruct_routine      [done]     the front: resolves both automatics, refuses what it cannot run, forwards
+sr::reconstruct_history      [done]     caller-owned, move-only, one per image stream; holds the upscaler's history too
 sr::atrous_denoise_routine   [done]     spatial, native; backs off with the input's sample count
 sr::svgf_denoise_routine     [done]     temporal, native; temporal, variance and à-trous passes, history in the caller's
-                                        denoise_history; the member that proves the moving-camera path in CI
+                                        reconstruct_history; the member that proves the moving-camera path in CI
 sr::oidn_denoise_routine     [done]     spatial, trained; Intel's weights in our own shaders, named only
                                         (far too slow for `automatic`)
+sr::fsr_upscale_routine      [done]     AMD FSR 3.1's upscaler, its host code driven through sg; any GPU, dx12 and vulkan, not WARP yet
 dlss_rr                      [planned]  needs sg's declared native scope
-fsr_rr                       [planned]  the same seams as dlss_rr
+fsr_rr                       [planned]  AMD Ray Regeneration; RDNA 4 only
 nrd                          [planned]  waits for a tracer that splits diffuse from specular
 ```
 
-`shaped-rendering/denoise-playground` is the example: a small path tracer, every knob live, and a split between the raw image and the denoised one.
+`shaped-rendering/denoise-playground` is the example: a small path tracer, every knob live, a scale selector, and a split between the raw image and the reconstructed one.

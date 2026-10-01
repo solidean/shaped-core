@@ -12,12 +12,12 @@
 
 #include <memory>
 
-/// Denoising — and, once a member supports it, upscaling — behind one call.
+/// Reconstruction — denoising, then upscaling — behind one call.
 ///
-/// `sr::denoise_routine` is the front: a caller names a method (or `automatic`) and the front forwards to the
-/// member routine that implements it.
+/// `sr::reconstruct_routine` is the front: a caller names a denoiser and an upscaler (or `automatic`) and the front
+/// forwards to the member routines that implement them, the denoiser at the traced extent and the upscaler after it.
 /// Every member is also a routine of its own, callable directly with its full options.
-/// libs/graphics/shaped-rendering/docs/denoising.md is the design: which members exist, how they meet a progressive path tracer, and why.
+/// libs/graphics/shaped-rendering/docs/reconstruction.md is the design: which members exist, how they meet a progressive path tracer, and why.
 
 /// Which denoiser runs.
 ///
@@ -48,9 +48,9 @@ enum class sr::denoise_quality : sg::u8
 
 /// How much smaller than the output the caller traces.
 ///
-/// Named presets only: each member maps them onto a ratio it supports, and a caller asks `denoise_input_extent` for
+/// Named presets only: each member maps them onto a ratio it supports, and a caller asks `reconstruct_input_extent` for
 /// the size to trace rather than computing one — so no caller can ask for a ratio a member would reject.
-/// A spatial member supports exactly 1, and answers every preset with the output's own extent.
+/// A denoiser that does not upscale runs at the traced extent, and the upscaler behind it maps the preset instead.
 enum class sr::render_scale_preset : sg::u8
 {
     native,
@@ -59,8 +59,24 @@ enum class sr::render_scale_preset : sg::u8
     performance,
 };
 
+/// Which upscaler runs behind the denoiser.
+///
+/// An upscaler does not denoise — a temporal upscaler smears Monte Carlo noise rather than removing it — so it runs on
+/// a denoiser's output, or directly on an image that has no noise to begin with.
+/// As with `denoise_method`, a named upscaler this build or device cannot run reports `unsupported`, and only
+/// `automatic` chooses.
+enum class sr::upscale_method : sg::u8
+{
+    none,
+    automatic, ///< the best upscaler this context supports, and none while the scale is native
+
+    fsr, ///< AMD FSR 3.1's analytic upscaler; runs on any GPU
+
+    count_
+};
+
 /// One guide buffer a member may read beside the noisy color.
-enum class sr::denoise_guide : sg::u8
+enum class sr::reconstruct_guide : sg::u8
 {
     /// Diffuse reflectance at the primary hit, so zero on a metal.
     /// A member reading split radiance reads it and `specular_albedo` separately; one reading unsplit radiance
@@ -70,16 +86,18 @@ enum class sr::denoise_guide : sg::u8
     normal,          ///< world-space shading normal at the primary hit, in rgb
     roughness,       ///< perceptual roughness at the primary hit, in r
     depth,           ///< linear view depth of the primary hit, in r; 0 or less where a ray missed
-    motion,          ///< this frame's pixel minus last frame's, in input pixels, in rg
-    hit_distance,    ///< distance to the first secondary hit, in r
+    /// The surface's own motion, in input pixels, in rg: where this frame's sample was traced minus where that
+    /// surface was last frame, so a still camera reports zero whatever the jitter.
+    motion,
+    hit_distance, ///< distance to the first secondary hit, in r
 
     split_diffuse_specular, ///< radiance arrives as two textures (`color` diffuse, `specular` specular) rather than one
 };
-CC_FLAG_ENUM_INDEXED(sr, denoise_guide, u16);
+CC_FLAG_ENUM_INDEXED(sr, reconstruct_guide, u16);
 
 namespace sr
 {
-using denoise_guide_set = cc::flags<denoise_guide>;
+using reconstruct_guide_set = cc::flags<reconstruct_guide>;
 }
 
 /// The knobs a caller sets once for every member.
@@ -87,17 +105,22 @@ using denoise_guide_set = cc::flags<denoise_guide>;
 /// Flat on purpose: each field is named for what it does, not for who reads it, and says which members read it.
 /// A member ignores what it has no use for, so switching members keeps every knob that still means something.
 /// A member's own options — the full vendor surface — are on the member routine, never here.
-struct sr::denoise_settings
+struct sr::reconstruct_settings
 {
     /// `automatic` because a caller reaching this struct wants something denoised; a caller holding a setting that is
     /// off by default (sv's per-layer one) says `none` itself.
-    denoise_method method = denoise_method::automatic;
+    denoise_method denoiser = denoise_method::automatic;
+
+    /// Runs behind the denoiser whenever the input extent is smaller than the output's.
+    /// Ignored for a denoiser that upscales by itself (`dlss_rr`).
+    /// `none` with a denoiser of `none` is a call with nothing to do; either one alone is fine.
+    upscale_method upscaler = upscale_method::automatic;
     render_scale_preset scale = render_scale_preset::native;
 
     /// Whether this call carries fresh per-frame samples — this frame's own, with motion vectors — rather than a
     /// converging mean.
     /// It lives here rather than beside each call so that planning and running a frame cannot disagree about it:
-    /// `denoise_input_extent`, `resolve_denoise_method` and `denoise_routine::execute` all read this one answer.
+    /// `reconstruct_input_extent`, `resolve_denoise_method` and `reconstruct_routine::execute` all read this one answer.
     /// False means `automatic` picks among the spatial members only, since a temporal member's history would
     /// double-count what the mean already averaged.
     bool fresh_samples = false;
@@ -122,18 +145,26 @@ struct sr::denoise_settings
     bool noisy_guides = false;
 
     /// A multiplier the caller will apply to the image before display.
-    /// dlss_rr only, which judges noise by how bright a pixel ends up on screen and assumes 1 without it.
+    /// dlss_rr judges noise by how bright a pixel ends up on screen and assumes 1 without it; the fsr upscaler reads it
+    /// the same way, for the history it keeps.
     ///
     /// NRD is the member this does NOT reach, and deliberately: its input contract says radiance must not be
     /// premultiplied by an exposure, so it is handed the radiance the tracer produced.
     f32 exposure = 1.0f;
+
+    /// In [0, 1]; 0 is off.
+    /// Sharpening applied to the upscaled image; fsr reads it (RCAS).
+    f32 upscale_sharpness = 0.0f;
+
+    /// The time since the previous call, in milliseconds; fsr scales a few of its decay rates by it.
+    f32 frame_time_ms = 1000.0f / 60.0f;
 };
 
 /// Everything beside the noisy color that a member may read.
 ///
-/// All of it is at the INPUT extent and in input pixels; only `denoise_inputs::output` is at the output's.
+/// All of it is at the INPUT extent and in input pixels; only `reconstruct_inputs::output` is at the output's.
 /// A texture left empty is a guide the caller does not have; a member that requires it reports `unsupported`.
-struct sr::denoise_guides
+struct sr::reconstruct_guides
 {
     sg::texture_2d albedo;
     sg::texture_2d specular_albedo;
@@ -144,10 +175,7 @@ struct sr::denoise_guides
     sg::texture_2d hit_distance;
 
     /// This frame's sub-pixel offset of the primary rays, in input pixels, in [-0.5, 0.5].
-    ///
-    /// **Nothing writes this yet** — no tracer in the repo jitters — so every member reads 0, which is the right
-    /// answer for an unjittered raygen rather than a placeholder.
-    /// Whoever lands jitter also settles whether `motion` carries the offset, which `dlss_rr` declares to NGX.
+    /// One offset for every sample of the frame while an upscaler runs, taken from `sr::reconstruct_jitter`.
     tg::vec2f jitter = tg::vec2f(0, 0);
     tg::vec2f previous_jitter = tg::vec2f(0, 0);
 
@@ -161,7 +189,7 @@ struct sr::denoise_guides
 };
 
 /// One denoise call's images.
-struct sr::denoise_inputs
+struct sr::reconstruct_inputs
 {
     /// The noisy radiance, linear and HDR, at the input extent.
     /// Diffuse radiance alone when the guides carry `split_diffuse_specular`.
@@ -171,14 +199,14 @@ struct sr::denoise_inputs
     /// Specular radiance, only under `split_diffuse_specular`.
     sg::texture_2d specular;
 
-    denoise_guides guides;
+    reconstruct_guides guides;
 
     /// Where the result goes: needs `image` usage, and must not be `color`.
-    /// Its extent is the output extent; any ratio to the input other than 1 must be one `denoise_input_extent` produced.
+    /// Its extent is the output extent; any ratio to the input other than 1 must be one `reconstruct_input_extent` produced.
     ///
-    /// Its rgb is the denoised radiance and **its alpha is `color`'s, carried through untouched** — every member
-    /// keeps it rather than writing one of its own, so switching members never changes what a caller composites with.
-    /// Whether a vendor member can honour that is open; see libs/graphics/shaped-rendering/docs/denoising.md.
+    /// Its rgb is the denoised radiance and **its alpha is `color`'s, carried through untouched** — every denoise
+    /// member keeps it rather than writing one of its own, so switching members never changes what a caller composites with.
+    /// An upscaled output is the exception: its alpha is the upscaler's own, since `color`'s is at the other extent.
     sg::texture_2d output;
 
     /// How many samples per pixel `color` already averages — an accumulated mean passes its frame count times its
@@ -187,11 +215,11 @@ struct sr::denoise_inputs
     u32 sample_count = 0;
 
     /// The guides this call carries, derived from which textures are set — `specular` included.
-    [[nodiscard]] denoise_guide_set present_guides() const;
+    [[nodiscard]] reconstruct_guide_set present_guides() const;
 };
 
 /// What one denoise call did.
-enum class sr::denoise_status : sg::u8
+enum class sr::reconstruct_status : sg::u8
 {
     denoised,    ///< `output` holds the result
     pending,     ///< the member is still initializing; `output` untouched
@@ -199,17 +227,107 @@ enum class sr::denoise_status : sg::u8
     failed,      ///< the member failed to initialize; `output` untouched until a reload
 };
 
-struct sr::denoise_outcome
+struct sr::reconstruct_outcome
 {
-    denoise_status status = denoise_status::pending;
+    reconstruct_status status = reconstruct_status::pending;
 
     /// The member that ran, or was asked to.
-    denoise_method method = denoise_method::none;
+    denoise_method denoiser = denoise_method::none;
+
+    /// The upscaler that ran behind it, or was asked to; `none` when the call did not upscale.
+    upscale_method upscaler = upscale_method::none;
 
     /// Whether the call started from no history — a first call, a new extent, a new member, or a `reset`.
     bool restarted = false;
 
-    [[nodiscard]] bool is_denoised() const { return status == denoise_status::denoised; }
+    [[nodiscard]] bool is_denoised() const { return status == reconstruct_status::denoised; }
+};
+
+/// One upscale call's images, in sr's guide conventions.
+///
+/// Everything but `output` is at the INPUT extent and in input pixels.
+struct sr::upscale_inputs
+{
+    /// The image to upscale: linear and HDR, and already clean.
+    sg::texture_2d color;
+
+    /// Linear view depth of the primary hit, in r; 0 or less where a ray missed.
+    sg::texture_2d depth;
+
+    /// The surface's own motion, in input pixels, in rg: where this frame's sample was traced minus where that
+    /// surface was last frame, so a still camera reports zero whatever the jitter.
+    sg::texture_2d motion;
+
+    /// This frame's sub-pixel offset of every sample, in input pixels, in [-0.5, 0.5].
+    /// One offset for the whole frame: an upscaler places each pixel's sample by it, so a tracer that jitters each
+    /// sample on its own gives it nothing to reconstruct from.
+    tg::vec2f jitter = tg::vec2f(0, 0);
+
+    /// The camera's projection, read for its vertical field of view.
+    tg::mat4f view_to_clip = tg::mat4f::identity;
+
+    /// A multiplier the caller will apply to the image before display.
+    f32 exposure = 1.0f;
+
+    /// Where the result goes, at the output extent: needs `image` usage, and must not be `color`.
+    /// Its alpha is the upscaler's own, not `color`'s.
+    sg::texture_2d output;
+};
+
+/// What one upscale call did.
+struct sr::upscale_outcome
+{
+    /// `denoised` means `output` holds the result, as it does for the front.
+    reconstruct_status status = reconstruct_status::pending;
+
+    /// Whether the call started from no history — a first call, a new extent, or a `reset`.
+    bool restarted = false;
+};
+
+/// Everything an upscaler keeps between calls, for one image stream.
+///
+/// Owned by the caller, one per stream, for the reasons `reconstruct_history` is, and move-only for the same one.
+/// Empty until the first call, and rebuilt when either extent changes.
+///
+/// FSR 3.1 keeps two full images at the output extent and about a dozen at the input extent, most of them small:
+/// roughly 80 MiB for 720p in and 1080p out.
+class sr::upscale_history
+{
+public:
+    upscale_history() = default;
+    upscale_history(upscale_history&&) noexcept = default;
+    upscale_history& operator=(upscale_history&&) noexcept = default;
+    upscale_history(upscale_history const&) = delete;
+    upscale_history& operator=(upscale_history const&) = delete;
+
+    /// Makes the next call start from no history, as on a camera cut.
+    void reset() { _reset_requested = true; }
+
+    /// Whether a `reset` is waiting for the next call to consume it.
+    [[nodiscard]] bool is_reset_pending() const { return _reset_requested; }
+
+    /// The extents this was built for, or 0x0 while empty.
+    [[nodiscard]] tg::vec2i input_extent() const { return _input_extent; }
+    [[nodiscard]] tg::vec2i output_extent() const { return _output_extent; }
+
+private:
+    friend class fsr_upscale_routine;
+    friend class reconstruct_routine;
+
+    /// Brings this to the two extents, keeping the upscaler's state only if neither changed.
+    /// Returns whether the call starts from no history, and consumes a pending `reset`.
+    bool _prepare(tg::vec2i input_extent, tg::vec2i output_extent);
+
+    /// The upscaler's own per-stream object — for FSR, its context and every image it created.
+    /// Type-erased so this header names no SDK type; it must hold only what is safe to drop mid-frame.
+    std::shared_ptr<void> _state;
+
+    tg::vec2i _input_extent = tg::vec2i(0, 0);
+    tg::vec2i _output_extent = tg::vec2i(0, 0);
+    bool _reset_requested = false;
+
+    /// The denoiser whose output the front last upscaled, so that switching it restarts this history too.
+    denoise_method _source_denoiser = denoise_method::none;
 };
 
 /// Everything a denoiser keeps between calls, for one image stream.
@@ -227,14 +345,14 @@ struct sr::denoise_outcome
 /// views should do.
 ///
 /// It holds images, plus at most one object of the member's own for state that is not a texture.
-class sr::denoise_history
+class sr::reconstruct_history
 {
 public:
-    denoise_history() = default;
-    denoise_history(denoise_history&&) noexcept = default;
-    denoise_history& operator=(denoise_history&&) noexcept = default;
-    denoise_history(denoise_history const&) = delete;
-    denoise_history& operator=(denoise_history const&) = delete;
+    reconstruct_history() = default;
+    reconstruct_history(reconstruct_history&&) noexcept = default;
+    reconstruct_history& operator=(reconstruct_history&&) noexcept = default;
+    reconstruct_history(reconstruct_history const&) = delete;
+    reconstruct_history& operator=(reconstruct_history const&) = delete;
 
     /// Dropping it hands member state to its deleter, and the GPU must be done with that state before it is released.
     /// The member arranges that, through `ctx.defer_until_retired`, so a caller may drop a history mid-frame.
@@ -242,21 +360,25 @@ public:
     /// **A history must still go before the context it was built on**, and a `dlss_rr` one before that member's routine.
     /// Its stream is released under the NGX instance the routine opened, so one dropped after the routine closed that
     /// instance is logged as an error, and its stream deleted without a call into NGX.
-    ~denoise_history() = default;
+    ~reconstruct_history() = default;
 
     /// How many images a member may keep here.
     /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
     static constexpr int state_slots = 8;
 
-    /// Makes the next call start from no history, as on a camera cut.
+    /// Makes the next call start from no history, as on a camera cut — the denoiser's and the upscaler's alike.
     /// The textures are kept and overwritten, since a cut does not change their size.
-    void reset() { _reset_requested = true; }
+    void reset()
+    {
+        _reset_requested = true;
+        _upscale.reset();
+    }
 
     /// Whether a `reset` is waiting for the next call to consume it.
     [[nodiscard]] bool is_reset_pending() const { return _reset_requested; }
 
     /// The member that built what this holds, or `none` while empty.
-    [[nodiscard]] denoise_method method() const { return _method; }
+    [[nodiscard]] denoise_method denoiser() const { return _method; }
 
     /// The input extent this was built for, or 0x0 while empty.
     [[nodiscard]] tg::vec2i extent() const { return _extent; }
@@ -270,6 +392,7 @@ private:
     friend class svgf_denoise_routine;
     friend class nrd_denoise_routine;
     friend class oidn_denoise_routine;
+    friend class reconstruct_routine;
     friend class dlss_rr_routine;
 
     /// Brings this to `method` at this pair of extents, dropping everything if any of the three changed.
@@ -306,10 +429,16 @@ private:
     /// The images a member keeps from call to call — its history and its scratch — so a steady stream allocates nothing.
     /// Which slot holds what is the member's own business.
     cc::fixed_array<sg::texture_2d, state_slots> _state;
+
+    /// The upscaler's history, kept apart from the denoiser's so that neither one's rebuild drops the other.
+    upscale_history _upscale;
+
+    /// The denoiser's output at the input extent, which the upscaler then reads.
+    sg::texture_2d _upscale_source;
 };
 
 /// Which members this context can run.
-struct sr::denoise_support
+struct sr::reconstruct_support
 {
     bool atrous = false;
     bool svgf = false;
@@ -318,7 +447,10 @@ struct sr::denoise_support
     bool fsr_rr = false;
     bool nrd = false;
 
+    bool fsr = false;
+
     [[nodiscard]] bool supports(denoise_method m) const;
+    [[nodiscard]] bool supports(upscale_method m) const;
 };
 
 namespace sr
@@ -327,8 +459,11 @@ namespace sr
 /// Stable: these are what `sr::denoise_method` spells, not prose.
 [[nodiscard]] cc::string_view to_string(denoise_method m);
 
+/// The upscaler's name, for the same use.
+[[nodiscard]] cc::string_view to_string(upscale_method m);
+
 /// What a call did, for the same use.
-[[nodiscard]] cc::string_view to_string(denoise_status s);
+[[nodiscard]] cc::string_view to_string(reconstruct_status s);
 
 /// Which members `ctx` can run: compiled in, buildable by the shader library this process registered, and present
 /// on its device.
@@ -336,61 +471,88 @@ namespace sr
 /// The native members are HLSL, so their answer depends on the compilers the library has — adding one can change it.
 ///
 /// A supported member can still be `pending` for its first frames, and `failed` if its shader does not build.
-[[nodiscard]] denoise_support query_denoise_support(sg::context const& ctx);
+[[nodiscard]] reconstruct_support query_reconstruct_support(sg::context const& ctx);
 
-/// The member `settings.method` resolves to on `ctx`: itself when named, the best one for `automatic`.
+/// The member `settings.denoiser` resolves to on `ctx`: itself when named, the best one for `automatic`.
 /// `none` when nothing qualifies or nothing was asked for.
 ///
 /// **`available_guides` is what the caller can supply**, and `automatic` skips a member that needs more than that.
 /// Without it `automatic` would pick the best member the DEVICE can run, which `execute` then refuses for a guide the
 /// call does not carry — and the caller gets no denoising at all rather than the best member its inputs support.
-/// A caller that already has its textures passes `denoise_inputs::present_guides()`; one still planning its trace
+/// A caller that already has its textures passes `reconstruct_inputs::present_guides()`; one still planning its trace
 /// passes the set it intends to write.
 ///
 /// A named member resolves to itself whether or not `ctx` supports it and whatever guides are named, so a comparison
-/// between two named members never silently compares one with itself; refusing it is `denoise_routine::execute`'s job.
+/// between two named members never silently compares one with itself; refusing it is `reconstruct_routine::execute`'s job.
 [[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx,
-                                                    denoise_settings const& settings,
-                                                    denoise_guide_set available_guides);
+                                                    reconstruct_settings const& settings,
+                                                    reconstruct_guide_set available_guides);
 
 /// Whether a member reads history, and so needs fresh per-frame samples and motion vectors rather than a converging mean.
 [[nodiscard]] bool is_temporal(denoise_method m);
 
 /// The guides `m` requires; a call missing one reports `unsupported`.
-[[nodiscard]] denoise_guide_set required_guides(denoise_method m);
+[[nodiscard]] reconstruct_guide_set required_guides(denoise_method m);
 
 /// The guides `m` reads when they are there.
-[[nodiscard]] denoise_guide_set optional_guides(denoise_method m);
+[[nodiscard]] reconstruct_guide_set optional_guides(denoise_method m);
 
-/// The input extent to trace so that the member `settings` resolves to produces `output_extent` under `settings.scale`.
+/// The upscaler `settings.upscaler` resolves to on `ctx`, behind the denoiser `settings.denoiser` resolves to.
 ///
-/// Always ask this rather than scaling by hand: a member supports only its own ratios, and a spatial one only 1.
-/// A member that will not run answers `output_extent`, because the call would be refused and a caller that traced
-/// smaller for it would composite a smaller image into its own output.
+/// `none` when the denoiser upscales by itself, and for `automatic` while `settings.scale` is native or nothing is
+/// supported.
+/// A named upscaler resolves to itself whether or not `ctx` supports it, and runs even at a native scale — FSR then
+/// anti-aliases rather than upscales.
+/// `available_guides` is the same set `resolve_denoise_method` takes, since the upscaler sits behind that denoiser.
+[[nodiscard]] upscale_method resolve_upscale_method(sg::context const& ctx,
+                                                    reconstruct_settings const& settings,
+                                                    reconstruct_guide_set available_guides);
+
+/// The input extent to trace so that the members `settings` resolves to produce `output_extent` under `settings.scale`.
+///
+/// Always ask this rather than scaling by hand: each upscaler supports only its own ratios, and a denoiser with no
+/// upscaler behind it only 1.
+/// A call that will be refused answers `output_extent`, because a caller that traced smaller for it would composite a
+/// smaller image into its own output.
 /// `available_guides` is why that check is not just about the device: a member whose guides the caller cannot supply
 /// will be refused exactly as one the device cannot run, and both have to answer the same way.
-[[nodiscard]] tg::vec2i denoise_input_extent(sg::context const& ctx,
-                                             denoise_settings const& settings,
-                                             tg::vec2i output_extent,
-                                             denoise_guide_set available_guides);
+[[nodiscard]] tg::vec2i reconstruct_input_extent(sg::context const& ctx,
+                                                 reconstruct_settings const& settings,
+                                                 tg::vec2i output_extent,
+                                                 reconstruct_guide_set available_guides);
+
+/// The sub-pixel offset to trace frame `frame_index` at, in input pixels in [-0.5, 0.5], for `reconstruct_guides::jitter`.
+///
+/// Every sample of the frame takes this one offset, in place of a random position inside its pixel: an upscaler
+/// reconstructs from where each frame's samples landed, so it has to know.
+/// (0, 0) whenever nothing upscales, so a caller may always trace with it; `available_guides` as for the extent.
+/// `frame_index` counts the caller's frames and may wrap; the sequence repeats after a period set by the ratio.
+[[nodiscard]] tg::vec2f reconstruct_jitter(sg::context const& ctx,
+                                           reconstruct_settings const& settings,
+                                           tg::vec2i output_extent,
+                                           u32 frame_index,
+                                           reconstruct_guide_set available_guides);
 } // namespace sr
 
-/// The front routine: one call for every denoiser.
+/// The front routine: one call for every denoiser and upscaler.
 ///
-/// Resolves `settings.method` against this context, then forwards to the member's own routine.
+/// Resolves `settings.denoiser` and `settings.upscaler` against this context, then forwards to the members' own routines:
+/// the denoiser into a scratch image at the input extent, and the upscaler from there into the output.
+/// With no upscaler it runs the denoiser alone, straight into the output.
 /// Members are acquired when the call runs rather than through dependency tokens, so a member this machine cannot
 /// initialize never holds the front pending.
 /// Prewarming the front prewarms every supported member, so their shaders compile before the first call.
-class sr::denoise_routine : public sg::render_routine<denoise_routine>
+class sr::reconstruct_routine : public sg::render_routine<reconstruct_routine>
 {
 public:
-    /// Denoises `in.color` into `in.output`, carrying `history` from call to call.
+    /// Denoises `in.color` and upscales it into `in.output`, carrying `history` from call to call.
     ///
     /// Nothing is written unless the outcome is `denoised`, so a caller composites the raw image otherwise.
-    [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
-                                                 denoise_inputs const& in,
-                                                 denoise_history& history,
-                                                 denoise_settings const& settings);
+    /// An upscaler requires the depth and motion guides.
+    [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
+                                                     reconstruct_inputs const& in,
+                                                     reconstruct_history& history,
+                                                     reconstruct_settings const& settings);
 
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;

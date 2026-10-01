@@ -7,7 +7,7 @@ Headers are included by full path from `src/`: `#include <shaped-rendering/<name
 
 > **Scope note:** the render-routine *framework* lives in **shaped-graphics** — `sg::render_routine`, `ctx.routines`, `sg::reload_generation`.
 > See [shaped-graphics/cheat-sheet.md](../shaped-graphics/cheat-sheet.md) and [shaped-graphics/docs/render-routines.md](../shaped-graphics/docs/render-routines.md).
-> `sr` hosts the concrete routines: Dear ImGui, blit, mipmap generation and denoising today; tonemapping later.
+> `sr` hosts the concrete routines: Dear ImGui, blit, mipmap generation, denoising and upscaling today; tonemapping later.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 ```cpp
@@ -317,32 +317,41 @@ A box filter is the cheap separable default for "we uploaded the base level and 
 It is wrong in places: it ignores gamma, so averaging sRGB content darkens it, and it aliases where a Kaiser or Mitchell filter would not.
 Those belong in routines of their own rather than behind a flag here.
 
-## Denoising
+## Reconstruction
 
-One front over several members; the design is [docs/denoising.md](docs/denoising.md).
+One front that denoises, then upscales; the design is [docs/reconstruction.md](docs/reconstruction.md).
 
 ```cpp
-#include <shaped-rendering/denoise.hh>                 // the front, the vocabulary, the history
-#include <shaped-rendering/atrous_denoise_routine.hh>  // the native spatial member
+#include <shaped-rendering/reconstruct.hh>                 // the front, the vocabulary, the history
+#include <shaped-rendering/atrous_denoise_routine.hh>      // the native spatial member
+#include <shaped-rendering/fsr_upscale_routine.hh>         // FSR 3.1's upscaler, callable directly
 
-auto history = sr::denoise_history();                  // caller-owned, MOVE-ONLY, one per image stream
-auto const out = sr::denoise_routine::execute(cmd,     // -> sr::denoise_outcome
-    {.color = noisy,                                   // linear HDR, input extent; its ALPHA rides through to output
-     .guides = {.albedo = a, .normal = n, .depth = d}, // all optional for atrous; empty texture = not there
-     .output = denoised,                               // image usage, never the same texture as color
-     .sample_count = spp * accumulated_frames},        // spatial members back off as it grows; 0 means 1
-    history,
-    {.method = sr::denoise_method::automatic,          // sr::denoise_settings: flat knobs, each says who reads it
-     .fresh_samples = false});                         // true only when feeding this frame's own samples + motion
-out.status                                             // denoised | pending | unsupported | failed — output untouched unless denoised
-out.method / out.restarted                             // the member that ran; whether it started from no history
-history.reset()                                        // a camera cut: the next call restarts
+auto const settings = sr::reconstruct_settings{
+    .denoiser = sr::denoise_method::automatic,             // flat knobs, each says who reads it; `none` = upscale only
+    .upscaler = sr::upscale_method::automatic,             // fsr where supported, none while the scale is native
+    .scale = sr::render_scale_preset::performance,         // named ratios only: 1, 1.5, 1.7, 2
+    .fresh_samples = true,                                 // true only when feeding this frame's own samples + motion
+    .upscale_sharpness = 0.3f,                             // [0, 1], 0 = off; fsr's RCAS on the upscaled image
+    .frame_time_ms = dt_ms};                               // time since the previous call; fsr decays its history by it
+auto const traced = sr::reconstruct_input_extent(ctx, settings, out_extent, guides);  // -> tg::vec2i to trace; ALWAYS ask
+auto const jitter = sr::reconstruct_jitter(ctx, settings, out_extent, frame, guides); // -> one offset for EVERY sample; (0,0) when nothing upscales
 
-sr::query_denoise_support(ctx)                         // -> sr::denoise_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd}
-sr::resolve_denoise_method(ctx, settings, guides)      // -> the member `automatic` (or a named method) means here; `guides` is what the CALLER can supply
-sr::denoise_input_extent(ctx, settings, out_extent, guides)  // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
-                                                       //    both skip a member whose required_guides the caller lacks, so automatic degrades instead of denoising nothing
-sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_set (cc::flags<sr::denoise_guide>)
+auto history = sr::reconstruct_history();                  // caller-owned, MOVE-ONLY, one per image stream
+auto const out = sr::reconstruct_routine::execute(cmd,     // -> sr::reconstruct_outcome
+    {.color = noisy,                                       // linear HDR, TRACED extent; its alpha rides through unless upscaled
+     .guides = {.albedo = a, .normal = n, .depth = d, .motion = m, .jitter = jitter, .view_to_clip = proj},
+     .output = image,                                      // OUTPUT extent, image usage, never the same texture as color
+     .sample_count = spp * accumulated_frames},            // spatial members back off as it grows; 0 means 1
+    history, settings);
+out.status                                                 // denoised | pending | unsupported | failed — output untouched unless denoised
+out.denoiser / out.upscaler / out.restarted                // what ran; whether it started from no history
+history.reset()                                            // a camera cut: the denoiser's and the upscaler's history restart
+
+sr::query_reconstruct_support(ctx)                         // -> sr::reconstruct_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd, fsr}
+sr::resolve_denoise_method(ctx, settings, guides)          // -> the member `automatic` (or a named method) means here; `guides` is what the CALLER can supply
+sr::resolve_upscale_method(ctx, settings, guides)          // -> the upscaler behind it; none for dlss_rr, which upscales itself
+                                                           //    every planner takes `guides`, so automatic degrades instead of denoising nothing
+sr::required_guides(m) / sr::optional_guides(m)            // -> sr::reconstruct_guide_set (cc::flags<sr::reconstruct_guide>)
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
@@ -351,22 +360,26 @@ sr::dlss_rr_routine::is_available(ctx)                 // -> bool; SDK fetched (
 sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal, split-signal, NO upscaling; needs hit_distance + specular + BOTH albedos (de-modulation)
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::oidn_denoise_routine::execute(cmd, inputs, history, {.network = sr::oidn_network_size::small})  // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP base, small ~1.6x faster; never `automatic`
-sr::mix_routine::execute(cmd, dst, src, w)             // -> bool; dst = lerp(dst, src, w) IN PLACE, w in [0,1]; false while compiling
+sr::fsr_upscale_routine::execute(cmd, {.color, .depth, .motion, .jitter, .output}, upscale_history, {.sharpening = true})  // -> sr::upscale_outcome; a CLEAN image only
+sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = lerp(dst, src, w) IN PLACE, w in [0,1]; false while compiling
 ```
 
 - **A named member that cannot run reports `unsupported`, logs once, and writes nothing** — only `automatic` chooses.
   Composite the raw image whenever the status is not `denoised`.
+- **An upscaler does not denoise.** It runs behind a denoise member, or alone on an image that has no noise.
+  It needs the depth and motion guides, and one jitter per frame: trace every sample of a frame at `reconstruct_jitter`'s offset.
 - **History is the caller's**, because a routine cannot know which stream a call belongs to.
   One per view or layer, dropped with it.
 - **The front's readiness gates nothing.** Acquiring it registers it, and its init prewarms every supported member.
-  `sr::denoise_routine::prewarm(ctx)` at startup starts their compiles before the first call.
+  `sr::reconstruct_routine::prewarm(ctx)` at startup starts their compiles before the first call.
 - **`fresh_samples` lives in the settings, not beside the call**, so planning a frame and running it read one answer.
   False (the default) is a converging mean and picks among the spatial members; true is this frame's own samples plus motion vectors.
-- **A denoised image keeps `color`'s alpha.** Every member writes rgb and copies the alpha, so switching members never changes what you composite with.
-- **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream.
+- **A denoised image keeps `color`'s alpha.** Every denoise member writes rgb and copies the alpha; an upscaled image's alpha is the upscaler's.
+- **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream, and FSR about 80 MiB for 720p in, 1080p out.
   Drop the history of a view nobody is looking at.
+- **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — see docs/TODO.md.
 - **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
-  knob live, and the raw image beside the denoised one.
+  knob live, a scale selector, and the raw image beside the reconstructed one.
 
 ## Writing a concrete routine
 

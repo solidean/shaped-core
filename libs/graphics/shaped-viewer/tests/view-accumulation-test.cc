@@ -4,7 +4,7 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -353,7 +353,7 @@ ASYNC_INVOCABLE_TEST("sv - a camera cut waits for a traced frame and drops the t
         v.refresh = {.rate = 0.0f}; // only when the history says there is nothing to re-present
         auto& scene = sv::ensure_scene_3d(v);
         scene.items.push_back(item);
-        scene.settings.denoise.method = sr::denoise_method::automatic;
+        scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
         scene.settings.temporal_denoise_frames = 2;
         scene.settings.temporal_denoise_fade_frames = 0;
         def.views.push_back(cc::move(v));
@@ -404,12 +404,12 @@ ASYNC_INVOCABLE_TEST("sv - a camera cut waits for a traced frame and drops the t
     };
 
     // Both denoisers and the tracer warmed first, so every counted frame below is one that dispatched.
-    sr::denoise_routine::prewarm(ctx);
+    sr::reconstruct_routine::prewarm(ctx);
     (void)co_await ctx.routines.idle_completion();
     REQUIRE(sv_test::frames_until_executed(ctx, [&](sg::command_list& cmd) { return execute(cmd, 0, traced).second; }));
     store = sv::view_store{}; // the warm-up's own counts are not what this test is about
 
-    auto const frame_history = [&]() -> sr::denoise_history const&
+    auto const frame_history = [&]() -> sr::reconstruct_history const&
     {
         auto const* const rec = store.peek_ptr(cut_id);
         CC_ASSERT(rec != nullptr, "the view traced, so it has a record");

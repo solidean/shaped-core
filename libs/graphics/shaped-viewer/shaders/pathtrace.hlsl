@@ -448,7 +448,7 @@ void PathTraceRayGen()
         //   no path of this lobe -> 0, which is NRD's own "lobe not sampled here"
         // Reporting a skipped lobe as 0 is only half honest: nrd_repack.hlsl passes it through
         // REBLUR_FrontEnd_GetNormHitDist, whose max(hitDist, NRD_EPS) turns it back into contact.
-        // Fixing that needs hitDistanceReconstructionMode and a dithered lobe choice — see denoising.md's known limit.
+        // Fixing that needs hitDistanceReconstructionMode and a dithered lobe choice — see reconstruction.md's known limit.
         float const escaped_distance = 1e4; // the RayDesc TMax above
         float const guide_diffuse = hit_dist_diffuse_n > 0.0
                                         ? hit_dist_diffuse / hit_dist_diffuse_n

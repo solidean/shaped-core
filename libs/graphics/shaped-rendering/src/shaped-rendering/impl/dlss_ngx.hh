@@ -2,8 +2,8 @@
 
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
-#include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/reconstruct.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 #include <memory> // std::shared_ptr, which is how a stream shares its open instance
@@ -30,7 +30,7 @@ struct dlss_instance;
 /// What one Ray Reconstruction feature is created for.
 ///
 /// All of it is fixed at creation: NGX builds its networks for a size, a preset and a colour space.
-/// So a change to any field is a new feature rather than a parameter, which is why `denoise_history` drops one when an
+/// So a change to any field is a new feature rather than a parameter, which is why `reconstruct_history` drops one when an
 /// extent moves and `dlss_rr_routine` does when `quality` or `hdr` does.
 struct dlss_feature_desc
 {
@@ -58,7 +58,7 @@ struct dlss_stream
 
 /// One evaluation's resources and per-frame values.
 ///
-/// Every texture is at the input extent except `output`, which is the contract `sr::denoise_inputs` already states.
+/// Every texture is at the input extent except `output`, which is the contract `sr::reconstruct_inputs` already states.
 /// A texture left empty is one this call does not carry; the implementation refuses when NGX requires it.
 struct dlss_eval_desc
 {
@@ -111,7 +111,7 @@ void dlss_close(std::shared_ptr<dlss_instance> const& instance);
 ///
 /// **The GPU must be done with it.** NGX frees device memory here, and a stream released while a frame that used it
 /// is still in flight is a use-after-free with no diagnostic — so it runs through `ctx.defer_until_retired`.
-/// A stream whose instance was already closed is a broken `sr::denoise_history` contract: that is logged as an error,
+/// A stream whose instance was already closed is a broken `sr::reconstruct_history` contract: that is logged as an error,
 /// and the struct is deleted without calling NGX.
 void dlss_release_stream(dlss_stream* stream);
 
