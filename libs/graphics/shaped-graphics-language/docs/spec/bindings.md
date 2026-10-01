@@ -26,6 +26,8 @@ What kind of resource it is follows from that type, and nothing else marks it.
 **A member of a plain value type is a constant**, and the group's plain members together are one constant buffer the compiler builds.
 So `texel_size: float2` above costs no declaration of its own: the group has an implicit constant buffer, and `texel_size` is a field of it.
 That is the common case, and it is why `constants[T]` below is rarer than it looks.
+Where its members land is the compiler's choice, unless `@layout(.hlsl)` or `@layout(.cpp)` on the binding promises a layout ([CHK-369](semantics/checking.md#bindings)).
+The host can then fill the block from its own struct.
 
 **A member of a resource type is that resource.**
 The table is the one sg already commits to.
@@ -140,6 +142,16 @@ The portable formats are core WebGPU's image formats:
 `rgba8_unorm`, `rgba8_snorm`, `rgba8_uint`, `rgba8_sint`, `rgba16_uint`, `rgba16_sint`, `rgba16_float`, and the `r32`, `rg32` and `rgba32` formats in `float`, `uint` and `sint`.
 Every other image format needs a feature.
 
+**An image whose format the host picks names an option** ([CHK-353](semantics/checking.md#consts)).
+Each format the host asks for is one compile, and the text names that format exactly as it names a written one, on every target and with no feature.
+
+```sgl sketch
+@option const output_format = .rgba16_float
+
+binding outputs:
+    upscaled: out image_2d[output_format]
+```
+
 ## Samplers
 
 Three forms, and each lands in a different place of sg's layout model.
@@ -203,6 +215,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
 | `load(xy, level)` | every texture but a cube | one texel, with no sampler; a multisampled one takes `sample = s` instead |
 | `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write |
+| `img[xy]`, `img[xy] = value` | an image | the same `load` and `store`, as a subscript ([CHK-367](semantics/checking.md#bindings)) |
 | `size(level)`, `layer_count()`, `level_count()`, `sample_count()` | textures and images | what the shape has |
 
 An array's layer is always named, `layer = 2`, since it is no coordinate on every target.
@@ -261,6 +274,11 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `acceleration_structure[.geometry]` | `sg::feature::ray_query`, or `raytracing_pipeline` in a file that grants that one |
 | a call that traces inline, `world.trace(r)` | `sg::feature::ray_query`, emulated on WebGPU; counted where the entry point reaches the call (CHK-322) |
 | a ray-tracing stage, a trace of a ray type, a callable's call | `sg::feature::raytracing_pipeline`, which WebGPU lacks |
+| a value of `half` or of its vectors | `sg::feature::shader_f16`, WebGPU's `shader-f16`; counted where the entry point holds one |
+| a value of `short`, `ushort` or their vectors | `sg::feature::shader_int16`, which WebGPU lacks |
+| a subgroup operation, `@subgroup_size`, `@subgroup_invocation_id` | `sg::feature::subgroups`, WebGPU's `subgroups` |
+| `@coherent` on a member ([Coherent memory](#coherent-memory)) | `sg::feature::device_coherence`, which WebGPU lacks |
+| `@atomic` on an image member ([Atomics](#atomics)) | `sg::feature::image_atomics`, which core WebGPU lacks |
 
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.
@@ -367,7 +385,40 @@ Its operations are builtins that take it first, called as methods: `add`, `subtr
 `and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
 Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
 The host holds a buffer of atomics as the plain integers it is.
-Floats, 64 bits, images, a compare-exchange and a vertex stage are [the incubator's](incubator/atomics.md).
+Floats, 64 bits, a compare-exchange and a vertex stage are [the incubator's](incubator/atomics.md).
+
+**An image's texels are atomics where its member says so.**
+`@atomic` on a `mut` image of the format `r32_uint` or `r32_sint` makes each texel an atomic, which a subscript reaches and the methods above update ([CHK-372](semantics/checking.md#atomics)):
+
+```sgl sketch
+require image_atomics
+
+binding prepare:
+    @atomic depth: mut image_2d[.r32_uint]
+
+prepare.depth[xy].max(d.bits)
+```
+
+Atomic is a property of the place, as it is for a buffer, so a plain `load` or `store` of such an image is refused and never races an update.
+An image used atomically in one pass and plainly in another is two members, or two bindings of one view.
+It needs `image_atomics`, which core WebGPU lacks.
+
+## Coherent memory
+
+**`@coherent` on a `mut` buffer or a `mut` image makes what one workgroup writes visible to another within the same dispatch** ([CHK-368](semantics/checking.md#bindings)).
+A write is published by a barrier of its workgroup, `storage_barrier` for a buffer and `texture_barrier` for an image, and an atomic update after that barrier tells the readers it is there.
+That is the shape of a single-pass reduction whose last workgroup reads what every other one wrote:
+
+```sgl sketch
+require device_coherence
+
+binding spd:
+    @coherent mip5: mut image_2d[.rgba16_float]
+    @coherent counter: mut buffer[atomic[uint]]
+```
+
+Without it a GPU whose per-core caches are not kept coherent may hand the reader a stale line.
+It costs every access to the member, and it needs `device_coherence`, which WebGPU lacks: there such a handoff is two dispatches.
 
 ## How a group reaches sg
 
@@ -427,10 +478,12 @@ An `@inline` binding is none either, since sg sets it as constants rather than b
 * A resource handed to a builtin is used as the builtin's parameter declares it: an `out` parameter writes, a `mut` one reads and writes, and an unmarked one reads.
   `size` reads, since the text it becomes uses the resource.
 * A constant member read anywhere reads the block.
+* An image subscript is the `load` or `store` it stands for, and an update of an `@atomic` texel reads and writes.
 
 **It is computed over the code the entry point runs, after inlining, in the form an emitter prints.**
 So a use in a called function counts, a use in a branch that may not run counts, and a use only a check or an `assert` makes does not, since the text holds neither.
-A use behind a constant that is always false still counts while the emitted text still holds it; removing it from both is dead-code elimination's job, never the footprint's alone.
+A use in a branch on a constant that is false is no use at all: the language removes that branch from the text, and so from the footprint ([CHK-356](semantics/checking.md#the-flat-tree)).
+That is what lets an option leave a binding untouched, rather than a choice of the target compiler's dead-code elimination.
 That is the invariant sg relies on: **the footprint covers everything the emitted text uses**, because a slot it calls untouched gets no layout transition at all.
 It is its own pass over that tree rather than something each emitter records as it prints.
 One pass serves every target and a pin judges it once, where four emitters would each have to tell a load from a store at every print site.

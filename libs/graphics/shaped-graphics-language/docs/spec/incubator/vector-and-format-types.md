@@ -81,9 +81,20 @@ The transformation hierarchy that `tg` has might be modelled later as well, inst
 * A symbol may end in digits, so `float3`, `vec4f16` and `rgba8` are plain identifiers.
 * No type name is a keyword.
 
+## What exists
+
+`hpos4` exists beside `vec3` and `pos3`, and both families are prelude structs of one-character fields.
+What the vectors can do is the spec's now ([checking](../semantics/checking.md#vectors)):
+
+* **Swizzles** on every prelude vector and on any struct marked `@swizzle`, always giving the plain vector, and assignable where their letters are distinct (CHK-349 to CHK-352).
+* **Arithmetic between a plain vector and its scalar**, under every operator, and the integer families' `min`, `max`, `clamp`, `abs` and `sign` (CHK-358, CHK-359).
+* **A one-value constructor** for every vector, `float3(x)` (CHK-360).
+* **Comparisons**: orderings componentwise to a `bool` vector, `==` over the whole value, `equal`, `any`, `all` and `select` (CHK-362 to CHK-365).
+* **16-bit vectors**, `half3` beside `float3` (CHK-346).
+
 ## Open
 
-* Whether `hpos4` exists, and how much of `tg` is mirrored beyond `vec` and `pos`.
+* How much of `tg` is mirrored beyond `vec`, `pos` and `hpos`.
 * Which conversions are implicit, if any: between `float3` and `vec3`, and from a computation type to a format type at a `return`.
 * What `color as rgba8` does to the value: clamp, quantize, or only retype while the target quantizes on write.
 * What arithmetic a format type has, or whether it must be converted before any use.

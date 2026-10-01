@@ -61,8 +61,11 @@ What stands in for the design above:
   A default that reads another parameter's binding retires the twins, and nothing a program writes changes.
 * **Every component type has records of its own**, rather than one generic over `texture_2d[T] -> T`.
 
+**Image subscripts are decided**: `img[xy]` is `load`, `img[xy] = v` is `store`, and the subscript takes `load`'s arguments ([CHK-367](../semantics/checking.md#bindings)).
+An `@atomic` image's texel is reached only through one (CHK-373).
+
 ## Open
 
-* Subscripts, `t[xy]` and `img[xy] = v`, as sugar over `load` and `store`.
+* Subscripts of a texture, `t[xy]` and `t[xy, level = 2]`, as sugar over its `load`, where the level has no default every target agrees on.
 * A gather of an int or a uint texture, which every target has and the prelude does not yet.
 * `level` of a comparison anywhere but 0.0, which some target would need a feature for.

@@ -61,15 +61,13 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **A `misplaced-not` inside a `test` body was seen to pass silently**, while writing the ray-tracing tests.
   It does not reproduce in a plain test body: `test:` ending in `not a and b` reports it, as a function body does.
   The likelier case is a test with an `error` or `warning` expectation, which takes every diagnostic inside it as its own (CHK-232); pin whichever it was with a corpus test.
-- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, and gathers of integer textures.
+- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: a texture's subscripts, and gathers of integer textures.
 - **A `require` inside a nested block, and `if feature f:` to branch on one.** A builtin's call counts its feature where the entry point reaches it (CHK-322), so a body uses features now.
   What is missing is scoping a grant to a block, and a branch that leaves a use out on a device without the feature.
 - **Features used through another symbol.** A binding's `required` counts only the uses resolved while its members compile, and `checker::compile` clears the grant around any symbol they demand.
   No such symbol can hold a resource yet; once a type alias or a struct field can, its use has to reach every binding that names it.
 - **Features across a hot reload outside a `pipeline`.** A declared pipeline freezes its features, so a reload needing another one keeps what it had.
   A compute shader or a stage acquired on its own has no frozen part: its reload compiles, and its pipeline is then refused by the feature's name.
-- **Unsigned literals by suffix.** A literal takes a `uint` wherever one is expected (CHK-253), and `1u` is `unsupported-yet` (CHK-61).
-  Whether the suffix is needed at all is the question [literal-types.md](spec/incubator/literal-types.md) holds.
 - **Arrays and `mat3` in GPU memory, and matrices and arrays across a stage edge.** An array is a value everywhere else (CHK-285).
   It is `unsupported-yet` wherever GPU memory or a stage edge holds one (CHK-291).
   `mat3` does not exist yet.
@@ -92,3 +90,10 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   So CHK-225's warning is too coarse there, and a `void` line is exempt from it today.
   The precise rule wants the check pass to know more about the effects of an expression and of a function, "could reach an assert" among them.
   A line of a test is then `no-effect` exactly when it has no effect and cannot reach an assert.
+- **A subgroup size a shader requires.** `@preferred_subgroup_size` asks and promises nothing (CHK-371), which is what a tuning hint on code correct at any size means.
+  A shader correct at one size alone needs a separate spelling, behind a feature, which a device that cannot run that size refuses.
+  It lands once a shader needs one; turning the preference into a requirement instead would refuse shaders that work today.
+- **A format-less storage image, `image_2d[.host]`.** An `out` image written as `float4` and bound to whatever float format the host has, one compile for every format.
+  dx12 and MSL have it, vulkan needs `shaderStorageImageWriteWithoutFormat`, and WGSL can never have it, so it is a feature.
+  Reading one is vulkan's separate `shaderStorageImageReadWithoutFormat`, so a `mut` or read-only `.host` image waits for a shader that wants it.
+  It is additive: the portable route is an option as the format, one compile per format ([bindings.md](spec/bindings.md#image-formats)).

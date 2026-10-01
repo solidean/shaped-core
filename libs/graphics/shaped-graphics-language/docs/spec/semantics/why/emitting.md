@@ -22,6 +22,8 @@ MSL came as that one file: a dialect, a reserved-word list and a case, and the w
 A matrix's orientation in HLSL can come from `-Zpr` or from a `#pragma pack_matrix` that the text cannot see.
 Either one would transpose the cube with every size still correct, and nothing would report it.
 So every matrix member says `column_major`, and the product is written `mul(m, v)`, which means the same under either flag.
+A flag a text needs to compile at all is a different thing: without it the compile fails loudly, and nothing reaches the screen.
+That is why HLSL's 16-bit float is `float16_t` and never `half`: without `-enable-16bit-types`, `half` silently means a 32-bit float, where `float16_t` fails.
 
 ## EMIT-6
 
@@ -196,3 +198,21 @@ One table holds the miss and closest-hit functions of every ray type, so they sh
 DXR finds a closest hit's record from the instance's hit-group offset, which Metal's intersection result does not carry, so sg binds each instance's offset beside the tables.
 A procedural group's intersection and its any hit are one function on metal, since Metal runs no any hit after a box's intersection, which is why CHK-345 fuses them.
 
+## EMIT-142
+
+Every target swizzles its own vectors, spelled the same, so the text reads like the source and like hand-written HLSL.
+Lowering every swizzle to a construction in the check pass was the alternative: nothing downstream would change.
+It would also grow a temporary and a constructor at most swizzles of ported code, and leave a write through a swizzle no node to stand on.
+A struct of the program is a struct in every target and no vector, so it keeps the construction.
+
+## EMIT-148
+
+A text is per target, never per device (EMIT-13), so dx12's has to be right on every device, NVIDIA's included, which runs 32 alone.
+The exact form, `[WaveSize(64)]`, fails the pipeline on such a device; the range form runs everywhere and prefers `n` where it can.
+SM 6.8, which the range form needs, is already the profile SGL's DXC edge compiles.
+
+## EMIT-154
+
+A host struct written with no knowledge of HLSL places a `float3` in 12 bytes and starts the next value right behind it.
+HLSL's constant buffers read in rows of 16 bytes, so a block laid out that way needs every member placed by hand there, and split where a vector crosses a row.
+That is the cost the `.cpp` layout asks for, and it is why `.hlsl` exists beside it.

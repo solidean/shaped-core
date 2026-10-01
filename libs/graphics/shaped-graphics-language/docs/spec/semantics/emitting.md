@@ -14,7 +14,10 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-1** A **target** is a text format together with the addressing rules of the backend that reads it.
 * **EMIT-2** The targets are `hlsl-dx12`, `hlsl-vulkan`, `wgsl` and `msl` ([why](why/emitting.md#emit-2)).
 * **EMIT-3** Every target's text carries its final addresses: no later pass numbers a binding, a location or an offset.
-* **EMIT-4** No target depends on a flag of the compiler that reads its text ([why](why/emitting.md#emit-4)).
+* **EMIT-4** No target depends on a flag of the compiler that reads its text for its meaning ([why](why/emitting.md#emit-4)).
+  A text means what it says under every flag, or it fails to compile without the one it needs, and never means something else.
+  HLSL that names a 16-bit type needs DXC's `-enable-16bit-types`, which SGL's DXC instances always pass.
+  MSL that holds a coherent member or an image atomic needs the language version that has it (EMIT-150, EMIT-151).
 * **EMIT-5** One emission writes one entry point: that entry point, and exactly the structs and the binding it needs.
 * **EMIT-6** Nothing in the text of one entry point depends on the text of another ([why](why/emitting.md#emit-6)).
 * **EMIT-7** An emitter reads the flat tree, the module's types and the module's bindings, and never an AST.
@@ -31,6 +34,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
+  It is also `wgsl` against `shader_int16`, `device_coherence` and `image_atomics`, which core WebGPU has none of.
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
@@ -89,6 +93,13 @@ struct target_ {
 | `mat4` | `float4x4` | `mat4x4f` | `float4x4` |
 | `int` | `int` | `i32` | `int` |
 | `bool` | `bool` | `bool` | `bool` |
+| `half`, `half3` | `float16_t`, `float16_t3` | `f16`, `vec3h` | `half`, `half3` |
+| `short`, `ushort` | `int16_t`, `uint16_t` | none: WGSL lacks `shader_int16` | `short`, `ushort` |
+
+* **EMIT-140** HLSL writes a 16-bit float as `float16_t` and never as `half`, which without `-enable-16bit-types` silently means a 32-bit float (EMIT-4).
+  A literal of a 16-bit type is a construction of its type around it on every target, `float16_t(0.5)`, `f16(0.5)` and `half(0.5)`.
+  MSL's bare `0.5` is a 32-bit float, and would widen the expression it stands in.
+* **EMIT-141** WGSL enables what its text uses ahead of every declaration: `enable f16;` where it names a 16-bit float, and `enable subgroups;` where it holds a subgroup operation or stage input.
 
 ## Enums
 
@@ -297,6 +308,24 @@ binding affine:
 * **EMIT-78** A `switch` is the target's own, by the table of the core form, and a label is the constant of EMIT-76 where its value is a case and its decimal text otherwise.
 * **EMIT-79** In the C-like targets the emitter ends each arm with `break;`, and writes none after a body that already exits.
 * **EMIT-80** WGSL writes an arm's values as one comma list, and the C-like targets as one label per value.
+* **EMIT-142** A swizzle of a prelude vector is the target's own, `v.zyx` on every target, since every prelude vector is a vector of every target ([why](why/emitting.md#emit-142)).
+  A swizzle of a struct of the program is a construction of its vector, one member access per letter, with an operand that is no local bound to a temporary first, as CHK-103 binds one.
+  A splat of a swizzle is one member access of its operand per letter, so `float4(..v.xyz, 1.0)` binds no temporary.
+* **EMIT-143** HLSL and MSL assign through a swizzle of a prelude vector as it stands, `v.xz += d;`.
+  WGSL assigns one component at a time, and so does every target through a swizzle of a struct of the program.
+  The new value goes into a temporary first, which reads the old value and the right side once, and each component is stored from it.
+* **EMIT-144** `==` and `!=` over two vectors are `all(a == b)` and `any(a != b)` on every target, and `equal` and `not_equal` are the targets' componentwise `==` and `!=`.
+  An operator between a vector and its scalar, a one-value constructor, `any`, `all` and `fwidth` are each the target's own.
+* **EMIT-145** `select(cond, if_true, if_false)` is `select(cond, if_true, if_false)` in HLSL, and `select(if_false, if_true, cond)` in WGSL and MSL.
+  Where that order would evaluate an argument with an effect ahead of one SGL evaluates first, the arguments are bound to locals in SGL's order.
+
+In WGSL, `v.xz += d` over a `float4` local `v` and a `float2` `d` reads so:
+
+```wgsl
+let sgl_t: vec2f = v.xz + d;
+v.x = sgl_t.x;
+v.z = sgl_t.y;
+```
 
 ```hlsl
 pixel_input main_vs(cube_vertex v)
@@ -387,18 +416,56 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
     A shader that traces or stands in traversal, held by two whose sets' payloads differ, is `ray-data-conflict`, since one text cannot agree with both.
   * A hit's instance transforms are the identity, since Metal hands them only under intersection tags sg's tables do not declare.
 
+## Subgroups, coherence and image atomics
+
+* **EMIT-146** A subgroup operation is the target's own, by the table below, with its lane converted to the target's lane type.
+  HLSL writes an inclusive prefix as the exclusive one combined with the invocation's own value, and a shuffle by an offset as `WaveReadLaneAt` of the lane it computes.
+  MSL's ballot is 64 bits, which fill the low two components of the `uint4`.
+* **EMIT-147** `@subgroup_size` and `@subgroup_invocation_id` are `WaveGetLaneCount()` and `WaveGetLaneIndex()` in HLSL, read into locals at the top of the entry point.
+  WGSL takes them as `@builtin(subgroup_size)` and `@builtin(subgroup_invocation_id)`, and MSL as `[[threads_per_simdgroup]]` and `[[thread_index_in_simdgroup]]`.
+* **EMIT-148** `hlsl-dx12` writes `@preferred_subgroup_size(n)` as `[WaveSize(4, 128, n)]`, the range form with `n` preferred, which every dx12 device runs ([why](why/emitting.md#emit-148)).
+  No other text states it: the preference reaches the host beside the text, as a kernel's shape does in MSL (EMIT-59).
+  sg's vulkan backend asks the pipeline for subgroups of `n` where the device runs that size in a compute stage, and WGSL and MSL have no way to ask.
+* **EMIT-149** `workgroup_uniform_load(m)` is `workgroupUniformLoad(&m)` in WGSL.
+  HLSL and MSL write the workgroup barrier of EMIT-131, then read `m` into a local.
+* **EMIT-150** A `@coherent` member is `globallycoherent` in HLSL, which DXC writes as SPIR-V's `Coherent` for vulkan, and its declaration carries `coherent(device)` in MSL, from MSL 3.2.
+  The barrier that publishes its writes is EMIT-131's, which is device-scoped in HLSL and MSL; WGSL lacks `device_coherence` (EMIT-109).
+* **EMIT-151** An image subscript is the `load` or the `store` it stands for (CHK-367), and a compound assignment through one loads the texel once into a local.
+  An `@atomic` image is the plain integer image in HLSL, and its texel's update is `InterlockedMax(img[xy], v, before)`, read back as a buffer atomic's is (EMIT-120).
+  MSL makes it a `read_write` texture and calls its own methods, `img.atomic_fetch_max(xy, v)`, `atomic_load` and `atomic_store`, from MSL 3.1.
+  WGSL lacks `image_atomics` (EMIT-109).
+* **EMIT-152** An option is written as the value the compile gave it, a literal, as every `const` is: no text names an option, and none uses its target's specialization constants.
+  A branch CHK-356 removes is in no text.
+
+| SGL | HLSL | WGSL | MSL |
+|---|---|---|---|
+| `subgroup_all`, `subgroup_any` | `WaveActiveAllTrue`, `WaveActiveAnyTrue` | `subgroupAll`, `subgroupAny` | `simd_all`, `simd_any` |
+| `subgroup_ballot` | `WaveActiveBallot` | `subgroupBallot` | `simd_ballot` |
+| `subgroup_add`, `subgroup_mul` | `WaveActiveSum`, `WaveActiveProduct` | `subgroupAdd`, `subgroupMul` | `simd_sum`, `simd_product` |
+| `subgroup_min`, `subgroup_max` | `WaveActiveMin`, `WaveActiveMax` | `subgroupMin`, `subgroupMax` | `simd_min`, `simd_max` |
+| `subgroup_bit_and`, `subgroup_bit_or`, `subgroup_bit_xor` | `WaveActiveBitAnd`, `WaveActiveBitOr`, `WaveActiveBitXor` | `subgroupAnd`, `subgroupOr`, `subgroupXor` | `simd_and`, `simd_or`, `simd_xor` |
+| `subgroup_exclusive_add`, `subgroup_exclusive_mul` | `WavePrefixSum`, `WavePrefixProduct` | `subgroupExclusiveAdd`, `subgroupExclusiveMul` | `simd_prefix_exclusive_sum`, `simd_prefix_exclusive_product` |
+| `subgroup_inclusive_add`, `subgroup_inclusive_mul` | the exclusive one, then `+ x` or `* x` | `subgroupInclusiveAdd`, `subgroupInclusiveMul` | `simd_prefix_inclusive_sum`, `simd_prefix_inclusive_product` |
+| `subgroup_broadcast`, `subgroup_broadcast_first` | `WaveReadLaneAt`, `WaveReadLaneFirst` | `subgroupBroadcast`, `subgroupBroadcastFirst` | `simd_broadcast`, `simd_broadcast_first` |
+| `subgroup_shuffle` | `WaveReadLaneAt` | `subgroupShuffle` | `simd_shuffle` |
+| `subgroup_shuffle_xor`, `_up`, `_down` | `WaveReadLaneAt` of the lane `WaveGetLaneIndex()` gives | `subgroupShuffleXor`, `subgroupShuffleUp`, `subgroupShuffleDown` | `simd_shuffle_xor`, `simd_shuffle_up`, `simd_shuffle_down` |
+| `quad_swap_x`, `quad_swap_y`, `quad_swap_diagonal` | `QuadReadAcrossX`, `QuadReadAcrossY`, `QuadReadAcrossDiagonal` | `quadSwapX`, `quadSwapY`, `quadSwapDiagonal` | `quad_shuffle_xor` by 1, 2 and 3 |
+| `quad_broadcast` | `QuadReadLaneAt` | `quadBroadcast` | `quad_broadcast` |
+
 ## Layout
 
 Every value in GPU memory — a constant block or a buffer's element — is placed by one rule per address space, the same on every target.
 The C++ struct a package generates is that layout byte for byte, padding included, so the host copies it in as it is.
 **That struct is the only thing the host may rely on**: without an annotation, where a member lands is the compiler's choice (EMIT-116).
-EMIT-110 and EMIT-111 describe today's choice, not a promise.
+EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369) is the annotation that makes a constant block's layout one.
 
 * **EMIT-110** A constant block, a group's plain members or an `@inline` binding, is placed by HLSL's constant-buffer packing.
   It is read in rows of 16 bytes, and a value that would cross a row starts the next one.
   A `float4`, a matrix and a nested struct start a row, and what follows a nested struct packs against its last member.
-* **EMIT-111** A buffer's element is placed by dx12's structured-buffer packing: each value right behind the one before, every one 4-byte aligned.
-  A buffer strides by its element's size, which is where its last value ends.
+  A 16-bit value is aligned to 2 bytes within its row, and every other value to 4.
+* **EMIT-111** A buffer's element is placed by dx12's structured-buffer packing: each value right behind the one before, aligned to its scalar's size.
+  That is 4 bytes, and 2 for a 16-bit value.
+  A buffer strides by its element's size, which is where its last value ends, rounded up to 4 bytes.
 * **EMIT-112** Each target is made to follow the two rules ([why](why/emitting.md#emit-112)).
   `hlsl-dx12` writes nothing, since they are its own rules.
   `hlsl-vulkan` states every offset, which sg's vulkan backend admits by requiring `scalarBlockLayout`.
@@ -413,6 +480,13 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 * **EMIT-116** A layout carries no guarantee without an annotation that asks for one ([why](why/emitting.md#emit-116)).
   The compiler may place members in another order than they are declared, to pack them tighter.
   Host code reaches GPU memory through the generated struct, never through offsets or an order it assumed.
+* **EMIT-153** A binding marked `@layout(.hlsl)` has its constant block placed by EMIT-110, in declaration order, and that layout is promised: the compiler never reorders it.
+  Every target writes it as EMIT-112 writes any block, so the promise is today's output kept.
+* **EMIT-154** A binding marked `@layout(.cpp)` has its constant block placed as a C++ compiler places a struct of the generated host types ([why](why/emitting.md#emit-154)).
+  Each value stands at the next multiple of its alignment: its scalar's size, or a nested struct's largest.
+  A struct's size is rounded up to its alignment, a `float3` takes 12 bytes, and no row rule applies.
+  Every target is told so: `hlsl-dx12` writes the block as its memory form (EMIT-113) with a `packoffset` on every field, and `hlsl-vulkan` states every offset.
+  WGSL and MSL write its memory form, and in every target a vector the layout lets cross a 16-byte row is split into scalars.
 
 ## Error kinds
 
@@ -440,7 +514,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 * GLSL, which comes through the same seam.
 * Arrays in GPU memory, which the checker refuses today (CHK-291).
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
-* An annotation that fixes a layout, `@layout(.hlsl)` or `@layout(.cpp)`, for memory a host fills without the generated struct; until it exists, EMIT-116 says nothing is fixed.
+* Whether `@layout` also promises a buffer element's layout, which EMIT-111 places today without a promise.
 * `mat3`, which SGL has no type for yet: its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
   The host holds a block's as `slib::gpu_mat3` and a buffer's as `tg::mat3f`, which is those 36 bytes.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.

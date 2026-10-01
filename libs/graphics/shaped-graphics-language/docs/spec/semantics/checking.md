@@ -66,6 +66,13 @@ struct b:
 * **CHK-26** A field, a binding member and a parameter have a type; one without is the normal error `missing-type`.
 * **CHK-27** A `mut` member is `unsupported-yet`; defaults, properties and methods are [members](#members-and-constructors).
 * **CHK-28** Two fields of one struct, two members of one binding and two parameters of one function differ in name, or the later one is `duplicate-declaration`.
+* **CHK-346** `half`, `short` and `ushort` are the prelude's 16-bit float, `int` and `uint` ([why](why/checking.md#chk-346)).
+  Their vectors are `half2` to `half4`, `short2` to `short4` and `ushort2` to `ushort4`.
+  A literal converts to one by CHK-253, so `h * 0.5` with `h` a `half` is a `half` product, and `as` converts by CHK-197.
+* **CHK-347** A builtin type's record may name the feature a value of it needs, as a builtin function's record may (CHK-322).
+  `half` and its vectors name `shader_f16`, and `short`, `ushort` and their vectors name `shader_int16`.
+  An entry point whose flat tree holds a value of such a type needs its feature, and a binding member that holds one is a form CHK-201 judges.
+* **CHK-348** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
 
 ## Members and constructors
 
@@ -95,6 +102,21 @@ struct b:
   It is checked once, where it is declared, and it is of its parameter's type or `type-mismatch`.
 * **CHK-244** A named-only parameter (AST-144) binds by name alone, and a named-only field makes its constructor's parameter named-only.
 * **CHK-245** `self` in the body of a method or a property is its receiver, and anywhere else it is `unknown-name`.
+* **CHK-349** `@swizzle` on a struct gives it swizzles ([why](why/checking.md#chk-349)).
+  Its fields are two to four, each named by one character, and all of one element type that has a vector family: `float`, `int`, `uint`, `bool`, `half`, `short` or `ushort`.
+  A struct that breaks this is `invalid-attribute-arguments`, and the detail names the field.
+  The prelude's vectors carry it: `float2` to `float4`, `int2` to `int4`, `uint2` to `uint4`, `bool2` to `bool4`, the 16-bit vectors (CHK-346), `vec3`, `pos3` and `hpos4`.
+* **CHK-350** A **swizzle** `v.zyx` names two to four fields of a `@swizzle` struct by their letters, in any order and with repeats.
+  It is a value of the plain vector of the element type and the letter count: `float3` from a `vec3`, a `pos3` and a program's `rgb` alike ([why](why/checking.md#chk-350)).
+  One letter is the field itself, by CHK-64.
+  A letter that names no field, or a fifth letter, is `unknown-member`, and the detail names the letter.
+* **CHK-351** Every swizzle of a `@swizzle` struct is a member of its type scope, as a field is (CHK-233) ([why](why/checking.md#chk-351)).
+  So `v.xy` is the swizzle before any function is consulted (CHK-249).
+  A function named `xy` visible at the use changes nothing, and `v.xy(…)` is still a call of it.
+  A property or a function of the type scope, an extension included, whose name is a swizzle of the type is `member-name-clash`, at that declaration.
+* **CHK-352** A swizzle whose letters are distinct is a place wherever its operand is one (CHK-112), so `=` and every `op=` take it.
+  Its operand's indices are evaluated once, before any component is written, as a mut argument's are (CHK-316).
+  One with a repeated letter, `v.xx = p`, is `not-assignable`, and a swizzle as a mut argument, `f(mut v.xy)`, is `unsupported-yet`.
 
 ```sgl
 struct falloff:
@@ -106,6 +128,21 @@ struct falloff:
     fun unit() -> falloff => falloff(1.0)
 
 fun falloff.doubled => falloff(self.radius * 2.0, sharpness = self.sharpness)
+```
+
+A swizzle reads a struct of the program as it reads a prelude vector, and gives a plain vector either way.
+
+```sgl sketch
+@swizzle struct rgb:
+    r: float
+    g: float
+    b: float
+
+fun tint(c: rgb, clip: hpos4, p: float4) -> float4:
+    let ndc = clip.xyz / clip.w     // float3, from an hpos4
+    let mut q = p
+    q.zw += ndc.xy                  // a swizzle with distinct letters is a place
+    return float4(..c.bgr, q.w)     // c.bgr is a float3, never an rgb
 ```
 
 ## Void
@@ -131,6 +168,15 @@ fun f(x: float) -> float:
   Any other value is `unsupported-yet`, and a written type the value does not have is `type-mismatch`.
 * **CHK-221** A `const` whose value is an enum case names that case as a `case` pattern, so it counts for exhaustiveness as `e.case` does (CHK-159).
 * **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
+* **CHK-353** `@option` on a file-scope `const` makes it an **option**: a value the host sets for each compile, whose written value is its default ([why](why/checking.md#chk-353)).
+  An option is a `bool`, an `int` or an enum case, an image format among them; one of another type is `unsupported-yet`.
+* **CHK-354** A compile names a value for each option it sets, and the option stands for that value wherever it is named, as CHK-219 has a `const` stand for its own.
+  So every rule that judges a constant judges each set of values on its own.
+  A value for a name no option of the module has, or of another type than the option's, is `invalid-option`, and the detail names it.
+  A test runs with every option at its default.
+* **CHK-355** An entry point's options are those its flat tree names, together with those its workgroup size, its subgroup-size preference and the image formats of its listed bindings name.
+  Each distinct set of their values is one compile, so an option the entry point does not reach multiplies nothing.
+  `sgl describe` reports them per entry point, and a pipeline's options are those of its stages together.
 
 ```sgl
 const steps = 4
@@ -140,6 +186,21 @@ fun sign(b: bool) -> float:
     return case b:
         true => 1.0
         false => scale
+```
+
+An option is read like any `const`, and a branch on it leaves the text with whatever only that branch used (CHK-356).
+
+```sgl sketch
+@option const lowres_motion_vectors = false
+@option const tile = 8
+
+@compute(tile, tile, 1) fun reproject(@thread_id id: int3){inputs}:
+    let mut mv = float2(0.0)
+    if lowres_motion_vectors:
+        mv = inputs.mv_low[id.xy / 2].xy    // with the option off, mv_low is in neither the text nor the footprint
+    else:
+        mv = inputs.mv[id.xy].xy
+    inputs.out[id.xy] = mv
 ```
 
 ## Enums
@@ -250,14 +311,14 @@ fun shade(k: float) -> float:
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal`, `@preferred_subgroup_size` |
 | a function, as a ray-tracing stage | `@raygen`, `@miss`, `@closest_hit`, `@any_hit`, `@intersection`, `@callable` |
-| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal` |
+| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal`, `@swizzle` |
 | an enum | `@builtin`, `@shadowable`, `@bitflags`, `@internal` |
-| a const | `@shadowable` |
+| a const | `@shadowable`, `@option` |
 | a test | `@expect` |
-| a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding` |
-| a binding member | `@unfilterable`, `@non_filtering`, `@sampler` |
+| a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding`, `@layout` |
+| a binding member | `@unfilterable`, `@non_filtering`, `@sampler`, `@coherent`, `@atomic` |
 | a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
@@ -266,7 +327,7 @@ fun shade(k: float) -> float:
   That holds for every path a lookup takes: a name, the type scope and declaring scope of a first argument's type (CHK-247), and `T.f(…)` (CHK-248).
   A builtin step that a function of the prelude wraps is `@internal` too, such as a step of a ray query or of a pipeline's trace.
   On a declaration of the program's file it hides nothing.
-* **CHK-324** A function of the prelude may take a resource, which a function of the program may not (CHK-206).
+* **CHK-324** A function of the prelude may take a resource, as a function of the program may take a texture, an image or a sampler (CHK-366).
   Inlining substitutes it: the argument stands wherever the parameter is named, since no target holds a resource in a local.
 
 ```sgl
@@ -295,8 +356,9 @@ fun shade(k: float) -> float:
   Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture_2d[float4]`, `out image_2d[.rgba8_unorm]`.
 * **CHK-199** A texture's argument is `float`, `int` or `uint`, one to four wide, and a texture without its argument is `wrong-kind-of-name`.
   Another type as the argument is `wrong-kind-of-name` too, and a name that is no type is `unknown-name` by CHK-24, so `texture_2d[rgba8]` is the latter.
-* **CHK-200** An image's argument is exactly one enum case naming one of sg's image formats, `.rgba8_unorm`.
+* **CHK-200** An image's argument is exactly one enum case naming one of sg's image formats, `.rgba8_unorm`, or a `const` whose value is one, an option included (CHK-353).
   It is the one value type argument SGL reads, until value type arguments exist in general.
+  Every rule that judges the format judges the value the `const` has.
 * **CHK-201** A form some backend lacks is the normal error `needs-feature` on every target alike, unless a `require` grants its feature ([Features](#features)):
   `texture_2d_ms_array`, an image outside the portable image formats, and a `mut` image outside the three `r32` formats.
 * **CHK-202** `@unfilterable` stands on a texture member of floats, and on any other binding member is `wrong-kind-of-name`.
@@ -308,8 +370,8 @@ fun shade(k: float) -> float:
   The settings apply in source order, and a later one overrides what an earlier one set, `filter` over `mip_filter` included.
   An attribute on the block is judged as on any other binding member.
 * **CHK-205** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
-* **CHK-206** A `@builtin` function alone may take a texture, an image or a sampler, and a function of the prelude by CHK-324.
-  For any other function each is `unsupported-yet`, as it is anywhere a value stands.
+* **CHK-206** A texture, an image and a sampler are parameters of a `@builtin` function, of a function of the prelude (CHK-324) and of a function of the program (CHK-366).
+  Anywhere else a value stands each is `unsupported-yet`.
 * **CHK-207** A builtin's image parameter names the texel it loads or stores instead of a format, `out image_2d[float4]`, and is a pattern:
   it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
 * **CHK-194** A builtin's bare `texture_2d` or `image_2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
@@ -333,6 +395,22 @@ fun shade(k: float) -> float:
   It is used by its name, handed to a builtin as CHK-206 says, or through a texture's `@sampler` (CHK-279).
   Either way it filters as a static sampler does for CHK-210 and CHK-281.
   Its name anywhere else is `unsupported-yet`, and so is its name in a test, which samples no texture.
+* **CHK-366** A function of the program may take a texture, an image or a sampler as a parameter, which inlining substitutes as it does a prelude function's (CHK-324) ([why](why/checking.md#chk-366)).
+  Its argument is a binding member of exactly the parameter's type, an element of a binding array, a file-scope sampler, or a parameter of that type handed on; anything else is `type-mismatch`.
+  The parameter stands for its argument wherever it is named, so the member's access, its `@sampler` and its footprint are the parameter's, and the function lists no binding for it.
+  A local, a field and a result of a resource type stay `unsupported-yet`.
+* **CHK-367** `img[xy]` is a texel of an image member: a read of it is `img.load(xy)`, and an assignment to it is `img.store(xy, v)` ([why](why/checking.md#chk-367)).
+  The subscript takes the arguments `load` takes, so an array's layer is named, `img[xy, layer = 2]`.
+  It is judged as the call it stands for, so a read of an `out` image is `no-matching-overload`, and `img[xy] += v` reads and writes a `mut` one.
+  A member of a texel is no place: `img[xy].x = v` is `not-assignable`.
+* **CHK-368** `@coherent` on a `mut buffer` or a `mut` image member makes it **coherent** across the workgroups of a dispatch ([why](why/checking.md#chk-368)).
+  A write to it that its workgroup follows with a barrier, `storage_barrier` for a buffer and `texture_barrier` for an image, is visible to every invocation of the dispatch.
+  That holds for every invocation that has read the result of an atomic update made after that barrier by an invocation of the writer's workgroup.
+  On any other member it is `wrong-kind-of-name`, and it needs `device_coherence`, a form CHK-201 judges.
+* **CHK-369** `@layout(.hlsl)` and `@layout(.cpp)` on a binding promise its constant block's layout to the host ([why](why/checking.md#chk-369)).
+  The members stand in declaration order, placed by the rule the argument names.
+  `.hlsl` is HLSL's constant-buffer packing, and `.cpp` places them as a C++ compiler places a struct of the generated host types ([emitting](emitting.md#layout)).
+  Any other argument, and the attribute on a `@workgroup` binding, is `invalid-attribute-arguments`.
 
 ```sgl
 @inline binding constants:
@@ -380,10 +458,14 @@ fun shade(k: float) -> float:
   At its default type as anywhere else, it is one `float` holds by CHK-253, or `literal-not-representable`.
 * **CHK-61** A decimal literal of digits alone is an **integer literal**, whose default type is the prelude's `int`, and a sign directly on it is part of it.
   A number literal is of its default type wherever no other type is asked of it by CHK-253.
-  An integer literal is held in 64 bits, and one beyond them is `unsupported-yet`, as is a literal with a suffix or a `p` exponent.
+  An integer literal is held in 64 bits, and one beyond them is `unsupported-yet`, as is a literal with a `p` exponent; a suffix is CHK-357.
   One the type it ends up with does not hold, its default type included, is `literal-not-representable`: `let u: uint = 3000000000` is legal and `let i = 3000000000` is not.
 * **CHK-269** A literal of hexadecimal digits behind `0x`, or of binary ones behind `0b`, is an integer literal like a decimal one ([why](why/checking.md#chk-269)).
   Its value is the number it spells: `0xffff'ffff` is 4294967295, which a `uint` holds and an `int` does not, and `-0x8000'0000` is the most negative `int`.
+* **CHK-357** A literal with a suffix ([NUM-15](../syntax/numbers.md#inside-the-symbols)) is of the type its suffix names wherever it stands, and converts to no other ([why](why/checking.md#chk-357)).
+  `i`, `u` and `f` name `int`, `uint` and `float` at the width 32, and `short`, `ushort` and `half` at 16; any other width is `unsupported-yet`.
+  An `f` on digits alone makes a float literal of the value they spell, so `1f` is `1.0`, and an `i` or a `u` on a float literal is `literal-not-representable`.
+  A value its type does not hold is `literal-not-representable`, as by CHK-253.
 * **CHK-62** A name resolves to a local or a parameter first, and to a symbol of the module after that; one that resolves to nothing is `unknown-name`.
   A body reads the members of its receiver through `self` alone: a bare `radius` in a method is no field of `self` ([why](why/checking.md#chk-62)).
 * **CHK-63** A name that stands for a struct, a function or a binding is no value by itself: it is `unsupported-yet`.
@@ -472,6 +554,7 @@ fun shade(k: float) -> float:
   The result takes part in the match, since the overloads of `as` differ in it; no such function is `no-matching-overload`.
 * **CHK-196** `x as T` where `x` already has the type `T` is `x`.
 * **CHK-197** The prelude converts between `float`, `int` and `uint` of one width, and nothing else ([why](why/checking.md#chk-197)).
+  Each family also converts between its widths: `half` and `float`, `short` and `int`, `ushort` and `uint` (CHK-346).
   A float whose truncation the integer holds becomes that integer, truncated toward zero.
   A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
   Between `int` and `uint` the bits stay.
@@ -482,6 +565,36 @@ let n = normalize p.normal
 let key = saturate dot(n, normalize vec3(0.45, 0.8, -0.4))
 let lit = p.color * (0.25 + 0.8 * key + 0.25 * fill)
 let color = float4(..lit, 1.0)
+```
+
+## Vectors
+
+The prelude's vectors are structs of one element type, so `float3` is `x`, `y` and `z` of `float`, and `v.x` is a field.
+The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2` to `uint4` and the 16-bit vectors: plain numbers, all of whose arithmetic is componentwise.
+`vec3`, `pos3` and `hpos4` keep their own arithmetic, since `pos3 + 0.5` means nothing.
+
+* **CHK-358** Every arithmetic operator, `+`, `-`, `*`, `/` and `%`, takes a plain vector and its element type on either side, and is componentwise ([why](why/checking.md#chk-358)).
+  So do `&`, `|`, `^`, `<<` and `>>` for the integer families, so `id.xy % 2` and `mask >> 4` need no construction.
+* **CHK-359** `min`, `max` and `clamp` take every integer vector family as they take the float ones, and `abs` and `sign` take the signed ones.
+* **CHK-360** Every vector of the prelude has a one-value constructor, `float3(x)`, whose every component is `x`; it is a function of the vector's name beside its synthesized constructor (CHK-240).
+* **CHK-361** `fwidth(x)` is `abs(ddx(x)) + abs(ddy(x))`, and like `ddx` it is `@stages(.pixel)` and takes derivatives (CHK-282).
+* **CHK-362** `<`, `<=`, `>` and `>=` over two plain vectors of one family are componentwise, and give the `bool` vector of their width ([why](why/checking.md#chk-362)).
+  A comparison chain over vectors is `type-mismatch`, since CHK-117 makes each of its links a `bool`.
+* **CHK-363** `==` and `!=` over two vectors of one type compare the whole value and give one `bool`: `a == b` holds where every component is equal.
+  So a `case` over a vector matches it whole (CHK-154).
+  `equal(a, b)` and `not_equal(a, b)` are the componentwise comparisons, which give the `bool` vector.
+* **CHK-364** `any(m)` and `all(m)` take a `bool` vector, and give whether any of its components is true, or every one.
+* **CHK-365** `select(cond, if_true, if_false)` evaluates all three in that order, and gives `if_true` where `cond` holds and `if_false` where it does not ([why](why/checking.md#chk-365)).
+  With a `bool` condition both values are of one scalar or vector type; with a `bool` vector both are vectors of its width, and it picks per component.
+  It is a function like any other, so `cond.select(a, b)` is the same call (CHK-247).
+
+```sgl sketch
+fun shade(uv: float2, id: int3, a: float3, b: float3) -> float3:
+    let checker = id.xy % 2                 // int2
+    let centred = uv - 0.5                  // float2
+    let nearer = a < b                      // bool3, per component
+    if a == b => return float3(0.0)         // one bool, for the whole value
+    return select(nearer, a, b) * centred.x
 ```
 
 ## Literals
@@ -529,6 +642,7 @@ fun f() -> float:
 | `@domain_location` | tessellation evaluation | `float3` or `float2` (CHK-306) |
 | `@thread_id`, `@local_thread_id`, `@workgroup_id` | compute | `int3` |
 | `@local_thread_index` | compute | `int` |
+| `@subgroup_size`, `@subgroup_invocation_id` | pixel, compute | `int` |
 | `@launch_id`, `@launch_size` | every ray-tracing stage (CHK-327) | `int3` |
 
   A `@compute fun` takes stage inputs alone.
@@ -549,6 +663,7 @@ fun f() -> float:
 * **CHK-274** A pixel stage that takes a member interpolated `.sample` runs once per sample, and needs `sample_rate_shading` of a device.
 * **CHK-272** `@primitive_id` needs `primitive_index` of a device and `@sample_index` needs `sample_rate_shading`, as a binding member needs its feature (CHK-261).
   The feature is the pixel stage's alone: the geometry and tessellation stages have the primitive's index wherever they have the stage.
+  `@subgroup_size` and `@subgroup_invocation_id` need `subgroups` in every stage that takes them.
 * **CHK-90** A `@vertex fun` returns a struct with at most one field that carries `@position`, and that field is of the type `hpos4`.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.
@@ -562,6 +677,11 @@ fun f() -> float:
   It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
   `sample` without a `level` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
+* **CHK-370** Each workgroup size of `@compute(x, y, z)` is an `int` literal, or names an `int` `const`, an option included; each is at least 1, or it is `invalid-attribute-arguments`.
+* **CHK-371** `@preferred_subgroup_size(n)` on a `@compute` entry point asks for subgroups of `n` invocations where the device runs that size, and promises nothing ([why](why/checking.md#chk-371)).
+  The shader is correct at any size, reads the size it got through `@subgroup_size`, and needs no feature.
+  `n` is a power of two from 4 to 128, written as an `int` literal or as an `int` `const`.
+  Any other `n`, and the attribute on any other function, is `invalid-attribute-arguments`.
 * **CHK-267** `@expect(footprint = "slot: access, ...")` on an entry point pins its [footprint](../bindings.md#footprint): each touched slot once, as `read`, `write` or `read write`, in any order.
   A footprint that differs is `unmet-expectation`, whose detail spells the one the code has.
   On a function that is no entry point, or with any other argument, it is `invalid-attribute-arguments`.
@@ -573,6 +693,8 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 
 * **CHK-258** A `require` names features as `sg::feature` names them, and only those a shader can use:
   `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures`, `ray_query` and `raytracing_pipeline`.
+  The 16-bit types add `shader_f16` and `shader_int16` (CHK-347), and the subgroup operations `subgroups` (CHK-376).
+  Coherent memory adds `device_coherence` (CHK-368), and image atomics `image_atomics` (CHK-372).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
@@ -583,7 +705,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 * **CHK-263** What an entry point needs of a device is what it uses, never what it merely may use ([why](why/checking.md#chk-263)).
   It needs what the bindings it lists require, its stage inputs (CHK-272), a member it takes per sample (CHK-274) and its stage itself (CHK-301, CHK-304, CHK-306, CHK-326).
   It needs what the builtins its inlined body calls need, by CHK-322.
-  It is judged once every body is checked, and a use is counted wherever it stands, reached or not.
+  It is judged once every body is checked, and a use is counted wherever it stands, reached or not, but in a branch CHK-356 removes.
 * **CHK-322** A builtin's record may name the features a call of it needs, and an entry point whose inlined body reaches such a call needs them too ([why](why/checking.md#chk-322)).
   It declares them as any other, by CHK-262, and one it does not is `feature-not-declared` with a note at the call.
   So a body's `require` that such a call needs is used, which CHK-265 judges once every entry point is flattened.
@@ -693,6 +815,22 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   Its builtins are `@stages(.pixel, .compute)`.
 * **CHK-297** An expression of an atomic's type stands only as a builtin's argument; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
   A local, a parameter or a field of an atomic's type is `wrong-kind-of-name` as well.
+* **CHK-372** `@atomic` on a `mut` image member of the format `.r32_uint` or `.r32_sint` makes each of its texels an atomic of `uint` or `int` ([why](why/checking.md#chk-372)).
+  On any other member it is `wrong-kind-of-name`, and it needs `image_atomics`, a form CHK-201 judges.
+* **CHK-373** `img[xy]` of an `@atomic` member is its texel's atomic, which stands only as a builtin's argument by CHK-297: `img[xy].max(v)`.
+  The buffer atomics' methods are its methods, `load()` and `store(v)` among them, and they are `@stages(.pixel, .compute)` as CHK-296 has every atomic's.
+  The image's own `load` and `store` are `wrong-kind-of-name` on it, and `size` and the image's other methods take it as they take any image.
+
+```sgl sketch
+require image_atomics
+
+binding prepare:
+    @atomic depth: mut image_2d[.r32_uint]
+
+@compute(8, 8) fun reduce_depth(@thread_id id: int3){prepare, inputs}:
+    let d = inputs.depth.load(id.xy, 0)
+    prepare.depth[id.xy / 2].max(d.bits)
+```
 
 ## Uniformity
 
@@ -703,11 +841,13 @@ Its rules start from WGSL's, but refusing all that Tint refuses is no goal; wher
 
 * **CHK-282** A barrier, and a builtin that takes derivatives implicitly, in **non-uniform control flow** is `non-uniform-control-flow`, at the call.
   A note names the branch or the exit that made the flow so, and what the branch tested.
-  `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx` and `ddy` take derivatives.
+  `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy` and `fwidth` take derivatives.
+  A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
 * **CHK-283** A value is **non-uniform** where it comes from a stage input other than `@workgroup_id`, from the stage struct, from a `mut` buffer or a `mut` image,
   from a non-uniform value, or from a local set anywhere in non-uniform control flow.
   A `mut` buffer or image is so whether it is named directly or as an element of a binding array.
-  Every read of workgroup memory is non-uniform, whatever was stored to it, and so is the result of every atomic.
+  Every read of workgroup memory is non-uniform, whatever was stored to it, but one through `workgroup_uniform_load` (CHK-374).
+  So is the result of every atomic and of every subgroup operation (CHK-377).
   Every other value is uniform: a literal, a `const`, a member of a constant block, and an element of a read-only buffer at a uniform index.
 * **CHK-284** Control flow is non-uniform inside an `if`, a `case` or a loop whose condition is non-uniform, and the right side of an `and` or an `or` whose left side is.
   It stays so after an `if` or a `case` one of whose sides leaves in non-uniform control flow, and for the rest of the entry point after such a `return`.
@@ -715,6 +855,56 @@ Its rules start from WGSL's, but refusing all that Tint refuses is no goal; wher
   A `while` condition is tested again before every iteration, so such a loop's condition runs in non-uniform control flow too.
   An inlined function's early `return` is such an exit of the block it became.
   A `discard` changes nothing, as in WGSL, where the pixel goes on as a helper of its quad.
+* **CHK-374** `workgroup_uniform_load(m)` waits at a workgroup barrier, then reads `m`, and its result is uniform ([why](why/checking.md#chk-374)).
+  `m` is a member of a `@workgroup` binding, or a field of one at any depth; an index on the way is `unsupported-yet`, and an atomic or anything else is `wrong-kind-of-name`.
+  It is a barrier, so it stands only in uniform control flow (CHK-282), and it is `@stages(.compute)`.
+
+```sgl sketch
+@workgroup binding spd:
+    finished: uint
+
+@compute(256) fun downsample(@local_thread_index li: int){work, spd}:
+    if li == 0:
+        spd.finished = work.counter[0].add(1u)
+    if workgroup_uniform_load(spd.finished) == work.groups - 1u:
+        workgroup_barrier()        // uniform control flow: the load's result is uniform
+```
+
+## Subgroups
+
+A **subgroup** is the invocations the hardware runs in lockstep: a wave on AMD, a warp on NVIDIA, a SIMD-group on Apple.
+A **quad** is four of them: in a pixel stage the 2x2 pixels a derivative compares, and in a compute stage four consecutive invocations of a subgroup.
+The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are its size and this invocation's index in it.
+
+* **CHK-376** The **subgroup operations** are the builtins of the table below; each needs `subgroups` (CHK-322) and is `@stages(.pixel, .compute)` ([why](why/checking.md#chk-376)).
+  A number is a numeric scalar of the prelude, and every operation that takes a number takes a vector of numbers too, componentwise.
+* **CHK-377** A subgroup operation stands only in uniform control flow, judged as CHK-282 judges a barrier, and its result is non-uniform ([why](why/checking.md#chk-377)).
+* **CHK-378** The lane of `subgroup_broadcast` is a constant `int`, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.
+  A lane that names no invocation of the subgroup, at run time, gives a value the language does not specify.
+* **CHK-379** A test whose run reaches a subgroup operation is `unsupported-yet` at the call: a run is one invocation, and has no subgroup.
+
+| operation | gives |
+|---|---|
+| `subgroup_all(b)`, `subgroup_any(b)` | whether the `bool` `b` holds in every invocation, or in any |
+| `subgroup_ballot(b)` | a `uint4` whose bit `i` is set where invocation `i`'s `b` holds |
+| `subgroup_add(x)`, `subgroup_mul(x)`, `subgroup_min(x)`, `subgroup_max(x)` | the sum, the product, the minimum or the maximum of the number `x` over the subgroup |
+| `subgroup_bit_and(x)`, `subgroup_bit_or(x)`, `subgroup_bit_xor(x)` | the same, bitwise, of an integer `x` |
+| `subgroup_exclusive_add(x)`, `subgroup_exclusive_mul(x)` | the sum or the product over the invocations below this one |
+| `subgroup_inclusive_add(x)`, `subgroup_inclusive_mul(x)` | the same, this invocation included |
+| `subgroup_broadcast(x, lane)`, `subgroup_broadcast_first(x)` | `x` of the invocation `lane`, or of the first one |
+| `subgroup_shuffle(x, lane)` | `x` of the invocation `lane`, an `int` computed at run time |
+| `subgroup_shuffle_xor(x, mask)`, `subgroup_shuffle_up(x, delta)`, `subgroup_shuffle_down(x, delta)` | `x` of the invocation `id ^ mask`, `id - delta` or `id + delta`, for this invocation's `id` |
+| `quad_swap_x(x)`, `quad_swap_y(x)`, `quad_swap_diagonal(x)` | `x` of the quad's horizontal, vertical or diagonal neighbour |
+| `quad_broadcast(x, lane)` | `x` of the quad's invocation `lane` |
+
+```sgl sketch
+require subgroups
+
+@compute(64) @preferred_subgroup_size(64) fun reduce(@local_thread_index li: int){work, tile}:
+    let v = work.input[li]
+    let quad_max = max(max(v, quad_swap_x(v)), max(quad_swap_y(v), quad_swap_diagonal(v)))
+    let total = subgroup_add(quad_max)
+```
 
 ## Geometry and tessellation stages
 
@@ -877,6 +1067,11 @@ hit_group textured for path_rays:
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
 * **CHK-213** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet` at its name.
   A gap of the pass is never a silent loss of the entry point.
+* **CHK-356** An `if` or an `else if` whose condition is a constant (CHK-310), as a statement or as a value, is replaced in the flat tree by the branch it takes ([why](why/checking.md#chk-356)).
+  The branch it does not take is in no target's text and in no footprint.
+  No rule that judges an entry point's inlined body judges it: neither the uniformity pass (CHK-282) nor the features the entry point needs (CHK-263).
+  Every body is still checked on its own (CHK-129), so an error in that branch is reported all the same.
+  A `let` holds no constant, so a branch on a local that holds an option keeps both sides.
 * **CHK-268** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
   A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
   A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
@@ -901,6 +1096,9 @@ hit_group textured for path_rays:
 * **CHK-120** `return`, `break` and `continue` are statements; one that stands as the result of a `case` arm leaves as it says, and that arm produces no value (CHK-165).
   One that stands as a value anywhere else is `unsupported-yet`.
 * **CHK-209** `print value` takes a value of any type; a string is `unsupported-yet`.
+* **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
+  Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.
+  In the flat tree it is the block of CHK-170 around an `if`, so a branch under a non-uniform condition is in non-uniform control flow (CHK-284).
 
 ```sgl
 fun falloff(d: float, steps: int) -> float:
@@ -910,6 +1108,13 @@ fun falloff(d: float, steps: int) -> float:
         w *= d
         if w < 0.125 => return 0.0
     return w
+```
+
+An `if` that is a value runs one branch, where `select` runs both.
+
+```sgl sketch
+let y = if c => 1.0 else 2.0
+let w = if x > 0.0 => sqrt(x) else 0.0     // sqrt runs only where x > 0
 ```
 
 ## Case
@@ -1039,34 +1244,34 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-348, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-368, CHK-372, CHK-373, CHK-374 |
 | `unexpected-keyword` | CHK-315 |
 | `default-not-allowed-here` | CHK-316 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304, CHK-349, CHK-369, CHK-370, CHK-371 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-329, CHK-344 |
-| `not-assignable` | CHK-112, CHK-236, CHK-316 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-329, CHK-344, CHK-362, CHK-366, CHK-375 |
+| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162 |
 | `no-effect` | CHK-225 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
-| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-350 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-367 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
-| `needs-feature` | CHK-201, CHK-320 |
+| `needs-feature` | CHK-201, CHK-320, CHK-347, CHK-368, CHK-372 |
 | `unknown-feature` | CHK-258 |
-| `feature-not-declared` | CHK-264, CHK-322 |
+| `feature-not-declared` | CHK-264, CHK-322, CHK-347 |
 | `unused-require` | CHK-265 |
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-298, CHK-329, CHK-344 |
 | `ambiguous-overload` | CHK-72 |
@@ -1078,8 +1283,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
 | `unmet-expectation` | CHK-232, CHK-267 |
-| `member-name-clash` | CHK-238 |
-| `literal-not-representable` | CHK-60, CHK-61, CHK-253 |
+| `member-name-clash` | CHK-238, CHK-351 |
+| `literal-not-representable` | CHK-60, CHK-61, CHK-253, CHK-357 |
 | `call-spelling` | CHK-256 |
 | `literal-conversion-result` | CHK-85 |
 | `literal-needs-type` | CHK-257, CHK-313 |
@@ -1087,10 +1292,11 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309 |
-| `non-uniform-control-flow` | CHK-282 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378 |
+| `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
 | `non-uniform-index` | CHK-300 |
 | `needless-nonuniform` | CHK-300 |
+| `invalid-option` | CHK-354 |
 
 ## Open
 
@@ -1101,3 +1307,6 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 * Where a leading dot is resolved beyond a `case` scrutinee: a parameter, a field and a return type each expect a type too.
 * Whether the bindings of a flat entry point are the ones its list names or the ones its body reads.
 * How a splatted value reads in the emitted text once a target can take the vector whole.
+* Whether a `case` over a constant scrutinee drops the arms it does not take, as CHK-356 drops a branch.
+* Whether a resource parameter takes a member of a narrower access, as a builtin's pattern does (CHK-207), rather than of exactly its type.
+* Whether `workgroup_uniform_load` takes an element of a workgroup array at a uniform index.
