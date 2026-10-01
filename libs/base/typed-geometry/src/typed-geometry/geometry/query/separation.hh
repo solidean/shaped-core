@@ -141,3 +141,38 @@ constexpr auto tg::box_boundary<D, DAmbient, T>::separation_from(Obj const& obj)
 {
     return tg::impl::separation_from(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_mantle<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}

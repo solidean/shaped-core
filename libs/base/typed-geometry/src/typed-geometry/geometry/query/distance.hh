@@ -544,3 +544,143 @@ constexpr bool tg::box_boundary<D, DAmbient, T>::contains(Obj const& obj, T eps)
 {
     return tg::impl::contains_within(*this, obj, eps);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule_boundary<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_boundary<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_mantle<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule_boundary<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_boundary<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_mantle<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule_boundary<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_boundary<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_mantle<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::capsule<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::capsule_boundary<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder_boundary<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder_mantle<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}

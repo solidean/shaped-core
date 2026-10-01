@@ -274,6 +274,9 @@ tg::box<D,DA,T>   {pos center; mat<D,DA> half_extents}  // {center + H*c : c in 
                                               //   NOT necessarily orthogonal (any affine image of a box is a box)
 tg::box_boundary<D,DA,T>                      // its faces; box3f_surface; box2in3f is a rectangle in 3D
 tg::halfspace<D,T> {vec normal; T dist}       // {x : dot(normal,x) <= dist}; h.boundary() is the plane
+tg::capsule<D,T>  {segment axis; T radius}    // within radius of the axis (2D: stadium); capsule_boundary
+tg::cylinder<3,T> {segment axis; T radius}    // flat caps; cylinder_boundary (all of it), cylinder_mantle = tube3
+                                              //   (open tube, NOT a boundary: .solid() but no round trip); .caps()
 tg::triangle<D,T> {pos pos0, pos1, pos2}      // filled triangle (hull of 3 verts), 2D patch  — finite
 tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,1]}, 1D        — finite
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite

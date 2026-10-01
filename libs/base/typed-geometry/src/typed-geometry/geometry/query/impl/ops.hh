@@ -4,6 +4,7 @@
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/scalar/traits.hh>
 
+#include <concepts>
 #include <type_traits>
 
 /// The seam every geometric query dispatches through: one class template per verb, specialized per pair of types.
@@ -83,9 +84,12 @@ concept epa_pair = gjk_pair<A, B> && traits::intrinsic_dim<A> == traits::ambient
                 && traits::intrinsic_dim<B> == traits::ambient_dim<B>
                 && (traits::ambient_dim<A> == 2 || traits::ambient_dim<A> == 3);
 
-/// a boundary type: it has a `.solid()` reading, which every boundary does and nothing else.
+/// a boundary type: its `.solid()` reading's `.boundary()` is itself.
+/// A mantle has a solid too, but it is only part of that solid's boundary, so it is not one.
 template <class Obj>
-concept is_boundary = requires(Obj const& o) { o.solid(); };
+concept is_boundary = requires(Obj const& o) {
+    { o.solid().boundary() } -> std::same_as<Obj>;
+};
 
 template <class Obj>
 using solid_t = decltype(static_cast<Obj const*>(nullptr)->solid());

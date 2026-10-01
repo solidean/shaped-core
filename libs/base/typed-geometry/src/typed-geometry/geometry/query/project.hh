@@ -137,3 +137,38 @@ constexpr auto tg::box_boundary<D, DAmbient, T>::project_to(Obj const& obj) cons
 {
     return tg::impl::project_to(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule_boundary<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_boundary<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_mantle<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}

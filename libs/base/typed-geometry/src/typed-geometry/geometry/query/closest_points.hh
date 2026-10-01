@@ -287,3 +287,73 @@ constexpr auto tg::box_boundary<D, DAmbient, T>::closest_point_to(Obj const& obj
 {
     return tg::impl::closest_point_to(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule_boundary<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_boundary<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_mantle<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule_boundary<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_boundary<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_mantle<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}

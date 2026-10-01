@@ -272,6 +272,8 @@ geometry/
     aabb.hh         [done]     solid axis-aligned box {min..max}; aabb_boundary its faces
     box.hh          [done]     oriented box {center + H*c : c in [-1,1]^D}, H's columns the half-axes; box_boundary
     halfspace.hh    [done]     {x : dot(normal,x) <= dist}, plane's encoding
+    capsule.hh      [done]     {x : distance(x, axis) <= radius}; capsule_boundary
+    cylinder.hh     [done]     3D, flat caps; cylinder_boundary, cylinder_mantle (tube3)
     triangle.hh     [done]     filled triangle (3 verts)
     segment.hh      [done]     closed segment between 2 endpoints
     ray.hh          [done]     {origin + t*dir : t >= 0}
@@ -280,7 +282,7 @@ geometry/
     sphere.hh       [done]     ball {x : distance(x, center) <= radius}; sphere_boundary is the surface
     ellipsoid.hh    [done]     solid ellipsoid {center + sum_i u_i * semi_axes[i] : |u| <= 1}; ellipsoid_boundary the surface
     primitives.hh   [done]
-    # planned: capsule, cylinder, cone, ... — see plans/old-tg-carryover.md
+    # planned: cone, hemisphere, tetrahedron, quad, ... — see plans/old-tg-carryover.md
   query/            [in progress]  # the member verbs' definitions, one header per verb; kernels and GJK / EPA in impl/
   construct/        [planned]  # hull, fitting, primitives_from_points
   geometry.hh       [done]

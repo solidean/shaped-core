@@ -75,6 +75,25 @@ struct ellipsoid;
 template <int D, int DAmbient, class T>
 struct ellipsoid_boundary;
 
+/// every point within radius of a segment: a stadium in 2D.
+/// Finite, intrinsic_dim D.
+template <int D, class T>
+struct capsule;
+/// the surface of a capsule.
+template <int D, class T>
+struct capsule_boundary;
+
+/// a disk swept along a segment, with flat caps; 3D only.
+/// Finite, intrinsic_dim 3.
+template <int D, class T>
+struct cylinder;
+/// the whole surface of a cylinder, caps included.
+template <int D, class T>
+struct cylinder_boundary;
+/// the curved part of a cylinder's surface, open at both ends: a tube.
+template <int D, class T>
+struct cylinder_mantle;
+
 //
 // Query results
 //
@@ -306,5 +325,40 @@ using ellipsoid2in3f = ellipsoid<2, 3, f32>;
 using ellipsoid2in3d = ellipsoid<2, 3, f64>;
 using ellipsoid2in3f_boundary = ellipsoid_boundary<2, 3, f32>;
 using ellipsoid2in3d_boundary = ellipsoid_boundary<2, 3, f64>;
+
+
+template <class T>
+using capsule2 = capsule<2, T>;
+template <class T>
+using capsule3 = capsule<3, T>;
+template <class T>
+using capsule3_boundary = capsule_boundary<3, T>;
+template <class T>
+using capsule3_surface = capsule_boundary<3, T>;
+template <class T>
+using cylinder3 = cylinder<3, T>;
+template <class T>
+using cylinder3_boundary = cylinder_boundary<3, T>;
+template <class T>
+using cylinder3_surface = cylinder_boundary<3, T>;
+template <class T>
+using cylinder3_mantle = cylinder_mantle<3, T>;
+template <class T>
+using tube3 = cylinder_mantle<3, T>;
+
+using capsule2f = capsule<2, f32>;
+using capsule3f = capsule<3, f32>;
+using capsule2d = capsule<2, f64>;
+using capsule3d = capsule<3, f64>;
+using capsule3f_surface = capsule_boundary<3, f32>;
+using capsule3d_surface = capsule_boundary<3, f64>;
+using cylinder3f = cylinder<3, f32>;
+using cylinder3d = cylinder<3, f64>;
+using cylinder3f_surface = cylinder_boundary<3, f32>;
+using cylinder3d_surface = cylinder_boundary<3, f64>;
+using cylinder3f_mantle = cylinder_mantle<3, f32>;
+using cylinder3d_mantle = cylinder_mantle<3, f64>;
+using tube3f = cylinder_mantle<3, f32>;
+using tube3d = cylinder_mantle<3, f64>;
 
 } // namespace tg

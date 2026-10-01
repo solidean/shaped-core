@@ -301,3 +301,73 @@ constexpr bool tg::box_boundary<D, DAmbient, T>::intersects(Obj const& obj, T ep
 {
     return tg::impl::intersects_within(*this, obj, eps);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::capsule_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cylinder_mantle<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::capsule<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::capsule_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder_mantle<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
