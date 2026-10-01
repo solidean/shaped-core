@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -589,7 +590,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
-        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler"};
+        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
@@ -720,6 +721,46 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             report(diagnostic_kind::wrong_kind_of_name, file, non_filtering->name,
                    "only a `sampler` member can be @non_filtering");
 
+        // CHK-368 and CHK-372: what a written resource is besides its type, said of the element of a binding array
+        auto const* const coherent = is_struct ? nullptr : find_attribute(file, f.attributes, "coherent");
+        auto const* const atomic = is_struct ? nullptr : find_attribute(file, f.attributes, "atomic");
+        auto is_coherent = false;
+        auto innermost = type;
+        while (innermost != checked_module::error_type && out.at(innermost).kind == type_kind::array)
+            innermost = out.at(innermost).element;
+        if (coherent != nullptr && type != checked_module::error_type)
+        {
+            auto const& r = out.at(innermost);
+            if ((r.kind == type_kind::buffer && r.is_mut)
+                || (r.kind == type_kind::image && r.access == access_mode::read_write))
+            {
+                judge_feature(file, coherent->name, "a @coherent member", feature::device_coherence);
+                is_coherent = true;
+            }
+            else
+                report(diagnostic_kind::wrong_kind_of_name, file, coherent->name,
+                       "only a `mut buffer` or a `mut` image is written by one workgroup for another, so only one can "
+                       "be @coherent");
+        }
+        if (atomic != nullptr && type != checked_module::error_type)
+        {
+            auto const& r = out.at(innermost);
+            auto const format
+                = r.kind == type_kind::image && r.format >= 0 ? k_image_formats[r.format].name : cc::string_view();
+            if (r.kind != type_kind::image || r.access != access_mode::read_write
+                || (format != "r32_uint" && format != "r32_sint"))
+                report(diagnostic_kind::wrong_kind_of_name, file, atomic->name,
+                       "only a `mut` image of .r32_uint or .r32_sint has atomic texels, so only one can be @atomic");
+            else
+            {
+                judge_feature(file, atomic->name, "an @atomic image", feature::image_atomics);
+                auto texels = r;
+                texels.is_atomic = true;
+                auto const atomic_image = resource_type(cc::move(texels));
+                type = innermost == type ? atomic_image : array_type(atomic_image, out.at(type).count);
+            }
+        }
+
         collected.push_back({
             .name = name,
             .type = type,
@@ -737,6 +778,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .stream = name_argument_of(file, find_attribute(file, f.attributes, "stream")),
             .is_unfilterable = unfilterable != nullptr,
             .is_non_filtering = non_filtering != nullptr,
+            .is_coherent = is_coherent,
         });
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(

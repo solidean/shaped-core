@@ -504,6 +504,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar or a vector.
 * A subscript on a buffer, as a value and as the place of an assignment.
+* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)); a texture's is not built.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A file-scope sampler, handed to a builtin by its name ([CHK-314](semantics/checking.md#bindings)).
@@ -514,6 +515,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform`.
 * `@workgroup` bindings, which take no group.
 * `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
+* `@atomic` images of `.r32_uint` and `.r32_sint`, with the same updates, and `@coherent` buffers and images.
 * `acceleration_structure[.geometry]`, which the prelude's `trace` takes ([raytracing.md](raytracing.md)).
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 

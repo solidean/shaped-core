@@ -359,6 +359,7 @@ if(SC_BUILD_TESTS)
         tests/check/texture-check-test.cc
         tests/check/uniformity-check-test.cc
         tests/check/subgroup-check-test.cc
+        tests/check/image-check-test.cc
         tests/check/case-check-test.cc
         tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc
@@ -397,6 +398,7 @@ if(SC_BUILD_TESTS)
         tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc
         tests/emit/subgroup-emit-test.cc
+        tests/emit/image-emit-test.cc
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
         tests/emit/raytracing-emit-test.cc

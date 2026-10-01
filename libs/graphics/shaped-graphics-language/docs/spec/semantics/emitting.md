@@ -18,6 +18,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   A text means what it says under every flag, or it fails to compile without the one it needs, and never means something else.
   HLSL that names a 16-bit type needs DXC's `-enable-16bit-types`, which SGL's DXC instances always pass.
   MSL that holds a coherent member or an image atomic needs the language version that has it (EMIT-150, EMIT-151).
+  SGL's metal instance compiles a metallib against MSL 3.2, and the driver compiles source at the newest version the device has.
 * **EMIT-5** One emission writes one entry point: that entry point, and exactly the structs and the binding it needs.
 * **EMIT-6** Nothing in the text of one entry point depends on the text of another ([why](why/emitting.md#emit-6)).
 * **EMIT-7** An emitter reads the flat tree, the module's types and the module's bindings, and never an AST.
@@ -434,7 +435,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   HLSL and MSL write the workgroup barrier of EMIT-131, read `m` into a local, and write the barrier again ([why](why/emitting.md#emit-149)).
 * **EMIT-150** A `@coherent` member is `globallycoherent` in HLSL, which DXC writes as SPIR-V's `Coherent` for vulkan, and its declaration carries `coherent(device)` in MSL, from MSL 3.2.
   The barrier that publishes its writes is EMIT-131's, which is device-scoped in HLSL and MSL; WGSL lacks `device_coherence` (EMIT-109).
-* **EMIT-151** An image subscript is the `load` or the `store` it stands for (CHK-367), and a compound assignment through one loads the texel once into a local.
+* **EMIT-151** An image subscript is the `load` or the `store` it stands for (CHK-367), and a compound assignment through one evaluates its coordinates once and loads the texel once.
   An `@atomic` image is the plain integer image in HLSL, and its texel's update is `InterlockedMax(img[xy], v, before)`, read back as a buffer atomic's is (EMIT-120).
   MSL makes it a `read_write` texture and calls its own methods, `img.atomic_fetch_max(xy, v)`, `atomic_load` and `atomic_store`, from MSL 3.1.
   WGSL lacks `image_atomics` (EMIT-109).

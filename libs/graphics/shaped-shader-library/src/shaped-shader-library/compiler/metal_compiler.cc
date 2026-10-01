@@ -2,6 +2,7 @@
 
 #if SLIB_HAS_METAL
 
+#include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-shader-compiler-msl/shader_cache.hh>
 
@@ -10,7 +11,10 @@ namespace
 class metal_shader_compiler final : public slib::shader_compiler
 {
 public:
-    metal_shader_compiler() { _cache.add_default_in_memory_provider(); }
+    explicit metal_shader_compiler(cc::string language_version) : _language_version(cc::move(language_version))
+    {
+        _cache.add_default_in_memory_provider();
+    }
 
     [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::metal; }
 
@@ -29,23 +33,28 @@ public:
     /// The node runs later, on the scheduler, never inside the `acquire` that asked for it.
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
-        return _cache.compile({.source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage});
+        // the source arm's driver compiles at the newest version the device has, and refuses being told one
+        auto options = ssc::msl::compile_options();
+        if (_cache.has_toolchain())
+            options.language_version = _language_version;
+        return _cache.compile({.source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage}, options);
     }
 
 private:
+    cc::string _language_version;
     // Mutable: compile() is const on the seam (it must be callable from several threads), and the cache is itself thread-safe.
     mutable ssc::msl::shader_cache _cache;
 };
 } // namespace
 
-std::unique_ptr<slib::shader_compiler> slib::create_metal_compiler()
+std::unique_ptr<slib::shader_compiler> slib::create_metal_compiler(cc::string_view language_version)
 {
-    return std::make_unique<metal_shader_compiler>();
+    return std::make_unique<metal_shader_compiler>(cc::string(language_version));
 }
 
 #else
 
-std::unique_ptr<slib::shader_compiler> slib::create_metal_compiler()
+std::unique_ptr<slib::shader_compiler> slib::create_metal_compiler(cc::string_view)
 {
     return nullptr;
 }

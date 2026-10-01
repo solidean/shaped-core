@@ -346,6 +346,14 @@ struct checker
     ast::expr_id binding_index = ast::expr_id::none;
     /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-206).
     cc::vector<ast::expr_id> handed;
+    /// The place of the assignment `check_assign` is checking right now, and whether it is a compound one.
+    ast::expr_id assigned = ast::expr_id::none;
+    bool is_compound_assigned = false;
+    /// What `check_texel` left of a texel that is that place: the subscript's arguments, the image first, which the
+    /// assignment's `store` takes with its value; and the `load` a compound one reads with.
+    ast::expr_id texel_place = ast::expr_id::none;
+    call_arguments texel_arguments;
+    i32 texel_load = -1;
     /// Parallel to `out.tests`: what a test in a function body sees of that function, and the function.
     cc::vector<cc::vector<local_name>> test_captures;
     cc::vector<symbol_id> test_enclosing;
@@ -772,6 +780,11 @@ struct checker
     void report_capture(function_scope const& scope, source_span where, local_name const& local);
     /// `values[i]`, which today is a buffer element and nothing else; the error type where it is not one.
     [[nodiscard]] type_id check_index(function_scope& scope, ast::expr_id id, ast::index const& node);
+    /// `img[xy]`, a texel of `image`: the `load` it reads as, or the place an assignment stores to (CHK-367); or the
+    /// atomic of an `@atomic` image's texel (CHK-373).
+    [[nodiscard]] type_id check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image);
+    /// The `store` of an assignment to the texel `check_texel` left in `texel_place`, with `value` of `type` stored.
+    void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
     [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
 

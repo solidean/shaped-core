@@ -113,6 +113,8 @@ struct planned_resource
     /// The element of a buffer; `none` for every other kind.
     check::type_id element = check::type_id::none;
     bool is_mut = false;
+    /// `@coherent`: HLSL declares it `globallycoherent`, and MSL `coherent(device)` (EMIT-150).
+    bool is_coherent = false;
     i32 group = 0;
     /// The first of the `count` consecutive slots it takes: a binding array takes one per element (CHK-299).
     i32 slot = 0;

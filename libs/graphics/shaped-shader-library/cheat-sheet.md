@@ -151,7 +151,10 @@ slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl 
                                    //   reflection only: a stage or entry point other than the package's is an async error
 
 #include <shaped-shader-library/compiler/metal_compiler.hh>  // Apple only: SLIB_HAS_METAL says whether it is there
-slib::create_metal_compiler()      // -> std::unique_ptr<shader_compiler>; metal -> metal_lib
+slib::create_metal_compiler(language_version = {})
+                                   // -> std::unique_ptr<shader_compiler>; metal -> metal_lib
+                                   //   language_version ("metal3.2") reaches a metallib's -std=; source ignores it
+                                   //   add_available_compilers gives the SGL edge "metal3.2", for coherent(device) and texture atomics
                                    //   the artifact is a metallib, or MSL source where Apple's Metal toolchain is not
                                    //   installed — target_format() is metal_lib either way, and the shader says which
                                    //   compiles through an ssc::msl::shader_cache: async, in memory and in the blob cache

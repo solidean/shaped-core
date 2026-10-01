@@ -115,6 +115,23 @@ TEST("sgl classify - a call of a builtin that constrains control flow says so, b
              "max:function ");
 }
 
+TEST("sgl classify - an atomic image's update constrains control flow, and a plain texel's subscript does not")
+{
+    constexpr auto source = "require image_atomics\n"
+                            "binding prepare:\n"
+                            "    @atomic depth: mut image_2d[.r32_uint]\n"
+                            "    plain: mut image_2d[.r32_uint]\n"
+                            "fun raise(xy: int2){prepare} -> uint => prepare.depth[xy].max(prepare.plain[xy])\n";
+    auto const checked = check_sources(read_prelude(), source);
+    REQUIRE(reports_of(checked) == "");
+    auto out = cc::string();
+    for (auto const& s :
+         sgl::classify(checked.user, checked.user_ast, {.module = &checked.module, .file_index = checked.user_file()}))
+        if (s.constrains_control_flow)
+            out.appendf("{}:{} ", checked.user.text_of(s.where), sgl::to_string(s.cls));
+    CHECK(out == "max:function ");
+}
+
 TEST("sgl classify - spans are in source order and never overlap, on the extension's whole sample")
 {
     auto const source = read_text(cc::string(SGL_SAMPLES_DIR) + "/../../tools/vscode-extension/examples/sample.sgl");

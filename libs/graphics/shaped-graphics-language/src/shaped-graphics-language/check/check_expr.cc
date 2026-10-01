@@ -2,6 +2,7 @@
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -181,14 +182,19 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
 
     auto const outer = subscripted;
     subscripted = node.object;
+    // CHK-367: an image is handed to the `load` or the `store` its subscript stands for
+    handed.push_back(node.object);
     auto const object = check_expr(scope, node.object);
+    handed.pop_back();
     subscripted = outer;
     if (object == error_type)
         return error_type;
     auto const kind = out.at(object).kind;
+    if (kind == type_kind::image)
+        return check_texel(scope, id, node, object);
     if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer or an array");
+        unsupported(file, where, "a subscript on anything but a buffer, an image or an array");
         return error_type;
     }
 
@@ -252,6 +258,76 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
         }
     }
     return result;
+}
+
+type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image)
+{
+    auto const file = scope.file;
+    // the subscript's arguments are what `load` takes past the image, which stands first as a method's receiver
+    auto arguments = check_arguments(scope, node.arguments, false);
+    arguments.written.insert_at(0, {.expr = node.object});
+    arguments.types.insert_at(0, image);
+    arguments.names.insert_at(0, {});
+    arguments.numbers.insert_at(0, number_of(file, node.object));
+    arguments.literals.insert_at(0, -1);
+    arguments.functions.insert_at(0, -1);
+    arguments.undefineds.insert_at(0, false);
+
+    auto const& info = out.at(image);
+    auto const texel = type_of_builtin(texel_name_of(info.format), file, span_of(file, id));
+    if (texel == error_type)
+        return error_type;
+
+    // CHK-373: an `@atomic` image's texel is an atomic, which stands only as a builtin's argument (CHK-297).
+    // Its coordinates are what the plain image's `load` takes, which the record left here says to the flat tree.
+    if (info.is_atomic)
+    {
+        auto const atomic = resource_type({.kind = type_kind::atomic, .element = texel});
+        if (!judge_atomic_use(file, id, atomic))
+            return error_type;
+        auto plain = info;
+        plain.is_atomic = false;
+        auto const plain_image = resource_type(cc::move(plain));
+        arguments.types[0] = plain_image;
+        auto const loaded = resolve_overload(scope, id, ast::expr_id::none, candidates_of(file, "load", plain_image),
+                                             arguments, "load", call_spelling::dot_call);
+        return loaded == error_type ? error_type : atomic;
+    }
+
+    // A plain assignment stores alone, and its `store` is resolved once its value is known.
+    auto const is_place = id == assigned;
+    if (is_place && !is_compound_assigned)
+    {
+        texel_place = id;
+        texel_arguments = cc::move(arguments);
+        texel_load = -1;
+        return texel;
+    }
+    auto const loaded = resolve_overload(scope, id, ast::expr_id::none, candidates_of(file, "load", image), arguments,
+                                         "load", call_spelling::dot_call);
+    if (loaded == error_type || !is_place)
+        return loaded;
+    texel_place = id;
+    texel_load = out.files[file].call_at(id);
+    texel_arguments = cc::move(arguments);
+    return loaded;
+}
+
+void checker::check_texel_store(function_scope& scope, ast::expr_id value, type_id type)
+{
+    auto const file = scope.file;
+    auto const place = texel_place;
+    texel_place = ast::expr_id::none;
+    // named, since an array's layer is a named argument written before it
+    auto arguments = cc::move(texel_arguments);
+    add_argument(arguments, {.expr = value}, type, "value");
+    auto const image = arguments.types[0];
+    auto const stored = resolve_overload(scope, place, ast::expr_id::none, candidates_of(file, "store", image),
+                                         arguments, "store", call_spelling::dot_call);
+    if (stored == error_type)
+        return;
+    out.texel_stores.push_back(
+        {.file = file, .place = place, .store = out.files[file].call_at(place), .load = texel_load});
 }
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
@@ -1287,6 +1363,13 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     auto arguments = check_arguments(scope, call.arguments, false);
     if (receiver == error_type || member.name.empty())
         return error_type;
+    // CHK-373: an `@atomic` image's texels are read and written by their atomics alone
+    if (out.at(receiver).kind == type_kind::image && out.at(receiver).is_atomic && (name == "load" || name == "store"))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, id),
+               cc::format("the texels of an @atomic image are atomics, so `{0}` is the texel's: `img[xy].{0}(…)`", name));
+        return error_type;
+    }
     arguments.written.insert_at(0, {.expr = member.object});
     arguments.types.insert_at(0, receiver);
     arguments.names.insert_at(0, {});

@@ -1708,6 +1708,209 @@
 /// Stores `v` in one step.
 @builtin @stages(.pixel, .compute) fun store(a: out atomic[int], v: int)
 
+// The atomics of an `@atomic` image's texels, which the flat tree calls for `img[xy].max(v)` (CHK-373).
+// Each takes the image, the coordinate and an array's layer where the buffer atomic takes the atomic.
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_1d[uint], xy: int) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d[uint], xy: int, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d[int], xy: int, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_1d[int], xy: int, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_1d[int], xy: int, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_1d[int], xy: int, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_1d[int], xy: int, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_1d[int], xy: int, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_1d[int], xy: int, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_1d[int], xy: int, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_1d[int], xy: int) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d[int], xy: int, v: int)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_1d_array[uint], xy: int, layer: int) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d_array[uint], xy: int, layer: int, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_1d_array[int], xy: int, layer: int) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d_array[int], xy: int, layer: int, v: int)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_2d[uint], xy: int2) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d[uint], xy: int2, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_2d[int], xy: int2, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_2d[int], xy: int2) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d[int], xy: int2, v: int)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_2d_array[uint], xy: int2, layer: int) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_2d_array[int], xy: int2, layer: int) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d_array[int], xy: int2, layer: int, v: int)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_3d[uint], xy: int3) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_3d[uint], xy: int3, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_3d[int], xy: int3, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_3d[int], xy: int3) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_3d[int], xy: int3, v: int)
+
 // Subgroup operations, which exchange values between the invocations the hardware runs together.
 // Each needs `subgroups`, stands only in uniform control flow, and gives a value that differs
 // within a workgroup (CHK-376, CHK-377).

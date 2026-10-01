@@ -389,6 +389,7 @@ if(SC_BUILD_TESTS)
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
             tests/compute/compute-sync-test.cc
+            tests/compute/compute-coherence-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
             tests/barrier/footprint-barrier-test.cc
@@ -433,6 +434,7 @@ if(SC_BUILD_TESTS)
                 shapes.sgl:*
                 stages.sgl:*
                 subgroups.sgl:*
+                coherence.sgl:*
         )
     endif()
 

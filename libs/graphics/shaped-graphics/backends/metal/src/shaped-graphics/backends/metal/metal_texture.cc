@@ -69,7 +69,12 @@ cc::result<metal_texture_handle> metal_context::create_metal_texture(sg::texture
     descriptor->setDepth(NS::UInteger(desc.dimension == sg::texture_dimension::d3 ? desc.depth : 1));
     descriptor->setMipmapLevelCount(NS::UInteger(desc.mip_levels));
     descriptor->setSampleCount(NS::UInteger(desc.sample_count));
-    descriptor->setUsage(texture_usage_of(desc.usage));
+    // An `@atomic` image is one of these, and Metal runs texture atomics only on a texture created for them.
+    auto usage = texture_usage_of(desc.usage);
+    if (desc.usage.has(sg::texture_usage::image)
+        && (desc.format == sg::pixel_format::r32_uint || desc.format == sg::pixel_format::r32_sint))
+        usage |= MTL::TextureUsageShaderAtomic;
+    descriptor->setUsage(usage);
 
     // A cube's six faces are slices in Metal's model too, and arrayLength counts cubes rather than faces — so the sg
     // layer count goes in unmultiplied either way.

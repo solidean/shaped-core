@@ -2,6 +2,7 @@
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/interpret/interpret.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
@@ -733,6 +734,11 @@ struct flattener
         {
             auto const arguments = ast().at(indexed->arguments);
             auto const object_type = tables().type_at(indexed->object);
+            // CHK-367: a texel read is the `load` the check pass resolved it as
+            if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::image)
+                return tables().call_at(id) >= 0 && !c.out.at(object_type).is_atomic
+                         ? flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)])
+                         : fail();
             // CHK-287: one element per index, `grid[i, j]` being `grid[i][j]`
             if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::array)
             {
@@ -1211,6 +1217,8 @@ struct flattener
     {
         if (is_by_target(record.callee))
             return flatten_by_target(id, type, record);
+        if (auto const texel = atomic_texel_of(record); ast::is_valid(texel))
+            return flatten_texel_atomic(id, type, record, texel);
         auto const values = flatten_written(c.out.at(record.written));
         auto const handed = written_closures;
         auto const slots = c.out.at(record.slots);
@@ -1220,6 +1228,68 @@ struct flattener
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         return target_call(id, type, record.callee, values, slots);
+    }
+
+    /// The subscript `img[xy]` of an `@atomic` image a call updates as its first argument; none for any other call.
+    [[nodiscard]] ast::expr_id atomic_texel_of(call_record const& record) const
+    {
+        auto const written = c.out.at(record.written);
+        if (written.empty())
+            return ast::expr_id::none;
+        auto const* const indexed = ast().at(written[0].expr).node.try_as<ast::index>();
+        if (indexed == nullptr)
+            return ast::expr_id::none;
+        auto const image = tables().type_at(indexed->object);
+        return is_valid(image) && c.out.at(image).kind == type_kind::image && c.out.at(image).is_atomic
+                 ? written[0].expr
+                 : ast::expr_id::none;
+    }
+
+    /// CHK-373: `img[xy].max(v)` is the texel's own atomic, which takes the image, its coordinates and the operands.
+    /// The coordinates are those of the plain image's `load`, which the check pass resolved at the subscript.
+    flat_expr_id flatten_texel_atomic(ast::expr_id id, type_id type, call_record const& record, ast::expr_id texel)
+    {
+        auto const* const atomic = c.out.builtin_function(c.out.at(record.callee).intrinsic);
+        auto const located = tables().call_at(texel);
+        if (atomic == nullptr || located < 0)
+            return fail();
+        auto const& image = c.out.at(tables().type_at(ast().at(texel).node.as<ast::index>().object));
+        auto const callee = texel_atomic(cc::format("texel_{}", atomic->name), image);
+        if (!is_valid(callee))
+            return fail();
+        // the internal atomic takes what the image's `load` does, in the same order, and the operands after it
+        auto const& load = c.out.call_records[located];
+        auto values = flatten_written(c.out.at(load.written));
+        auto slots = cc::vector<i32>::create_copy_of(c.out.at(load.slots));
+        auto const written = c.out.at(record.written);
+        for (auto i = isize(1); i < written.size(); ++i)
+        {
+            slots.push_back(i32(values.size()));
+            values.push_back(flatten_expr(written[i].expr));
+        }
+        return target_call(id, type, callee, values, slots);
+    }
+
+    /// The prelude's internal atomic `name` of a texel of `image`, by the image's shape and texel.
+    [[nodiscard]] symbol_id texel_atomic(cc::string_view name, check::type_info const& image) const
+    {
+        auto const* const found = c.prelude_names.get_ptr(cc::string(name));
+        if (found == nullptr)
+            return symbol_id::none;
+        auto const texel = texel_name_of(image.format);
+        for (auto const f : *found)
+        {
+            auto const& s = c.out.at(f);
+            if (s.kind != symbol_kind::function || s.info < 0)
+                continue;
+            auto const parameters = c.out.at(c.out.functions[s.info].parameters);
+            if (parameters.empty())
+                continue;
+            auto const& p = c.out.at(parameters[0].type);
+            if (p.kind == type_kind::image && p.shape == image.shape && c.out.name_of(p.element) == texel)
+                return f;
+        }
+        return symbol_id::none;
     }
 
     /// A builtin or a construction over `values`, written in the order the call wrote them.
@@ -2360,6 +2430,9 @@ struct flattener
 
     void flatten_assign(origin from, ast::assign_stmt const& assign)
     {
+        for (auto const& t : c.out.texel_stores)
+            if (t.place == assign.target && t.file == file())
+                return flatten_texel_store(from, assign, t);
         if (is_swizzled(assign.target) && sgl::is_valid(assign.op))
             return flatten_swizzle_assign(from, assign, c.text_of(file(), c.file_of(file()).at(assign.op).where));
         auto const place = flatten_expr(assign.target);
@@ -2383,6 +2456,59 @@ struct flattener
             value = builtin_call(assign.value, callee, arguments);
         }
         add_stmt(from, flat_assign{.place = place, .value = value});
+    }
+
+    /// CHK-367: `img[xy] = v` is the `store` the check pass resolved, and `img[xy] op= v` loads the texel first.
+    /// A compound one evaluates the image's index and the coordinates once, which the load and the store both read.
+    void flatten_texel_store(origin from, ast::assign_stmt const& assign, texel_store const& t)
+    {
+        auto const& store = c.out.call_records[t.store];
+        if (t.load < 0)
+        {
+            add_stmt(from, flat_eval{.value = flatten_bound_call(assign.target, checked_module::void_type, store)});
+            return;
+        }
+        auto const& load = c.out.call_records[t.load];
+        auto coordinates = flatten_written(c.out.at(load.written));
+        for (auto i = isize(0); i < coordinates.size(); ++i)
+        {
+            if (!is_valid(coordinates[i]))
+            {
+                is_failed = true;
+                return;
+            }
+            if (i == 0)
+            {
+                coordinates[i] = with_bound_index(coordinates[i], assign.target);
+                continue;
+            }
+            if (is_substitutable(coordinates[i]))
+                continue;
+            auto const local = add_local(local_kind::temporary, "coordinate", entry.at(coordinates[i]).type);
+            add_stmt(from, flat_let{.local = local, .value = coordinates[i]});
+            coordinates[i] = local_ref(local, assign.target);
+        }
+        auto const texel = tables().type_at(assign.target);
+        auto const loaded = target_call(assign.target, texel, load.callee, coordinates, c.out.at(load.slots));
+        auto const value = flatten_expr(assign.value);
+        auto const op = c.text_of(file(), c.file_of(file()).at(assign.op).where);
+        type_id const types[] = {texel, is_valid(value) ? entry.at(value).type : type_id::none};
+        auto const operator_callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
+        if (!is_valid(loaded) || !is_valid(value) || !is_valid(operator_callee))
+        {
+            is_failed = true;
+            return;
+        }
+        flat_expr_id const operands[] = {loaded, value};
+        auto const combined = builtin_call(assign.value, operator_callee, operands);
+
+        // the store's written arguments are the load's, then the value
+        auto values = cc::vector<flat_expr_id>();
+        for (auto const coordinate : coordinates)
+            values.push_back(again(coordinate, assign.target));
+        values.push_back(combined);
+        add_stmt(from, flat_eval{.value = target_call(assign.target, checked_module::void_type, store.callee, values,
+                                                      c.out.at(store.slots))});
     }
 
     /// What `place op= value` reads the place as, which is the place read a second time.

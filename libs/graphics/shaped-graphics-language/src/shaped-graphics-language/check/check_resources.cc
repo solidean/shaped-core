@@ -55,9 +55,9 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
         // and a bare one takes every image of the shape (CHK-194).
         if (t.format < 0 && t.element == type_id::none)
             return cc::string(shape.image);
-        return t.format < 0
-                 ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
-                 : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_image_formats[t.format].name);
+        return t.format < 0 ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
+                            : cc::format("{}{}{}[.{}]", t.is_atomic ? "@atomic " : "", access_prefix(t.access),
+                                         shape.image, k_image_formats[t.format].name);
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
     case type_kind::acceleration_structure:
@@ -774,6 +774,9 @@ bool checker::takes(type_id parameter, type_id argument) const
     if (is_bare && p.kind == type_kind::image)
         return a.kind == type_kind::image && a.format >= 0 && a.shape == p.shape;
     if (p.kind != type_kind::image || p.format >= 0 || a.kind != type_kind::image || a.format < 0 || p.shape != a.shape)
+        return false;
+    // CHK-373: a texel of an `@atomic` image is read and written by its atomic alone, never by the image's own methods
+    if (a.is_atomic)
         return false;
     if (out.name_of(p.element) != texel_name_of(a.format))
         return false;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/string/string_view.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 
 #include <memory>
@@ -17,5 +18,8 @@ namespace slib
 /// A compile is an `ssc::msl::shader_cache` node: it runs on the scheduler rather than inside `acquire`, and it is kept
 /// in memory and in the blob cache like DXC's.
 /// Exists only on Apple targets, which is what `SLIB_HAS_METAL` says.
-[[nodiscard]] std::unique_ptr<shader_compiler> create_metal_compiler();
+///
+/// `language_version` is the MSL version a metallib is compiled against, as `-std=` spells it: "metal3.2".
+/// Empty takes the toolchain's default; the source arm ignores it, since the driver compiles at the device's newest.
+[[nodiscard]] std::unique_ptr<shader_compiler> create_metal_compiler(cc::string_view language_version = {});
 } // namespace slib

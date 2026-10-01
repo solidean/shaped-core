@@ -396,6 +396,7 @@ struct planner
                                        .type = is_array ? whole.element : members[i].type,
                                        .element = t.element,
                                        .is_mut = t.is_mut,
+                                       .is_coherent = members[i].is_coherent,
                                        .group = group,
                                        .slot = slot,
                                        .count = count});

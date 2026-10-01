@@ -87,6 +87,12 @@ void shader_cache::add_default_in_memory_provider(isize max_entries)
     _cache.add_default_in_memory_provider(max_entries);
 }
 
+bool shader_cache::has_toolchain() const
+{
+    auto const* const comp = shared_compiler();
+    return comp != nullptr && comp->toolchain().is_available;
+}
+
 void shader_cache::apply_bookkeeping()
 {
     _cache.apply_bookkeeping();

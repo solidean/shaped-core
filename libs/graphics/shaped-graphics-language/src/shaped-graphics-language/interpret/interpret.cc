@@ -178,6 +178,13 @@ struct machine
         return {};
     }
 
+    /// A texel's atomic, whose first argument is the image rather than the atomic.
+    [[nodiscard]] bool is_texel_atomic(flat_call const& c) const
+    {
+        auto const arguments = e.at(c.arguments);
+        return !arguments.empty() && is_known(e, arguments[0]) && m.at(e.at(arguments[0]).type).kind == type_kind::image;
+    }
+
     /// EVAL-93: the atomic's place, then the other arguments, then the update, in one step.
     flow atomic_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
     {
@@ -253,7 +260,9 @@ struct machine
 
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
-        if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->is_atomic)
+        // a texel of an `@atomic` image is no memory a test holds, so its update is evaluated as a load of one is
+        if (auto const* const record = m.builtin_function(c.intrinsic);
+            record != nullptr && record->is_atomic && !is_texel_atomic(c))
             return atomic_call(x, c, *record, result);
         auto args = cc::vector<value>();
         if (auto const f = eval_all(c.arguments, args); !f.is_normal())

@@ -263,6 +263,8 @@ struct sgl::check::type_info
     /// A position in `k_image_formats` for an `image`; -1 for every other kind.
     i32 format = -1;
     access_mode access = access_mode::read;
+    /// An `@atomic` image: each texel is an atomic, which a subscript reaches and only an atomic's methods touch (CHK-372).
+    bool is_atomic = false;
     /// A `sampler` that compares.
     bool is_comparison = false;
     /// How a resource type is written, `out image_2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
@@ -338,6 +340,8 @@ struct sgl::check::member_info
     bool is_unfilterable = false;
     /// Carries `@non_filtering`: a sampler that never filters.
     bool is_non_filtering = false;
+    /// Carries `@coherent`: a `mut` buffer or image whose writes reach every workgroup of the dispatch (CHK-368).
+    bool is_coherent = false;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
     i32 static_sampler = -1;
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
@@ -748,6 +752,20 @@ struct sgl::check::callable_call
     symbol_id table = symbol_id::none;
 
     constexpr bool operator==(callable_call const&) const = default;
+};
+
+/// `img[xy] = v` or `img[xy] op= v`: an assignment to an image's texel, which is a `store` of it (CHK-367).
+struct sgl::check::texel_store
+{
+    i32 file = 0;
+    /// The subscript the assignment names.
+    ast::expr_id place = ast::expr_id::none;
+    /// The `store`, whose value argument is the assignment's value; positions in `checked_module::call_records`.
+    i32 store = -1;
+    /// The `load` of a compound assignment, over the subscript's own arguments; -1 for a plain one.
+    i32 load = -1;
+
+    constexpr bool operator==(texel_store const&) const = default;
 };
 
 /// `trace(world, r, set.ray, mut payload)`: a trace of a ray-tracing pipeline's ray type (CHK-329).

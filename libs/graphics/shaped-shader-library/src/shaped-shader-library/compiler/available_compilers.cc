@@ -44,6 +44,7 @@ void slib::add_available_compilers(shader_library& lib)
 
 #if SLIB_HAS_METAL
     lib.add_compiler(create_metal_compiler());
-    lib.add_compiler(create_sgl_compiler(create_metal_compiler()));
+    // EMIT-4: SGL writes `coherent(device)` and texture atomics, which a metallib compiles from MSL 3.2 on
+    lib.add_compiler(create_sgl_compiler(create_metal_compiler("metal3.2")));
 #endif
 }

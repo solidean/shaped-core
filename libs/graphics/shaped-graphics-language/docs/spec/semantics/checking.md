@@ -405,7 +405,7 @@ fun shade(k: float) -> float:
 * **CHK-367** `img[xy]` is a texel of an image member: a read of it is `img.load(xy)`, and an assignment to it is `img.store(xy, v)` ([why](why/checking.md#chk-367)).
   The subscript takes the arguments `load` takes, so an array's layer is named, `img[xy, layer = 2]`.
   It is judged as the call it stands for, so a read of an `out` image is `no-matching-overload`, and `img[xy] += v` reads and writes a `mut` one.
-  A member of a texel is no place: `img[xy].x = v` is `not-assignable`.
+  A texel is stored whole, so a member of one is no place, and no `mut` argument hands one over: `img[xy].x = v` is `not-assignable`.
 * **CHK-368** `@coherent` on a `mut buffer` or a `mut` image member makes it **coherent** across the workgroups of a dispatch ([why](why/checking.md#chk-368)).
   A write to it that its workgroup follows with a barrier, `storage_barrier` for a buffer and `texture_barrier` for an image, is visible to every invocation of the dispatch.
   That holds for every invocation that has read the result of an atomic update made after that barrier by an invocation of the writer's workgroup.
@@ -821,6 +821,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   A local, a parameter or a field of an atomic's type is `wrong-kind-of-name` as well.
 * **CHK-372** `@atomic` on a `mut` image member of the format `.r32_uint` or `.r32_sint` makes each of its texels an atomic of `uint` or `int` ([why](why/checking.md#chk-372)).
   On any other member it is `wrong-kind-of-name`, and it needs `image_atomics`, a form CHK-201 judges.
+  It is part of the member's type, which a resource parameter never names, so no function of the program takes such an image.
 * **CHK-373** `img[xy]` of an `@atomic` member is its texel's atomic, which stands only as a builtin's argument by CHK-297: `img[xy].max(v)`.
   The buffer atomics' methods are its methods, `load()` and `store(v)` among them, and they are `@stages(.pixel, .compute)` as CHK-296 has every atomic's.
   The image's own `load` and `store` are `wrong-kind-of-name` on it, and `size` and the image's other methods take it as they take any image.

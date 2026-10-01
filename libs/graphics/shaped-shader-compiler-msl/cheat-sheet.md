@@ -57,6 +57,8 @@ cache.compile(desc, opts={})             // -> sg::async_compiled_shader; runs o
 cache.set_blob_cache(&c)                 // persistent tier; defaults to bcache::default_cache(), nullptr = off
                                          //   SC_SG_COLD=shaders runs it cold
 cache.backlog()                          // -> cc::async_backlog const&; every compile this cache started
+cache.has_toolchain()                    // -> bool; whether an automatic compile runs the metallib arm
+                                         //   ask it before setting language_version, which the source arm refuses
 // key = source + entry_point + stage + workgroup_size + every option + the ARM that will run + the toolchain VERSION
 // One ssc::msl::compiler for the whole process sits behind every cache, so `xcrun` runs once.
 // GOTCHA: read a node only once it is settled — `co_await cc::async_settled(node)` in an ASYNC_TEST.
