@@ -1,3 +1,4 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/hash.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
@@ -143,6 +144,26 @@ cc::optional<cc::string> slib::mount_table::read_text(cc::string_view path) cons
         if (auto text = c.fs->read_text(c.path); text.has_value())
             return text;
     return cc::nullopt;
+}
+
+cc::vector<cc::string> slib::mount_table::list(cc::string_view dir) const
+{
+    auto result = cc::vector<cc::string>();
+    auto const normalized = impl::normalize_path(dir);
+    if (!normalized.has_value())
+        return result;
+    // a file of `dir` is served by a mount at or above it, the same mounts a read of it would ask
+    for (auto const& c : candidates_for(normalized.value()))
+        for (auto& name : c.fs->list(c.path))
+        {
+            auto is_known = false;
+            for (auto const& known : result)
+                is_known = is_known || known == name;
+            if (!is_known)
+                result.push_back(cc::move(name));
+        }
+    cc::sort(result);
+    return result;
 }
 
 slib::file_revision slib::mount_table::revision(cc::string_view path) const

@@ -1,0 +1,15 @@
+// A second file's pipeline over the same group of module `marking`, named through an alias: it colors every pixel with
+// the group's `tint` and leaves `hits` alone.
+use marking as m
+
+@vertex fun tint_vs(c: m.corner){m.marks} -> m.varyings:
+    return { position = m.to_clip(c) }
+
+@pixel fun tint_ps(p: m.varyings){m.marks} -> m.target:
+    return { color = m.marks.tint }
+
+pipeline tinting:
+    vertex = tint_vs
+    pixel = tint_ps
+    cull = .none
+    format = .rgba8_unorm

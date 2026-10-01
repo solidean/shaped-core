@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
@@ -30,6 +31,22 @@ using include_resolver = cc::function_ref<cc::optional<cc::string>(cc::string_vi
 
 } // namespace slib
 
+/// One file of the module library an SGL source may `use`: its virtual path and its text.
+struct slib::module_source
+{
+    cc::string_view path;
+    cc::string_view text;
+};
+
+/// The files of every module directory of a library, read: what an SGL compile's `use` is resolved against.
+/// `files` views `paths` and `texts`, so the three move together and are never copied apart.
+struct slib::module_library
+{
+    cc::vector<cc::string> paths;
+    cc::vector<cc::string> texts;
+    cc::vector<module_source> files;
+};
+
 /// What `preprocess` hands back.
 /// `entry_point` is empty where preprocessing kept the name it was given, which is every compiler but SGL's:
 /// SGL renames an entry point the target reserves, and the compile has to ask for the name the text declares.
@@ -47,6 +64,9 @@ struct slib::preprocessed_source
     cc::vector<sg::binding> declared_bindings;
     /// Every constant block and buffer element the text declares, laid out as the text states; empty without `stated`.
     cc::vector<block_layout> layouts;
+    /// The module files the source reached through `use`, by virtual path: what it depends on beside itself.
+    /// Only SGL fills it.
+    cc::vector<cc::string> used_modules;
 };
 
 /// One shader to compile.
@@ -59,6 +79,9 @@ struct slib::shader_source_description
     /// What a diagnostic calls the source: a virtual path, or the label of an ad-hoc compile; may be empty.
     /// Never opened, and no part of what a compile depends on.
     cc::string label;
+    /// The module library an SGL source may `use`, which every other language ignores.
+    /// A file of it whose path is `label` is the source itself, and is left out.
+    cc::span<module_source const> modules;
 };
 
 /// One compilation edge: `source_language` -> `target_format`.

@@ -29,6 +29,7 @@ public:
 
     [[nodiscard]] cc::optional<cc::string> read_text(cc::string_view path) const override;
     [[nodiscard]] file_revision revision(cc::string_view path) const override;
+    [[nodiscard]] cc::vector<cc::string> list(cc::string_view dir) const override;
 
     /// Asks the OS to watch the directory `prefix` names.
     /// nullopt where this platform has no watch backend, under SC_THREADS=OFF, or when the directory does not exist — a shipped build with no source tree being the ordinary case.

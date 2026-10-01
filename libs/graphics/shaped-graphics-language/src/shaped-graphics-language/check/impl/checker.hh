@@ -281,6 +281,35 @@ struct footprint_pin
     source_span where;
 };
 
+/// One `use` line of a file: the name it binds, and the module that name stands for.
+struct module_use
+{
+    cc::string name;
+    i32 module = -1;
+    /// The whole line, which a clash with the name is reported at.
+    source_span where;
+};
+
+/// How the files behind the prelude fall into modules, read from their `module` and `use` lines before anything is
+/// declared.
+struct module_plan
+{
+    /// The library files the program reaches, as positions in the library, in the order they are checked.
+    cc::vector<i32> library_order;
+    /// Each module's name; module 0 is the program's own, whose name is empty where its file declares none.
+    cc::vector<cc::string> modules;
+    /// Parallel to `library_order` and then the program: the module of each file.
+    cc::vector<i32> file_module;
+    /// Parallel to `file_module`: the `use` lines of each file that name a module.
+    cc::vector<cc::vector<module_use>> uses;
+    /// What the plan found wrong, each `file` a position in `library_order`, and the program's one past its end.
+    cc::vector<located_diagnostic> diagnostics;
+};
+
+/// The modules `program` reaches through `use`, from the files of `library` grouped by their `module` line (CHK-346).
+/// A library file without a `module` line is no module's, and is left out.
+[[nodiscard]] module_plan plan_modules(cc::span<module_file const> library, module_file program);
+
 /// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 struct checker
 {
@@ -288,14 +317,24 @@ struct checker
     builtins::registry const& builtins;
     checked_module out;
 
+    /// How many of `files` are the prelude's; every other file is a module's.
+    i32 prelude_count = 0;
+    /// The modules of the files behind the prelude: 0 is the program's, every other one a module it reaches by `use`.
+    cc::vector<cc::string> modules;
+    /// Parallel to `files`: the module of each, and -1 for a file of the prelude.
+    cc::vector<i32> file_module;
+    /// Parallel to `files`: the `use` lines of each, which name a module and nothing else (CHK-347).
+    cc::vector<cc::vector<module_use>> uses;
+
     /// The prelude's scope: every name its files declare but those of `@operator` functions.
-    /// More than one symbol under a name means all of them are functions; the same holds for `file_names`.
+    /// More than one symbol under a name means all of them are functions; the same holds for `module_scopes`.
     cc::map<cc::string, cc::vector<symbol_id>> prelude_names;
-    /// The user file's own scope, the inner one.
-    cc::map<cc::string, cc::vector<symbol_id>> file_names;
-    /// What the user file sees: `file_names` over `prelude_names`, where two overload sets of one name merge.
+    /// Parallel to `modules`: the scope every file of the module shares, the inner one.
+    cc::vector<cc::map<cc::string, cc::vector<symbol_id>>> module_scopes;
+    /// Parallel to `modules`: what a file of the module sees, its scope over `prelude_names`, where two overload sets
+    /// of one name merge.
     /// Built once every file is declared.
-    cc::map<cc::string, cc::vector<symbol_id>> names;
+    cc::vector<cc::map<cc::string, cc::vector<symbol_id>>> merged_scopes;
     /// `@operator` functions by operator spelling.
     cc::map<cc::string, cc::vector<symbol_id>> operators;
     /// The prelude's alone, which is all a prelude file sees (CHK-190).
@@ -347,13 +386,34 @@ struct checker
     [[nodiscard]] parsed_file const& file_of(i32 file) const { return files[file].file; }
     [[nodiscard]] ast::file_ast const& ast_of(i32 file) const { return files[file].ast; }
     [[nodiscard]] cc::string_view text_of(i32 file, source_span where) const { return file_of(file).text_of(where); }
-    /// The user file is the last one; every file before it is the prelude's.
-    [[nodiscard]] bool is_prelude_file(i32 file) const { return file < i32(files.size()) - 1; }
-    /// The module-level names a lookup from `file` finds: a prelude file never sees the user file's.
+    [[nodiscard]] bool is_prelude_file(i32 file) const { return file < prelude_count; }
+    /// The program is the last file, behind the prelude and the library files it reaches.
+    [[nodiscard]] i32 program_file() const { return i32(files.size()) - 1; }
+    /// The module-level names a lookup from `file` finds: a prelude file sees the prelude alone, and a module's file sees
+    /// its module's names over the prelude's, and no other module's.
     [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& names_seen_from(i32 file) const
     {
-        return is_prelude_file(file) ? prelude_names : names;
+        return is_prelude_file(file) ? prelude_names : merged_scopes[file_module[file]];
     }
+    /// The module a `use` line of `file` binds to `name`; -1 for none.
+    [[nodiscard]] i32 used_module(i32 file, cc::string_view name) const
+    {
+        for (auto const& u : uses[file])
+            if (u.name == name)
+                return u.module;
+        return -1;
+    }
+    /// The module `expr` names: a bare name a `use` of `file` binds, which no local of `scope` and no type parameter
+    /// hides; -1 for anything else.
+    [[nodiscard]] i32 module_named(i32 file, ast::expr_id expr, function_scope const* scope) const;
+    /// The module-level symbols `expr` names from `file`: a bare name, or `m.name` where `m` is a module (CHK-348).
+    /// Null for any other expression, for a name a local of `scope` or a type parameter hides, and for a name that
+    /// finds nothing.
+    /// `is_qualified`, where given, says whether it was `m.name`.
+    [[nodiscard]] cc::vector<symbol_id> const* symbols_named(i32 file,
+                                                             ast::expr_id expr,
+                                                             function_scope const* scope,
+                                                             bool* is_qualified = nullptr) const;
     /// The `@operator` functions a use of an operator in `file` may choose from, by spelling.
     [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& operators_seen_from(i32 file) const
     {
@@ -397,8 +457,13 @@ struct checker
     void declare_file(i32 file);
     void declare(i32 file, ast::decl_id decl);
     void add_symbol(symbol s, source_span name_where);
-    /// Lays the user file's scope over the prelude's into `names`.
+    /// Lays each module's scope over the prelude's into `merged_scopes`, and reports a `use` whose name the file's module
+    /// declares too.
     void merge_scopes();
+    /// Lays `scope` over `names`: two overload sets of one name merge, and anything else of `scope` hides what `names`
+    /// has of its name, unless that is `@shadowable(false)` (CHK-188, CHK-220).
+    void merge_scope(cc::map<cc::string, cc::vector<symbol_id>>& names,
+                     cc::map<cc::string, cc::vector<symbol_id>> const& scope);
     /// True where every symbol of `ids` is a function, so the name is an overload set (CHK-12, CHK-189).
     [[nodiscard]] bool is_all_functions(cc::span<symbol_id const> ids) const;
     /// True where `ids` are functions, or a struct in front of functions of its name (CHK-240).
@@ -420,6 +485,11 @@ struct checker
     /// The functions a call of `name` from `file` may choose from, where `first` is its first argument's type:
     /// the functions of that name visible there, and those of the type scope of `first` (CHK-247).
     [[nodiscard]] cc::vector<symbol_id> candidates_of(i32 file, cc::string_view name, type_id first) const;
+    /// The same, where the functions of the name are `named` rather than what `file` sees: a call `m.name(…)`.
+    [[nodiscard]] cc::vector<symbol_id> candidates_of(i32 file,
+                                                      cc::string_view name,
+                                                      type_id first,
+                                                      cc::vector<symbol_id> const* named) const;
     /// A declaration of the prelude marked `@internal`, which no lookup from the program's file finds (CHK-323).
     [[nodiscard]] bool is_internal(symbol_id id) const;
     /// True where a lookup from `file` sees a function of `from`: the prelude never sees the program's.
@@ -774,6 +844,11 @@ struct checker
     [[nodiscard]] type_id check_expr(function_scope& scope, ast::expr_id expr);
     [[nodiscard]] type_id check_literal(function_scope& scope, ast::expr_id id, ast::literal const& literal);
     [[nodiscard]] type_id check_name(function_scope& scope, ast::expr_id id, ast::name const& name);
+    /// A module-level name as a value, where `found` is what the name, bare or qualified, resolved to.
+    [[nodiscard]] type_id check_symbol_value(function_scope& scope,
+                                             ast::expr_id id,
+                                             cc::string_view text,
+                                             cc::vector<symbol_id> const* found);
     [[nodiscard]] type_id check_member(function_scope& scope, ast::expr_id id, ast::member const& member);
     [[nodiscard]] type_id check_call(function_scope& scope, ast::expr_id id, ast::call const& call);
     [[nodiscard]] type_id check_logical(function_scope& scope, ast::expr_id id, ast::call const& call);
@@ -859,6 +934,14 @@ struct checker
                                            call_spelling written_as = call_spelling::free);
     /// `a.foo(…)` or `T.foo(…)`, whose callee is the member `callee`.
     [[nodiscard]] type_id check_dot_call(function_scope& scope, ast::expr_id id, ast::call const& call);
+    /// A call of the module-level name `text`, bare or qualified, where `found` is what it resolved to (CHK-247).
+    /// A qualified call's functions are `found` alone, where a bare one's are all its file sees.
+    [[nodiscard]] type_id check_named_call(function_scope& scope,
+                                           ast::expr_id id,
+                                           ast::call const& call,
+                                           cc::string_view text,
+                                           cc::vector<symbol_id> const* found,
+                                           bool is_qualified);
     [[nodiscard]] cc::string signature_text(cc::string_view spelling, cc::span<type_id const> types) const;
     /// A call as it was written, each named argument with its name and a number literal as its text:
     /// `sub(int, b = 2.5)`; `file_of_call` is the file its arguments stand in.

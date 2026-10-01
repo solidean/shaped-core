@@ -11,10 +11,36 @@ So there is no resolver that runs first and no tree of resolved names: there is 
 
 ## CHK-2
 
-Placing the prelude in front needs no multi-file compilation.
-One unnamed module is the smallest thing that holds several files, and it is what a module will be once several files declare one.
-Concatenating the texts would have been less code, and every span of the program's file would then be off by the length of the prelude.
+Placing the prelude in front needs no multi-file compilation, and placing the modules behind it needs none either.
+Every file stays a file of its own: concatenating the texts would have been less code, and every span would then be off by what stood in front.
 A position is the whole name of a file, since nothing else about it is known to the pass: a caller keeps the names, and the program's file is always the last one.
+
+## CHK-346
+
+This is a tracer of the [compilation model](../../incubator/compilation-model.md), which compiles a module against the interfaces of the ones it uses.
+Here every reached module is checked together with the program, in one pass, and nothing is kept between compiles.
+That is what made modules cheap enough to arrive before interfaces; the input, a list of named files, is what the interface work grows from.
+A library file without a `module` line is a program of a module directory, which is how a package's own shader directory can be one.
+
+## CHK-347
+
+A `use` brings in the module's name only, so a foreign name is always written qualified and the reader never wonders where one came from.
+It is the file's own, as an import is in most languages: a file's dependencies read from its head, and deleting a `use` cannot break a sibling.
+Both are the strict end of their choice: a wildcard import, and a `use` shared across a module's files, would each add to what compiles and break nothing.
+
+## CHK-349
+
+Within one pass a loop of modules would check, since compilation is demand-driven per symbol.
+The compilation model compiles a module against the interfaces of the modules it uses, which only an acyclic graph allows.
+Refusing the loop now keeps every program written today compiling once modules compile apart.
+
+## CHK-350
+
+Each refusal is something the tracer has no model for yet, and each lifts without breaking a program.
+A file-scope sampler is numbered among its module's, and two modules' would claim one index.
+An operator cannot be written qualified, so a module's would need an import rule of its own.
+Two bindings of one name in one list would be one name twice in the target text and to the host.
+A library's entry points are built when a program file states them, so a compile builds only its own.
 
 ## CHK-7
 

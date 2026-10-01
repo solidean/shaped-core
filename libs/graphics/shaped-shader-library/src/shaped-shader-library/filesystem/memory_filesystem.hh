@@ -24,6 +24,7 @@ public:
 
     [[nodiscard]] cc::optional<cc::string> read_text(cc::string_view path) const override;
     [[nodiscard]] file_revision revision(cc::string_view path) const override;
+    [[nodiscard]] cc::vector<cc::string> list(cc::string_view dir) const override;
 
     /// Fires the sink from whichever thread called write() / remove(), once the change is visible to a reader.
     /// Filters by prefix — filesystem::watch does not ask for that, but it costs one comparison and lets a test say exactly what it means.

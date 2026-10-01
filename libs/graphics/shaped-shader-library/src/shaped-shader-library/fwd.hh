@@ -38,6 +38,9 @@ struct gpu_bool;
 // shader packages
 enum class shader_language;
 struct shader_source_description;
+struct module_source;
+struct module_library;
+struct module_dir;
 struct preprocessed_source;
 struct block_field;
 struct block_layout;

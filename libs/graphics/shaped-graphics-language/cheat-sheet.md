@@ -33,18 +33,27 @@ sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = 
                                            // from ONE check; compile_to_text per entry point and target checks that many times
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
-sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target, run_tests
+sgl::text_request                          // source, source_name ("<sgl>"), library, entry_point, stage (none = any), target, run_tests
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
+r.value().library_files                    // the names of the library files the source reached: what an edit of it depends on
+
+#include <shaped-graphics-language/driver/library_file.hh>
+sgl::library_file{.name = "modules/view.sgl", .source = text}
+                                           // a file the source may `use` a module of; every request takes a span of them
+                                           // grouped by their `module` line; one without it, or named like the source, is left out
+sgl::is_same_path(a, b)                    // one file? a path or a file:// uri, either separator, any case on Windows
 
 #include <shaped-graphics-language/driver/test_source.hh>
-auto const t = sgl::test_source(text, "colors.sgl");
+auto const t = sgl::test_source(text, "colors.sgl", library);   // library optional
                                            // -> tested_source { errors, warnings, test_count, tests_run, tests_passed,
                                            // tests_expecting_diagnostics, entry_points }; t.is_clean(): nothing to report
 
 #include <shaped-graphics-language/driver/describe.hh>
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
+sgl::describe({.library = files, .module = "view"});   // module `view` instead of a source: its bindings and structs, no entry point
+                                           // a binding of another module is named `view.frame`; a memory struct of one carries `module`
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`; a binding array: `count` slots from `slot`), block_size
                                            // texture / image / sampler members also carry the sg enum values of their binding:
                                            // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
@@ -380,6 +389,8 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
+#   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
+uv run dev.py run sgl -- describe --module view --module-dir shaders     # a module of the directories, as its package entry reads it
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads;
                                                                          # each entry point and pipeline carries its sg `features`

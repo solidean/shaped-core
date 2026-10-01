@@ -77,6 +77,14 @@
                     ],
                     "default": "info",
                     "description": "How much the language server logs to the \"SGL Language Server\" output channel."
+                },
+                "sgl.moduleDirs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "markdownDescription": "Directories whose `.sgl` files are modules a file may `use`, relative to the workspace folder or absolute. A shader package's `SOURCE_DIR` and `MODULE_DIRS` are what its build reads."
                 }
             }
         },

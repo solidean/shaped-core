@@ -12,6 +12,8 @@
 // `test`s state what the language does.
 // A file passes when it checks with no diagnostic at all, every test in it passes, and every entry point it declares is
 // written for every target.
+// The files of tests/corpus/modules/ are the library every file may `use`; each is also a program of its own module,
+// so a module's tests run as any file's do.
 
 #ifndef SGL_CORPUS_DIR
 #error "SGL_CORPUS_DIR must be defined by the build (see libs/graphics/shaped-graphics-language/CMakeLists.txt)"
@@ -46,13 +48,39 @@ cc::vector<sgl_corpus_file> corpus_files()
     cc::sort(out, [](sgl_corpus_file const& a, sgl_corpus_file const& b) { return a.relative_path < b.relative_path; });
     return out;
 }
+
+/// The texts of tests/corpus/modules/, read once, and named as the corpus names them.
+struct corpus_library
+{
+    cc::vector<cc::string> names;
+    cc::vector<cc::string> sources;
+    cc::vector<sgl::library_file> files;
+};
+
+corpus_library const& library()
+{
+    static auto const result = []
+    {
+        auto lib = corpus_library();
+        for (auto const& f : corpus_files())
+            if (f.relative_path.starts_with("modules/"))
+            {
+                lib.names.push_back(f.relative_path);
+                lib.sources.push_back(read_text(f.path));
+            }
+        for (auto i = isize(0); i < lib.names.size(); ++i)
+            lib.files.push_back({.name = lib.names[i], .source = lib.sources[i]});
+        return lib;
+    }();
+    return result;
+}
 } // namespace
 
 INVOCABLE_TEST("sgl corpus - a file checks clean, passes its tests, and writes every entry point",
                (sgl_corpus_file const& f))
 {
     auto const source = read_text(f.path);
-    auto const tested = sgl::test_source(source, f.relative_path);
+    auto const tested = sgl::test_source(source, f.relative_path, library().files);
     CHECK(tested.errors == "");
     CHECK(tested.warnings == "");
     // a corpus file is there to test something
@@ -61,8 +89,10 @@ INVOCABLE_TEST("sgl corpus - a file checks clean, passes its tests, and writes e
     CHECK(tested.tests_run + tested.tests_expecting_diagnostics == tested.test_count);
 
     // one check of the file for every entry point and target, which is what keeps a large corpus quick
-    auto const texts = sgl::compile_all_to_text(
-        {.source = source, .source_name = f.relative_path, .targets = sgl::emit::all_targets()});
+    auto const texts = sgl::compile_all_to_text({.source = source,
+                                                 .source_name = f.relative_path,
+                                                 .library = library().files,
+                                                 .targets = sgl::emit::all_targets()});
     REQUIRE(texts.has_value());
     CHECK(texts.value().size() == tested.entry_points.size() * isize(sgl::emit::all_targets().size()));
     for (auto const& e : texts.value())

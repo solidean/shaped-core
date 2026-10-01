@@ -91,7 +91,8 @@ Designs weighed and rejected, recorded so they are not proposed again:
 Recorded so they are not re-derived:
 
 * **Generating the LSP types** from the specification's `metaModel.json`, once the hand-written subset in `protocol/types.hh` becomes a chore.
-* **Workspace files**: snapshots hold open documents only; enumerating and watching the workspace's `.sgl` files lands with modules, and so does an analysis covering every file of one.
+* **Module directories** come from the `sgl.moduleDirs` setting, which the extension resolves against the workspace folder and hands over at initialization.
+  An analysis reads their files anew each time; snapshots still hold open documents only, so an unsaved edit to a module is not seen by a file that uses it.
 * **Reusing a checked prelude**, which waits for modules, where an imported module is a checked thing reused the same way.
 * **Hover, go-to-definition, completion and formatting**: the checker's side tables already answer the first two per expression; the library needs a position-to-node lookup.
 * **A Test Explorer** view beside the gutter marks.

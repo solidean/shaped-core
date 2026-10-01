@@ -1,0 +1,16 @@
+// A pipeline over module `marking`'s group: its pixel stage writes `hits`, one element per pixel.
+use marking
+
+@vertex fun marks_vs(c: marking.corner){marking.marks} -> marking.varyings:
+    return { position = marking.to_clip(c) }
+
+@pixel fun mark_ps(p: marking.varyings){marking.marks} -> marking.target:
+    let i = marking.pixel_index(p)
+    marking.marks.hits[i] = (i + 1) as float
+    return { color = float4(0.0, 1.0, 0.0, 1.0) }
+
+pipeline writing:
+    vertex = marks_vs
+    pixel = mark_ps
+    cull = .none
+    format = .rgba8_unorm

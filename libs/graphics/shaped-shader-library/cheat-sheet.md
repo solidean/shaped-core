@@ -44,6 +44,7 @@ sc_add_shader_package(
 #   cube.sgl:render_target:target       # a `@pixel struct`; a name the file does not declare is a build error
 #   cube.sgl:pipeline:pipeline          # a `pipeline` declaration
 #   `*` needs no stage word: an SGL entry point carries its stage in the source.
+#   module:view                         # every binding and @vertex / @pixel struct of module `view` (see modules below)
 #   those need a runnable `sgl` while building: the tree's own natively, SC_SGL_TOOL otherwise (a cross build,
 #   SC_BUILD_TOOLS=OFF). dev.py builds the host one for a cross preset itself. Entry points alone need neither.
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
@@ -55,6 +56,32 @@ sc_add_shader_package(
 #   added" into a clear message instead of a missing header inside generated code at build time.
 # on Windows+DXC an EXECUTABLE that declares a package also gets dxcompiler.dll + dxil.dll staged beside
 #   it; declared on a LIBRARY target it stages nothing, and the exe must copy them itself.
+```
+
+### SGL modules (CMake)
+
+```cmake
+sc_add_shader_package(
+    ...
+    LANGUAGE    sgl
+    MODULE_DIRS shaders/modules         # more module directories; SOURCE_DIR always is one
+    SHADERS
+        module:view                     # export module `view`: its types into <NAMESPACE>::view
+        blit.sgl:*)                     # `use view` in it resolves through the module directories
+# a `use` finds a module among the .sgl files DIRECTLY in a module directory, grouped by their `module` line.
+# module:view writes <sgl_modules/view.hh> (+ .cc) with the types AND `namespace sgl_modules { namespace view = ::NS::view; }`;
+#   generated code names a module's types as ::sgl_modules::view::frame, so it needs that header and nothing else.
+# that header's directory is PUBLIC on TARGET: linking the exporting target is what makes a module reachable.
+#   another package using the module lists the exporter's module dir in its own MODULE_DIRS, by path.
+#   a module nobody exports fails as a missing <sgl_modules/view.hh>, whose include line names the entry to add.
+# every module file is embedded; a new one in a module dir needs a reconfigure, as a new shader does.
+```
+
+```cpp
+#include <sgl_modules/view.hh>               // or through any package header naming one of its types
+auto const layout = ctx.cached.acquire_binding_group_layout<sgl_modules::view::frame>();
+auto const group = ctx.transient.create_binding_group(cmd, layout, sgl_modules::view::frame{...});
+pass.bind_group(0, *group);                   // ONE group for every pipeline listing view.frame first: they share its layout
 ```
 
 ## generated symbols
@@ -77,6 +104,10 @@ lib.add_compiler(std::unique_ptr<shader_compiler>);   // a later compiler for th
 lib.add_package(my::shaders::package());    // mounts embedded, then SOURCE_DIR over it (a missing dir finds nothing)
 lib.add_package(pkg, filesystem_handle fs); // explicit fs instead (tests: a memory_filesystem)
 lib.mount(virtual_dir, fs);                 // shared includes that belong to no package
+lib.add_module_dir(virtual_dir);            // a mounted dir of SGL modules that belongs to no package
+lib.read_modules();                         // -> module_library { paths, texts, files }: what every SGL compile `use`s, read now
+// an SGL package adds its own module dirs; every SGL compile, compile_source and compile_hit_group included, sees all of them.
+// a module file a compile reached is a dependency like an include: editing it reloads the shader.
 lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts)
 lib.poll_hot_reload();                      // no-op unless started unthreaded; safe every frame
 lib.is_hot_reloading();                     // -> bool
@@ -324,6 +355,7 @@ auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::pa
 //   a constant block packs as an HLSL cbuffer, a buffer element tight like a tg struct (the SGL spec's layout rules).
 // SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // every name lives in the package namespace, so two files declaring one name is a generator error.
+// a module's types live in NS::<module> instead, reached as ::sgl_modules::<module>::<name> (SGL modules, above).
 // sg sees an SGL binding by its path, `work.values`, and a group's constant block by the binding's name:
 //   the identifier the target text spells it with stays on each binding as `reflected_name`, for diagnostics.
 // `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
@@ -463,8 +495,11 @@ slib::real_filesystem               // rooted at a real dir; revision folds mtim
 slib::shader_definition   // { string_view path; sg::shader_stage stage; string_view entry_point;
                           //   shader_asset_handle* asset; }   asset = the generated global to fill in
 slib::shader_package      // { string_view name; shader_language language; string_view source_dir;
-                          //   span<embedded_file const> embedded_files; span<shader_definition const> definitions; }
+                          //   span<embedded_file const> embedded_files; span<shader_definition const> definitions;
+                          //   span<module_dir const> module_dirs; }
                           //   source_dir is absolute + baked at configure; MAY NOT EXIST (a shipped build)
+slib::module_dir          // { string_view path; string_view source_dir; }  an SGL package's module directory:
+                          //   path "" is its own source dir; a MODULE_DIRS one stands at ".modules/<i>" of the mount
 ```
 
 ## gotchas
@@ -475,7 +510,7 @@ slib::shader_package      // { string_view name; shader_language language; strin
 - an asset only WEAKLY references its library, because a generated global (a static) outlives it.
   Acquiring through a stale global reports an error rather than dangling.
 - a generated package header is PRIVATE to its target. To publish a shader, re-expose it from your own
-  public header and own the drift (docs/coding-guidelines.md).
+  public header and own the drift (docs/coding-guidelines.md). A module's <sgl_modules/m.hh> is the exception: PUBLIC.
 - a reload only recompiles formats someone has already acquired.
 - watch() is a hint to rescan, NOT a report. If you find yourself plumbing changed *paths* through it,
   stop — revision() is the source of truth and that is what makes overflow/rename/coalescing all free.

@@ -3,6 +3,11 @@
 Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
+- **SGL modules are read whole on every compile.** Every SGL compile lists and reads every module directory of the library, and a module file added after configure needs a reconfigure to be embedded.
+  Module names are the library's: two packages whose directories declare one module make it one module.
+  Nothing checks that a module is exported by one package alone; two exports meet as a clash of the `sgl_modules::m` alias.
+  `real_filesystem::list` reads the disk through `<filesystem>`, since clean-core has no directory listing yet.
+
 - **A package has one `SOURCE_DIR`, so a shader cannot include a header from outside it.**
   `sc_add_shader_package` takes a single `SOURCE_DIR`, and the generator's `include_closure` resolves and embeds every `#include` under that one directory.
   A shipped binary reads its shaders from the embedded copy and `ssc::dxc` has no filesystem fallback.

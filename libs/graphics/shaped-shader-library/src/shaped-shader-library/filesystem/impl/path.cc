@@ -81,6 +81,14 @@ bool slib::impl::is_path_under(cc::string_view path, cc::string_view prefix)
     return path.size() == prefix.size() || path[prefix.size()] == '/';
 }
 
+cc::string_view slib::impl::name_in(cc::string_view path, cc::string_view dir)
+{
+    if (path.size() == dir.size() || !is_path_under(path, dir))
+        return {};
+    auto const name = relative_to(path, dir);
+    return name.contains('/') ? cc::string_view() : name;
+}
+
 cc::string_view slib::impl::relative_to(cc::string_view path, cc::string_view prefix)
 {
     CC_ASSERT(is_path_under(path, prefix), "path must live under prefix");

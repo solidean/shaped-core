@@ -106,7 +106,7 @@ auto const row = open_t::add_row(table_desc, open_t::first_host_hit_group);
 - Both compile SGL into the first format the context accepts that `library` has a compiler for, as an asset's `acquire` would pick.
 - A part the declaration leaves closed must stay empty in `host`, which `description` asserts.
 
-The host's source restates the ray set and the payload structs today, since SGL files do not import each other yet.
+The host's source reaches the ray set and the payload structs through `use` of the module declaring them, since a runtime compile reads the library's module directories like any other.
 
 ## Hot reload
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -33,6 +34,10 @@ public:
 
     /// Whether read_text would find something.
     [[nodiscard]] bool exists(cc::string_view path) const { return revision(path) != file_revision::none; }
+
+    /// The names of the files directly in `dir`, not of its directories, in no particular order.
+    /// Empty for a directory that is not there, and for a filesystem that cannot list, which is where everything starts.
+    [[nodiscard]] virtual cc::vector<cc::string> list([[maybe_unused]] cc::string_view dir) const { return {}; }
 
     /// Registers `sink` for changes under `prefix` — a path prefix, empty meaning this filesystem's whole root.
     /// The subscription unsubscribes on destruction.

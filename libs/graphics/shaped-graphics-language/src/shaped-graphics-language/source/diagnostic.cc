@@ -148,6 +148,12 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "type-mismatch";
     case diagnostic_kind::dependency_cycle:
         return "dependency-cycle";
+    case diagnostic_kind::unknown_module:
+        return "unknown-module";
+    case diagnostic_kind::module_cycle:
+        return "module-cycle";
+    case diagnostic_kind::use_of_own_module:
+        return "use-of-own-module";
     case diagnostic_kind::unknown_builtin:
         return "unknown-builtin";
     case diagnostic_kind::opaque_struct_needs_builtin:
@@ -386,6 +392,12 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a value of another type than the one expected here";
     case diagnostic_kind::dependency_cycle:
         return "a declaration that needs itself to be compiled";
+    case diagnostic_kind::unknown_module:
+        return "a `use` of a module no file declares";
+    case diagnostic_kind::module_cycle:
+        return "modules that `use` each other in a loop";
+    case diagnostic_kind::use_of_own_module:
+        return "a `use` of the file's own module";
     case diagnostic_kind::unknown_builtin:
         return "a `@builtin` declaration the compiler does not know";
     case diagnostic_kind::opaque_struct_needs_builtin:
@@ -550,6 +562,9 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::ambiguous_overload:
     case diagnostic_kind::type_mismatch:
     case diagnostic_kind::dependency_cycle:
+    case diagnostic_kind::unknown_module:
+    case diagnostic_kind::module_cycle:
+    case diagnostic_kind::use_of_own_module:
     case diagnostic_kind::unknown_builtin:
     case diagnostic_kind::opaque_struct_needs_builtin:
     case diagnostic_kind::binding_not_listed:

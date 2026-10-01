@@ -13,6 +13,7 @@
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-shader-library/impl/frozen.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh>
+#include <shaped-shader-library/impl/sgl_library.hh>
 #include <shaped-shader-library/shader_asset.hh>
 
 using namespace cc::primitive_defines;
@@ -283,9 +284,11 @@ slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d
     // A stage reloaded, so the source may say something new: described outside the lock, since it checks the whole file.
     auto next = current;
     auto const source = (*d.vertex)->read_source();
+    auto const modules = (*d.vertex)->read_modules();
+    auto const library = impl::sgl_library_of(modules.files);
     auto const described
         = source.has_value()
-            ? sgl::describe({.source = source.value(), .source_name = d.file})
+            ? sgl::describe({.source = source.value(), .source_name = (*d.vertex)->virtual_path(), .library = library})
             : cc::result<sgl::module_description, cc::string>(cc::error(cc::string("the source is gone")));
     auto const* found = static_cast<sgl::described_pipeline const*>(nullptr);
     if (described.has_value())

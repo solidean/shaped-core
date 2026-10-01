@@ -18,6 +18,8 @@ class slib::mount_table final : public filesystem
 public:
     [[nodiscard]] cc::optional<cc::string> read_text(cc::string_view path) const override;
     [[nodiscard]] file_revision revision(cc::string_view path) const override;
+    /// Every name any mount that could serve a file of `dir` lists there, each once, sorted.
+    [[nodiscard]] cc::vector<cc::string> list(cc::string_view dir) const override;
 
     /// Composes the mounts' own watches: every mount intersecting `prefix` is subscribed to, and the returned subscription owns all of them.
     ///

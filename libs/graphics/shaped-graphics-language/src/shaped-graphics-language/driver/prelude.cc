@@ -77,6 +77,11 @@ namespace
 }
 } // namespace
 
+bool sgl::is_same_path(cc::string_view a, cc::string_view b)
+{
+    return normalized(a) == normalized(b);
+}
+
 sgl::i32 sgl::prelude_file_of(cc::string_view path)
 {
     auto const given = normalized(path);

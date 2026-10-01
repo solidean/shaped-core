@@ -1,4 +1,5 @@
 #include "files.hh"
+#include "module_dirs.hh"
 
 #include <babel-data/data/json.hh>
 #include <clean-core/string/print.hh>
@@ -137,6 +138,8 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
 void write_memory_struct(babel::json::object_writer& o, sgl::described_memory_struct const& s)
 {
     o.write("name", cc::string_view(s.name));
+    if (!s.module.empty())
+        o.write("module", cc::string_view(s.module));
     o.write("space", cc::string_view(s.space));
     o.write("size", s.size);
     auto members = o.write_array("members");
@@ -426,23 +429,43 @@ COMMAND("describe")
 {
     auto path = cc::string();
     auto out_path = cc::string();
+    auto module = cc::string();
+    auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args(
         {.name = "sgl describe",
          .description = "Describes the bindings, the vertex and pixel structs, the entry points and the "
                         "pipelines of an SGL file as JSON, or prints the diagnostics that keep it from compiling."});
-    args.positional("FILE", path, {.desc = "the SGL source"});
+    args.positional("FILE", path, {.desc = "the SGL source; none with --module"});
     args.arg({"out"}, out_path, {.desc = "write the JSON here instead of to stdout", .metavar = "PATH"});
+    args.arg({"module-dir"}, module_dirs,
+             {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
+    args.arg({"module"}, module,
+             {.desc = "describe this module of the module directories instead of a file", .metavar = "NAME"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
+    if (path.empty() == module.empty())
+    {
+        cc::eprintln("sgl describe: give either a FILE or --module NAME");
+        return exit_usage;
+    }
+    auto const library = sgl_tool::read_module_dirs(module_dirs);
+    if (library.has_error())
+    {
+        cc::eprintln("sgl describe: {}", library.error());
+        return exit_usage;
+    }
 
-    auto const source = sgl_tool::read_file(path);
+    auto source = cc::result<cc::string, cc::string>(cc::string());
+    if (!path.empty())
+        source = sgl_tool::read_file(path);
     if (source.has_error())
     {
         cc::eprintln("sgl describe: cannot read {}: {}", path, source.error());
         return exit_usage;
     }
 
-    auto const described = sgl::describe({.source = source.value(), .source_name = path});
+    auto const described = sgl::describe(
+        {.source = source.value(), .source_name = path, .library = library.value().files, .module = module});
     if (described.has_error())
     {
         cc::eprint(described.error());

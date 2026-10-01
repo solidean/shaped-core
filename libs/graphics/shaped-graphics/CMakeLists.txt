@@ -392,6 +392,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
             tests/barrier/footprint-barrier-test.cc
+            tests/pipeline/module-bindings-test.cc
             tests/pipeline/pipeline_harness.cc
             tests/pipeline/depth-stencil-test.cc
             tests/pipeline/blend-test.cc
@@ -412,7 +413,11 @@ if(SC_BUILD_TESTS)
             NAMESPACE  sg::test::sgl_shaders
             SOURCE_DIR tests/shaders/sgl
             LANGUAGE   sgl
+            MODULE_DIRS tests/shaders/sgl/modules
             SHADERS
+                module:marking
+                module_marking.sgl:*
+                module_tinting.sgl:*
                 double_values.sgl:*
                 quads.sgl:*
                 textures.sgl:*

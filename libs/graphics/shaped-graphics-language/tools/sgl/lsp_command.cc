@@ -1,3 +1,5 @@
+#include "lsp/analysis.hh"
+#include "lsp/protocol/json.hh"
 #include "lsp/protocol/log_listener.hh"
 #include "lsp/protocol/stdio_host.hh"
 #include "lsp/server.hh"
@@ -22,9 +24,13 @@ ASYNC_COMMAND("lsp", nx::config::owns_recorder)
     server->protocol().on_initialized(
         [&]
         {
-            auto const name = server->protocol().initialize_params()["initializationOptions"]["logLevel"].as_string();
+            auto const options = server->protocol().initialize_params()["initializationOptions"];
+            auto const name = options["logLevel"].as_string();
             if (auto const level = lsp::level_of(name); level.has_value())
                 log.set_min_level(level.value());
+            // absolute, since the client resolves them against its workspace
+            if (auto dirs = cc::vector<cc::string>(); lsp::json::read(options["moduleDirs"], dirs))
+                sgl_lsp::set_module_dirs(cc::move(dirs));
         });
 
     auto const exit_code = co_await host->serve(server->protocol());

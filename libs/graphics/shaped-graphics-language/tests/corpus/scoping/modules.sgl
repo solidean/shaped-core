@@ -1,0 +1,34 @@
+// `use` brings in a module's name and nothing else: whatever the module declares is reached as `module.name`.
+// The module here is tests/corpus/modules/, the library every corpus file is checked with.
+use shading
+use shading as s
+
+// a type, a function, a const and an enum case of the module
+fun lit(power: float) -> shading.light => shading.light(power)
+
+test lit(2.0).power == 2.0
+test shading.toned(3.0, shading.tone.clamped) == 1.0
+test shading.steps == 4
+
+// an alias names the same module
+test s.toned(0.5, s.tone.linear) == 0.5
+
+// a call on a value of a module's type finds the functions declared with that type (CHK-247): both spellings work
+test lit(6.0).strength() == 6.0
+test strength(lit(6.0)) == 6.0
+test lit(6.0).halved().power == 3.0
+
+// a binding of the module is listed and read through its qualified name, and a test's driver gives zero
+fun scaled(x: float){shading.frame} -> float => shading.exposed(x) + shading.frame.exposure
+
+test {shading.frame}:
+    scaled(2.0) == 0.0
+
+// an entry point listing a module's binding numbers it by position, as any binding
+@compute(1) fun apply(@thread_id id: int3){shading.frame}:
+    let x = shading.frame.exposure
+
+// a literal converts to a module's struct by the functions of its name visible where it is declared, as a call does
+fun made(power: float) -> shading.light => { power = power }
+
+test made(5.0).power == 5.0
