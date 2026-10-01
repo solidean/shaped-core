@@ -3,6 +3,8 @@
 #include <clean-core/container/pair.hh>
 #include <typed-geometry/geometry/query/impl/ops.hh>
 #include <typed-geometry/geometry/query/impl/special_case.hh>
+#include <typed-geometry/linalg/cross.hh>
+#include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
@@ -50,13 +52,175 @@ struct gjk_result
     int simplex_size = 0;
 };
 
-/// The point of the simplex nearest the origin, as barycentrics over a subset of its vertices.
+/// The point of a simplex nearest the origin, as barycentrics over the vertices of the face it lies on.
+template <int D, class T>
+struct simplex_face
+{
+    int idx[4] = {};
+    T bary[4] = {};
+    int k = 0;
+};
+
+template <int D, class T>
+[[nodiscard]] constexpr T face_distance_sqr(gjk_vertex<D, T> const* s, simplex_face<D, T> const& f)
+{
+    auto v = vec<D, T>();
+    for (int m = 0; m < f.k; ++m)
+        v = v + s[f.idx[m]].w * f.bary[m];
+    return v.length_sqr();
+}
+
+/// Nearest point of the segment s[i] s[j] to the origin.
+template <int D, class T>
+[[nodiscard]] constexpr simplex_face<D, T> nearest_on_segment(gjk_vertex<D, T> const* s, int i, int j)
+{
+    auto const a = s[i].w;
+    auto const ab = s[j].w - a;
+    auto const ab2 = tg::dot(ab, ab);
+    auto const t = tg::traits::is_zero(ab2) ? T(1) : -tg::dot(a, ab) / ab2;
+    if (t <= T(0))
+        return {{i}, {T(1)}, 1};
+    if (t >= T(1))
+        return {{j}, {T(1)}, 1};
+    return {{i, j}, {T(1) - t, t}, 2};
+}
+
+/// Nearest point of the triangle s[i] s[j] s[k] to the origin, by the same seven regions the point-triangle
+/// projection uses, read off dot products with the two edges at each vertex.
+template <int D, class T>
+[[nodiscard]] constexpr simplex_face<D, T> nearest_on_triangle(gjk_vertex<D, T> const* s, int i, int j, int k)
+{
+    auto const a = s[i].w;
+    auto const b = s[j].w;
+    auto const c = s[k].w;
+    auto const ab = b - a;
+    auto const ac = c - a;
+
+    auto const d1 = -tg::dot(ab, a);
+    auto const d2 = -tg::dot(ac, a);
+    if (d1 <= T(0) && d2 <= T(0))
+        return {{i}, {T(1)}, 1};
+
+    auto const d3 = -tg::dot(ab, b);
+    auto const d4 = -tg::dot(ac, b);
+    if (d3 >= T(0) && d4 <= d3)
+        return {{j}, {T(1)}, 1};
+
+    auto const vc = d1 * d4 - d3 * d2;
+    if (vc <= T(0) && d1 >= T(0) && d3 <= T(0))
+    {
+        auto const t = d1 / (d1 - d3);
+        return {{i, j}, {T(1) - t, t}, 2};
+    }
+
+    auto const d5 = -tg::dot(ab, c);
+    auto const d6 = -tg::dot(ac, c);
+    if (d6 >= T(0) && d5 <= d6)
+        return {{k}, {T(1)}, 1};
+
+    auto const vb = d5 * d2 - d1 * d6;
+    if (vb <= T(0) && d2 >= T(0) && d6 <= T(0))
+    {
+        auto const t = d2 / (d2 - d6);
+        return {{i, k}, {T(1) - t, t}, 2};
+    }
+
+    auto const va = d3 * d6 - d5 * d4;
+    if (va <= T(0) && d4 - d3 >= T(0) && d5 - d6 >= T(0))
+    {
+        auto const t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return {{j, k}, {T(1) - t, t}, 2};
+    }
+
+    auto const sum = va + vb + vc;
+    if (tg::traits::is_zero(sum))
+    {
+        // a collinear triangle: the nearest of its three edges
+        simplex_face<D, T> const edges[3]
+            = {impl::nearest_on_segment(s, i, j), impl::nearest_on_segment(s, j, k), impl::nearest_on_segment(s, i, k)};
+        auto best = 0;
+        for (int e = 1; e < 3; ++e)
+            if (impl::face_distance_sqr(s, edges[e]) < impl::face_distance_sqr(s, edges[best]))
+                best = e;
+        return edges[best];
+    }
+    return {{i, j, k}, {va / sum, vb / sum, vc / sum}, 3};
+}
+
+
+/// Nearest point of the tetrahedron to the origin: the origin itself when its barycentrics are all non-negative,
+/// otherwise the nearest point of the four faces.
+/// No orientation test decides between them, because on a nearly flat tetrahedron — two segments' Minkowski
+/// difference is a parallelogram — those signs are noise; a volume small against its edges counts as flat.
+template <int D, class T>
+[[nodiscard]] constexpr simplex_face<D, T> nearest_on_tetrahedron(gjk_vertex<D, T> const* s)
+{
+    static_assert(D == 3, "only a 3D simplex has four vertices");
+    auto const e1 = s[1].w - s[0].w;
+    auto const e2 = s[2].w - s[0].w;
+    auto const e3 = s[3].w - s[0].w;
+    auto const volume = tg::dot(tg::dual(tg::cross(e1, e2)), e3);
+    auto const reach = e1.length_sqr() * e2.length_sqr() * e3.length_sqr();
+    auto const tol = impl::machine_epsilon<T>() * T(64);
+
+    if (volume * volume > tol * tol * reach)
+    {
+        // s0 + sum_m l_m (s_m - s0) = 0
+        auto const l = mat<3, 3, T>::make_from_cols(e1, e2, e3).inverse() * -s[0].w;
+        auto const l0 = T(1) - l.data[0] - l.data[1] - l.data[2];
+        if (l0 >= T(0) && l.data[0] >= T(0) && l.data[1] >= T(0) && l.data[2] >= T(0))
+            return {{0, 1, 2, 3}, {l0, l.data[0], l.data[1], l.data[2]}, 4};
+    }
+
+    int const faces[4][3] = {{1, 2, 3}, {0, 2, 3}, {0, 1, 3}, {0, 1, 2}};
+    simplex_face<D, T> best = impl::nearest_on_triangle(s, faces[0][0], faces[0][1], faces[0][2]);
+    auto best_d2 = impl::face_distance_sqr(s, best);
+    for (int f = 1; f < 4; ++f)
+    {
+        auto const c = impl::nearest_on_triangle(s, faces[f][0], faces[f][1], faces[f][2]);
+        auto const d2 = impl::face_distance_sqr(s, c);
+        if (d2 < best_d2)
+        {
+            best = c;
+            best_d2 = d2;
+        }
+    }
+    return best;
+}
+
+/// Replaces the simplex with the face of it nearest the origin, and writes that point's barycentrics.
+template <int D, class T>
+constexpr void reduce_simplex(gjk_vertex<D, T>* s, int& n, T* bary)
+{
+    simplex_face<D, T> f;
+    if (n == 1)
+        f = {{0}, {T(1)}, 1};
+    else if (n == 2)
+        f = impl::nearest_on_segment(s, 0, 1);
+    else if (n == 3)
+        f = impl::nearest_on_triangle(s, 0, 1, 2);
+    else if constexpr (D == 3)
+        f = impl::nearest_on_tetrahedron(s);
+
+    gjk_vertex<D, T> kept[4] = {};
+    for (int m = 0; m < f.k; ++m)
+    {
+        kept[m] = s[f.idx[m]];
+        bary[m] = f.bary[m];
+    }
+    for (int m = 0; m < f.k; ++m)
+        s[m] = kept[m];
+    n = f.k;
+}
+
+/// The exhaustive form of reduce_simplex: every face of the simplex, the nearest one with positive barycentrics.
+/// Slower, and robust where the closed forms' region tests turn noisy — a nearly degenerate face late in a run.
 ///
 /// Every non-empty subset is a face; the nearest point of a face's affine hull comes from a Gram system of at most
 /// D x D, and a face qualifies when every barycentric is positive.
 /// The nearest qualifying face is the answer, and the vertices outside it are dropped from the simplex.
 template <int D, class T>
-constexpr void reduce_simplex(gjk_vertex<D, T>* s, int& n, T* bary)
+constexpr void reduce_simplex_exhaustive(gjk_vertex<D, T>* s, int& n, T* bary)
 {
     auto best_mask = 0;
     auto best_d2 = T(0);
@@ -211,11 +375,30 @@ template <class A, class B>
             break;
 
         r.simplex[r.simplex_size++] = w;
-        impl::reduce_simplex(r.simplex, r.simplex_size, bary);
+        gjk_vertex<D, T> before[D + 1] = {};
+        auto const before_size = r.simplex_size;
+        for (auto i = 0; i < before_size; ++i)
+            before[i] = r.simplex[i];
 
-        auto nv = r.simplex[0].w * bary[0];
-        for (auto i = 1; i < r.simplex_size; ++i)
-            nv = nv + r.simplex[i].w * bary[i];
+        auto const nearest = [&]
+        {
+            auto p = r.simplex[0].w * bary[0];
+            for (auto i = 1; i < r.simplex_size; ++i)
+                p = p + r.simplex[i].w * bary[i];
+            return p;
+        };
+
+        impl::reduce_simplex(r.simplex, r.simplex_size, bary);
+        auto nv = nearest();
+        // the closed forms stalled: retry the same simplex with the exhaustive search before giving up
+        if (!(nv.length_sqr() < v2))
+        {
+            for (auto i = 0; i < before_size; ++i)
+                r.simplex[i] = before[i];
+            r.simplex_size = before_size;
+            impl::reduce_simplex_exhaustive(r.simplex, r.simplex_size, bary);
+            nv = nearest();
+        }
 
         // a full simplex encloses the origin
         if (r.simplex_size == D + 1)

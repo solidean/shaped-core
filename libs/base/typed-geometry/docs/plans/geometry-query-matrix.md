@@ -124,11 +124,11 @@ Support is `tg::impl::support_op<Obj>`, a kernel like any other, and not a publi
 - **The unbounded types** (ray, line, plane, halfspace) have support functions that run off to infinity, so they get closed forms from day one.
 - **GJK iterates to a relative tolerance and carries an iteration cap**; hitting the cap returns its current best answer.
 - **Measured, it is slower than the estimate this plan started from** (5–10x a closed form for box–box).
-  On a Ryzen 9 5900X in a release build, distance through GJK took 124x the closed form for aabb–aabb and 252x for ball–aabb.
-  It took 22x for segment–segment and 11x for point–triangle (`libs/base/typed-geometry/tests/benchmarks/query-benchmark.cc`).
-  Two costs dominate and are the follow-up.
-  The tolerance is 64 machine epsilons, which a curved support approaches slowly.
-  And the simplex step solves a small system for every face rather than reusing the last step's.
+  On a Ryzen 9 5900X in a release build, distance through GJK takes 75x the closed form for aabb–aabb and 103x for ball–aabb.
+  It takes 13x for segment–segment and 7x for point–triangle (`libs/base/typed-geometry/tests/benchmarks/query-benchmark.cc`).
+  The simplex step is a closed form per size — segment, triangle by its Voronoi regions, tetrahedron by its faces — with an exhaustive search over every face as the fallback when that stalls.
+  Before it, solving a small system for every face, the same pairs took 124x, 252x, 22x and 11x.
+  A 16x looser tolerance buys only another 20–30%, so it stays at 64 machine epsilons; what remains is iteration count on curved supports.
   The hot pairs have closed forms already, so this prices the cold tail rather than a realtime path.
 - **EPA** extends a GJK simplex that contains the origin to the penetration depth and normal: `a.separation_from(b)`.
 - **`intersection_with` is not a GJK derivative.**
