@@ -32,3 +32,7 @@ test {shading.frame}:
 fun made(power: float) -> shading.light => { power = power }
 
 test made(5.0).power == 5.0
+
+// a qualified call names the module's functions alone: the type of its argument does not widen it to the prelude's
+@expect(error = "unknown-name")
+test shading.saturate(2.0) == 1.0

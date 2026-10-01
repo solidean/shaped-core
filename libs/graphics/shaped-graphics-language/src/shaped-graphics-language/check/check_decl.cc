@@ -817,7 +817,7 @@ void checker::compile_struct(symbol_id id)
         if (!is_prelude_file(file) || parameters.size() != 1)
         {
             unsupported(file, s.name,
-                        !is_prelude_file(file) ? "a generic struct of the program"
+                        !is_prelude_file(file) ? "a generic struct outside the prelude"
                                                : "a generic struct of more than one type parameter");
             out.symbols[index_of(id)].state = symbol_state::failed;
             return;
@@ -1187,11 +1187,22 @@ cc::vector<symbol_id> checker::binding_list_of(i32 file, ast::range_of<ast::argu
         set_target(file, entry.value, {.kind = target_kind::symbol, .symbol = binding});
         if (out.at(binding).kind == symbol_kind::binding)
         {
+            // CHK-351: one binding listed twice, by any two spellings, is one group bound twice
             // CHK-350: two bindings of one name in one list would be one name twice in the target text
+            auto is_listed = false;
             auto is_clash = false;
             for (auto const other : bindings)
+            {
+                is_listed = is_listed || other == binding;
                 is_clash = is_clash || (other != binding && out.at(other).name == out.at(binding).name);
-            if (is_clash)
+            }
+            if (is_listed)
+            {
+                report(diagnostic_kind::duplicate_declaration, file, where,
+                       cc::format("{} is listed already", out.at(binding).name));
+                is_failed = true;
+            }
+            else if (is_clash)
             {
                 unsupported(
                     file, where,

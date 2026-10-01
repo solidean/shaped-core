@@ -53,6 +53,9 @@ TEST("sgl check - a foreign name is always qualified, and a module is no value")
         reports_with(library, "use view\nfun f(x: view.float) -> float => x\n").contains("unknown-name user:[view.float]"));
     // a local hides the module, as it hides any module-level name
     CHECK(reports_with(library, "use view\nfun f(view: float) -> float => view\n") == "");
+    // a qualified call too: the type of its argument does not widen it to the prelude's functions
+    CHECK(reports_with(library, "use view\nfun f(x: float) -> float => view.saturate(x)\n")
+          == "unknown-name user:[view.saturate] view.saturate\n");
 }
 
 TEST("sgl check - a call on a value of a module's type finds that module's functions (CHK-247)")
@@ -66,7 +69,7 @@ TEST("sgl check - a binding of a module is listed and read through its qualified
 {
     cc::string_view const library[] = {k_view};
     CHECK(reports_with(library, "use view\nfun f(x: float) -> float => x * view.frame.exposure\n")
-          == "binding-not-listed user:[view.frame] frame is not in the binding list of f\n");
+          == "binding-not-listed user:[view.frame] view.frame is not in the binding list of f\n");
     // a call of a module's function needs what it lists, by the same rule as a call of the file's own
     CHECK(reports_with(library, "use view\nfun f(x: float) -> float => view.exposed(x)\n").contains("binding-not-listed"));
     CHECK(reports_with(library, "use view\ntest {view.frame}:\n    view.frame.exposure == 0.0\n") == "");
@@ -75,6 +78,12 @@ TEST("sgl check - a binding of a module is listed and read through its qualified
     cc::string_view const two[] = {k_view, "module post\nbinding frame:\n    gain: float\n"};
     CHECK(reports_with(two, "use view\nuse post\nfun f(x: float){view.frame, post.frame} -> float => x\n")
           == "unsupported-yet user:[post.frame] two bindings named frame in one list, from different modules\n");
+
+    // CHK-351: one binding listed twice, by its name or through two aliases of its module
+    CHECK(reports_with(library, "use view\nuse view as v\nfun f(x: float){view.frame, v.frame} -> float => x\n")
+          == "duplicate-declaration user:[v.frame] frame is listed already\n");
+    CHECK(reports_with({}, "binding frame:\n    e: float\nfun f(x: float){frame, frame} -> float => x\n")
+          == "duplicate-declaration user:[frame] frame is listed already\n");
 }
 
 TEST("sgl check - what a `use` names must be a module of the library, and not the file's own")
@@ -89,6 +98,10 @@ TEST("sgl check - what a `use` names must be a module of the library, and not th
           == "duplicate-declaration user:[use lights as view] view names a module of this file already\n");
     CHECK(reports_with(library, "use view\nstruct view:\n    x: float\n")
           == "duplicate-declaration user:[use view] view names a module here, and a declaration of this module\n");
+    // a prelude name too, which then keeps meaning the prelude's declaration
+    CHECK(reports_with(library, "use view as float\nfun f(x: float) -> float => x\n")
+          == "duplicate-declaration user:[use view as float] float names a module here, and a declaration of the "
+             "prelude\n");
 }
 
 TEST("sgl check - modules that use each other in a loop are module-cycle")

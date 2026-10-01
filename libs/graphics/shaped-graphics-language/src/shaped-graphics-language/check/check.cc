@@ -654,16 +654,8 @@ void checker::attach_extensions(isize first)
 
 cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, type_id first) const
 {
-    return candidates_of(file, name, first, names_seen_from(file).get_ptr(name));
-}
-
-cc::vector<symbol_id> checker::candidates_of(i32 file,
-                                             cc::string_view name,
-                                             type_id first,
-                                             cc::vector<symbol_id> const* named) const
-{
     auto result = cc::vector<symbol_id>();
-    if (named != nullptr)
+    if (auto const* const named = names_seen_from(file).get_ptr(name))
         for (auto const id : *named)
             if (out.at(id).kind == symbol_kind::function)
                 result.push_back(id);
@@ -702,6 +694,14 @@ cc::vector<symbol_id> checker::candidates_of(i32 file,
             if (out.at(id).kind == symbol_kind::function && is_visible_from(file, id))
                 add(id);
     return result;
+}
+
+cc::string checker::name_seen_from(i32 file, symbol_id id) const
+{
+    auto const& s = out.at(id);
+    if (s.file < 0 || is_prelude_file(s.file) || is_prelude_file(file) || file_module[s.file] == file_module[file])
+        return cc::string(s.name);
+    return cc::format("{}.{}", modules[file_module[s.file]], s.name);
 }
 
 i32 checker::module_named(i32 file, ast::expr_id expr, function_scope const* scope) const
@@ -879,13 +879,30 @@ void checker::merge_scopes()
         merge_scope(names, scope);
     }
 
-    // CHK-347: a `use` line's name and a declaration of the file's module would be one name for two things
+    // CHK-347: a `use` line's name and a declaration of the file's module, or of the prelude, would be one name for two
+    // things
+    // A refused `use` binds nothing, so the name keeps meaning the declaration.
     for (auto file = prelude_count; file < i32(files.size()); ++file)
-        for (auto const& u : uses[file])
-            if (auto const* const found = module_scopes[file_module[file]].get_ptr(u.name);
-                found != nullptr && !found->empty())
+    {
+        auto kept = cc::vector<module_use>();
+        for (auto& u : uses[file])
+        {
+            auto const* const found = module_scopes[file_module[file]].get_ptr(u.name);
+            auto is_prelude_name = false;
+            if (auto const* const prelude = prelude_names.get_ptr(u.name))
+                for (auto const id : *prelude)
+                    is_prelude_name = is_prelude_name || !is_internal(id);
+            if (found != nullptr && !found->empty())
                 report(diagnostic_kind::duplicate_declaration, file, u.where,
                        cc::format("{} names a module here, and a declaration of this module", u.name));
+            else if (is_prelude_name)
+                report(diagnostic_kind::duplicate_declaration, file, u.where,
+                       cc::format("{} names a module here, and a declaration of the prelude", u.name));
+            else
+                kept.push_back(cc::move(u));
+        }
+        uses[file] = cc::move(kept);
+    }
 }
 
 void checker::merge_scope(cc::map<cc::string, cc::vector<symbol_id>>& names,

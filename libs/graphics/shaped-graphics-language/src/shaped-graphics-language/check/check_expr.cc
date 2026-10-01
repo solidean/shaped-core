@@ -555,14 +555,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                     is_captured = is_captured || listed == binding;
             if (is_captured)
                 report(diagnostic_kind::test_captures_runtime_value, file, object_where,
-                       cc::format("{} is a binding of {}, and a test runs on its own", out.at(binding).name,
+                       cc::format("{} is a binding of {}, and a test runs on its own", name_seen_from(file, binding),
                                   out.at(scope.enclosing).name));
             else if (!is_listed && scope.is_test)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
-                       cc::format("{} is a binding, and the test does not list it", out.at(binding).name));
+                       cc::format("{} is a binding, and the test does not list it", name_seen_from(file, binding)));
             else if (!is_listed)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
-                       cc::format("{} is not in the binding list of {}", out.at(binding).name,
+                       cc::format("{} is not in the binding list of {}", name_seen_from(file, binding),
                                   out.at(scope.function).name));
 
             auto const index = find_member(out.bindings[out.at(binding).info].members);
@@ -1014,8 +1014,14 @@ type_id checker::check_named_call(function_scope& scope,
     auto const arguments = check_arguments(scope, call.arguments, is_structure);
     auto const first_type
         = arguments.written.empty() || arguments.written[0].splat_member > 0 ? type_id::none : arguments.types[0];
-    auto const candidates
-        = is_qualified ? candidates_of(file, text, first_type, found) : candidates_of(file, text, first_type);
+    // CHK-348: `m.f(…)` names the functions of `m`, and no type scope widens them
+    auto candidates = cc::vector<symbol_id>();
+    if (!is_qualified)
+        candidates = candidates_of(file, text, first_type);
+    else if (found != nullptr)
+        for (auto const candidate : *found)
+            if (out.at(candidate).kind == symbol_kind::function)
+                candidates.push_back(candidate);
 
     if (is_structure)
     {
@@ -2011,17 +2017,18 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
             // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-333)
             auto& d = report(
                 diagnostic_kind::binding_not_listed, file, where,
-                cc::format("{} needs {}, and the test does not list it", out.at(callee).name, out.at(needed).name));
+                cc::format("{} needs {}, and the test does not list it", name_seen_from(file, callee),
+                           name_seen_from(file, needed)));
             d.notes.push_back({.file = file,
                                .where = where,
                                .message = cc::format("`test {{{}}}:` lists it, and the driver that runs the test "
                                                      "gives its values",
-                                                     out.at(needed).name)});
+                                                     name_seen_from(file, needed))});
         }
         else if (!is_listed)
             report(diagnostic_kind::binding_not_listed, file, where,
-                   cc::format("{} needs {}, which is not in the binding list of {}", out.at(callee).name,
-                              out.at(needed).name, out.at(scope.function).name));
+                   cc::format("{} needs {}, which is not in the binding list of {}", name_seen_from(file, callee),
+                              name_seen_from(file, needed), out.at(scope.function).name));
     }
 }
 

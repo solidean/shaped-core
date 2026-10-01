@@ -71,10 +71,11 @@ The program is checked with a **library**: the files of the module directories i
   A module is no value, so its name where a value or a type stands is `wrong-kind-of-name`.
   A `use` of a module no library file declares is `unknown-module`, and one of the file's own module `use-of-own-module`.
   A dotted path is `unsupported-yet`, and so is `use` in a function body.
-  Two `use` lines binding one name, or a `use` binding a name a declaration of its file's module has, is `duplicate-declaration`.
+  Two `use` lines binding one name, or a `use` binding a name a declaration of its file's module or of the prelude has, is `duplicate-declaration`, and that `use` binds nothing.
 * **CHK-348** `m.name`, where `m` is a name a `use` of the file binds and no local hides, stands for the module-level name `name` of module `m` wherever a bare name could stand.
   That is a value, a call, a type, an entry of a binding list, a binding member, an enum case and `m.T.f(…)`.
   It finds what `m` declares and nothing of the prelude.
+  A call `m.f(…)` takes the functions `m` declares as `f` alone: CHK-247's type scope of the first argument does not widen it.
   A literal converts to a struct of another module by the functions of its name visible where the struct is declared, its constructor among them, as a call finds them by CHK-247.
 * **CHK-349** Modules that `use` each other in a loop are the normal error `module-cycle`, reported at the `use` that closes it, and its detail names the loop ([why](why/checking.md#chk-349)).
   A program file that joins a module (CHK-346) counts as that module.
@@ -327,6 +328,7 @@ fun shade(k: float) -> float:
 * **CHK-40** A `binding` with a block is a symbol whose members have a name and a type; the composition form is `unsupported-yet`.
 * **CHK-41** `@inline` on a binding is recorded on the checked binding, since an emitter needs it.
 * **CHK-42** Each entry of a function's binding list is the name of a binding, bare or of a module (CHK-348); any other entry is `unsupported-yet`.
+* **CHK-351** A binding listed twice in one list, by any two spellings of its name, is `duplicate-declaration` at the second.
 * **CHK-43** A binding list is checked and never passed ([why](why/checking.md#chk-43)).
 * **CHK-44** `binding.member` is an expression of the member's type, inside a function whose binding list names that binding.
 * **CHK-45** In any other function it is the normal error `binding-not-listed`.
@@ -1081,7 +1083,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | kind | reported by |
 |---|---|
 | `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350 |
-| `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347 |
+| `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
 | `module-cycle` | CHK-349 |

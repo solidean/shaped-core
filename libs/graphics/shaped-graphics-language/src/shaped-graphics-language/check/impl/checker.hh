@@ -403,6 +403,8 @@ struct checker
                 return u.module;
         return -1;
     }
+    /// How a diagnostic in `file` names `id`: `m.name` for a symbol of another module, by that module's own name.
+    [[nodiscard]] cc::string name_seen_from(i32 file, symbol_id id) const;
     /// The module `expr` names: a bare name a `use` of `file` binds, which no local of `scope` and no type parameter
     /// hides; -1 for anything else.
     [[nodiscard]] i32 module_named(i32 file, ast::expr_id expr, function_scope const* scope) const;
@@ -485,11 +487,6 @@ struct checker
     /// The functions a call of `name` from `file` may choose from, where `first` is its first argument's type:
     /// the functions of that name visible there, and those of the type scope of `first` (CHK-247).
     [[nodiscard]] cc::vector<symbol_id> candidates_of(i32 file, cc::string_view name, type_id first) const;
-    /// The same, where the functions of the name are `named` rather than what `file` sees: a call `m.name(…)`.
-    [[nodiscard]] cc::vector<symbol_id> candidates_of(i32 file,
-                                                      cc::string_view name,
-                                                      type_id first,
-                                                      cc::vector<symbol_id> const* named) const;
     /// A declaration of the prelude marked `@internal`, which no lookup from the program's file finds (CHK-323).
     [[nodiscard]] bool is_internal(symbol_id id) const;
     /// True where a lookup from `file` sees a function of `from`: the prelude never sees the program's.
