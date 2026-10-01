@@ -31,4 +31,8 @@ namespace slib::impl
 
 /// `path` made relative to `prefix` (which must contain it, per is_path_under). Both must be normalized.
 [[nodiscard]] cc::string_view relative_to(cc::string_view path, cc::string_view prefix);
+
+/// The name of `path` where it is a file directly in `dir`; empty where it lies elsewhere, deeper included.
+/// Both must be normalized.
+[[nodiscard]] cc::string_view name_in(cc::string_view path, cc::string_view dir);
 } // namespace slib::impl

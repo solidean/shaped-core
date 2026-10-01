@@ -61,6 +61,17 @@
 # The third field is the SGL name exactly as the shader spells it, and one the file does not declare is a build error.
 # `*` generates nothing for what the file `use`s: an imported module is described by its own package entry.
 #
+# An SGL package's SOURCE_DIR is a module directory, and MODULE_DIRS names more, relative to the calling CMakeLists:
+# a file's `use view` finds module `view` among the `.sgl` files directly in any of them.
+# A module another package exports is reached by naming that package's directory here too.
+#
+#           module:view                                  # every binding, struct, @vertex and @pixel struct of `view`
+#
+# A module's types land in <NAMESPACE>::view, in their own header <sgl_modules/view.hh>, which also declares the alias
+# `sgl_modules::view` that generated code names them through.
+# That header's directory is PUBLIC on TARGET, so linking the package's target is what makes a module reachable.
+# A file whose entry point lists a module binding no package exports fails on that missing header.
+#
 # Those entries are read by the SGL compiler itself, `sgl describe`, because it is the one parser of the language.
 # So a package that has one needs a runnable `sgl` while it builds:
 # the tree's own `sgl` target in a native build, or SC_SGL_TOOL, which also serves a cross build and an
@@ -80,7 +91,7 @@ set(SC_SGL_TOOL "" CACHE FILEPATH
     "A runnable `sgl`, for an SGL shader package's `*` and typed entries where the tree's own cannot run or is not built")
 
 function(sc_add_shader_package)
-    cmake_parse_arguments(PKG "" "TARGET;NAME;NAMESPACE;SOURCE_DIR;LANGUAGE" "SHADERS" ${ARGN})
+    cmake_parse_arguments(PKG "" "TARGET;NAME;NAMESPACE;SOURCE_DIR;LANGUAGE" "SHADERS;MODULE_DIRS" ${ARGN})
 
     foreach(_required TARGET NAME NAMESPACE SOURCE_DIR SHADERS)
         if(NOT PKG_${_required})
@@ -107,9 +118,21 @@ function(sc_add_shader_package)
             "target (${_target_dir}), not from ${CMAKE_CURRENT_SOURCE_DIR}")
     endif()
 
-    set(_source_dir "${CMAKE_CURRENT_SOURCE_DIR}/${PKG_SOURCE_DIR}")
+    # normalized as MODULE_DIRS are, since slib compares the two to add a directory listed by two packages once
+    cmake_path(ABSOLUTE_PATH PKG_SOURCE_DIR BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE OUTPUT_VARIABLE _source_dir)
     if(NOT IS_DIRECTORY "${_source_dir}")
         message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): SOURCE_DIR '${_source_dir}' is not a directory")
+    endif()
+    set(_module_dirs "")
+    foreach(_dir IN LISTS PKG_MODULE_DIRS)
+        cmake_path(ABSOLUTE_PATH _dir BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE OUTPUT_VARIABLE _absolute)
+        if(NOT IS_DIRECTORY "${_absolute}")
+            message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): MODULE_DIRS '${_dir}' is not a directory")
+        endif()
+        list(APPEND _module_dirs "${_absolute}")
+    endforeach()
+    if(_module_dirs AND NOT PKG_LANGUAGE STREQUAL "sgl")
+        message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): MODULE_DIRS is for an SGL package")
     endif()
 
     # Per target, not just per name: two targets in one directory sharing a NAME would collide.
@@ -125,6 +148,9 @@ function(sc_add_shader_package)
     string(APPEND _manifest_text "NAMESPACE=${PKG_NAMESPACE}\n")
     string(APPEND _manifest_text "SOURCE_DIR=${_source_dir}\n")
     string(APPEND _manifest_text "LANGUAGE=${PKG_LANGUAGE}\n")
+    foreach(_dir IN LISTS _module_dirs)
+        string(APPEND _manifest_text "MODULE_DIR=${_dir}\n")
+    endforeach()
     foreach(_shader IN LISTS PKG_SHADERS)
         string(APPEND _manifest_text "SHADER=${_shader}\n")
     endforeach()
@@ -137,13 +163,30 @@ function(sc_add_shader_package)
     # Only those: a package of entry points alone must keep building where no `sgl` can run.
     set(_sgl_args "")
     set(_sgl_depends "")
+    # `module:view` writes modules/sgl_modules/view.hh and .cc beside the package's own header
+    set(_module_headers "")
+    set(_module_sources "")
     if(PKG_LANGUAGE STREQUAL "sgl")
         set(_needs_sgl OFF)
         foreach(_shader IN LISTS PKG_SHADERS)
             string(REPLACE ":" ";" _parts "${_shader}")
             list(LENGTH _parts _count)
+            list(GET _parts 0 _first)
             list(GET _parts 1 _kind)
-            if((_count EQUAL 2 AND _kind STREQUAL "*")
+            if(_first STREQUAL "module")
+                # One exporter per module: each writes <sgl_modules/NAME.hh> into its own include directory, and a
+                # target linking two would silently take whichever comes first on its include path.
+                get_property(_exporter GLOBAL PROPERTY "SC_SGL_EXPORTED_MODULE_${_kind}")
+                if(_exporter AND NOT _exporter STREQUAL "${PKG_TARGET}/${PKG_NAME}")
+                    message(FATAL_ERROR
+                        "sc_add_shader_package(${PKG_NAME}): module:${_kind} is exported by ${_exporter} already; "
+                        "a module has one exporting package, which every other one reaches through its MODULE_DIRS")
+                endif()
+                set_property(GLOBAL PROPERTY "SC_SGL_EXPORTED_MODULE_${_kind}" "${PKG_TARGET}/${PKG_NAME}")
+                list(APPEND _module_headers "${_gen_dir}/modules/sgl_modules/${_kind}.hh")
+                list(APPEND _module_sources "${_gen_dir}/modules/sgl_modules/${_kind}.cc")
+                set(_needs_sgl ON)
+            elseif((_count EQUAL 2 AND _kind STREQUAL "*")
                OR _kind STREQUAL "binding" OR _kind STREQUAL "vertex_input" OR _kind STREQUAL "render_target")
                 set(_needs_sgl ON)
             endif()
@@ -173,12 +216,22 @@ function(sc_add_shader_package)
     foreach(_shader IN LISTS PKG_SHADERS)
         string(REPLACE ":" ";" _parts "${_shader}")
         list(GET _parts 0 _path)
-        list(APPEND _shader_files "${_source_dir}/${_path}")
+        if(NOT _path STREQUAL "module")
+            list(APPEND _shader_files "${_source_dir}/${_path}")
+        endif()
     endforeach()
+    # Every module file is embedded, and one added to a module directory changes neither the manifest nor the depfile,
+    # so the directories are globbed with CONFIGURE_DEPENDS: a file appearing re-runs configure, then the generator.
+    if(PKG_LANGUAGE STREQUAL "sgl")
+        foreach(_dir IN ITEMS "${_source_dir}" ${_module_dirs})
+            file(GLOB _found CONFIGURE_DEPENDS "${_dir}/*.sgl")
+            list(APPEND _shader_files ${_found})
+        endforeach()
+    endif()
     list(REMOVE_DUPLICATES _shader_files)
 
     add_custom_command(
-        OUTPUT "${_gen_hh}" "${_gen_cc}"
+        OUTPUT "${_gen_hh}" "${_gen_cc}" ${_module_headers} ${_module_sources}
         COMMAND uv run "${SC_SHADER_PACKAGE_SCRIPT}" --manifest "${_manifest}" --out-dir "${_gen_dir}" ${_sgl_args}
         DEPENDS "${_manifest}" "${SC_SHADER_PACKAGE_SCRIPT}" "${SC_SHADER_PACKAGE_GRAMMAR}" "${SC_SHADER_PACKAGE_SGL}"
                 "${SC_SHADER_PACKAGE_SGL_HOST}" ${_shader_files} ${_sgl_depends}
@@ -193,14 +246,18 @@ function(sc_add_shader_package)
     # directory carries no dependency edge -- so without this the test's TU and the generator are unordered.
     # Named per PACKAGE, not per target: a target may declare more than one, and two add_custom_target calls
     # under one name is a configure error.
-    add_custom_target(${PKG_TARGET}-${PKG_NAME}-shader-package DEPENDS "${_gen_hh}" "${_gen_cc}")
+    add_custom_target(${PKG_TARGET}-${PKG_NAME}-shader-package DEPENDS "${_gen_hh}" "${_gen_cc}" ${_module_headers} ${_module_sources})
 
     # Plain PRIVATE sources, never a FILE_SET: the generated header lives in the binary dir, and a FILE_SET
     # hard-errors on anything outside its BASE_DIRS.
     # It is per-target private API anyway -- to publish a shader, re-expose it from your own public header
     # (see slib's coding guidelines).
-    target_sources(${PKG_TARGET} PRIVATE "${_gen_hh}" "${_gen_cc}")
+    target_sources(${PKG_TARGET} PRIVATE "${_gen_hh}" "${_gen_cc}" ${_module_headers} ${_module_sources})
     target_include_directories(${PKG_TARGET} PRIVATE "${_gen_dir}")
+    # A module's header is the one generated header another target may include, which linking this target gives it.
+    if(PKG_LANGUAGE STREQUAL "sgl")
+        target_include_directories(${PKG_TARGET} PUBLIC "$<BUILD_INTERFACE:${_gen_dir}/modules>")
+    endif()
 
     if(NOT PKG_TARGET STREQUAL "shaped-shader-library")
         target_link_libraries(${PKG_TARGET} PRIVATE shaped-shader-library)

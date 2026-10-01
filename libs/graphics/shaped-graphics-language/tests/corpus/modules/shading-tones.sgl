@@ -1,0 +1,13 @@
+// The second file of module `shading`: a module may span files, which see each other unqualified.
+module shading
+
+enum tone:
+    linear
+    clamped
+
+fun toned(x: float, t: tone) -> float:
+    if t == tone.clamped => return saturate(x)
+    return x
+
+test toned(2.0, tone.clamped) == 1.0
+test strength(light(3.0)) == 3.0

@@ -33,3 +33,15 @@ slib::file_revision slib::embedded_filesystem::revision(cc::string_view path) co
 {
     return find(path) == nullptr ? file_revision::none : k_embedded_revision;
 }
+
+cc::vector<cc::string> slib::embedded_filesystem::list(cc::string_view dir) const
+{
+    auto result = cc::vector<cc::string>();
+    auto const normalized = impl::normalize_path(dir);
+    if (!normalized.has_value())
+        return result;
+    for (auto const& file : _files)
+        if (auto const name = impl::name_in(file.path, normalized.value()); !name.empty())
+            result.push_back(cc::string(name));
+    return result;
+}

@@ -7,6 +7,7 @@
 #include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::bound_samplers_space
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh> // the pixel formats by name
+#include <shaped-shader-library/impl/sgl_library.hh>
 
 using namespace cc::primitive_defines;
 
@@ -219,9 +220,11 @@ public:
             return cc::error(cc::format("SGL has no entry point of the stage '{}' is declared as", desc.entry_point));
         }
 
+        auto const library = slib::impl::sgl_library_of(desc.modules);
         auto text = sgl::compile_to_text(
             {.source = desc.source,
              .source_name = desc.label.empty() ? cc::string_view("<sgl>") : cc::string_view(desc.label),
+             .library = library,
              .entry_point = desc.entry_point,
              .stage = stage,
              .target = _target});
@@ -231,7 +234,9 @@ public:
         auto shader = sg::compiled_shader{.stage = desc.stage,
                                           .format = _inner->target_format(),
                                           .entry_point = emitted.entry_point};
-        auto result = slib::preprocessed_source{.source = emitted.text, .entry_point = emitted.entry_point};
+        auto result = slib::preprocessed_source{.source = emitted.text,
+                                                .entry_point = emitted.entry_point,
+                                                .used_modules = emitted.library_files};
         for (auto const& b : emitted.bindings)
         {
             auto binding = binding_of(b, shader.format, shader.stage);

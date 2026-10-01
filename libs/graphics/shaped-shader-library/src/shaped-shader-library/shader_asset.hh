@@ -64,6 +64,8 @@ public:
     /// The text of that source as its library's filesystem holds it now; nullopt when the file or the library is gone.
     /// Not the text the current shader was compiled from, which a reload may not have promoted yet.
     [[nodiscard]] cc::optional<cc::string> read_source() const;
+    /// The module library of its library, read now, which an SGL source is checked against; empty when the library is gone.
+    [[nodiscard]] module_library read_modules() const;
     [[nodiscard]] sg::shader_stage stage() const { return _stage; }
     [[nodiscard]] cc::string_view entry_point() const { return _entry_point; }
 
@@ -85,7 +87,7 @@ private:
         sg::shader_format format = sg::shader_format::dxil;
         sg::async_compiled_shader current;
         sg::async_compiled_shader pending;
-        cc::vector<cc::string> dependencies; ///< source + resolved includes, as of the last compile
+        cc::vector<cc::string> dependencies; ///< source, resolved includes and module files reached, as of the last compile
     };
 
     struct state

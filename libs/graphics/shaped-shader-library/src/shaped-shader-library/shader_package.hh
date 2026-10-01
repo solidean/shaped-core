@@ -20,6 +20,17 @@ struct slib::shader_definition
     shader_asset_handle* asset = nullptr;
 };
 
+/// A directory whose `.sgl` files are modules every SGL compile of the library may `use`.
+struct slib::module_dir
+{
+    /// Where its files are, relative to the package's mount: empty for the package's own source dir.
+    cc::string_view path;
+    /// The directory on disk as the build saw it, which names the directory across packages: two packages listing one
+    /// directory add its modules once.
+    /// Mounted over the embedded copy where `path` is not empty, as `source_dir` is over the package's.
+    cc::string_view source_dir;
+};
+
 /// A target's shaders, as emitted by sc_add_shader_package.
 /// A pure description with static storage — generated code owns one and hands it out through its package() function.
 struct slib::shader_package
@@ -40,4 +51,7 @@ struct slib::shader_package
     cc::span<embedded_file const> embedded_files;
 
     cc::span<shader_definition const> definitions;
+
+    /// An SGL package's module directories, its own source dir first; their files are among `embedded_files`.
+    cc::span<module_dir const> module_dirs;
 };

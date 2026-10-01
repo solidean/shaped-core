@@ -7,7 +7,8 @@
 // Why <filesystem> is included here and nowhere else: it is not a blessed clean-core header (see libs/base/clean-core/docs/blessed-stdlib-headers.md).
 //
 // Reading is already off it — that goes through cc's file stream adapters.
-// What is left needs filesystem *metadata* (is_regular_file, last_write_time, file_size), which clean-core does not model.
+// What is left needs filesystem *metadata* (is_regular_file, last_write_time, file_size) and a directory listing, which
+// clean-core does not model.
 #include <filesystem>
 
 slib::real_filesystem::real_filesystem(cc::string root_dir) : _root_dir(cc::move(root_dir))
@@ -76,6 +77,28 @@ slib::file_revision slib::real_filesystem::revision(cc::string_view path) const
 
     auto const mixed = cc::make_hash_finalized(u64(written.time_since_epoch().count()), u64(size));
     return file_revision(mixed == 0 ? 1 : mixed); // never collide with `none`
+}
+
+cc::vector<cc::string> slib::real_filesystem::list(cc::string_view dir) const
+{
+    auto result = cc::vector<cc::string>();
+    auto native = to_native_path(dir);
+    if (!native.has_value())
+        return result;
+    // UTF-8 both ways, as read_text is: the narrow std::filesystem spellings are the ANSI code page on Windows.
+    auto const& text = native.value();
+    auto const root = std::filesystem::path(
+        std::u8string_view(reinterpret_cast<char8_t const*>(cc::string_view(text).data()), text.size()));
+    std::error_code ec;
+    // advanced with an error_code, since a range-for's increment would throw on a failing directory
+    for (auto it = std::filesystem::directory_iterator(root, ec); !ec && it != std::filesystem::directory_iterator();
+         it.increment(ec))
+        if (std::error_code is_file; it->is_regular_file(is_file) && !is_file)
+        {
+            auto const name = it->path().filename().generic_u8string();
+            result.push_back(cc::string(cc::string_view(reinterpret_cast<char const*>(name.data()), isize(name.size()))));
+        }
+    return result;
 }
 
 cc::optional<slib::watch_subscription> slib::real_filesystem::watch(cc::string_view prefix, watch_sink sink) const

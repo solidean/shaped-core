@@ -1,5 +1,8 @@
 #include "features.hh"
 
+#include <clean-core/error/optional.hh>
+#include <clean-core/string/format.hh>
+#include <shaped-graphics-language/ast/decl.hh>
 #include <shaped-graphics-language/source/diagnostic.hh>
 
 using namespace cc::primitive_defines;
@@ -34,6 +37,27 @@ namespace
         });
     return out;
 }
+
+/// Where the document reaches `module`: the `use` naming it, else its first `use`, since it may reach it through
+/// another module; the document's start where it has none.
+[[nodiscard]] sgl::source_span use_line_of(sgl_lsp::analysis const& a, cc::string_view module)
+{
+    auto first = cc::optional<sgl::source_span>();
+    for (auto const id : a.ast.at(a.ast.declarations))
+    {
+        auto const& d = a.ast.at(id);
+        auto const* const u = d.node.try_as<sgl::ast::use_decl>();
+        if (u == nullptr || !sgl::ast::is_valid(u->path))
+            continue;
+        auto const where = a.file.at(d.form).where;
+        if (!first.has_value())
+            first = where;
+        if (auto const* const n = a.ast.at(u->path).node.try_as<sgl::ast::name>();
+            n != nullptr && a.file.text_of(n->where) == module)
+            return where;
+    }
+    return first.has_value() ? first.value() : sgl::source_span{};
+}
 } // namespace
 
 cc::vector<lsp::diagnostic> sgl_lsp::diagnostics_of(analysis const& a,
@@ -46,6 +70,19 @@ cc::vector<lsp::diagnostic> sgl_lsp::diagnostics_of(analysis const& a,
     for (auto const& d : a.diagnostics)
         if (d.file == user)
             out.push_back(lsp_diagnostic_of(a, d, e));
+    // an error in a module the document reaches is shown on the `use` that reaches it, pointing into the module's file
+    for (auto const& d : a.diagnostics)
+    {
+        if (d.file == user || d.file < a.module.prelude_file_count() || d.what.level == sgl::severity::warning)
+            continue;
+        auto const& module = a.module.file_modules[d.file];
+        auto summary = lsp_diagnostic_of(a, d, e);
+        summary.related_information.insert_at(
+            0, {.location = {.uri = a.uri_of(d.file), .range = summary.range}, .message = summary.message});
+        summary.range = sgl_lsp::range_of(a, user, use_line_of(a, module), e);
+        summary.message = cc::format("module {} does not check: {}", module, summary.message);
+        out.push_back(cc::move(summary));
+    }
     // a test that did not check has its diagnostics already, and one that expects diagnostics is a mark instead
     for (auto const& r : tests)
         if (!r.is_passed() && r.status != sgl::test::test_status::not_run

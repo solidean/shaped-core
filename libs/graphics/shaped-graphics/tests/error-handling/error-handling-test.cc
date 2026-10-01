@@ -46,6 +46,10 @@ sg::buffer_usages const copy_both = sg::buffer_usage::copy_src | sg::buffer_usag
 // A frame whose binding group leaves the layout's one binding unprovided, so the create throws out of the coroutine.
 cc::shared_async<int> create_unwired_group(sg::context_handle ctx, sg::binding_group_layout_handle layout)
 {
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
     auto group = ctx->transient.create_binding_group(layout, cc::span<sg::named_view const>());
     co_return group != nullptr ? 1 : 0;
 }

@@ -342,3 +342,16 @@ TEST("sgl lsp - a test judged by the diagnostics it expects is one mark on its k
     CHECK(marks[1]["range"]["start"]["line"].as_double() == 3);
     CHECK(marks[1]["failed"].as_double() == 1);
 }
+
+TEST("sgl lsp - an error in a module the document uses is shown on its `use`, pointing into the module's file",
+     main_thread)
+{
+    sgl_lsp::set_module_dirs({cc::string(SGL_LSP_TEST_MODULES_DIR)});
+    auto s = session("// uses a broken module\nuse broken\nfun g() -> float => broken.f()\n");
+    sgl_lsp::set_module_dirs({});
+    auto const p = s.last("textDocument/publishDiagnostics");
+    CHECK(diagnostics_text(p) == "1:0 unknown-name module broken does not check: nope\n");
+    auto const related = p["diagnostics"][0]["relatedInformation"][0];
+    CHECK(related["location"]["uri"].as_string().ends_with("/tests/modules/broken.sgl"));
+    CHECK(related["location"]["range"]["start"]["line"].as_double() == 3);
+}

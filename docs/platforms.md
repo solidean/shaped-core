@@ -55,6 +55,10 @@ They are deployment tiers rather than a performance gradient: threads mean `Shar
 Overflowing it is no trap on wasm: the stack grows into the heap, and the crash surfaces later as an out-of-bounds read inside the allocator.
 Code here bounds a recursion's depth and was sized against a native stack, so 64 KiB is a portability bug rather than a tighter budget; [Emscripten.cmake](../tools/cmake/Emscripten.cmake) sets it.
 
+**At most four wasm binaries link at once**, while compiles keep full parallelism.
+Each link runs `wasm-opt`, at about 2 GB per process, and a full test build links every binary at the end.
+`SC_WASM_LINK_JOBS` changes the cap; it is a Ninja job pool, so another generator ignores it.
+
 ### WASM debug sidecars (`SC_WASM_DEBUG_SIDECARS`)
 
 `off` (the default), `source-map`, `dwarf` or `both` — where a wasm build's debug info goes when it is not going into the binary.

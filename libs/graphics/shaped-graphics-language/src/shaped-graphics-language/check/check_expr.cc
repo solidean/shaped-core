@@ -435,6 +435,23 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     }
 
     auto const* const found = names_seen_from(file).get_ptr(text);
+    if ((found == nullptr || found->empty()) && used_module(file, text) >= 0)
+    {
+        // CHK-347: a module is reached through its names, and is no value itself
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               cc::format("{} is a module, and only `{}.name` reaches what it declares", text, text));
+        return error_type;
+    }
+    return check_symbol_value(scope, id, text, found);
+}
+
+type_id checker::check_symbol_value(function_scope& scope,
+                                    ast::expr_id id,
+                                    cc::string_view text,
+                                    cc::vector<symbol_id> const* found)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, id);
     if (found == nullptr || found->empty())
     {
         report(diagnostic_kind::unknown_name, file, where, text);
@@ -505,14 +522,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         return isize(-1);
     };
 
+    // CHK-348: `m.name` is the name `name` of module `m`, which stands for it wherever a bare name could
+    if (module_named(file, member.object, &scope) >= 0)
+        return check_symbol_value(scope, id, text_of(file, span_of(file, id)), symbols_named(file, id, &scope));
+
     // `constants.view_projection`: a binding is no value, so the object is looked at before it is checked
-    auto const* const object_name
-        = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
-    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr
-        && !is_type_parameter_name(text_of(file, object_name->where)))
+    if (auto const* const found = symbols_named(file, member.object, &scope))
     {
-        auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
-        if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::binding)
+        if (out.at(found->front()).kind == symbol_kind::binding)
         {
             auto const binding = found->front();
             auto const object_where = span_of(file, member.object);
@@ -538,14 +555,14 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                     is_captured = is_captured || listed == binding;
             if (is_captured)
                 report(diagnostic_kind::test_captures_runtime_value, file, object_where,
-                       cc::format("{} is a binding of {}, and a test runs on its own", out.at(binding).name,
+                       cc::format("{} is a binding of {}, and a test runs on its own", name_seen_from(file, binding),
                                   out.at(scope.enclosing).name));
             else if (!is_listed && scope.is_test)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
-                       cc::format("{} is a binding, and the test does not list it", out.at(binding).name));
+                       cc::format("{} is a binding, and the test does not list it", name_seen_from(file, binding)));
             else if (!is_listed)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
-                       cc::format("{} is not in the binding list of {}", out.at(binding).name,
+                       cc::format("{} is not in the binding list of {}", name_seen_from(file, binding),
                                   out.at(scope.function).name));
 
             auto const index = find_member(out.bindings[out.at(binding).info].members);
@@ -588,7 +605,7 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
 
         // `light_kind.point`: an enum is no value either (CHK-148), so its name never reaches `check_expr`
-        if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::enumeration)
+        if (out.at(found->front()).kind == symbol_kind::enumeration)
         {
             auto const enumeration = found->front();
             auto const object_where = span_of(file, member.object);
@@ -972,8 +989,21 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
                                            : check_pipeline_trace(scope, id, call, ray.value());
     }
 
+    return check_named_call(scope, id, call, text, names_seen_from(file).get_ptr(text), false);
+}
+
+type_id checker::check_named_call(function_scope& scope,
+                                  ast::expr_id id,
+                                  ast::call const& call,
+                                  cc::string_view text,
+                                  cc::vector<symbol_id> const* found,
+                                  bool is_qualified)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, id);
+    auto const callee_where = span_of(file, call.callee);
+
     // CHK-247: the functions of its name, and those of its first argument's type scope, whatever else the name is
-    auto const* const found = names_seen_from(file).get_ptr(text);
     auto const kind = found == nullptr || found->empty() ? symbol_kind::function : out.at(found->front()).kind;
     if (kind == symbol_kind::unsupported)
     {
@@ -984,7 +1014,14 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     auto const arguments = check_arguments(scope, call.arguments, is_structure);
     auto const first_type
         = arguments.written.empty() || arguments.written[0].splat_member > 0 ? type_id::none : arguments.types[0];
-    auto const candidates = candidates_of(file, text, first_type);
+    // CHK-348: `m.f(…)` names the functions of `m`, and no type scope widens them
+    auto candidates = cc::vector<symbol_id>();
+    if (!is_qualified)
+        candidates = candidates_of(file, text, first_type);
+    else if (found != nullptr)
+        for (auto const candidate : *found)
+            if (out.at(candidate).kind == symbol_kind::function)
+                candidates.push_back(candidate);
 
     if (is_structure)
     {
@@ -1023,7 +1060,11 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
     if (candidates.empty())
     {
-        report(diagnostic_kind::unknown_name, file, callee_where, text);
+        if (!is_qualified && used_module(file, text) >= 0)
+            report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
+                   cc::format("{} is a module, and a call needs a function or a struct", text));
+        else
+            report(diagnostic_kind::unknown_name, file, callee_where, text_of(file, callee_where));
         return error_type;
     }
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
@@ -1050,14 +1091,14 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
             || scope.find_local(text_of(file, span_of(file, applied->object))) == nullptr))
         return check_filled(scope, id, call);
 
+    // CHK-348: `m.foo(…)` is a call of the name `foo` of module `m`, and `m` is no argument
+    if (module_named(file, member.object, &scope) >= 0)
+        return check_named_call(scope, id, call, name, symbols_named(file, call.callee, &scope), true);
+
     // `T.foo(…)`: the functions of the type scope of `T`, and `T` is no argument (CHK-248)
-    auto const* const object_name
-        = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
-    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr
-        && !is_type_parameter_name(text_of(file, object_name->where)))
+    if (auto const* const found = symbols_named(file, member.object, &scope))
     {
-        auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
-        auto const kind = found != nullptr && !found->empty() ? out.at(found->front()).kind : symbol_kind::unsupported;
+        auto const kind = out.at(found->front()).kind;
         if (kind == symbol_kind::structure || kind == symbol_kind::enumeration)
         {
             auto const owner = found->front();
@@ -1590,10 +1631,19 @@ cc::vector<symbol_id> checker::functions_named_after(i32 file, type_id to) const
     auto result = cc::vector<symbol_id>();
     if (!is_valid(to) || to == error_type || out.at(to).kind != type_kind::structure)
         return result;
-    if (auto const* const found = names_seen_from(file).get_ptr(out.at(out.at(to).symbol).name))
+    auto const& name = out.at(out.at(to).symbol).name;
+    if (auto const* const found = names_seen_from(file).get_ptr(name))
         for (auto const id : *found)
             if (out.at(id).kind == symbol_kind::function)
                 result.push_back(id);
+    // CHK-348: a struct another module declares converts by the functions of its name visible there, its constructor
+    // among them, as a call on a value of it finds them (CHK-247)
+    auto const declaring_file = out.at(out.at(to).symbol).file;
+    if (!is_prelude_file(declaring_file) && (is_prelude_file(file) || file_module[declaring_file] != file_module[file]))
+        if (auto const* const declared = module_scopes[file_module[declaring_file]].get_ptr(name))
+            for (auto const id : *declared)
+                if (out.at(id).kind == symbol_kind::function)
+                    result.push_back(id);
     return result;
 }
 
@@ -1965,19 +2015,19 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         if (!is_listed && scope.is_test)
         {
             // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-333)
-            auto& d = report(
-                diagnostic_kind::binding_not_listed, file, where,
-                cc::format("{} needs {}, and the test does not list it", out.at(callee).name, out.at(needed).name));
+            auto& d = report(diagnostic_kind::binding_not_listed, file, where,
+                             cc::format("{} needs {}, and the test does not list it", name_seen_from(file, callee),
+                                        name_seen_from(file, needed)));
             d.notes.push_back({.file = file,
                                .where = where,
                                .message = cc::format("`test {{{}}}:` lists it, and the driver that runs the test "
                                                      "gives its values",
-                                                     out.at(needed).name)});
+                                                     name_seen_from(file, needed))});
         }
         else if (!is_listed)
             report(diagnostic_kind::binding_not_listed, file, where,
-                   cc::format("{} needs {}, which is not in the binding list of {}", out.at(callee).name,
-                              out.at(needed).name, out.at(scope.function).name));
+                   cc::format("{} needs {}, which is not in the binding list of {}", name_seen_from(file, callee),
+                              name_seen_from(file, needed), out.at(scope.function).name));
     }
 }
 

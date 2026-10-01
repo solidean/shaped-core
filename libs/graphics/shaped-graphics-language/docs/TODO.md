@@ -53,8 +53,16 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   A group compiled apart cannot agree with the module's inferred qualifiers otherwise.
   The way out is compiling the host's groups against the module's inferred qualifiers, which slib would hand to `compile_hit_group`.
   hlsl.cc writes `#pragma dxc diagnostic ignored "-Wpayload-access-perf"` into every ray-tracing stage, where only a stage of a widest payload needs it.
-- **Shared source for a host's hit groups.** `slib::compile_hit_group` compiles a group from SGL text the host concatenates with the ray set's declarations.
-  That is a stopgap for `use`: the group's file would import the module that declares the set.
+
+- **Modules are a tracer.** Every compile parses the library and checks the modules the program reaches, in one pass with it, and keeps nothing between compiles.
+  Interfaces, separate compilation and a parsed library shared across compiles are the [compilation model](spec/incubator/compilation-model.md)'s.
+  The front end parses a library file only where its first line may be a `module` line, which keeps a module directory of programs cheap for the tool and slib.
+  The language server still parses every file of its module directories.
+- **What a module the program uses cannot hold yet** (CHK-350): a file-scope sampler, an `@operator` function, and a second binding of one name in one list.
+  Its entry points, pipelines and tests are built only when it is compiled as a program.
+- **The sgl tool lists a module directory through `<filesystem>`** (`tools/sgl/module_dirs.cc`), since clean-core has no directory listing yet.
+- **The language server reads its module directories once**, from the `sgl.moduleDirs` setting, and re-reads their files on every analysis.
+  Go-to-definition into a module's file waits for the position lookup [lsp.md](lsp.md) lists.
 - **A generic struct's type parameter is not in scope in its methods.** `mixed_hit.procedural()` returns through the helper `procedural_of_mixed[A]`, since the method cannot name `A`.
 - **An enum does not convert to `int`.** `h.kind as int` is refused (CHK-150), so storing a `hit_kind` in a buffer takes a `case`; [enum-futures.md](spec/incubator/enum-futures.md) holds the cast.
 - **The matrix zoo, and `tg` types such as `quat`.** A hit's transforms are rows of `float4` because SGL has `mat4` alone; `mat3x4`, `mat3` and a quaternion would let a hit hand them over typed.

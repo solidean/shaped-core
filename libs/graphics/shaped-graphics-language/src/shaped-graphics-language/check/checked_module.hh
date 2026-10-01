@@ -140,8 +140,15 @@ struct sgl::check::checked_module
     /// Every call of a callable by its table's index (CHK-344).
     cc::vector<callable_call> callable_calls;
 
-    /// One entry per file `check` was given, in that order.
+    /// One entry per file checked: the prelude's, then the library files the program reaches, then the program's.
     cc::vector<file_tables> files;
+    /// How many of `files` are the prelude's.
+    i32 prelude_files = 0;
+    /// Parallel to the files between the prelude and the program: each one's position in the library `check` was given.
+    /// A library file no `use` reaches is not checked, and has no entry.
+    cc::vector<i32> library_files;
+    /// Parallel to `files`: the module each file belongs to; empty for the prelude's and for a program that names none.
+    cc::vector<cc::string> file_modules;
 
     /// Only the entry points that checked without an error; a broken one has diagnostics and no flat tree.
     cc::vector<flat_entry_point> entry_points;
@@ -162,8 +169,18 @@ struct sgl::check::checked_module
     /// `types[1]`: what a function without a return type returns.
     static constexpr type_id void_type = type_id(1);
 
-    /// The files before the user file, which is always the last.
-    [[nodiscard]] i32 prelude_file_count() const { return files.empty() ? 0 : i32(files.size()) - 1; }
+    [[nodiscard]] i32 prelude_file_count() const { return prelude_files; }
+    /// The program's file, which is always the last.
+    [[nodiscard]] i32 program_file() const { return i32(files.size()) - 1; }
+    /// The module the program names `id` through, as `m.name` (CHK-348): empty for a symbol of the prelude and of the
+    /// program's own module.
+    [[nodiscard]] cc::string_view foreign_module_of(symbol_id id) const
+    {
+        auto const file = at(id).file;
+        if (file < 0 || file >= i32(file_modules.size()) || file_modules[file] == file_modules.back())
+            return {};
+        return file_modules[file];
+    }
 
     [[nodiscard]] symbol const& at(symbol_id id) const { return symbols[index_of(id)]; }
     [[nodiscard]] type_info const& at(type_id id) const { return types[index_of(id)]; }

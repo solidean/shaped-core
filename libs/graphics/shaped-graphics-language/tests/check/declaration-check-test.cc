@@ -176,9 +176,10 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("const k = 2.0 * 1.0\n")
           == "unsupported-yet user:[2.0 * 1.0] a const whose value is no literal, no enum case and no const\n");
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
-    CHECK(reports_for("use brdf\n") == "unsupported-yet user:[use brdf] use\n");
+
     // CHK-339: a generic struct is the prelude's
-    CHECK(reports_for("struct box[T]:\n    value: T\n") == "unsupported-yet user:[box] a generic struct of the program\n");
+    CHECK(reports_for("struct box[T]:\n    value: T\n")
+          == "unsupported-yet user:[box] a generic struct outside the prelude\n");
     CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
           == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
@@ -231,7 +232,8 @@ TEST("sgl check - a type parameter is opaque, and a call says what it stands for
 TEST("sgl check - a generic struct is the prelude's, and an instance names one type argument")
 {
     // CHK-339
-    CHECK(reports_for("struct box[A]:\n    v: A\n") == "unsupported-yet user:[box] a generic struct of the program\n");
+    CHECK(reports_for("struct box[A]:\n    v: A\n")
+          == "unsupported-yet user:[box] a generic struct outside the prelude\n");
     CHECK(reports_for("fun f(r: report[float, float]) => 1.0\n")
           == "wrong-kind-of-name user:[report[float, float]] report takes one type argument\n");
 }
@@ -295,12 +297,12 @@ TEST("sgl check - a binding records @inline and its members")
     CHECK(!checked.module.bindings[1].is_inline);
 }
 
-TEST("sgl check - the binding list is checked: every entry is a bare name of a binding")
+TEST("sgl check - the binding list is checked: every entry is the name of a binding")
 {
     CHECK(reports_for("fun f(x: float){nope} -> float => x\n") == "unknown-name user:[nope] nope\n");
     CHECK(reports_for("fun f(x: float){vec3} -> float => x\n") == "wrong-kind-of-name user:[vec3] vec3 is no binding\n");
     CHECK(reports_for("binding b:\n    k: float\nfun f(x: float){b = b} -> float => x\n")
-          == "unsupported-yet user:[b = b] a binding entry that is not a bare name\n");
+          == "unsupported-yet user:[b = b] a binding entry that is not a binding's name\n");
 }
 
 namespace

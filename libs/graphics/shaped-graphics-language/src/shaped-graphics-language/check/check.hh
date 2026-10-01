@@ -18,10 +18,15 @@ struct sgl::check::module_file
 
 namespace sgl::check
 {
-/// Name resolution, type checking and evaluation of one unnamed module: the files of `prelude` in front, then `user`.
+/// Name resolution, type checking and evaluation of `program`, behind the files of `prelude` and the modules of
+/// `library` it reaches through `use`.
+///
+/// A library file belongs to the module its `module` line names; one without that line is no module's and is left out.
+/// Only the modules the program reaches are checked, and `checked_module::library_files` says which files those were.
+/// A program whose own `module` line names a module of the library is checked together with that module's files.
 ///
 /// They stay separate files, so every span keeps pointing into its own source.
-/// A file is named by position in that order: prelude file i is file i, and the user file is file `prelude.size()`, the last one.
+/// A file is named by position: the prelude's first, then the reached library files, then the program, the last one.
 /// `sgl::prelude_files()` is the library's own prelude, and a test may bring any other, an empty one included.
 ///
 /// A `@builtin` declaration stands for the record of `builtins` that has its name and, for a function, its parameter types.
@@ -31,6 +36,12 @@ namespace sgl::check
 /// What did not check has the error type, and the error type never causes a second diagnostic.
 ///
 /// A tracer: it carries exactly what `tests/samples/` needs, and everything else is `unsupported-yet`.
+[[nodiscard]] checked_module check(cc::span<module_file const> prelude,
+                                   cc::span<module_file const> library,
+                                   module_file program,
+                                   builtins::registry const& builtins);
+
+/// The same with no library.
 [[nodiscard]] checked_module check(cc::span<module_file const> prelude,
                                    module_file user,
                                    builtins::registry const& builtins);
@@ -44,9 +55,15 @@ namespace sgl::check
 [[nodiscard]] cc::optional<checked_prelude> check_prelude(cc::span<module_file const> prelude,
                                                           builtins::registry const& builtins);
 
-/// `check` over the prelude `prelude` was made from and `user`, starting from what checking the prelude left.
+/// `check` over the prelude `prelude` was made from, `library` and `program`, starting from what checking the prelude
+/// left.
 /// What it gives is what `check` gives, except that every id the program's check makes comes after the prelude's.
 /// It reads `prelude` and never writes it, so any number of threads may check against one at once.
+[[nodiscard]] checked_module check(checked_prelude const& prelude,
+                                   cc::span<module_file const> library,
+                                   module_file program);
+
+/// The same with no library.
 [[nodiscard]] checked_module check(checked_prelude const& prelude, module_file user);
 } // namespace sgl::check
 
@@ -82,5 +99,5 @@ private:
 
     friend cc::optional<checked_prelude> check_prelude(cc::span<module_file const> prelude,
                                                        builtins::registry const& builtins);
-    friend checked_module check(checked_prelude const& prelude, module_file user);
+    friend checked_module check(checked_prelude const& prelude, cc::span<module_file const> library, module_file program);
 };

@@ -65,6 +65,10 @@ expected_cell expected_at(int x, int y, bool is_cut)
 /// Builds the scene, runs `pipeline` over the grid and checks every cell.
 cc::shared_async<cc::unit> trace_grid(sg::context_handle ctx, sg::compute_pipeline_handle pipeline, bool is_cut)
 {
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
     // two triangles, non-indexed, three floats per vertex
     float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
     auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
@@ -238,6 +242,10 @@ expected_sphere expected_sphere_at(int x, int y, bool is_cut)
 
 cc::shared_async<cc::unit> trace_sphere_grid(sg::context_handle ctx, sg::compute_pipeline_handle pipeline, bool is_cut)
 {
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
     float const boxes[] = {0, 0, 0, 2, 2, 2, 2, 0, 0, 4, 2, 2};
     auto const input = ctx->persistent.create_buffer_from_data(boxes, sg::buffer_usage::accel_structure_build_input);
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
@@ -380,6 +388,10 @@ expected_mixed expected_mixed_at(int x, int y, bool is_cut)
 
 cc::shared_async<cc::unit> trace_mixed_grid(sg::context_handle ctx, sg::compute_pipeline_handle pipeline, bool is_cut)
 {
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
     float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
     float const boxes[] = {0, 0, 0, 2, 2, 2, 2, 0, 0, 4, 2, 2};
     auto const triangle_input

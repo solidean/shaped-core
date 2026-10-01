@@ -10,6 +10,11 @@ rules:
     files: [tests/corpus/corpus-test.cc, tests/check/checked-prelude-test.cc]
 
   - kind: allow-include
+    value: <filesystem>
+    reason: the sgl tool lists the .sgl files of a --module-dir; temporary until clean-core has a directory listing
+    files: tools/sgl/module_dirs.cc
+
+  - kind: allow-include
     value: [<fcntl.h>, <io.h>]
     reason: the language server's stdio host duplicates stdout and sets binary mode through the CRT; clean-core has no descriptor API
     files: tools/sgl/lsp/protocol/stdio_host.cc

@@ -1,4 +1,5 @@
 #include "files.hh"
+#include "module_dirs.hh"
 
 #include <clean-core/string/print.hh>
 #include <nexus/args/ambient.hh>
@@ -24,6 +25,7 @@ COMMAND("emit")
     auto entry = cc::string();
     auto target_name = cc::string("hlsl-dx12");
     auto run_tests = false;
+    auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args({.name = "sgl emit",
                           .description = "Compiles one entry point of an SGL file and prints the target text, "
                                          "or the diagnostics that kept it from being written."});
@@ -31,8 +33,16 @@ COMMAND("emit")
     args.arg({"entry"}, entry, {.desc = "the entry point, by name", .metavar = "NAME", .required = true});
     args.arg({"target"}, target_name, {.desc = "hlsl-dx12, hlsl-vulkan, wgsl or msl", .metavar = "TARGET"});
     args.arg({"run-tests"}, run_tests, {.desc = "run the file's tests first, and write nothing where one fails"});
+    args.arg({"module-dir"}, module_dirs,
+             {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
+    auto const library = sgl_tool::read_module_dirs(module_dirs);
+    if (library.has_error())
+    {
+        cc::eprintln("sgl emit: {}", library.error());
+        return exit_usage;
+    }
 
     auto target = sgl::emit::target::hlsl_dx12;
     auto is_known = false;
@@ -55,8 +65,12 @@ COMMAND("emit")
         return exit_usage;
     }
 
-    auto const text = sgl::compile_to_text(
-        {.source = source.value(), .source_name = path, .entry_point = entry, .target = target, .run_tests = run_tests});
+    auto const text = sgl::compile_to_text({.source = source.value(),
+                                            .source_name = path,
+                                            .library = sgl_tool::files_but(library.value(), path),
+                                            .entry_point = entry,
+                                            .target = target,
+                                            .run_tests = run_tests});
     if (text.has_error())
     {
         cc::eprint(text.error());

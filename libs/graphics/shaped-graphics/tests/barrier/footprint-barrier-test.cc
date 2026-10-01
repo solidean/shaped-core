@@ -265,6 +265,10 @@ cc::shared_async<cc::pair<cc::vector<byte>, sg::stats>> draws_in_one_rendering(s
                                                                                cc::vector<draw_step> steps,
                                                                                cc::vector<sg::buffer<float>> settle)
 {
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx.device_home())
+        co_await cc::async_resume_on(*home);
+
     auto const corners
         = ctx.persistent.create_buffer_from_data(cc::vector<shaders::shift_corner>{{.position = tg::vec3f(-1, -1, 0)},
                                                                                    {.position = tg::vec3f(3, -1, 0)},
@@ -320,6 +324,10 @@ cc::shared_async<cc::pair<cc::vector<byte>, sg::stats>> two_draws(sg::context& c
                                                                   sg::raster_pipeline const& second,
                                                                   sg::buffer<float> const& hits)
 {
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx.device_home())
+        co_await cc::async_resume_on(*home);
+
     auto const group = ctx.persistent.create_binding_group(ctx.cached.acquire_binding_group_layout<shaders::marks>(),
                                                            shaders::marks{.hits = hits.as_readwrite_buffer()});
     co_return co_await draws_in_one_rendering(

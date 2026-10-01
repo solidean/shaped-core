@@ -62,6 +62,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/raytracing_pipeline.hh
     src/shaped-shader-library/impl/pipeline_field_support.hh
     src/shaped-shader-library/impl/pipeline_fields.hh
+    src/shaped-shader-library/impl/sgl_library.hh
 )
 
 # The OS file-watch backend behind real_filesystem::watch.
@@ -152,6 +153,7 @@ if(SC_BUILD_TESTS)
         tests/dxc_compiler-test.cc
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc
+        tests/sgl_modules-test.cc
         tests/metal_compiler-test.cc
         tests/pipeline-test.cc
         tests/raytracing_pipeline-test.cc

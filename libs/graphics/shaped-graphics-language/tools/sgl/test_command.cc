@@ -1,4 +1,5 @@
 #include "files.hh"
+#include "module_dirs.hh"
 
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -21,12 +22,21 @@ constexpr int exit_failed = 2;
 COMMAND("test")
 {
     auto paths = cc::vector<cc::string>();
+    auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args({.name = "sgl test",
                           .description = "Checks SGL files and runs their tests; prints what failed, and one line per "
                                          "file."});
     args.positional("FILES", paths, {.desc = "the SGL sources", .min_count = 1});
+    args.arg({"module-dir"}, module_dirs,
+             {.desc = "a directory whose .sgl files are modules the files may use", .metavar = "DIR"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
         return r.exit_code();
+    auto const library = sgl_tool::read_module_dirs(module_dirs);
+    if (library.has_error())
+    {
+        cc::eprintln("sgl test: {}", library.error());
+        return exit_usage;
+    }
 
     auto code = exit_ok;
     for (auto const& path : paths)
@@ -38,7 +48,7 @@ COMMAND("test")
             code = exit_usage;
             continue;
         }
-        auto const tested = sgl::test_source(source.value(), path);
+        auto const tested = sgl::test_source(source.value(), path, sgl_tool::files_but(library.value(), path));
         cc::eprint(tested.errors);
         cc::eprint(tested.warnings);
         auto line = cc::format("{}: {} of {} tests passed", path, tested.tests_passed, tested.tests_run);

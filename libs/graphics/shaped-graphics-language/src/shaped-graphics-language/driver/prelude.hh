@@ -48,6 +48,11 @@ namespace sgl
 /// A driver checks such a source as that file of the prelude, in place of the library's copy.
 /// Behind the prelude it would declare everything a second time, and each name would then hide its own twin.
 [[nodiscard]] i32 prelude_file_of(cc::string_view path);
+
+/// Whether `a` and `b` are one path, each a path or a `file://` uri: either separator matches, `.`, `..` and doubled
+/// separators are read lexically, and on Windows any case matches.
+/// Nothing is opened, so a relative path and its absolute spelling, or a path and a symbolic link to it, are two paths.
+[[nodiscard]] bool is_same_path(cc::string_view a, cc::string_view b);
 } // namespace sgl
 
 namespace sgl::impl

@@ -247,6 +247,10 @@ async function doStart() {
     watchBinaries(resolved.watch);
 
     const logLevel = vscode.workspace.getConfiguration('sgl').get('server.logLevel', 'info');
+    // the server takes them absolute, so a relative one is the workspace folder's
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+    const moduleDirs = vscode.workspace.getConfiguration('sgl').get('moduleDirs', [])
+        .map((dir) => (path.isAbsolute(dir) || !folder ? dir : path.join(folder, dir)));
     const serverOptions = {
         command: copy.binary,
         args: ['lsp'],
@@ -254,7 +258,7 @@ async function doStart() {
     };
     const clientOptions = {
         documentSelector: [{ scheme: 'file', language: 'sgl' }],
-        initializationOptions: { logLevel },
+        initializationOptions: { logLevel, moduleDirs },
         outputChannel: output,
     };
 
@@ -529,7 +533,7 @@ async function activate(context) {
         vscode.workspace.onDidCloseTextDocument(onDocumentClosed),
         vscode.window.onDidChangeVisibleTextEditors((editors) => editors.forEach(applyMarks)),
         vscode.workspace.onDidChangeConfiguration((event) => {
-            if (event.affectsConfiguration('sgl.server')) {
+            if (event.affectsConfiguration('sgl.server') || event.affectsConfiguration('sgl.moduleDirs')) {
                 restartServer();
             }
         }),

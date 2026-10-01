@@ -556,12 +556,10 @@ struct flattener
         {
             return where.kind == target_kind::enum_case ? enum_value(type, id, where.index) : fail();
         }
-        if (e.node.is<ast::name>() || e.node.is<ast::self_ref>())
+        // A module-level name: a const is its value, and a file-scope sampler is handed to a builtin.
+        // A const that did not check has no value, and its name already has the error type (CHK-19).
+        auto const module_level = [&]() -> flat_expr_id
         {
-            for (auto const& b : current()->bound)
-                if (b.where == where)
-                    return is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
-            // a const that did not check has no value, and its name already has the error type (CHK-19)
             if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
                 && c.out.at(where.symbol).state == symbol_state::checked)
                 return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
@@ -569,9 +567,19 @@ struct flattener
                 && c.out.at(where.symbol).state == symbol_state::checked)
                 return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
             return fail();
+        };
+        if (e.node.is<ast::name>() || e.node.is<ast::self_ref>())
+        {
+            for (auto const& b : current()->bound)
+                if (b.where == where)
+                    return is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
+            return module_level();
         }
         if (auto const* const m = e.node.try_as<ast::member>())
         {
+            // CHK-348: `m.name`, a module-level name of module `m`
+            if (where.kind == target_kind::symbol)
+                return module_level();
             // `a.foo` that is no field is a call of `foo` with `a` (CHK-249)
             if (tables().call_at(id) >= 0)
                 return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);

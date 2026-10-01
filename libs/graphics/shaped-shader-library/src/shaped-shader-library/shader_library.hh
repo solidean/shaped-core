@@ -22,6 +22,7 @@ struct reload_config;
 struct compile_source_options;
 } // namespace slib
 
+
 /// Where a source that is not a file resolves its includes, and what it is called in an error.
 /// See shader_library::compile_source.
 struct slib::compile_source_options
@@ -96,6 +97,16 @@ public:
     /// Mounts a filesystem at a virtual path — for shader sources that belong to no single package, like a shared include library.
     void mount(cc::string_view virtual_dir, filesystem_handle fs);
 
+    /// Adds a directory of the mounted filesystem to the ones every SGL compile reads its modules from.
+    /// An SGL package's own are added with it; this is for one that belongs to no package, as `mount` is for includes.
+    /// Module names are the library's: two directories declaring one module make it one module of both their files.
+    void add_module_dir(cc::string_view virtual_dir);
+
+    /// Every `.sgl` file directly in a module directory, read now, which is what an SGL source's `use` reaches.
+    /// The directories come in the order they were added, and each one's files sorted by name, so a diagnostic about the
+    /// library never depends on the filesystem's order.
+    [[nodiscard]] module_library read_modules() const;
+
     /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
     /// Call after every add_package: the watcher walks the asset list, which registration grows.
     ///
@@ -141,7 +152,7 @@ public:
     struct compile_outcome
     {
         sg::async_compiled_shader shader;
-        cc::vector<cc::string> dependencies; ///< the source itself, then each resolved include
+        cc::vector<cc::string> dependencies; ///< the source itself, each resolved include, each module file reached
     };
 
     /// Reads, preprocesses and compiles one shader for `format`.
@@ -229,6 +240,11 @@ private:
     cc::vector<shader_asset_handle> _assets;
 
     cc::vector<package_entry> _packages;
+
+    /// The module directories, as virtual paths, and parallel to them the directory on disk each is, which a package
+    /// listing an added one again is told apart by; empty where it is no directory on disk.
+    cc::vector<cc::string> _module_dirs;
+    cc::vector<cc::string> _module_sources;
 
     /// Mutable because compiling is const, and tracking what it handed out changes nothing a caller can observe.
     mutable cc::async_backlog _backlog = cc::async_backlog("slib.shader_library");
