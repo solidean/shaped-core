@@ -103,6 +103,8 @@ public:
     void add_module_dir(cc::string_view virtual_dir);
 
     /// Every `.sgl` file directly in a module directory, read now, which is what an SGL source's `use` reaches.
+    /// The directories come in the order they were added, and each one's files sorted by name, so a diagnostic about the
+    /// library never depends on the filesystem's order.
     [[nodiscard]] module_library read_modules() const;
 
     /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
@@ -150,7 +152,7 @@ public:
     struct compile_outcome
     {
         sg::async_compiled_shader shader;
-        cc::vector<cc::string> dependencies; ///< the source itself, then each resolved include
+        cc::vector<cc::string> dependencies; ///< the source itself, each resolved include, each module file reached
     };
 
     /// Reads, preprocesses and compiles one shader for `format`.

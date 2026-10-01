@@ -344,8 +344,6 @@ slib::module_library slib::shader_library::read_modules() const
             result.paths.push_back(cc::move(path.value()));
             result.texts.push_back(cc::move(text.value()));
         }
-    for (auto i = isize(0); i < result.paths.size(); ++i)
-        result.files.push_back({.path = result.paths[i], .text = result.texts[i]});
     return result;
 }
 
@@ -538,11 +536,12 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
 
     // What an SGL source's `use` reaches, read as it is now: the modules are files like an include is.
     auto const modules = language == shader_language::sgl ? read_modules() : module_library();
+    auto const module_files = modules.files();
     shader_source_description desc = {.source = cc::move(source),
                                       .entry_point = cc::string::create_copy_of(entry_point),
                                       .stage = stage,
                                       .label = cc::string::create_copy_of(label),
-                                      .modules = modules.files};
+                                      .modules = module_files};
 
     auto preprocessed = compiler->preprocess(desc, resolve);
     if (preprocessed.has_error())

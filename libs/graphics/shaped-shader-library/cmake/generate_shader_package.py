@@ -1134,6 +1134,13 @@ def main() -> int:
         # The asset structs are names in the same namespace as every generated type.
         taken = {f.stem: f"the entry points of '{f.path}'" for f in entries.files}
         taken |= {f"{f.stem}_t": f"the entry points of '{f.path}'" for f in entries.files}
+        # an exported module is a namespace beside them, which a file's object or a type of its name would clash with
+        for name in entries.sgl.modules:
+            if name in taken:
+                raise GeneratorError(
+                    f"shader package '{manifest.name}': module:{name} generates the namespace '{name}', and the "
+                    f"generated C++ name '{name}' is already {taken[name]}; rename the file or the module")
+            taken[name] = f"the namespace of module:{name}"
         sgl_host_code.check_names(manifest.name, entries.sgl, taken)
         header = emit_header(manifest, entries)
         source = emit_source(manifest, entries.files, entries.bindings, embedded, entries.sgl)
@@ -1156,7 +1163,7 @@ def main() -> int:
     # Depfile: every file we read.
     # This is what makes editing an .hlsli regenerate the package -- DEPENDS alone only covers the entry
     # points named in the manifest, and the include closure is discovered here.
-    # A module file added to a module directory is not in it, and needs a reconfigure, as a new shader file does.
+    # A module file added to a module directory is not in it; ShaderPackage.cmake globs the directories for that.
     depfile = f"{(args.out_dir / (manifest.name + '.hh')).as_posix()}:"
     for _, file in embedded:
         depfile += f" \\\n  {file.as_posix()}"

@@ -85,11 +85,19 @@ cc::vector<cc::string> slib::real_filesystem::list(cc::string_view dir) const
     auto native = to_native_path(dir);
     if (!native.has_value())
         return result;
+    // UTF-8 both ways, as read_text is: the narrow std::filesystem spellings are the ANSI code page on Windows.
+    auto const& text = native.value();
+    auto const root = std::filesystem::path(
+        std::u8string_view(reinterpret_cast<char8_t const*>(cc::string_view(text).data()), text.size()));
     std::error_code ec;
-    for (auto const& e :
-         std::filesystem::directory_iterator(std::filesystem::path(native.value().c_str_materialize()), ec))
-        if (std::error_code is_file; e.is_regular_file(is_file) && !is_file)
-            result.push_back(cc::string(e.path().filename().generic_string().c_str()));
+    // advanced with an error_code, since a range-for's increment would throw on a failing directory
+    for (auto it = std::filesystem::directory_iterator(root, ec); !ec && it != std::filesystem::directory_iterator();
+         it.increment(ec))
+        if (std::error_code is_file; it->is_regular_file(is_file) && !is_file)
+        {
+            auto const name = it->path().filename().generic_u8string();
+            result.push_back(cc::string(cc::string_view(reinterpret_cast<char const*>(name.data()), isize(name.size()))));
+        }
     return result;
 }
 

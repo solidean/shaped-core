@@ -118,7 +118,8 @@ function(sc_add_shader_package)
             "target (${_target_dir}), not from ${CMAKE_CURRENT_SOURCE_DIR}")
     endif()
 
-    set(_source_dir "${CMAKE_CURRENT_SOURCE_DIR}/${PKG_SOURCE_DIR}")
+    # normalized as MODULE_DIRS are, since slib compares the two to add a directory listed by two packages once
+    cmake_path(ABSOLUTE_PATH PKG_SOURCE_DIR BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE OUTPUT_VARIABLE _source_dir)
     if(NOT IS_DIRECTORY "${_source_dir}")
         message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): SOURCE_DIR '${_source_dir}' is not a directory")
     endif()
@@ -173,6 +174,15 @@ function(sc_add_shader_package)
             list(GET _parts 0 _first)
             list(GET _parts 1 _kind)
             if(_first STREQUAL "module")
+                # One exporter per module: each writes <sgl_modules/NAME.hh> into its own include directory, and a
+                # target linking two would silently take whichever comes first on its include path.
+                get_property(_exporter GLOBAL PROPERTY "SC_SGL_EXPORTED_MODULE_${_kind}")
+                if(_exporter AND NOT _exporter STREQUAL "${PKG_TARGET}/${PKG_NAME}")
+                    message(FATAL_ERROR
+                        "sc_add_shader_package(${PKG_NAME}): module:${_kind} is exported by ${_exporter} already; "
+                        "a module has one exporting package, which every other one reaches through its MODULE_DIRS")
+                endif()
+                set_property(GLOBAL PROPERTY "SC_SGL_EXPORTED_MODULE_${_kind}" "${PKG_TARGET}/${PKG_NAME}")
                 list(APPEND _module_headers "${_gen_dir}/modules/sgl_modules/${_kind}.hh")
                 list(APPEND _module_sources "${_gen_dir}/modules/sgl_modules/${_kind}.cc")
                 set(_needs_sgl ON)
@@ -210,6 +220,14 @@ function(sc_add_shader_package)
             list(APPEND _shader_files "${_source_dir}/${_path}")
         endif()
     endforeach()
+    # Every module file is embedded, and one added to a module directory changes neither the manifest nor the depfile,
+    # so the directories are globbed with CONFIGURE_DEPENDS: a file appearing re-runs configure, then the generator.
+    if(PKG_LANGUAGE STREQUAL "sgl")
+        foreach(_dir IN ITEMS "${_source_dir}" ${_module_dirs})
+            file(GLOB _found CONFIGURE_DEPENDS "${_dir}/*.sgl")
+            list(APPEND _shader_files ${_found})
+        endforeach()
+    endif()
     list(REMOVE_DUPLICATES _shader_files)
 
     add_custom_command(

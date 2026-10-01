@@ -39,12 +39,19 @@ struct slib::module_source
 };
 
 /// The files of every module directory of a library, read: what an SGL compile's `use` is resolved against.
-/// `files` views `paths` and `texts`, so the three move together and are never copied apart.
 struct slib::module_library
 {
     cc::vector<cc::string> paths;
     cc::vector<cc::string> texts;
-    cc::vector<module_source> files;
+
+    /// Each file as a view of `paths` and `texts`, which must outlive the result.
+    [[nodiscard]] cc::vector<module_source> files() const
+    {
+        auto result = cc::vector<module_source>();
+        for (auto i = cc::isize(0); i < paths.size(); ++i)
+            result.push_back({.path = paths[i], .text = texts[i]});
+        return result;
+    }
 };
 
 /// What `preprocess` hands back.

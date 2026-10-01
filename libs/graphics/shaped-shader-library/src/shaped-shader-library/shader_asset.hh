@@ -87,7 +87,7 @@ private:
         sg::shader_format format = sg::shader_format::dxil;
         sg::async_compiled_shader current;
         sg::async_compiled_shader pending;
-        cc::vector<cc::string> dependencies; ///< source + resolved includes, as of the last compile
+        cc::vector<cc::string> dependencies; ///< source, resolved includes and module files reached, as of the last compile
     };
 
     struct state

@@ -74,7 +74,8 @@ sc_add_shader_package(
 # that header's directory is PUBLIC on TARGET: linking the exporting target is what makes a module reachable.
 #   another package using the module lists the exporter's module dir in its own MODULE_DIRS, by path.
 #   a module nobody exports fails as a missing <sgl_modules/view.hh>, whose include line names the entry to add.
-# every module file is embedded; a new one in a module dir needs a reconfigure, as a new shader does.
+# every module file is embedded; a new one in a module dir re-runs configure and the generator on the next build.
+# a module is exported by one package; a second `module:view` anywhere in the build is a configure error.
 ```
 
 ```cpp
@@ -105,7 +106,8 @@ lib.add_package(my::shaders::package());    // mounts embedded, then SOURCE_DIR 
 lib.add_package(pkg, filesystem_handle fs); // explicit fs instead (tests: a memory_filesystem)
 lib.mount(virtual_dir, fs);                 // shared includes that belong to no package
 lib.add_module_dir(virtual_dir);            // a mounted dir of SGL modules that belongs to no package
-lib.read_modules();                         // -> module_library { paths, texts, files }: what every SGL compile `use`s, read now
+lib.read_modules();                         // -> module_library { paths, texts, files() }: what every SGL compile `use`s, read now,
+                                            //    directory by directory as added, each sorted by name; files() views the two vectors
 // an SGL package adds its own module dirs; every SGL compile, compile_source and compile_hit_group included, sees all of them.
 // a module file a compile reached is a dependency like an include: editing it reloads the shader.
 lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts)
@@ -144,7 +146,7 @@ asset->acquire(sg::shader_format)   // -> explicit format (tests/tools with no c
 asset->generation()                 // -> u64; moves when a reload replaced the shader. Cache it.
 asset->last_error()                 // -> optional<string>; why the last reload was rejected
 asset->virtual_path() / stage() / entry_point()
-asset->dependencies()               // -> vector<string>; source + resolved includes (what is watched)
+asset->dependencies()               // -> vector<string>; source, resolved includes, module files reached (what is watched)
 // GOTCHA: acquire returns a COLD cc::async node. The ambient scheduler's workers run it, or block on it with
 //   cc::try_async_blocking_get(sh). Lazy + per format: nothing compiles until asked, and each format is
 //   compiled separately from the same source.

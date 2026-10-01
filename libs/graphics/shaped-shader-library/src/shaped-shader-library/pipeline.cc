@@ -285,7 +285,7 @@ slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d
     auto next = current;
     auto const source = (*d.vertex)->read_source();
     auto const modules = (*d.vertex)->read_modules();
-    auto const library = impl::sgl_library_of(modules.files);
+    auto const library = impl::sgl_library_of(modules.files());
     auto const described
         = source.has_value()
             ? sgl::describe({.source = source.value(), .source_name = (*d.vertex)->virtual_path(), .library = library})

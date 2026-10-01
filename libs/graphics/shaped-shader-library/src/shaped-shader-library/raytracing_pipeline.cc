@@ -114,7 +114,7 @@ cc::string slib::frozen_moved_of(raytracing_pipeline_definition const& d)
     // A shader reloaded, so the source may state something new: described outside the lock, since it checks the whole file.
     auto const source = handles.empty() ? cc::optional<cc::string>() : (*handles[0])->read_source();
     auto const modules = handles.empty() ? module_library() : (*handles[0])->read_modules();
-    auto const library = impl::sgl_library_of(modules.files);
+    auto const library = impl::sgl_library_of(modules.files());
     auto const described
         = source.has_value()
             ? sgl::describe({.source = source.value(), .source_name = (*handles[0])->virtual_path(), .library = library})
@@ -298,7 +298,7 @@ cc::shared_async<sg::compiled_shader> slib::compile_callable(sg::context* ctx,
     if (!d.has_host_callables)
         throw fail(cc::format("{}'s {} takes no callable of the host's", d.file, d.name));
     auto const modules = library->read_modules();
-    auto const sgl_library = impl::sgl_library_of(modules.files);
+    auto const sgl_library = impl::sgl_library_of(modules.files());
     auto const described = sgl::describe({.source = source, .source_name = label, .library = sgl_library});
     if (described.has_error())
         throw fail(cc::format("{} does not compile, so it holds no callable:\n{}", label, described.error()));
@@ -335,7 +335,7 @@ cc::shared_async<cc::vector<sg::hit_shader>> slib::compile_hit_group(sg::context
     if (!d.has_host_hit_groups)
         throw fail(cc::format("{}'s {} takes no hit group of the host's", d.file, d.name));
     auto const modules = library->read_modules();
-    auto const sgl_library = impl::sgl_library_of(modules.files);
+    auto const sgl_library = impl::sgl_library_of(modules.files());
     auto const described = sgl::describe({.source = source, .source_name = label, .library = sgl_library});
     if (described.has_error())
         throw fail(cc::format("{} does not compile, so it holds no hit group:\n{}", label, described.error()));
