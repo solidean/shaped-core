@@ -139,6 +139,34 @@ constexpr auto tg::ellipsoid_boundary<D, DAmbient, T>::closest_points_to(Obj con
     return tg::impl::closest_points_to(*this, obj);
 }
 
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::halfspace<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb_boundary<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box<D, DAmbient, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box_boundary<D, DAmbient, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
 // closest_point_to, one definition per object type
 
 template <int D, class T>
@@ -228,6 +256,34 @@ constexpr auto tg::ellipsoid<D, DAmbient, T>::closest_point_to(Obj const& obj) c
 template <int D, int DAmbient, class T>
 template <class Obj>
 constexpr auto tg::ellipsoid_boundary<D, DAmbient, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::halfspace<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb_boundary<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box<D, DAmbient, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box_boundary<D, DAmbient, T>::closest_point_to(Obj const& obj) const
 {
     return tg::impl::closest_point_to(*this, obj);
 }

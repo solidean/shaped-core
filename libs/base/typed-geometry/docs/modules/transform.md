@@ -229,7 +229,7 @@ The third is the one with content: `composed` must produce a transform whose act
 The equivalence extends to the **return type**, not just the value.
 Composing a similarity with a per-axis scaling gives an affine transform, under which a sphere is an ellipsoid.
 The chained spelling reaches an ellipsoid too, because the sphere becomes one at the scaling step and an ellipsoid stays an ellipsoid under the similarity.
-Where a pair is unsupported, both spellings fail: a rotation composed with a translation is rigid, which an `aabb` rejects, and so does the chain at its rotation step.
+Where a pair is unsupported, both spellings fail: a projected ray is a bounded segment, which a `ray` rejects at the projection step either way.
 
 ### Composition is opt-in, and `composed` is the opt-in
 
@@ -324,7 +324,10 @@ Which registrations exist is a statement about geometry, not about effort:
 |---|---|---|
 | `sphere` | similarity / affine (unless embedded) | `sphere` / **`ellipsoid`** |
 | `ellipsoid` | affine | `ellipsoid` |
-| `aabb` | scaling + translation **only** | `aabb` |
+| `aabb` | scaling + translation / affine | `aabb` / **`box`** |
+| `box` | affine | `box` |
+| `halfspace` | affine, projective (as its plane) | `halfspace` |
+| any `*_boundary` | whatever its solid is | the boundary of the solid's image |
 | `triangle`, `segment` | affine, projective | unchanged |
 | `plane` | affine, projective | `plane` |
 | `ray`, `line` | affine **only** | unchanged |
@@ -338,14 +341,15 @@ An unbounded primitive generally does not.
 
 ### An unsupported pair is a compile error on purpose
 
-A rotated `aabb` is not an `aabb`.
-Returning the enclosing box instead would be a silent, lossy answer to a question the caller did not ask, so the chain falls through to its `static_assert` and says so.
-The same holds for a projected `ray` (its point at infinity maps to a finite point, so the image is a bounded segment) and a projected `sphere` (a general quadric).
+A rotated `aabb` is not an `aabb`, so it becomes an oriented `box` rather than the enclosing aabb.
+Returning the enclosing box would be a silent, lossy answer to a question the caller did not ask.
+Where no type holds the answer the chain falls through to its `static_assert` and says so.
+That is a projected `ray` (its point at infinity maps to a finite point, so the image is a bounded segment) and a projected `sphere` (a general quadric).
 
-Each of those gaps names a type tg does not have yet — `obb`, a clipped segment, `quadric`.
+Each of those gaps names a type tg does not have yet — a clipped segment, `quadric`.
 
 The cost of that design is that "can X be transformed by Y" is not separately probeable: the member's return type is `auto`, so asking would instantiate the body and trip the `static_assert`.
-Probe the branch condition instead — `requires { tg::scaling_translation_transform<D, T>(t); }` is exactly why an `aabb` accepts or rejects a given transform.
+Probe the branch condition instead — `requires { tg::scaling_translation_transform<D, T>(t); }` is exactly why an `aabb` stays an `aabb` under a given transform.
 
 ### A normal is a `bivec`, not a `vec`
 

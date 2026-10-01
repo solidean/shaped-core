@@ -255,7 +255,8 @@ Access checking is part of that `requires`, so a non-befriended object never see
 
 One branch covers many inputs: `aabb` asks only for `scaling_translation_transform<D, T>` and thereby handles the identity, a pure translation and both scalings.
 
-An unsupported pair is a **compile error**, deliberately — a rotated `aabb` is not an `aabb`, and returning an enlarged one silently would be worse.
+An unsupported pair is a **compile error**, deliberately — a projected `ray` is not a `ray`, and returning something else silently would be worse.
+A rotated `aabb` is answered with the type that holds it, an oriented `box`.
 Since the member's return type is `auto`, asking "is this supported?" would instantiate the body and trip the `static_assert`.
 Probe the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
 
@@ -268,7 +269,9 @@ The primitive *types* and the `object_traits` seam have landed; queries, measure
 geometry/
   traits.hh         [done]     object_traits<ObjT> seam + tg::traits::intrinsic_dim/ambient_dim/is_finite
   primitives/       [in progress]
-    aabb.hh         [done]     solid axis-aligned box {min..max}
+    aabb.hh         [done]     solid axis-aligned box {min..max}; aabb_boundary its faces
+    box.hh          [done]     oriented box {center + H*c : c in [-1,1]^D}, H's columns the half-axes; box_boundary
+    halfspace.hh    [done]     {x : dot(normal,x) <= dist}, plane's encoding
     triangle.hh     [done]     filled triangle (3 verts)
     segment.hh      [done]     closed segment between 2 endpoints
     ray.hh          [done]     {origin + t*dir : t >= 0}
@@ -277,7 +280,7 @@ geometry/
     sphere.hh       [done]     ball {x : distance(x, center) <= radius}; sphere_boundary is the surface
     ellipsoid.hh    [done]     solid ellipsoid {center + sum_i u_i * semi_axes[i] : |u| <= 1}; ellipsoid_boundary the surface
     primitives.hh   [done]
-    # planned: halfspace, box, capsule, cylinder, cone, ... — see plans/old-tg-carryover.md
+    # planned: capsule, cylinder, cone, ... — see plans/old-tg-carryover.md
   query/            [in progress]  # the member verbs' definitions, one header per verb; kernels and GJK / EPA in impl/
   construct/        [planned]  # hull, fitting, primitives_from_points
   geometry.hh       [done]
@@ -376,8 +379,8 @@ The top-level `<typed-geometry/all.hh>` pulls in everything.
 3.  linalg: bivec + cross/dual/undual  [done]
 4.  linalg: mat, quat                  [done]
 5.  transform: the flag lattice, homogeneous_transform, transformed(pos/vec/bivec), the object handshake   [done]
-6.  geometry primitives: aabb, triangle, segment, ray, line, plane, sphere, ellipsoid + object_traits   [in progress]  types done; queries planned
-7.  geometry measure/query basics      [planned]
+6.  geometry primitives + object_traits   [in progress]  wave 1 of plans/old-tg-carryover.md
+7.  geometry queries: member verbs, kernel seam, GJK / EPA   [in progress]
 8.  curves                             [planned]
 9.  symbolic scalars                   [planned]
 10. calculus                           [planned]

@@ -34,6 +34,26 @@ struct line;
 template <int D, class T>
 struct plane;
 
+/// half-space {x : dot(normal, x) <= dist}, plane's encoding with the plane as its boundary.
+/// Infinite, intrinsic_dim D.
+template <int D, class T>
+struct halfspace;
+
+/// the faces of an aabb.
+/// Finite, intrinsic_dim D-1.
+template <int D, class T>
+struct aabb_boundary;
+
+/// oriented box {center + H * c : c in [-1, 1]^D}, H's columns the half-axes (not necessarily orthogonal).
+/// Finite, intrinsic_dim D; DAmbient is the space it sits in, as for sphere.
+template <int D, int DAmbient, class T>
+struct box;
+
+/// the faces of a box.
+/// Finite, intrinsic_dim D-1.
+template <int D, int DAmbient, class T>
+struct box_boundary;
+
 /// solid sphere (ball) {x : distance(x, center) <= radius}. Finite, intrinsic_dim D.
 /// D is the dimension of the flat it curves in, DAmbient the space that flat sits in.
 /// The primary template is undefined — each supported pair is a specialization, since the embedded case also has to name its flat.
@@ -98,6 +118,18 @@ template <class T>
 using plane3 = plane<3, T>;
 
 template <class T>
+using halfspace2 = halfspace<2, T>;
+template <class T>
+using halfspace3 = halfspace<3, T>;
+
+template <class T>
+using box2 = box<2, 2, T>;
+template <class T>
+using box3 = box<3, 3, T>;
+template <class T>
+using box2in3 = box<2, 3, T>;
+
+template <class T>
 using sphere2 = sphere<2, 2, T>;
 template <class T>
 using sphere3 = sphere<3, 3, T>;
@@ -108,6 +140,22 @@ template <class T>
 using ellipsoid3 = ellipsoid<3, 3, T>;
 
 // a boundary is spelled "_boundary"; in 3D it is also "_surface"
+template <class T>
+using aabb2_boundary = aabb_boundary<2, T>;
+template <class T>
+using aabb3_boundary = aabb_boundary<3, T>;
+template <class T>
+using aabb3_surface = aabb_boundary<3, T>;
+
+template <class T>
+using box2_boundary = box_boundary<2, 2, T>;
+template <class T>
+using box3_boundary = box_boundary<3, 3, T>;
+template <class T>
+using box3_surface = box_boundary<3, 3, T>;
+template <class T>
+using box2in3_boundary = box_boundary<2, 3, T>;
+
 template <class T>
 using sphere2_boundary = sphere_boundary<2, 2, T>;
 template <class T>
@@ -150,6 +198,16 @@ using aabb3d = aabb<3, f64>;
 using aabb2i = aabb<2, i32>;
 using aabb3i = aabb<3, i32>;
 
+using aabb2f_boundary = aabb_boundary<2, f32>;
+using aabb3f_boundary = aabb_boundary<3, f32>;
+using aabb2d_boundary = aabb_boundary<2, f64>;
+using aabb3d_boundary = aabb_boundary<3, f64>;
+using aabb2i_boundary = aabb_boundary<2, i32>;
+using aabb3i_boundary = aabb_boundary<3, i32>;
+using aabb3f_surface = aabb_boundary<3, f32>;
+using aabb3d_surface = aabb_boundary<3, f64>;
+using aabb3i_surface = aabb_boundary<3, i32>;
+
 using triangle2f = triangle<2, f32>;
 using triangle3f = triangle<3, f32>;
 using triangle2d = triangle<2, f64>;
@@ -179,6 +237,27 @@ using plane2f = plane<2, f32>;
 using plane3f = plane<3, f32>;
 using plane2d = plane<2, f64>;
 using plane3d = plane<3, f64>;
+
+using halfspace2f = halfspace<2, f32>;
+using halfspace3f = halfspace<3, f32>;
+using halfspace2d = halfspace<2, f64>;
+using halfspace3d = halfspace<3, f64>;
+
+// box carries a half-axis matrix, so only the real-scalar suffixes f/d.
+using box2f = box<2, 2, f32>;
+using box3f = box<3, 3, f32>;
+using box2d = box<2, 2, f64>;
+using box3d = box<3, 3, f64>;
+using box2in3f = box<2, 3, f32>;
+using box2in3d = box<2, 3, f64>;
+using box2f_boundary = box_boundary<2, 2, f32>;
+using box3f_boundary = box_boundary<3, 3, f32>;
+using box2d_boundary = box_boundary<2, 2, f64>;
+using box3d_boundary = box_boundary<3, 3, f64>;
+using box3f_surface = box_boundary<3, 3, f32>;
+using box3d_surface = box_boundary<3, 3, f64>;
+using box2in3f_boundary = box_boundary<2, 3, f32>;
+using box2in3d_boundary = box_boundary<2, 3, f64>;
 
 // sphere/ellipsoid carry a radius or a semi-axis map, so only the real-scalar suffixes f/d.
 using sphere2f = sphere<2, 2, f32>;

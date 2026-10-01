@@ -4,7 +4,8 @@
 
 ## What this module is
 
-`geometry/` holds the geometric primitive *types* — `aabb`, `triangle`, `segment`, `ray`, `line`, `plane` — and the `object_traits` seam that classifies them.
+`geometry/` holds the geometric primitive *types* and the `object_traits` seam that classifies them.
+The types are `aabb`, `box`, `triangle`, `segment`, `ray`, `line`, `plane`, `halfspace`, `sphere`, `ellipsoid`, and the boundaries of the solids among them.
 It depends on `linalg/`, since the primitives are phrased in `pos`/`vec`, and on `scalar/`.
 Geometric *queries* (containment, distance, closest point, intersection) are member functions whose definitions live in `geometry/query/`, one header per verb.
 [plans/geometry-query-matrix.md](../plans/geometry-query-matrix.md) is that layer, and [plans/old-tg-carryover.md](../plans/old-tg-carryover.md) the object roster and the per-type verbs.
@@ -37,6 +38,8 @@ The ones worth internalizing:
 - `segment` — `{(1-t)·pos0 + t·pos1 : t in [0,1]}`, endpoints included.
 - `ray` — `{origin + t·dir : t >= 0}`; `line` — the same with `t in R`.
 - `plane` — the points **on** the hyperplane `{x : dot(normal, x) == dist}`, *not* a half-space.
+- `halfspace` — `{x : dot(normal, x) <= dist}`, plane's encoding, with the plane as its boundary.
+- `box` — `{center + H·c : c in [-1, 1]^D}`, the half-axes as `H`'s columns and not necessarily orthogonal, so every affine image of a box is a box.
 
 ### `object_traits`: `intrinsic_dim`, `ambient_dim`, `is_finite`
 

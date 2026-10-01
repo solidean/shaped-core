@@ -143,6 +143,34 @@ constexpr auto tg::ellipsoid_boundary<D, DAmbient, T>::distance_sqr_to(Obj const
     return tg::impl::distance_sqr_to(*this, obj);
 }
 
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::halfspace<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb_boundary<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box<D, DAmbient, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box_boundary<D, DAmbient, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
 // distance_to, one definition per object type
 
 template <int D, class T>
@@ -236,6 +264,34 @@ constexpr auto tg::ellipsoid_boundary<D, DAmbient, T>::distance_to(Obj const& ob
     return tg::impl::distance_to(*this, obj);
 }
 
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::halfspace<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb_boundary<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box<D, DAmbient, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box_boundary<D, DAmbient, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
 // signed_distance_to, one definition per object type
 
 template <int D, class T>
@@ -325,6 +381,34 @@ constexpr auto tg::ellipsoid<D, DAmbient, T>::signed_distance_to(Obj const& obj)
 template <int D, int DAmbient, class T>
 template <class Obj>
 constexpr auto tg::ellipsoid_boundary<D, DAmbient, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::halfspace<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb_boundary<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box<D, DAmbient, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box_boundary<D, DAmbient, T>::signed_distance_to(Obj const& obj) const
 {
     return tg::impl::signed_distance_to(*this, obj);
 }

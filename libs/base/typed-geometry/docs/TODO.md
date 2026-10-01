@@ -52,8 +52,6 @@ Add entries as we discover them, and remove them as they land.
 
 ## geometry
 
-- **A rotated `aabb`.**
-  It becomes the oriented `box` once that lands in wave 1 of [plans/old-tg-carryover.md](plans/old-tg-carryover.md); until then it is a deliberate compile error.
 - **The affine image of an embedded `sphere`.**
   It is an `ellipsoid<D, DAmbient, T>`, but building one means turning the circle's normal into an orthonormal basis of its plane, which `linalg` has no routine for.
   What is missing is a `tg::any_orthogonal(vec)` / `tg::orthonormal_basis(vec)`.

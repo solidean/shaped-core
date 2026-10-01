@@ -5,6 +5,8 @@
 /// would let that pair have two answers in one program.
 
 #include <typed-geometry/geometry/query/impl/kernels/aabb.hh>
+#include <typed-geometry/geometry/query/impl/kernels/box.hh>
+#include <typed-geometry/geometry/query/impl/kernels/halfspace.hh>
 #include <typed-geometry/geometry/query/impl/kernels/linear.hh>
 #include <typed-geometry/geometry/query/impl/kernels/plane.hh>
 #include <typed-geometry/geometry/query/impl/kernels/pos.hh>

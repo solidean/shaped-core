@@ -3,7 +3,9 @@
 /// All geometric primitive types.
 
 #include <typed-geometry/geometry/primitives/aabb.hh>
+#include <typed-geometry/geometry/primitives/box.hh>
 #include <typed-geometry/geometry/primitives/ellipsoid.hh>
+#include <typed-geometry/geometry/primitives/halfspace.hh>
 #include <typed-geometry/geometry/primitives/line.hh>
 #include <typed-geometry/geometry/primitives/plane.hh>
 #include <typed-geometry/geometry/primitives/ray.hh>

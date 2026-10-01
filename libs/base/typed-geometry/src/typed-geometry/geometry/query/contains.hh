@@ -114,3 +114,31 @@ constexpr auto tg::ellipsoid_boundary<D, DAmbient, T>::contains(Obj const& obj) 
 {
     return tg::impl::contains(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::halfspace<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb_boundary<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box<D, DAmbient, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box_boundary<D, DAmbient, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}

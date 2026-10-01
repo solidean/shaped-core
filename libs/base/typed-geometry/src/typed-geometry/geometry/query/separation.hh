@@ -113,3 +113,31 @@ constexpr auto tg::ellipsoid_boundary<D, DAmbient, T>::separation_from(Obj const
 {
     return tg::impl::separation_from(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::halfspace<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box<D, DAmbient, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box_boundary<D, DAmbient, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}

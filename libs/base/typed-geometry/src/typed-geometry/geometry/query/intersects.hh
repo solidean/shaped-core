@@ -23,6 +23,11 @@ template <class A, class B>
         return impl::contains(a, b);
     else if constexpr (gjk_pair<A, B>)
         return impl::gjk(a, b).overlapping;
+    // a boundary meets b exactly when its solid meets b without swallowing it whole
+    else if constexpr (is_boundary<A> && has_intersects_direct<solid_t<A>, B> && has_contains<solid_t<A>, B>)
+        return impl::intersects(a.solid(), b) && !impl::contains(a.solid(), b);
+    else if constexpr (is_boundary<B> && has_intersects_direct<solid_t<B>, A> && has_contains<solid_t<B>, A>)
+        return impl::intersects(b.solid(), a) && !impl::contains(b.solid(), a);
     else
         static_assert(false, "tg: no intersects for this pair of types; tg::has_intersects<A, B> is the probe");
 }
@@ -117,6 +122,34 @@ constexpr auto tg::ellipsoid<D, DAmbient, T>::intersects(Obj const& obj) const
 template <int D, int DAmbient, class T>
 template <class Obj>
 constexpr auto tg::ellipsoid_boundary<D, DAmbient, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::halfspace<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::aabb_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box<D, DAmbient, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr auto tg::box_boundary<D, DAmbient, T>::intersects(Obj const& obj) const
 {
     return tg::impl::intersects(*this, obj);
 }

@@ -71,6 +71,8 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/primitives/ray.hh
     src/typed-geometry/geometry/primitives/line.hh
     src/typed-geometry/geometry/primitives/plane.hh
+    src/typed-geometry/geometry/primitives/halfspace.hh
+    src/typed-geometry/geometry/primitives/box.hh
     src/typed-geometry/geometry/primitives/sphere.hh
     src/typed-geometry/geometry/primitives/ellipsoid.hh
     src/typed-geometry/geometry/primitives/primitives.hh
@@ -79,6 +81,8 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/query/distance.hh
     src/typed-geometry/geometry/query/impl/kernels.hh
     src/typed-geometry/geometry/query/impl/kernels/aabb.hh
+    src/typed-geometry/geometry/query/impl/kernels/box.hh
+    src/typed-geometry/geometry/query/impl/kernels/halfspace.hh
     src/typed-geometry/geometry/query/impl/kernels/linear.hh
     src/typed-geometry/geometry/query/impl/kernels/plane.hh
     src/typed-geometry/geometry/query/impl/kernels/pos.hh
@@ -177,11 +181,14 @@ if(SC_BUILD_TESTS)
         tests/geometry/ray-test.cc
         tests/geometry/line-test.cc
         tests/geometry/plane-test.cc
+        tests/geometry/halfspace-test.cc
+        tests/geometry/box-test.cc
         tests/geometry/object-traits-test.cc
         tests/geometry/query/ladder-test.cc
         tests/geometry/query/point-queries-test.cc
         tests/geometry/query/special-case-test.cc
         tests/geometry/query/gjk-test.cc
+        tests/geometry/query/wave1-queries-test.cc
     )
     sc_nexus_binary(typed-geometry-test KINDS tests)
 

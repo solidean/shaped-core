@@ -265,8 +265,13 @@ t(obj);               // the call spelling of t.transform(obj) — application, 
 ## geometry primitives (each denotes a set of points)
 
 ```cpp
-#include <typed-geometry/geometry/primitives/aabb.hh>      // and triangle/segment/ray/line/plane.hh
+#include <typed-geometry/geometry/primitives/aabb.hh>      // and box/triangle/segment/ray/line/plane/halfspace.hh
 tg::aabb<D,T>     {pos min, max}              // solid box {x : min <= x <= max}              — finite
+tg::aabb_boundary<D,T>                        // its faces; aabb3f_surface
+tg::box<D,DA,T>   {pos center; mat<D,DA> half_extents}  // {center + H*c : c in [-1,1]^D}; columns = half-axes,
+                                              //   NOT necessarily orthogonal (any affine image of a box is a box)
+tg::box_boundary<D,DA,T>                      // its faces; box3f_surface; box2in3f is a rectangle in 3D
+tg::halfspace<D,T> {vec normal; T dist}       // {x : dot(normal,x) <= dist}; h.boundary() is the plane
 tg::triangle<D,T> {pos pos0, pos1, pos2}      // filled triangle (hull of 3 verts), 2D patch  — finite
 tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,1]}, 1D        — finite
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite
@@ -299,7 +304,9 @@ obj.transformed(t);   // every primitive; which transforms it accepts is a geome
 //   sphere              similarity -> sphere      |  affine -> ELLIPSOID (unless embedded: needs a basis of the flat)
 //   *_boundary          whatever its solid becomes, then .boundary()
 //   ellipsoid           affine     -> ellipsoid   (embedded or not — the map is one of the ambient space)
-//   aabb                scaling + translation ONLY (a rotated aabb needs obb, which does not exist)
+//   aabb                scaling + translation -> aabb  |  affine -> BOX (never a silently enlarged aabb)
+//   box                 affine
+//   halfspace           whatever its plane accepts
 //   triangle, segment   affine, projective
 //   plane               affine, projective        (normal picks up the cofactor, not the linear part)
 //   ray, line           affine ONLY               (a projected ray is a bounded segment)
@@ -453,7 +460,7 @@ cc::format("{}", h);                               // shortest digits for f16: "
   An implicit one would make two registrations at different classes an ambiguous overload set.
   Narrowing is not a constructor at all.
 - **A normal is a `bivec`, not a `vec`.** It transforms by the cofactor matrix, not the linear part — the difference only shows up under a non-uniform scaling, which is what makes it a silent bug.
-- **`obj.transformed(t)` on an unsupported pair is a compile error on purpose** (a rotated `aabb` is not an `aabb`).
+- **`obj.transformed(t)` on an unsupported pair is a compile error on purpose** (a projected `ray` is not a `ray`); a rotated `aabb` is a `box`.
   It is not probeable — the return type is `auto`, so asking trips the `static_assert`.
   Test the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
 - **Transform scale factors are POSITIVE** unless the class carries `negative_scaling` (`tg::signed_scaling_transform3f`, `signed_similarity_transform3f`, …); the factories assert it.

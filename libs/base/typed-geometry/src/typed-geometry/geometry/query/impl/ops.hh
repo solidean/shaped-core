@@ -75,6 +75,13 @@ concept epa_pair = gjk_pair<A, B> && traits::intrinsic_dim<A> == traits::ambient
                 && traits::intrinsic_dim<B> == traits::ambient_dim<B>
                 && (traits::ambient_dim<A> == 2 || traits::ambient_dim<A> == 3);
 
+/// a boundary type: it has a `.solid()` reading, which every boundary does and nothing else.
+template <class Obj>
+concept is_boundary = requires(Obj const& o) { o.solid(); };
+
+template <class Obj>
+using solid_t = decltype(static_cast<Obj const*>(nullptr)->solid());
+
 template <class T>
 inline constexpr bool is_pos = false;
 template <int D, class T>
@@ -109,11 +116,18 @@ template <class A, class B>
 concept has_contains = impl::has_op<impl::contains_op, A, B> //
                     || (impl::is_pos<B> && has_project_to<B, A>);
 
+/// the rungs of intersects that do not go through a boundary's solid.
 template <class A, class B>
-concept has_intersects = impl::has_op<impl::intersects_op, A, B> //
-                      || impl::has_op<impl::intersects_op, B, A> //
-                      || (impl::is_pos<A> && has_contains<B, A>) //
-                      || (impl::is_pos<B> && has_contains<A, B>) || impl::gjk_pair<A, B>;
+concept has_intersects_direct = impl::has_op<impl::intersects_op, A, B> //
+                             || impl::has_op<impl::intersects_op, B, A> //
+                             || (impl::is_pos<A> && has_contains<B, A>) //
+                             || (impl::is_pos<B> && has_contains<A, B>) || impl::gjk_pair<A, B>;
+
+template <class A, class B>
+concept has_intersects
+    = has_intersects_direct<A, B> //
+   || (impl::is_boundary<A> && has_intersects_direct<impl::solid_t<A>, B> && has_contains<impl::solid_t<A>, B>)
+   || (impl::is_boundary<B> && has_intersects_direct<impl::solid_t<B>, A> && has_contains<impl::solid_t<B>, A>);
 
 template <class A, class B>
 concept has_separation_from = impl::has_op<impl::separation_op, A, B> || impl::epa_pair<A, B>;
