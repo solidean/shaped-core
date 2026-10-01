@@ -42,6 +42,14 @@ struct contains_op;
 template <class A, class B>
 struct intersects_op;
 
+/// `a.intersection_with(b)`: the overlap as a primitive, where it is one.
+template <class A, class B>
+struct intersection_op;
+
+/// `l.intersection_parameter_with(b)` for a line, ray or segment l: where along l it meets b.
+template <class A, class B>
+struct intersection_parameter_op;
+
 /// `a.separation_from(b)`, where a closed form beats EPA.
 template <class A, class B>
 struct separation_op;
@@ -82,6 +90,18 @@ concept is_boundary = requires(Obj const& o) { o.solid(); };
 template <class Obj>
 using solid_t = decltype(static_cast<Obj const*>(nullptr)->solid());
 
+/// a line, ray or segment: origin + t * dir over a parameter range.
+template <class T>
+inline constexpr bool is_linear_v = false;
+template <int D, class T>
+inline constexpr bool is_linear_v<tg::line<D, T>> = true;
+template <int D, class T>
+inline constexpr bool is_linear_v<tg::ray<D, T>> = true;
+template <int D, class T>
+inline constexpr bool is_linear_v<tg::segment<D, T>> = true;
+template <class T>
+concept is_linear = is_linear_v<T>;
+
 template <class T>
 inline constexpr bool is_pos = false;
 template <int D, class T>
@@ -121,7 +141,9 @@ template <class A, class B>
 concept has_intersects_direct = impl::has_op<impl::intersects_op, A, B> //
                              || impl::has_op<impl::intersects_op, B, A> //
                              || (impl::is_pos<A> && has_contains<B, A>) //
-                             || (impl::is_pos<B> && has_contains<A, B>) || impl::gjk_pair<A, B>;
+                             || (impl::is_pos<B> && has_contains<A, B>) || impl::gjk_pair<A, B>
+                             || (impl::is_linear<A> && impl::has_op<impl::intersection_parameter_op, A, B>)
+                             || (impl::is_linear<B> && impl::has_op<impl::intersection_parameter_op, B, A>);
 
 template <class A, class B>
 concept has_intersects
@@ -131,4 +153,21 @@ concept has_intersects
 
 template <class A, class B>
 concept has_separation_from = impl::has_op<impl::separation_op, A, B> || impl::epa_pair<A, B>;
+template <class A, class B>
+concept has_intersection_parameter_with = impl::has_op<impl::intersection_parameter_op, A, B>;
+
+/// the parameters of a linear object against b are crossings (b is a surface), not an interval inside a solid.
+template <class A, class B>
+concept parameters_are_hits
+    = requires(A const& a, B const& b) { impl::intersection_parameter_op<A, B>::apply(a, b).has_any(); };
+
+/// a linear object's overlap with b is a primitive: crossing points, or a segment when b is a bounded solid.
+template <class A, class B>
+concept parameters_as_geometry
+    = impl::is_linear<A> && has_intersection_parameter_with<A, B> && (parameters_are_hits<A, B> || traits::is_finite<B>);
+
+template <class A, class B>
+concept has_intersection_with = impl::has_op<impl::intersection_op, A, B> //
+                             || impl::has_op<impl::intersection_op, B, A> //
+                             || parameters_as_geometry<A, B> || parameters_as_geometry<B, A>;
 } // namespace tg

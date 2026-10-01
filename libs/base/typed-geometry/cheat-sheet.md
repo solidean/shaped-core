@@ -350,6 +350,13 @@ a.distance_sqr_to(b);  a.distance_to(b);   // distance_to needs has_sqrt
 p.signed_distance_to(obj);  // negative inside (plane: on the normal's far side)
 a.contains(b);              // every point of b is in a — not symmetric
 a.intersects(b);            // they share a point
+l.intersection_parameter_with(b);          // l a line/ray/segment: tg::hits<N,T> against a SURFACE (sorted crossings,
+                                           //   .has_any() .first() .last()), cc::optional<tg::hit_interval<T>> {start,
+                                           //   end} against a SOLID (from inside, start is the ray's own 0)
+l.closest_intersection_parameter_with(b);  // cc::optional<T>: the first crossing, or where l enters the solid
+a.intersection_with(b);     // cc::optional<X>, X the generic-case shape: aabb∩aabb aabb, plane∩plane line,
+                            //   triangle∩plane segment, ball∩plane disk3, sphere surfaces circle3; a linear object
+                            //   gives its crossing pos (hits of pos) or the segment inside a BOUNDED solid
 a.separation_from(b);       // cc::optional<tg::separation<D,T>> {normal, depth}: move b by normal*depth to stop
                             //   overlapping; empty when apart. Bounded convex SOLIDS only (EPA), 2D and 3D
 // bounded convex objects with a support (pos, segment, triangle, aabb, sphere) get distance / closest points /

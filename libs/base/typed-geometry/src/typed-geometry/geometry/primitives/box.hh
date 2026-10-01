@@ -175,6 +175,8 @@ public:
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr auto separation_from(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersection_with(Obj const& obj) const;
 
     // comparison
 public:
@@ -299,6 +301,8 @@ public:
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr auto separation_from(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersection_with(Obj const& obj) const;
 
     // comparison
 public:

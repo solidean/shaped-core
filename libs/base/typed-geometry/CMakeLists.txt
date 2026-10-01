@@ -82,8 +82,10 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/query/impl/kernels.hh
     src/typed-geometry/geometry/query/impl/kernels/aabb.hh
     src/typed-geometry/geometry/query/impl/kernels/box.hh
+    src/typed-geometry/geometry/query/impl/kernels/constructive.hh
     src/typed-geometry/geometry/query/impl/kernels/halfspace.hh
     src/typed-geometry/geometry/query/impl/kernels/linear.hh
+    src/typed-geometry/geometry/query/impl/kernels/parameters.hh
     src/typed-geometry/geometry/query/impl/kernels/plane.hh
     src/typed-geometry/geometry/query/impl/kernels/pos.hh
     src/typed-geometry/geometry/query/impl/kernels/sphere.hh
@@ -92,7 +94,10 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/query/impl/gjk.hh
     src/typed-geometry/geometry/query/impl/ops.hh
     src/typed-geometry/geometry/query/impl/special_case.hh
+    src/typed-geometry/geometry/query/hits.hh
+    src/typed-geometry/geometry/query/intersection.hh
     src/typed-geometry/geometry/query/intersects.hh
+    src/typed-geometry/geometry/query/parameter.hh
     src/typed-geometry/geometry/query/project.hh
     src/typed-geometry/geometry/query/separation.hh
     src/typed-geometry/geometry/query/query.hh
@@ -194,6 +199,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/query/special-case-test.cc
         tests/geometry/query/gjk-test.cc
         tests/geometry/query/wave1-queries-test.cc
+        tests/geometry/query/intersection-test.cc
     )
     sc_nexus_binary(typed-geometry-test KINDS tests)
 

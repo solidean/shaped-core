@@ -6,8 +6,10 @@
 
 #include <typed-geometry/geometry/query/impl/kernels/aabb.hh>
 #include <typed-geometry/geometry/query/impl/kernels/box.hh>
+#include <typed-geometry/geometry/query/impl/kernels/constructive.hh>
 #include <typed-geometry/geometry/query/impl/kernels/halfspace.hh>
 #include <typed-geometry/geometry/query/impl/kernels/linear.hh>
+#include <typed-geometry/geometry/query/impl/kernels/parameters.hh>
 #include <typed-geometry/geometry/query/impl/kernels/plane.hh>
 #include <typed-geometry/geometry/query/impl/kernels/pos.hh>
 #include <typed-geometry/geometry/query/impl/kernels/sphere.hh>

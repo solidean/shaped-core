@@ -8,6 +8,16 @@
 
 namespace tg::impl
 {
+/// whether a parameter result holds anything: hits, or an interval.
+template <class R>
+[[nodiscard]] constexpr bool any_parameter(R const& r)
+{
+    if constexpr (requires { r.has_any(); })
+        return r.has_any();
+    else
+        return r.has_value();
+}
+
 template <class A, class B>
 [[nodiscard]] constexpr bool intersects(A const& a, B const& b)
 {
@@ -21,6 +31,10 @@ template <class A, class B>
         return impl::contains(b, a);
     else if constexpr (is_pos<B> && has_contains<A, B>)
         return impl::contains(a, b);
+    else if constexpr (is_linear<A> && has_op<intersection_parameter_op, A, B>)
+        return impl::any_parameter(intersection_parameter_op<A, B>::apply(a, b));
+    else if constexpr (is_linear<B> && has_op<intersection_parameter_op, B, A>)
+        return impl::any_parameter(intersection_parameter_op<B, A>::apply(b, a));
     else if constexpr (gjk_pair<A, B>)
         return impl::gjk(a, b).overlapping;
     // a boundary meets b exactly when its solid meets b without swallowing it whole

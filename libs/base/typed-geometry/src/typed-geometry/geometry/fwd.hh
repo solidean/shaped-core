@@ -83,6 +83,14 @@ struct ellipsoid_boundary;
 template <int D, class T>
 struct separation;
 
+/// at most N crossings of a linear object with a surface, sorted along it.
+template <int N, class HitT>
+struct hits;
+
+/// the parameters [start, end] of a linear object inside a solid.
+template <class T>
+struct hit_interval;
+
 //
 // Dimensional aliases
 //
