@@ -168,8 +168,7 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
                          return;
                      }
                      // CHK-347: a `use` binds its name for the whole file, and a body is not where a file's lines go
-                     auto const is_use = ast::is_valid(d.declaration)
-                                      && ast.at(d.declaration).node.is<ast::use_decl>();
+                     auto const is_use = ast::is_valid(d.declaration) && ast.at(d.declaration).node.is<ast::use_decl>();
                      unsupported(file, where, is_use ? "`use` inside a function" : "a declaration inside a function");
                  },
                  [&](ast::invalid_stmt const&) { result = flow::unknown; });

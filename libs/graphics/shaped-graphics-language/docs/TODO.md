@@ -56,7 +56,8 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 
 - **Modules are a tracer.** Every compile parses the library and checks the modules the program reaches, in one pass with it, and keeps nothing between compiles.
   Interfaces, separate compilation and a parsed library shared across compiles are the [compilation model](spec/incubator/compilation-model.md)'s.
-  The front end parses a library file only where its first line may be a `module` line, which keeps a module directory of programs cheap for the tool and slib; the language server still parses every file.
+  The front end parses a library file only where its first line may be a `module` line, which keeps a module directory of programs cheap for the tool and slib.
+  The language server still parses every file of its module directories.
 - **What a module the program uses cannot hold yet** (CHK-350): a file-scope sampler, an `@operator` function, and a second binding of one name in one list.
   Its entry points, pipelines and tests are built only when it is compiled as a program.
 - **The sgl tool lists a module directory through `<filesystem>`** (`tools/sgl/module_dirs.cc`), since clean-core has no directory listing yet.

@@ -52,7 +52,8 @@ namespace
         auto const where = a.file.at(d.form).where;
         if (!first.has_value())
             first = where;
-        if (auto const* const n = a.ast.at(u->path).node.try_as<sgl::ast::name>(); n != nullptr && a.file.text_of(n->where) == module)
+        if (auto const* const n = a.ast.at(u->path).node.try_as<sgl::ast::name>();
+            n != nullptr && a.file.text_of(n->where) == module)
             return where;
     }
     return first.has_value() ? first.value() : sgl::source_span{};
@@ -76,8 +77,8 @@ cc::vector<lsp::diagnostic> sgl_lsp::diagnostics_of(analysis const& a,
             continue;
         auto const& module = a.module.file_modules[d.file];
         auto summary = lsp_diagnostic_of(a, d, e);
-        summary.related_information.insert_at(0, {.location = {.uri = a.uri_of(d.file), .range = summary.range},
-                                                  .message = summary.message});
+        summary.related_information.insert_at(
+            0, {.location = {.uri = a.uri_of(d.file), .range = summary.range}, .message = summary.message});
         summary.range = sgl_lsp::range_of(a, user, use_line_of(a, module), e);
         summary.message = cc::format("module {} does not check: {}", module, summary.message);
         out.push_back(cc::move(summary));

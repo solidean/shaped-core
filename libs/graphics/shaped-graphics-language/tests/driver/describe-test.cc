@@ -773,11 +773,13 @@ TEST("sgl describe - a module is described as every declaration of its files, wi
 TEST("sgl describe - a module is described without the modules it uses, which describe themselves")
 {
     sgl::library_file const library[] = {
-        {.name = "math.sgl", .source = "module math\n\nbinding scale:\n    factor: float\n\nstruct particle:\n"
-                                       "    x: float\n"},
-        {.name = "view.sgl", .source = "module view\nuse math\n\nbinding frame:\n    things: buffer[math.particle]\n"
-                                       "\nstruct particle:\n    y: float\n\nbinding local:\n"
-                                       "    own: buffer[particle]\n"},
+        {.name = "math.sgl",
+         .source = "module math\n\nbinding scale:\n    factor: float\n\nstruct particle:\n"
+                   "    x: float\n"},
+        {.name = "view.sgl",
+         .source = "module view\nuse math\n\nbinding frame:\n    things: buffer[math.particle]\n"
+                   "\nstruct particle:\n    y: float\n\nbinding local:\n"
+                   "    own: buffer[particle]\n"},
     };
     auto const r = sgl::describe({.library = library, .module = "view"});
     REQUIRE(r.has_value());
@@ -796,8 +798,9 @@ TEST("sgl describe - a module is described without the modules it uses, which de
 
 TEST("sgl describe - a module file saved with a byte-order mark is still a module of the library")
 {
-    sgl::library_file const library[] = {{.name = "view.sgl", .source = "\xEF\xBB\xBFmodule view\n\nbinding frame:\n"
-                                                                        "    exposure: float\n"}};
+    sgl::library_file const library[] = {{.name = "view.sgl",
+                                          .source = "\xEF\xBB\xBFmodule view\n\nbinding frame:\n"
+                                                    "    exposure: float\n"}};
     auto const r = sgl::describe({.library = library, .module = "view"});
     REQUIRE(r.has_value());
     CHECK(r.value().bindings.size() == 1);

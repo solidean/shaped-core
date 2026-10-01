@@ -2015,10 +2015,9 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         if (!is_listed && scope.is_test)
         {
             // CHK-228: a test gives a callee its bindings by listing them, and its driver gives them values (CHK-333)
-            auto& d = report(
-                diagnostic_kind::binding_not_listed, file, where,
-                cc::format("{} needs {}, and the test does not list it", name_seen_from(file, callee),
-                           name_seen_from(file, needed)));
+            auto& d = report(diagnostic_kind::binding_not_listed, file, where,
+                             cc::format("{} needs {}, and the test does not list it", name_seen_from(file, callee),
+                                        name_seen_from(file, needed)));
             d.notes.push_back({.file = file,
                                .where = where,
                                .message = cc::format("`test {{{}}}:` lists it, and the driver that runs the test "
