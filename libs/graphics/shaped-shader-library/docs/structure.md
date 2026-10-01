@@ -24,7 +24,7 @@ This document is design intent, not a guarantee of final API.
 src/shaped-shader-library/
   fwd.hh / all.hh                 [done]
   shader_package.hh               [done]        shader_definition + shader_package + embedded_file
-  shader_asset.hh/.cc             [done]        acquire(ctx)/acquire(format); per-format pending+current
+  shader_asset.hh/.cc             [done]        acquire(ctx)/acquire(format), with SGL options; per-format and per-option-set pending+current
                                                 slots; consumer-side promotion; generation/last_error
   shader_library.hh/.cc           [done]        mounts + compilers + read->preprocess->compile; packages;
                                                 start_hot_reload/poll_hot_reload; weak alive-token
@@ -116,6 +116,9 @@ The shape the seam is built for, and what is still `[planned]`:
   It carries [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the tier-1 compute and raster fixtures.
   A package generates host types from it: groups, `@inline` constants, vertex inputs, render targets, and raster and ray-tracing pipelines.
   A ray-tracing pipeline's type is [raytracing-pipelines](raytracing-pipelines.md); the SGL compiler maps all six ray-tracing stages.
+  **An SGL option is set per acquire**: a generated options struct per entry point and pipeline that reaches one, at the source's defaults.
+  A `shader_asset` keys its compiles by format and by the values of the options its entry point reaches, and a reload recompiles each set.
+  A binding whose image format or array length names an option generates no type yet, since its type fixes both.
   A group's textures and images are typed views, a bound sampler an `sg::sampler` field, and a `sampler name:` block of the binding one of its `declared_samplers()`.
   Its table carries every fact sg's layouts take from a binding, from `sgl describe`, so the WebGPU layout agrees with the WGSL the group becomes.
   **The MSL arm runs too**: `create_metal_compiler()` is the `metal_lib` inner compiler that `create_sgl_compiler` maps to the `msl` target.

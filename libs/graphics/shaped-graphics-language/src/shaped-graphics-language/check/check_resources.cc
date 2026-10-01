@@ -217,14 +217,32 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
-    // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats.
+    // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats, or a const of one.
     // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
-    auto const* const dot = ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>();
-    auto const format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
+    auto const argument = arguments[0].value;
+    auto const* const dot = ast_of(file).at(argument).node.try_as<ast::leading_dot>();
+    auto format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
+    if (auto const* const n = ast_of(file).at(argument).node.try_as<ast::name>())
+    {
+        auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+        auto const id = found != nullptr && !found->empty() ? found->front() : symbol_id::none;
+        if (is_valid(id) && out.at(id).kind == symbol_kind::constant)
+        {
+            set_target(file, argument, {.kind = target_kind::symbol, .symbol = id});
+            if (demand(id, file, n->where) != symbol_state::checked)
+                return checked_module::error_type;
+            auto const& c = out.constants[out.at(id).info];
+            if (c.kind == constant_kind::enum_case && out.name_of(c.type) == "pixel_format")
+            {
+                format = find_image_format(out.at(out.at(c.type).cases)[c.case_index].name);
+                note_option(file, n->where, c);
+            }
+        }
+    }
     if (format < 0)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[0].value),
-               "an image takes one of sg's image formats as an enum case: `.rgba8_unorm`");
+               "an image takes one of sg's image formats, as an enum case or a const of one: `.rgba8_unorm`");
         return checked_module::error_type;
     }
     if (!k_image_formats[format].is_portable)

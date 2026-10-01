@@ -219,12 +219,16 @@ public:
             return cc::error(cc::format("SGL has no entry point of the stage '{}' is declared as", desc.entry_point));
         }
 
+        auto options = cc::vector<sgl::check::option_value>();
+        for (auto const& o : desc.options)
+            options.push_back({.name = o.name, .value = o.value});
         auto text = sgl::compile_to_text(
             {.source = desc.source,
              .source_name = desc.label.empty() ? cc::string_view("<sgl>") : cc::string_view(desc.label),
              .entry_point = desc.entry_point,
              .stage = stage,
-             .target = _target});
+             .target = _target,
+             .options = options});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
@@ -292,6 +296,24 @@ private:
     sgl::emit::target _target;
 };
 } // namespace
+
+slib::shader_option slib::option_of(cc::string_view name, bool value)
+{
+    return {.name = cc::string(name), .value = cc::string(value ? "true" : "false")};
+}
+
+slib::shader_option slib::option_of(cc::string_view name, int value)
+{
+    return {.name = cc::string(name), .value = cc::format("{}", value)};
+}
+
+slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value)
+{
+    for (auto const& c : slib::impl::fields::cases_pixel_format)
+        if (c.value == int(value))
+            return {.name = cc::string(name), .value = cc::format(".{}", c.name)};
+    CC_UNREACHABLE("every sg::pixel_format has a name");
+}
 
 std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
 {

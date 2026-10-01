@@ -38,6 +38,36 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
 }
 
 
+# An option as the host sets it: its C++ type, and its default as `describe` spells it, written as a C++ value.
+OPTION_TYPES = {
+    "bool": ("bool", lambda value: value),
+    "int": ("int", lambda value: value),
+    "pixel_format": ("sg::pixel_format", lambda value: f"sg::pixel_format::{value.lstrip('.')}"),
+}
+
+
+def options_struct(package: str, where: str, struct_name: str, names: list[str], options: list[dict]) -> str:
+    """The options a shader or a pipeline reaches as one struct, each defaulted as its source writes it."""
+    by_name = {o["name"]: o for o in options}
+    out = [f"/// The options {where} reaches, each at the default its source writes. Generated; do not edit.\n"]
+    out.append(f"struct {struct_name}\n{{\n")
+    for name in names:
+        option = by_name[name]
+        known = OPTION_TYPES.get(option["type"])
+        if known is None:
+            raise HostCodeError(
+                f"shader package '{package}': {where} reaches the option '{name}' of type '{option['type']}', which has "
+                f"no C++ type in the generator yet (sgl_host_code.py knows: {', '.join(OPTION_TYPES)})")
+        out.append(f"    {known[0]} {name} = {known[1](option['value'])}; ///< `@option const {name}`\n")
+    out.append("\n")
+    out.append("    /// The values as an acquire takes them.\n")
+    out.append("    [[nodiscard]] cc::vector<slib::shader_option> values() const\n    {\n")
+    listed = ", ".join(f'slib::option_of("{name}", {name})' for name in names)
+    out.append(f"        return {{{listed}}};\n    }}\n")
+    out.append("};\n")
+    return "".join(out)
+
+
 def dx12_semantic(member: dict) -> str:
     """The dx12 semantic of a vertex input member, which `sgl describe` states (EMIT-28).
     The text SGL emits takes it from the same place, so the input layout and the shader always agree."""
@@ -94,6 +124,11 @@ def includes(entries: SglEntries) -> list[str]:
             or any(p.get("samplers") for _, p in entries.pipelines)):
         out += ["<shaped-graphics/binding/pipeline_layout.hh>", "<shaped-graphics/binding/sampler.hh>",
                 "<shaped-shader-library/binding/binding_groups.hh>"]
+    # An options struct: its values as an acquire takes them, and a format's enumerators for a default.
+    if (any(e.get("options") for e in entries.described_entry_points.values())
+            or any(p.get("options") for _, p in entries.pipelines + entries.raytracing_pipelines)):
+        out += ["<clean-core/container/vector.hh>", "<shaped-shader-library/compiler/shader_compiler.hh>",
+                "<shaped-graphics/resource/pixel_format.hh>"]
     if not entries.bindings and not entries.vertex_inputs and not entries.render_targets:
         return out
     out += ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
@@ -134,8 +169,18 @@ def includes(entries: SglEntries) -> list[str]:
 # ---- a resource group ----------------------------------------------------------------------------------------------
 
 
+def refuse_options(package: str, file: SglFile, binding: dict) -> None:
+    """A binding's generated type bakes its layout and its image formats, so one that names an option has none yet."""
+    if binding.get("options"):
+        raise HostCodeError(
+            f"shader package '{package}': '{file.path}' `binding {binding['name']}` names the option(s) "
+            f"{', '.join(binding['options'])}, and a generated binding type fixes its formats and its layout; "
+            f"list the file's entry points alone, without '{file.path}:*'")
+
+
 def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFile, binding: dict) -> str:
     name = binding["name"]
+    refuse_options(package, file, binding)
     out = [f"\nnamespace {namespace}\n{{\n"]
     out.append(f"/// `binding {name}` of {file.path}, as the host fills it. Generated; do not edit.\n")
     out.append("///\n")
@@ -416,6 +461,7 @@ def emit_memory_struct_impl(namespace: str, struct: dict) -> str:
 def emit_inline(package: str, memory: dict[str, int], namespace: str, file: SglFile, binding: dict) -> str:
     """An `@inline binding`: the block byte for byte as the shader reads it, padding included, and `to_block` a copy of it."""
     name = binding["name"]
+    refuse_options(package, file, binding)
     out = [f"\nnamespace {namespace}\n{{\n"]
     out.append(f"/// `@inline binding {name}` of {file.path}: the inline constants, byte for byte as the shader reads them. Generated; do not edit.\n")
     out.append("///\n")
@@ -516,22 +562,33 @@ def entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> dict[tuple[str
     return out
 
 
-def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> str:
-    """One struct per wrapped entry point: its asset, and the pipeline layout its binding list states."""
+def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str], package: str = "") -> str:
+    """One struct per wrapped entry point: its asset, the pipeline layout its binding list states, and its options."""
     wrappers = entry_wrappers(entries, stems)
     out = []
     for (path, name), type_name in wrappers.items():
         described = entries.described_entry_points[(path, name)]
         listed = described["bindings"]
         types = ", ".join(listed)
+        options = described.get("options", [])
+        if options:
+            out.append(options_struct(package, f"`{name}` of {path}", f"{type_name}_options", options,
+                                      entries.file_options.get(path, [])))
         out.append(f"/// `{name}` of {path}: a {described['stage']} entry point listing {{{', '.join(listed)}}}.\n")
         out.append(f"struct {type_name}\n{{\n")
+        if options:
+            out.append(f"    using options = {type_name}_options;\n\n")
         out.append("    slib::shader_asset_handle asset;\n")
         out.append("\n")
         out.append("    /// The asset, as a plain handle has it: `->acquire(ctx)`.\n")
         out.append("    [[nodiscard]] slib::shader_asset* operator->() const { return asset.get(); }\n")
         out.append("    [[nodiscard]] bool operator==(std::nullptr_t) const { return asset == nullptr; }\n")
         out.append("\n")
+        if options:
+            out.append("    /// The shader compiled with `values`: each distinct set is a compile of its own, kept across reloads.\n")
+            out.append("    [[nodiscard]] sg::async_compiled_shader acquire(sg::context const& ctx, options const& values = {}) const\n    {\n")
+            out.append("        return asset->acquire(ctx, values.values());\n    }\n")
+            out.append("\n")
         out.append(f"    /// The pipeline layout this entry point's binding list states, with no reflected binding in it.\n")
         out.append("    /// It carries only the file samplers this entry point reaches, so a file used as a library never fills the sampler slots.\n")
         out.append("    /// A raster pipeline whose stages list different groups needs their union, spelled `ctx.cached.acquire_pipeline_layout<...>()`.\n")
@@ -546,7 +603,12 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> str:
             out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>(samplers);\n    }}\n")
         else:
             out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>();\n    }}\n")
-        if described["stage"] == "compute":
+        if described["stage"] == "compute" and options:
+            out.append("\n")
+            out.append("    /// The compute pipeline of this entry point over that layout, with `values` for its options.\n")
+            out.append("    [[nodiscard]] sg::async_compute_pipeline acquire_pipeline(sg::context& ctx, options const& values = {}) const\n    {\n")
+            out.append("        return slib::acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx), values.values());\n    }\n")
+        elif described["stage"] == "compute":
             out.append("\n")
             out.append("    /// The compute pipeline of this entry point over that layout, which is all a compute pipeline needs.\n")
             out.append("    [[nodiscard]] sg::async_compute_pipeline acquire_pipeline(sg::context& ctx) const\n    {\n")
@@ -763,13 +825,17 @@ def pipeline_includes(entries: SglEntries) -> list[str]:
     return out
 
 
-def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
+def emit_pipelines(entries: SglEntries, stems: dict[str, str], package: str = "") -> str:
     """One type per `pipeline` declaration: an `sg::raster_pipeline_source`, so `ctx.cached` acquires it."""
     out = []
     for file, p in entries.pipelines:
         stem = stems[file.path]
         type_name = pipeline_type(stem, p["name"])
         fields = open_fields(p)
+        options = p.get("options", [])
+        if options:
+            out.append(options_struct(package, f"`pipeline {p['name']}` of {file.path}", f"{type_name}_options",
+                                      options, file.options))
         named = [p[s] for s in PIPELINE_STAGES if p[s]]
         stages = ", ".join(named[:-1]) + " and " + named[-1] if len(named) > 1 else named[0]
         writes = f", writing `{p['target_set']}`" if p["target_set"] else ", writing depth alone"
@@ -781,6 +847,9 @@ def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
         for cpp, name, path in fields:
             default = "0" if cpp == "int" else "sg::pixel_format::undefined"
             out.append(f"    {cpp} {name} = {default}; ///< `{path}`\n")
+        if options:
+            out.append("    /// The values of the options its stages reach, which each set is a pipeline of its own; defaulted as written.\n")
+            out.append(f"    {type_name}_options options;\n")
         out.append("};\n")
         out.append(f"struct {type_name}\n{{\n")
         out.append(f"    using open = {type_name}_open;\n\n")
@@ -904,24 +973,32 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         for verb, latest in (("description", "false"), ("description_latest", "true")):
             out.append(f"\ncc::shared_async<sg::raster_pipeline_description> {qualified}::{verb}("
                        "sg::context& ctx, open const& parts, sg::raster_pipeline_customize customize) const\n{\n")
-            if not fields:
+            if not fields and not p.get("options"):
                 out.append("    (void)parts;\n")
+            values = ", parts.options.values()" if p.get("options") else ""
             out.append(f"    return slib::describe_raster_pipeline(&ctx, &definition(), cc::vector<slib::open_part>{stated}, "
-                       f"cc::move(customize), {latest});\n}}\n")
+                       f"cc::move(customize), {latest}{values});\n}}\n")
     return "".join(out)
 
 
 # ---- a ray-tracing pipeline --------------------------------------------------------------------------------------------
 
 
-def emit_raytracing_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
+def emit_raytracing_pipelines(entries: SglEntries, stems: dict[str, str], package: str = "") -> str:
     """One type per `@raytracing pipeline`: its description, its table, and its listed hit groups by position."""
     out = []
     for file, p in entries.raytracing_pipelines:
         type_name = pipeline_type(stems[file.path], p["name"])
         rays = file.ray_set(p["rays"])["rays"]
+        options = p.get("options", [])
+        if options:
+            out.append(options_struct(package, f"`@raytracing pipeline {p['name']}` of {file.path}",
+                                      f"{type_name}_options", options, file.options))
         out.append(f"/// `@raytracing pipeline {p['name']}` of {file.path}, over the ray set `{p['rays']}`. Generated; do not edit.\n")
         out.append(f"struct {type_name}\n{{\n")
+        if options:
+            out.append("    /// Its options, whose `values()` a description takes in `host.options`.\n")
+            out.append(f"    using options = {type_name}_options;\n\n")
         out.append(f"    /// The ray types of `{p['rays']}`, in table order: a trace of one takes its position as its contribution and its miss.\n")
         out.append(f"    static constexpr int ray_count = {len(rays)};\n")
         out.append("    /// A hit group's position among this pipeline's table's groups, which no other pipeline's `add_row` takes.\n")

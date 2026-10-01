@@ -129,6 +129,8 @@ struct sgl::check::checked_module
     cc::vector<pipeline_setting> pipeline_settings;
     /// The value of every `const` that checked.
     cc::vector<constant_info> constants;
+    /// Every place the program names an option, in the order the pass met them (CHK-355).
+    cc::vector<option_use> option_uses;
     /// How each resolved call fills its callee's parameters; `file_tables::call_of` points in here.
     cc::vector<call_record> call_records;
     cc::vector<written_argument> written_arguments;
@@ -272,10 +274,11 @@ struct sgl::check::checked_module
             && is_equal(binding_lists, rhs.binding_lists) && is_equal(type_lists, rhs.type_lists)
             && is_equal(samplers, rhs.samplers) && is_equal(pipelines, rhs.pipelines)
             && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
-            && is_equal(call_records, rhs.call_records) && is_equal(written_arguments, rhs.written_arguments)
-            && is_equal(call_slots, rhs.call_slots) && is_equal(near_misses, rhs.near_misses)
-            && is_equal(ray_traces, rhs.ray_traces) && is_equal(callable_calls, rhs.callable_calls)
-            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
+            && is_equal(option_uses, rhs.option_uses) && is_equal(call_records, rhs.call_records)
+            && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
+            && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
+            && is_equal(callable_calls, rhs.callable_calls) && is_equal(files, rhs.files)
+            && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;
     }

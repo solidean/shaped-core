@@ -495,6 +495,12 @@ The footprint and the bound resources would then be the union of every variant, 
 A switch that changes an image's format specializes on no target at all.
 A preprocessor would break what the syntax is built on: local errors, lossless parsing, and one tree for the language server.
 
+## CHK-355
+
+The host is generated from the options an entry point reaches, before any value is chosen, so the set must be one for every value.
+A set read off the flat tree would lose an option named only inside a branch another option removes, and the host could then never set it.
+Counting what the declarations name is a little wider than what one compile reads, and an option too many costs only a key.
+
 ## CHK-356
 
 An option is only worth having if what it turns off is gone.

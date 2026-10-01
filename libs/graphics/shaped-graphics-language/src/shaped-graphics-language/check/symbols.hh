@@ -452,8 +452,29 @@ struct sgl::check::constant_info
     f64 real = 0;
     /// A position in the `cases` of `type`, for an `enum_case`.
     i32 case_index = -1;
+    /// The `@option const` the value comes from, through any chain of consts naming it (CHK-353); `none` for a plain one.
+    symbol_id option = symbol_id::none;
 
     bool operator==(constant_info const&) const = default;
+};
+
+/// Where the source names an option, through a const naming it or directly: what an entry point's options are read from.
+struct sgl::check::option_use
+{
+    symbol_id option = symbol_id::none;
+    i32 file = 0;
+    source_span where;
+
+    bool operator==(option_use const&) const = default;
+};
+
+/// A value a compile gives an option, by the option's name, spelled as SGL spells it: `16`, `-3`, `true`, `.rgba16_float`.
+struct sgl::check::option_value
+{
+    cc::string name;
+    cc::string value;
+
+    bool operator==(option_value const&) const = default;
 };
 
 struct sgl::check::parameter

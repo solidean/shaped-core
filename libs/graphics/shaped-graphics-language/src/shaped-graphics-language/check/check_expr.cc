@@ -539,7 +539,10 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     case symbol_kind::constant:
         // CHK-219: a const is its value, and one that did not check is silent here, as a failed symbol always is.
         if (demand(symbol, file, where) == symbol_state::checked)
+        {
+            note_option(file, where, out.constants[out.at(symbol).info]);
             return out.at(symbol).type;
+        }
         break;
     case symbol_kind::sampler:
     {

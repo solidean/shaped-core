@@ -25,7 +25,17 @@ cc::vector<sgl::check::module_file> sgl::driver::impl::module_files_of(front_end
     return files;
 }
 
-sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view source, cc::string_view source_name)
+cc::vector<cc::string> sgl::driver::impl::option_names_of(check::checked_module const& m, check::flat_entry_point const& e)
+{
+    auto names = cc::vector<cc::string>();
+    for (auto const id : e.options)
+        names.push_back(m.at(id).name);
+    return names;
+}
+
+sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view source,
+                                                              cc::string_view source_name,
+                                                              cc::span<check::option_value const> options)
 {
     auto result = front_end{.prelude = prelude_files(), .source_name = source_name};
     auto const own = prelude_file_of(source_name);
@@ -55,7 +65,7 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
         modules.push_back({.file = *result.files[i], .ast = *result.asts[i]});
     auto const user = check::module_file{.file = *result.files.back(), .ast = *result.asts.back()};
     auto const* const checked = own >= 0 ? nullptr : checked_prelude();
-    result.module = checked != nullptr ? check::check(*checked, user) : check::check(modules, user);
+    result.module = checked != nullptr ? check::check(*checked, user, options) : check::check(modules, user, options);
 
     // Every phase's diagnostics in one list, so a test's `@expect` can take one of any phase before it is written out.
     auto all = cc::vector<check::located_diagnostic>();

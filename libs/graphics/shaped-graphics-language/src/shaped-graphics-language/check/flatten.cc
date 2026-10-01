@@ -2,6 +2,7 @@
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/interpret/interpret.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
@@ -2011,6 +2012,24 @@ struct flattener
         return add_expr(type, id, flat_block{.label = value_block, .body = body});
     }
 
+    /// CHK-356: the value of `condition` where it is a constant, which a branch on it is replaced by the taken side of.
+    /// Nothing for a condition that is no constant, and for one with no value, which `judge_constants` reports.
+    [[nodiscard]] cc::optional<bool> constant_condition(flat_expr_id condition) const
+    {
+        if (!is_valid(condition) || !is_constant(c.out, entry, condition))
+            return {};
+        auto const o = evaluate_constant(c.out, entry, condition);
+        if (o.status != run_status::ok || o.result.leaves.size() != 1 || o.result.leaves[0].kind != value_kind::boolean)
+            return {};
+        return o.result.leaves[0].as_bool();
+    }
+
+    /// The taken side of a branch on a constant, as a block of its own, so its locals stay in its scope.
+    void add_taken(origin from, ast::range_of<flat_stmt_id> body)
+    {
+        add_stmt(from, flat_block{.label = add_label("if"), .body = body});
+    }
+
     /// The branches of an `if` value, each an `if` nested in the `else` of the one before; the last has no condition.
     void flatten_if_branches(origin from, cc::span<ast::if_branch const> branches, label_id value_block)
     {
@@ -2020,8 +2039,17 @@ struct flattener
             return;
         }
         auto const condition = flatten_expr(branches.front().condition);
-        auto const then_body = flatten_arm_body(branches.front().then, value_block);
         auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
+        // CHK-356: only the side a constant takes is flattened, so nothing judges what the other side would use
+        if (auto const taken = constant_condition(condition); taken.has_value())
+        {
+            if (taken.value())
+                return add_taken(from, flatten_arm_body(branches.front().then, value_block));
+            if (rest.size() == 1)
+                return add_taken(from, flatten_arm_body(rest.front().then, value_block));
+            return flatten_if_branches(from, rest, value_block);
+        }
+        auto const then_body = flatten_arm_body(branches.front().then, value_block);
         auto else_body = ast::range_of<flat_stmt_id>();
         if (rest.size() == 1)
             else_body = flatten_arm_body(rest.front().then, value_block);
@@ -2295,10 +2323,19 @@ struct flattener
             return;
         }
         auto const condition = flatten_expr(first.condition);
+        auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
+        // CHK-356: only the side a constant takes is flattened, so nothing judges what the other side would use
+        if (auto const taken = constant_condition(condition); taken.has_value())
+        {
+            if (taken.value())
+                return add_taken(from, flatten_body(first.then));
+            if (!rest.empty() && !ast::is_valid(rest.front().condition))
+                return add_taken(from, flatten_body(rest.front().then));
+            return flatten_if(from, rest);
+        }
         auto const then_body = flatten_body(first.then);
 
         auto else_body = ast::range_of<flat_stmt_id>();
-        auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
         if (!rest.empty() && !ast::is_valid(rest.front().condition))
             else_body = flatten_body(rest.front().then);
         else if (!rest.empty())
@@ -2872,6 +2909,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     }
     judge_constants(f.entry);
     judge_uniformity(f.entry);
+    f.entry.options = options_reached(id, traversal != nullptr ? traversal->any_hit : symbol_id::none);
     out.entry_points.push_back(cc::move(f.entry));
 }
 

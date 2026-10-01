@@ -90,6 +90,14 @@ A builtin call whose parameters take the arguments in another order, or two of w
 Beyond that the flattener never hoists and never reorders, since evaluation order is the legalizer's job.
 Each body is checked once on its own, and each default once where it is declared.
 
+**A branch on a constant is flattened on the side it takes, and nothing else** (CHK-356).
+The flattener folds an `if` whose condition is a constant, a literal argument included, so the other side never enters the tree.
+The text, the footprint, the uniformity pass and the features an entry point needs all read that tree, so none of them sees it.
+
+**An option is substituted where its `const` compiles**, so every reader of a const reads the compile's value unaware.
+`checker::options` holds the values, and `option_uses` records where the program names an option.
+An entry point's options are the uses inside its declaration, its callees' and its bindings', which no value changes.
+
 **Compiling a function means its signature, with one exception.**
 A body is checked after every signature is known, which is what lets a function call one declared below it.
 An arrow body without `-> T` infers its result, so its body is checked as part of compiling it, while the symbol is still in compilation.

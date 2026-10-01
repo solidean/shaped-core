@@ -11,20 +11,24 @@ using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::check::impl;
 
-checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user, builtins::registry const& builtins)
+checked_module sgl::check::check(cc::span<module_file const> prelude,
+                                 module_file user,
+                                 builtins::registry const& builtins,
+                                 cc::span<option_value const> options)
 {
     auto files = cc::vector<module_file>();
     files.push_back_range(prelude);
     files.push_back(user);
     auto c = checker{.files = files, .builtins = builtins};
     c.out.builtins = &builtins;
+    c.options = options;
     c.run();
     return cc::move(c.out);
 }
 
-checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user)
+checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user, cc::span<option_value const> options)
 {
-    return check(prelude, user, builtins::default_registry());
+    return check(prelude, user, builtins::default_registry(), options);
 }
 
 sgl::check::checked_prelude::checked_prelude() = default;
@@ -64,13 +68,14 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     return result;
 }
 
-checked_module sgl::check::check(checked_prelude const& prelude, module_file user)
+checked_module sgl::check::check(checked_prelude const& prelude, module_file user, cc::span<option_value const> options)
 {
     auto files = cc::vector<module_file>();
     files.push_back_range(prelude._files);
     files.push_back(user);
     auto c = *prelude._state;
     c.files = files;
+    c.options = options;
     c.run(prelude._resume);
     return cc::move(c.out);
 }
@@ -413,6 +418,7 @@ void checker::run(resume_point from)
             compile(symbol_id(i));
 
     judge_redeclarations(from.symbols);
+    judge_option_values();
 
     // A default is checked where it is declared, once, and a call binds against the signature alone (CHK-243).
     for (auto i = from.symbols; i < out.symbols.size(); ++i)

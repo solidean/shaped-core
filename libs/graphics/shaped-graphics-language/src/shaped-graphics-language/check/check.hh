@@ -31,12 +31,18 @@ namespace sgl::check
 /// What did not check has the error type, and the error type never causes a second diagnostic.
 ///
 /// A tracer: it carries exactly what `tests/samples/` needs, and everything else is `unsupported-yet`.
+///
+/// `options` sets the user file's options by name, each standing for its value wherever it is named (CHK-354).
+/// An option `options` leaves out keeps its default, and a name no option of the user file has is `invalid-option`.
 [[nodiscard]] checked_module check(cc::span<module_file const> prelude,
                                    module_file user,
-                                   builtins::registry const& builtins);
+                                   builtins::registry const& builtins,
+                                   cc::span<option_value const> options = {});
 
 /// The same against `builtins::default_registry()`.
-[[nodiscard]] checked_module check(cc::span<module_file const> prelude, module_file user);
+[[nodiscard]] checked_module check(cc::span<module_file const> prelude,
+                                   module_file user,
+                                   cc::span<option_value const> options = {});
 
 /// The files of `prelude` checked once, for any number of programs behind them; none where they report anything.
 /// A failed prelude is never kept, so a caller falls back to `check` over the files, which reports it.
@@ -47,7 +53,9 @@ namespace sgl::check
 /// `check` over the prelude `prelude` was made from and `user`, starting from what checking the prelude left.
 /// What it gives is what `check` gives, except that every id the program's check makes comes after the prelude's.
 /// It reads `prelude` and never writes it, so any number of threads may check against one at once.
-[[nodiscard]] checked_module check(checked_prelude const& prelude, module_file user);
+[[nodiscard]] checked_module check(checked_prelude const& prelude,
+                                   module_file user,
+                                   cc::span<option_value const> options = {});
 } // namespace sgl::check
 
 namespace sgl::check::impl
@@ -82,5 +90,5 @@ private:
 
     friend cc::optional<checked_prelude> check_prelude(cc::span<module_file const> prelude,
                                                        builtins::registry const& builtins);
-    friend checked_module check(checked_prelude const& prelude, module_file user);
+    friend checked_module check(checked_prelude const& prelude, module_file user, cc::span<option_value const> options);
 };

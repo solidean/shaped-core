@@ -21,7 +21,11 @@ struct sgl::text_request
     /// The stage the caller expects the entry point to be; `none` takes whichever it is.
     check::stage stage = check::stage::none;
     emit::target target = emit::target::hlsl_dx12;
+    /// The values this compile gives the source's options, by name (CHK-354); an option left out keeps its default.
+    /// A name the source has no option of, and a value of another type than the option's, is `invalid-option`.
+    cc::span<check::option_value const> options;
     /// Runs the source's own tests after it checked, and makes a test that does not pass an error like any other.
+    /// The tests run with every option at its default, whatever `options` says.
     bool run_tests = false;
 };
 
@@ -83,6 +87,8 @@ struct sgl::emitted_source
     cc::string target_struct;
     /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
     check::feature_set features;
+    /// The options the entry point reaches, by name, in declaration order (CHK-355).
+    cc::vector<cc::string> options;
     /// What the entry point's code does to each binding it lists, keyed by host name; a slot it never touches is absent.
     cc::vector<check::slot_footprint> footprint;
     /// Every constant block and buffer element as the text declares it, which a compiler reflecting the text reports.

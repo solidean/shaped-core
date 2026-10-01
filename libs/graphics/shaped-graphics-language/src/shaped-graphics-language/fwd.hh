@@ -56,6 +56,7 @@ struct described_ray_set;
 struct described_hit_group;
 struct described_raytracing_pipeline;
 struct described_callables;
+struct described_option;
 struct module_description;
 struct describe_request;
 
@@ -221,6 +222,8 @@ enum class function_role : u8;
 struct symbol;
 enum class constant_kind : u8;
 struct constant_info;
+struct option_use;
+struct option_value;
 struct parameter;
 struct function_info;
 struct binding_info;

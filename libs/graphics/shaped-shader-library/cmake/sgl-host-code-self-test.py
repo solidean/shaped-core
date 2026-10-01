@@ -346,6 +346,54 @@ def a_pipelines_layout_holds_the_file_samplers_any_stage_reaches():
     expect_in("acquire_pipeline_layout<ns::shadow>();", plain, "no sampler")
 
 
+# ---- options --------------------------------------------------------------------------------------------------------
+
+OPTIONS = [{"name": "tile", "type": "int", "value": "8"}, {"name": "sharpen", "type": "bool", "value": "false"},
+           {"name": "output_format", "type": "pixel_format", "value": ".rgba16_float"}]
+
+
+@test
+def an_entry_points_options_are_a_struct_at_the_sources_defaults():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["shadow"], "options": ["tile", "output_format"]}
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)],
+                                         described_entry_points={(FILE.path, "cs"): entry},
+                                         file_options={FILE.path: OPTIONS})
+    header = sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"}, "pkg")
+    expect_in("struct shadow_cs_t_options\n{\n    int tile = 8;", header, "an int option, defaulted")
+    expect_in("    sg::pixel_format output_format = sg::pixel_format::rgba16_float;", header, "a format option")
+    expect_not_in("sharpen", header, "an option the entry point does not reach")
+    expect_in('return {slib::option_of("tile", tile), slib::option_of("output_format", output_format)};', header,
+              "the values in the order reached")
+    expect_in("    using options = shadow_cs_t_options;", header, "the wrapper names its struct")
+    expect_in("acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx), values.values());", header,
+              "the compute pipeline takes them")
+    expect_in("<shaped-shader-library/compiler/shader_compiler.hh>", " ".join(sgl_host_code.includes(entries)),
+              "slib::option_of's header")
+
+
+@test
+def a_pipelines_options_ride_in_its_open_parts():
+    file = SglFile(path="shadow.sgl", options=OPTIONS)
+    pipeline = {**TESSELLATED, "options": ["sharpen"]}
+    entries = sgl_description.SglEntries(bindings=[(file, GROUP)], pipelines=[(file, pipeline)])
+    header = sgl_host_code.emit_pipelines(entries, {file.path: "shadow"}, "pkg")
+    expect_in("struct shadow_tessellated_t_options\n{\n    bool sharpen = false;", header, "the pipeline's struct")
+    expect_in("    shadow_tessellated_t_options options;\n};", header, "a member of the open parts")
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {file.path: "shadow"}, {})
+    expect_in("cc::move(customize), false, parts.options.values());", source, "the description takes them")
+
+
+@test
+def a_binding_whose_layout_names_an_option_has_no_generated_type():
+    binding = {**GROUP, "options": ["output_format"]}
+    try:
+        sgl_host_code.emit_group("pkg", {}, "ns", FILE, binding)
+    except sgl_host_code.HostCodeError as e:
+        expect_in("output_format", str(e), "the refusal names the option")
+        return
+    raise AssertionError("a binding naming an option generated a type")
+
+
 # ---- the runner -----------------------------------------------------------------------------------------------------
 
 

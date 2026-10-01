@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
@@ -111,6 +112,9 @@ struct sgl::described_binding
     cc::string block_host_name;
     /// The members' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
     cc::string shape;
+    /// The options its members' types name, an image's format or an array's length, by name in declaration order.
+    /// Its layout and its formats are then those of the values this describe was given.
+    cc::vector<cc::string> options;
 };
 
 struct sgl::described_struct_member
@@ -182,6 +186,8 @@ struct sgl::described_entry_point
     /// Both empty for any other stage and for a stage without one.
     cc::string payload;
     cc::string payload_shape;
+    /// The options it reaches, by name in declaration order (CHK-355): each distinct set of their values is one compile.
+    cc::vector<cc::string> options;
 };
 
 /// One field of a pipeline's description, as the check pass resolved it.
@@ -225,6 +231,8 @@ struct sgl::described_pipeline
     cc::vector<described_pipeline_setting> settings;
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
+    /// The options any of its stages reaches, by name in declaration order.
+    cc::vector<cc::string> options;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
     /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, and the samplers.
     /// Then the stages by name, then `features`, then the last setting of every format and of the sample count.
@@ -301,6 +309,8 @@ struct sgl::described_raytracing_pipeline
     cc::string host_callable_shape;
     /// The file-scope samplers any of its shaders reaches, its callables included, in index order.
     cc::vector<cc::string> samplers;
+    /// The options any of its shaders reaches, by name in declaration order.
+    cc::vector<cc::string> options;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
     /// the ray set with each payload's shape and size, the raygen, the misses, the hit groups and each group's records,
     /// the callables, the recursion depth, the payload and attribute sizes, the layout, the samplers and the features.
@@ -308,8 +318,21 @@ struct sgl::described_raytracing_pipeline
     cc::vector<cc::string> frozen;
 };
 
+/// An `@option const` of the file: a value the host sets for each compile (CHK-353).
+struct sgl::described_option
+{
+    cc::string name;
+    /// `bool`, `int`, or the name of its enum, `pixel_format` for an image's format.
+    cc::string type;
+    /// What this describe compiled it as, spelled as a compile's value is: `8`, `-3`, `true`, `.rgba16_float`.
+    /// Its written default, unless the request gave it another.
+    cc::string value;
+};
+
 struct sgl::module_description
 {
+    /// In declaration order.
+    cc::vector<described_option> options;
     /// In source order.
     cc::vector<described_binding> bindings;
     cc::vector<described_struct> structs;
@@ -330,6 +353,8 @@ struct sgl::describe_request
     cc::string_view source;
     /// What a diagnostic calls the source; it is never opened.
     cc::string_view source_name = "<sgl>";
+    /// The values the source's options are described with, as `text_request::options` gives them; empty for the defaults.
+    cc::span<check::option_value const> options;
 };
 
 namespace sgl

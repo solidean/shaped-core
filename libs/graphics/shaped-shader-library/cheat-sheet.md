@@ -110,6 +110,12 @@ slib::reload_config                         // { double interval_ms = 200; bool 
 asset->acquire(sg::context const&)  // -> sg::async_compiled_shader in a format THE CONTEXT accepts;
                                     //    async error if no registered compiler reaches one
 asset->acquire(sg::shader_format)   // -> explicit format (tests/tools with no context)
+asset->acquire(ctx, options)        // an SGL source's options set: cc::span<slib::shader_option const>, {name, value}
+                                    //   value spelled as SGL spells it (`16`, `true`, `.rgba16_float`); slib::option_of(name, v)
+                                    //   writes one from a bool, an int or an sg::pixel_format
+                                    //   keyed per format AND per set of the options the entry point reaches (asset->options()):
+                                    //   one it does not reach is dropped, so it never splits a compile; a reload recompiles each set
+                                    //   a default left out and one given are two entries of one text, which the compiler's cache shares
 asset->generation()                 // -> u64; moves when a reload replaced the shader. Cache it.
 asset->last_error()                 // -> optional<string>; why the last reload was rejected
 asset->virtual_path() / stage() / entry_point()
@@ -125,8 +131,9 @@ asset->dependencies()               // -> vector<string>; source + resolved incl
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 slib::shader_language              // hlsl | wgsl | sgl | metal   (slang/glsl planned)
 slib::include_resolver             // cc::function_ref<cc::optional<cc::string>(cc::string_view path)>
-slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; cc::string label; }
+slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; cc::string label; options }
                                    //   label = what a diagnostic calls the source; never opened, may be empty
+                                   //   options = an SGL source's option values, which its preprocess writes the text with
 slib::shader_compiler              // ONE edge: source_language() -> target_format()
                                    //   preprocess(desc, resolve) -> cc::result<cc::string>  (flattens #includes)
                                    //   compile(desc) -> sg::async_compiled_shader  (errors on the node, no throw)
@@ -332,6 +339,11 @@ auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  
 //   it also holds the file-scope samplers the entry point reaches, as sg::bound_samplers: s<i> of
 //   slib::bound_samplers_space (10) on dx12, binding i + 1 of sg's reserved group elsewhere, a `pipeline`'s the same.
 auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx); // compute: needs nothing else
+// an entry point that reaches `@option const`s gets <file>_<entry>_t::options: one field per option, at the source's default
+auto const tuned = co_await shaders::taa.reproject.acquire_pipeline(ctx, {.tile = 16, .lowres = true}); // a compile per set
+shaders::taa.reproject.acquire(ctx, {.tile = 16})  // the shader alone; .values() is the struct as an acquire's span takes it
+//   an option of a type the generator has no C++ for (a program's own enum) is a generator error;
+//   a binding whose image format or array length names an option has no generated type yet: list its entry points alone
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
 // a wrapper's layout holds only the samplers ITS entry point reaches, so a file used as a library never fills the sampler slots:
 //   a raster pipeline whose stages reach file samplers is built from the file's `pipeline`, whose layout holds every stage's.
@@ -340,6 +352,7 @@ auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx)
 //   It is an sg::raster_pipeline_source, so ctx.cached acquires it like a description:
 auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = swapchain_format}); // open: one field per `.host` part
 //   nothing `.host` -> acquire_raster_pipeline(shaders::cube.pipeline); a last argument customize(sg::raster_pipeline_description&) runs last
+//   options its stages reach ride in the open parts: {.color = f, .options = {.tile = 16}}, every stage keying on its own
 //   .description(ctx, parts)          the description itself, to build or inspect
 //   .description_latest(ctx, parts)   the newest stages and settings even where the frozen part moved; acquire it yourself
 //   an open field left unset (a format still `undefined`, a sample count still 0) asserts: the declaration said the host would state it
@@ -391,6 +404,7 @@ auto hits = co_await slib::compile_hit_group(&ctx, &library, &open_t::definition
 auto sq = co_await slib::compile_callable(&ctx, &library, &open_t::definition(), source, "squared", "label.sgl");
 //   -> sg::compiled_shader; it must take the parameter of the pipeline's `.host` callables, by name and shape
 auto host = slib::raytracing_host_parts{.hit_groups = hits, .callables = {sq}};
+//   a pipeline whose shaders reach options: .options = path_t::options{.bounces = 2}.values(), handed to every shader
 auto desc2 = co_await shaders::rt.open_path.description(ctx, host);
 open_t::table_description(pipeline, host);     // the same host parts: a record for each of the host's callables
 open_t::add_row(table_desc, open_t::first_host_hit_group);

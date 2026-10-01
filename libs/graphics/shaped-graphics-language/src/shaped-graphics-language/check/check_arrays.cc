@@ -71,6 +71,7 @@ cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
     auto const& c = out.constants[out.at(id).info];
     if (c.kind != constant_kind::integer)
         return {};
+    note_option(file, span_of(file, expr), c);
     return c.integer;
 }
 

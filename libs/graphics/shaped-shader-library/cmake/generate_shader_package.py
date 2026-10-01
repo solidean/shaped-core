@@ -676,9 +676,9 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
         out.append("#include <shaped-graphics/binding/binding_group.hh>\n")
         out.append("#include <shaped-graphics/resource/views.hh>\n")
     out.append(f"\nnamespace {manifest.namespace}\n{{\n")
-    out.append(sgl_host_code.emit_entry_wrappers(entries.sgl, stems))
-    out.append(sgl_host_code.emit_pipelines(entries.sgl, stems))
-    out.append(sgl_host_code.emit_raytracing_pipelines(entries.sgl, stems))
+    out.append(sgl_host_code.emit_entry_wrappers(entries.sgl, stems, manifest.name))
+    out.append(sgl_host_code.emit_pipelines(entries.sgl, stems, manifest.name))
+    out.append(sgl_host_code.emit_raytracing_pipelines(entries.sgl, stems, manifest.name))
 
     for file in files:
         out.append(f"/// {file.path}\n")
@@ -826,6 +826,13 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
 
     # The definition table carries the declared path through verbatim rather than rebuilding it from the
     # folder and stem, and emits the sg::shader_stage enumerator rather than a string to parse back.
+    # The options each described SGL entry point reaches, which its asset keys its compiles on.
+    reached = {key: e.get("options", []) for key, e in sgl.described_entry_points.items() if e.get("options")}
+    for index, names in enumerate(reached.values()):
+        listed = ", ".join(f'"{name}"' for name in names)
+        out.append(f"constexpr cc::string_view k_options_{index}[] = {{{listed}}};\n")
+    option_tables = {key: f"k_options_{index}" for index, key in enumerate(reached)}
+
     out.append("\nslib::shader_definition const k_definitions[] = {\n")
     for file in files:
         for stage, points in file.stages.items():
@@ -834,6 +841,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
                 enumerator = SGL_STAGES[stage] if manifest.language == "sgl" else stage
                 out.append(f"     .stage = sg::shader_stage::{enumerator},\n")
                 out.append(f'     .entry_point = "{point}",\n')
+                if (file.path, point) in option_tables:
+                    out.append(f"     .options = {option_tables[(file.path, point)]},\n")
                 # A wrapped SGL entry point holds its handle as `asset`.
                 wrapped = (file.path, point) in sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files})
                 member = f"{point}.asset" if wrapped else point

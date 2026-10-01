@@ -303,6 +303,8 @@ struct checker
     cc::span<module_file const> files;
     builtins::registry const& builtins;
     checked_module out;
+    /// The values this compile gives the user file's options, by name (CHK-354).
+    cc::span<option_value const> options;
 
     /// The prelude's scope: every name its files declare but those of `@operator` functions.
     /// More than one symbol under a name means all of them are functions; the same holds for `file_names`.
@@ -456,6 +458,16 @@ struct checker
     void compile_enum(symbol_id id);
     /// A `const`: its value is a number literal, an enum case or another `const`, and anything else is `unsupported-yet`.
     void compile_const(symbol_id id);
+    /// CHK-354: `info` as the compile's value for option `id` sets it, or as written where it sets none.
+    /// A value of another type than the option's is `invalid-option`, and leaves the default.
+    void apply_option_value(symbol_id id, constant_info& info);
+    /// CHK-354: a value the compile gives a name no option of the user file has is `invalid-option`.
+    void judge_option_values();
+    /// Records that `where` of `file` names the option `c` comes from, if it comes from one (CHK-355).
+    void note_option(i32 file, source_span where, constant_info const& c);
+    /// CHK-355: the options named by `function`, every function it calls, and the bindings it lists, in declaration order.
+    /// `also` is a further function the tree inlines without a call of the source, such as a fused any hit; or `none`.
+    [[nodiscard]] cc::vector<symbol_id> options_reached(symbol_id function, symbol_id also);
     /// A file-scope `sampler name:`: its settings, and the sampler type they make (CHK-314).
     void compile_file_sampler(symbol_id id);
     /// False where `attributes` hold `@shadowable(false)`; a malformed one is reported when its declaration is compiled.

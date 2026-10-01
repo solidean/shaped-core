@@ -1,0 +1,13 @@
+// A compute shader with options, which an acquire sets: each set of values it reaches is a shader of its own.
+// Declared whole, so its entry point's options struct is generated beside its binding group.
+
+@option const factor = 2
+@option const negate = false
+@option const tile = 64
+
+binding scaled_work:
+    values: mut buffer[float]
+
+@compute(tile) fun scale(@thread_id id: int3){scaled_work}:
+    let v = scaled_work.values[id.x] * (factor as float)
+    scaled_work.values[id.x] = if negate => -v else v

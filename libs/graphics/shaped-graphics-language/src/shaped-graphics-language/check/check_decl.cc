@@ -1007,7 +1007,7 @@ void checker::compile_const(symbol_id id)
     auto const& c = d.node.as<ast::const_decl>();
     constexpr auto error_type = checked_module::error_type;
 
-    cc::string_view const known[] = {"shadowable"};
+    cc::string_view const known[] = {"shadowable", "option"};
     judge_attributes(file, d.attributes, known, "a const");
 
     auto const fail = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
@@ -1053,6 +1053,37 @@ void checker::compile_const(symbol_id id)
             return fail();
         }
     }
+    else if (auto const* const dot = value.node.try_as<ast::leading_dot>())
+    {
+        // `const f: pixel_format = .rgba16_float`: the written type is what the leading dot is resolved against
+        auto const declared = ast::is_valid(c.type) ? resolve_value_type(file, c.type) : error_type;
+        if (declared == error_type)
+        {
+            // CHK-152: nothing else says which enum the case is of
+            if (!ast::is_valid(c.type))
+                unsupported(file, where, "a leading dot without the const's type: `const f: e = .a`");
+            return fail();
+        }
+        if (out.at(declared).kind != type_kind::enumeration)
+        {
+            report(diagnostic_kind::unknown_member, file, where,
+                   cc::format("{} is no enum, so it has no case to name with a leading dot", out.name_of(declared)));
+            return fail();
+        }
+        auto const name = text_of(file, dot->name);
+        auto const cases = out.at(out.at(declared).cases);
+        for (auto i = isize(0); i < cases.size(); ++i)
+            if (cases[i].name == name)
+                info = {.symbol = id, .type = declared, .kind = constant_kind::enum_case, .case_index = i32(i)};
+        if (info.kind != constant_kind::enum_case)
+        {
+            report(diagnostic_kind::unknown_member, file, where,
+                   cc::format("the enum {} has no case {}", out.name_of(declared), name));
+            return fail();
+        }
+        set_target(file, c.value,
+                   {.kind = target_kind::enum_case, .symbol = out.at(declared).symbol, .index = info.case_index});
+    }
     else if (value.node.is<ast::member>() || value.node.is<ast::name>())
     {
         auto scope = function_scope{.file = file};
@@ -1095,6 +1126,18 @@ void checker::compile_const(symbol_id id)
                        declared, info.type);
             return fail();
         }
+    }
+
+    // CHK-353: an option is a bool, an int or an enum case, and the compile may give it another value of its type
+    if (find_attribute(file, d.attributes, "option") != nullptr)
+    {
+        if (info.kind == constant_kind::real)
+        {
+            unsupported(file, c.name, "an option of float; an option is a bool, an int or an enum case");
+            return fail();
+        }
+        info.option = id;
+        apply_option_value(id, info);
     }
 
     set_type(file, c.value, info.type);

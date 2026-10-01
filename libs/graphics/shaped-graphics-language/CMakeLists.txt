@@ -54,6 +54,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_features.cc
+    src/shaped-graphics-language/check/check_options.cc
     src/shaped-graphics-language/check/check_footprint.cc
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stages.cc
@@ -403,6 +404,7 @@ if(SC_BUILD_TESTS)
 
         tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc
+        tests/driver/options-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
         tests/driver/test-source-test.cc

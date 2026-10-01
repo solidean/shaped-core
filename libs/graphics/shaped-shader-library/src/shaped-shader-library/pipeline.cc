@@ -332,7 +332,8 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                                                  pipeline_definition const* definition,
                                                                                  cc::vector<open_part> open,
                                                                                  sg::raster_pipeline_customize customize,
-                                                                                 bool latest)
+                                                                                 bool latest,
+                                                                                 cc::vector<shader_option> options)
 {
     auto const& d = *definition;
     CC_ASSERTF(d.vertex != nullptr && *d.vertex != nullptr,
@@ -364,15 +365,15 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();
     desc.layout = d.acquire_layout(*ctx);
-    desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx);
+    desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
     if (d.pixel != nullptr)
-        desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx);
+        desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx, options);
     if (d.geometry != nullptr)
-        desc.geometry_shader = co_await (*d.geometry)->acquire(*ctx);
+        desc.geometry_shader = co_await (*d.geometry)->acquire(*ctx, options);
     if (d.tessellation_control != nullptr)
-        desc.tessellation_control_shader = co_await (*d.tessellation_control)->acquire(*ctx);
+        desc.tessellation_control_shader = co_await (*d.tessellation_control)->acquire(*ctx, options);
     if (d.tessellation_evaluation != nullptr)
-        desc.tessellation_evaluation_shader = co_await (*d.tessellation_evaluation)->acquire(*ctx);
+        desc.tessellation_evaluation_shader = co_await (*d.tessellation_evaluation)->acquire(*ctx, options);
     // a vertex stage that draws from no vertex buffer, reading `@vertex_index` alone, has no layout
     if (d.vertex_input != nullptr)
         desc.vertex_input = d.vertex_input();

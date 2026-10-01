@@ -49,6 +49,24 @@ struct slib::preprocessed_source
     cc::vector<block_layout> layouts;
 };
 
+/// A value one compile gives an option of an SGL source, by the option's name, spelled as SGL spells it: `16`, `true`, `.rgba16_float`.
+/// Only SGL has options; every other compiler takes none.
+struct slib::shader_option
+{
+    cc::string name;
+    cc::string value;
+
+    [[nodiscard]] bool operator==(shader_option const&) const = default;
+};
+
+namespace slib
+{
+/// An option's value as a compile takes it, from the C++ type a generated options struct holds it as.
+[[nodiscard]] shader_option option_of(cc::string_view name, bool value);
+[[nodiscard]] shader_option option_of(cc::string_view name, int value);
+[[nodiscard]] shader_option option_of(cc::string_view name, sg::pixel_format value);
+} // namespace slib
+
 /// One shader to compile.
 /// `source` is the shader text — flattened once preprocess has run.
 struct slib::shader_source_description
@@ -59,6 +77,8 @@ struct slib::shader_source_description
     /// What a diagnostic calls the source: a virtual path, or the label of an ad-hoc compile; may be empty.
     /// Never opened, and no part of what a compile depends on.
     cc::string label;
+    /// The values SGL's `preprocess` writes the text with; what it writes is all a compile reads, so the cache keys on that.
+    cc::vector<shader_option> options;
 };
 
 /// One compilation edge: `source_language` -> `target_format`.

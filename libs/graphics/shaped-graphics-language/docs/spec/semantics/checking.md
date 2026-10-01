@@ -166,6 +166,7 @@ fun f(x: float) -> float:
 
 * **CHK-219** A `const` at file scope stands for its value wherever it is named: an `int` or `float` literal, `-` in front of one, an enum case, or another `const`.
   Any other value is `unsupported-yet`, and a written type the value does not have is `type-mismatch`.
+  A leading dot names a case of the written type, `const f: pixel_format = .rgba8_unorm`, by CHK-152.
 * **CHK-221** A `const` whose value is an enum case names that case as a `case` pattern, so it counts for exhaustiveness as `e.case` does (CHK-159).
 * **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
 * **CHK-353** `@option` on a file-scope `const` makes it an **option**: a value the host sets for each compile, whose written value is its default ([why](why/checking.md#chk-353)).
@@ -174,7 +175,8 @@ fun f(x: float) -> float:
   So every rule that judges a constant judges each set of values on its own.
   A value for a name no option of the module has, or of another type than the option's, is `invalid-option`, and the detail names it.
   A test runs with every option at its default.
-* **CHK-355** An entry point's options are those its flat tree names, together with those its workgroup size, its subgroup-size preference and the image formats of its listed bindings name.
+* **CHK-355** An entry point's options are those named by its own declaration, by every function it calls at any depth, and by the bindings it lists ([why](why/checking.md#chk-355)).
+  That takes in its workgroup size, its subgroup-size preference, an array's length and an image's format, and a branch CHK-356 removes too.
   Each distinct set of their values is one compile, so an option the entry point does not reach multiplies nothing.
   `sgl describe` reports them per entry point, and a pipeline's options are those of its stages together.
 
@@ -473,7 +475,8 @@ fun shade(k: float) -> float:
 * **CHK-64** `value.name` is the field `name` of the struct type of `value` where it has one, and a call by CHK-249 otherwise.
   A name with neither a field nor a candidate is the normal error `unknown-member`.
 * **CHK-65** `(x)` is `x`.
-* **CHK-152** `.name` is the case `name` of the enum the context expects, which today is the scrutinee of a `case` and the field a pipeline setting assigns (CHK-178).
+* **CHK-152** `.name` is the case `name` of the enum the context expects.
+  Today that is the scrutinee of a `case`, the field a pipeline setting assigns (CHK-178) and the written type of a `const` (CHK-219).
   A leading dot where no type is expected is `unsupported-yet`, and one whose expected type is no enum, or has no such case, is `unknown-member`.
 * **CHK-66** Every expression kind not named in this section is `unsupported-yet`.
 

@@ -64,6 +64,8 @@ class SglFile:
     ray_sets: list[dict] = field(default_factory=list)
     hit_groups: list[dict] = field(default_factory=list)
     raytracing_pipelines: list[dict] = field(default_factory=list)
+    # The `@option const`s, in declaration order: name, type and the default the file writes.
+    options: list[dict] = field(default_factory=list)
 
     def binding(self, name: str) -> dict | None:
         return next((b for b in self.bindings if b["name"] == name), None)
@@ -86,6 +88,9 @@ class SglFile:
     def ray_set(self, name: str) -> dict | None:
         return next((s for s in self.ray_sets if s["name"] == name), None)
 
+    def option(self, name: str) -> dict | None:
+        return next((o for o in self.options if o["name"] == name), None)
+
 
 @dataclass
 class SglEntries:
@@ -97,6 +102,8 @@ class SglEntries:
     described_entry_points: dict[tuple[str, str], dict] = field(default_factory=dict)
     # path -> the file-scope samplers of a file the compiler described, which its entry points' layouts name.
     file_samplers: dict[str, list[dict]] = field(default_factory=dict)
+    # path -> the options of a file the compiler described, which its entry points' option structs are made of.
+    file_options: dict[str, list[dict]] = field(default_factory=dict)
     # (file, the described binding)
     bindings: list[tuple[SglFile, dict]] = field(default_factory=list)
     vertex_inputs: list[tuple[SglFile, dict]] = field(default_factory=list)
@@ -118,7 +125,7 @@ def describe(tool: Path, source: Path, shown_as: str) -> SglFile:
                    memory_structs=data.get("memory_structs", []), entry_points=data["entry_points"],
                    pipelines=data.get("pipelines", []), samplers=data.get("samplers", []),
                    ray_sets=data.get("ray_sets", []), hit_groups=data.get("hit_groups", []),
-                   raytracing_pipelines=data.get("raytracing_pipelines", []))
+                   raytracing_pipelines=data.get("raytracing_pipelines", []), options=data.get("options", []))
 
 
 def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | None) -> SglEntries:
@@ -164,6 +171,7 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
                 add("entry_points", (path, e["name"]), (path, e["stage"], e["name"]))
                 out.described_entry_points[(path, e["name"])] = e
             out.file_samplers[path] = described.samplers
+            out.file_options[path] = described.options
             for b in described.bindings:
                 add("bindings", (path, b["name"]), (described, b))
             for s in described.structs:

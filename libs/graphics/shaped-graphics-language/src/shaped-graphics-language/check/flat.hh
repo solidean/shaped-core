@@ -692,6 +692,8 @@ struct sgl::check::flat_entry_point
     i32 workgroup[3] = {1, 1, 1};
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
+    /// The options it reaches, each once, in declaration order (CHK-355); empty for a test.
+    cc::vector<symbol_id> options;
     /// The ray types it traces, by their position in their set, each once (CHK-332).
     cc::vector<flat_traced_ray> traced_rays;
     /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
@@ -742,6 +744,6 @@ struct sgl::check::flat_entry_point
             && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
             && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
             && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names
-            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes;
+            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes && is_equal(options, rhs.options);
     }
 };

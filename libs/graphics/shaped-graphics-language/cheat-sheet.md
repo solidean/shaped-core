@@ -33,9 +33,13 @@ sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = 
                                            // from ONE check; compile_to_text per entry point and target checks that many times
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
-sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target, run_tests
+sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target, options, run_tests
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
+                                           // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:
+                                           // `16`, `-3`, `true`, `.rgba16_float`; the rest keep their defaults, tests always run at them
+                                           // a name the source has no option of, or a value of another type: `invalid-option`
+r.value().options                          // the options the entry point reaches, by name: each set of their values is one text
 
 #include <shaped-graphics-language/driver/test_source.hh>
 auto const t = sgl::test_source(text, "colors.sgl");
@@ -52,6 +56,8 @@ d.value().structs                          // the @vertex / @pixel structs: name
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint,
                                            // samplers: the file-scope samplers its code reaches
 d.value().samplers                         // the file-scope samplers: name, index (declaration order), sampler_type, settings, shape
+d.value().options                          // every `@option const`: name, type (`bool`, `int`, an enum's name), value as described
+                                           // entry points, pipelines and bindings each carry the `options` they reach or name
 @expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
 d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths),
                                            // samplers: the file-scope ones any stage reaches, which its one layout holds
@@ -380,6 +386,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads;
@@ -438,6 +445,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 ## The language: places, function values, generics
 
 ```sgl sketch
+@option const tile = 8                   // the host sets it per compile, and this is its default (CHK-353)
+@compute(tile, tile) fun blur(...)       // an option stands where a const stands: a workgroup size, an array length, an image format
+if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
+fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
+
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by
 bump(mut c, 2.0)                         // the call marks it; exact type, indices evaluated once (CHK-316)

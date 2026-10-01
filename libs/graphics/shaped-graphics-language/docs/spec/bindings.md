@@ -146,7 +146,7 @@ Every other image format needs a feature.
 Each format the host asks for is one compile, and the text names that format exactly as it names a written one, on every target and with no feature.
 
 ```sgl sketch
-@option const output_format = .rgba16_float
+@option const output_format: pixel_format = .rgba16_float
 
 binding outputs:
     upscaled: out image_2d[output_format]

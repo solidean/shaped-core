@@ -19,7 +19,8 @@
 ///
 ///   auto cs = my::shaders::vignette.compute.main->acquire(ctx);
 ///
-/// Compilation is lazy and per format: nothing is compiled until the first acquire for a given format.
+/// Compilation is lazy and per format and option set: nothing is compiled until the first acquire for a given pair.
+/// An SGL entry point's options are values the host sets per acquire, and each set of the ones it reaches is a compile of its own.
 ///
 /// A reload is staged and promoted by the next acquire, so a broken edit leaves the last good shader running and last_error() saying why.
 /// Why it has to work that way: slib's coding guidelines, "Reload stages, it never replaces".
@@ -27,18 +28,28 @@ class slib::shader_asset
 {
 public:
     /// `library` is weak on purpose — see the note on the members.
+    /// `options` names the options of its SGL source the entry point reaches, which are all an acquire keys on.
     shader_asset(std::weak_ptr<shader_library> library,
                  cc::string virtual_path,
                  sg::shader_stage stage,
-                 cc::string entry_point);
+                 cc::string entry_point,
+                 cc::vector<cc::string> options = {});
 
     /// The compiled shader in a format `ctx` accepts, preferring the context's own order.
     /// The result carries an async error if no registered compiler connects this package's language to any format the context takes.
-    [[nodiscard]] sg::async_compiled_shader acquire(sg::context const& ctx) const;
+    /// `options` sets the SGL source's options by name; one the entry point does not reach is dropped, so it never splits a compile.
+    /// An option left out keeps its default, and a value the source refuses is the shader's error.
+    /// The key is the values given, so a default left out and one given are two entries of one text, which the compiler's cache shares.
+    [[nodiscard]] sg::async_compiled_shader acquire(sg::context const& ctx,
+                                                    cc::span<shader_option const> options = {}) const;
 
     /// The compiled shader in exactly `format`.
     /// For tests and tools that have no context.
-    [[nodiscard]] sg::async_compiled_shader acquire(sg::shader_format format) const;
+    [[nodiscard]] sg::async_compiled_shader acquire(sg::shader_format format,
+                                                    cc::span<shader_option const> options = {}) const;
+
+    /// The options of its source the entry point reaches, by name; empty for every language but SGL.
+    [[nodiscard]] cc::span<cc::string const> options() const { return _options; }
 
     /// Whether a registered compiler connects this shader's language to `format`.
     ///
@@ -72,17 +83,19 @@ public:
     /// Empty before the first acquire, which is why a shader is only watched once someone has asked for it.
     [[nodiscard]] cc::vector<cc::string> dependencies() const;
 
-    /// Stages a recompile of every format compiled so far.
+    /// Stages a recompile of every format and option set compiled so far.
     /// Called by the reload watcher; the next acquire() picks the results up.
-    /// A format nobody ever acquired is skipped — recompiling it would burn the compiler on a shader that is never used.
+    /// A pair nobody ever acquired is skipped — recompiling it would burn the compiler on a shader that is never used.
     void stage_reload();
 
 private:
-    /// One target format's state.
+    /// One target format's state under one set of option values.
     /// `current` is the last shader that compiled; `pending` is a staged reload not yet promoted.
     struct format_entry
     {
         sg::shader_format format = sg::shader_format::dxil;
+        /// The values of the options the entry point reaches that the acquire gave, ordered by name.
+        cc::vector<shader_option> options;
         sg::async_compiled_shader current;
         sg::async_compiled_shader pending;
         cc::vector<cc::string> dependencies; ///< source + resolved includes, as of the last compile
@@ -90,7 +103,7 @@ private:
 
     struct state
     {
-        // Linear scan over a handful of formats — a shader is consumed by one or two backends.
+        // Linear scan over a handful of entries — a shader is consumed by one or two backends, under a few option sets.
         cc::small_vector<format_entry, 2> formats;
         u64 generation = 0;
         cc::optional<cc::string> last_error;
@@ -108,6 +121,7 @@ private:
     cc::string _virtual_path;
     sg::shader_stage _stage;
     cc::string _entry_point;
+    cc::vector<cc::string> _options;
 
     // The watcher stages compiles from its own thread while a consumer acquires.
     // Mutable so acquire() stays const: promoting a staged compile is not a change a caller can observe as one.
@@ -121,8 +135,9 @@ namespace slib
 /// What a generated compute entry point's `acquire_pipeline` is: the layout comes from its binding list, so nothing is
 /// reflected, and a compute pipeline needs nothing beyond a shader and a layout.
 /// Cold, like every coroutine here: awaiting it is what starts the compile.
-/// `ctx` must outlive the result.
+/// `ctx` must outlive the result, and `options` are the shader's, as `shader_asset::acquire` takes them.
 [[nodiscard]] sg::async_compute_pipeline acquire_compute_pipeline(sg::context* ctx,
                                                                   shader_asset_handle asset,
-                                                                  sg::pipeline_layout_handle layout);
+                                                                  sg::pipeline_layout_handle layout,
+                                                                  cc::vector<shader_option> options = {});
 } // namespace slib
