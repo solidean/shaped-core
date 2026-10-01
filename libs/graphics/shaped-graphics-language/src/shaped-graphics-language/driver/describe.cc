@@ -664,9 +664,12 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto errors = cc::vector<emit::error>();
     auto result = module_description();
     auto described = cc::vector<check::symbol_id>();
-    // the source's own declarations, or every file's of the module described
-    auto const is_own
-        = [&](i32 file) { return is_module ? file >= m.prelude_file_count() : file == front.program_file(); };
+    // the source's own declarations, or every file's of the module described, and none of a module either uses
+    auto const is_own = [&](i32 file)
+    {
+        return is_module ? file >= m.prelude_file_count() && m.file_modules[file] == m.file_modules.back()
+                         : file == front.program_file();
+    };
 
     // Only the program's own declarations: the prelude describes nothing, and an imported module describes itself.
     for (auto i = isize(0); i < m.symbols.size(); ++i)
@@ -706,6 +709,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     }
 
     // The structs the described bindings place in memory, each once and after what it holds.
+    // Once by type: two modules may each declare a struct of one name.
+    auto placed = cc::vector<check::type_id>();
     for (auto const id : described)
     {
         for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage})
@@ -714,12 +719,14 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             emit_impl::collect_placed_structs(m, id, space, structs);
             for (auto const type : structs)
             {
-                auto const name = m.name_of(type);
                 auto is_known = false;
-                for (auto const& known : result.memory_structs)
-                    is_known = is_known || known.name == name;
+                for (auto const known : placed)
+                    is_known = is_known || known == type;
                 if (!is_known)
+                {
+                    placed.push_back(type);
                     result.memory_structs.push_back(describe_memory_struct(m, type, space));
+                }
             }
         }
     }
@@ -778,7 +785,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             for (auto j = isize(0); j < i; ++j)
                 is_repeat = is_repeat || errors[j] == error;
             if (!is_repeat)
-                text.appendf("{}: error: {}: {}\n", request.source_name, emit::to_string(error.kind), error.detail);
+                text.appendf("{}: error: {}: {}\n", is_module ? cc::string_view(program_name) : request.source_name,
+                             emit::to_string(error.kind), error.detail);
         }
         return cc::error(cc::move(text));
     }

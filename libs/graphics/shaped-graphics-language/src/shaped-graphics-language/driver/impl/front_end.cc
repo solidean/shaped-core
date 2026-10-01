@@ -33,6 +33,9 @@ namespace
 /// A library file without one belongs to no module, so it is left out unparsed; a module directory is mostly programs.
 bool may_declare_module(cc::string_view text)
 {
+    // a byte-order mark, which the parser reads as indentation
+    if (text.starts_with("\xEF\xBB\xBF"))
+        text = text.subview(3);
     while (!text.empty())
     {
         auto const end = text.find('\n');

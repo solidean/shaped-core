@@ -185,7 +185,12 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
     auto result = cc::vector<entry_text>();
     for (auto const& e : front.module.entry_points)
         for (auto const t : request.targets)
-            result.push_back(
-                {.entry_point = e.name, .target = t, .text = emit_text(front.module, e, t, request.source_name)});
+        {
+            auto text = emit_text(front.module, e, t, request.source_name);
+            if (text.has_value())
+                for (auto const name : front.library_names)
+                    text.value().library_files.push_back(cc::string(name));
+            result.push_back({.entry_point = e.name, .target = t, .text = cc::move(text)});
+        }
     return result;
 }

@@ -769,3 +769,36 @@ TEST("sgl describe - a module is described as every declaration of its files, wi
     REQUIRE(missing.has_error());
     CHECK(missing.error() == "<module nowhere>: error: no file of the library declares module nowhere\n");
 }
+
+TEST("sgl describe - a module is described without the modules it uses, which describe themselves")
+{
+    sgl::library_file const library[] = {
+        {.name = "math.sgl", .source = "module math\n\nbinding scale:\n    factor: float\n\nstruct particle:\n"
+                                       "    x: float\n"},
+        {.name = "view.sgl", .source = "module view\nuse math\n\nbinding frame:\n    things: buffer[math.particle]\n"
+                                       "\nstruct particle:\n    y: float\n\nbinding local:\n"
+                                       "    own: buffer[particle]\n"},
+    };
+    auto const r = sgl::describe({.library = library, .module = "view"});
+    REQUIRE(r.has_value());
+    auto const& d = r.value();
+    // `math.scale` is math's, and nothing of view's
+    REQUIRE(d.bindings.size() == 2);
+    CHECK(d.bindings[0].name == "frame");
+    CHECK(d.bindings[1].name == "local");
+    // two structs named `particle`, one of each module, are both placed
+    REQUIRE(d.memory_structs.size() == 2);
+    CHECK(d.memory_structs[0].name == "particle");
+    CHECK(d.memory_structs[0].module == "math");
+    CHECK(d.memory_structs[1].name == "particle");
+    CHECK(d.memory_structs[1].module == "");
+}
+
+TEST("sgl describe - a module file saved with a byte-order mark is still a module of the library")
+{
+    sgl::library_file const library[] = {{.name = "view.sgl", .source = "\xEF\xBB\xBFmodule view\n\nbinding frame:\n"
+                                                                        "    exposure: float\n"}};
+    auto const r = sgl::describe({.library = library, .module = "view"});
+    REQUIRE(r.has_value());
+    CHECK(r.value().bindings.size() == 1);
+}
