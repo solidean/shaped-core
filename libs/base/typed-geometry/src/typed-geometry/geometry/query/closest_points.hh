@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/pair.hh>
+#include <typed-geometry/geometry/query/impl/gjk.hh>
 #include <typed-geometry/geometry/query/impl/kernels.hh>
 #include <typed-geometry/geometry/query/project.hh>
 
@@ -25,6 +26,11 @@ template <class A, class B>
         return cc::pair{a, impl::project_to(a, b)};
     else if constexpr (is_pos<B> && has_project_to<B, A>)
         return cc::pair{impl::project_to(b, a), b};
+    else if constexpr (gjk_pair<A, B>)
+    {
+        auto const r = impl::gjk(a, b);
+        return cc::pair{r.on_a, r.on_b};
+    }
     else
         static_assert(false, "tg: no closest_points_to for this pair of types; tg::has_closest_points_to<A, B> is the "
                              "probe");

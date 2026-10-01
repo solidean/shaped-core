@@ -10,3 +10,7 @@
 #include <typed-geometry/geometry/query/impl/kernels/pos.hh>
 #include <typed-geometry/geometry/query/impl/kernels/sphere.hh>
 #include <typed-geometry/geometry/query/impl/kernels/triangle.hh>
+
+// the generic floor, after every closed form
+#include <typed-geometry/geometry/query/impl/epa.hh>
+#include <typed-geometry/geometry/query/impl/gjk.hh>

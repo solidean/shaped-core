@@ -58,3 +58,12 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::segment<D, T>>
         return s.pos0 + (s.pos1 - s.pos0) * t;
     }
 };
+
+template <int D, class T>
+struct tg::impl::support_op<tg::segment<D, T>>
+{
+    [[nodiscard]] static constexpr pos<D, T> apply(segment<D, T> const& s, vec<D, T> const& dir)
+    {
+        return tg::dot(s.pos1 - s.pos0, dir) > T(0) ? s.pos1 : s.pos0;
+    }
+};

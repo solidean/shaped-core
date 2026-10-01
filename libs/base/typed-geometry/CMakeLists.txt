@@ -84,10 +84,13 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/query/impl/kernels/pos.hh
     src/typed-geometry/geometry/query/impl/kernels/sphere.hh
     src/typed-geometry/geometry/query/impl/kernels/triangle.hh
+    src/typed-geometry/geometry/query/impl/epa.hh
+    src/typed-geometry/geometry/query/impl/gjk.hh
     src/typed-geometry/geometry/query/impl/ops.hh
     src/typed-geometry/geometry/query/impl/special_case.hh
     src/typed-geometry/geometry/query/intersects.hh
     src/typed-geometry/geometry/query/project.hh
+    src/typed-geometry/geometry/query/separation.hh
     src/typed-geometry/geometry/query/query.hh
     src/typed-geometry/geometry/geometry.hh
     src/typed-geometry/geometry/all.hh
@@ -178,6 +181,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/query/ladder-test.cc
         tests/geometry/query/point-queries-test.cc
         tests/geometry/query/special-case-test.cc
+        tests/geometry/query/gjk-test.cc
     )
     sc_nexus_binary(typed-geometry-test KINDS tests)
 

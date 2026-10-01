@@ -65,3 +65,17 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::triangle<D, T>>
         return a + ab * (vb / sum) + ac * (vc / sum);
     }
 };
+
+template <int D, class T>
+struct tg::impl::support_op<tg::triangle<D, T>>
+{
+    [[nodiscard]] static constexpr pos<D, T> apply(triangle<D, T> const& t, vec<D, T> const& dir)
+    {
+        auto const d0 = tg::dot(t.pos0 - pos<D, T>(), dir);
+        auto const d1 = tg::dot(t.pos1 - pos<D, T>(), dir);
+        auto const d2 = tg::dot(t.pos2 - pos<D, T>(), dir);
+        if (d0 >= d1 && d0 >= d2)
+            return t.pos0;
+        return d1 >= d2 ? t.pos1 : t.pos2;
+    }
+};

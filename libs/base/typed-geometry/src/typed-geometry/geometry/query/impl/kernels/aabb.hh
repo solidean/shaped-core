@@ -22,3 +22,16 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::aabb<D, T>>
         return r;
     }
 };
+
+/// Per axis, the max corner where the direction is positive and the min corner otherwise.
+template <int D, class T>
+struct tg::impl::support_op<tg::aabb<D, T>>
+{
+    [[nodiscard]] static constexpr pos<D, T> apply(aabb<D, T> const& b, vec<D, T> const& dir)
+    {
+        pos<D, T> r;
+        for (int i = 0; i < D; ++i)
+            r.data[i] = dir.data[i] > T(0) ? b.max.data[i] : b.min.data[i];
+        return r;
+    }
+};

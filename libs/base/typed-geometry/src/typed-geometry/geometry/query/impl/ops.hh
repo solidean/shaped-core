@@ -1,6 +1,7 @@
 #pragma once
 
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/scalar/traits.hh>
 
 #include <type_traits>
@@ -41,8 +42,38 @@ struct contains_op;
 template <class A, class B>
 struct intersects_op;
 
+/// `a.separation_from(b)`, where a closed form beats EPA.
+template <class A, class B>
+struct separation_op;
+
+/// The farthest point of a bounded convex object along a direction: `apply(obj, dir) -> pos`.
+/// It is all GJK and EPA need of an object; a direction of zero length may return any point of it.
+template <class Obj>
+struct support_op;
+
 template <template <class, class> class Op, class A, class B>
 concept has_op = requires(A const& a, B const& b) { Op<A, B>::apply(a, b); };
+
+/// the type is a geometric object, i.e. it has an object_traits; checked first so other probes stay soft.
+template <class Obj>
+concept is_object = requires { object_traits<Obj>::ambient_dim; };
+
+template <class Obj>
+concept has_support
+    = is_object<Obj> && requires(Obj const& o, vec<traits::ambient_dim<Obj>, traits::scalar_t<Obj>> const& d) {
+          support_op<Obj>::apply(o, d);
+      };
+
+/// both objects are bounded convex sets with supports in one space, over a scalar GJK may iterate on.
+template <class A, class B>
+concept gjk_pair = has_support<A> && has_support<B> && traits::ambient_dim<A> == traits::ambient_dim<B>
+                && !tg::traits::is_exact<traits::scalar_t<A>>;
+
+/// EPA serves full-dimensional solids only: a flat difference A - B has no interior to be deep inside of.
+template <class A, class B>
+concept epa_pair = gjk_pair<A, B> && traits::intrinsic_dim<A> == traits::ambient_dim<A>
+                && traits::intrinsic_dim<B> == traits::ambient_dim<B>
+                && (traits::ambient_dim<A> == 2 || traits::ambient_dim<A> == 3);
 
 template <class T>
 inline constexpr bool is_pos = false;
@@ -65,7 +96,7 @@ template <class A, class B>
 concept has_closest_points_to = impl::has_op<impl::closest_points_op, A, B> //
                              || impl::has_op<impl::closest_points_op, B, A> //
                              || (impl::is_pos<A> && has_project_to<A, B>)   //
-                             || (impl::is_pos<B> && has_project_to<B, A>);
+                             || (impl::is_pos<B> && has_project_to<B, A>) || impl::gjk_pair<A, B>;
 
 template <class A, class B>
 concept has_distance_sqr_to = impl::has_op<impl::distance_sqr_op, A, B> //
@@ -82,5 +113,8 @@ template <class A, class B>
 concept has_intersects = impl::has_op<impl::intersects_op, A, B> //
                       || impl::has_op<impl::intersects_op, B, A> //
                       || (impl::is_pos<A> && has_contains<B, A>) //
-                      || (impl::is_pos<B> && has_contains<A, B>);
+                      || (impl::is_pos<B> && has_contains<A, B>) || impl::gjk_pair<A, B>;
+
+template <class A, class B>
+concept has_separation_from = impl::has_op<impl::separation_op, A, B> || impl::epa_pair<A, B>;
 } // namespace tg

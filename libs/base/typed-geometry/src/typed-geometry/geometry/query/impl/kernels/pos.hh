@@ -11,3 +11,9 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::pos<D, T>>
 {
     [[nodiscard]] static constexpr pos<D, T> apply(pos<D, T> const&, pos<D, T> const& q) { return q; }
 };
+
+template <int D, class T>
+struct tg::impl::support_op<tg::pos<D, T>>
+{
+    [[nodiscard]] static constexpr pos<D, T> apply(pos<D, T> const& p, vec<D, T> const&) { return p; }
+};

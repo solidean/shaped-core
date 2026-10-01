@@ -56,6 +56,14 @@ template <int D, int DAmbient, class T>
 struct ellipsoid_boundary;
 
 //
+// Query results
+//
+
+/// how far, and which way, one overlapping solid has to move to leave another: {normal, depth}.
+template <int D, class T>
+struct separation;
+
+//
 // Dimensional aliases
 //
 

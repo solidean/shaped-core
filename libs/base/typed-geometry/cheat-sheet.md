@@ -316,6 +316,10 @@ a.distance_sqr_to(b);  a.distance_to(b);   // distance_to needs has_sqrt
 p.signed_distance_to(obj);  // negative inside (plane: on the normal's far side)
 a.contains(b);              // every point of b is in a — not symmetric
 a.intersects(b);            // they share a point
+a.separation_from(b);       // cc::optional<tg::separation<D,T>> {normal, depth}: move b by normal*depth to stop
+                            //   overlapping; empty when apart. Bounded convex SOLIDS only (EPA), 2D and 3D
+// bounded convex objects with a support (pos, segment, triangle, aabb, sphere) get distance / closest points /
+//   intersects against each other for free through GJK; closed forms take over where they exist
 // a member used without its verb's header: "function with deduced return type cannot be used before it is defined"
 // an unsupported pair: a static_assert naming the probe — tg::has_distance_sqr_to<A, B>, tg::has_intersects<A, B>, …
 // kernels: tg::impl::<verb>_op<A, B> specializations; each verb also tries (B, A), then derives

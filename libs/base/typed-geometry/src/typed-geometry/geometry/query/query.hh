@@ -8,3 +8,4 @@
 #include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/geometry/query/intersects.hh>
 #include <typed-geometry/geometry/query/project.hh>
+#include <typed-geometry/geometry/query/separation.hh>

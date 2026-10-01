@@ -57,3 +57,17 @@ struct tg::impl::signed_distance_op<tg::pos<D, T>, tg::sphere_boundary<D, D, T>>
         return (p - s.center).length() - s.radius;
     }
 };
+
+/// The center pushed out by the radius along the direction; a zero direction has no farthest point, so it is the center.
+template <int D, class T>
+    requires(tg::traits::has_sqrt<T>)
+struct tg::impl::support_op<tg::sphere<D, D, T>>
+{
+    [[nodiscard]] static constexpr pos<D, T> apply(sphere<D, D, T> const& s, vec<D, T> const& dir)
+    {
+        auto const l = dir.length();
+        if (tg::traits::is_zero(l))
+            return s.center;
+        return s.center + dir * (s.radius / l);
+    }
+};

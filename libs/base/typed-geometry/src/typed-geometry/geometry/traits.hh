@@ -1,6 +1,7 @@
 #pragma once
 
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/linalg/fwd.hh>
 
 /// Object trait seam for typed-geometry's geometric primitives.
 ///
@@ -55,4 +56,37 @@ template <class ObjT>
 inline constexpr bool is_finite = object_traits<ObjT>::is_finite;
 } // namespace traits
 
+namespace impl
+{
+// every object is a template whose last parameter is its scalar; read it off that shape.
+template <class ObjT>
+struct object_scalar;
+template <template <int, class> class ObjT, int D, class T>
+struct object_scalar<ObjT<D, T>>
+{
+    using type = T;
+};
+template <template <int, int, class> class ObjT, int D, int DAmbient, class T>
+struct object_scalar<ObjT<D, DAmbient, T>>
+{
+    using type = T;
+};
+} // namespace impl
+
+namespace traits
+{
+/// the scalar an object's coordinates are in (f32 for a triangle3f).
+template <class ObjT>
+using scalar_t = typename impl::object_scalar<ObjT>::type;
+} // namespace traits
+
 } // namespace tg
+
+/// A point is the singleton set {p}: zero-dimensional and bounded, which is what lets every query take a pos.
+template <int D, class T>
+struct tg::object_traits<tg::pos<D, T>>
+{
+    static constexpr int intrinsic_dim = 0;
+    static constexpr int ambient_dim = D;
+    static constexpr bool is_finite = true;
+};

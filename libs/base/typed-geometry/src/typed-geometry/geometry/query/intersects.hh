@@ -1,6 +1,7 @@
 #pragma once
 
 #include <typed-geometry/geometry/query/contains.hh>
+#include <typed-geometry/geometry/query/impl/gjk.hh>
 #include <typed-geometry/geometry/query/impl/kernels.hh>
 
 /// `a.intersects(b)`: a and b share a point.
@@ -20,6 +21,8 @@ template <class A, class B>
         return impl::contains(b, a);
     else if constexpr (is_pos<B> && has_contains<A, B>)
         return impl::contains(a, b);
+    else if constexpr (gjk_pair<A, B>)
+        return impl::gjk(a, b).overlapping;
     else
         static_assert(false, "tg: no intersects for this pair of types; tg::has_intersects<A, B> is the probe");
 }
