@@ -25,6 +25,16 @@ enum class sgl::check::feature : sgl::u8
     sample_rate_shading,
     geometry_shader,
     tessellation_shader,
+    /// `half` and its vectors (CHK-347).
+    shader_f16,
+    /// `short`, `ushort` and their vectors (CHK-347), which WebGPU has on no device.
+    shader_int16,
+    /// The `subgroup_*` and `quad_*` operations (CHK-376).
+    subgroups,
+    /// A `@coherent` member (CHK-368), which WebGPU has on no device.
+    device_coherence,
+    /// An `@atomic` image (CHK-372), which WebGPU has on no device.
+    image_atomics,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u16);
@@ -44,6 +54,11 @@ inline constexpr cc::string_view k_feature_names[] = {
     "sample_rate_shading",         //
     "geometry_shader",             //
     "tessellation_shader",         //
+    "shader_f16",                  //
+    "shader_int16",                //
+    "subgroups",                   //
+    "device_coherence",            //
+    "image_atomics",               //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

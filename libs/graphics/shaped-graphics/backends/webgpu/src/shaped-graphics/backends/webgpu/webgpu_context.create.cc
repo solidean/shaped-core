@@ -16,7 +16,8 @@ namespace
 constexpr WGPUFeatureName k_optional_features[] = {
     WGPUFeatureName_TimestampQuery,    WGPUFeatureName_TextureCompressionBC, WGPUFeatureName_Depth32FloatStencil8,
     WGPUFeatureName_DepthClipControl,  WGPUFeatureName_TextureFormatsTier1,  WGPUFeatureName_TextureFormatsTier2,
-    WGPUFeatureName_Float32Filterable, WGPUFeatureName_BGRA8UnormStorage,
+    WGPUFeatureName_Float32Filterable, WGPUFeatureName_BGRA8UnormStorage,    WGPUFeatureName_ShaderF16,
+    WGPUFeatureName_Subgroups,
 };
 
 void on_uncaptured_error(WGPUDevice const*, WGPUErrorType type, WGPUStringView message, void* userdata1, void*)
@@ -81,7 +82,9 @@ void finish_creation(webgpu_context& ctx)
                                .depth32_float_stencil8 = has(WGPUFeatureName_Depth32FloatStencil8),
                                // sg's extended set holds bgra8_unorm, which WebGPU grants with a feature of its own.
                                .extended_image_formats
-                               = has(WGPUFeatureName_TextureFormatsTier1) && has(WGPUFeatureName_BGRA8UnormStorage)});
+                               = has(WGPUFeatureName_TextureFormatsTier1) && has(WGPUFeatureName_BGRA8UnormStorage),
+                               .shader_f16 = has(WGPUFeatureName_ShaderF16),
+                               .subgroups = has(WGPUFeatureName_Subgroups)});
 }
 
 struct request_state

@@ -396,6 +396,59 @@ cc::string_view missing_required_capability(VkPhysicalDevice dev)
     return {};
 }
 
+// The shader features above the floor that sg::feature reports, as the device has them.
+// Creation enables each one the device has, so this is also what the context answers.
+struct optional_shader_features
+{
+    VkBool32 shader_float16 = VK_FALSE;
+    VkBool32 shader_int16 = VK_FALSE;
+    VkBool32 storage_buffer_16bit = VK_FALSE;
+    VkBool32 uniform_and_storage_buffer_16bit = VK_FALSE;
+    VkBool32 subgroup_size_control = VK_FALSE;
+    bool subgroups = false;
+
+    /// A 16-bit type is used in registers and in buffers alike, so each kind needs both storage bits too.
+    [[nodiscard]] bool has_16bit_storage() const
+    {
+        return storage_buffer_16bit == VK_TRUE && uniform_and_storage_buffer_16bit == VK_TRUE;
+    }
+    [[nodiscard]] bool has_f16() const { return shader_float16 == VK_TRUE && has_16bit_storage(); }
+    [[nodiscard]] bool has_int16() const { return shader_int16 == VK_TRUE && has_16bit_storage(); }
+};
+
+optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
+{
+    auto vk13 = VkPhysicalDeviceVulkan13Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    auto vk12 = VkPhysicalDeviceVulkan12Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+                                                 .pNext = &vk13};
+    auto vk11 = VkPhysicalDeviceVulkan11Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+                                                 .pNext = &vk12};
+    auto features = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk11};
+    vkGetPhysicalDeviceFeatures2(dev, &features);
+
+    auto subgroup = VkPhysicalDeviceSubgroupProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+    auto properties
+        = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
+    vkGetPhysicalDeviceProperties2(dev, &properties);
+
+    // SGL's subgroup family is one feature, so the device must have every operation of it in both stages it allows.
+    constexpr auto stages = VkShaderStageFlags(VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    constexpr auto operations = VkSubgroupFeatureFlags(
+        VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_VOTE_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT
+        | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT
+        | VK_SUBGROUP_FEATURE_QUAD_BIT);
+
+    return {
+        .shader_float16 = vk12.shaderFloat16,
+        .shader_int16 = features.features.shaderInt16,
+        .storage_buffer_16bit = vk11.storageBuffer16BitAccess,
+        .uniform_and_storage_buffer_16bit = vk11.uniformAndStorageBuffer16BitAccess,
+        .subgroup_size_control = vk13.subgroupSizeControl,
+        .subgroups
+        = (subgroup.supportedStages & stages) == stages && (subgroup.supportedOperations & operations) == operations,
+    };
+}
+
 // Creates a timeline semaphore starting at `initial_value`.
 // Read with vkGetSemaphoreCounterValue and waited on with vkWaitSemaphores — no host event needed.
 VkResult create_timeline_semaphore(VkDevice device, u64 initial_value, VkSemaphore& out)
@@ -608,6 +661,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         transfer_queue_count = transfer_family_queue_count >= 3 ? 2u : (transfer_family_queue_count >= 2 ? 1u : 0u);
     }
 
+    auto const shader_features = query_optional_shader_features(best_device);
+
     float const queue_priority = 1.0f;
     auto const queue_info = VkDeviceQueueCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -648,6 +703,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         // DXC writes HLSL's `discard` as a demotion to a helper, which keeps the pixel in its quad's derivatives.
         // SGL states that on every target, and the capability is invalid unless the feature, which 1.3 requires, is enabled.
         .shaderDemoteToHelperInvocation = VK_TRUE,
+        // A pipeline asks for a subgroup size through it, where the device can set one.
+        .subgroupSizeControl = shader_features.subgroup_size_control,
         .synchronization2 = VK_TRUE,
         .dynamicRendering = VK_TRUE,
     };
@@ -657,6 +714,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
         .descriptorBindingPartiallyBound = VK_TRUE,
         .runtimeDescriptorArray = VK_TRUE,
+        .shaderFloat16 = shader_features.shader_float16,
         .scalarBlockLayout = VK_TRUE,
         // How the query system resets a pool: vkCmdResetQueryPool cannot be recorded inside a render-pass instance,
         // and a timestamp legitimately can be.
@@ -695,6 +753,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto vk11_features = VkPhysicalDeviceVulkan11Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
         .pNext = &vk12_features,
+        .storageBuffer16BitAccess = shader_features.storage_buffer_16bit,
+        .uniformAndStorageBuffer16BitAccess = shader_features.uniform_and_storage_buffer_16bit,
         .shaderDrawParameters = VK_TRUE,
     };
 
@@ -720,7 +780,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .fillModeNonSolid = supported.fillModeNonSolid,
                      .samplerAnisotropy = supported.samplerAnisotropy,
                      .fragmentStoresAndAtomics = VK_TRUE,
-                     .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats},
+                     .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats,
+                     .shaderInt16 = shader_features.shader_int16},
     };
 
     auto maintenance5_features = VkPhysicalDeviceMaintenance5FeaturesKHR{
@@ -812,6 +873,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         raytracing_supported = ctx->_raytracing_functions.load(device);
     }
     ctx->set_raytracing_supported(raytracing_supported);
+    ctx->_shader_f16 = shader_features.has_f16();
+    ctx->_shader_int16 = shader_features.has_int16();
+    ctx->_subgroups = shader_features.subgroups;
     ctx->_group_pool.initialize(*ctx);
     // Required at the floor, so device creation would have failed without it.
     ctx->set_host_query_reset(true);

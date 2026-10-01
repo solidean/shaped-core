@@ -242,7 +242,7 @@ public:
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
 
-    /// Vulkan has every stage sg models, so the graphics-stage features are a flat yes; the other three are device facts.
+    /// Vulkan has every stage sg models, and most of the rest are device facts.
     [[nodiscard]] bool supports(sg::feature f) const override
     {
         switch (f)
@@ -278,6 +278,16 @@ public:
             return _float32_filtering;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::shader_f16:
+            return _shader_f16;
+        case sg::feature::shader_int16:
+            return _shader_int16;
+        case sg::feature::subgroups:
+            return _subgroups;
+        // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
+        case sg::feature::device_coherence:
+        case sg::feature::image_atomics:
+            return true;
         }
         return false;
     }
@@ -812,6 +822,11 @@ public:
     bool _sample_rate_shading = false;
     bool _wireframe_fill = false;
     bool _depth32_float_stencil8 = false;
+    /// The 16-bit kinds each with the 16-bit buffer storage they need, and the whole subgroup family in compute and pixel.
+    /// Creation enables the device features behind them wherever the device has them.
+    bool _shader_f16 = false;
+    bool _shader_int16 = false;
+    bool _subgroups = false;
     /// Without it every sampler is created with anisotropy off; with it, maxAnisotropy is clamped to the device limit.
     bool _sampler_anisotropy = false;
 

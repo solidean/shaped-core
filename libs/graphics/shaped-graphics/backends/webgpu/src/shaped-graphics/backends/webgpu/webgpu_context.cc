@@ -70,6 +70,8 @@ void webgpu_context::set_limits(isize uniform_offset_alignment, granted_features
     _float32_filtering = features.float32_filtering;
     _depth32_float_stencil8 = features.depth32_float_stencil8;
     _extended_image_formats = features.extended_image_formats;
+    _shader_f16 = features.shader_f16;
+    _subgroups = features.subgroups;
     _limits.max_sample_count = 4;
 
     _upload_ring.initialize(*this, _config.upload_ring_bytes);

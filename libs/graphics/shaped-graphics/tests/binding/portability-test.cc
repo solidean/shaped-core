@@ -133,4 +133,10 @@ TEST("sg - every feature has a name, and the name finds it")
         CHECK(sg::feature_from_string(sg::to_string(f)) == cc::optional<sg::feature>(f));
     }
     CHECK(!sg::feature_from_string("raytracing").has_value());
+
+    // More features than 16 bits hold, so a set keeps the last one apart from the first.
+    auto const last = sg::feature_set(sg::feature::image_atomics);
+    CHECK(last.has(sg::feature::image_atomics));
+    CHECK(!last.has(sg::feature::ray_query));
+    CHECK(sg::feature_from_string("image_atomics") == cc::optional<sg::feature>(sg::feature::image_atomics));
 }

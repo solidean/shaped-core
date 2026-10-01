@@ -77,9 +77,13 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
           == "unknown-feature user:[timestamp_query] timestamp_query; a shader may require binding_arrays, "
              "extended_image_formats, readwrite_image_formats, multisampled_array_textures, ray_query, "
              "raytracing_pipeline, primitive_index, "
-             "sample_rate_shading, geometry_shader, tessellation_shader\n");
+             "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
+             "device_coherence, image_atomics\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
+
+    // The 16-bit types, the subgroup operations, coherent memory and image atomics are names too.
+    CHECK(reports_for("require shader_f16, shader_int16, subgroups, device_coherence, image_atomics\n") == "");
 }
 
 TEST("sgl check - a require in a body that nothing needs is unused, and one of a file or a binding never is")
