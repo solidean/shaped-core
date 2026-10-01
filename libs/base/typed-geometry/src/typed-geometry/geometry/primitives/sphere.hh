@@ -210,8 +210,8 @@ public:
     /// so dividing the image of a unit normal by that scale re-normalizes it exactly, with no sqrt.
     /// A signed scale flips the normal, which names the same plane.
     ///
-    /// The affine image is an ellipse in space — an ellipsoid<2, 3, T> — but naming its semi-axes needs an orthonormal
-    /// basis of the disk's plane, which linalg has no routine for yet, so that pair is a compile error for now.
+    /// The affine image is an ellipse in space, an ellipsoid<2, 3, T>, whose semi-axes are the images of two radius
+    /// vectors spanning the disk's plane.
     template <class TransformT>
     [[nodiscard]] constexpr auto transformed(TransformT const& t) const
     {
@@ -230,10 +230,18 @@ public:
             T const scale = s.uniform_scale();
             return sphere(center.transformed(s), radius * (scale < T(0) ? -scale : scale), normal.transformed(s) / scale);
         }
+        else if constexpr (requires { tg::affine_transform<3, T>(t); })
+        {
+            auto const a = tg::affine_transform<3, T>(t);
+            auto const m = a.linear_mat();
+            auto const [u, w] = tg::orthonormal_basis(normal);
+            vec<3, T> const axes[2] = {m * (u * radius), m * (w * radius)};
+            return ellipsoid<2, 3, T>(center.transformed(a), axes);
+        }
         else
-            static_assert(false, "tg: an embedded sphere only survives a similarity. Its affine image is an ellipse in "
-                                 "space, which needs an orthonormal basis of its plane — a linalg routine tg does not "
-                                 "have yet.");
+            static_assert(false,
+                          "tg: an embedded sphere survives an affine map (as an ellipse in space); its projective "
+                          "image is a general conic, which tg has no type for.");
     }
 
     // measures and readings
@@ -255,6 +263,17 @@ public:
     [[nodiscard]] constexpr pos<3, T> any_point() const { return center; }
     [[nodiscard]] constexpr T area() const { return tg::pi<T> * radius * radius; }
     [[nodiscard]] constexpr T perimeter() const { return T(2) * tg::pi<T> * radius; }
+
+    // sampling
+public:
+    /// a disk sample in the plane spanned by an orthonormal basis of the normal.
+    [[nodiscard]] pos<3, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T>)
+    {
+        auto const [u, w] = tg::orthonormal_basis(normal);
+        auto const d = tg::impl::uniform_in_unit_ball<2, T>(rng);
+        return center + (u * d.data[0] + w * d.data[1]) * radius;
+    }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
@@ -434,6 +453,22 @@ public:
         return tg::plane<3, T>(normal, tg::dot(normal, center - pos<3, T>()));
     }
     [[nodiscard]] constexpr T length() const { return T(2) * tg::pi<T> * radius; }
+
+    /// a point of the circle, along the first vector of an orthonormal basis of its plane.
+    [[nodiscard]] constexpr pos<3, T> any_point() const
+    {
+        return center + tg::orthonormal_basis(normal).first * radius;
+    }
+
+    // sampling
+public:
+    [[nodiscard]] pos<3, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T>)
+    {
+        auto const [u, w] = tg::orthonormal_basis(normal);
+        auto const d = tg::impl::uniform_direction<2, T>(rng);
+        return center + (u * d.data[0] + w * d.data[1]) * radius;
+    }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:

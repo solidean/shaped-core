@@ -132,3 +132,15 @@ TEST("tg sphere - a disk embedded in 3D carries its plane")
         CHECK(tgtest::approx(r.normal, tg::vec3f(0, 0, 1), 1e-4f));
     }
 }
+
+TEST("tg sphere - an affine map turns a disk in 3D into an ellipse in 3D")
+{
+    auto const d = tg::disk3f(tg::pos3f(0, 0, 0), 1.0f, tg::vec3f(0, 0, 1));
+    auto const e = d.transformed(tg::scaling_transform3f::make_scaling(tg::vec3f(2, 3, 1)));
+    static_assert(std::is_same_v<decltype(e), tg::ellipsoid2in3f const>);
+
+    // whatever basis the disk's plane got, the image's semi-axes stay in the plane and span the scaled ellipse
+    CHECK(tgtest::approx(e.semi_axes[0].data[2], 0.0f));
+    CHECK(tgtest::approx(e.semi_axes[1].data[2], 0.0f));
+    CHECK(tgtest::approx(e.area(), 6.0f * tg::pi<float>, 1e-3f));
+}

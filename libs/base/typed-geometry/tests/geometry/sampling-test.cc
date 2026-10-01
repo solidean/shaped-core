@@ -33,6 +33,14 @@ TEST("tg sampling - samples lie in the object")
         CHECK(box.boundary().sample_uniform(rng).distance_to(box.boundary()) < 1e-12);
         CHECK(tgtest::approx(ball.boundary().sample_uniform(rng).distance_to(ball.center), 2.0, 1e-9));
 
+        auto const disk = tg::disk3d(tg::pos3d(1, 1, 1), 2.0, tg::vec3d(0, 0.6, 0.8));
+        auto const dp = disk.sample_uniform(rng);
+        CHECK(tg::abs(tg::dot(dp - disk.center, disk.normal)) < 1e-12);
+        CHECK(dp.distance_to(disk.center) <= 2.0);
+        auto const cp = disk.boundary().sample_uniform(rng);
+        CHECK(tgtest::approx(cp.distance_to(disk.center), 2.0, 1e-9));
+        CHECK(tg::abs(tg::dot(cp - disk.center, disk.normal)) < 1e-12);
+
         // on a face, the largest box coordinate is +-1
         auto const c = obox.parameter_of(obox.boundary().sample_uniform(rng));
         auto reach = 0.0;

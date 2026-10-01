@@ -57,6 +57,8 @@ a == b  a != b                             // component-wise
 #include <typed-geometry/linalg/vec_ops.hh>
 tg::dot(a, b);                             // T   — dot product
 tg::normalize(v);                          // vec — free form of v.normalized() (requires has_sqrt<T>)
+tg::any_orthogonal(v);                     // vec — perpendicular to v, any length (2D: rotated, 3D: smallest component zeroed)
+tg::orthonormal_basis(n);                  // pair<vec3, vec3> {u, w}: (u, w, n) right-handed orthonormal; n MUST be unit
 ```
 
 ## pos — point (affine arithmetic)
@@ -301,7 +303,7 @@ tg::sphere_boundary<D,DA,T>, tg::ellipsoid_boundary<D,DA,T>  // the SURFACE: sam
 //   boundaries: sphere3f_boundary == sphere3f_surface, sphere2f_boundary, ellipsoid3d_surface, circle3f, …
 
 obj.transformed(t);   // every primitive; which transforms it accepts is a geometric statement:
-//   sphere              similarity -> sphere      |  affine -> ELLIPSOID (unless embedded: needs a basis of the flat)
+//   sphere              similarity -> sphere      |  affine -> ELLIPSOID (embedded too: disk3 -> ellipsoid2in3)
 //   *_boundary          whatever its solid becomes, then .boundary()
 //   ellipsoid           affine     -> ellipsoid   (embedded or not — the map is one of the ambient space)
 //   aabb                scaling + translation -> aabb  |  affine -> BOX (never a silently enlarged aabb)
@@ -336,7 +338,7 @@ o.sample_uniform(rng);   // cc::random&; uniform over the object's point set —
                          //   sphere3f the ball, sphere3f_surface the surface, aabb3f_surface the faces
 // segment, triangle, aabb (+boundary), box (+boundary, 2D/3D), sphere (+boundary, flat), ellipsoid (solid)
 // direct methods with a fixed draw count, except the ball/ellipsoid: rejection measured 2x faster
-// not yet: disk3 / circle3 (need an orthonormal basis of their plane), ellipsoid_boundary (not a linear image)
+// also disk3 / circle3 (through an orthonormal basis of their plane); not yet ellipsoid_boundary (not a linear image)
 ```
 
 ## geometric queries (members; definitions per verb)

@@ -52,10 +52,6 @@ Add entries as we discover them, and remove them as they land.
 
 ## geometry
 
-- **The affine image of an embedded `sphere`.**
-  It is an `ellipsoid<D, DAmbient, T>`, but building one means turning the circle's normal into an orthonormal basis of its plane, which `linalg` has no routine for.
-  What is missing is a `tg::any_orthogonal(vec)` / `tg::orthonormal_basis(vec)`.
-  Until it lands, that pair is a compile error while every non-embedded sphere maps fine.
 - **`quadric`.**
   What a `sphere` or `ellipsoid` becomes under a projective map, so those pairs are unregistered rather than approximated.
 - **A clipped / half-open segment.**

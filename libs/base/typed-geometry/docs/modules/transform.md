@@ -332,8 +332,7 @@ Which registrations exist is a statement about geometry, not about effort:
 | `plane` | affine, projective | `plane` |
 | `ray`, `line` | affine **only** | unchanged |
 
-The affine image of an *embedded* `sphere` is the one gap left in that table.
-It is an ellipse in the ambient space, but naming it needs an orthonormal basis of the disk's plane, which `linalg` has no routine for yet.
+An *embedded* `sphere` maps affinely to an ellipse in the ambient space, its semi-axes the images of two radius vectors from `tg::orthonormal_basis` of its plane.
 
 A finite convex primitive given by its vertices does survive a projection.
 `w` is affine over the primitive and the positive-`w` halfspace is convex, so asserting `w > 0` at the vertices settles the whole hull.
