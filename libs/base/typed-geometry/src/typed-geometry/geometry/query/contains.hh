@@ -219,3 +219,24 @@ constexpr auto tg::hemisphere_mantle<D, T>::contains(Obj const& obj) const
 {
     return tg::impl::contains(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron_boundary<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::quad<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}

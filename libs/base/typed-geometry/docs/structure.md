@@ -276,6 +276,8 @@ geometry/
     cylinder.hh     [done]     3D, flat caps; cylinder_boundary, cylinder_mantle (tube3)
     cone.hh         [done]     {apex, axis, radius}; cone_boundary, cone_mantle
     hemisphere.hh   [done]     {center, radius, normal}; hemisphere_boundary, hemisphere_mantle (the dome)
+    tetrahedron.hh  [done]     solid hull of 4 points; tetrahedron_boundary
+    quad.hh         [done]     bilinear patch over 4 corners
     triangle.hh     [done]     filled triangle (3 verts)
     segment.hh      [done]     closed segment between 2 endpoints
     ray.hh          [done]     {origin + t*dir : t >= 0}
@@ -284,7 +286,7 @@ geometry/
     sphere.hh       [done]     ball {x : distance(x, center) <= radius}; sphere_boundary is the surface
     ellipsoid.hh    [done]     solid ellipsoid {center + sum_i u_i * semi_axes[i] : |u| <= 1}; ellipsoid_boundary the surface
     primitives.hh   [done]
-    # planned: tetrahedron, quad, inf_cylinder, inf_cone, frustum — see plans/old-tg-carryover.md
+    # planned: inf_cylinder, inf_cone, frustum (wave 3) — see plans/old-tg-carryover.md
   query/            [in progress]  # the member verbs' definitions, one header per verb; kernels and GJK / EPA in impl/
   construct/        [planned]  # hull, fitting, primitives_from_points
   geometry.hh       [done]

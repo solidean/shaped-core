@@ -852,3 +852,87 @@ constexpr bool tg::hemisphere_mantle<D, T>::contains(Obj const& obj, T eps) cons
 {
     return tg::impl::contains_within(*this, obj, eps);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron_boundary<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::quad<D, T>::distance_sqr_to(Obj const& obj) const
+{
+    return tg::impl::distance_sqr_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron_boundary<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::quad<D, T>::distance_to(Obj const& obj) const
+{
+    return tg::impl::distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron_boundary<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::quad<D, T>::signed_distance_to(Obj const& obj) const
+{
+    return tg::impl::signed_distance_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::tetrahedron<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::tetrahedron_boundary<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::quad<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}

@@ -12,7 +12,9 @@
 #include <typed-geometry/geometry/primitives/hemisphere.hh>
 #include <typed-geometry/geometry/primitives/line.hh>
 #include <typed-geometry/geometry/primitives/plane.hh>
+#include <typed-geometry/geometry/primitives/quad.hh>
 #include <typed-geometry/geometry/primitives/ray.hh>
 #include <typed-geometry/geometry/primitives/segment.hh>
 #include <typed-geometry/geometry/primitives/sphere.hh>
+#include <typed-geometry/geometry/primitives/tetrahedron.hh>
 #include <typed-geometry/geometry/primitives/triangle.hh>

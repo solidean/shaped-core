@@ -455,3 +455,45 @@ constexpr bool tg::hemisphere_mantle<D, T>::intersects(Obj const& obj, T eps) co
 {
     return tg::impl::intersects_within(*this, obj, eps);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::quad<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::tetrahedron<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::tetrahedron_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::quad<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}

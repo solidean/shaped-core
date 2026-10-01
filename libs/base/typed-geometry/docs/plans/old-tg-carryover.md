@@ -1,6 +1,6 @@
 # Plan: carrying the old typed-geometry over
 
-Status: **agreed, being built** — wave 1 first; this file shrinks as items land.
+Status: **agreed, being built** — waves 1 and 2 have landed; wave 3 is next.
 The old typed-geometry is the reference for *what* the surface was, never for *how*: every geometric algorithm is reimplemented.
 [geometry-query-matrix.md](geometry-query-matrix.md) is the binary-query machinery this builds on.
 

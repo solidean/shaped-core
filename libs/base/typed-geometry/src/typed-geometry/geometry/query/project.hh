@@ -214,3 +214,24 @@ constexpr auto tg::hemisphere_mantle<D, T>::project_to(Obj const& obj) const
 {
     return tg::impl::project_to(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron_boundary<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::quad<D, T>::project_to(Obj const& obj) const
+{
+    return tg::impl::project_to(*this, obj);
+}

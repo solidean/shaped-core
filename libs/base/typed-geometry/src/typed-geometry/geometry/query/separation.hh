@@ -218,3 +218,24 @@ constexpr auto tg::hemisphere_mantle<D, T>::separation_from(Obj const& obj) cons
 {
     return tg::impl::separation_from(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::quad<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}

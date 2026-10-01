@@ -116,6 +116,19 @@ struct hemisphere_boundary;
 template <int D, class T>
 struct hemisphere_mantle;
 
+/// the solid convex hull of four points; 3D only.
+/// Finite, intrinsic_dim 3.
+template <int D, class T>
+struct tetrahedron;
+/// the four faces of a tetrahedron.
+template <int D, class T>
+struct tetrahedron_boundary;
+
+/// the bilinear patch spanned by four corners, which need not be coplanar.
+/// Finite, intrinsic_dim 2.
+template <int D, class T>
+struct quad;
+
 //
 // Query results
 //
@@ -413,5 +426,26 @@ using hemisphere3f_surface = hemisphere_boundary<3, f32>;
 using hemisphere3d_surface = hemisphere_boundary<3, f64>;
 using hemisphere3f_mantle = hemisphere_mantle<3, f32>;
 using hemisphere3d_mantle = hemisphere_mantle<3, f64>;
+
+
+template <class T>
+using tetrahedron3 = tetrahedron<3, T>;
+template <class T>
+using tetrahedron3_boundary = tetrahedron_boundary<3, T>;
+template <class T>
+using tetrahedron3_surface = tetrahedron_boundary<3, T>;
+template <class T>
+using quad2 = quad<2, T>;
+template <class T>
+using quad3 = quad<3, T>;
+
+using tetrahedron3f = tetrahedron<3, f32>;
+using tetrahedron3d = tetrahedron<3, f64>;
+using tetrahedron3f_surface = tetrahedron_boundary<3, f32>;
+using tetrahedron3d_surface = tetrahedron_boundary<3, f64>;
+using quad2f = quad<2, f32>;
+using quad3f = quad<3, f32>;
+using quad2d = quad<2, f64>;
+using quad3d = quad<3, f64>;
 
 } // namespace tg

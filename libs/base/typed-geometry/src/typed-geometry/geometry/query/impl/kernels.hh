@@ -13,6 +13,7 @@
 #include <typed-geometry/geometry/query/impl/kernels/linear.hh>
 #include <typed-geometry/geometry/query/impl/kernels/parameters.hh>
 #include <typed-geometry/geometry/query/impl/kernels/plane.hh>
+#include <typed-geometry/geometry/query/impl/kernels/polytope.hh>
 #include <typed-geometry/geometry/query/impl/kernels/pos.hh>
 #include <typed-geometry/geometry/query/impl/kernels/round.hh>
 #include <typed-geometry/geometry/query/impl/kernels/sphere.hh>

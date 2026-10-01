@@ -250,3 +250,24 @@ constexpr auto tg::hemisphere_mantle<D, T>::intersection_with(Obj const& obj) co
 {
     return tg::impl::intersection_with(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::tetrahedron_boundary<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::quad<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
