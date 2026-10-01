@@ -122,6 +122,13 @@ Support is `tg::impl::support_op<Obj>`, a kernel like any other, and not a publi
   Closed forms are added top-down by profiled call frequency, and GJK is their test oracle.
 - **The unbounded types** (ray, line, plane, halfspace) have support functions that run off to infinity, so they get closed forms from day one.
 - **GJK iterates to a relative tolerance and carries an iteration cap**; hitting the cap returns its current best answer.
+- **Measured, it is slower than the estimate this plan started from** (5–10x a closed form for box–box).
+  On a Ryzen 9 5900X in a release build, distance through GJK took 124x the closed form for aabb–aabb and 252x for ball–aabb.
+  It took 22x for segment–segment and 11x for point–triangle (`libs/base/typed-geometry/tests/benchmarks/query-benchmark.cc`).
+  Two costs dominate and are the follow-up.
+  The tolerance is 64 machine epsilons, which a curved support approaches slowly.
+  And the simplex step solves a small system for every face rather than reusing the last step's.
+  The hot pairs have closed forms already, so this prices the cold tail rather than a realtime path.
 - **EPA** extends a GJK simplex that contains the origin to the penetration depth and normal: `a.separation_from(b)`.
 - **`intersection_with` is not a GJK derivative.**
   It is defined only where the overlap is a representable primitive, and a pair whose overlap has no type has no `intersection_with` at all.
@@ -159,14 +166,14 @@ The verbs are realtime first, and they **assume special cases away**: two 3D lin
 - **No UB and bounded iteration**: no computed index out of range, no integer division by zero, an iteration cap on every iterative kernel.
 - **Exact comparisons**, through `tg::traits::is_zero` and plain `<`; GJK's tolerance is internal to it.
 
-**The epsilon overloads** `a.intersects(b, eps)` and `a.contains(b, eps)` exist only for pairs where a kernel can give this bracket cheaply:
+**The epsilon overloads** `a.intersects(b, eps)` and `a.contains(p, eps)` (for a point `p`) give this bracket:
 - `true` if `a` and `b` share a point;
 - `false` if `a.distance_to(b) > eps`;
 - either, in between.
 
 It holds up to rounding — a pair within an ulp or two of either edge may land on the wrong side — and `eps` must be `>= 0`.
-Each kernel pads in whatever way is cheap for it (slab padding, a barycentric margin), which is why the in-between is left open.
-The exact meaning is already spelled `a.distance_to(b) <= eps`.
+The default is the exact test, `distance_sqr_to(b) <= eps²`, so the overloads exist wherever a distance does.
+A kernel may pad more cheaply in whatever way suits it (a barycentric margin, say), which is why the in-between is left open; none does yet.
 
 **The opt-in check.**
 `SC_CHECK_GEOMETRY_SPECIAL_CASES` (default off, on in the `debug-nopch` presets) reaches C++ as `TG_CHECK_SPECIAL_CASES`.

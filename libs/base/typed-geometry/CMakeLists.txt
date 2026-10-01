@@ -84,6 +84,7 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/query/impl/kernels/box.hh
     src/typed-geometry/geometry/query/impl/kernels/constructive.hh
     src/typed-geometry/geometry/query/impl/kernels/halfspace.hh
+    src/typed-geometry/geometry/query/impl/kernels/hot_pairs.hh
     src/typed-geometry/geometry/query/impl/kernels/linear.hh
     src/typed-geometry/geometry/query/impl/kernels/parameters.hh
     src/typed-geometry/geometry/query/impl/kernels/plane.hh
@@ -165,6 +166,7 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/fixed_int-benchmark.cc
         tests/benchmarks/half_float-benchmark.cc
         tests/benchmarks/sampling-benchmark.cc
+        tests/benchmarks/query-benchmark.cc
 
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc
@@ -200,6 +202,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/query/gjk-test.cc
         tests/geometry/query/wave1-queries-test.cc
         tests/geometry/query/intersection-test.cc
+        tests/geometry/query/hot-pairs-test.cc
     )
     sc_nexus_binary(typed-geometry-test KINDS tests)
 

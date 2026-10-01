@@ -8,6 +8,7 @@
 #include <typed-geometry/geometry/query/impl/kernels/box.hh>
 #include <typed-geometry/geometry/query/impl/kernels/constructive.hh>
 #include <typed-geometry/geometry/query/impl/kernels/halfspace.hh>
+#include <typed-geometry/geometry/query/impl/kernels/hot_pairs.hh>
 #include <typed-geometry/geometry/query/impl/kernels/linear.hh>
 #include <typed-geometry/geometry/query/impl/kernels/parameters.hh>
 #include <typed-geometry/geometry/query/impl/kernels/plane.hh>

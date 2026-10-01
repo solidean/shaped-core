@@ -1,6 +1,7 @@
 #pragma once
 
 #include <typed-geometry/geometry/query/contains.hh>
+#include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/geometry/query/impl/gjk.hh>
 #include <typed-geometry/geometry/query/impl/kernels.hh>
 
@@ -44,6 +45,18 @@ template <class A, class B>
         return impl::intersects(b.solid(), a) && !impl::contains(b.solid(), a);
     else
         static_assert(false, "tg: no intersects for this pair of types; tg::has_intersects<A, B> is the probe");
+}
+
+/// `a.intersects(b, eps)`: true when a and b meet, false when they are farther apart than eps, either in between.
+/// The bracket holds up to rounding; the exact distance test satisfies it, and is the default.
+template <class A, class B, class T>
+[[nodiscard]] constexpr bool intersects_within(A const& a, B const& b, T eps)
+{
+    if constexpr (has_distance_sqr_to<A, B>)
+        return impl::distance_sqr_to(a, b) <= eps * eps;
+    else
+        static_assert(false, "tg: no intersects(b, eps) for this pair of types; it needs tg::has_distance_sqr_to<A, "
+                             "B>");
 }
 } // namespace tg::impl
 
@@ -166,4 +179,125 @@ template <class Obj>
 constexpr auto tg::box_boundary<D, DAmbient, T>::intersects(Obj const& obj) const
 {
     return tg::impl::intersects(*this, obj);
+}
+
+// intersects(b, eps), one definition per object type
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::pos<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::segment<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::ray<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::line<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::triangle<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::plane<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::aabb<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::sphere<D, D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <class T>
+template <class Obj>
+constexpr bool tg::sphere<2, 3, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::sphere_boundary<D, D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <class T>
+template <class Obj>
+constexpr bool tg::sphere_boundary<2, 3, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::ellipsoid<D, DAmbient, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::ellipsoid_boundary<D, DAmbient, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::halfspace<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::aabb_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::box<D, DAmbient, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::box_boundary<D, DAmbient, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
 }

@@ -174,6 +174,10 @@ public:
     template <class Obj>
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
     template <class Obj>
+    [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
+    template <class Obj>
     [[nodiscard]] constexpr auto separation_from(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr auto intersection_with(Obj const& obj) const;
@@ -299,6 +303,10 @@ public:
     [[nodiscard]] constexpr auto contains(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
     template <class Obj>
     [[nodiscard]] constexpr auto separation_from(Obj const& obj) const;
     template <class Obj>

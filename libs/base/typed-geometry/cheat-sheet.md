@@ -359,6 +359,9 @@ a.intersection_with(b);     // cc::optional<X>, X the generic-case shape: aabb�
                             //   gives its crossing pos (hits of pos) or the segment inside a BOUNDED solid
 a.separation_from(b);       // cc::optional<tg::separation<D,T>> {normal, depth}: move b by normal*depth to stop
                             //   overlapping; empty when apart. Bounded convex SOLIDS only (EPA), 2D and 3D
+a.intersects(b, eps);  p_obj.contains(p, eps);  // bool: true if they meet, false beyond eps, either between;
+                                                // default is the exact distance test (up to rounding)
+// closed forms: aabb–aabb, ball–ball, ball–aabb, segment–segment, box–box (SAT); GJK measured 11–250x slower
 // bounded convex objects with a support (pos, segment, triangle, aabb, sphere) get distance / closest points /
 //   intersects against each other for free through GJK; closed forms take over where they exist
 // a member used without its verb's header: "function with deduced return type cannot be used before it is defined"

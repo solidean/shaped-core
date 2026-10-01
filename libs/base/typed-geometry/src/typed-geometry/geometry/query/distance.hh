@@ -48,6 +48,17 @@ template <class A, class B>
         static_assert(false, "tg: no signed_distance_to for this pair of types; tg::has_signed_distance_to<A, B> is "
                              "the probe");
 }
+
+/// `a.contains(p, eps)` for a point: true when p is in a, false when it is farther than eps from it, either in between.
+/// It lives with the distances because the exact distance test is what it defaults to.
+template <class A, class B, class T>
+[[nodiscard]] constexpr bool contains_within(A const& a, B const& b, T eps)
+{
+    if constexpr (is_pos<B> && has_distance_sqr_to<A, B>)
+        return impl::distance_sqr_to(a, b) <= eps * eps;
+    else
+        static_assert(false, "tg: contains(b, eps) is defined for a point b with a distance to a");
+}
 } // namespace tg::impl
 
 // distance_sqr_to, one definition per object type
@@ -411,4 +422,125 @@ template <class Obj>
 constexpr auto tg::box_boundary<D, DAmbient, T>::signed_distance_to(Obj const& obj) const
 {
     return tg::impl::signed_distance_to(*this, obj);
+}
+
+// contains(b, eps), one definition per object type
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::pos<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::segment<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::ray<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::line<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::triangle<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::plane<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::aabb<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::sphere<D, D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <class T>
+template <class Obj>
+constexpr bool tg::sphere<2, 3, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::sphere_boundary<D, D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <class T>
+template <class Obj>
+constexpr bool tg::sphere_boundary<2, 3, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::ellipsoid<D, DAmbient, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::ellipsoid_boundary<D, DAmbient, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::halfspace<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::aabb_boundary<D, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::box<D, DAmbient, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::box_boundary<D, DAmbient, T>::contains(Obj const& obj, T eps) const
+{
+    return tg::impl::contains_within(*this, obj, eps);
 }
