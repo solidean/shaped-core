@@ -46,6 +46,11 @@ public:
         }
     }
 
+    // readings
+public:
+    /// a point of the boundary plane, which the half-space includes.
+    [[nodiscard]] constexpr pos<D, T> any_point() const { return pos<D, T>() + normal * dist; }
+
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
     template <class Obj>

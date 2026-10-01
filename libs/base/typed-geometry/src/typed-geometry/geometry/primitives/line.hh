@@ -5,6 +5,7 @@
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
 /// Line: an infinite straight line through a point along a direction.
@@ -51,6 +52,20 @@ public:
         }
         else
             static_assert(false, "tg: a line only survives an affine map");
+    }
+
+    // readings
+public:
+    [[nodiscard]] constexpr pos<D, T> any_point() const { return origin; }
+
+    // parameters
+public:
+    /// origin + t * dir.
+    [[nodiscard]] constexpr pos<D, T> at(T t) const { return origin + dir * t; }
+    /// the parameter of p's projection onto the line.
+    [[nodiscard]] constexpr T parameter_of(pos<D, T> const& p) const
+    {
+        return tg::dot(p - origin, dir) / tg::dot(dir, dir);
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md

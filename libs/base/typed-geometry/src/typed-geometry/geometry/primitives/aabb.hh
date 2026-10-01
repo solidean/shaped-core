@@ -1,9 +1,13 @@
 #pragma once
 
+#include <clean-core/container/fixed_array.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/impl/bounds_of.hh>
 #include <typed-geometry/geometry/primitives/box.hh>
+#include <typed-geometry/geometry/primitives/segment.hh>
 #include <typed-geometry/geometry/traits.hh>
+#include <typed-geometry/linalg/comp.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
@@ -83,6 +87,74 @@ public:
                                  "has no tg type.");
     }
 
+    // measures and readings
+public:
+    [[nodiscard]] constexpr pos<D, T> centroid() const { return min + (max - min) / T(2); }
+    [[nodiscard]] constexpr aabb bounds() const { return *this; }
+    [[nodiscard]] constexpr pos<D, T> any_point() const { return min; }
+    /// in 2D the area; in 3D the area of the six faces.
+    [[nodiscard]] constexpr T area() const
+        requires(D == 2 || D == 3)
+    {
+        auto const s = max - min;
+        if constexpr (D == 2)
+            return s.data[0] * s.data[1];
+        else
+            return T(2) * (s.data[0] * s.data[1] + s.data[1] * s.data[2] + s.data[2] * s.data[0]);
+    }
+    [[nodiscard]] constexpr T perimeter() const
+        requires(D == 2)
+    {
+        auto const s = max - min;
+        return T(2) * (s.data[0] + s.data[1]);
+    }
+    [[nodiscard]] constexpr T volume() const
+        requires(D == 3)
+    {
+        auto const s = max - min;
+        return s.data[0] * s.data[1] * s.data[2];
+    }
+    /// corner i takes max on the axes whose bit is set in i.
+    [[nodiscard]] constexpr cc::fixed_array<pos<D, T>, (1 << D)> vertices() const
+    {
+        cc::fixed_array<pos<D, T>, (1 << D)> r = {};
+        for (int v = 0; v < (1 << D); ++v)
+            for (int i = 0; i < D; ++i)
+                r[v].data[i] = (v >> i) & 1 ? max.data[i] : min.data[i];
+        return r;
+    }
+    /// every pair of corners that differ on exactly one axis.
+    [[nodiscard]] constexpr cc::fixed_array<segment<D, T>, D * (1 << (D - 1))> edges() const
+    {
+        auto const v = this->vertices();
+        cc::fixed_array<segment<D, T>, D * (1 << (D - 1))> r = {};
+        auto n = 0;
+        for (int c = 0; c < (1 << D); ++c)
+            for (int i = 0; i < D; ++i)
+                if (!((c >> i) & 1))
+                    r[n++] = segment<D, T>(v[c], v[c | (1 << i)]);
+        return r;
+    }
+
+    // parameters
+public:
+    /// min + c * (max - min) per axis; the box is c in [0, 1]^D.
+    [[nodiscard]] constexpr pos<D, T> at(comp<D, T> const& c) const
+    {
+        auto r = min;
+        for (int i = 0; i < D; ++i)
+            r.data[i] = min.data[i] + (max.data[i] - min.data[i]) * c.data[i];
+        return r;
+    }
+    /// the inverse of at, unclamped: outside the box a coordinate leaves [0, 1].
+    [[nodiscard]] constexpr comp<D, T> parameter_of(pos<D, T> const& p) const
+    {
+        comp<D, T> r;
+        for (int i = 0; i < D; ++i)
+            r.data[i] = (p.data[i] - min.data[i]) / (max.data[i] - min.data[i]);
+        return r;
+    }
+
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
     template <class Obj>
@@ -145,6 +217,23 @@ public:
             return t.custom_transform(*this);
         else
             return this->solid().transformed(t).boundary();
+    }
+
+    // measures and readings
+public:
+    [[nodiscard]] constexpr pos<D, T> centroid() const { return min + (max - min) / T(2); }
+    [[nodiscard]] constexpr aabb<D, T> bounds() const { return aabb<D, T>(min, max); }
+    [[nodiscard]] constexpr pos<D, T> any_point() const { return min; }
+    /// the faces of a 2D box are its outline.
+    [[nodiscard]] constexpr T length() const
+        requires(D == 2)
+    {
+        return this->solid().perimeter();
+    }
+    [[nodiscard]] constexpr T area() const
+        requires(D == 3)
+    {
+        return this->solid().area();
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md

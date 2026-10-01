@@ -75,11 +75,13 @@ Per type, inline in the family's header, with no generic derivation.
 | `volume()` | intrinsic dim 3 | the volume |
 
 A boundary type answers only its own measures: `sphere3_surface.volume()` does not exist, and the enclosed volume is `s.solid().volume()`.
+An ellipse's perimeter and an ellipsoid's surface area have no closed form, so `ellipsoid` has neither and `ellipsoid_boundary` has no measure at all.
 
 ## Parameters
 
 `o.at(t)` maps a parameter to a point, and `o.parameter_of(p)` inverts it.
-For a `p` off the object, `parameter_of` gives the parameter of `p.project_to(o)` on a segment, ray or line, and the unclamped barycentrics on a triangle (negative outside).
+For a `p` off the object, `parameter_of` gives the parameter of `p.project_to(o)` on a segment, ray or line.
+On a triangle, an aabb or a box it is the unclamped extension of the map: barycentrics go negative, box coordinates leave their range.
 
 | family | parameter | domain | point |
 |---|---|---|---|

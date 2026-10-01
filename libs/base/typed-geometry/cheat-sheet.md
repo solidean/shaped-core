@@ -312,6 +312,23 @@ obj.transformed(t);   // every primitive; which transforms it accepts is a geome
 //   ray, line           affine ONLY               (a projected ray is a bounded segment)
 ```
 
+## unary members (per type, inline)
+
+```cpp
+seg.length();  tri.area();  tri.perimeter();  box.volume();   // by intrinsic dim: 1 length, 2 area + perimeter, 3 volume
+aabb3.area();  sphere3.area();          // a 3D SOLID's area() is its surface; a boundary answers only its own measure
+                                        //   (sphere3f_surface has area(), no volume(); aabb2_boundary has length())
+o.centroid();  o.bounds();              // pos; aabb<D,T>
+o.vertices();  o.edges();               // cc::fixed_array — segment, triangle, aabb (2^D / D*2^(D-1)), box
+tri.normal();  tri.plane();             // 3D, unit, counter-clockwise; also box2in3.normal(), disk3.plane()
+o.any_point();                          // a point of the set (for a surface ON it, not the center)
+seg.unbounded();  ray.unbounded();      // the line through it
+seg.at(t);  ray.at(t);  line.at(t);     // t: [0,1] / >= 0 / any
+tri.at(comp3 bary);  aabb.at(comp [0,1]^D);  box.at(comp [-1,1]^D)
+o.parameter_of(p);                      // inverse of at; segment/ray/line: of p's projection (clamped),
+                                        //   triangle/aabb/box: unclamped (barycentrics go negative)
+```
+
 ## geometric queries (members; definitions per verb)
 
 ```cpp

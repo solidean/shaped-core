@@ -2,9 +2,14 @@
 
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/traits.hh>
+#include <typed-geometry/linalg/cross.hh>
+#include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/scalar/constants.hh>
+#include <typed-geometry/scalar/scalar.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
 /// Solid ellipsoid, stored as a center and its D semi-axis vectors.
@@ -99,6 +104,42 @@ public:
                           "quadric, which tg has no type for yet.");
     }
 
+    // measures and readings
+public:
+    [[nodiscard]] constexpr pos<DAmbient, T> centroid() const { return center; }
+    /// along each coordinate the reach is the length of the semi-axes' components there.
+    [[nodiscard]] constexpr aabb<DAmbient, T> bounds() const
+        requires(tg::traits::has_sqrt<T>)
+    {
+        auto e = vec<DAmbient, T>();
+        for (int k = 0; k < DAmbient; ++k)
+        {
+            auto s = T(0);
+            for (int i = 0; i < D; ++i)
+                s = s + semi_axes[i].data[k] * semi_axes[i].data[k];
+            e.data[k] = tg::sqrt(s);
+        }
+        return aabb<DAmbient, T>(center - e, center + e);
+    }
+    [[nodiscard]] constexpr pos<DAmbient, T> any_point() const { return center; }
+    /// the filled ellipse's area.
+    /// An ellipsoid's surface area has no closed form, so there is none in 3D.
+    [[nodiscard]] constexpr T area() const
+        requires(D == 2 && tg::traits::has_sqrt<T>)
+    {
+        if constexpr (DAmbient == 2)
+            return tg::pi<T>
+                 * tg::abs(semi_axes[0].data[0] * semi_axes[1].data[1] - semi_axes[0].data[1] * semi_axes[1].data[0]);
+        else
+            return tg::pi<T> * tg::dual(tg::cross(semi_axes[0], semi_axes[1])).length();
+    }
+    [[nodiscard]] constexpr T volume() const
+        requires(D == 3 && DAmbient == 3)
+    {
+        return T(4) / T(3) * tg::pi<T>
+             * tg::abs(mat<3, 3, T>::make_from_cols(semi_axes[0], semi_axes[1], semi_axes[2]).determinant());
+    }
+
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
     template <class Obj>
@@ -165,6 +206,26 @@ public:
         else
             return this->solid().transformed(t).boundary();
     }
+
+    // measures and readings
+public:
+    [[nodiscard]] constexpr pos<DAmbient, T> centroid() const { return center; }
+    /// along each coordinate the reach is the length of the semi-axes' components there.
+    [[nodiscard]] constexpr aabb<DAmbient, T> bounds() const
+        requires(tg::traits::has_sqrt<T>)
+    {
+        auto e = vec<DAmbient, T>();
+        for (int k = 0; k < DAmbient; ++k)
+        {
+            auto s = T(0);
+            for (int i = 0; i < D; ++i)
+                s = s + semi_axes[i].data[k] * semi_axes[i].data[k];
+            e.data[k] = tg::sqrt(s);
+        }
+        return aabb<DAmbient, T>(center - e, center + e);
+    }
+    [[nodiscard]] constexpr pos<DAmbient, T> any_point() const { return center + semi_axes[0]; }
+    // an ellipse's perimeter and an ellipsoid's surface area have no closed form, so there are no measures here
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:

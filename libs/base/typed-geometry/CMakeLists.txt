@@ -96,6 +96,7 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/query/project.hh
     src/typed-geometry/geometry/query/separation.hh
     src/typed-geometry/geometry/query/query.hh
+    src/typed-geometry/geometry/impl/bounds_of.hh
     src/typed-geometry/geometry/geometry.hh
     src/typed-geometry/geometry/all.hh
 )
@@ -184,6 +185,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/halfspace-test.cc
         tests/geometry/box-test.cc
         tests/geometry/object-traits-test.cc
+        tests/geometry/measures-test.cc
         tests/geometry/query/ladder-test.cc
         tests/geometry/query/point-queries-test.cc
         tests/geometry/query/special-case-test.cc

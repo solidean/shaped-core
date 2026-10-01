@@ -2,10 +2,15 @@
 
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/primitives/ellipsoid.hh>
+#include <typed-geometry/geometry/primitives/plane.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/linalg/vec_ops.hh>
+#include <typed-geometry/scalar/constants.hh>
+#include <typed-geometry/scalar/scalar.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
 namespace tg
@@ -101,6 +106,34 @@ public:
                                  "type for yet.");
     }
 
+    // measures and readings
+public:
+    [[nodiscard]] constexpr pos<D, T> centroid() const { return center; }
+    [[nodiscard]] constexpr aabb<D, T> bounds() const
+    {
+        return aabb<D, T>(center - vec<D, T>(radius), center + vec<D, T>(radius));
+    }
+    [[nodiscard]] constexpr pos<D, T> any_point() const { return center; }
+    /// in 2D the disk's area; in 3D the area of the surface.
+    [[nodiscard]] constexpr T area() const
+        requires(D == 2 || D == 3)
+    {
+        if constexpr (D == 2)
+            return tg::pi<T> * radius * radius;
+        else
+            return T(4) * tg::pi<T> * radius * radius;
+    }
+    [[nodiscard]] constexpr T perimeter() const
+        requires(D == 2)
+    {
+        return T(2) * tg::pi<T> * radius;
+    }
+    [[nodiscard]] constexpr T volume() const
+        requires(D == 3)
+    {
+        return T(4) / T(3) * tg::pi<T> * radius * radius * radius;
+    }
+
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
     template <class Obj>
@@ -188,6 +221,26 @@ public:
                                  "have yet.");
     }
 
+    // measures and readings
+public:
+    [[nodiscard]] constexpr pos<3, T> centroid() const { return center; }
+    /// along each axis the disk reaches radius * sqrt(1 - normal_k^2): its rim tilted out of that axis.
+    [[nodiscard]] constexpr aabb<3, T> bounds() const
+        requires(tg::traits::has_sqrt<T>)
+    {
+        auto e = vec<3, T>();
+        for (int k = 0; k < 3; ++k)
+            e.data[k] = radius * tg::sqrt(T(1) - normal.data[k] * normal.data[k]);
+        return aabb<3, T>(center - e, center + e);
+    }
+    [[nodiscard]] constexpr tg::plane<3, T> plane() const
+    {
+        return tg::plane<3, T>(normal, tg::dot(normal, center - pos<3, T>()));
+    }
+    [[nodiscard]] constexpr pos<3, T> any_point() const { return center; }
+    [[nodiscard]] constexpr T area() const { return tg::pi<T> * radius * radius; }
+    [[nodiscard]] constexpr T perimeter() const { return T(2) * tg::pi<T> * radius; }
+
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
     template <class Obj>
@@ -243,6 +296,32 @@ public:
             return t.custom_transform(*this);
         else
             return this->solid().transformed(t).boundary();
+    }
+
+    // measures and readings
+public:
+    [[nodiscard]] constexpr pos<D, T> centroid() const { return center; }
+    [[nodiscard]] constexpr aabb<D, T> bounds() const
+    {
+        return aabb<D, T>(center - vec<D, T>(radius), center + vec<D, T>(radius));
+    }
+    /// the point of the surface along the first axis.
+    [[nodiscard]] constexpr pos<D, T> any_point() const
+    {
+        auto p = center;
+        p.data[0] = p.data[0] + radius;
+        return p;
+    }
+    /// the circumference of a circle.
+    [[nodiscard]] constexpr T length() const
+        requires(D == 2)
+    {
+        return T(2) * tg::pi<T> * radius;
+    }
+    [[nodiscard]] constexpr T area() const
+        requires(D == 3)
+    {
+        return T(4) * tg::pi<T> * radius * radius;
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
@@ -302,6 +381,24 @@ public:
         else
             return this->solid().transformed(t).boundary();
     }
+
+    // measures and readings
+public:
+    [[nodiscard]] constexpr pos<3, T> centroid() const { return center; }
+    /// along each axis the disk reaches radius * sqrt(1 - normal_k^2): its rim tilted out of that axis.
+    [[nodiscard]] constexpr aabb<3, T> bounds() const
+        requires(tg::traits::has_sqrt<T>)
+    {
+        auto e = vec<3, T>();
+        for (int k = 0; k < 3; ++k)
+            e.data[k] = radius * tg::sqrt(T(1) - normal.data[k] * normal.data[k]);
+        return aabb<3, T>(center - e, center + e);
+    }
+    [[nodiscard]] constexpr tg::plane<3, T> plane() const
+    {
+        return tg::plane<3, T>(normal, tg::dot(normal, center - pos<3, T>()));
+    }
+    [[nodiscard]] constexpr T length() const { return T(2) * tg::pi<T> * radius; }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
