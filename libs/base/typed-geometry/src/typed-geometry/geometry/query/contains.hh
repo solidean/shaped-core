@@ -177,3 +177,45 @@ constexpr auto tg::cylinder_mantle<D, T>::contains(Obj const& obj) const
 {
     return tg::impl::contains(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_boundary<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_mantle<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_boundary<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_mantle<D, T>::contains(Obj const& obj) const
+{
+    return tg::impl::contains(*this, obj);
+}

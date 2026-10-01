@@ -371,3 +371,87 @@ constexpr bool tg::cylinder_mantle<D, T>::intersects(Obj const& obj, T eps) cons
 {
     return tg::impl::intersects_within(*this, obj, eps);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_mantle<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_boundary<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_mantle<D, T>::intersects(Obj const& obj) const
+{
+    return tg::impl::intersects(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cone<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cone_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cone_mantle<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::hemisphere<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::hemisphere_boundary<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::hemisphere_mantle<D, T>::intersects(Obj const& obj, T eps) const
+{
+    return tg::impl::intersects_within(*this, obj, eps);
+}

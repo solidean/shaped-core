@@ -235,6 +235,9 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::cylinder<D, T>>
     [[nodiscard]] static constexpr pos<D, T> apply(pos<D, T> const& p, cylinder<D, T> const& c)
     {
         auto const k = impl::cylinder_coords_of(p, c.axis);
+        // a point inside is its own projection, returned as given so contains can rely on equality
+        if (k.s >= T(0) && k.s <= T(1) && k.rho <= c.radius)
+            return p;
         auto const s = impl::clamp01(k.s);
         auto const radial = k.rho <= c.radius ? k.radial : k.radial * (c.radius / k.rho);
         return c.axis.at(s) + radial;

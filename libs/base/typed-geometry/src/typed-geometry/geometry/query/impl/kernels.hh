@@ -6,6 +6,7 @@
 
 #include <typed-geometry/geometry/query/impl/kernels/aabb.hh>
 #include <typed-geometry/geometry/query/impl/kernels/box.hh>
+#include <typed-geometry/geometry/query/impl/kernels/capped.hh>
 #include <typed-geometry/geometry/query/impl/kernels/constructive.hh>
 #include <typed-geometry/geometry/query/impl/kernels/halfspace.hh>
 #include <typed-geometry/geometry/query/impl/kernels/hot_pairs.hh>

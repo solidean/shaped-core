@@ -357,3 +357,87 @@ constexpr auto tg::cylinder_mantle<D, T>::closest_point_to(Obj const& obj) const
 {
     return tg::impl::closest_point_to(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_boundary<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_mantle<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_boundary<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_mantle<D, T>::closest_points_to(Obj const& obj) const
+{
+    return tg::impl::closest_points_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_boundary<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_mantle<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_boundary<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_mantle<D, T>::closest_point_to(Obj const& obj) const
+{
+    return tg::impl::closest_point_to(*this, obj);
+}

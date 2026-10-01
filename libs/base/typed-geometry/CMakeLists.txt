@@ -78,6 +78,9 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/primitives/capsule.hh
     src/typed-geometry/geometry/primitives/cylinder.hh
     src/typed-geometry/geometry/query/impl/kernels/round.hh
+    src/typed-geometry/geometry/primitives/cone.hh
+    src/typed-geometry/geometry/primitives/hemisphere.hh
+    src/typed-geometry/geometry/query/impl/kernels/capped.hh
     src/typed-geometry/geometry/primitives/primitives.hh
     src/typed-geometry/geometry/query/closest_points.hh
     src/typed-geometry/geometry/query/contains.hh
@@ -197,6 +200,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/halfspace-test.cc
         tests/geometry/box-test.cc
         tests/geometry/object-traits-test.cc
+        tests/geometry/capped-test.cc
         tests/geometry/round-test.cc
         tests/geometry/measures-test.cc
         tests/geometry/sampling-test.cc

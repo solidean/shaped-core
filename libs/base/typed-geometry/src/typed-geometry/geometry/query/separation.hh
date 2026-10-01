@@ -176,3 +176,45 @@ constexpr auto tg::cylinder_mantle<D, T>::separation_from(Obj const& obj) const
 {
     return tg::impl::separation_from(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_mantle<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_boundary<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_mantle<D, T>::separation_from(Obj const& obj) const
+{
+    return tg::impl::separation_from(*this, obj);
+}

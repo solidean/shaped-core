@@ -94,6 +94,28 @@ struct cylinder_boundary;
 template <int D, class T>
 struct cylinder_mantle;
 
+/// an apex and a base disk of radius at the end of axis from it; 3D only.
+/// Finite, intrinsic_dim 3.
+template <int D, class T>
+struct cone;
+/// the whole surface of a cone, base included.
+template <int D, class T>
+struct cone_boundary;
+/// the slanted surface of a cone, without its base.
+template <int D, class T>
+struct cone_mantle;
+
+/// the half of a ball on the side its unit normal points to, base included; 3D only.
+/// Finite, intrinsic_dim 3.
+template <int D, class T>
+struct hemisphere;
+/// the dome and the base of a hemisphere.
+template <int D, class T>
+struct hemisphere_boundary;
+/// the dome of a hemisphere, without its base.
+template <int D, class T>
+struct hemisphere_mantle;
+
 //
 // Query results
 //
@@ -360,5 +382,36 @@ using cylinder3f_mantle = cylinder_mantle<3, f32>;
 using cylinder3d_mantle = cylinder_mantle<3, f64>;
 using tube3f = cylinder_mantle<3, f32>;
 using tube3d = cylinder_mantle<3, f64>;
+
+
+template <class T>
+using cone3 = cone<3, T>;
+template <class T>
+using cone3_boundary = cone_boundary<3, T>;
+template <class T>
+using cone3_surface = cone_boundary<3, T>;
+template <class T>
+using cone3_mantle = cone_mantle<3, T>;
+template <class T>
+using hemisphere3 = hemisphere<3, T>;
+template <class T>
+using hemisphere3_boundary = hemisphere_boundary<3, T>;
+template <class T>
+using hemisphere3_surface = hemisphere_boundary<3, T>;
+template <class T>
+using hemisphere3_mantle = hemisphere_mantle<3, T>;
+
+using cone3f = cone<3, f32>;
+using cone3d = cone<3, f64>;
+using cone3f_surface = cone_boundary<3, f32>;
+using cone3d_surface = cone_boundary<3, f64>;
+using cone3f_mantle = cone_mantle<3, f32>;
+using cone3d_mantle = cone_mantle<3, f64>;
+using hemisphere3f = hemisphere<3, f32>;
+using hemisphere3d = hemisphere<3, f64>;
+using hemisphere3f_surface = hemisphere_boundary<3, f32>;
+using hemisphere3d_surface = hemisphere_boundary<3, f64>;
+using hemisphere3f_mantle = hemisphere_mantle<3, f32>;
+using hemisphere3d_mantle = hemisphere_mantle<3, f64>;
 
 } // namespace tg

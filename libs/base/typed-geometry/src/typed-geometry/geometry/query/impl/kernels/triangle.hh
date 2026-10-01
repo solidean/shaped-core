@@ -59,6 +59,10 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::triangle<D, T>>
         if (va <= T(0) && d4 - d3 >= T(0) && d5 - d6 >= T(0))
             return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
 
+        // in 2D the face region is the triangle itself, so p is its own projection, returned exactly
+        if constexpr (D == 2)
+            return p;
+
         // the face: va, vb, vc are the barycentrics scaled by twice the squared area
         auto const sum = va + vb + vc;
         TG_SPECIAL_CASE(tg::traits::is_zero(sum), "projection onto a zero-area triangle");

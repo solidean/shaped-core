@@ -277,6 +277,8 @@ tg::halfspace<D,T> {vec normal; T dist}       // {x : dot(normal,x) <= dist}; h.
 tg::capsule<D,T>  {segment axis; T radius}    // within radius of the axis (2D: stadium); capsule_boundary
 tg::cylinder<3,T> {segment axis; T radius}    // flat caps; cylinder_boundary (all of it), cylinder_mantle = tube3
                                               //   (open tube, NOT a boundary: .solid() but no round trip); .caps()
+tg::cone<3,T>     {pos apex; vec axis; T radius}  // axis: apex -> base center (|axis| = height); cone_boundary, cone_mantle
+tg::hemisphere<3,T> {pos center; T radius; vec normal}  // the half ball the normal points into; _boundary, _mantle (dome)
 tg::triangle<D,T> {pos pos0, pos1, pos2}      // filled triangle (hull of 3 verts), 2D patch  — finite
 tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,1]}, 1D        — finite
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite

@@ -208,3 +208,45 @@ constexpr auto tg::cylinder_mantle<D, T>::intersection_with(Obj const& obj) cons
 {
     return tg::impl::intersection_with(*this, obj);
 }
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_boundary<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::cone_mantle<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_boundary<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr auto tg::hemisphere_mantle<D, T>::intersection_with(Obj const& obj) const
+{
+    return tg::impl::intersection_with(*this, obj);
+}
