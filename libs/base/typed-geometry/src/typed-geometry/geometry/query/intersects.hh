@@ -58,6 +58,20 @@ template <class A, class B, class T>
         static_assert(false, "tg: no intersects(b, eps) for this pair of types; it needs tg::has_distance_sqr_to<A, "
                              "B>");
 }
+
+/// `a.may_intersect(b)`: false only when a and b are certainly apart; true when they meet, and possibly when they do not.
+/// A kernel gives the cheap test where one exists — a frustum against anything with a support, plane by plane —
+/// and the exact intersects is the fallback, which is always a valid answer.
+template <class A, class B>
+[[nodiscard]] constexpr bool may_intersect(A const& a, B const& b)
+{
+    if constexpr (has_op<may_intersect_op, A, B>)
+        return may_intersect_op<A, B>::apply(a, b);
+    else if constexpr (has_op<may_intersect_op, B, A>)
+        return may_intersect_op<B, A>::apply(b, a);
+    else
+        return impl::intersects(a, b);
+}
 } // namespace tg::impl
 
 // intersects, one definition per object type
@@ -580,4 +594,265 @@ template <class Obj>
 constexpr bool tg::frustum_boundary<D, T>::intersects(Obj const& obj, T eps) const
 {
     return tg::impl::intersects_within(*this, obj, eps);
+}
+
+// may_intersect, one definition per object type
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::pos<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::segment<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::ray<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::line<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::triangle<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::plane<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::aabb<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::sphere<D, D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <class T>
+template <class Obj>
+constexpr bool tg::sphere<2, 3, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::sphere_boundary<D, D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <class T>
+template <class Obj>
+constexpr bool tg::sphere_boundary<2, 3, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::ellipsoid<D, DAmbient, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::ellipsoid_boundary<D, DAmbient, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::halfspace<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::aabb_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::box<D, DAmbient, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, int DAmbient, class T>
+template <class Obj>
+constexpr bool tg::box_boundary<D, DAmbient, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::capsule<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::capsule_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cylinder_mantle<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cone<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cone_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::cone_mantle<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::hemisphere<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::hemisphere_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::hemisphere_mantle<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::tetrahedron<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::tetrahedron_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::quad<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cylinder<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cylinder_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cone<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::inf_cone_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::frustum<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
+}
+
+template <int D, class T>
+template <class Obj>
+constexpr bool tg::frustum_boundary<D, T>::may_intersect(Obj const& obj) const
+{
+    return tg::impl::may_intersect(*this, obj);
 }

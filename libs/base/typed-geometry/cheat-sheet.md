@@ -286,6 +286,9 @@ tg::inf_cylinder<D,T> {line axis; T radius}  // unbounded tube (2D: a slab); _bo
 tg::inf_cone<D,T> {pos apex; vec dir; angle opening_angle}  // single nappe, dir unit, opening < 180deg; _boundary
 tg::frustum<3,T>  {plane planes[6]}           // left right bottom top near far, normals OUTWARD (inside: <= dist);
                                               //   .vertices() 8 corners (bit0 right, bit1 top, bit2 far); _boundary
+tg::frustum3d::make_from_view_projection(vp); // REVERSE-Z [0,1] (near -> 1); infinite far -> absent far plane
+f.has_far_plane();                            // false: planes[5] is {0, 0}; plane-only queries still work,
+                                              //   vertices / volume / bounds / sampling / GJK need a far plane
 tg::triangle<D,T> {pos pos0, pos1, pos2}      // filled triangle (hull of 3 verts), 2D patch  — finite
 tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,1]}, 1D        — finite
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite
@@ -373,6 +376,8 @@ a.intersection_with(b);     // cc::optional<X>, X the generic-case shape: aabb�
                             //   gives its crossing pos (hits of pos) or the segment inside a BOUNDED solid
 a.separation_from(b);       // cc::optional<tg::separation<D,T>> {normal, depth}: move b by normal*depth to stop
                             //   overlapping; empty when apart. Bounded convex SOLIDS only (EPA), 2D and 3D
+a.may_intersect(b);         // culling: false only when certainly apart; frustum vs anything with a support is
+                            //   plane by plane (cheap), every other pair falls back to the exact intersects
 a.intersects(b, eps);  p_obj.contains(p, eps);  // bool: true if they meet, false beyond eps, either between;
                                                 // default is the exact distance test (up to rounding)
 // closed forms: aabb–aabb, ball–ball, ball–aabb, segment–segment, box–box (SAT); GJK measured 11–250x slower

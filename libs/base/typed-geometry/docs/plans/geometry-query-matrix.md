@@ -35,6 +35,7 @@ The goal: the hand-written surface grows with the number of objects rather than 
 | `a.project_to(b)` | `a` mapped onto `b`: a `pos` for a `pos`, a segment for a segment onto a plane |
 | `r.intersection_parameter_with(b)` | `tg::hits<N, T>` for a surface, `cc::optional<tg::hit_interval<T>>` for a solid |
 | `r.closest_intersection_parameter_with(b)` | `cc::optional<T>` — the first hit, or the interval's start (0 from inside) |
+| `a.may_intersect(b)` | `bool`: false only when certainly apart — a cheap culling test (frustum, plane by plane), exact `intersects` otherwise |
 | `a.separation_from(b)` | `cc::optional<tg::separation<D, T>>`, `{normal, depth}`; bounded convex solids only |
 | `a.intersects(b, eps)`, `a.contains(b, eps)` | `bool`, the bracket contract of §6; only where a kernel can give it cheaply |
 

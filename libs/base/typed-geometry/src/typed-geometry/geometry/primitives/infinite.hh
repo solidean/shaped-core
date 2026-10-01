@@ -71,6 +71,8 @@ public:
     template <class Obj>
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
     template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
+    template <class Obj>
     [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
     template <class Obj>
     [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
@@ -132,6 +134,8 @@ public:
     [[nodiscard]] constexpr auto contains(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
     template <class Obj>
@@ -213,6 +217,8 @@ public:
     template <class Obj>
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
     template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
+    template <class Obj>
     [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
     template <class Obj>
     [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
@@ -279,6 +285,8 @@ public:
     [[nodiscard]] constexpr auto contains(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
     template <class Obj>

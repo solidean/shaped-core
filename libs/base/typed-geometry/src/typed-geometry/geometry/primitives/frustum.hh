@@ -18,6 +18,11 @@
 /// Represents {x : dot(planes[i].normal, x) <= planes[i].dist for every i}, a convex hexahedron.
 /// Only the planes are stored; `vertices()` derives the eight corners where three planes meet.
 /// Each choice of one plane from left/right, bottom/top and near/far must meet in a point, which any view frustum does.
+///
+/// The far plane is last by convention, and it may be absent: a zero normal with dist 0, which every point satisfies.
+/// That is what a reverse-Z projection with an infinite far plane gives, and `has_far_plane()` says which case this is.
+/// Queries that only test planes work either way — contains, line parameters (the interval stays open), may_intersect.
+/// Those that need the corners — vertices, bounds, volume, centroid, sampling, and GJK through the support — need it.
 /// tg::frustum_boundary is its six faces.
 template <int D, class T>
 struct tg::frustum
@@ -40,8 +45,46 @@ public:
     {
     }
 
+    /// The frustum a view-projection matrix sees, for a reverse-Z depth range: near maps to 1, far to 0.
+    ///
+    /// A point is inside when its clip coordinates satisfy -w <= x <= w, -w <= y <= w and 0 <= z <= w, and each of
+    /// those six inequalities is a plane in world space read off the rows of the matrix.
+    /// Other depth conventions get their own named factories when a caller needs one.
+    /// A projection with an infinite far plane has nothing to read there, and gives the frustum an absent far plane.
+    [[nodiscard]] static constexpr frustum make_from_view_projection(projective_transform<D, T> const& vp)
+        requires(tg::traits::has_sqrt<T>)
+    {
+        auto const m = vp.to_mat();
+        auto const row = [&](int r)
+        { return vec<4, T>(m.cols[0].data[r], m.cols[1].data[r], m.cols[2].data[r], m.cols[3].data[r]); };
+        // a clip-space half-space a . (x, 1) >= 0, as a world plane with its normal pointing out
+        auto const outward = [](vec<4, T> const& a)
+        {
+            auto const n = vec<3, T>(a.data[0], a.data[1], a.data[2]);
+            auto const l = n.length();
+            return plane<D, T>(-n / l, a.data[3] / l);
+        };
+        auto const r0 = row(0);
+        auto const r1 = row(1);
+        auto const r2 = row(2);
+        auto const r3 = row(3);
+        // infinite far: the z row has no xyz part, so z >= 0 holds everywhere in front of the camera
+        auto const far_
+            = tg::traits::is_zero(r2.data[0]) && tg::traits::is_zero(r2.data[1]) && tg::traits::is_zero(r2.data[2])
+                ? plane<D, T>(vec<D, T>(), T(0))
+                : outward(r2);
+        return frustum(outward(r3 + r0), outward(r3 - r0), outward(r3 + r1), outward(r3 - r1), outward(r3 - r2), far_);
+    }
+
     // readings
 public:
+    /// false when the far plane is absent: an infinite view frustum, unbounded behind its near plane.
+    [[nodiscard]] constexpr bool has_far_plane() const
+    {
+        auto const& n = planes[5].normal;
+        return !(tg::traits::is_zero(n.data[0]) && tg::traits::is_zero(n.data[1]) && tg::traits::is_zero(n.data[2]));
+    }
+
     [[nodiscard]] constexpr frustum_boundary<D, T> boundary() const
     {
         return frustum_boundary<D, T>(planes[0], planes[1], planes[2], planes[3], planes[4], planes[5]);
@@ -156,6 +199,8 @@ public:
     template <class Obj>
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
     template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
+    template <class Obj>
     [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
     template <class Obj>
     [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
@@ -232,6 +277,8 @@ public:
     [[nodiscard]] constexpr auto contains(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
     template <class Obj>
     [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
     template <class Obj>

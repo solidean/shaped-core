@@ -37,7 +37,8 @@ tg::projective_transform3f  // + a non-trivial homogeneous row
 - **Any geometric type.** Each object writes its own `transformed` member in `geometry/`, which sits above this module.
   Nothing here names a geometric type, so the dependency runs one way only.
 - Camera / projection conventions.
-  `make_from_mat` takes a homogeneous matrix, but tg does not pick a handedness or a depth range — that is a rendering convention, not a geometric one.
+  `make_from_mat` takes a homogeneous matrix, but this module does not pick a handedness or a depth range — that is a rendering convention, not a geometric one.
+  The one place tg reads a convention is `frustum::make_from_view_projection`, which assumes reverse-Z [0, 1]; other depth ranges get their own named factories.
 
 ## Key decisions
 

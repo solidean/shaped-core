@@ -379,3 +379,18 @@ struct tg::impl::intersection_parameter_op<L, tg::frustum_boundary<3, T>>
         return impl::crossings<2>(v, r.value().start, r.value().end);
     }
 };
+
+/// The culling test: an object wholly outside any one plane is certainly apart.
+/// Near a corner an object can be outside the frustum while straddling every plane, which is why this may say true.
+template <int D, class T, class Obj>
+    requires(tg::impl::has_support<Obj>)
+struct tg::impl::may_intersect_op<tg::frustum<D, T>, Obj>
+{
+    [[nodiscard]] static constexpr bool apply(frustum<D, T> const& f, Obj const& o)
+    {
+        for (auto const& pl : f.planes)
+            if (tg::dot(pl.normal, support_op<Obj>::apply(o, -pl.normal) - pos<D, T>()) > pl.dist)
+                return false;
+        return true;
+    }
+};

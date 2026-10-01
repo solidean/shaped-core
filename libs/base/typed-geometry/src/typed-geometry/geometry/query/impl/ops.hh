@@ -51,6 +51,10 @@ struct intersection_op;
 template <class A, class B>
 struct intersection_parameter_op;
 
+/// `a.may_intersect(b)`: a cheap test that is false only when a and b are certainly apart.
+template <class A, class B>
+struct may_intersect_op;
+
 /// `a.separation_from(b)`, where a closed form beats EPA.
 template <class A, class B>
 struct separation_op;

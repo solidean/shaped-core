@@ -104,3 +104,70 @@ TEST("tg wave3 - frustum")
     for (auto i = 0; i < 300; ++i)
         CHECK(f.contains(f.sample_uniform(rng)));
 }
+
+TEST("tg wave3 - a frustum from a reverse-Z view-projection, and culling")
+{
+    // left-handed, looking down +z, 90 degrees vertically, square; reverse-Z: near 1 -> depth 1, far 10 -> depth 0
+    auto const n = 1.0;
+    auto const f = 10.0;
+    auto m = tg::mat4d::zero;
+    m[0, 0] = 1.0;
+    m[1, 1] = 1.0;
+    m[2, 2] = -n / (f - n);
+    m[3, 2] = n * f / (f - n);
+    m[2, 3] = 1.0;
+    auto const vp = tg::projective_transform3d::make_from_mat(m);
+
+    auto const fr = tg::frustum3d::make_from_view_projection(vp);
+    CHECK(fr.contains(tg::pos3d(0, 0, 5)));
+    CHECK(!fr.contains(tg::pos3d(0, 0, 0.5)));
+    CHECK(!fr.contains(tg::pos3d(0, 0, 11)));
+    CHECK(!fr.contains(tg::pos3d(6, 0, 5)));
+    CHECK(tgtest::approx(fr.vertices()[0], tg::pos3d(-1, -1, 1), 1e-9));
+    CHECK(tgtest::approx(fr.vertices()[7], tg::pos3d(10, 10, 10), 1e-9));
+
+    // culling agrees with the exact test away from the corners, and may only err towards true
+    CHECK(fr.may_intersect(tg::sphere3d(tg::pos3d(0, 0, 5), 1.0)));
+    CHECK(!fr.may_intersect(tg::sphere3d(tg::pos3d(0, 0, -5), 1.0)));
+    CHECK(!fr.may_intersect(tg::aabb3d(tg::pos3d(20, -1, 4), tg::pos3d(22, 1, 6))));
+    auto rng = cc::random(59);
+    for (auto i = 0; i < 300; ++i)
+    {
+        auto const s
+            = tg::sphere3d(tg::pos3d(rng.uniform(-15.0, 15.0), rng.uniform(-15.0, 15.0), rng.uniform(-5.0, 15.0)), 1.0);
+        if (fr.intersects(s))
+            CHECK(fr.may_intersect(s));
+        CHECK(s.may_intersect(fr) == fr.may_intersect(s));
+    }
+
+    // every other pair falls back to the exact test
+    CHECK(tg::sphere3d(tg::pos3d(0, 0, 0), 1.0).may_intersect(tg::pos3d(0.5, 0, 0)));
+}
+
+TEST("tg wave3 - an infinite reverse-Z projection gives a frustum without a far plane")
+{
+    // reverse-Z with the far plane at infinity: depth = near / z, so z_clip is the constant near
+    auto const n = 1.0;
+    auto m = tg::mat4d::zero;
+    m[0, 0] = 1.0;
+    m[1, 1] = 1.0;
+    m[3, 2] = n;
+    m[2, 3] = 1.0;
+    auto const fr = tg::frustum3d::make_from_view_projection(tg::projective_transform3d::make_from_mat(m));
+
+    CHECK(!fr.has_far_plane());
+    CHECK(tg::frustum3d::make_from_view_projection(tg::projective_transform3d::make_from_mat(tg::mat4d::identity))
+              .has_far_plane());
+
+    CHECK(fr.contains(tg::pos3d(0, 0, 1e9)));
+    CHECK(!fr.contains(tg::pos3d(0, 0, 0.5)));
+    CHECK(!fr.contains(tg::pos3d(1e9 + 1, 0, 1e9)));
+
+    CHECK(fr.may_intersect(tg::sphere3d(tg::pos3d(0, 0, 1e6), 1.0)));
+    CHECK(!fr.may_intersect(tg::sphere3d(tg::pos3d(0, 0, -5), 1.0)));
+
+    // the view ray enters at the near plane and never leaves
+    auto const in = tg::ray3d(tg::pos3d(0, 0, 0), tg::vec3d(0, 0, 1)).intersection_parameter_with(fr).value();
+    CHECK(tgtest::approx(in.start, 1.0));
+    CHECK(in.end > 1e30);
+}
