@@ -1,0 +1,58 @@
+// The prelude's Slug helpers: everything of the coverage but the texture loop, which a test cannot bind (CHK-333)
+
+// The root code reads the signs of a curve's three heights: bit 0 when the first root counts, bit 8 the second.
+// Wholly above or wholly below the ray: neither root.
+test slug_root_code(1.0, 2.0, 3.0) == 0
+test slug_root_code(-1.0, -2.0, -3.0) == 0
+// Crossing upward from below: the second root alone.
+test slug_root_code(-1.0, 0.0, 1.0) == 0x0100
+// Crossing downward: the first alone.
+test slug_root_code(1.0, 0.0, -1.0) == 0x0001
+// Dipping below and coming back: both.
+test slug_root_code(1.0, -1.0, 1.0) == 0x0101
+
+// A line from (-1, -1) to (3, 1) as the quadratic {p1, p2, p2} crosses y = 0 at x = 1, twice over.
+test:
+    let r = slug_solve_horizontal(float4(-1.0, -1.0, 3.0, 1.0), float2(3.0, 1.0))
+    nearly_equal(r.x, 1.0, within = 0.0001) and nearly_equal(r.y, 1.0, within = 0.0001)
+
+// The parabola from (-2, 1) to (2, 1) with its control point at (0, -3) crosses y = 0 at x = -sqrt(2) and x = sqrt(2).
+test:
+    let r = slug_solve_horizontal(float4(-2.0, 1.0, 0.0, -3.0), float2(2.0, 1.0))
+    nearly_equal(r.x, -1.41421, within = 0.0001) and nearly_equal(r.y, 1.41421, within = 0.0001)
+
+// The same curve turned on its side, for the vertical ray.
+test:
+    let r = slug_solve_vertical(float4(1.0, -2.0, -3.0, 0.0), float2(1.0, 2.0))
+    nearly_equal(r.x, -1.41421, within = 0.0001) and nearly_equal(r.y, 1.41421, within = 0.0001)
+
+// A band list past the row's end continues on the next row of the 4096-wide texture.
+test:
+    let a = slug_band_location(int2(4000, 7), 50)
+    let b = slug_band_location(int2(4000, 7), 200)
+    a.x == 4050 and a.y == 7 and b.x == 104 and b.y == 8
+
+// Inside under the nonzero rule is 1 however many times the ray crossed; under even-odd, twice in is outside.
+test slug_combine(1.0, 1.0, 1.0, 1.0, false, false) == 1.0
+test slug_combine(2.0, 2.0, 1.0, 1.0, false, false) == 1.0
+test slug_combine(2.0, 2.0, 1.0, 1.0, true, false) == 0.0
+test slug_combine(0.25, 0.25, 1.0, 1.0, false, true) == 0.5
+
+binding shape_data:
+    curves: texture_2d[float4]
+    bands: texture_2d[uint4]
+
+struct shape_varyings:
+    @position position: hpos4
+    em: float2
+    @interpolate(.flat) banding: float4
+    @interpolate(.flat) glyph: int4
+
+@pixel struct target:
+    color: float4
+
+// Both overloads reach every target: the raster one takes its footprint from derivatives, the other is handed one.
+@pixel fun shape_ps(p: shape_varyings){shape_data} -> target:
+    let a = slug_coverage(shape_data.curves, shape_data.bands, p.em, p.banding, p.glyph, false)
+    let b = slug_coverage(shape_data.curves, shape_data.bands, p.em, float2(0.01, 0.01), p.banding, p.glyph, true)
+    return { color = float4(a, b, 0.0, 1.0) }

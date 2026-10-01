@@ -4,8 +4,8 @@
 
 /// Aggregate forward declarations for babel-serializer.
 /// babel-data's fwd.hh declares `namespace babel` itself plus the base64 / JSON / markdown half; this one adds
-/// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::png, babel::jpg,
-/// babel::hdr, babel::pfm, the babel::image aggregator over the four codecs, and babel::chrome_trace.
+/// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::font, babel::png,
+/// babel::jpg, babel::hdr, babel::pfm, the babel::image aggregator over the four codecs, and babel::chrome_trace.
 /// Each owns its own header; include that header directly when it is all you need.
 
 namespace babel::chrome_trace
@@ -23,6 +23,21 @@ struct data;
 /// The domain every recording site in babel::obj is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::obj
+
+namespace babel::font
+{
+enum class glyph_id : u16;
+enum class outline_format : u8;
+struct face_metrics;
+struct horizontal_metric;
+struct glyf_point;
+struct glyf_component;
+struct glyf_outline;
+class face;
+
+/// The domain every recording site in babel::font is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::font
 
 namespace babel::stl
 {

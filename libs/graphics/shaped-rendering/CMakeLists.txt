@@ -26,6 +26,11 @@ add_library(shaped-rendering
     src/shaped-rendering/imgui_routine.cc
     src/shaped-rendering/imgui_style.cc
     src/shaped-rendering/shaders.cc
+    src/shaped-rendering/slug_atlas.cc
+    src/shaped-rendering/slug_font.cc
+    src/shaped-rendering/slug_routine.cc
+    src/shaped-rendering/slug_shape.cc
+    src/shaped-rendering/impl/slug_reference.cc
     src/shaped-rendering/impl/imgui_draw_math.cc
     src/shaped-rendering/impl/imgui_input_translation.cc
     src/shaped-rendering/impl/imgui_texture_registry.cc
@@ -58,6 +63,11 @@ target_sources(shaped-rendering
     src/shaped-rendering/imgui_routine.hh
     src/shaped-rendering/imgui_style.hh
     src/shaped-rendering/shaders.hh
+    src/shaped-rendering/slug_atlas.hh
+    src/shaped-rendering/slug_font.hh
+    src/shaped-rendering/slug_routine.hh
+    src/shaped-rendering/slug_shape.hh
+    src/shaped-rendering/impl/slug_reference.hh
 )
 
 target_compile_features(shaped-rendering PUBLIC cxx_std_23)
@@ -78,9 +88,9 @@ target_include_directories(shaped-rendering
 # and imgui's target carries PUBLIC compile definitions that change what imgui.h declares — a consumer that missed them would see a different ImGuiIO layout than imgui.cpp was built with.
 target_link_libraries(shaped-rendering PUBLIC shaped-graphics shaped-shader-library imgui)
 
-# Capture writes an image file, and babel owns image encoding in this repo — a second encoder here would be the wrong
-# trade. PRIVATE: it is what capture.cc uses, never something an sr header hands out.
-target_link_libraries(shaped-rendering PRIVATE babel-serializer)
+# babel owns image encoding, which capture writes with, and font reading, which Slug's glyph compilation reads from.
+# PUBLIC because slug_shape.hh and slug_font.hh take a babel::font::face.
+target_link_libraries(shaped-rendering PUBLIC babel-serializer)
 
 sc_target_pch(shaped-rendering SG)
 
@@ -242,6 +252,7 @@ sc_add_shader_package(
         raster_box_filter_mipmap.sgl:*
         nn_pool.sgl:*
         nn_upsample.sgl:*
+        slug.sgl:*
 )
 
 sc_add_shader_package(
@@ -309,6 +320,7 @@ if(SC_BUILD_TESTS)
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
         tests/shader-package-test.cc
+        tests/slug-shape-test.cc
         tests/tza-test.cc
         tests/oidn-tiling-test.cc
     )
@@ -372,6 +384,7 @@ if(SC_BUILD_TESTS)
             tests/imgui-routine-test.cc
             tests/raster-box-filter-mipmap-test.cc
             tests/nn-resample-test.cc
+            tests/slug-routine-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
     endif()

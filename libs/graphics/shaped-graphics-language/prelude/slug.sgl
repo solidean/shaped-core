@@ -1,0 +1,141 @@
+// Slug: the coverage of a shape bounded by quadratic Bézier curves, evaluated at one sample, from its outline alone.
+//
+// Eric Lengyel's algorithm, after the reference shaders at github.com/EricLengyel/Slug (MIT OR Apache-2.0).
+// A shape is drawn from two textures: `curves` holds control points, two texels per curve, and `bands` splits the shape
+// into horizontal and vertical strips, each listing only the curves that cross it, sorted so a loop can stop early.
+// shaped-rendering's glyph compilation writes both, and its `sr::slug_atlas` holds them.
+//
+// Here rather than beside the routine that draws quads, because any surface can carry a shape: a mesh's pixel shader
+// calls `slug_coverage` with the em coordinate it interpolated, exactly as the quad routine does.
+// It moves out of the prelude once SGL has `use`.
+//
+// `glyph` is the reference's packed per-shape data:
+//     x, y   where the shape's band header starts in `bands`
+//     z      the last vertical band's index
+//     w      the last horizontal band's index in its low byte, and the flags above it: 0x1000 is the even-odd rule
+
+/// Which of a curve's two roots contribute, from the signs of its three control points' heights above the ray.
+/// Bit 0 is the first root and bit 8 the second.
+fun slug_root_code(y1: float, y2: float, y3: float) -> uint:
+    let i1 = y1.bits >> 31
+    let i2 = y2.bits >> 30
+    let i3 = y3.bits >> 29
+    let shift = (i3 & 4) | (((i2 & 2) | (i1 & 0xffff'fffd)) & 0xffff'fffb)
+    return (0x2e74 >> shift) & 0x0101
+
+/// Where a sample-relative curve crosses y = 0, as the two x coordinates of its roots.
+/// Imaginary roots meet as a double root at the parabola's extremum, and a near-linear curve is solved as a line.
+fun slug_solve_horizontal(p12: float4, p3: float2) -> float2:
+    let ax = p12.x - p12.z * 2.0 + p3.x
+    let ay = p12.y - p12.w * 2.0 + p3.y
+    let bx = p12.x - p12.z
+    let by = p12.y - p12.w
+    let mut t1 = 0.0
+    let mut t2 = 0.0
+    if abs(ay) < 1.0 / 65536.0:
+        t1 = p12.y * (0.5 / by)
+        t2 = t1
+    else:
+        let ra = 1.0 / ay
+        let d = sqrt(max(by * by - ay * p12.y, 0.0))
+        t1 = (by - d) * ra
+        t2 = (by + d) * ra
+    return float2((ax * t1 - bx * 2.0) * t1 + p12.x, (ax * t2 - bx * 2.0) * t2 + p12.x)
+
+/// Where a sample-relative curve crosses x = 0, as the two y coordinates of its roots.
+fun slug_solve_vertical(p12: float4, p3: float2) -> float2:
+    let ax = p12.x - p12.z * 2.0 + p3.x
+    let ay = p12.y - p12.w * 2.0 + p3.y
+    let bx = p12.x - p12.z
+    let by = p12.y - p12.w
+    let mut t1 = 0.0
+    let mut t2 = 0.0
+    if abs(ax) < 1.0 / 65536.0:
+        t1 = p12.x * (0.5 / bx)
+        t2 = t1
+    else:
+        let ra = 1.0 / ax
+        let d = sqrt(max(bx * bx - ax * p12.x, 0.0))
+        t1 = (bx - d) * ra
+        t2 = (bx + d) * ra
+    return float2((ay * t1 - by * 2.0) * t1 + p12.y, (ay * t2 - by * 2.0) * t2 + p12.y)
+
+/// Where a band's curve list starts: an offset past the shape's header, wrapping onto the next row of a 4096-wide texture.
+fun slug_band_location(glyph_location: int2, offset: uint) -> int2:
+    let x = glyph_location.x + (offset as int)
+    return int2(x & 4095, glyph_location.y + (x >> 12))
+
+/// The two rays' coverages, weighted by how close each came to a curve, under the shape's fill rule.
+/// `weight_boost` takes the square root, which makes thin shapes optically heavier.
+fun slug_combine(xcov: float, ycov: float, xwgt: float, ywgt: float, even_odd: bool, weight_boost: bool) -> float:
+    let raw = max(abs(xcov * xwgt + ycov * ywgt) / max(xwgt + ywgt, 1.0 / 65536.0), min(abs(xcov), abs(ycov)))
+    let filled = case even_odd:
+        true => 1.0 - abs(1.0 - fract(raw * 0.5) * 2.0)
+        false => saturate(raw)
+    return case weight_boost:
+        true => sqrt(filled)
+        false => filled
+
+/// The coverage of the shape `glyph` names, at `em` in the shape's own space, 0 outside it and 1 inside.
+/// `em_per_pixel` is how much em space one pixel spans along each axis: what a raster caller takes from derivatives and a
+/// traced one from its ray's footprint.
+/// `banding` is the shape's band scale in xy and band offset in zw.
+fun slug_coverage(curves: texture_2d[float4], bands: texture_2d[uint4], em: float2, em_per_pixel: float2, banding: float4, glyph: int4, weight_boost: bool) -> float:
+    let pixels_per_em = float2(1.0 / em_per_pixel.x, 1.0 / em_per_pixel.y)
+    let band_max = int2(glyph.z, glyph.w & 0xff)
+    let unclamped = int2((em.x * banding.x + banding.z) as int, (em.y * banding.y + banding.w) as int)
+    let band_index = clamp(unclamped, int2(0, 0), band_max)
+    let glyph_location = int2(glyph.x, glyph.y)
+    let origin = float4(em.x, em.y, em.x, em.y)
+
+    // The horizontal ray: curves sorted by descending maximum x, so the first wholly left of the sample ends the band.
+    let mut xcov = 0.0
+    let mut xwgt = 0.0
+    let hband = bands.load(int2(glyph_location.x + band_index.y, glyph_location.y))
+    let hband_location = slug_band_location(glyph_location, hband.y)
+    for i in 0 ..< (hband.x as int):
+        let entry = bands.load(int2(hband_location.x + i, hband_location.y))
+        let curve_location = int2(entry.x as int, entry.y as int)
+        let p12 = curves.load(curve_location) - origin
+        let next = curves.load(int2(curve_location.x + 1, curve_location.y))
+        let p3 = float2(next.x - em.x, next.y - em.y)
+        if max(max(p12.x, p12.z), p3.x) * pixels_per_em.x < -0.5 => break
+        let code = slug_root_code(p12.y, p12.w, p3.y)
+        if code != 0:
+            let r = slug_solve_horizontal(p12, p3) * pixels_per_em.x
+            if (code & 1) != 0:
+                xcov += saturate(r.x + 0.5)
+                xwgt = max(xwgt, saturate(1.0 - abs(r.x) * 2.0))
+            if code > 1:
+                xcov -= saturate(r.y + 0.5)
+                xwgt = max(xwgt, saturate(1.0 - abs(r.y) * 2.0))
+
+    // The vertical ray: its bands follow the horizontal ones in the header.
+    let mut ycov = 0.0
+    let mut ywgt = 0.0
+    let vband = bands.load(int2(glyph_location.x + band_max.y + 1 + band_index.x, glyph_location.y))
+    let vband_location = slug_band_location(glyph_location, vband.y)
+    for i in 0 ..< (vband.x as int):
+        let entry = bands.load(int2(vband_location.x + i, vband_location.y))
+        let curve_location = int2(entry.x as int, entry.y as int)
+        let p12 = curves.load(curve_location) - origin
+        let next = curves.load(int2(curve_location.x + 1, curve_location.y))
+        let p3 = float2(next.x - em.x, next.y - em.y)
+        if max(max(p12.y, p12.w), p3.y) * pixels_per_em.y < -0.5 => break
+        let code = slug_root_code(p12.x, p12.z, p3.x)
+        if code != 0:
+            let r = slug_solve_vertical(p12, p3) * pixels_per_em.y
+            if (code & 1) != 0:
+                ycov -= saturate(r.x + 0.5)
+                ywgt = max(ywgt, saturate(1.0 - abs(r.x) * 2.0))
+            if code > 1:
+                ycov += saturate(r.y + 0.5)
+                ywgt = max(ywgt, saturate(1.0 - abs(r.y) * 2.0))
+
+    return slug_combine(xcov, ycov, xwgt, ywgt, (glyph.w & 0x1000) != 0, weight_boost)
+
+/// The raster form: one pixel's em span is the em coordinate's change across the pixel, which `ddx` and `ddy` give.
+/// So it must be called in uniform control flow, as every derivative must.
+fun slug_coverage(curves: texture_2d[float4], bands: texture_2d[uint4], em: float2, banding: float4, glyph: int4, weight_boost: bool) -> float:
+    let em_per_pixel = abs(ddx(em)) + abs(ddy(em))
+    return slug_coverage(curves, bands, em, em_per_pixel, banding, glyph, weight_boost)

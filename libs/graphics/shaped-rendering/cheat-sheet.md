@@ -278,6 +278,39 @@ sr::blit_routine::prewarm(ctx);          // warm the compile/pipeline ahead of t
   their command list unsubmitted.
 - Its shaders are `blit.sgl`, in sr's packages — nothing separate to register.
 
+## Slug — shapes and text from their outlines ([docs/slug.md](docs/slug.md))
+
+```cpp
+#include <shaped-rendering/slug_shape.hh>     // + slug_atlas.hh, slug_routine.hh, slug_font.hh
+
+auto o = sr::slug_outline();                   // closed contours of quadratics, in the shape's own units
+o.move_to(p); o.line_to(p); o.quad_to(c, p); o.cubic_to(c0, c1, p, tolerance); o.close();
+o.fill_rule = sr::slug_fill_rule::even_odd;    // nonzero by default
+sr::slug_outline::rectangle(box);  sr::slug_outline_of(face, glyph);   // -> result: a TrueType glyph, composites resolved
+auto const shape = sr::compile_slug_shape(o);  // device-free curve + band tables, rounded to half floats before banding
+
+auto atlas = sr::slug_atlas();                 // CALLER-OWNED, move-only, append-only; no device until prepare
+auto const ref = atlas.add(shape).value();     // slug_shape_ref; ref.is_drawable is false for an empty shape
+atlas.prepare(cmd);                            // creates / grows / uploads — BEFORE the rendering scope
+
+auto const inst = sr::make_slug_instance(ref, origin, x_axis, y_axis, srgb_rgba);   // 68 bytes; axes per OUTLINE unit
+auto const prepared = sr::slug_routine::prepare(cmd, atlas, instances);           // atlas.prepare + instance upload
+(void)sr::slug_routine::execute(scope, atlas, prepared, {.object_to_clip = m, .depth_bias = 0, .weight_boost = false});
+(void)sr::slug_routine::execute(scope, atlas, retained_buffer, first, count, view);  // instances the caller keeps
+sr::slug_routine::prewarm(ctx, {.color = f, .depth = sg::pixel_format::undefined});  // one pipeline per format pair
+
+auto font = sr::slug_font::load_system_ui_font().value();   // or slug_font::load(path); owns its own atlas
+font.append_line(out, "text", origin, size, color, right = {1, 0}, up = {0, 1});      // advance-only: no kerning
+font.line_width("text", size);  font.atlas();  font.glyph(g);
+```
+
+- **Output is linear and premultiplied**, blended premultiplied; an instance's colour is 8-bit sRGB, straight alpha.
+- **A scope with depth tests and never writes it**; `depth_bias` keeps a shape on a surface in front of it.
+- **The routine's pipelines name slug.sgl's target set**: open the scope with a plain `rendering_info`, not another shader's generated target.
+- **Any pixel shader can cover a shape**: the SGL prelude's `slug_coverage(curves, bands, em, banding, glyph, weight_boost)`.
+  It takes its footprint from `ddx` / `ddy`, so call it in uniform control flow; the other overload takes `em_per_pixel`.
+- `impl::slug_reference_coverage(atlas, instance, em, em_per_pixel, weight_boost)` is the pixel shader on the CPU, for tests.
+
 ## Box-filter mipmap routine
 
 Fills a texture's mip chain by averaging each level into the next — one compute dispatch per generated level.

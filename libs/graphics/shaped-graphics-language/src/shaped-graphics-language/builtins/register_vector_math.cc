@@ -145,6 +145,41 @@ void multiply_bits(leaves in, result& out)
     bitwise_pairs(in, out, [](u32 a, u32 b) { return a * b; });
 }
 
+/// Ordered by value: an int as its two's complement, a uint as its bits.
+bool integer_less(scalar a, scalar b)
+{
+    if (a.kind == check::value_kind::scalar_uint)
+        return a.bits < b.bits;
+    return a.as_int() < b.as_int();
+}
+void min_integers(leaves in, result& out)
+{
+    auto const width = in.size() / 2;
+    for (auto i = isize(0); i < width; ++i)
+        out.push_back(integer_less(in[width + i], in[i]) ? in[width + i] : in[i]);
+}
+void max_integers(leaves in, result& out)
+{
+    auto const width = in.size() / 2;
+    for (auto i = isize(0); i < width; ++i)
+        out.push_back(integer_less(in[i], in[width + i]) ? in[width + i] : in[i]);
+}
+void clamp_integers(leaves in, result& out)
+{
+    auto const width = in.size() / 3;
+    for (auto i = isize(0); i < width; ++i)
+    {
+        auto const raised = integer_less(in[i], in[width + i]) ? in[width + i] : in[i];
+        out.push_back(integer_less(in[2 * width + i], raised) ? in[2 * width + i] : raised);
+    }
+}
+/// int vectors alone: the most negative int has no positive counterpart, and wraps to itself as every target does.
+void abs_integers(leaves in, result& out)
+{
+    for (auto const& x : in)
+        out.push_back(x.as_int() < 0 ? scalar::of(i32(0u - x.bits)) : x);
+}
+
 void dot(leaves in, result& out)
 {
     auto const width = in.size() / 2;
@@ -174,6 +209,7 @@ void sgl::builtins::register_vector_math(registry& r)
     cc::string_view const scaled[] = {"float2", "float3", "float4", "vec3"};
     cc::string_view const measured[] = {"vec3", "float2", "float3", "float4"};
     cc::string_view const integer_vectors[] = {"int2", "int3", "int4", "uint2", "uint3", "uint4"};
+    cc::string_view const signed_vectors[] = {"int2", "int3", "int4"};
 
     r.add_comment("// what a float and a plain vector of floats share, component by component");
     for (auto const type : numbers)
@@ -210,6 +246,19 @@ void sgl::builtins::register_vector_math(registry& r)
         r.functions.back().judged_last = judged_operand::divisor;
         add_infix(r, "%", named("remainder", type), type, type, type, remainder_integers, integer_division_undefined);
         r.functions.back().judged_last = judged_operand::divisor;
+    }
+
+    r.add_comment("// integer vectors order componentwise as their scalars do, an int by value and a uint by its bits");
+    for (auto const type : integer_vectors)
+    {
+        add_function(r, "min", {"a", type, "b", type}, type, min_integers);
+        add_function(r, "max", {"a", type, "b", type}, type, max_integers);
+        add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp_integers, {}, {}, clamp_undefined);
+    }
+    for (auto const type : signed_vectors)
+    {
+        add_function(r, "abs", {"x", type}, type, abs_integers);
+        r.functions.back().unrepresentable_when_constant = negation_unrepresentable;
     }
 
     r.add_comment("// a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no "

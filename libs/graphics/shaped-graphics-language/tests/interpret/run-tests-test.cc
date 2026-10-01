@@ -168,26 +168,29 @@ TEST("sgl tests - an integer divisor of zero is a program error, and no expectat
 
 TEST("sgl tests - a maths builtin outside the domain WGSL defines it on is a program error")
 {
-    auto const checked = check_sources(read_prelude(), "test:\n    let x = -2.0\n    pow(x, 0.5) > 0.0\n"
-                                                       "test:\n    let zero = 0.0\n    pow(zero, zero) == 1.0\n"
-                                                       "test:\n    let x = 2.0\n    asin(x) > 0.0\n"
-                                                       "test:\n    let e = 1.0\n    smoothstep(e, e, 0.5) == 0.0\n"
-                                                       "test:\n    let zero = 0.0\n    atan2(zero, zero) == 0.0\n"
-                                                       "test:\n    let x = 0.5\n    clamp(x, 1.0, 0.0) == 0.0\n"
-                                                       "test:\n    let x = 5\n    clamp(x, 3, 2) == 2\n"
-                                                       "test:\n    let x = 2.0\n    pow(x, 0.5) > 1.0\n"
-                                                       "test:\n    let y = 0.0\n    atan2(y, 1.0) == 0.0\n"
-                                                       "test:\n    let x = 0.5\n    clamp(x, 1.0, 1.0) == 1.0\n");
+    auto const checked
+        = check_sources(read_prelude(), "test:\n    let x = -2.0\n    pow(x, 0.5) > 0.0\n"
+                                        "test:\n    let zero = 0.0\n    pow(zero, zero) == 1.0\n"
+                                        "test:\n    let x = 2.0\n    asin(x) > 0.0\n"
+                                        "test:\n    let e = 1.0\n    smoothstep(e, e, 0.5) == 0.0\n"
+                                        "test:\n    let zero = 0.0\n    atan2(zero, zero) == 0.0\n"
+                                        "test:\n    let x = 0.5\n    clamp(x, 1.0, 0.0) == 0.0\n"
+                                        "test:\n    let x = 5\n    clamp(x, 3, 2) == 2\n"
+                                        "test:\n    let x = int2(5, 5)\n    clamp(x, int2(3, 3), int2(2, 2)).x == 2\n"
+                                        "test:\n    let x = 2.0\n    pow(x, 0.5) > 1.0\n"
+                                        "test:\n    let y = 0.0\n    atan2(y, 1.0) == 0.0\n"
+                                        "test:\n    let x = 0.5\n    clamp(x, 1.0, 1.0) == 1.0\n");
     auto files = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < checked.files.size(); ++i)
         files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
-    REQUIRE(checked.module.tests.size() == 10);
-    for (auto i = isize(0); i < 7; ++i)
+    REQUIRE(checked.module.tests.size() == 11);
+    for (auto i = isize(0); i < 8; ++i)
         CHECK(sgl::test::run_test(checked.module, files, i).status == sgl::test::test_status::program_error).dump("test", i);
     CHECK(sgl::test::run_test(checked.module, files, 4).detail.contains("atan2"));
     CHECK(sgl::test::run_test(checked.module, files, 5).detail.contains("clamp"));
+    CHECK(sgl::test::run_test(checked.module, files, 7).detail.contains("clamp"));
     // inside the domain it is an ordinary value, and a clamp to one value is no empty range
-    for (auto i = isize(7); i < 10; ++i)
+    for (auto i = isize(8); i < 11; ++i)
         CHECK(sgl::test::run_test(checked.module, files, i).is_passed()).dump("test", i);
 }
 

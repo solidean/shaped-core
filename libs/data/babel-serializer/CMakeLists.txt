@@ -7,6 +7,7 @@ add_library(babel-serializer
     src/babel-serializer/fwd.cc
 
     src/babel-serializer/data/sqlite.cc
+    src/babel-serializer/font/font.cc
     src/babel-serializer/geometry/gltf.cc
     src/babel-serializer/geometry/obj.cc
     src/babel-serializer/geometry/stl.cc
@@ -34,6 +35,8 @@ target_sources(babel-serializer
     src/babel-serializer/fwd.hh
 
     src/babel-serializer/data/sqlite.hh
+
+    src/babel-serializer/font/font.hh
 
     src/babel-serializer/geometry/gltf.hh
     src/babel-serializer/geometry/obj.hh
@@ -100,6 +103,8 @@ if(SC_BUILD_TESTS)
         tests/babel-recording-test.cc
 
         tests/data/sqlite-test.cc
+
+        tests/font/font-test.cc
 
         tests/geometry/gltf-test.cc
         tests/geometry/obj-test.cc

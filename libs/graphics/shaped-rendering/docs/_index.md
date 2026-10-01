@@ -12,6 +12,7 @@ The render-routine *framework* lives in shaped-graphics (see [its render-routine
 ## Topics
 
 - [reconstruction](reconstruction.md) — one call that denoises and upscales: the members, the reconstruction contract, FSR 3.1 behind the denoisers, and how a denoiser meets a progressive path tracer.
+- [slug](slug.md) — shapes and text drawn from their outlines: the pieces, the decisions behind them, and the plan.
 - [imgui](imgui.md) — the Dear ImGui renderer: how to drive it, why it is three types, and the 1.92 texture protocol a backend has to implement.
 - [render-routines](render-routines.md) — sr-side overview: writing a concrete routine, with a link to the framework doc in shaped-graphics.
 - [structure](structure.md) — the intended module roadmap with status tags, including windowing.

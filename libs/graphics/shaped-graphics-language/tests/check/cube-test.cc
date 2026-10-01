@@ -1,5 +1,7 @@
 #include "check-test-support.hh"
 
+#include <shaped-graphics-language/driver/prelude.hh>
+
 using namespace sgl_test;
 
 namespace
@@ -88,7 +90,8 @@ TEST("sgl check - the pass is total: every truncation of the cube checks, settle
             all_settled = all_settled
                        && (s.state == sgl::check::symbol_state::checked || s.state == sgl::check::symbol_state::failed);
         CHECK(all_settled);
-        CHECK(m.files.size() == 4);
+        // every prelude file, then the program
+        CHECK(m.files.size() == sgl::prelude_files().size() + 1);
         CHECK(checked.tables().type_of.size() == checked.user_ast.exprs.size());
         CHECK(m.entry_points.size() <= 2);
         // the dumps walk every id the module holds

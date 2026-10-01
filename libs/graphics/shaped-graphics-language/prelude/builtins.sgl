@@ -273,6 +273,29 @@
 @builtin @pure @operator("/") fun divide_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("%") fun remainder_uint4(a: uint4, b: uint4) -> uint4
 
+// integer vectors order componentwise as their scalars do, an int by value and a uint by its bits
+@builtin @pure fun min(a: int2, b: int2) -> int2
+@builtin @pure fun max(a: int2, b: int2) -> int2
+@builtin @pure fun clamp(x: int2, low: int2, high: int2) -> int2
+@builtin @pure fun min(a: int3, b: int3) -> int3
+@builtin @pure fun max(a: int3, b: int3) -> int3
+@builtin @pure fun clamp(x: int3, low: int3, high: int3) -> int3
+@builtin @pure fun min(a: int4, b: int4) -> int4
+@builtin @pure fun max(a: int4, b: int4) -> int4
+@builtin @pure fun clamp(x: int4, low: int4, high: int4) -> int4
+@builtin @pure fun min(a: uint2, b: uint2) -> uint2
+@builtin @pure fun max(a: uint2, b: uint2) -> uint2
+@builtin @pure fun clamp(x: uint2, low: uint2, high: uint2) -> uint2
+@builtin @pure fun min(a: uint3, b: uint3) -> uint3
+@builtin @pure fun max(a: uint3, b: uint3) -> uint3
+@builtin @pure fun clamp(x: uint3, low: uint3, high: uint3) -> uint3
+@builtin @pure fun min(a: uint4, b: uint4) -> uint4
+@builtin @pure fun max(a: uint4, b: uint4) -> uint4
+@builtin @pure fun clamp(x: uint4, low: uint4, high: uint4) -> uint4
+@builtin @pure fun abs(x: int2) -> int2
+@builtin @pure fun abs(x: int3) -> int3
+@builtin @pure fun abs(x: int4) -> int4
+
 // a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no operator
 @builtin @pure @operator("+") fun add_vec3(a: vec3, b: vec3) -> vec3
 @builtin @pure @operator("-") fun subtract_vec3(a: vec3, b: vec3) -> vec3

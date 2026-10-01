@@ -871,6 +871,9 @@ frame.seconds() / frame.delta_seconds() -> double              // since the loop
                                                                //   both sampled once per frame, so every view animates off the same instant
 auto id = frame.scoped_id(i);  frame.id_seed()                 // RAII id scope, so one name in a loop names N views
 frame.push_id(i) / frame.pop_id()                              // the same, explicit — every push needs its pop
+frame.draw_overlay([&](sv::overlay_context const& o) { ... })  // TEMPORARY until the canvas: drawn over the finished image
+                                                               //   o.cmd (copies before any scope), o.target (open it preserved()),
+                                                               //   o.size, o.world_to_clip (the window view's camera); NO depth
 frame.present()                                                // flatten + record + present; idempotent
                                                                //   a frame_scope's destructor is this call, and viewer::end_frame is too
 frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)

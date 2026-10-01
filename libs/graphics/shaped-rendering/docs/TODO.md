@@ -62,6 +62,17 @@ Bigger design intent lives in [structure.md](structure.md).
 - SVGF feeds back its integrated, unfiltered colour, where the paper feeds back the first à-trous pass's output.
   That is simpler and never compounds the filter across frames, at the price of a noisier history.
   Its reprojection takes the nearest texel rather than a bilinear footprint, which smears slightly under subpixel motion.
+- Slug's open items; [slug.md](slug.md#plan) is the plan they belong to.
+  - The atlas is append-only, so a font asked for many glyphs grows without bound.
+    Eviction has to rewrite every band list that points at a curve it moves, since lists hold texel locations.
+  - CFF and CFF2 outlines: `babel::font` reports them and does not decode them, and `sr::slug_outline_of` refuses such a face.
+    The charstrings decode to path commands in babel, and the cubics split into quadratics in sr (`slug_outline::cubic_to`).
+  - The runtime fill rule and weight boost were chosen over a pipeline per variant, on the condition that they cost nothing measurable.
+    The benchmark against a nonzero-only shader that settles it is not written yet.
+  - `sr::slug_font` lays a line out by advance widths alone: no kerning, no ligatures, no shaping, which needs a design of its own.
+  - `sr::slug_font::load_system_ui_font` reads a font the operating system ships, because shaped-core vendors none.
+  - `slug_font.cc` decodes UTF-8 itself, since clean-core has no code-point iteration yet.
+  - The routine's pipelines carry slug.sgl's target set, so a scope opened with another shader's generated target refuses them.
 - Get imgui off stb.
   It bundles stb rect-pack, truetype and textedit; we scope them with `IMGUI_STB_NAMESPACE` so they cannot collide with anyone else's stb, but scoping is containment, not a fix.
   stb is hobby-grade — no release process, known robustness gaps parsing malformed fonts — and it sits on the path that loads user-supplied font files.

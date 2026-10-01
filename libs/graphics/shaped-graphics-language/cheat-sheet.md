@@ -74,6 +74,8 @@ d.value().pipelines                        // name, stages, layout, vertex_input
 sgl::prelude_files()                       // -> cc::span<prelude_file const> { name, source }, in module order:
                                            // "builtins.sgl": GENERATED in memory from the builtin registry, never read from disk
                                            // "core.sgl": the hand-written prelude/core.sgl as it was when the library was built
+                                           // "raytracing.sgl", "slug.sgl": hand-written too — slug.sgl is Slug's slug_coverage,
+                                           // there until `use` exists so any pixel shader can cover a shape
 sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file const> { file, ast }: the same files, parsed ONCE per
                                            // process and shared by every thread; point a module_file at it rather than parsing again
 sgl::prelude_file_of(path)                 // -> i32: which prelude file an ABSOLUTE path or file:// uri is, else -1;

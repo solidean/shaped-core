@@ -62,7 +62,7 @@ One-liner per library:
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
   The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
-  So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers) and glTF 2.0/GLB readers (`geometry/`).
+  So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers) and glTF 2.0/GLB readers (`geometry/`), and an OpenType reader (`font/`, TrueType outlines as stored).
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
   Namespace `babel`. Depends on babel-data + typed-geometry.
@@ -119,6 +119,8 @@ One-liner per library:
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
   Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
+  Hosts **Slug**: shapes and text drawn on the GPU from their outlines — `sr::slug_routine` over a caller-owned `sr::slug_atlas`, depth-tested where the scope has depth.
+  Its coverage is the SGL prelude's `slug_coverage`, so any pixel shader can draw a shape on a surface — [docs/slug.md](libs/graphics/shaped-rendering/docs/slug.md).
   Hosts **reconstruction**: `sr::reconstruct_routine` denoises, then upscales with AMD FSR 3.1 on any GPU.
   AMD's host code is driven through sg — [docs/reconstruction.md](libs/graphics/shaped-rendering/docs/reconstruction.md) is the design.
   sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.

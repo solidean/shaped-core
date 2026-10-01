@@ -4,8 +4,10 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics/resource/views.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
@@ -13,7 +15,27 @@
 #include <shaped-viewer/scene/quadric_set.hh>
 #include <shaped-viewer/view/layer.hh>
 #include <shaped-viewer/view/view_data.hh>
+#include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec.hh>
+
+/// What a frame overlay draws with: the frame's command list, its finished image, and the window view's camera.
+///
+/// TEMPORARY: a hook to draw over a frame — Slug text, say — until sv's canvas exists to own such drawing.
+/// The image is composited and holds no depth: whatever an overlay draws lies over every view, the scene included.
+struct sv::overlay_context
+{
+    /// The frame's own list, after every trace and composite; copies recorded here must come before any scope opens.
+    sg::command_list& cmd;
+
+    /// The frame's output, to be opened with `preserved()` so the image underneath survives.
+    sg::render_target_view target;
+
+    /// The output's size in pixels.
+    tg::vec2i size = tg::vec2i(0, 0);
+
+    /// The window view's camera, world to clip at the output's aspect, in tg's column-vector convention.
+    tg::mat4f world_to_clip = tg::mat4f::identity;
+};
 
 /// An id-stack scope opened on a frame: view names created while it is alive are derived under it.
 ///
@@ -175,6 +197,12 @@ public:
     /// Re-registering the same name is how this is meant to be called — every frame, from the same place.
     void register_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body);
 
+    /// Records `draw` over this frame's finished image, after every view is composited and before it is presented.
+    /// Called in the order added; it runs only on a frame that draws.
+    ///
+    /// TEMPORARY, until the canvas exists: it is the one way to draw text or 2D over a viewer today.
+    void draw_overlay(cc::unique_function<void(overlay_context const&)> draw) { _overlays.push_back(cc::move(draw)); }
+
     /// Flattens the frame into a render plan, records it and presents.
     /// Idempotent, and a no-op on a closed frame.
     void present();
@@ -220,6 +248,8 @@ private:
     bool _presented = false;
 
     cc::vector<view_data> _views; ///< every view authored this frame; a leaf names them by index
+
+    cc::vector<cc::unique_function<void(overlay_context const&)>> _overlays; ///< what draw_overlay added, in order
 
     /// One batch the immediate quadric calls are accumulating into, for one (view, layer, material).
     ///

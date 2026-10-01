@@ -1,0 +1,101 @@
+// Slug shapes, one quad per shape instance, covered by the prelude's `slug_coverage`.
+// Paired with sr::slug_routine.
+//
+// A shape lives in its own em space; `em_to_object` and `origin` place it on the object's xy plane, and the per-draw rows
+// take that plane to clip space, so a shape is drawn flat on screen, on a model's face or anywhere in between.
+// The vertex stage widens each quad by half a pixel along its corner's outward direction after projection, exactly so
+// antialiased edges are never clipped: Lengyel's dynamic dilation, perspective included.
+//
+// Colors arrive sRGB-encoded in 8 bits and leave linear and premultiplied, so the target blends premultiplied.
+
+// The object-to-clip matrix as four rows, the viewport in pixels, and the per-draw knobs.
+@inline binding slug_draw:
+    row0: float4
+    row1: float4
+    row2: float4
+    row3: float4
+    viewport: float2
+    depth_bias: float
+    weight_boost: int
+
+binding slug_tables:
+    curves: texture_2d[float4]
+    bands: texture_2d[uint4]
+
+// `corner` is a corner of the unit square, six of them per quad; everything else is the shape instance.
+@vertex struct slug_vertex:
+    corner: float2
+    @per_instance em_to_object: float4
+    @per_instance origin: float2
+    @per_instance em_bounds: float4
+    @per_instance banding: float4
+    @per_instance glyph: uint2
+    @per_instance @format(.rgba8_unorm) color: float4
+
+struct slug_varyings:
+    @position position: hpos4
+    color: float4
+    em: float2
+    @interpolate(.flat) banding: float4
+    @interpolate(.flat) glyph: int4
+
+@pixel struct slug_target:
+    color: float4
+
+fun srgb_to_linear(c: float) -> float:
+    if c <= 0.04045 => return c / 12.92
+    return pow((c + 0.055) / 1.055, 2.4)
+
+@vertex fun main_vs(v: slug_vertex){slug_draw} -> slug_varyings:
+    let col0 = float2(v.em_to_object.x, v.em_to_object.y)
+    let col1 = float2(v.em_to_object.z, v.em_to_object.w)
+
+    let em_corner = float2(mix(v.em_bounds.x, v.em_bounds.z, v.corner.x), mix(v.em_bounds.y, v.em_bounds.w, v.corner.y))
+    let p = v.origin + col0 * em_corner.x + col1 * em_corner.y
+
+    // The corner's outward direction in object space: one unit along each placed em axis, signed by the corner.
+    let sx = v.corner.x * 2.0 - 1.0
+    let sy = v.corner.y * 2.0 - 1.0
+    let n = normalize(col0) * sx + normalize(col1) * sy
+    let nn = normalize(n)
+
+    // How far along `n` the corner moves so it lands half a pixel further out after the perspective divide.
+    let m0 = slug_draw.row0
+    let m1 = slug_draw.row1
+    let m3 = slug_draw.row3
+    let s = m3.x * p.x + m3.y * p.y + m3.w
+    let t = m3.x * nn.x + m3.y * nn.y
+    let u = (s * (m0.x * nn.x + m0.y * nn.y) - t * (m0.x * p.x + m0.y * p.y + m0.w)) * slug_draw.viewport.x
+    let w = (s * (m1.x * nn.x + m1.y * nn.y) - t * (m1.x * p.x + m1.y * p.y + m1.w)) * slug_draw.viewport.y
+    let s2 = s * s
+    let st = s * t
+    let uv = u * u + w * w
+    let d = n * (s2 * (st + sqrt(uv)) / (uv - st * st))
+    let q = p + d
+
+    // The em coordinate follows the corner: the inverse of the placement maps the object-space push back into em space.
+    let det = col0.x * col1.y - col1.x * col0.y
+    let em = float2(em_corner.x + (d.x * col1.y - d.y * col1.x) / det, em_corner.y + (d.y * col0.x - d.x * col0.y) / det)
+
+    let r0 = slug_draw.row0
+    let r1 = slug_draw.row1
+    let r2 = slug_draw.row2
+    let r3 = slug_draw.row3
+    let cw = r3.x * q.x + r3.y * q.y + r3.w
+    let cz = r2.x * q.x + r2.y * q.y + r2.w - slug_draw.depth_bias * cw
+
+    let a = v.color.w
+    let linear = float4(srgb_to_linear(v.color.x) * a, srgb_to_linear(v.color.y) * a, srgb_to_linear(v.color.z) * a, a)
+    return {
+        position = hpos4(r0.x * q.x + r0.y * q.y + r0.w, r1.x * q.x + r1.y * q.y + r1.w, cz, cw)
+        color = linear
+        em = em
+        banding = v.banding
+        glyph = int4((v.glyph.x & 0xffff) as int, (v.glyph.x >> 16) as int, (v.glyph.y & 0xffff) as int, (v.glyph.y >> 16) as int)
+    }
+
+@pixel fun main_ps(p: slug_varyings){slug_tables, slug_draw} -> slug_target:
+    let coverage = slug_coverage(slug_tables.curves, slug_tables.bands, p.em, p.banding, p.glyph, slug_draw.weight_boost != 0)
+    return {
+        color = p.color * coverage
+    }

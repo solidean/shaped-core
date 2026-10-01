@@ -101,10 +101,10 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/unannotated_bindings.cc
 )
 
-# The prelude is three files, and two of them are embedded.
+# The prelude is four files, and three of them are embedded.
 # prelude/builtins.sgl is GENERATED from the C++ builtin registry and committed.
 # The library produces the same text in memory, so it never reads that file.
-# prelude/core.sgl and prelude/raytracing.sgl are hand-written SGL, and the library carries their text: a page has no filesystem and a shipped binary no source tree.
+# prelude/core.sgl, prelude/raytracing.sgl and prelude/slug.sgl are hand-written SGL, and the library carries their text: a page has no filesystem and a shipped binary no source tree.
 # Baked in at configure time, and CMAKE_CONFIGURE_DEPENDS is what makes an edit of the file re-run this.
 #
 # MSVC caps ONE string literal at 16380 bytes, and adjacent literals are joined only after that limit applies.
@@ -142,23 +142,26 @@ endfunction()
 
 _sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/core.sgl" _sgl_prelude_literals)
 _sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/raytracing.sgl" _sgl_raytracing_literals)
+_sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/slug.sgl" _sgl_slug_literals)
 
 # The same file names the prelude's directory, which tells the library's own prelude files from a user's files of the same names.
 # Written only when it differs, so a configure that changes nothing recompiles nothing.
 # Not file(CONFIGURE): SGL spells an attribute `@name`, and two of them on one line would read as a CMake variable.
 set(_sgl_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.generated.cc")
 set(_sgl_prelude_cc
-"// Generated from prelude/core.sgl and prelude/raytracing.sgl by shaped-graphics-language's CMakeLists. Do not edit.
+"// Generated from prelude/core.sgl, prelude/raytracing.sgl and prelude/slug.sgl by shaped-graphics-language's CMakeLists. Do not edit.
 #include <shaped-graphics-language/driver/prelude.hh>
 
 namespace
 {
 constexpr char const* k_prelude =${_sgl_prelude_literals};
 constexpr char const* k_raytracing =${_sgl_raytracing_literals};
+constexpr char const* k_slug =${_sgl_slug_literals};
 } // namespace
 
 cc::string_view sgl::impl::embedded_core_prelude() { return k_prelude; }
 cc::string_view sgl::impl::embedded_raytracing_prelude() { return k_raytracing; }
+cc::string_view sgl::impl::embedded_slug_prelude() { return k_slug; }
 
 cc::string_view sgl::impl::prelude_directory() { return R\"sglprelude(${CMAKE_CURRENT_SOURCE_DIR}/prelude)sglprelude\"; }
 ")

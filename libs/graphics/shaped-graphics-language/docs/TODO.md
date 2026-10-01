@@ -76,6 +76,10 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   No such symbol can hold a resource yet; once a type alias or a struct field can, its use has to reach every binding that names it.
 - **Features across a hot reload outside a `pipeline`.** A declared pipeline freezes its features, so a reload needing another one keeps what it had.
   A compute shader or a stage acquired on its own has no frozen part: its reload compiles, and its pipeline is then refused by the feature's name.
+- **Multi-component swizzles.** A vector has the fields `x y z w` and nothing else, so `.xy` or `.zw` is `unknown-member`, and code ported from HLSL writes a constructor for each.
+  Even read-only swizzles are a design: assignment through one, repeated components, and how they meet the `..v` splat.
+- **`prelude/slug.sgl` is a stopgap for `use`.** It is in the prelude only so any pixel shader can call `slug_coverage`.
+  It moves to a library file a shader imports once `use` exists, and every compile stops checking it.
 - **Unsigned literals by suffix.** A literal takes a `uint` wherever one is expected (CHK-253), and `1u` is `unsupported-yet` (CHK-61).
   Whether the suffix is needed at all is the question [literal-types.md](spec/incubator/literal-types.md) holds.
 - **Arrays and `mat3` in GPU memory, and matrices and arrays across a stage edge.** An array is a value everywhere else (CHK-285).
