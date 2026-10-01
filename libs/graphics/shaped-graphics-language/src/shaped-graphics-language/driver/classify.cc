@@ -373,6 +373,7 @@ struct classifier
                 set(t, token_class::self_, is_declaration);
                 break;
             case check::target_kind::array_length:
+            case check::target_kind::swizzle:
                 set(t, token_class::field, is_declaration);
                 break;
             case check::target_kind::array_filled:

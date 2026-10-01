@@ -114,6 +114,22 @@ flat_expr_id flat_builder::member(flat_expr_id object, i32 index)
     return add_expr(type, flat_member{.object = object, .member = index});
 }
 
+flat_expr_id flat_builder::swizzle_of(flat_expr_id object, cc::string_view letters)
+{
+    auto const members = m.at(m.at(e.at(object).type).members);
+    auto read = swizzle{.count = i8(letters.size())};
+    for (auto i = isize(0); i < letters.size() && i < 4; ++i)
+        for (auto f = isize(0); f < members.size(); ++f)
+            if (members[f].name.size() == 1 && members[f].name[0] == letters[i])
+                read.fields[i] = i8(f);
+    auto const vector = cc::format("{}{}", m.name_of(members[0].type), letters.size());
+    auto type = checked_module::error_type;
+    for (auto t = isize(0); t < m.types.size(); ++t)
+        if (m.builtin_type_of(type_id(t)) != nullptr && m.name_of(type_id(t)) == vector)
+            type = type_id(t);
+    return add_expr(type, flat_member{.object = object, .letters = read});
+}
+
 flat_expr_id flat_builder::member(flat_expr_id object, cc::string_view name)
 {
     auto const members = m.at(m.at(e.at(object).type).members);

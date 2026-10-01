@@ -385,6 +385,32 @@ TEST("sgl check - a default is checked once, where it is declared, and reads onl
     CHECK(reports_for("struct s:\n    a: float\n    b: float = a * 2.0\n") == "");
 }
 
+TEST("sgl check - @swizzle takes two to four one-letter fields of one type with vectors, and owns their names")
+{
+    CHECK(reports_for("@swizzle struct rgb:\n    r: float\n    g: float\n    b: float\n") == "");
+    CHECK(reports_for("@swizzle struct mask:\n    a: bool\n    b: bool\n") == "");
+    CHECK(reports_for("@swizzle struct ab:\n    a: float\n    bb: float\n")
+          == "invalid-attribute-arguments user:[swizzle] bb is no one-letter field, and a swizzle names its fields by "
+             "their letters\n");
+    CHECK(reports_for("@swizzle struct ab:\n    a: float\n    b: int\n")
+          == "invalid-attribute-arguments user:[swizzle] b is int and a is float, and a swizzle's fields are of one "
+             "type\n");
+    CHECK(reports_for("@swizzle struct one:\n    a: float\n")
+          == "invalid-attribute-arguments user:[swizzle] a swizzle reads two to four fields, and one has 1\n");
+    CHECK(reports_for("@swizzle struct ab:\n    a: mat4\n    b: mat4\n")
+          == "invalid-attribute-arguments user:[swizzle] a is mat4, which has no vectors\n");
+
+    // CHK-351: a function or a property named like a swizzle would never be reached, an extension's included
+    CHECK(reports_for("fun float3.zy(self) -> float => 1.0\n")
+          == "member-name-clash user:[zy] zy is a swizzle of float3 already\n");
+    CHECK(reports_for("fun float3.xxx => 1.0\n") == "member-name-clash user:[xxx] xxx is a swizzle of float3 already\n");
+    CHECK(reports_for("@swizzle struct rgb:\n    r: float\n    g: float\n    b: float\n    gr => 1.0\n")
+          == "member-name-clash user:[gr] gr is a swizzle of rgb already\n");
+    // a name with a letter that is no field is free, and so is one on a struct without the attribute
+    CHECK(reports_for("fun float3.xyzw => 1.0\n") == "");
+    CHECK(reports_for("struct rgb:\n    r: float\n    g: float\n    gr => 1.0\n") == "");
+}
+
 TEST("sgl check - a type scope holds one kind of thing per name, and an extension names a type")
 {
     CHECK(reports_for("struct s:\n    x: float\n    fun x(self) -> float => 1.0\n")

@@ -474,6 +474,18 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
     return checked_module::error_type;
 }
 
+cc::string checker::vector_name_of(type_id element, isize count) const
+{
+    // CHK-349: the element types that have a vector family, each named after it and its width
+    cc::string_view const families[] = {"float", "int", "uint", "bool"};
+    if (element == checked_module::error_type || out.builtin_type_of(element) == nullptr)
+        return {};
+    for (auto const family : families)
+        if (out.name_of(element) == family)
+            return cc::format("{}{}", family, count);
+    return {};
+}
+
 // ---- structs and bindings -------------------------------------------------------------------------------------------
 
 ast::range_of<member_info> checker::compile_members(i32 file,
@@ -775,7 +787,7 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal"};
+    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -822,6 +834,34 @@ void checker::compile_struct(symbol_id id)
                        cc::format("{} is a ray type, whose payload is a struct, and this is {}", m.name,
                                   out.name_of(m.type)));
 
+    // CHK-349: a swizzle names fields by their letters and is a vector of their one element type
+    auto has_swizzles = false;
+    if (auto const* const swizzled = find_attribute(file, d.attributes, "swizzle"))
+    {
+        auto const fields = out.at(members);
+        auto why = cc::string();
+        if (fields.size() < 2 || fields.size() > 4)
+            why = cc::format("a swizzle reads two to four fields, and {} has {}", out.at(id).name, fields.size());
+        for (auto const& f : fields)
+        {
+            if (!why.empty() || f.type == checked_module::error_type || fields[0].type == checked_module::error_type)
+                continue;
+            if (f.name.size() != 1)
+                why = cc::format("{} is no one-letter field, and a swizzle names its fields by their letters", f.name);
+            else if (f.type != fields[0].type)
+                why = cc::format("{} is {} and {} is {}, and a swizzle's fields are of one type", f.name,
+                                 out.name_of(f.type), fields[0].name, out.name_of(fields[0].type));
+            else if (vector_name_of(f.type, 2).empty())
+                why = cc::format("{} is {}, which has no vectors", f.name, out.name_of(f.type));
+        }
+        if (!why.empty())
+            report(diagnostic_kind::invalid_attribute_arguments, file, swizzled->name, why);
+        auto is_typed = !fields.empty();
+        for (auto const& f : fields)
+            is_typed = is_typed && f.type != checked_module::error_type;
+        has_swizzles = why.empty() && is_typed;
+    }
+
     // The type exists only now, so a field that needs its own struct found a cycle and not a type.
     auto const type = type_id(out.types.size());
     out.types.push_back({
@@ -832,6 +872,7 @@ void checker::compile_struct(symbol_id id)
         // A struct has no compute edge: a compute entry point has no stage struct at all.
         .edge = stage_of(is_vertex, is_pixel, false, false, false, false),
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
+        .has_swizzles = has_swizzles,
         .element = parameter,
         .is_template = is_valid(parameter),
     });

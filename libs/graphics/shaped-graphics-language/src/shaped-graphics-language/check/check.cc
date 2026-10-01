@@ -511,6 +511,24 @@ cc::string_view checker::member_kind_of(symbol_id owner, cc::string_view name) c
         if (auto const* const c = d.try_as<ast::enum_case_decl>(); c != nullptr && text_of(o.file, c->name) == name)
             return "case";
     }
+    // CHK-351: every swizzle is a member as a field is, and a function of its name would never be reached
+    if (s != nullptr && find_attribute(o.file, ast.at(o.declaration).attributes, "swizzle") != nullptr
+        && name.size() >= 2 && name.size() <= 4)
+    {
+        auto is_swizzle = true;
+        for (auto const letter : name)
+        {
+            auto is_field = false;
+            for (auto const member : ast.at(members))
+                if (auto const* const f = ast.at(member).node.try_as<ast::field_decl>();
+                    f != nullptr && ast::is_valid(f->field) && text_of(o.file, ast.at(f->field).name).size() == 1
+                    && text_of(o.file, ast.at(f->field).name)[0] == letter)
+                    is_field = true;
+            is_swizzle = is_swizzle && is_field;
+        }
+        if (is_swizzle)
+            return "swizzle";
+    }
     auto const* const scope = type_scopes.get_ptr(i32(index_of(owner)));
     auto const* const found = scope != nullptr ? scope->get_ptr(name) : nullptr;
     if (found == nullptr || found->empty())

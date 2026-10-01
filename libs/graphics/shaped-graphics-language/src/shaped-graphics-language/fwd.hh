@@ -230,6 +230,7 @@ enum class pipeline_kind : u8;
 struct pipeline_info;
 enum class target_kind : u8;
 struct target;
+struct swizzle;
 struct written_argument;
 struct ray_trace;
 struct callable_call;

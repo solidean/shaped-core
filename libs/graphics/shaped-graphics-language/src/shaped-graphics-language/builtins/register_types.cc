@@ -25,9 +25,10 @@ constexpr scalar_family k_uint_family = {"uint", "u32", "u", value_kind::scalar_
 constexpr scalar_family k_bool_family = {"bool", "bool", "", value_kind::boolean, false, false};
 
 /// A vector of `width` scalars of `family` with the fields `x y [z [w]]`, which every target spells as its own vector.
+/// Its swizzles are the target's own too (EMIT-142).
 type_record vector_of(scalar_family const& family, cc::string_view name, i32 width, cc::string_view doc)
 {
-    auto declaration = cc::format("struct {}:", name);
+    auto declaration = cc::format("@swizzle struct {}:", name);
     cc::string_view const fields[] = {"x", "y", "z", "w"};
     for (auto i = 0; i < width; ++i)
         declaration.appendf("\n    {}: {}", fields[i], family.name);

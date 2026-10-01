@@ -256,11 +256,18 @@ struct sgl::check::flat_file_sampler
     constexpr bool operator==(flat_file_sampler const&) const = default;
 };
 
+/// `v.normal`, one field of a struct; or `v.zyx`, a swizzle of a prelude vector, whose value is the plain vector of
+/// its fields (CHK-350).
+/// A swizzle of a struct of the program never stands here: the check pass writes it as the construction it means.
 struct sgl::check::flat_member
 {
     flat_expr_id object = flat_expr_id::none;
-    /// A position in the `members` of the object's struct type.
+    /// A position in the `members` of the object's struct type; -1 for a swizzle.
     i32 member = -1;
+    /// The fields a swizzle reads, two to four of them; a `count` of zero for one field.
+    swizzle letters;
+
+    [[nodiscard]] constexpr bool is_swizzle() const { return letters.count > 0; }
 
     constexpr bool operator==(flat_member const&) const = default;
 };
@@ -406,6 +413,7 @@ struct sgl::check::flat_var
 
 /// `place` is a `flat_local_ref` of a mutable local, a chain of `flat_member` over one, or a `flat_buffer_element` of a
 /// `mut` buffer, whose index is evaluated before `value`.
+/// A swizzle stands only on top of a place, its fields distinct; over a buffer element its index is a local or a literal.
 struct sgl::check::flat_assign
 {
     flat_expr_id place = flat_expr_id::none;

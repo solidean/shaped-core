@@ -497,9 +497,24 @@ struct machine
             if (auto const f = eval(member->object, object); !f.is_normal())
                 return f;
             auto const type = x.type;
-            if (auto const f = slice_member(object, member->member, result); !f.is_normal())
-                return f;
+            if (!member->is_swizzle())
+            {
+                if (auto const f = slice_member(object, member->member, result); !f.is_normal())
+                    return f;
+                result.type = type;
+                return {};
+            }
+            // a swizzle is its fields' values one after another, in the order its letters are written
+            auto leaves = cc::vector<scalar>();
+            for (auto i = 0; i < member->letters.count; ++i)
+            {
+                auto field = value();
+                if (auto const f = slice_member(object, member->letters.fields[i], field); !f.is_normal())
+                    return f;
+                leaves.push_back_range(field.leaves);
+            }
             result.type = type;
+            result.leaves = cc::move(leaves);
             return {};
         }
         if (auto const* const construct = x.node.try_as<flat_construct>())
@@ -598,7 +613,7 @@ struct machine
                 return b->is_workgroup;
             if (auto const* const element = node.try_as<flat_element>())
                 id = element->object;
-            else if (auto const* const member = node.try_as<flat_member>())
+            else if (auto const* const member = node.try_as<flat_member>(); member != nullptr && !member->is_swizzle())
                 id = member->object;
             else
                 return false;
@@ -724,6 +739,63 @@ struct machine
                 workgroup[where.cell].is_written[offset + i] = true;
         else
             is_set[index_of(where.local)] = true;
+        return {};
+    }
+
+    /// CHK-352: the operand's indices first, then the value, then one store per letter.
+    flow assign_swizzle(flat_member const& place, flat_expr_id stored)
+    {
+        if (!is_known(e, place.object))
+            return type_error("an expression id that names nothing");
+        auto const object_type = e.at(place.object).type;
+        auto const members = members_of(m, object_type);
+        auto field_offset = [&](i32 field)
+        {
+            auto offset = isize(0);
+            for (auto i = 0; i < field; ++i)
+                offset += leaf_count_of(m, members[i].type);
+            return offset;
+        };
+        for (auto i = 0; i < place.letters.count; ++i)
+            if (place.letters.fields[i] < 0 || place.letters.fields[i] >= members.size()
+                || leaf_count_of(m, members[place.letters.fields[i]].type) != 1)
+                return type_error("a swizzle of a field its type does not have");
+
+        if (auto const* const element = e.at(place.object).node.try_as<flat_buffer_element>())
+        {
+            auto buffer = isize(-1);
+            auto offset = isize(0);
+            if (auto const f = locate(*element, object_type, buffer, offset); !f.is_normal())
+                return f;
+            auto v = value();
+            if (auto const f = eval(stored, v); !f.is_normal())
+                return f;
+            if (v.leaves.size() != place.letters.count)
+                return type_error("a store of a value of the wrong size");
+            for (auto i = 0; i < place.letters.count; ++i)
+                out.buffers[buffer].leaves[offset + field_offset(place.letters.fields[i])] = v.leaves[i];
+            is_stored[buffer] = true;
+            return {};
+        }
+
+        auto where = place_ref();
+        auto offset = isize(0);
+        auto type = type_id::none;
+        if (auto const f = locate_place(place.object, where, offset, type); !f.is_normal())
+            return f;
+        auto v = value();
+        if (auto const f = eval(stored, v); !f.is_normal())
+            return f;
+        if (v.leaves.size() != place.letters.count)
+            return type_error("an assignment of a value of the wrong size");
+        for (auto i = 0; i < place.letters.count; ++i)
+        {
+            auto const field = place.letters.fields[i];
+            auto component = value();
+            component.leaves.push_back(v.leaves[i]);
+            if (auto const f = write(where, offset + field_offset(field), members[field].type, component); !f.is_normal())
+                return f;
+        }
         return {};
     }
 
@@ -909,6 +981,9 @@ struct machine
         }
         if (auto const* const a = s.node.try_as<flat_assign>())
         {
+            if (auto const* const member = is_known(e, a->place) ? e.at(a->place).node.try_as<flat_member>() : nullptr;
+                member != nullptr && member->is_swizzle())
+                return assign_swizzle(*member, a->value);
             auto const* const element
                 = is_known(e, a->place) ? e.at(a->place).node.try_as<flat_buffer_element>() : nullptr;
             if (element != nullptr)

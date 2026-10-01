@@ -51,6 +51,9 @@ public:
     /// False for WGSL: `if c {`, `loop {`, and a `once` that is `loop { … break; }`.
     [[nodiscard]] virtual bool is_c_like() const = 0;
 
+    /// True where `v.zy = value;` assigns through a swizzle; WGSL assigns one component at a time (EMIT-143).
+    [[nodiscard]] virtual bool assigns_through_swizzles() const { return true; }
+
     /// A `discard` as a whole statement: `discard;`, or MSL's `discard_fragment();` (EMIT-117).
     [[nodiscard]] virtual cc::string_view discard_statement() const { return "discard;"; }
 

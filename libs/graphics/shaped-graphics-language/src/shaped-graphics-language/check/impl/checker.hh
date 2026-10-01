@@ -538,6 +538,12 @@ struct checker
     [[nodiscard]] type_id resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
     /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
+    /// The name of the plain vector of `count` values of `element`, `float3`; empty for an element without vectors.
+    [[nodiscard]] cc::string vector_name_of(type_id element, isize count) const;
+    /// The swizzle `name` is of a value of `object`, a count of zero where it is none (CHK-350).
+    [[nodiscard]] swizzle swizzle_of(type_id object, cc::string_view name) const;
+    /// What an unknown member of a `@swizzle` struct says about its letters; empty for any other type.
+    [[nodiscard]] cc::string why_no_swizzle(type_id object, cc::string_view name) const;
     /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.

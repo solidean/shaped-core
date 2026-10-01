@@ -20,18 +20,18 @@
 @builtin struct float
 
 @shadowable(false)
-@builtin struct float2:
+@builtin @swizzle struct float2:
     x: float
     y: float
 
 @shadowable(false)
-@builtin struct float3:
+@builtin @swizzle struct float3:
     x: float
     y: float
     z: float
 
 @shadowable(false)
-@builtin struct float4:
+@builtin @swizzle struct float4:
     x: float
     y: float
     z: float
@@ -39,21 +39,21 @@
 
 /// A direction: it has a length, and a translation leaves it alone.
 @shadowable(false)
-@builtin struct vec3:
+@builtin @swizzle struct vec3:
     x: float
     y: float
     z: float
 
 /// A position: a translation moves it.
 @shadowable(false)
-@builtin struct pos3:
+@builtin @swizzle struct pos3:
     x: float
     y: float
     z: float
 
 /// A position in clip space, before the divide.
 @shadowable(false)
-@builtin struct hpos4:
+@builtin @swizzle struct hpos4:
     x: float
     y: float
     z: float
@@ -73,18 +73,18 @@
 @builtin struct int
 
 @shadowable(false)
-@builtin struct int2:
+@builtin @swizzle struct int2:
     x: int
     y: int
 
 @shadowable(false)
-@builtin struct int3:
+@builtin @swizzle struct int3:
     x: int
     y: int
     z: int
 
 @shadowable(false)
-@builtin struct int4:
+@builtin @swizzle struct int4:
     x: int
     y: int
     z: int
@@ -95,18 +95,18 @@
 @builtin struct uint
 
 @shadowable(false)
-@builtin struct uint2:
+@builtin @swizzle struct uint2:
     x: uint
     y: uint
 
 @shadowable(false)
-@builtin struct uint3:
+@builtin @swizzle struct uint3:
     x: uint
     y: uint
     z: uint
 
 @shadowable(false)
-@builtin struct uint4:
+@builtin @swizzle struct uint4:
     x: uint
     y: uint
     z: uint
@@ -118,18 +118,18 @@
     true
 
 @shadowable(false)
-@builtin struct bool2:
+@builtin @swizzle struct bool2:
     x: bool
     y: bool
 
 @shadowable(false)
-@builtin struct bool3:
+@builtin @swizzle struct bool3:
     x: bool
     y: bool
     z: bool
 
 @shadowable(false)
-@builtin struct bool4:
+@builtin @swizzle struct bool4:
     x: bool
     y: bool
     z: bool

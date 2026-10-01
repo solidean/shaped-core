@@ -639,16 +639,62 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         set_target(file, id, {.kind = target_kind::field, .symbol = type.symbol, .index = i32(index)});
         return out.at(type.members)[index].type;
     }
+    // CHK-351: a swizzle is found where a field is, so no function in scope ever stands for `v.xy`
+    auto const letters = swizzle_of(object, name);
+    if (letters.count > 0)
+    {
+        set_target(file, id, {.kind = target_kind::swizzle, .symbol = type.symbol, .index = letters.packed()});
+        auto const element = out.at(type.members)[letters.fields[0]].type;
+        return type_of_builtin(vector_name_of(element, letters.count), file, span_of(file, id));
+    }
     auto const candidates = candidates_of(file, name, object);
     if (candidates.empty())
     {
         report(diagnostic_kind::unknown_member, file, member.name,
-               cc::format("{} has no member {}", out.name_of(object), name));
+               cc::format("{} has no member {}{}", out.name_of(object), name, why_no_swizzle(object, name)));
         return error_type;
     }
     auto arguments = call_arguments();
     add_argument(arguments, {.expr = member.object}, object, {}, number_of(file, member.object));
     return resolve_overload(scope, id, ast::expr_id::none, candidates, arguments, name, call_spelling::dot_read);
+}
+
+swizzle checker::swizzle_of(type_id object, cc::string_view name) const
+{
+    if (object == error_type || !out.at(object).has_swizzles || name.size() < 2 || name.size() > 4)
+        return {};
+    auto const fields = out.at(out.at(object).members);
+    auto result = swizzle{.count = i8(name.size())};
+    for (auto i = isize(0); i < name.size(); ++i)
+    {
+        auto found = isize(-1);
+        for (auto f = isize(0); f < fields.size(); ++f)
+            if (fields[f].name.size() == 1 && fields[f].name[0] == name[i])
+                found = f;
+        if (found < 0)
+            return {};
+        result.fields[i] = i8(found);
+    }
+    return result;
+}
+
+cc::string checker::why_no_swizzle(type_id object, cc::string_view name) const
+{
+    if (object == error_type || !out.at(object).has_swizzles || name.size() < 2)
+        return {};
+    // CHK-350: the detail names the letter that is no field, or the letter one too many
+    auto letters = cc::string();
+    for (auto const& f : out.at(out.at(object).members))
+        letters += f.name;
+    for (auto const c : name)
+    {
+        auto is_field = false;
+        for (auto i = isize(0); i < letters.size(); ++i)
+            is_field = is_field || letters[i] == c;
+        if (!is_field)
+            return cc::format(": its swizzle letters are {}, and {} is none", letters, c);
+    }
+    return cc::format(": a swizzle reads at most four fields, and {} is its fifth letter", name[4]);
 }
 
 // ---- calls ----------------------------------------------------------------------------------------------------------

@@ -221,6 +221,34 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         return false;
     };
 
+    // CHK-352: a swizzle, and a field of one, is a place where its operand is one and its letters are distinct
+    auto operand = expr;
+    while (ast::is_valid(operand))
+    {
+        auto const* const m = ast.at(operand).node.try_as<ast::member>();
+        if (m == nullptr)
+            break;
+        auto const& t = out.files[file].target_at(operand);
+        auto const is_swizzle = t.kind == target_kind::swizzle;
+        if (!is_swizzle
+            && (t.kind != target_kind::field || !ast::is_valid(m->object)
+                || out.files[file].target_at(m->object).kind != target_kind::swizzle))
+            break;
+        if (is_swizzle && swizzle::unpacked(t.index).has_repeats())
+            return refuse(span_of(file, expr), cc::format("{} names a field twice, and a swizzle that does is no place",
+                                                          text_of(file, span_of(file, operand))));
+        operand = m->object;
+    }
+    if (operand != expr)
+    {
+        if (!what.empty())
+        {
+            unsupported(file, span_of(file, expr), cc::format("a swizzle as {}", what));
+            return false;
+        }
+        return judge_place(scope, operand, what);
+    }
+
     // An array element is part of the local that holds it, and a buffer element is a place of its own.
     auto const kind_of_object = [&](ast::index const& indexed)
     {

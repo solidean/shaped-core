@@ -1,0 +1,156 @@
+// a swizzle reads several fields of a `@swizzle` struct at once, as the plain vector of their type (CHK-349 to CHK-352)
+
+// the letters in any order, and with repeats
+test float3(1.0, 2.0, 3.0).zyx.x == 3.0
+
+test:
+    let v = float4(1.0, 2.0, 3.0, 4.0)
+    let r = v.wzyx
+    r.x == 4.0 and r.y == 3.0 and r.z == 2.0 and r.w == 1.0
+    let d = v.xx
+    d.x == 1.0 and d.y == 1.0
+    // a swizzle of a swizzle reads the fields below it
+    let t = v.zyw.yx
+    t.x == 2.0 and t.y == 3.0
+
+// every family of vectors has them, a bool's included
+test int3(1, 2, 3).zx.x == 3
+test uint2(5, 6).yx.x == 6
+test bool3(true, false, true).yx.x == false
+
+// the result is the plain vector, so a position's swizzle is no position
+fun sum3(v: float3) => v.x + v.y + v.z
+
+test:
+    let p = pos3(1.0, 2.0, 3.0)
+    let h = hpos4(2.0, 4.0, 6.0, 2.0)
+    sum3(p.zyx) == 6.0
+    let n: float2 = h.xy
+    n.y == 4.0
+
+@expect(error = "type-mismatch")
+test:
+    let p = pos3(1.0, 2.0, 3.0)
+    let q: pos3 = p.zyx
+    true
+
+// a letter that names no field is no swizzle, and neither is a fifth one
+@expect(error = "unknown-member")
+test:
+    let v = float3(1.0, 2.0, 3.0)
+    let w = v.xyw
+    true
+
+@expect(error = "unknown-member")
+test:
+    let v = float4(1.0, 2.0, 3.0, 4.0)
+    let w = v.xyzwx
+    true
+
+// a swizzle is found where a field is, so a free function of its name never stands for it
+fun xy(v: float3) -> float => 100.0
+
+test float3(1.0, 2.0, 3.0).xy.y == 2.0
+
+// a swizzle with distinct letters is a place, for `=` and every `op=`
+test:
+    let mut v = float4(1.0, 2.0, 3.0, 4.0)
+    v.zx = float2(7.0, 8.0)
+    v.x == 8.0 and v.y == 2.0 and v.z == 7.0
+    v.yw += float2(10.0, 20.0)
+    v.y == 12.0 and v.w == 24.0
+    // the value is read whole before any component is written
+    v.xy = v.yx
+    v.x == 12.0 and v.y == 8.0
+    // and a field of a swizzle is a place too
+    v.zy.x = 0.5
+    v.z == 0.5
+
+// a member of a local is a place, and so is its swizzle
+struct particle:
+    position: float3
+    velocity: float3
+
+test:
+    let mut p = particle(float3(0.0, 0.0, 0.0), float3(1.0, 2.0, 3.0))
+    p.position.xz = p.velocity.zx
+    p.position.x == 3.0 and p.position.y == 0.0 and p.position.z == 1.0
+
+// the operand's index is evaluated once, before any component is written
+fun next(i: mut int) -> int:
+    i += 1
+    return i - 1
+
+test:
+    let mut vs = [float2(1.0, 2.0), float2(3.0, 4.0)]
+    let mut i = 0
+    vs[next(mut i)].yx += float2(10.0, 20.0)
+    i == 1
+    vs[0].x == 21.0 and vs[0].y == 12.0
+    vs[1].x == 3.0
+
+// a repeated letter would write one field twice, so that swizzle is no place
+@expect(error = "not-assignable")
+test:
+    let mut v = float3(1.0, 2.0, 3.0)
+    v.xx = float2(1.0, 2.0)
+    true
+
+// a swizzle is a place only where its operand is one
+@expect(error = "not-assignable")
+test:
+    let v = float3(1.0, 2.0, 3.0)
+    v.xy = float2(1.0, 2.0)
+    true
+
+// a mut argument is not taken through a swizzle yet
+fun double2(v: mut float2):
+    v = v * float2(2.0, 2.0)
+
+@expect(error = "unsupported-yet")
+test:
+    let mut v = float3(1.0, 2.0, 3.0)
+    double2(mut v.xy)
+    true
+
+// a struct of the program has them too, by its own letters, and gives the plain vector as well
+@swizzle struct rgb:
+    r: float
+    g: float
+    b: float
+
+fun sky() => rgb(0.25, 0.5, 1.0)
+
+test:
+    let c = sky()
+    let f = c.bgr
+    sum3(f) == 1.75
+    f.x == 1.0 and f.z == 0.25
+    // an operand that is no local is evaluated once
+    sky().gb.y == 1.0
+    // a splat of a swizzle hands on its fields
+    let wide = float4(..c.bgr, 2.0)
+    wide.x == 1.0 and wide.z == 0.25 and wide.w == 2.0
+
+test:
+    let mut d = rgb(0.0, 0.0, 0.0)
+    d.rb = float2(1.0, 2.0)
+    d.r == 1.0 and d.g == 0.0 and d.b == 2.0
+    d.gr += float2(5.0, 5.0)
+    d.g == 5.0 and d.r == 6.0
+    d.br = d.rb
+    d.r == 2.0 and d.b == 6.0
+
+// a buffer element is a place, so its swizzle is one; every target writes these
+binding grid:
+    points: mut buffer[float4]
+    colors: mut buffer[float3]
+
+@compute(64) fun shuffle(@thread_id id: int3){grid}:
+    let i = id.x
+    grid.points[i].wzyx = grid.points[i + 1]
+    grid.points[i].xy += grid.points[i].zw
+    grid.colors[i].zx = grid.colors[i].xy
+    let mut c = sky()
+    c.bg = grid.colors[i].xy
+    grid.colors[i + 1] = float3(..c.bgr) + float3(..sky().rgb)

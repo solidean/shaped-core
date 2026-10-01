@@ -426,8 +426,9 @@ struct flattener
         if (auto const* const member = x.node.try_as<flat_member>())
         {
             auto const index = member->member;
+            auto const letters = member->letters;
             auto const object = again(member->object, from);
-            return add_expr(x.type, from, flat_member{.object = object, .member = index});
+            return add_expr(x.type, from, flat_member{.object = object, .member = index, .letters = letters});
         }
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
@@ -473,8 +474,9 @@ struct flattener
         if (auto const* const member = x.node.try_as<flat_member>())
         {
             auto const index = member->member;
+            auto const letters = member->letters;
             auto const object = pin_place(member->object);
-            return add_expr(x.type, x.from.expr, flat_member{.object = object, .member = index});
+            return add_expr(x.type, x.from.expr, flat_member{.object = object, .member = index, .letters = letters});
         }
         if (auto const* const element = x.node.try_as<flat_element>())
         {
@@ -529,6 +531,126 @@ struct flattener
         };
         return {.first = add_expr(type, from, flat_block{.label = label, .body = add_list(body)}),
                 .later = local_ref(local, from)};
+    }
+
+    // ---- swizzles ---------------------------------------------------------------------------------------------------
+
+    /// The fields of `operand` a swizzle reads.
+    struct swizzled
+    {
+        ast::expr_id operand = ast::expr_id::none;
+        swizzle letters;
+    };
+
+    /// True for the member `id` that is a swizzle, or a field of one.
+    [[nodiscard]] bool is_swizzled(ast::expr_id id) const
+    {
+        auto const* const m = ast::is_valid(id) ? ast().at(id).node.try_as<ast::member>() : nullptr;
+        if (m == nullptr)
+            return false;
+        auto const kind = tables().target_at(id).kind;
+        return kind == target_kind::swizzle
+            || (kind == target_kind::field && ast::is_valid(m->object)
+                && tables().target_at(m->object).kind == target_kind::swizzle);
+    }
+
+    /// What the `is_swizzled` member `id` reads, through every swizzle below it: `v.zyx.yx` reads `v.yz`, and `v.zy.x`
+    /// reads `v.z`.
+    [[nodiscard]] swizzled swizzled_at(ast::expr_id id) const
+    {
+        auto const& where = tables().target_at(id);
+        auto result = swizzled{
+            .operand = ast().at(id).node.as<ast::member>().object,
+            .letters = where.kind == target_kind::swizzle ? swizzle::unpacked(where.index)
+                                                          : swizzle{.fields = {i8(where.index)}, .count = 1},
+        };
+        while (tables().target_at(result.operand).kind == target_kind::swizzle)
+        {
+            result.letters = result.letters.over(swizzle::unpacked(tables().target_at(result.operand).index));
+            result.operand = ast().at(result.operand).node.as<ast::member>().object;
+        }
+        return result;
+    }
+
+    /// The type of field `field` of a value of `type`.
+    [[nodiscard]] type_id field_type(type_id type, i32 field) const
+    {
+        return c.out.at(c.out.at(type).members)[field].type;
+    }
+
+    /// One field of `object`, or the swizzle `letters` of it, which is `type`.
+    /// A prelude vector's swizzle is a member of its own; a struct of the program's is the construction of the vector it
+    /// means, from an operand that is no local evaluated once (EMIT-142).
+    flat_expr_id swizzle_of(flat_expr_id object, swizzle letters, type_id type, ast::expr_id id)
+    {
+        if (!is_valid(object))
+            return fail();
+        auto const object_type = entry.at(object).type;
+        if (letters.count == 1)
+            return add_expr(type, id, flat_member{.object = object, .member = letters.fields[0]});
+        if (c.out.builtin_type_of(object_type) != nullptr)
+            return add_expr(type, id, flat_member{.object = object, .letters = letters});
+        auto const once = entry.at(object).node.is<flat_local_ref>() ? evaluated_once{.first = object, .later = object}
+                                                                     : evaluate_once(object, "swizzled", id);
+        auto arguments = cc::vector<flat_expr_id>();
+        for (auto i = 0; i < letters.count; ++i)
+        {
+            auto const operand = i == 0 ? once.first : again(once.later, id);
+            arguments.push_back(add_expr(field_type(object_type, letters.fields[i]), id,
+                                         flat_member{.object = operand, .member = letters.fields[i]}));
+        }
+        return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
+    }
+
+    flat_expr_id read_swizzle(swizzled const& s, type_id type, ast::expr_id id)
+    {
+        return swizzle_of(flatten_expr(s.operand), s.letters, type, id);
+    }
+
+    /// `v.zy = value`, and `v.zy op= value`, whose operand's indices are evaluated once, before the value (CHK-352).
+    void flatten_swizzle_assign(origin from, ast::assign_stmt const& assign, cc::string_view op)
+    {
+        auto const s = swizzled_at(assign.target);
+        auto const type = tables().type_at(assign.target);
+        auto const operand = pin_place(flatten_expr(s.operand));
+        auto value = flatten_expr(assign.value);
+        if (!is_valid(operand) || !is_valid(value))
+        {
+            is_failed = true;
+            return;
+        }
+        auto const operand_type = entry.at(operand).type;
+        if (op != "=")
+        {
+            type_id const types[] = {type, entry.at(value).type};
+            auto const callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
+            if (!is_valid(callee))
+            {
+                is_failed = true;
+                return;
+            }
+            auto const read = swizzle_of(again(operand, assign.target), s.letters, type, assign.target);
+            flat_expr_id const arguments[] = {read, value};
+            value = builtin_call(assign.value, callee, arguments);
+        }
+        if (s.letters.count == 1 || c.out.builtin_type_of(operand_type) != nullptr)
+        {
+            add_stmt(from, flat_assign{.place = swizzle_of(operand, s.letters, type, assign.target), .value = value});
+            return;
+        }
+        // EMIT-143: a struct of the program takes one component at a time, from the value held once
+        auto const held = add_local(local_kind::temporary, "swizzled", type);
+        add_stmt(from, flat_let{.local = held, .value = value});
+        for (auto i = 0; i < s.letters.count; ++i)
+        {
+            auto const element = field_type(operand_type, s.letters.fields[i]);
+            auto const object = i == 0 ? operand : again(operand, assign.target);
+            auto const place
+                = add_expr(element, assign.target, flat_member{.object = object, .member = s.letters.fields[i]});
+            auto const component
+                = add_expr(element, assign.target, flat_member{.object = local_ref(held, assign.target), .member = i});
+            add_stmt(from, flat_assign{.place = place, .value = component});
+        }
     }
 
     // ---- expressions ------------------------------------------------------------------------------------------------
@@ -590,6 +712,8 @@ struct flattener
                     add_stmt({.file = file(), .expr = id}, flat_eval{.value = object});
                 return add_expr(type, id, flat_int_literal{.value = where.index});
             }
+            if (is_swizzled(id))
+                return read_swizzle(swizzled_at(id), type, id);
             if (where.kind != target_kind::field)
                 return fail();
             auto const object = flatten_expr(m->object);
@@ -1312,6 +1436,7 @@ struct flattener
         auto result = cc::vector<flat_expr_id>();
         auto handed = cc::vector<i32>();
         auto splat = evaluated_once{};
+        auto splat_letters = swizzle();
         for (auto const& w : written)
         {
             handed.push_back(w.is_function ? closure_of(w.expr) : -1);
@@ -1328,7 +1453,16 @@ struct flattener
             }
             if (w.splat_member == 0)
             {
-                auto const value = flatten_expr(w.expr);
+                // EMIT-142: a splat of a swizzle reads its operand's fields, and binds no vector of them
+                splat_letters = {};
+                auto read = w.expr;
+                if (is_swizzled(w.expr))
+                {
+                    auto const s = swizzled_at(w.expr);
+                    read = s.operand;
+                    splat_letters = s.letters;
+                }
+                auto const value = flatten_expr(read);
                 auto const is_local = is_valid(value) && entry.at(value).node.is<flat_local_ref>();
                 splat = !is_valid(value) || is_local ? evaluated_once{.first = value, .later = value}
                                                      : evaluate_once(value, "splat", w.expr);
@@ -1339,9 +1473,9 @@ struct flattener
                 continue;
             }
             auto const object = w.splat_member == 0 ? splat.first : again(splat.later, w.expr);
-            auto const members = c.out.at(c.out.at(entry.at(object).type).members);
-            result.push_back(add_expr(members[w.splat_member].type, w.expr,
-                                      flat_member{.object = object, .member = w.splat_member}));
+            auto const field = splat_letters.count > 0 ? i32(splat_letters.fields[w.splat_member]) : w.splat_member;
+            result.push_back(add_expr(field_type(entry.at(object).type, field), w.expr,
+                                      flat_member{.object = object, .member = field}));
         }
         written_closures = cc::move(handed);
         return result;
@@ -2130,6 +2264,8 @@ struct flattener
 
     void flatten_assign(origin from, ast::assign_stmt const& assign)
     {
+        if (is_swizzled(assign.target) && sgl::is_valid(assign.op))
+            return flatten_swizzle_assign(from, assign, c.text_of(file(), c.file_of(file()).at(assign.op).where));
         auto const place = flatten_expr(assign.target);
         auto value = flatten_expr(assign.value);
         auto const op = sgl::is_valid(assign.op) ? c.text_of(file(), c.file_of(file()).at(assign.op).where) : "";
@@ -2206,8 +2342,10 @@ struct flattener
         auto const x = entry.at(id);
         if (auto const* const member = x.node.try_as<flat_member>())
         {
+            auto const index = member->member;
+            auto const letters = member->letters;
             auto const object = reread(member->object, from);
-            return add_expr(x.type, from, flat_member{.object = object, .member = member->member});
+            return add_expr(x.type, from, flat_member{.object = object, .member = index, .letters = letters});
         }
         if (auto const* const element = x.node.try_as<flat_element>())
         {

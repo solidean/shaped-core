@@ -415,9 +415,51 @@ struct writer
         }
     }
 
+    /// The letters of a swizzle of a vector of `type`, `zyx`.
+    cc::string letters_text(type_id type, swizzle const& letters) const
+    {
+        auto const fields = p.m.at(p.m.at(type).members);
+        auto text = cc::string();
+        for (auto i = 0; i < letters.count; ++i)
+            text += fields[letters.fields[i]].name;
+        return text;
+    }
+
+    /// `v.zy = value;` where the target assigns through a swizzle, and one component at a time from a local that holds
+    /// the value where it does not, or where the vector is in a memory form (EMIT-143).
+    void assign_swizzle(flat_member const& place, flat_expr_id stored)
+    {
+        auto const value = expr(stored, true).text;
+        auto const object_type = p.e.at(place.object).type;
+        auto const memory = memory_of(place.object);
+        auto const object = wrapped(expr(place.object), level::primary);
+        if (!memory.has_value() && d.assigns_through_swizzles())
+            return line(cc::format("{}.{} = {};", object, letters_text(object_type, place.letters), value));
+
+        auto const value_type = p.e.at(stored).type;
+        auto const name = p.names.mint("swizzled");
+        auto declaration = cc::string();
+        d.write_local(declaration, {.name = name, .type = type_text(p, d, value_type), .value = value});
+        line(declaration);
+        auto const fields = p.m.at(p.m.at(object_type).members);
+        auto const components = p.m.at(p.m.at(value_type).members);
+        for (auto i = 0; i < place.letters.count; ++i)
+        {
+            auto const field = place.letters.fields[i];
+            auto const component = cc::format("{}.{}", name, components[i].name);
+            if (memory.has_value())
+                write_memory(memory.value(), field, component, fields[field].type);
+            else
+                line(cc::format("{}.{} = {};", object, fields[field].name, component));
+        }
+    }
+
     /// `place = value;`, through a memory form where the place is in one.
     void assign(flat_assign const& a)
     {
+        if (auto const* const member = p.e.at(a.place).node.try_as<flat_member>();
+            member != nullptr && member->is_swizzle())
+            return assign_swizzle(*member, a.value);
         auto const value = expr(a.value, true).text;
         auto target = memory_of(a.place);
         auto component = -1;
@@ -483,7 +525,7 @@ struct writer
         if (auto const memory = memory_of(id); memory.has_value())
             return {.text = read_memory(memory.value())};
         // A component of a vector in a memory form is read from the field that holds it, not from the rebuilt vector.
-        if (auto const* const member = x.node.try_as<flat_member>())
+        if (auto const* const member = x.node.try_as<flat_member>(); member != nullptr && !member->is_swizzle())
             if (auto const* const record = p.m.builtin_type_of(p.e.at(member->object).type);
                 record != nullptr && record->leaf_count <= 4)
                 if (auto const object = memory_of(member->object); object.has_value())
@@ -544,6 +586,12 @@ struct writer
             {
                 auto const object_type = p.e.at(member.object).type;
                 auto object = wrapped(expr(member.object), level::primary);
+                // EMIT-142: a prelude vector's swizzle is the target's own, spelled alike everywhere
+                if (member.is_swizzle())
+                {
+                    result = {.text = cc::format("{}.{}", object, letters_text(object_type, member.letters))};
+                    return;
+                }
                 // A builtin's fields are spelled alike everywhere: x, y, z, w.
                 if (is_builtin_type(p.m, object_type))
                 {

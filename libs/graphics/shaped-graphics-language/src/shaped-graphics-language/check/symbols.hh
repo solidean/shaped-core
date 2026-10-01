@@ -243,6 +243,8 @@ struct sgl::check::type_info
     stage edge = stage::none;
     /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.
     bool is_no_padding = false;
+    /// `@swizzle`: every two to four of its one-letter fields read at once, `v.zyx`, as a plain vector (CHK-349).
+    bool has_swizzles = false;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
@@ -647,6 +649,8 @@ enum class sgl::check::target_kind : sgl::u8
     receiver,
     /// On a `member`: an array's `length`, a constant (CHK-288).
     array_length,
+    /// On a `member`: a swizzle of the struct `symbol`, whose fields `index` packs (`swizzle::unpacked`, CHK-350).
+    swizzle,
     /// On a call: `T[N].filled(v)`, an array holding `v` in every element (CHK-289).
     array_filled,
     /// On a call: the prelude's `undefined()`, a value of the type the parameter it meets has, which nobody reads
@@ -662,6 +666,50 @@ struct sgl::check::target
     i32 index = -1;
 
     constexpr bool operator==(target const&) const = default;
+};
+
+/// The fields a swizzle reads, `v.zyx`: positions in its struct's `members`, in the order written (CHK-350).
+/// A `count` of one is a field; zero is no swizzle at all.
+struct sgl::check::swizzle
+{
+    i8 fields[4] = {};
+    i8 count = 0;
+
+    [[nodiscard]] constexpr bool has_repeats() const
+    {
+        for (auto i = 0; i < count; ++i)
+            for (auto j = 0; j < i; ++j)
+                if (fields[i] == fields[j])
+                    return true;
+        return false;
+    }
+
+    /// `inner.fields` read through this one: the swizzle of `v.zyx.yx` over `v`, which is `v.yz`.
+    [[nodiscard]] constexpr swizzle over(swizzle const& inner) const
+    {
+        auto result = swizzle{.count = count};
+        for (auto i = 0; i < count; ++i)
+            result.fields[i] = inner.fields[fields[i]];
+        return result;
+    }
+
+    /// As a `target::index` holds it: the count, then two bits per field.
+    [[nodiscard]] constexpr i32 packed() const
+    {
+        auto result = i32(count);
+        for (auto i = 0; i < count; ++i)
+            result |= i32(fields[i]) << (3 + 2 * i);
+        return result;
+    }
+    [[nodiscard]] static constexpr swizzle unpacked(i32 index)
+    {
+        auto result = swizzle{.count = i8(index & 7)};
+        for (auto i = 0; i < result.count; ++i)
+            result.fields[i] = i8((index >> (3 + 2 * i)) & 3);
+        return result;
+    }
+
+    constexpr bool operator==(swizzle const&) const = default;
 };
 
 /// `table[i](mut p)`: a call of callable `i` of a `callables` table (CHK-344).
