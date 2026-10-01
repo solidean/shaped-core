@@ -119,4 +119,11 @@ if(EMSCRIPTEN)
     # process exit code (pass/fail), and memory growth avoids a fixed heap cap. These are link-time settings;
     # they no-op on the static libraries and apply to the linked test binaries.
     add_link_options("SHELL:-s NODERAWFS=1" "SHELL:-s EXIT_RUNTIME=1" "SHELL:-s ALLOW_MEMORY_GROWTH=1")
+
+    # A link runs wasm-opt, which takes about 2 GB per process, so a full test build links more binaries at once
+    # than a developer machine has memory for; compiles stay at full parallelism.
+    # A Ninja job pool, so another generator ignores it.
+    set(SC_WASM_LINK_JOBS 4 CACHE STRING "How many wasm links (each running wasm-opt) may run at once")
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS sc_wasm_link=${SC_WASM_LINK_JOBS})
+    set(CMAKE_JOB_POOL_LINK sc_wasm_link)
 endif()
