@@ -4,6 +4,7 @@
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/impl/bounds_of.hh>
+#include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/primitives/line.hh>
 #include <typed-geometry/geometry/traits.hh>
@@ -81,6 +82,14 @@ public:
         auto const d = pos1 - pos0;
         auto const t = tg::dot(p - pos0, d) / tg::dot(d, d);
         return t < T(0) ? T(0) : (t > T(1) ? T(1) : t);
+    }
+
+    // sampling
+public:
+    [[nodiscard]] pos<D, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T>)
+    {
+        return this->at(rng.uniform(T(0), T(1)));
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md

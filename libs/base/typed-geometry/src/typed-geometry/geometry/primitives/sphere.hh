@@ -2,6 +2,7 @@
 
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/primitives/ellipsoid.hh>
 #include <typed-geometry/geometry/primitives/plane.hh>
@@ -132,6 +133,14 @@ public:
         requires(D == 3)
     {
         return T(4) / T(3) * tg::pi<T> * radius * radius * radius;
+    }
+
+    // sampling
+public:
+    [[nodiscard]] pos<D, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T> && (D == 2 || D == 3))
+    {
+        return center + tg::impl::uniform_in_unit_ball<D, T>(rng) * radius;
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
@@ -322,6 +331,14 @@ public:
         requires(D == 3)
     {
         return T(4) * tg::pi<T> * radius * radius;
+    }
+
+    // sampling
+public:
+    [[nodiscard]] pos<D, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T> && (D == 2 || D == 3))
+    {
+        return center + tg::impl::uniform_direction<D, T>(rng) * radius;
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md

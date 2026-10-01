@@ -97,6 +97,7 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/query/separation.hh
     src/typed-geometry/geometry/query/query.hh
     src/typed-geometry/geometry/impl/bounds_of.hh
+    src/typed-geometry/geometry/impl/sampling.hh
     src/typed-geometry/geometry/geometry.hh
     src/typed-geometry/geometry/all.hh
 )
@@ -158,6 +159,7 @@ if(SC_BUILD_TESTS)
 
         tests/benchmarks/fixed_int-benchmark.cc
         tests/benchmarks/half_float-benchmark.cc
+        tests/benchmarks/sampling-benchmark.cc
 
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc
@@ -186,6 +188,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/box-test.cc
         tests/geometry/object-traits-test.cc
         tests/geometry/measures-test.cc
+        tests/geometry/sampling-test.cc
         tests/geometry/query/ladder-test.cc
         tests/geometry/query/point-queries-test.cc
         tests/geometry/query/special-case-test.cc

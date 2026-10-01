@@ -99,7 +99,8 @@ On a triangle, an aabb or a box it is the unclamped extension of the map: baryce
 `o.sample_uniform(rng)` for every finite object, taking a `cc::random&`; widening it to any generator with `uniform(T, T)` is additive.
 The type says which set is sampled: `sphere3` the ball, `sphere3_surface` its surface, `cylinder_mantle` the tube alone.
 **Direct methods first**, with a fixed number of draws per sample.
-Where a direct method looks expensive (a `cbrt` for the ball), a nexus benchmark compares it against rejection sampling, and the faster one is kept.
+Where a direct method looks expensive, a nexus benchmark compares it against rejection sampling, and the faster one is kept.
+The ball is that case: rejection from the enclosing cube measured 2.5x faster in 3D and 2.1x in 2D, so a ball's (and an ellipsoid's) sample draws a varying count.
 
 ## Support matrix
 

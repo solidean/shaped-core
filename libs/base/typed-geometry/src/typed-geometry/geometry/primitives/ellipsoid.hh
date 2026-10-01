@@ -2,6 +2,7 @@
 
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/cross.hh>
@@ -138,6 +139,19 @@ public:
     {
         return T(4) / T(3) * tg::pi<T>
              * tg::abs(mat<3, 3, T>::make_from_cols(semi_axes[0], semi_axes[1], semi_axes[2]).determinant());
+    }
+
+    // sampling
+public:
+    /// the ball's sample carried by the semi-axes: a linear map keeps a uniform volume uniform.
+    [[nodiscard]] pos<DAmbient, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T> && (D == 2 || D == 3))
+    {
+        auto const u = tg::impl::uniform_in_unit_ball<D, T>(rng);
+        auto p = center;
+        for (int i = 0; i < D; ++i)
+            p = p + semi_axes[i] * u.data[i];
+        return p;
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md

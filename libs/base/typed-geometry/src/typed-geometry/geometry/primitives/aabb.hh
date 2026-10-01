@@ -4,6 +4,7 @@
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/impl/bounds_of.hh>
+#include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/box.hh>
 #include <typed-geometry/geometry/primitives/segment.hh>
 #include <typed-geometry/geometry/traits.hh>
@@ -155,6 +156,17 @@ public:
         return r;
     }
 
+    // sampling
+public:
+    [[nodiscard]] pos<D, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T>)
+    {
+        auto r = min;
+        for (int i = 0; i < D; ++i)
+            r.data[i] = rng.uniform(min.data[i], max.data[i]);
+        return r;
+    }
+
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
     template <class Obj>
@@ -234,6 +246,44 @@ public:
         requires(D == 3)
     {
         return this->solid().area();
+    }
+
+    // sampling
+public:
+    /// a face chosen by its area, then a point on it: D + 1 draws, the face's own coordinate drawn and overwritten.
+    [[nodiscard]] pos<D, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T>)
+    {
+        auto const s = max - min;
+        T area[D] = {};
+        auto total = T(0);
+        for (int i = 0; i < D; ++i)
+        {
+            area[i] = T(1);
+            for (int j = 0; j < D; ++j)
+                if (j != i)
+                    area[i] = area[i] * s.data[j];
+            total = total + T(2) * area[i];
+        }
+
+        auto pick = rng.uniform(T(0), total);
+        auto r = this->solid().sample_uniform(rng);
+        for (int i = 0; i < D; ++i)
+        {
+            if (pick < area[i] || i == D - 1)
+            {
+                r.data[i] = min.data[i];
+                return r;
+            }
+            pick = pick - area[i];
+            if (pick < area[i])
+            {
+                r.data[i] = max.data[i];
+                return r;
+            }
+            pick = pick - area[i];
+        }
+        return r;
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md

@@ -4,6 +4,7 @@
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/impl/bounds_of.hh>
+#include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/primitives/plane.hh>
 #include <typed-geometry/geometry/primitives/segment.hh>
@@ -131,6 +132,22 @@ public:
         auto const v = (d11 * d20 - d01 * d21) / denom;
         auto const w = (d00 * d21 - d01 * d20) / denom;
         return comp<3, T>(T(1) - v - w, v, w);
+    }
+
+    // sampling
+public:
+    /// a point of the unit square, folded onto the half below its diagonal: two draws, no rejection.
+    [[nodiscard]] pos<D, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T>)
+    {
+        auto u = rng.uniform(T(0), T(1));
+        auto v = rng.uniform(T(0), T(1));
+        if (u + v > T(1))
+        {
+            u = T(1) - u;
+            v = T(1) - v;
+        }
+        return pos0 + (pos1 - pos0) * u + (pos2 - pos0) * v;
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md

@@ -329,6 +329,16 @@ o.parameter_of(p);                      // inverse of at; segment/ray/line: of p
                                         //   triangle/aabb/box: unclamped (barycentrics go negative)
 ```
 
+## sampling
+
+```cpp
+o.sample_uniform(rng);   // cc::random&; uniform over the object's point set — the TYPE says which set:
+                         //   sphere3f the ball, sphere3f_surface the surface, aabb3f_surface the faces
+// segment, triangle, aabb (+boundary), box (+boundary, 2D/3D), sphere (+boundary, flat), ellipsoid (solid)
+// direct methods with a fixed draw count, except the ball/ellipsoid: rejection measured 2x faster
+// not yet: disk3 / circle3 (need an orthonormal basis of their plane), ellipsoid_boundary (not a linear image)
+```
+
 ## geometric queries (members; definitions per verb)
 
 ```cpp

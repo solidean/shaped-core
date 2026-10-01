@@ -3,6 +3,7 @@
 #include <clean-core/container/fixed_array.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/comp.hh>
 #include <typed-geometry/linalg/cross.hh>
@@ -143,6 +144,17 @@ public:
         return r;
     }
 
+    // sampling
+public:
+    [[nodiscard]] pos<DAmbient, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T>)
+    {
+        comp<D, T> c;
+        for (int i = 0; i < D; ++i)
+            c.data[i] = rng.uniform(T(-1), T(1));
+        return this->at(c);
+    }
+
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
 public:
     template <class Obj>
@@ -226,6 +238,45 @@ public:
         requires(D == 3 && tg::traits::has_sqrt<T>)
     {
         return this->solid().area();
+    }
+
+    // sampling
+public:
+    /// a face chosen by its area, then a point on it; 2D and 3D boxes.
+    [[nodiscard]] pos<DAmbient, T> sample_uniform(cc::random& rng) const
+        requires(tg::impl::samplable<T> && (D == 2 || D == 3))
+    {
+        auto const& h = half_extents.cols;
+        T area[D] = {};
+        if constexpr (D == 2)
+        {
+            area[0] = h[1].length(); // the faces at c_0 = +-1 run along half-axis 1
+            area[1] = h[0].length();
+        }
+        else
+        {
+            area[0] = tg::dual(tg::cross(h[1], h[2])).length();
+            area[1] = tg::dual(tg::cross(h[2], h[0])).length();
+            area[2] = tg::dual(tg::cross(h[0], h[1])).length();
+        }
+        auto total = T(0);
+        for (int i = 0; i < D; ++i)
+            total = total + T(2) * area[i];
+
+        auto pick = rng.uniform(T(0), total);
+        comp<D, T> c;
+        for (int i = 0; i < D; ++i)
+            c.data[i] = rng.uniform(T(-1), T(1));
+        for (int i = 0; i < D; ++i)
+        {
+            if (pick < T(2) * area[i] || i == D - 1)
+            {
+                c.data[i] = pick < area[i] ? T(-1) : T(1);
+                break;
+            }
+            pick = pick - T(2) * area[i];
+        }
+        return this->solid().at(c);
     }
 
     // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
