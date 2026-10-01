@@ -77,7 +77,10 @@ checked_module sgl::check::check(checked_prelude const& prelude, module_file use
 
 // ---- number literals ------------------------------------------------------------------------------------------------
 
-number_class impl::classify_number(cc::string_view text)
+namespace
+{
+/// `classify_number` of a number without a suffix.
+number_class classify_unsuffixed(cc::string_view text)
 {
     auto const is_digit = [](char c) { return c >= '0' && c <= '9'; };
     auto at = isize(0);
@@ -130,6 +133,44 @@ number_class impl::classify_number(cc::string_view text)
             return number_class::other;
     }
     return is_float && at == size ? number_class::plain_float : number_class::other;
+}
+} // namespace
+
+cc::optional<suffixed_number> impl::split_suffix(cc::string_view text)
+{
+    auto const is_digit = [](char c) { return c >= '0' && c <= '9'; };
+    auto end = text.size();
+    while (end > 0 && is_digit(text[end - 1]))
+        --end;
+    if (end < 2)
+        return {};
+    auto const letter = text[end - 1];
+    if (letter != 'i' && letter != 'u' && letter != 'f')
+        return {};
+    auto const body = text.subview({.offset = 0, .size = end - 1});
+    // NUM-16: `f` is a digit of a hexadecimal number
+    auto const unsigned_body = body.starts_with('-') || body.starts_with('+') ? body.subview(1) : body;
+    if (letter == 'f' && (unsigned_body.starts_with("0x") || unsigned_body.starts_with("0X")))
+        return {};
+    auto const kind = classify_unsuffixed(body);
+    if (kind != number_class::plain_integer && kind != number_class::plain_float)
+        return {};
+    auto result = suffixed_number{.body = body, .letter = letter};
+    if (end < text.size())
+    {
+        // a width this long names no type either way, and is kept from overflowing
+        result.width = 0;
+        for (auto i = end; i < text.size() && result.width < 100'000; ++i)
+            result.width = result.width * 10 + (text[i] - '0');
+    }
+    return result;
+}
+
+number_class impl::classify_number(cc::string_view text)
+{
+    if (split_suffix(text).has_value())
+        return number_class::suffixed;
+    return classify_unsuffixed(text);
 }
 
 cc::optional<f64> impl::parse_plain_float(cc::string_view text)

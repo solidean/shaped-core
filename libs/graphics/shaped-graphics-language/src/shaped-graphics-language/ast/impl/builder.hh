@@ -33,6 +33,8 @@ enum class scope_kind : u8
 enum class operator_level : u8
 {
     assignment,
+    /// The `else` of a one-line `if c => a else b`, which joins the `=>` before it to what follows (AST-154).
+    alternative,
     computes_as,
     connective,
     comparison,
@@ -222,6 +224,8 @@ struct builder
     /// `fun` without a name; `right_of_arrow` is `none` when the body is the keyword form's block.
     expr_id fun_lambda_expression(form_id form, form_id keyword_form, keyword_parts const& parts, form_id right_of_arrow);
     expr_id case_expression(form_id form, keyword_parts const& parts);
+    /// `if c => a else b`, and every `else if` of it, as one `if_expr` (AST-154).
+    expr_id if_expression(form_id form);
     expr_id jump_expression(form_id form, keyword_parts const& parts, cc::string_view keyword);
     /// The node of a jump, after saying whether the jump has somewhere to go; `continue` takes no `value`.
     expr_id make_jump(form_id form, cc::string_view keyword, expr_id value);

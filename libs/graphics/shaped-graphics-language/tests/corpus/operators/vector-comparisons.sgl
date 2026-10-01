@@ -1,0 +1,61 @@
+// two vectors compare per component under an ordering, and as a whole under `==` and `!=` (CHK-362 to CHK-364)
+
+// an ordering gives the bool vector of its width
+test:
+    let a = float3(1.0, 5.0, 3.0)
+    let b = float3(2.0, 5.0, 1.0)
+    (a < b) == bool3(true, false, false)
+    (a <= b) == bool3(true, true, false)
+    (a > b) == bool3(false, false, true)
+    (int2(-1, 4) >= int2(-1, 5)) == bool2(true, false)
+    (uint2(1u, 9u) < uint2(2u, 3u)) == bool2(true, false)
+
+// `==` and `!=` read the whole value, one bool, where `equal` and `not_equal` read each component
+test:
+    let a = int3(1, 2, 3)
+    a == int3(1, 2, 3)
+    a != int3(1, 2, 4)
+    not (a == int3(1, 2, 4))
+    equal(a, int3(1, 0, 3)) == bool3(true, false, true)
+    not_equal(a, int3(1, 0, 3)) == bool3(false, true, false)
+    pos3(1.0, 2.0, 3.0) == pos3(1.0, 2.0, 3.0)
+    vec3(1.0, 2.0, 3.0) != vec3(1.0, 2.0, 0.0)
+
+// any and all read a bool vector whole
+test:
+    any(bool3(false, true, false))
+    not any(bool2(false, false))
+    all(float2(1.0, 2.0) < float2(3.0, 4.0))
+    not all(equal(uint2(1u, 2u), uint2(1u, 3u)))
+
+// a comparison chain makes each link a bool, which an ordering of vectors is not
+@expect(error = "type-mismatch")
+test float2(0.0, 0.0) < float2(1.0, 1.0) < float2(2.0, 2.0)
+
+// a bool vector is no condition: `any` or `all` says which is meant
+@expect(error = "type-mismatch")
+test:
+    let a = float2(1.0, 2.0)
+    if a < float2(3.0, 0.0) => assert false
+    true
+
+// a case over a vector matches it whole, by its `==`
+fun corner(v: int2) -> int:
+    return case v:
+        int2(0, 0) => 0
+        int2(1, 0) or int2(0, 1) => 1
+        _ => 2
+
+test corner(int2(0, 0)) == 0 and corner(int2(0, 1)) == 1 and corner(int2(1, 1)) == 2
+
+binding cells:
+    grid: mut buffer[int2]
+
+@compute(64) fun sort_cells(@thread_id id: int3){cells}:
+    let i = id.x
+    let a = cells.grid[i]
+    let b = cells.grid[i + 1]
+    if any(a > b) and a != b:
+        cells.grid[i] = min(a, b)
+        cells.grid[i + 1] = max(a, b)
+    cells.grid[i] = cells.grid[i] * corner(a)

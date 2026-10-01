@@ -121,6 +121,7 @@ struct range;
 enum class lambda_spelling : u8;
 struct lambda;
 struct case_expr;
+struct if_expr;
 struct loop_expr;
 struct return_expr;
 struct yield_expr;

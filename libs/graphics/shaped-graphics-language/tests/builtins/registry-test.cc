@@ -105,8 +105,11 @@ TEST("sgl builtins - what means nothing is not there: a position plus a position
         auto const is_pair = [&](cc::string_view a, cc::string_view b)
         { return f.parameters.size() == 2 && f.parameters[0] == a && f.parameters[1] == b; };
         // an operator, that is: `distance(a, b)` of two positions is a length, and means something
+        // two positions differ by a direction, and compare equal or not; no other operator takes two
         if (is_pair("pos3", "pos3") && f.signature.contains("@operator"))
-            CHECK(f.result == vec3);
+            CHECK((f.result == vec3) == f.signature.contains("@operator(\"-\")"));
+        if (is_pair("pos3", "pos3") && f.signature.contains("@operator") && f.result != vec3)
+            CHECK((f.signature.contains("@operator(\"==\")") || f.signature.contains("@operator(\"!=\")")));
         CHECK(!(is_pair("vec3", "vec3") && f.name.starts_with("multiply")));
     }
 }

@@ -295,6 +295,8 @@ expr_id builder::run_expression(form_id form)
         return invalid_expression(form, diagnostic_kind::statement_in_expression);
     case operator_level::computes_as:
         return lambda_expression(form, parts);
+    case operator_level::alternative:
+        return if_expression(form);
     case operator_level::ascription:
         return ascription_fold(form, parts.operands, parts.operators, attribute_mode::reject);
     case operator_level::arrow:
@@ -555,6 +557,42 @@ expr_id builder::case_expression(form_id form, keyword_parts const& parts)
     }
     auto const arms = append(ast.case_arms, cc::span<case_arm const>(collected));
     return make_expr(form, case_expr{.value = value, .arms = arms});
+}
+
+expr_id builder::if_expression(form_id form)
+{
+    auto collected = cc::vector<if_branch>();
+    auto rest = form;
+    // each `if c => a else rest`, until `rest` is the value of the closing `else`
+    while (is_kind(rest, form_kind::operator_run)
+           && level_of(run_parts_of(rest).operators[0]) == operator_level::alternative)
+    {
+        auto const parts = run_parts_of(rest);
+        auto const arrow = run_parts_of(parts.operands[0]);
+        auto const keyword = keyword_parts_of(arrow.operands[0]);
+        auto branch = if_branch{.form = parts.operands[0]};
+        if (keyword.keywords.size() > 1)
+            report(diagnostic_kind::unexpected_keyword, keyword.keywords[1]);
+        if (keyword.arguments.empty())
+            branch.condition = invalid_expression(arrow.operands[0], diagnostic_kind::expected_expression);
+        else
+            branch.condition = expression(keyword.arguments[0]);
+        if (keyword.arguments.size() > 1)
+            report(diagnostic_kind::too_many_arguments, keyword.arguments[1]);
+        if (is_valid(keyword.block))
+            report(diagnostic_kind::too_many_arguments, keyword.block);
+        branch.then = value_body(arrow.operands[1], body_owner::value_block);
+        collected.push_back(branch);
+        rest = parts.operands[1];
+    }
+    // `else if d => b` with no `else` of its own has no value where `d` is false, as a lone `if` has none
+    if (is_kind(rest, form_kind::operator_run) && level_of(run_parts_of(rest).operators[0]) == operator_level::computes_as
+        && is_keyword_led(run_parts_of(rest).operands[0], "if"))
+        return invalid_expression(rest, diagnostic_kind::statement_in_expression);
+    collected.push_back({.form = rest, .then = value_body(rest, body_owner::value_block)});
+
+    auto const branches = append(ast.if_branches, cc::span<if_branch const>(collected));
+    return make_expr(form, if_expr{.branches = branches});
 }
 
 expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::string_view keyword)

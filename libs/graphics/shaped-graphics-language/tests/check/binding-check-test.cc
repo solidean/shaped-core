@@ -324,6 +324,22 @@ TEST("sgl check - a compute entry point takes the thread id and returns nothing"
                       + "@compute(0) fun go(@thread_id id: int3){work}:\n"
                         "    work.values[0] = 1.0\n")
               .contains("a workgroup size is a positive int literal"));
+    // CHK-370: a size may name an int const, and the const is judged by its value
+    CHECK(reports_for(cc::string(work)
+                      + "const width = 8\n"
+                        "@compute(width, width) fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+          == "");
+    CHECK(reports_for(cc::string(work)
+                      + "const none = 0\n"
+                        "@compute(none) fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+              .contains("a workgroup size is a positive int literal, or the name of a positive int const"));
+    CHECK(reports_for(cc::string(work)
+                      + "const wide = 8.0\n"
+                        "@compute(wide) fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+              .contains("invalid-attribute-arguments"));
 }
 
 TEST("sgl check - a buffer's host name is its path, so no two buffers of a module share one (CHK-171)")

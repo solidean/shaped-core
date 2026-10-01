@@ -768,6 +768,8 @@ struct flattener
             return flatten_value_loop(id, type, *loop);
         if (auto const* const c = e.node.try_as<ast::case_expr>())
             return flatten_value_case(id, type, *c);
+        if (auto const* const i = e.node.try_as<ast::if_expr>())
+            return flatten_value_if(id, type, *i);
         return fail();
     }
 
@@ -803,7 +805,10 @@ struct flattener
     /// A number literal as the type it was checked as, which a conversion may have made other than its default.
     flat_expr_id flatten_number(ast::expr_id id, type_id type)
     {
-        auto const text = c.text_of(file(), c.span_of(file(), id));
+        auto text = c.text_of(file(), c.span_of(file(), id));
+        // CHK-357: a suffix named the type already, and the value is the number before it
+        if (auto const suffixed = split_suffix(text); suffixed.has_value())
+            text = suffixed.value().body;
         auto const is_float = type == c.prelude_type(builtins::k_float);
         if (classify_number(text) == number_class::plain_integer)
         {
@@ -1679,7 +1684,7 @@ struct flattener
             auto patterns = cc::vector<flat_expr_id>();
             if (!is_wildcard)
                 collect_patterns(arm.pattern, patterns);
-            auto const body = flatten_arm_body(arm, value_block);
+            auto const body = flatten_arm_body(arm.result, value_block);
             if (is_wildcard)
             {
                 result.default_body = body;
@@ -1947,32 +1952,33 @@ struct flattener
         into.push_back(flatten_expr(id));
     }
 
-    ast::range_of<flat_stmt_id> flatten_arm_body(ast::case_arm const& arm, label_id value_block)
+    /// The body of a `case` arm or of a branch of an `if` value; `value_block` is what its value leaves, or none.
+    ast::range_of<flat_stmt_id> flatten_arm_body(ast::body const& result, label_id value_block)
     {
         auto const outer = cc::move(block);
         block = {};
         if (is_valid(value_block))
             current()->value_blocks.push_back(value_block);
 
-        if (arm.result.kind == ast::body_kind::arrow && ast::is_valid(arm.result.value))
+        if (result.kind == ast::body_kind::arrow && ast::is_valid(result.value))
         {
-            auto const where = origin{.file = file(), .expr = arm.result.value};
-            auto const& e = ast().at(arm.result.value);
+            auto const where = origin{.file = file(), .expr = result.value};
+            auto const& e = ast().at(result.value);
             auto const is_jump = e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>()
                               || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>()
                               || e.node.is<ast::discard_expr>();
             if (is_jump)
-                flatten_expr_stmt(where, arm.result.value);
+                flatten_expr_stmt(where, result.value);
             else if (is_valid(value_block))
             {
-                auto const value = flatten_expr(arm.result.value);
+                auto const value = flatten_expr(result.value);
                 add_stmt(where, flat_leave{.target = value_block, .value = value});
             }
             else
-                flatten_expr_stmt(where, arm.result.value);
+                flatten_expr_stmt(where, result.value);
         }
         else
-            for (auto const stmt : ast().at(arm.result.statements))
+            for (auto const stmt : ast().at(result.statements))
                 flatten_stmt(stmt);
 
         if (is_valid(value_block))
@@ -1990,6 +1996,44 @@ struct flattener
         auto const where = origin{.file = file(), .expr = id};
         flat_stmt_id const statements[] = {make_stmt(where, parts)};
         return add_expr(type, id, flat_block{.label = value_block, .body = add_list(statements)});
+    }
+
+    /// `if c => a else b` somebody reads the value of: a block around an `if` whose branches leave it (CHK-375).
+    /// Only the branch the condition takes runs.
+    flat_expr_id flatten_value_if(ast::expr_id id, type_id type, ast::if_expr const& node)
+    {
+        auto const value_block = add_label("if");
+        auto const outer = cc::move(block);
+        block = {};
+        flatten_if_branches({.file = file(), .expr = id}, ast().at(node.branches), value_block);
+        auto const body = add_list(block);
+        block = cc::move(outer);
+        return add_expr(type, id, flat_block{.label = value_block, .body = body});
+    }
+
+    /// The branches of an `if` value, each an `if` nested in the `else` of the one before; the last has no condition.
+    void flatten_if_branches(origin from, cc::span<ast::if_branch const> branches, label_id value_block)
+    {
+        if (branches.size() < 2 || !ast::is_valid(branches.front().condition))
+        {
+            is_failed = true;
+            return;
+        }
+        auto const condition = flatten_expr(branches.front().condition);
+        auto const then_body = flatten_arm_body(branches.front().then, value_block);
+        auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
+        auto else_body = ast::range_of<flat_stmt_id>();
+        if (rest.size() == 1)
+            else_body = flatten_arm_body(rest.front().then, value_block);
+        else
+        {
+            auto const outer = cc::move(block);
+            block = {};
+            flatten_if_branches(from, rest, value_block);
+            else_body = add_list(block);
+            block = cc::move(outer);
+        }
+        add_stmt(from, flat_if{.condition = condition, .then_body = then_body, .else_body = else_body});
     }
 
     // ---- calls ------------------------------------------------------------------------------------------------------
@@ -2157,6 +2201,9 @@ struct flattener
             // CHK-324: a resource stands wherever the parameter is named, since no target holds one in a local
             else if (is_substitutable(argument) || is_resource_member(argument))
                 bound.push_back({.where = where, .literal = argument});
+            // an element of a binding array at an index computed once, named again wherever the parameter is (CHK-366)
+            else if (is_resource(c.out.at(x.type).kind) && x.node.is<flat_element>())
+                bound.push_back({.where = where, .literal = pin_place(argument)});
             else
             {
                 auto const local = add_local(local_kind::let, parameters[i].name, x.type);
@@ -2192,7 +2239,10 @@ struct flattener
         // a property's `=>:` block has its value through `yield`, which leaves the property's block
         if (property != nullptr && !ast::is_valid(source->value))
             current()->value_blocks.push_back(label);
-        if (ast::is_valid(source->value))
+        // an arrow body of no value is a statement, such as `=> img.store(xy, v)`, which a leave would drop
+        if (ast::is_valid(source->value) && info.result == checked_module::void_type)
+            flatten_expr_stmt({.file = s.file, .expr = source->value}, source->value);
+        else if (ast::is_valid(source->value))
             flatten_return({.file = s.file, .expr = source->value}, source->value);
         for (auto const stmt : ast().at(source->statements))
             flatten_stmt(stmt);
@@ -2504,6 +2554,8 @@ struct flattener
         }
         if (auto const* const c = x.node.try_as<ast::case_expr>())
             return add_stmt(from, flatten_case_parts(*c, label_id::none));
+        if (auto const* const i = x.node.try_as<ast::if_expr>())
+            return flatten_if_branches(from, ast().at(i->branches), label_id::none);
 
         // CHK-225: a line of type bool of the test's own body is a check.
         if (is_test && frames.size() == 1 && tables().type_at(value) == bool_type())

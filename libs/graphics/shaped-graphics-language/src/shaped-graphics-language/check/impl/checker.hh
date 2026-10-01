@@ -19,11 +19,27 @@ enum class number_class : u8
     plain_float,
     /// Decimal digits, or hexadecimal or binary ones behind `0x` or `0b`, and nothing else.
     plain_integer,
-    /// A suffix or a `p` exponent: spellings whose meaning needs literal types.
+    /// One of the two above with a suffix, which names its type (CHK-357): `1u`, `0.5f`, `7i32`.
+    suffixed,
+    /// A `p` exponent, or anything else that reads as no number of the ones above.
     other,
 };
 
 [[nodiscard]] number_class classify_number(cc::string_view text);
+
+/// A `suffixed` number taken apart.
+struct suffixed_number
+{
+    /// The number without its suffix, a `plain_integer` or a `plain_float`.
+    cc::string_view body;
+    /// `i`, `u` or `f`.
+    char letter = 0;
+    /// 32 where the suffix writes none.
+    i32 width = 32;
+};
+
+/// Nothing where `text` is no `suffixed` number.
+[[nodiscard]] cc::optional<suffixed_number> split_suffix(cc::string_view text);
 
 /// `text` must be a `plain_float`; nullopt when the value does not fit an f64.
 [[nodiscard]] cc::optional<f64> parse_plain_float(cc::string_view text);
@@ -535,7 +551,11 @@ struct checker
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
     /// `resolve_type` for the type of a value — a field, a parameter, a result, a local — where a buffer cannot stand.
     /// A buffer is a resource a binding member names, and is only ever read through a subscript.
-    [[nodiscard]] type_id resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
+    /// `allows_resource` takes a texture, an image or a sampler, as a parameter of a function of the program (CHK-366).
+    [[nodiscard]] type_id resolve_value_type(i32 file,
+                                             ast::expr_id expr,
+                                             function_scope const* scope = nullptr,
+                                             bool allows_resource = false);
     /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
     /// The name of the plain vector of `count` values of `element`, `float3`; empty for an element without vectors.
@@ -758,6 +778,18 @@ struct checker
                                      ast::loop_expr const& loop,
                                      bool yields_value,
                                      bool& has_break);
+    /// The body of a `case` arm or of a branch of an `if` value: what it gives in `arm_type`, or that it leaves.
+    void check_arm_body(function_scope& scope,
+                        ast::body const& body,
+                        bool yields_value,
+                        type_id& arm_type,
+                        bool& arm_exits,
+                        bool& is_failed);
+    /// `if c => a else b`, read as a value where `yields_value`, and as an `if` statement otherwise (CHK-375).
+    [[nodiscard]] type_id check_if_value(function_scope& scope,
+                                         ast::if_expr const& node,
+                                         bool yields_value,
+                                         flow* ending = nullptr);
     /// A `case`; the result is the type of its arms, and `nothing` for one that is a statement.
     /// `ending`, where given, is how the `case` ends as a statement: it exits when it is exhaustive and every arm exits.
     [[nodiscard]] type_id check_case(function_scope& scope,
@@ -779,6 +811,8 @@ struct checker
 
     [[nodiscard]] type_id check_expr(function_scope& scope, ast::expr_id expr);
     [[nodiscard]] type_id check_literal(function_scope& scope, ast::expr_id id, ast::literal const& literal);
+    /// `text` must be a `suffixed` number.
+    [[nodiscard]] type_id check_suffixed_literal(i32 file, source_span where, cc::string_view text);
     [[nodiscard]] type_id check_name(function_scope& scope, ast::expr_id id, ast::name const& name);
     [[nodiscard]] type_id check_member(function_scope& scope, ast::expr_id id, ast::member const& member);
     [[nodiscard]] type_id check_call(function_scope& scope, ast::expr_id id, ast::call const& call);

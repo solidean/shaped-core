@@ -427,6 +427,7 @@ fun blend(base: vec3, top: vec3, mask: float) -> vec3:
 * **AST-53** An `else` that pairs with nothing is a normal error, and it reads as an `if` statement with a missing condition, so its body is still read.
 * **AST-154** An `if` with an `else` where a value is expected reads as an `if` expression, the chain of AST-50 with a body per branch: `let y = if c => a else b`.
   An `if` without an `else` there is still `statement-in-expression`, since it has no value where its condition is false.
+  The `else` joins the `if` on its own line, so a statement written that way is the same chain, and it gives no value.
 
 ```sgl
 if count > 0:

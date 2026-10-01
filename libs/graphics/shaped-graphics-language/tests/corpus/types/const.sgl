@@ -38,3 +38,10 @@ struct frag:
 @pixel fun main_ps(p: frag) -> target:
     let w = weight(default_mode) * scale + (steps as float)
     return target(float4(w * p.a, 0.0, 0.0, 1.0))
+
+// a workgroup size may name an int const, which the attribute reads as its value (CHK-370)
+binding cells:
+    values: mut buffer[float]
+
+@compute(steps, also_steps) fun spread(@thread_id id: int3){cells}:
+    cells.values[id.x + id.y * steps] = scale

@@ -365,6 +365,47 @@ ASYNC_TEST("slib sgl compiler - the control flow the legalizer writes is accepte
 
 namespace
 {
+/// Each spelling of the vector vocabulary a target writes in its own way: a one-value constructor, `select` in both
+/// orders, the whole-value `==`, a scalar spread over a vector, `fwidth`, an integer `sign`, and an `if` as a value.
+constexpr auto k_vector_source
+    = cc::string_view("@pixel struct target:\n"
+                      "    color: float4\n"
+                      "\n"
+                      "struct pixel_input:\n"
+                      "    @position position: hpos4\n"
+                      "    uv: float2\n"
+                      "\n"
+                      "@pixel fun main_ps(p: pixel_input) -> target:\n"
+                      "    let v = p.uv\n"
+                      "    let w = fwidth(v) + float2(0.5)\n"
+                      "    let id = p.position.xy as int2\n"
+                      "    let cell = (id & 7) ^ 1\n"
+                      "    let u = (1u << (id.x as uint)) | uint2(3u, 5u)\n"
+                      "    let picked = select(v.x > 0.5, v, w)\n"
+                      "    let each = select(v > w, v, w % 0.25)\n"
+                      "    let same = if v == w or any(equal(cell, int2(0))) => 1.0 else 0.0\n"
+                      "    let s = sign(cell) * clamp(cell, int2(0), int2(4))\n"
+                      "    return { color = float4(picked.x + each.y + same, (s.x + s.y) as float, "
+                      "(u.x as float) + 1f, 1.0) }\n");
+} // namespace
+
+ASYNC_TEST("slib sgl compiler - the vector vocabulary SGL writes is accepted by every compiler behind an edge",
+           exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+
+    for (auto const format : lib.supported_formats(slib::shader_language::sgl))
+    {
+        auto const node = lib.compile_source(k_vector_source, sg::shader_stage::fragment, "main_ps", format,
+                                             {.language = slib::shader_language::sgl, .label = "vectors.sgl"});
+        co_await cc::async_settled(node);
+        CHECK(value_of(node).bytecode.size() > 0);
+    }
+}
+
+namespace
+{
 /// Two groups, and in the second one resource of every kind, so a register class, a slot or a space off by one shows.
 constexpr auto k_two_groups_source
     = cc::string_view("binding frame:\n"

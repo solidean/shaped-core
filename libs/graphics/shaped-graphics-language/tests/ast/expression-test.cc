@@ -390,3 +390,18 @@ TEST("sgl ast - consecutive keywords head one form, and a jump takes the rest as
     CHECK(body_of("return let x\n") == "(return (invalid \"return let x\")) !! statement-in-expression @13+6\n");
     CHECK(body_of("continue break\n").contains("unexpected-keyword"));
 }
+
+TEST("sgl ast - an if with an else is a value: a branch per condition, and the else last")
+{
+    CHECK(body_of("let y = if c => a else if d => b + 1 else return 0\n")
+          == "(let y = (if-expr\n"
+             "  (branch c => a)\n"
+             "  (branch d => (call:infix + b num:1))\n"
+             "  (else => (return num:0))))");
+    // as a statement it is the same chain, read on one line
+    CHECK(body_of("if c => f() else g()\n") == "(if-expr\n  (branch c => (call:paren f))\n  (else => (call:paren g)))");
+    // without its else it has no value where its condition is false (AST-154)
+    CHECK(body_of("let y = if c => a\n") == "(let y = (invalid \"if c => a\")) !! statement-in-expression @21+2\n");
+    CHECK(body_of("let y = if c => a else if d => b\n")
+          == "(let y = (invalid \"if d => b\")) !! statement-in-expression @36+2\n");
+}

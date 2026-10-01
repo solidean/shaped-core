@@ -422,8 +422,8 @@ struct pipeline_compiler
                     return true;
                 }
             }
-            // A suffixed literal is a number whose meaning needs literal types, which the checker has not.
-            if (is_literal && kind == number_class::other)
+            // A setting reads a plain number; a suffixed or `p` literal is not one yet.
+            if (is_literal && (kind == number_class::other || kind == number_class::suffixed))
             {
                 c.unsupported(in_file, at, "a number literal of this spelling");
                 is_failed = true;

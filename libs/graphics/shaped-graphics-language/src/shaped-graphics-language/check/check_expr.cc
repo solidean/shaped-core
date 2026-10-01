@@ -342,6 +342,7 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::ascription const&) { return not_yet("a type ascription"); },
         [&](ast::range const&) { return not_yet("a range"); }, [&](ast::lambda const&) { return not_yet("a lambda"); },
         [&](ast::case_expr const& c) { return check_case(scope, expr, c, true); },
+        [&](ast::if_expr const& i) { return check_if_value(scope, i, true); },
         [&](ast::loop_expr const& loop)
         {
             auto has_break = false;
@@ -390,8 +391,10 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
             wide_literals.push_back({.file = file, .expr = id, .function = scope.function});
         return type_of_builtin(builtins::k_int, file, where);
     }
+    case number_class::suffixed:
+        return check_suffixed_literal(file, where, text);
     case number_class::other:
-        unsupported(file, where, "a number literal with a suffix or a p exponent");
+        unsupported(file, where, "a number literal with a p exponent");
         return error_type;
     case number_class::plain_float:
         break;
@@ -411,6 +414,66 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
     return float_type;
 }
 
+type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_view text)
+{
+    // CHK-357: the suffix names the type, and the literal converts to no other
+    auto const s = split_suffix(text).value();
+    if (s.width == 16)
+    {
+        unsupported(file, where, "a 16-bit literal, since half, short and ushort are not in the prelude yet");
+        return error_type;
+    }
+    if (s.width != 32)
+    {
+        unsupported(file, where, cc::format("a literal of {} bits, which no type of the prelude is", s.width));
+        return error_type;
+    }
+    auto const is_float_body = classify_number(s.body) == number_class::plain_float;
+    if (is_float_body && s.letter != 'f')
+    {
+        report(diagnostic_kind::literal_not_representable, file, where,
+               cc::format("{} is a float literal, and its suffix names an integer type", text));
+        return error_type;
+    }
+
+    auto const name = s.letter == 'f' ? builtins::k_float : s.letter == 'u' ? builtins::k_uint : builtins::k_int;
+    auto const type = type_of_builtin(name, file, where);
+    if (type == error_type)
+        return error_type;
+    if (s.letter == 'f')
+    {
+        auto const value = is_float_body ? parse_plain_float(s.body) : cc::optional<f64>();
+        auto const integer = is_float_body ? cc::optional<i64>() : parse_literal_integer(s.body);
+        if (!value.has_value() && !integer.has_value())
+        {
+            unsupported(file, where, "a float literal this large");
+            return error_type;
+        }
+        auto const real = value.has_value() ? value.value() : f64(integer.value());
+        if (!holds({.is_number = true, .real = real}, type))
+        {
+            report(diagnostic_kind::literal_not_representable, file, where, cc::format("float does not hold {}", text));
+            return error_type;
+        }
+        return type;
+    }
+    auto const value = parse_literal_integer(s.body);
+    if (!value.has_value())
+    {
+        unsupported(file, where, "an integer literal beyond 64 bits");
+        return error_type;
+    }
+    auto const v = value.value();
+    auto const is_held = s.letter == 'u' ? v >= 0 && v <= 4294967295ll : v >= -2147483647ll - 1 && v <= 2147483647ll;
+    if (!is_held)
+    {
+        report(diagnostic_kind::literal_not_representable, file, where,
+               cc::format("{} does not hold {}", s.letter == 'u' ? "uint" : "int", text));
+        return error_type;
+    }
+    return type;
+}
+
 type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name const& name)
 {
     auto const file = scope.file;
@@ -424,6 +487,20 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         {
             report_capture(scope, where, *local);
             return error_type;
+        }
+        // CHK-366: a resource parameter stands where its binding member would, which is as a call's argument
+        if (local->type != error_type && is_resource(out.at(local->type).kind)
+            && out.at(local->type).kind != type_kind::buffer)
+        {
+            auto is_handed = false;
+            for (auto const h : handed)
+                is_handed = is_handed || h == id;
+            if (!is_handed)
+            {
+                unsupported(file, where,
+                            cc::format("{} as a value; hand it to a call, as in `t.load(xy)`", out.name_of(local->type)));
+                return error_type;
+            }
         }
         return local->type;
     }
@@ -839,6 +916,8 @@ number_literal checker::number_of(i32 file, ast::expr_id expr) const
             return {};
         return {.is_number = true, .real = value.value()};
     }
+    // CHK-357: a suffix names the literal's type, so it converts to no other
+    case number_class::suffixed:
     case number_class::other:
         break;
     }
@@ -1202,11 +1281,19 @@ type_id checker::resolve_overload(function_scope& scope,
             return error_type;
         note_near_misses(file, id, candidates, arguments);
         // A struct's one constructor says what it takes, which is what a reader needs to fix the call.
-        auto const is_constructor = candidates.size() == 1 && out.at(candidates[0]).role == function_role::constructor;
-        if (is_constructor)
+        // The functions of the struct's name beside it, such as `float3(x)`, change nothing about that.
+        auto constructor = symbol_id::none;
+        auto constructor_count = 0;
+        for (auto const candidate : candidates)
+            if (out.at(candidate).role == function_role::constructor)
+            {
+                constructor = candidate;
+                ++constructor_count;
+            }
+        if (constructor_count == 1)
         {
             auto expected = cc::vector<type_id>();
-            for (auto const& p : out.at(out.functions[out.at(candidates[0]).info].parameters))
+            for (auto const& p : out.at(out.functions[out.at(constructor).info].parameters))
                 expected.push_back(p.type);
             report(diagnostic_kind::no_matching_overload, file, where,
                    cc::format("{}, and the constructor is {}", call_text(file, spelling, arguments),

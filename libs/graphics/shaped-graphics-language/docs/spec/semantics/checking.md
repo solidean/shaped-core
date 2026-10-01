@@ -396,7 +396,8 @@ fun shade(k: float) -> float:
   Either way it filters as a static sampler does for CHK-210 and CHK-281.
   Its name anywhere else is `unsupported-yet`, and so is its name in a test, which samples no texture.
 * **CHK-366** A function of the program may take a texture, an image or a sampler as a parameter, which inlining substitutes as it does a prelude function's (CHK-324) ([why](why/checking.md#chk-366)).
-  Its argument is a binding member of exactly the parameter's type, an element of a binding array, a file-scope sampler, or a parameter of that type handed on; anything else is `type-mismatch`.
+  Its argument is a binding member of exactly the parameter's type, an element of a binding array, a file-scope sampler, or a parameter of that type handed on.
+  Anything else does not match it, by CHK-70.
   The parameter stands for its argument wherever it is named, so the member's access, its `@sampler` and its footprint are the parameter's, and the function lists no binding for it.
   A local, a field and a result of a resource type stay `unsupported-yet`.
 * **CHK-367** `img[xy]` is a texel of an image member: a read of it is `img.load(xy)`, and an assignment to it is `img.store(xy, v)` ([why](why/checking.md#chk-367)).
@@ -1257,7 +1258,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304, CHK-349, CHK-369, CHK-370, CHK-371 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-329, CHK-344, CHK-362, CHK-366, CHK-375 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-329, CHK-344, CHK-362, CHK-375 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162 |
@@ -1265,7 +1266,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-350 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-367 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-366, CHK-367 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |

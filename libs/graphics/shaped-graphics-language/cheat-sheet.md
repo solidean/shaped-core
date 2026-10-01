@@ -182,7 +182,7 @@ sgl::ast::dump_diagnostics(ast)            // `stray-else @6+4`, one per line
 ```
 
 Expressions: `invalid_expr` `literal` `name` `self_ref` `wildcard` `leading_dot` `member` `index` `call` `tuple` `array` `object`
-`comparison_chain` `cast` `membership` `ascription` `range` `lambda` `case_expr` `loop_expr` `return_expr` `yield_expr`
+`comparison_chain` `cast` `membership` `ascription` `range` `lambda` `case_expr` `if_expr` `loop_expr` `return_expr` `yield_expr`
 `break_expr` `continue_expr` `struct_type` `function_type` `with_bindings`.
 
 - `call` is every application: `spelling` is `paren` / `juxtaposition` / `infix` / `prefix`, and an operator call has `op` instead of `callee`.
@@ -195,6 +195,7 @@ Expressions: `invalid_expr` `literal` `name` `self_ref` `wildcard` `leading_dot`
   Only the `fun` spelling has `type_parameters`, `bindings` and a `return_type`, and only it can be left with `return`.
 - `function_type` is every `a -> b` that is not the return arrow of a signature; its form is a two-operand run.
 - `with_bindings` is `f(x){…}`, reserved and always reported.
+- `if_expr` is `if c => a else b` on one line, as `if_branch`es with the closing `else` last; its `else` is an `op` leaf of its form.
 
 Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, as `if_branch`es) `for_stmt` `while_stmt`
 `assert_stmt` `print_stmt` `decl_stmt` `expr_stmt`.

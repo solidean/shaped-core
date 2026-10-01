@@ -1,0 +1,80 @@
+// a plain vector and its scalar meet under every arithmetic operator, from either side, componentwise (CHK-358)
+
+test:
+    let v = float3(1.0, 2.0, 4.0)
+    v + 1.0 == float3(2.0, 3.0, 5.0)
+    1.0 - v == float3(0.0, -1.0, -3.0)
+    v * 2.0 == 2.0 * v
+    8.0 / v == float3(8.0, 4.0, 2.0)
+    v % 3.0 == float3(1.0, 2.0, 1.0)
+    5.0 % v == float3(0.0, 1.0, 1.0)
+
+// an integer vector takes its scalar the same way, and divides as its scalar does, toward zero
+test:
+    let id = int3(5, -7, 6)
+    id.xy % 2 == int2(1, -1)
+    id / 2 == int3(2, -3, 3)
+    10 - id == int3(5, 17, 4)
+    id * 3 + 1 == int3(16, -20, 19)
+    12 / int2(5, -4) == int2(2, -3)
+
+test:
+    let u = uint2(6u, 9u)
+    u + 1u == uint2(7u, 10u)
+    u * 2 == uint2(12u, 18u)
+    20u % u == uint2(2u, 2u)
+
+// and the bits of an integer vector meet a scalar as well
+test:
+    let mask = uint4(0xff00u, 0x0ff0u, 0x00ffu, 0xf00fu)
+    mask >> 4 == uint4(0x0ff0u, 0x00ffu, 0x000fu, 0x0f00u)
+    (mask & 0x0f0fu) == uint4(0x0f00u, 0x0f00u, 0x000fu, 0x000fu)
+    (0x1u << uint2(1u, 3u)) == uint2(2u, 8u)
+    (int2(1, -8) | 4) == int2(5, -4)
+    (int2(-8, 7) >> 1) == int2(-4, 3)
+    (6 ^ int2(3, 5)) == int2(5, 3)
+
+// a direction keeps its own arithmetic: no scalar adds to it
+@expect(error = "no-matching-overload")
+test (vec3(1.0, 2.0, 3.0) + 1.0).x == 2.0
+
+// a constant division by a zero component has no value, from either side
+@expect(error = "constant-without-value")
+test (int2(4, 4) / 0).x == 0
+
+// min, max and clamp take the integer vectors, and abs and sign the signed ones (CHK-359)
+test:
+    min(int3(1, 5, -2), int3(3, 0, -4)) == int3(1, 0, -4)
+    max(uint2(1u, 7u), uint2(4u, 2u)) == uint2(4u, 7u)
+    clamp(int3(-9, 3, 9), int3(0, 0, 0), int3(5, 5, 5)) == int3(0, 3, 5)
+    abs(int2(-3, 4)) == int2(3, 4)
+    sign(int3(-6, 0, 2)) == int3(-1, 0, 1)
+    sign(-7) == -1
+
+// every vector of the prelude has a one-value constructor, beside the constructor of its fields (CHK-360)
+test:
+    float3(0.5) == float3(0.5, 0.5, 0.5)
+    int2(-1) == int2(-1, -1)
+    uint4(3u).w == 3u
+    bool2(true) == bool2(true, true)
+    vec3(1.0).y == 1.0
+    pos3(2.0).z == 2.0
+    // a literal converts to its one value as to any float, and a literal call of three still constructs
+    float3(1) == float3(1.0, 1.0, 1.0)
+    float3(1, 2, 3).z == 3.0
+
+// fwidth is how far a value moves between neighbouring pixels, which only a pixel stage has
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@pixel fun grid_ps(p: pixel_input) -> target:
+    let cell = p.position.xy / 16.0
+    let width = fwidth(cell)
+    let line = abs(fract(cell - 0.5) - 0.5) / width
+    let id = (p.position.xy as int2) / 8
+    let checker = (id.x + id.y) % 2
+    let shade = min(min(line.x, line.y), 1.0) * 0.5 + 0.25 * (checker as float)
+    return { color = float4(..float3(shade), 1.0) }

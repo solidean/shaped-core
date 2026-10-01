@@ -114,6 +114,8 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
                      }
                      else if (auto const* const c = value.node.try_as<ast::case_expr>())
                          set_type(file, e.value, check_case(scope, e.value, *c, false, &result));
+                     else if (auto const* const i = value.node.try_as<ast::if_expr>())
+                         set_type(file, e.value, check_if_value(scope, *i, false, &result));
                      else if (auto const* const loop = value.node.try_as<ast::loop_expr>())
                      {
                          auto has_break = false;

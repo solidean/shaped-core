@@ -102,4 +102,33 @@ void add_function(registry& r,
 /// The suffix an operator function of `type` carries in its name: none for `float`, `_int`, `_color` for `float3`.
 /// An operator function is found through its operator alone, so the name is documentation and shows in a dump.
 [[nodiscard]] cc::string suffix_of(cc::string_view type);
+
+/// The leaves of a vector and a scalar, either side, as two vectors of the vector's width: what a componentwise
+/// evaluator of two vectors reads (CHK-358).
+void spread_leaves(cc::span<check::scalar const> in, bool is_scalar_left, cc::vector<check::scalar>& out);
+
+/// `Evaluate`, an evaluator of two vectors, over a vector and a scalar.
+template <evaluator Evaluate, bool IsScalarLeft>
+void spread_evaluate(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
+{
+    auto both = cc::vector<check::scalar>();
+    spread_leaves(in, IsScalarLeft, both);
+    Evaluate(both, out);
+}
+
+/// `Check`, a check of two vectors, over a vector and a scalar.
+template <undefined_check Check, bool IsScalarLeft>
+cc::string_view spread_check(cc::span<check::scalar const> in)
+{
+    auto both = cc::vector<check::scalar>();
+    spread_leaves(in, IsScalarLeft, both);
+    return Check(both);
+}
+
+/// The type registered under `name`, read off its declaration, since a record learns its name only in `finalize`.
+[[nodiscard]] builtin_type_id registered_type(registry const& r, cc::string_view name);
+
+/// The arguments of `c` with the scalar at `at` written as a vector of the type `c.data` names, `vec3i(s)`.
+/// It is for a target that takes no vector beside a scalar for the operator at hand, as WGSL's `&` and its shifts.
+[[nodiscard]] cc::vector<written> spread_arguments(call_context const& c, isize at);
 } // namespace sgl::builtins::impl

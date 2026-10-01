@@ -1,0 +1,52 @@
+// a suffix names a literal's type, which it keeps wherever it stands (CHK-357)
+
+// `u`, `i` and `f` are `uint`, `int` and `float`, and a width of 32 says the same
+test:
+    let u = 1u
+    let i = 1i
+    let f = 1f
+    u == 1u32 and i == 1i32 and f == 1.0 and 0.5f == 0.5f32
+    // an `f` on digits alone is the float they spell
+    f + 0.5 == 1.5
+
+// a hexadecimal or binary number takes `u` and `i` too, and a sign stays part of the literal
+test 0xffu == 255u and 0b101i == 5 and -3i == -3
+
+// a suffixed literal converts to no other type, as an unsuffixed one would
+fun half_of(x: float) => x * 0.5
+
+@expect(error = "no-matching-overload")
+test half_of(2u) == 1.0
+
+@expect(error = "type-mismatch")
+test:
+    let x: float = 2i
+    x == 2.0
+
+// so an operator of two suffixed literals needs no type from elsewhere
+test 7u / 2u == 3u
+
+// a value its type does not hold is refused, and so is an integer suffix on a float literal
+@expect(error = "literal-not-representable")
+test -1u == 0u
+
+@expect(error = "literal-not-representable")
+test 3'000'000'000i == 0
+
+@expect(error = "literal-not-representable")
+test 0.5u == 0u
+
+// the 16-bit types come later, and no other width names a type
+@expect(error = "unsupported-yet")
+test 1u16 == 1u
+
+@expect(error = "unsupported-yet")
+test 1i64 == 1
+
+// every target writes the literal as its type's own
+binding counts:
+    totals: mut buffer[uint]
+
+@compute(64) fun tally(@thread_id id: int3){counts}:
+    let i = id.x
+    counts.totals[i] = counts.totals[i] * 2u + 1u + ((0.25f * 4f) as uint)

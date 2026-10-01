@@ -208,8 +208,14 @@ TEST("sgl check - a number literal with a dot or an exponent is a float, and not
     CHECK(body_reports("let u: uint = 3'000'000'000\nreturn k\n") == "");
     CHECK(body_reports("let i = 99'999'999'999'999'999'999\nreturn k\n")
           == "unsupported-yet user:[99'999'999'999'999'999'999] an integer literal beyond 64 bits\n");
-    CHECK(body_reports("return 0.5f32\n")
-          == "unsupported-yet user:[0.5f32] a number literal with a suffix or a p exponent\n");
+    // CHK-357: a suffix names the type; a width of 16 waits for the 16-bit types, and any other names none
+    CHECK(body_reports("return 0.5f32 + 1f\n") == "");
+    CHECK(body_reports("return 0.5f16\n")
+          == "unsupported-yet user:[0.5f16] a 16-bit literal, since half, short and ushort are not in the prelude "
+             "yet\n");
+    CHECK(body_reports("let i = 1i8\nreturn k\n")
+          == "unsupported-yet user:[1i8] a literal of 8 bits, which no type of the prelude is\n");
+    CHECK(body_reports("return 1p8\n") == "unsupported-yet user:[1p8] a number literal with a p exponent\n");
     // CHK-269: a hex or binary literal is a number like any other, held to the type asked of it
     CHECK(body_reports("return 0xff\n") == "");
     CHECK(body_reports("let u: uint = 0xffff'ffff\nreturn k\n") == "");

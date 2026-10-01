@@ -79,11 +79,39 @@ type_record scalar_of(scalar_family const& family, cc::string_view doc)
     return record;
 }
 
+/// A vector of the prelude, which takes a one-value constructor once every vector is registered.
+struct registered_vector
+{
+    builtin_type_id id;
+    cc::string_view element;
+    i32 width;
+};
+
 /// The vectors of a family at widths 2 to 4, each named after the family and its width.
-void add_vectors(registry& r, scalar_family const& family)
+void add_vectors(registry& r, scalar_family const& family, cc::vector<registered_vector>& vectors)
 {
     for (auto width = 2; width <= 4; ++width)
-        r.add(vector_of(family, cc::format("{}{}", family.name, width), width, ""));
+        vectors.push_back({.id = r.add(vector_of(family, cc::format("{}{}", family.name, width), width, "")),
+                           .element = family.name,
+                           .width = width});
+}
+
+template <int Width>
+void fill(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
+{
+    for (auto i = 0; i < Width; ++i)
+        out.push_back(in[0]);
+}
+
+/// The target's own vector of one value, `(float3)x`, `vec3f(x)` and `float3(x)`; `data` names the vector.
+/// HLSL's constructor wants every component, so it spreads a scalar by a cast.
+written write_filled(call_context const& c)
+{
+    auto const type = c.builtins.at(builtin_type_id(i32(c.data))).spelled_in(c.target);
+    if (c.target == language::hlsl)
+        return {.text = cc::format("({}){}", type, wrapped(c.arguments[0], precedence::unary)),
+                .binds = precedence::unary};
+    return {.text = cc::format("{}({})", type, c.arguments[0].text)};
 }
 } // namespace
 
@@ -92,11 +120,20 @@ void sgl::builtins::register_types(registry& r)
     r.add_comment("// A struct line without a block is opaque: there is no member to name.\n"
                   "// A builtin type is @shadowable(false): a program's own `int` would be a second type that reads "
                   "the same.");
+    auto vectors = cc::vector<registered_vector>();
     r.add(scalar_of(k_float_family, ""));
-    add_vectors(r, k_float_family);
-    r.add(vector_of(k_float_family, "vec3", 3, "/// A direction: it has a length, and a translation leaves it alone."));
-    r.add(vector_of(k_float_family, "pos3", 3, "/// A position: a translation moves it."));
-    r.add(vector_of(k_float_family, "hpos4", 4, "/// A position in clip space, before the divide."));
+    add_vectors(r, k_float_family, vectors);
+    vectors.push_back({.id = r.add(vector_of(k_float_family, "vec3", 3,
+                                             "/// A direction: it has a length, and a translation leaves it alone.")),
+                       .element = "float",
+                       .width = 3});
+    vectors.push_back({.id = r.add(vector_of(k_float_family, "pos3", 3, "/// A position: a translation moves it.")),
+                       .element = "float",
+                       .width = 3});
+    vectors.push_back(
+        {.id = r.add(vector_of(k_float_family, "hpos4", 4, "/// A position in clip space, before the divide.")),
+         .element = "float",
+         .width = 4});
 
     r.add(type_record{
         .declaration = "struct mat4",
@@ -127,13 +164,29 @@ void sgl::builtins::register_types(registry& r)
     });
 
     r.add(scalar_of(k_int_family, "/// 32 bits, signed; its arithmetic wraps."));
-    add_vectors(r, k_int_family);
+    add_vectors(r, k_int_family, vectors);
     r.add(scalar_of(k_uint_family, "/// 32 bits, unsigned; its arithmetic wraps."));
-    add_vectors(r, k_uint_family);
+    add_vectors(r, k_uint_family, vectors);
     // A builtin enum: `bool.true` is a case like any other, and the record says the targets write it as their bool.
     // `false` comes first, so the zero value of a bool is false.
     auto boolean = scalar_of(k_bool_family, "");
     boolean.declaration = "enum bool:\n    false\n    true";
     r.add(cc::move(boolean));
-    add_vectors(r, k_bool_family);
+    add_vectors(r, k_bool_family, vectors);
+
+    r.add_comment("// a vector of one value, beside the constructor of its fields (CHK-360)");
+    evaluator const fills[] = {nullptr, nullptr, fill<2>, fill<3>, fill<4>};
+    for (auto const& v : vectors)
+    {
+        auto const name = r.types[index_of(v.id)].declaration;
+        auto const start = name.find("struct ") + 7;
+        auto const end = name.find(':');
+        auto const type = cc::string_view(name).subview({.offset = start, .size = end - start});
+        r.add(function_record{
+            .signature = cc::format("@pure fun {0}(x: {1}) -> {0}", type, v.element),
+            .doc = "/// Every component `x`.",
+            .evaluate = fills[v.width],
+            .write = {.kind = spelling_kind::custom, .custom = write_filled, .data = u32(index_of(v.id))},
+        });
+    }
 }

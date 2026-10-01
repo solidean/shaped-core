@@ -635,6 +635,8 @@ void sgl::builtins::register_math(registry& r)
             {.wgsl = "dpdx", .msl = "dfdx"}, nullptr, true);
         add(r, cc::format("@pure @stages(.pixel) fun ddy(x: {0}) -> {0}", t.name), no_derivative,
             {.wgsl = "dpdy", .msl = "dfdy"}, nullptr, true);
+        add(r, cc::format("@pure @stages(.pixel) fun fwidth(x: {0}) -> {0}", t.name), no_derivative, {}, nullptr, true,
+            "/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.");
     }
 
     r.add_comment("// geometry");

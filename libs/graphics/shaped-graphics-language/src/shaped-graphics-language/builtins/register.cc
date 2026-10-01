@@ -249,6 +249,48 @@ cc::string_view impl::clamp_undefined(cc::span<scalar const> in)
     return {};
 }
 
+void impl::spread_leaves(cc::span<scalar const> in, bool is_scalar_left, cc::vector<scalar>& out)
+{
+    auto const width = in.size() - 1;
+    auto const s = is_scalar_left ? in[0] : in[width];
+    auto const vector = in.subspan({.offset = is_scalar_left ? 1 : 0, .size = width});
+    for (auto i = isize(0); i < width; ++i)
+        out.push_back(is_scalar_left ? s : vector[i]);
+    for (auto i = isize(0); i < width; ++i)
+        out.push_back(is_scalar_left ? vector[i] : s);
+}
+
+builtin_type_id impl::registered_type(registry const& r, cc::string_view name)
+{
+    for (auto i = isize(0); i < r.types.size(); ++i)
+    {
+        auto const declaration = cc::string_view(r.types[i].declaration);
+        for (auto const keyword : {cc::string_view("struct "), cc::string_view("enum ")})
+        {
+            auto const at = declaration.find(keyword);
+            if (at < 0)
+                continue;
+            auto const rest = declaration.subview(at + keyword.size());
+            auto end = isize(0);
+            while (end < rest.size() && rest[end] != ':' && rest[end] != '\n' && rest[end] != '[')
+                ++end;
+            if (rest.subview({.offset = 0, .size = end}) == name)
+                return builtin_type_id(i32(i));
+        }
+    }
+    return builtin_type_id::none;
+}
+
+cc::vector<written> impl::spread_arguments(call_context const& c, isize at)
+{
+    auto result = cc::vector<written>();
+    for (auto const& a : c.arguments)
+        result.push_back(a);
+    auto const type = c.builtins.at(builtin_type_id(i32(c.data))).spelled_in(c.target);
+    result[at] = {.text = cc::format("{}({})", type, c.arguments[at].text)};
+    return result;
+}
+
 cc::string impl::suffix_of(cc::string_view type)
 {
     if (type == "float")

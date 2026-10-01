@@ -135,6 +135,38 @@
     z: bool
     w: bool
 
+// a vector of one value, beside the constructor of its fields (CHK-360)
+/// Every component `x`.
+@builtin @pure fun float2(x: float) -> float2
+/// Every component `x`.
+@builtin @pure fun float3(x: float) -> float3
+/// Every component `x`.
+@builtin @pure fun float4(x: float) -> float4
+/// Every component `x`.
+@builtin @pure fun vec3(x: float) -> vec3
+/// Every component `x`.
+@builtin @pure fun pos3(x: float) -> pos3
+/// Every component `x`.
+@builtin @pure fun hpos4(x: float) -> hpos4
+/// Every component `x`.
+@builtin @pure fun int2(x: int) -> int2
+/// Every component `x`.
+@builtin @pure fun int3(x: int) -> int3
+/// Every component `x`.
+@builtin @pure fun int4(x: int) -> int4
+/// Every component `x`.
+@builtin @pure fun uint2(x: uint) -> uint2
+/// Every component `x`.
+@builtin @pure fun uint3(x: uint) -> uint3
+/// Every component `x`.
+@builtin @pure fun uint4(x: uint) -> uint4
+/// Every component `x`.
+@builtin @pure fun bool2(x: bool) -> bool2
+/// Every component `x`.
+@builtin @pure fun bool3(x: bool) -> bool3
+/// Every component `x`.
+@builtin @pure fun bool4(x: bool) -> bool4
+
 // @pure: a call has no effect, so nobody can tell whether or when it ran.
 // A @builtin without it is assumed to have one, and the compiler then keeps its place among its neighbours.
 //
@@ -273,6 +305,262 @@
 @builtin @pure @operator("/") fun divide_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("%") fun remainder_uint4(a: uint4, b: uint4) -> uint4
 
+// a plain vector and its scalar, from either side, componentwise (CHK-358);
+// `*` and `/` of a float vector by a float are the scaling further below
+@builtin @pure @operator("+") fun add_float2_scalar(a: float2, b: float) -> float2
+@builtin @pure @operator("+") fun add_scalar_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("-") fun subtract_float2_scalar(a: float2, b: float) -> float2
+@builtin @pure @operator("-") fun subtract_scalar_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("/") fun divide_scalar_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("%") fun remainder_float2_scalar(a: float2, b: float) -> float2
+@builtin @pure @operator("%") fun remainder_scalar_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("+") fun add_color_scalar(a: float3, b: float) -> float3
+@builtin @pure @operator("+") fun add_scalar_color(a: float, b: float3) -> float3
+@builtin @pure @operator("-") fun subtract_color_scalar(a: float3, b: float) -> float3
+@builtin @pure @operator("-") fun subtract_scalar_color(a: float, b: float3) -> float3
+@builtin @pure @operator("/") fun divide_scalar_color(a: float, b: float3) -> float3
+@builtin @pure @operator("%") fun remainder_color_scalar(a: float3, b: float) -> float3
+@builtin @pure @operator("%") fun remainder_scalar_color(a: float, b: float3) -> float3
+@builtin @pure @operator("+") fun add_float4_scalar(a: float4, b: float) -> float4
+@builtin @pure @operator("+") fun add_scalar_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("-") fun subtract_float4_scalar(a: float4, b: float) -> float4
+@builtin @pure @operator("-") fun subtract_scalar_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("/") fun divide_scalar_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("%") fun remainder_float4_scalar(a: float4, b: float) -> float4
+@builtin @pure @operator("%") fun remainder_scalar_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("+") fun add_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("-") fun subtract_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("*") fun multiply_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("/") fun divide_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("%") fun remainder_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("+") fun add_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("-") fun subtract_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("*") fun multiply_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("/") fun divide_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("%") fun remainder_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("+") fun add_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("-") fun subtract_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("*") fun multiply_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("/") fun divide_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("%") fun remainder_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("+") fun add_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("-") fun subtract_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("*") fun multiply_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("/") fun divide_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("%") fun remainder_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("+") fun add_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("-") fun subtract_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("*") fun multiply_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("/") fun divide_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("%") fun remainder_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("+") fun add_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("-") fun subtract_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("*") fun multiply_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("/") fun divide_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("%") fun remainder_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("+") fun add_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("-") fun subtract_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("*") fun multiply_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("/") fun divide_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("%") fun remainder_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("+") fun add_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("-") fun subtract_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("*") fun multiply_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("/") fun divide_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("%") fun remainder_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("+") fun add_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("-") fun subtract_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("*") fun multiply_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("/") fun divide_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("%") fun remainder_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("+") fun add_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("-") fun subtract_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("*") fun multiply_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("/") fun divide_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("%") fun remainder_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("+") fun add_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("-") fun subtract_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("*") fun multiply_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("/") fun divide_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("%") fun remainder_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("+") fun add_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("-") fun subtract_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("*") fun multiply_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("/") fun divide_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("%") fun remainder_scalar_uint4(a: uint, b: uint4) -> uint4
+
+// what the integers share with the floats, componentwise (CHK-359); `sign` of an int is an int
+@builtin @pure fun sign(x: int) -> int
+@builtin @pure fun min(a: int2, b: int2) -> int2
+@builtin @pure fun max(a: int2, b: int2) -> int2
+@builtin @pure fun clamp(x: int2, low: int2, high: int2) -> int2
+@builtin @pure fun abs(x: int2) -> int2
+@builtin @pure fun sign(x: int2) -> int2
+@builtin @pure fun min(a: int3, b: int3) -> int3
+@builtin @pure fun max(a: int3, b: int3) -> int3
+@builtin @pure fun clamp(x: int3, low: int3, high: int3) -> int3
+@builtin @pure fun abs(x: int3) -> int3
+@builtin @pure fun sign(x: int3) -> int3
+@builtin @pure fun min(a: int4, b: int4) -> int4
+@builtin @pure fun max(a: int4, b: int4) -> int4
+@builtin @pure fun clamp(x: int4, low: int4, high: int4) -> int4
+@builtin @pure fun abs(x: int4) -> int4
+@builtin @pure fun sign(x: int4) -> int4
+@builtin @pure fun min(a: uint2, b: uint2) -> uint2
+@builtin @pure fun max(a: uint2, b: uint2) -> uint2
+@builtin @pure fun clamp(x: uint2, low: uint2, high: uint2) -> uint2
+@builtin @pure fun min(a: uint3, b: uint3) -> uint3
+@builtin @pure fun max(a: uint3, b: uint3) -> uint3
+@builtin @pure fun clamp(x: uint3, low: uint3, high: uint3) -> uint3
+@builtin @pure fun min(a: uint4, b: uint4) -> uint4
+@builtin @pure fun max(a: uint4, b: uint4) -> uint4
+@builtin @pure fun clamp(x: uint4, low: uint4, high: uint4) -> uint4
+
+// two vectors compared: an ordering per component (CHK-362), and `==` and `!=` of the whole value,
+// which `equal` and `not_equal` are per component (CHK-363)
+@builtin @pure @operator("<") fun less_float2(a: float2, b: float2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_float2(a: float2, b: float2) -> bool2
+@builtin @pure @operator(">") fun greater_float2(a: float2, b: float2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_float2(a: float2, b: float2) -> bool2
+@builtin @pure @operator("<") fun less_color(a: float3, b: float3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_color(a: float3, b: float3) -> bool3
+@builtin @pure @operator(">") fun greater_color(a: float3, b: float3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_color(a: float3, b: float3) -> bool3
+@builtin @pure @operator("<") fun less_float4(a: float4, b: float4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_float4(a: float4, b: float4) -> bool4
+@builtin @pure @operator(">") fun greater_float4(a: float4, b: float4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_float4(a: float4, b: float4) -> bool4
+@builtin @pure @operator("<") fun less_int2(a: int2, b: int2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_int2(a: int2, b: int2) -> bool2
+@builtin @pure @operator(">") fun greater_int2(a: int2, b: int2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_int2(a: int2, b: int2) -> bool2
+@builtin @pure @operator("<") fun less_int3(a: int3, b: int3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_int3(a: int3, b: int3) -> bool3
+@builtin @pure @operator(">") fun greater_int3(a: int3, b: int3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_int3(a: int3, b: int3) -> bool3
+@builtin @pure @operator("<") fun less_int4(a: int4, b: int4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_int4(a: int4, b: int4) -> bool4
+@builtin @pure @operator(">") fun greater_int4(a: int4, b: int4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_int4(a: int4, b: int4) -> bool4
+@builtin @pure @operator("<") fun less_uint2(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_uint2(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator(">") fun greater_uint2(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_uint2(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator("<") fun less_uint3(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_uint3(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator(">") fun greater_uint3(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_uint3(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator("<") fun less_uint4(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_uint4(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator(">") fun greater_uint4(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_uint4(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator("==") fun same_float2(a: float2, b: float2) -> bool
+@builtin @pure @operator("!=") fun differs_float2(a: float2, b: float2) -> bool
+@builtin @pure fun equal(a: float2, b: float2) -> bool2
+@builtin @pure fun not_equal(a: float2, b: float2) -> bool2
+@builtin @pure @operator("==") fun same_color(a: float3, b: float3) -> bool
+@builtin @pure @operator("!=") fun differs_color(a: float3, b: float3) -> bool
+@builtin @pure fun equal(a: float3, b: float3) -> bool3
+@builtin @pure fun not_equal(a: float3, b: float3) -> bool3
+@builtin @pure @operator("==") fun same_float4(a: float4, b: float4) -> bool
+@builtin @pure @operator("!=") fun differs_float4(a: float4, b: float4) -> bool
+@builtin @pure fun equal(a: float4, b: float4) -> bool4
+@builtin @pure fun not_equal(a: float4, b: float4) -> bool4
+@builtin @pure @operator("==") fun same_int2(a: int2, b: int2) -> bool
+@builtin @pure @operator("!=") fun differs_int2(a: int2, b: int2) -> bool
+@builtin @pure fun equal(a: int2, b: int2) -> bool2
+@builtin @pure fun not_equal(a: int2, b: int2) -> bool2
+@builtin @pure @operator("==") fun same_int3(a: int3, b: int3) -> bool
+@builtin @pure @operator("!=") fun differs_int3(a: int3, b: int3) -> bool
+@builtin @pure fun equal(a: int3, b: int3) -> bool3
+@builtin @pure fun not_equal(a: int3, b: int3) -> bool3
+@builtin @pure @operator("==") fun same_int4(a: int4, b: int4) -> bool
+@builtin @pure @operator("!=") fun differs_int4(a: int4, b: int4) -> bool
+@builtin @pure fun equal(a: int4, b: int4) -> bool4
+@builtin @pure fun not_equal(a: int4, b: int4) -> bool4
+@builtin @pure @operator("==") fun same_uint2(a: uint2, b: uint2) -> bool
+@builtin @pure @operator("!=") fun differs_uint2(a: uint2, b: uint2) -> bool
+@builtin @pure fun equal(a: uint2, b: uint2) -> bool2
+@builtin @pure fun not_equal(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator("==") fun same_uint3(a: uint3, b: uint3) -> bool
+@builtin @pure @operator("!=") fun differs_uint3(a: uint3, b: uint3) -> bool
+@builtin @pure fun equal(a: uint3, b: uint3) -> bool3
+@builtin @pure fun not_equal(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator("==") fun same_uint4(a: uint4, b: uint4) -> bool
+@builtin @pure @operator("!=") fun differs_uint4(a: uint4, b: uint4) -> bool
+@builtin @pure fun equal(a: uint4, b: uint4) -> bool4
+@builtin @pure fun not_equal(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator("==") fun same_bool2(a: bool2, b: bool2) -> bool
+@builtin @pure @operator("!=") fun differs_bool2(a: bool2, b: bool2) -> bool
+@builtin @pure fun equal(a: bool2, b: bool2) -> bool2
+@builtin @pure fun not_equal(a: bool2, b: bool2) -> bool2
+@builtin @pure @operator("==") fun same_bool3(a: bool3, b: bool3) -> bool
+@builtin @pure @operator("!=") fun differs_bool3(a: bool3, b: bool3) -> bool
+@builtin @pure fun equal(a: bool3, b: bool3) -> bool3
+@builtin @pure fun not_equal(a: bool3, b: bool3) -> bool3
+@builtin @pure @operator("==") fun same_bool4(a: bool4, b: bool4) -> bool
+@builtin @pure @operator("!=") fun differs_bool4(a: bool4, b: bool4) -> bool
+@builtin @pure fun equal(a: bool4, b: bool4) -> bool4
+@builtin @pure fun not_equal(a: bool4, b: bool4) -> bool4
+@builtin @pure @operator("==") fun same_vec3(a: vec3, b: vec3) -> bool
+@builtin @pure @operator("!=") fun differs_vec3(a: vec3, b: vec3) -> bool
+@builtin @pure fun equal(a: vec3, b: vec3) -> bool3
+@builtin @pure fun not_equal(a: vec3, b: vec3) -> bool3
+@builtin @pure @operator("==") fun same_pos3(a: pos3, b: pos3) -> bool
+@builtin @pure @operator("!=") fun differs_pos3(a: pos3, b: pos3) -> bool
+@builtin @pure fun equal(a: pos3, b: pos3) -> bool3
+@builtin @pure fun not_equal(a: pos3, b: pos3) -> bool3
+@builtin @pure @operator("==") fun same_hpos4(a: hpos4, b: hpos4) -> bool
+@builtin @pure @operator("!=") fun differs_hpos4(a: hpos4, b: hpos4) -> bool
+@builtin @pure fun equal(a: hpos4, b: hpos4) -> bool4
+@builtin @pure fun not_equal(a: hpos4, b: hpos4) -> bool4
+
+// a bool vector read whole (CHK-364), and `select`, which evaluates all three of its arguments
+// and gives `if_true` where `cond` holds (CHK-365)
+/// Whether some component of `m` is true.
+@builtin @pure fun any(m: bool2) -> bool
+/// Whether every component of `m` is true.
+@builtin @pure fun all(m: bool2) -> bool
+/// Whether some component of `m` is true.
+@builtin @pure fun any(m: bool3) -> bool
+/// Whether every component of `m` is true.
+@builtin @pure fun all(m: bool3) -> bool
+/// Whether some component of `m` is true.
+@builtin @pure fun any(m: bool4) -> bool
+/// Whether every component of `m` is true.
+@builtin @pure fun all(m: bool4) -> bool
+@builtin @pure fun select(cond: bool, if_true: float, if_false: float) -> float
+@builtin @pure fun select(cond: bool, if_true: float2, if_false: float2) -> float2
+@builtin @pure fun select(cond: bool2, if_true: float2, if_false: float2) -> float2
+@builtin @pure fun select(cond: bool, if_true: float3, if_false: float3) -> float3
+@builtin @pure fun select(cond: bool3, if_true: float3, if_false: float3) -> float3
+@builtin @pure fun select(cond: bool, if_true: float4, if_false: float4) -> float4
+@builtin @pure fun select(cond: bool4, if_true: float4, if_false: float4) -> float4
+@builtin @pure fun select(cond: bool, if_true: int, if_false: int) -> int
+@builtin @pure fun select(cond: bool, if_true: int2, if_false: int2) -> int2
+@builtin @pure fun select(cond: bool2, if_true: int2, if_false: int2) -> int2
+@builtin @pure fun select(cond: bool, if_true: int3, if_false: int3) -> int3
+@builtin @pure fun select(cond: bool3, if_true: int3, if_false: int3) -> int3
+@builtin @pure fun select(cond: bool, if_true: int4, if_false: int4) -> int4
+@builtin @pure fun select(cond: bool4, if_true: int4, if_false: int4) -> int4
+@builtin @pure fun select(cond: bool, if_true: uint, if_false: uint) -> uint
+@builtin @pure fun select(cond: bool, if_true: uint2, if_false: uint2) -> uint2
+@builtin @pure fun select(cond: bool2, if_true: uint2, if_false: uint2) -> uint2
+@builtin @pure fun select(cond: bool, if_true: uint3, if_false: uint3) -> uint3
+@builtin @pure fun select(cond: bool3, if_true: uint3, if_false: uint3) -> uint3
+@builtin @pure fun select(cond: bool, if_true: uint4, if_false: uint4) -> uint4
+@builtin @pure fun select(cond: bool4, if_true: uint4, if_false: uint4) -> uint4
+@builtin @pure fun select(cond: bool, if_true: bool, if_false: bool) -> bool
+@builtin @pure fun select(cond: bool, if_true: bool2, if_false: bool2) -> bool2
+@builtin @pure fun select(cond: bool2, if_true: bool2, if_false: bool2) -> bool2
+@builtin @pure fun select(cond: bool, if_true: bool3, if_false: bool3) -> bool3
+@builtin @pure fun select(cond: bool3, if_true: bool3, if_false: bool3) -> bool3
+@builtin @pure fun select(cond: bool, if_true: bool4, if_false: bool4) -> bool4
+@builtin @pure fun select(cond: bool4, if_true: bool4, if_false: bool4) -> bool4
+@builtin @pure fun select(cond: bool, if_true: vec3, if_false: vec3) -> vec3
+@builtin @pure fun select(cond: bool, if_true: pos3, if_false: pos3) -> pos3
+@builtin @pure fun select(cond: bool, if_true: hpos4, if_false: hpos4) -> hpos4
+
 // a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no operator
 @builtin @pure @operator("+") fun add_vec3(a: vec3, b: vec3) -> vec3
 @builtin @pure @operator("-") fun subtract_vec3(a: vec3, b: vec3) -> vec3
@@ -402,6 +690,68 @@
 @builtin @pure @operator(">>") fun shift_right_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("~") fun bit_not_uint4(x: uint4) -> uint4
 
+// an integer vector and its scalar, from either side, componentwise (CHK-358)
+@builtin @pure @operator("&") fun bit_and_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("|") fun bit_or_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("^") fun bit_xor_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("<<") fun shift_left_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator(">>") fun shift_right_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("&") fun bit_and_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("|") fun bit_or_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("^") fun bit_xor_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("<<") fun shift_left_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator(">>") fun shift_right_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("&") fun bit_and_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("|") fun bit_or_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("^") fun bit_xor_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("<<") fun shift_left_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator(">>") fun shift_right_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("&") fun bit_and_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("|") fun bit_or_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("^") fun bit_xor_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("<<") fun shift_left_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator(">>") fun shift_right_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("&") fun bit_and_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("|") fun bit_or_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("^") fun bit_xor_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("<<") fun shift_left_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator(">>") fun shift_right_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("&") fun bit_and_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("|") fun bit_or_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("^") fun bit_xor_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("<<") fun shift_left_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator(">>") fun shift_right_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("&") fun bit_and_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("|") fun bit_or_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("^") fun bit_xor_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("<<") fun shift_left_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator(">>") fun shift_right_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("&") fun bit_and_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("|") fun bit_or_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("^") fun bit_xor_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("<<") fun shift_left_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator(">>") fun shift_right_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("&") fun bit_and_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("|") fun bit_or_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("^") fun bit_xor_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("<<") fun shift_left_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator(">>") fun shift_right_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("&") fun bit_and_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("|") fun bit_or_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("^") fun bit_xor_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("<<") fun shift_left_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator(">>") fun shift_right_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("&") fun bit_and_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("|") fun bit_or_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("^") fun bit_xor_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("<<") fun shift_left_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator(">>") fun shift_right_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("&") fun bit_and_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("|") fun bit_or_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("^") fun bit_xor_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("<<") fun shift_left_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator(">>") fun shift_right_scalar_uint4(a: uint, b: uint4) -> uint4
+
 // the maths of float and its plain vectors, componentwise; `round` is ties to even everywhere,
 // and a value a target leaves indeterminate - pow of a negative base, asin of 2 - has no behaviour
 @builtin @pure fun sin(x: float) -> float
@@ -525,12 +875,20 @@
 // a run of one invocation has no neighbours, and reads 0
 @builtin @pure @stages(.pixel) fun ddx(x: float) -> float
 @builtin @pure @stages(.pixel) fun ddy(x: float) -> float
+/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
+@builtin @pure @stages(.pixel) fun fwidth(x: float) -> float
 @builtin @pure @stages(.pixel) fun ddx(x: float2) -> float2
 @builtin @pure @stages(.pixel) fun ddy(x: float2) -> float2
+/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
+@builtin @pure @stages(.pixel) fun fwidth(x: float2) -> float2
 @builtin @pure @stages(.pixel) fun ddx(x: float3) -> float3
 @builtin @pure @stages(.pixel) fun ddy(x: float3) -> float3
+/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
+@builtin @pure @stages(.pixel) fun fwidth(x: float3) -> float3
 @builtin @pure @stages(.pixel) fun ddx(x: float4) -> float4
 @builtin @pure @stages(.pixel) fun ddy(x: float4) -> float4
+/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
+@builtin @pure @stages(.pixel) fun fwidth(x: float4) -> float4
 
 // geometry
 @builtin @pure fun cross(a: vec3, b: vec3) -> vec3

@@ -201,16 +201,13 @@ cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute cons
     for (auto i = isize(0); i < arguments.size(); ++i)
     {
         auto const& argument = arguments[i];
-        auto const text
-            = ast::is_valid(argument.value) ? text_of(file, span_of(file, argument.value)) : cc::string_view();
-        auto const value = ast::is_valid(argument.value) && ast_of(file).at(argument.value).node.is<ast::literal>()
-                                && classify_number(text) == number_class::plain_integer
-                             ? parse_plain_integer(text)
-                             : cc::optional<i32>();
+        // CHK-370: an int literal, or the name of an int const
+        auto const value = ast::is_valid(argument.value) && !argument.is_splat ? constant_count(file, argument.value)
+                                                                               : cc::optional<i32>();
         if (!argument.name.empty() || argument.is_splat || !value.has_value() || value.value() < 1)
         {
             report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-                   "a workgroup size is a positive int literal");
+                   "a workgroup size is a positive int literal, or the name of a positive int const");
             return {1, 1, 1};
         }
         result[i] = value.value();
@@ -414,7 +411,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     return result;
 }
 
-type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope)
+type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope, bool allows_resource)
 {
     auto const type = resolve_type(file, expr, scope);
     if (type == checked_module::error_type)
@@ -452,6 +449,8 @@ type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope 
         unsupported(file, span_of(file, expr), "an array of resources as a value; a binding array is a binding member");
         return checked_module::error_type;
     }
+    if (allows_resource && out.at(type).kind != type_kind::buffer)
+        return type;
     unsupported(file, span_of(file, expr),
                 out.at(type).kind == type_kind::buffer
                     ? "a buffer as a value; a buffer is a binding member, read as `values[i]`"
@@ -1357,8 +1356,20 @@ void checker::compile_function(symbol_id id)
         // CHK-315: `p: mut T` over a value type is the caller's place; over a resource or a stream `mut` is its access
         auto is_mut_parameter = false;
         allows_function_type = !is_builtin && geometry == nullptr;
+        // CHK-366: a function of the program takes a texture, an image or a sampler, which inlining substitutes
+        auto const is_entry = is_raster_entry || ray_stage != stage::none || geometry != nullptr || control != nullptr
+                           || is_evaluation || find_attribute(file, d.attributes, "compute") != nullptr;
+        auto const takes_resources = !is_builtin && !is_entry && !is_prelude_file(file);
+        // `mut image_2d[…]` is the access of an image, and no place
+        auto const names_image = [&](ast::expr_id t)
+        {
+            auto const* const i = ast.at(t).node.try_as<ast::index>();
+            auto const* const n = i != nullptr ? ast.at(i->object).node.try_as<ast::name>() : nullptr;
+            return n != nullptr && text_of(file, n->where).starts_with("image_");
+        };
         if (auto const* const q = ast::is_valid(p.type) ? ast.at(p.type).node.try_as<ast::qualified_type>() : nullptr;
-            q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr)
+            q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr
+            && !(takes_resources && names_image(q->type)))
         {
             is_mut_parameter = true;
             // a function is no place, so a function type is not the whole type here (CHK-317)
@@ -1385,9 +1396,10 @@ void checker::compile_function(symbol_id id)
         // CHK-302: a geometry stage's stream is a parameter of its entry point, and of no other function
         else if (ast::is_valid(p.type))
             // CHK-324: a function of the prelude may take a resource, which inlining substitutes as its argument
-            type = is_builtin                                   ? resolve_pattern_type(file, p.type)
-                 : geometry != nullptr || is_prelude_file(file) ? resolve_type(file, p.type)
-                                                                : resolve_value_type(file, p.type);
+            type = is_builtin ? resolve_pattern_type(file, p.type)
+                 : geometry != nullptr || is_prelude_file(file)
+                     ? resolve_type(file, p.type)
+                     : resolve_value_type(file, p.type, nullptr, takes_resources);
         else if (is_receiver)
             type = receiver;
         else

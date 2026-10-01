@@ -316,7 +316,10 @@ binding affine:
   The new value goes into a temporary first, which reads the old value and the right side once, and each component is stored from it.
 * **EMIT-144** `==` and `!=` over two vectors are `all(a == b)` and `any(a != b)` on every target, and `equal` and `not_equal` are the targets' componentwise `==` and `!=`.
   An operator between a vector and its scalar, a one-value constructor, `any`, `all` and `fwidth` are each the target's own.
+  HLSL's constructor takes every component, so its one-value constructor is a cast, `(float3)x`.
+  Where a target takes no scalar beside a vector, the scalar is written as that vector: WGSL's `&`, `|`, `^` and shifts, and MSL's `fmod`.
 * **EMIT-145** `select(cond, if_true, if_false)` is `select(cond, if_true, if_false)` in HLSL, and `select(if_false, if_true, cond)` in WGSL and MSL.
+  MSL takes a `bool` condition beside scalars alone, so one beside vectors is spread, `select(f, t, bool3(c))`.
   Where that order would evaluate an argument with an effect ahead of one SGL evaluates first, the arguments are bound to locals in SGL's order.
 
 In WGSL, `v.xz += d` over a `float4` local `v` and a `float2` `d` reads so:

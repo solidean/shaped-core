@@ -325,3 +325,14 @@ TEST("sgl check - a marked index stays marked when an argument after it moves it
     CHECK(loaded("id.x % 4").contains("non-uniform-index"));
     CHECK(loaded("nonuniform (g.x % 4)").contains("needless-nonuniform"));
 }
+
+TEST("sgl check - an if that is a value runs its branch in the flow its condition makes, and select runs no branch")
+{
+    // CHK-375: only the taken branch runs, so a derivative inside it is where not every pixel of the quad arrives
+    CHECK(reports_for(pixel("    let d = if p.uv.x > 0.5 => ddx(p.uv.x) else 0.0\n    c.x = d\n")).contains(kind));
+    CHECK(reports_for(pixel("    let w = if p.uv.x > 0.5 => fwidth(p.uv) else p.uv\n    c.x = w.y\n")).contains(kind));
+    // a uniform condition leaves every pixel together
+    CHECK(reports_for(pixel("    let d = if material.threshold > 0.5 => ddx(p.uv.x) else 0.0\n    c.x = d\n")) == "");
+    // select evaluates all three of its arguments, so nothing in them is under its condition (CHK-365)
+    CHECK(reports_for(pixel("    c.x = select(p.uv.x > 0.5, ddx(p.uv.x), 0.0)\n")) == "");
+}
