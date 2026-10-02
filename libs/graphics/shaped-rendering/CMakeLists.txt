@@ -326,6 +326,7 @@ if(SC_BUILD_TESTS)
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
         tests/shader-package-test.cc
+        tests/slug-font-test.cc
         tests/slug-module-test.cc
         tests/slug-shape-test.cc
         tests/tza-test.cc

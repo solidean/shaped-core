@@ -176,10 +176,12 @@ slug_instance make_slug_instance(slug_shape_ref const& shape,
 {
     CC_ASSERT(shape.is_drawable, "an empty shape has nothing to draw; skip refs whose is_drawable is false");
 
-    // Stored em is the outline scaled by em_scale, so one stored unit is 1 / em_scale of an outline unit.
+    // Stored em is the outline less stored_origin, scaled by em_scale: one stored unit is 1 / em_scale of an outline
+    // unit, and stored (0, 0) is where stored_origin lands on the axes.
     auto const inv = 1.0f / shape.em_scale;
+    auto const at = origin + x_axis * shape.stored_origin[0] + y_axis * shape.stored_origin[1];
     return {.em_to_object = tg::vec4f(x_axis[0] * inv, x_axis[1] * inv, y_axis[0] * inv, y_axis[1] * inv),
-            .origin = tg::vec2f(origin[0], origin[1]),
+            .origin = tg::vec2f(at[0], at[1]),
             .em_bounds
             = tg::vec4f(shape.em_bounds.min[0], shape.em_bounds.min[1], shape.em_bounds.max[0], shape.em_bounds.max[1]),
             .banding = shape.banding,

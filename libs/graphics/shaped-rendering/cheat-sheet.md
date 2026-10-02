@@ -292,6 +292,8 @@ auto const shape = sr::compile_slug_shape(o);  // device-free curve + band table
 
 auto atlas = sr::slug_atlas();                 // CALLER-OWNED, move-only, append-only; no device until prepare
 auto const ref = atlas.add(shape).value();     // slug_shape_ref; ref.is_drawable is false for an empty shape
+ref.glyph();                                   // tg::vec4i: the `glyph` argument module `slug`'s coverage takes
+// stored space = (outline - ref.stored_origin) * ref.em_scale, centred on the shape; em_bounds and module `slug`'s em are in it
 atlas.prepare(cmd);                            // creates / grows / uploads — BEFORE the rendering scope
 
 auto const inst = sr::make_slug_instance(ref, origin, x_axis, y_axis, srgb_rgba);   // 68 bytes; axes per OUTLINE unit; ref must be drawable

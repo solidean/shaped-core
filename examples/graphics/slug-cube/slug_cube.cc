@@ -182,7 +182,7 @@ constexpr int decal_face = 5; // the top face carries the star
     return o;
 }
 
-/// A heart of four cubic Béziers, the classic SVG one in a 100-unit box, y up: the curves are split into quadratics on the CPU.
+/// A heart of cubic Béziers, the classic SVG one in a 100-unit box, y up: the curves are split into quadratics on the CPU.
 [[nodiscard]] sr::slug_outline heart()
 {
     auto const p = [](f32 x, f32 y) { return tg::pos2f(x, 100.0f - y); };
@@ -544,8 +544,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         auto const decal = ctx->transient.create_binding_group(
             *cmd, decal_layout,
             shaders::decal{.banding = star.banding,
-                           .glyph = tg::vec4i(i32(star.glyph_location & 0xffff), i32(star.glyph_location >> 16), i32(star.band_info & 0xffff),
-                                              i32(star.band_info >> 16)),
+                           .glyph = star.glyph(),
                            .color = tg::vec4f(0.96f, 0.80f, 0.30f, 1.0f)});
         {
             auto const depth = ctx->transient.create_texture_2d(

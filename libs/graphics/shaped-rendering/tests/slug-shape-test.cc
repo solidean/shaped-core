@@ -30,12 +30,18 @@ struct placed
     return p;
 }
 
+/// Outline point `at` in `ref`'s stored space.
+[[nodiscard]] tg::pos2f stored(sr::slug_shape_ref const& ref, tg::pos2f at)
+{
+    return tg::pos2f((at[0] - ref.stored_origin[0]) * ref.em_scale, (at[1] - ref.stored_origin[1]) * ref.em_scale);
+}
+
 /// The coverage at outline point `at`, sampled with pixels `pixel` outline units wide.
 [[nodiscard]] f32 coverage(placed const& p, tg::pos2f at, f32 pixel = 1.0f)
 {
     auto const s = p.ref.em_scale;
-    return sr::impl::slug_reference_coverage(p.atlas, p.instance, tg::pos2f(at[0] * s, at[1] * s),
-                                             tg::vec2f(pixel * s, pixel * s), false);
+    return sr::impl::slug_reference_coverage(p.atlas, p.instance, stored(p.ref, at), tg::vec2f(pixel * s, pixel * s),
+                                             false);
 }
 
 /// A circle of four quadratic arcs per quadrant pair, close enough to round for a coverage estimate.
@@ -74,9 +80,11 @@ TEST("sr::slug - a rectangle compiles into one run and bands that cover it")
     REQUIRE(shape.run_ends.size() == 1);
     CHECK(shape.run_ends[0] == 5);
 
-    // a power of two bringing 100 into (1024, 2048], where every integer is exact
-    CHECK(shape.em_scale == 16.0f);
-    CHECK(shape.em_bounds.min == tg::pos2f(0, 0));
+    // centred on the rectangle, and scaled by a power of two bringing its half-extent of 50 into (1024, 2048],
+    // where every integer is exact
+    CHECK(shape.stored_origin == tg::pos2f(50, 25));
+    CHECK(shape.em_scale == 32.0f);
+    CHECK(shape.em_bounds.min == tg::pos2f(-1600, -800));
     CHECK(shape.em_bounds.max == tg::pos2f(1600, 800));
 
     // horizontal lines are in no horizontal band, vertical lines in no vertical one: two curves each
@@ -97,6 +105,25 @@ TEST("sr::slug - a rectangle is covered inside, uncovered outside, and half cove
     CHECK(tg::abs(coverage(p, tg::pos2f(50, 0)) - 0.5f) < 0.01f);
     // a quarter of a pixel inside the edge
     CHECK(tg::abs(coverage(p, tg::pos2f(99.75f, 25)) - 0.75f) < 0.01f);
+}
+
+TEST("sr::slug - a shape far from the origin keeps the precision it has at the origin")
+{
+    // Scaling by the largest coordinate rather than the half-extent turned a 3x3 square at (10000, 10000) into nothing.
+    for (auto const side : {3.0f, 10.0f})
+    {
+        auto const near = place(sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(side, side))));
+        auto const far = place(
+            sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(10000, 10000), tg::pos2f(10000 + side, 10000 + side))));
+        CHECK(near.ref.em_scale == far.ref.em_scale);
+        CHECK(near.ref.em_bounds == far.ref.em_bounds);
+        for (auto const t : {-0.25f, 0.0f, 0.1f, 0.5f, 0.9f, 1.0f, 1.25f})
+        {
+            auto const at = tg::pos2f(side * t, side * 0.5f);
+            auto const pixel = side / 16.0f;
+            CHECK(coverage(near, at, pixel) == coverage(far, at + tg::vec2f(10000, 10000), pixel));
+        }
+    }
 }
 
 TEST("sr::slug - a reversed inner contour is a hole under the nonzero rule")
@@ -189,9 +216,10 @@ TEST("sr::slug - an atlas keeps each shape's band block on one row and each run 
         auto const instance
             = sr::make_slug_instance(ref, tg::pos2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1), tg::vec4f(1, 1, 1, 1));
         auto const s = ref.em_scale;
-        CHECK(sr::impl::slug_reference_coverage(atlas, instance, tg::pos2f(50 * s, 50 * s), tg::vec2f(s, s), false)
+        CHECK(sr::impl::slug_reference_coverage(atlas, instance, stored(ref, tg::pos2f(50, 50)), tg::vec2f(s, s), false)
               == 1.0f);
-        CHECK(sr::impl::slug_reference_coverage(atlas, instance, tg::pos2f(5 * s, 5 * s), tg::vec2f(s, s), false) == 0.0f);
+        CHECK(sr::impl::slug_reference_coverage(atlas, instance, stored(ref, tg::pos2f(5, 5)), tg::vec2f(s, s), false)
+              == 0.0f);
     }
     CHECK(atlas.has_pending_upload());
 }

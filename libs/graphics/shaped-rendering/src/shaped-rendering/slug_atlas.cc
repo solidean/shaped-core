@@ -85,7 +85,10 @@ void upload(sg::command_list& cmd,
 
 cc::result<slug_shape_ref> slug_atlas::add(slug_compiled_shape const& shape)
 {
-    auto ref = slug_shape_ref{.banding = shape.banding, .em_bounds = shape.em_bounds, .em_scale = shape.em_scale};
+    auto ref = slug_shape_ref{.banding = shape.banding,
+                              .em_bounds = shape.em_bounds,
+                              .em_scale = shape.em_scale,
+                              .stored_origin = shape.stored_origin};
     if (shape.is_empty())
         return ref;
 

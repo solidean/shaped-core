@@ -3,6 +3,7 @@
 Concrete render routines and helpers on top of [shaped-graphics](../shaped-graphics/readme.md).
 Namespace `sr`.
 Depends on **shaped-graphics** and **shaped-shader-library** (concrete routines acquire their shaders through it) and the vendored **imgui**, plus transitively typed-geometry + clean-core.
+Also on **babel-serializer**, since Slug reads fonts through `babel::font`.
 Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 
 sr is the home for the common building blocks of a renderer built on sg — mipmap generation, texture compression, tonemapping, and similar reusable render routines.

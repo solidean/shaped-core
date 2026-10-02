@@ -68,6 +68,34 @@ struct slug_fixture
     sg::texture_2d target;
     sg::texture_2d depth;
 
+    /// Draws `count` instances of a persistent buffer from `first` on, cleared to black, and reads the target back.
+    [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> draw_range(sg::buffer<sr::slug_instance> const& buffer,
+                                                                           isize first,
+                                                                           isize count)
+    {
+        sr::slug_routine::prewarm(*ctx, {.color = target_format, .depth = sg::pixel_format::undefined});
+        (void)co_await ctx->routines.idle_completion();
+        nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
+        auto cmd = ctx->create_command_list();
+        atlas.prepare(*cmd);
+        {
+            auto pass = cmd->raster.render_to(
+                {.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
+            CHECK(sr::slug_routine::execute(pass, atlas, buffer, first, count, {.object_to_clip = pixels_to_clip()})
+                  == sg::routine_outcome::executed);
+        }
+        ctx->submit_command_list(cc::move(cmd));
+        ctx->advance_epoch();
+        co_await ctx->idle_completion();
+
+        auto read = ctx->create_command_list();
+        auto const future = read->download.bytes_from_texture(target.raw());
+        ctx->submit_command_list(cc::move(read));
+        auto const bytes = co_await future.bytes();
+        co_return bytes;
+    }
+
     /// Draws every instance once, cleared to black, and reads the target back.
     [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> draw(cc::optional<f32> depth_clear = {})
     {
@@ -135,12 +163,13 @@ sr::slug_shape_ref add(slug_fixture& f, sr::slug_outline const& outline, tg::pos
 }
 
 /// The reference coverage of pixel (x, y) under instance `i`, sampled at the pixel's centre.
-[[nodiscard]] f32 expected_at(slug_fixture const& f, isize i, int x, int y, f32 em_scale, tg::pos2f origin, f32 scale)
+[[nodiscard]] f32
+expected_at(slug_fixture const& f, isize i, int x, int y, sr::slug_shape_ref const& ref, tg::pos2f origin, f32 scale)
 {
-    auto const ox = (f32(x) + 0.5f - origin[0]) / scale;
-    auto const oy = (origin[1] - (f32(y) + 0.5f)) / scale;
-    auto const per_pixel = em_scale / scale;
-    return sr::impl::slug_reference_coverage(f.atlas, f.instances[i], tg::pos2f(ox * em_scale, oy * em_scale),
+    auto const ox = (f32(x) + 0.5f - origin[0]) / scale - ref.stored_origin[0];
+    auto const oy = (origin[1] - (f32(y) + 0.5f)) / scale - ref.stored_origin[1];
+    auto const per_pixel = ref.em_scale / scale;
+    return sr::impl::slug_reference_coverage(f.atlas, f.instances[i], tg::pos2f(ox * ref.em_scale, oy * ref.em_scale),
                                              tg::vec2f(per_pixel, per_pixel), false);
 }
 } // namespace
@@ -155,9 +184,9 @@ ASYNC_INVOCABLE_TEST("sr::slug_routine - every pixel matches the CPU reference o
     // a rectangle with a sub-pixel offset, and an even-odd ring, side by side
     auto const rect_origin = tg::pos2f(8.3f, 60.6f);
     auto const ring_origin = tg::pos2f(90.0f, 64.0f);
-    auto const s0
-        = add(*f, sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(40, 30))), rect_origin, 1.0f).em_scale;
-    auto const s1 = add(*f, ring(), ring_origin, 1.5f).em_scale;
+    auto const r0
+        = add(*f, sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(40, 30))), rect_origin, 1.0f);
+    auto const r1 = add(*f, ring(), ring_origin, 1.5f);
 
     auto const pixels = co_await f->draw();
     REQUIRE(pixels.size() == isize(target_size) * target_size * 8);
@@ -167,8 +196,8 @@ ASYNC_INVOCABLE_TEST("sr::slug_routine - every pixel matches the CPU reference o
         for (auto x = 0; x < target_size; ++x)
         {
             // the two shapes never overlap, so a pixel's expected value is the larger of the two
-            auto const expected = cc::max(expected_at(*f, 0, x, y, s0, rect_origin, 1.0f),
-                                          expected_at(*f, 1, x, y, s1, ring_origin, 1.5f));
+            auto const expected = cc::max(expected_at(*f, 0, x, y, r0, rect_origin, 1.0f),
+                                          expected_at(*f, 1, x, y, r1, ring_origin, 1.5f));
             worst = cc::max(worst, tg::abs(red_at(pixels, x, y) - expected));
         }
     // half-float output and per-target rounding, nothing more
@@ -194,4 +223,22 @@ ASYNC_INVOCABLE_TEST("sr::slug_routine - a scope with depth tests against it and
 
     auto const blocked = co_await f->draw(0.25f);
     CHECK(red_at(blocked, 60, 60) < 0.01f);
+}
+
+ASYNC_INVOCABLE_TEST("sr::slug_routine - a retained draw covers its sub-range of a persistent buffer and nothing else",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    auto const f = make_fixture(ctx);
+    auto const square = sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(20, 20)));
+    for (auto const x : {10.0f, 50.0f, 90.0f})
+        (void)add(*f, square, tg::pos2f(x, 80), 1.0f);
+    auto const buffer = ctx->persistent.create_buffer_from_data(f->instances, sg::buffer_usage::vertex_buffer);
+
+    // the middle square alone: the ones before and after it in the buffer stay black
+    auto const pixels = co_await f->draw_range(buffer, 1, 1);
+    CHECK(red_at(pixels, 60, 70) > 0.99f);
+    CHECK(red_at(pixels, 20, 70) < 0.01f);
+    CHECK(red_at(pixels, 100, 70) < 0.01f);
 }

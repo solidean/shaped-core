@@ -37,7 +37,9 @@ sr::slug_font            shaped-rendering  a face's glyphs compiled on demand, a
 Implied on-curve midpoints, composite resolution and every other curve-building step belong to `sr::slug_outline_of`.
 
 **Compilation rounds before it bands.**
-Points are scaled by a power of two so the largest coordinate lands at or below 2048, where a half float holds every integer, then rounded to half floats.
+Points are moved so the outline's bounds are centred on (0, 0), and that centre is kept as `stored_origin`, which an instance folds back into its origin.
+Centring is what makes precision follow a shape's size rather than its distance from the origin: a 3-unit square at (10000, 10000) compiles as well as one at (0, 0).
+They are then scaled by a power of two so the largest half-extent lands at or below 2048, where a half float holds every integer, and rounded to half floats.
 The bands are built from the rounded points, so the sort the shader's early exit relies on is a sort of exactly what the GPU reads.
 The compiler also follows the reference's recommendations:
 
@@ -73,6 +75,8 @@ SGL has no preprocessor, and both are a branch after the curve loops, uniform wi
 
 The coverage is SGL module `slug` (`shaders/modules/slug.sgl`) rather than part of the routine's shader, so a mesh's own pixel shader can draw a shape as part of its surface.
 The mesh's vertices carry an em coordinate like a UV, and the pixel shader asks the module for the coverage at it.
+That coordinate is in the shape's stored space, the space of `sr::slug_shape_ref::em_bounds`, not outline units.
+The shape's `glyph` argument is `sr::slug_shape_ref::glyph()`, the reference's packed `int4`.
 
 ```sgl sketch
 use slug

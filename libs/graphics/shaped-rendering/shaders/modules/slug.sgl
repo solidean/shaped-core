@@ -81,7 +81,9 @@ fun combine(xcov: float, ycov: float, xwgt: float, ywgt: float, even_odd: bool, 
         true => sqrt(filled)
         false => filled
 
-/// The coverage of the shape `glyph` names, at `em` in the shape's own space, 0 outside it and 1 inside.
+/// The coverage of the shape `glyph` names, at `em`, 0 outside it and 1 inside.
+/// `em` is in the shape's stored space, the space of `sr::slug_shape_ref::em_bounds`, not outline units.
+/// `glyph` is `sr::slug_shape_ref::glyph()`.
 /// `em_per_pixel` is how much em space one pixel spans along each axis: what a raster caller takes from derivatives and a
 /// traced one from its ray's footprint.
 /// `banding` is the shape's band scale in xy and band offset in zw.
@@ -140,6 +142,7 @@ fun coverage(em: float2, em_per_pixel: float2, banding: float4, glyph: int4, wei
     return combine(xcov, ycov, xwgt, ywgt, (glyph.w & 0x1000) != 0, weight_boost)
 
 /// The raster form: one pixel's em span is the em coordinate's change across the pixel, which `ddx` and `ddy` give.
+/// `em` is in stored space, as for the form above.
 /// So it must be called in uniform control flow, as every derivative must.
 fun coverage(em: float2, banding: float4, glyph: int4, weight_boost: bool){tables} -> float:
     let em_per_pixel = abs(ddx(em)) + abs(ddy(em))

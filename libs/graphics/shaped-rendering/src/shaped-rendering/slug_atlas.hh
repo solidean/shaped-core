@@ -28,6 +28,17 @@ struct sr::slug_shape_ref
     /// Stored units per outline unit.
     f32 em_scale = 1.0f;
 
+    /// The outline point stored (0, 0) sits at, in outline units.
+    tg::pos2f stored_origin = tg::pos2f(0, 0);
+
+    /// The packed shape data module `slug`'s `coverage` takes as its `glyph` argument:
+    /// the band header's x and y, the last vertical band, and the last horizontal band with the flags above it.
+    [[nodiscard]] tg::vec4i glyph() const
+    {
+        return tg::vec4i(i32(glyph_location & 0xffff), i32(glyph_location >> 16), i32(band_info & 0xffff),
+                         i32(band_info >> 16));
+    }
+
     /// False for an empty shape — a space — which the caller skips rather than make an instance of.
     bool is_drawable = false;
 };

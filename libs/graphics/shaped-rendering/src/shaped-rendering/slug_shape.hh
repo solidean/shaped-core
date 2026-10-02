@@ -74,8 +74,10 @@ private:
 
 /// An outline compiled into Slug's two tables, ready for an atlas to place.
 ///
-/// Coordinates are stored as half floats in a *stored space*: the outline's units scaled by `em_scale`, a power of two
-/// chosen so the largest coordinate lands at or below 2048, where every integer is exact.
+/// Coordinates are stored as half floats in a *stored space*: the outline's units less `stored_origin`, its bounds' centre,
+/// scaled by `em_scale`.
+/// The scale is a power of two chosen so the largest half-extent lands at or below 2048, where every integer is exact.
+/// Centring is what makes precision follow a shape's size, not its distance from (0, 0).
 /// The bands are built from the rounded points, so they sort exactly what the GPU reads.
 struct sr::slug_compiled_shape
 {
@@ -97,6 +99,9 @@ struct sr::slug_compiled_shape
 
     /// Stored units per outline unit, a power of two.
     f32 em_scale = 1.0f;
+
+    /// The outline point stored (0, 0) sits at, in outline units.
+    tg::pos2f stored_origin = tg::pos2f(0, 0);
 
     /// Band scale in xy and offset in zw: a stored-space position times the scale plus the offset is its band index.
     tg::vec4f banding;

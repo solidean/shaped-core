@@ -377,14 +377,27 @@ slug_compiled_shape compile_slug_shape(slug_outline const& outline)
     auto out = slug_compiled_shape();
     out.fill_rule = outline.fill_rule;
 
-    auto largest = 0.0f;
-    for (auto const& c : outline.curves)
-        for (auto const& p : {c.p1, c.p2, c.p3})
-            largest = cc::max(largest, cc::max(tg::abs(p[0]), tg::abs(p[1])));
-    if (largest == 0.0f)
+    if (outline.curves.empty())
         return out;
 
-    // A power of two, so the scaling itself is exact, bringing the largest coordinate into (1024, 2048].
+    // Stored space is centred on the outline, so precision follows the shape's size rather than its distance from (0, 0).
+    auto outline_lo = outline.curves[0].p1;
+    auto outline_hi = outline.curves[0].p1;
+    for (auto const& c : outline.curves)
+    {
+        for (auto const& p : {c.p1, c.p2, c.p3})
+        {
+            outline_lo = tg::pos2f(cc::min(outline_lo[0], p[0]), cc::min(outline_lo[1], p[1]));
+            outline_hi = tg::pos2f(cc::max(outline_hi[0], p[0]), cc::max(outline_hi[1], p[1]));
+        }
+    }
+    auto const centre = tg::pos2f((outline_lo[0] + outline_hi[0]) * 0.5f, (outline_lo[1] + outline_hi[1]) * 0.5f);
+    auto const largest = cc::max(outline_hi[0] - centre[0], outline_hi[1] - centre[1]);
+    if (largest == 0.0f)
+        return out;
+    out.stored_origin = centre;
+
+    // A power of two, so the scaling itself is exact, bringing the largest half-extent into (1024, 2048].
     auto scale = 1.0f;
     while (largest * scale > exact_half_range)
         scale *= 0.5f;
@@ -392,7 +405,8 @@ slug_compiled_shape compile_slug_shape(slug_outline const& outline)
         scale *= 2.0f;
     out.em_scale = scale;
 
-    auto const store = [&](tg::pos2f p) { return tg::pos2f(rounded(p[0] * scale), rounded(p[1] * scale)); };
+    auto const store = [&](tg::pos2f p)
+    { return tg::pos2f(rounded((p[0] - centre[0]) * scale), rounded((p[1] - centre[1]) * scale)); };
 
     // Curves in rounded form; a curve that collapsed to a point covers nothing and is dropped.
     auto curves = cc::vector<stored_curve>();
