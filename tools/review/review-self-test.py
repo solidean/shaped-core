@@ -2509,6 +2509,47 @@ def test_an_ask_answered_only_in_the_text_box_is_answered(root: Path) -> None:
     assert row["answered"] == 1, f"the nav counts the text-only answer as missing: {row}"
 
 
+def test_an_empty_changes_heading_or_discharges_is_refused(root: Path) -> None:
+    """Both parse, and both are what a script writes when the command feeding it ids failed.
+
+    The entry then reads as covering an area, and coverage silently counts nothing for it.
+    A bare `discharges:` is no attribute at all, so it would end the prelude as a sentence instead.
+    """
+    front = "---\nid: {n}\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhat, and the options.\n\n"
+    ask = "## ask  which\n{line}\n\nWhich way?\n\n- radio: this\n"
+    run = design_review(root, {
+        "010-heading": front.format(n="010") + "## changes  \nshow: collapsed\n\n" + ask.format(line="discharges: X-1"),
+        "020-spaced": front.format(n="020") + ask.format(line="discharges:   "),
+        "030-bare": front.format(n="030") + ask.format(line="discharges:"),
+        "040-fine": front.format(n="040") + "## changes  X-1\nshow: collapsed\n\n" + ask.format(line="discharges: X-1"),
+    })
+    code, out = run("validate", "d")
+    assert code != 0, out
+    assert "010-heading:11: a `changes` heading names no change id" in out, out
+    assert "020-spaced:12: a `discharges:` line names no change id" in out, out
+    assert "030-bare:12: a `discharges:` line names no change id" in out, out
+    assert "040-fine" not in out, out
+
+
+def test_a_stray_carriage_return_does_not_end_a_line(root: Path) -> None:
+    """`ids=$(review changes --ids | tr '\\n' ' ')` keeps the `\\r` of a CRLF tool's last line, mid-line.
+
+    `str.splitlines` ends a line there, which split a `## changes` heading from its `show:` below.
+    The heading's length was never the cause, so a long one is held to parse as well.
+    """
+    ids = [f"CHANGE-{i:05d}" for i in range(500)]
+    for joined in (" ".join(ids[:48]) + "\r ", " ".join(ids)):
+        text = (f"---\nid: 1\ntitle: t\n---\n\n## changes  {joined}\nshow: collapsed\n\n"
+                f"## ask  which\ndischarges: {joined}\n\nWhich way?\n\n- radio: this\n")
+        entry = parse_text(text, Path("x.md"))
+        changes, which = entry.blocks
+        assert changes.attrs.get("show") == "collapsed", changes.attrs
+        expected = joined.split()
+        assert changes.change_ids == expected and which.discharges == expected
+        assert which.line == 9, f"a stray `\\r` must not shift the line numbers after it: {which.line}"
+    assert stamp_rounds(entry, 1).count("round: 1") == 2, "the splice offsets must agree with the parse"
+
+
 def test_an_addresses_naming_no_comment_of_its_entry_is_refused(root: Path) -> None:
     """`addresses: c1` on an entry that has no `c1` satisfies nothing and misleads the reader of the thread.
 

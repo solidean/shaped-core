@@ -38,6 +38,10 @@ Should the completion signal split per resource?
 Blocks do not nest and are not fenced.
 So an agent writing one cannot leave the file unbalanced; the worst it can do is name a type that does not exist, and that is an error with a line number.
 
+**A line ends at `\n` alone.**
+A stray `\r` inside a line, which a shell join of a CRLF tool's output leaves behind, is a character of that line and never a break.
+A heading or a `discharges:` line holds any number of change ids.
+
 ## Front matter
 
 `id` and `title` are required.
@@ -350,6 +354,8 @@ One entry can therefore carry five questions discharging five different change s
 
 - The **name** is the answer key, unique within the entry, lowercase with dashes.
 - `discharges:` lists the change ids this question accounts for.
+  `validate` refuses one naming none, and a `## changes` heading naming none, with the line.
+  Both are what a script writes when the command feeding it ids failed, and coverage would silently count nothing for them.
 - `follows:` names the earlier ask this is a follow-up to.
 - Option lines are `- radio:`, `- check:` or `- rank:`; a trailing `(recommended)` is recognised and shown as a badge.
 - **An option label is markdown**, rendered the way a `prose` block is, and its references resolve like any other.
