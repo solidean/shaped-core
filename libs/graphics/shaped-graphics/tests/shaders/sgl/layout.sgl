@@ -51,12 +51,13 @@ binding stretch:
     weights: float4
     count: uint
 
-// A group's block follows the same rule: `dir` at 4 and `after` at 16.
+// A group's block follows the same rule: `dir` at 4, `after` at 16 and `to_world` at 20, column by column as tg holds it.
 @layout(.cpp)
 binding host_echo:
     gain: float
     dir: float3
     after: float
+    to_world: mat4
     values: mut buffer[float]
 
 @compute(1) fun echo(){host_echo, host_params}:
@@ -78,3 +79,45 @@ binding host_echo:
     host_echo.values[14] = host_echo.dir.y
     host_echo.values[15] = host_echo.dir.z
     host_echo.values[16] = host_echo.after
+    // a matrix times a unit vector is that column
+    let c0 = host_echo.to_world * float4(1.0, 0.0, 0.0, 0.0)
+    let c1 = host_echo.to_world * float4(0.0, 1.0, 0.0, 0.0)
+    let c2 = host_echo.to_world * float4(0.0, 0.0, 1.0, 0.0)
+    let c3 = host_echo.to_world * float4(0.0, 0.0, 0.0, 1.0)
+    host_echo.values[17] = c0.x
+    host_echo.values[18] = c0.y
+    host_echo.values[19] = c0.z
+    host_echo.values[20] = c0.w
+    host_echo.values[21] = c1.x
+    host_echo.values[22] = c1.y
+    host_echo.values[23] = c1.z
+    host_echo.values[24] = c1.w
+    host_echo.values[25] = c2.x
+    host_echo.values[26] = c2.y
+    host_echo.values[27] = c2.z
+    host_echo.values[28] = c2.w
+    host_echo.values[29] = c3.x
+    host_echo.values[30] = c3.y
+    host_echo.values[31] = c3.z
+    host_echo.values[32] = c3.w
+
+// 16-bit members pack at 2 bytes, as tg's do: `h` at 4, `tint` at 6, `count` at 12 and `after` at 16, 20 bytes in all.
+// A group's block, since an @inline binding holds no 16-bit value.
+@layout(.cpp)
+binding host_halves:
+    require shader_f16, shader_int16
+    gain: float
+    h: half
+    tint: half3
+    count: ushort
+    after: float
+    values: mut buffer[float]
+
+@compute(1) fun echo_halves(){host_halves}:
+    host_halves.values[0] = host_halves.gain
+    host_halves.values[1] = host_halves.h as float
+    host_halves.values[2] = host_halves.tint.x as float
+    host_halves.values[3] = host_halves.tint.y as float
+    host_halves.values[4] = host_halves.tint.z as float
+    host_halves.values[5] = (host_halves.count as uint) as float
+    host_halves.values[6] = host_halves.after
