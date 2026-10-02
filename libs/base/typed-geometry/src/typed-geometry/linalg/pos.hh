@@ -109,6 +109,35 @@ public:
         return t.transform(*this);
     }
 
+    // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
+public:
+    template <class Obj>
+    [[nodiscard]] constexpr auto project_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_points_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_point_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_sqr_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto signed_distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto contains(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto separation_from(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersection_with(Obj const& obj) const;
+
     // comparison
 public:
     [[nodiscard]] friend constexpr bool operator==(pos const&, pos const&) = default;

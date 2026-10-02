@@ -11,6 +11,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
 #include <shaped-graphics/raster/vertex_input.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh> // slib::shader_option
 #include <shaped-shader-library/fwd.hh>
 
 /// A pipeline an SGL `pipeline` declaration states, as slib describes it.
@@ -117,10 +118,12 @@ namespace slib
 /// configuration that went with them, so the host's code still fits what it draws with.
 /// A source whose frozen part moved before it was ever described on `ctx` has nothing to keep, and fails.
 /// `latest` builds the newest stages and settings instead, frozen part and all, for a host that follows a reload itself.
+/// `options` are the values of the source's options, handed to every stage, each of which keys on those it reaches.
 [[nodiscard]] cc::shared_async<sg::raster_pipeline_description> describe_raster_pipeline(
     sg::context* ctx,
     pipeline_definition const* definition,
     cc::vector<open_part> open,
     sg::raster_pipeline_customize customize,
-    bool latest = false);
+    bool latest = false,
+    cc::vector<shader_option> options = {});
 } // namespace slib

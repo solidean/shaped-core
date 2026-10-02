@@ -340,6 +340,20 @@ The checking goes elsewhere: the interpreter reports the program error in a `tes
 A construct that is missing on some target is lowered or feature-gated, never left target-dependent; this rule covers only a value no program should produce.
 Price a defined-everywhere option by what every correct program pays for it, not by what it buys the rare incorrect one.
 
+### A robustness branch is priced against the operation it follows
+
+The shader rule above is about values no correct program produces; CPU geometry gets the opposite answer for input correct programs produce all the time.
+tg's kernels assume special cases away, and a review proposed drawing the line by whether an arbitrarily small perturbation can flip the answer.
+That rule was rejected, because a ray along x against the plane `z = 5` flips too, as soon as the direction or the normal moves:
+
+```raw
+whenever we do a division, we're already committed to 10+ cycles. so a well predicted branch afterwards to improve robustness is quite the good bang for buck
+```
+
+The input that decides it is the **exactly** zero denominator, which "happens more often than you might think simply because unit basis vectors are quite common".
+And a NaN from a distance whose answer is well-defined — a ball's center to its surface — is a defect under any rule, not a special case.
+Price a proposed guard by what it costs next to the arithmetic already on that path, and by how often real input is exactly degenerate, not by a stability argument.
+
 ### A check that costs every dispatch or draw is opt-in
 
 A validation that runs per operation on a hot path is never on by default, whatever it protects against.
@@ -642,6 +656,9 @@ The shapes this takes, each seen at least once:
   The push only enqueued each dependent on a scheduler.
   So the deadlock hazard, the "continuations must not block" rule and a per-context guard were all recommended against code that could not reach them.
   The maintainer's question — "is this something user code commonly needs to abide to" — is what sent the review to `route_after_schedule`, one grep the draft had skipped.
+- **A bug filed against the review tool is a mechanism claim too.** "A `changes` heading of 48 ids is refused, 47 pass" was filed as a length limit.
+  The cause was a stray `\r` that the reviewer's own shell pipeline left after the last id, and cutting to 47 ids had simply dropped it.
+  Bisect the input, not just its size, before naming a limit.
 - **Look for the configuration that makes the race deterministic before writing the item.** A `singlethreaded-*` preset removes exactly the concurrency a one-run finding depends on.
   Two minutes there convert "I saw it once" into a named mechanism.
 
@@ -737,6 +754,10 @@ One draft said a fix counted "a callee's asserts" when it counted every assert o
 It also said a doc "no longer" described something that three of its lines still partly did.
 A comment grouped by area drifts a second way: a change lands under the commit its area came from rather than the one that made it.
 Another draft credited a call-stack fix to the metal commit beside it, and credited "88 ms to 2.9 ms" to the last of the two commits that made it.
+**A fix's before-state is claimed per input, from the before-code.**
+A fix that touched several sibling kernels is summarised as if each had shown the failure the probe found in one.
+A comment said a ray, line, segment, triangle or quad parallel to a plane "used to hit at infinity".
+Only the ray and line did; a segment's range and a triangle's barycentrics rejected the infinite parameter.
 **A number that spans commits names every commit it spans.**
 **Read the diff of each commit while writing its bullet, and name every hunk a reader will see.**
 A sort comparator, a `nan` spelling or a nested-test case left out of the comment is a hunk the author cannot account for.

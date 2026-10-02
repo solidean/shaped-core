@@ -202,6 +202,9 @@ enum class sgl::check::stage_input : sgl::u8
     /// A ray-tracing stage's launch index, and the size of the launch (CHK-327).
     launch_id,
     launch_size,
+    /// How many invocations the subgroup holds, and this one's index in it (CHK-271).
+    subgroup_size,
+    subgroup_invocation_id,
 };
 
 /// What the checker knows of one stage input: the attribute, the stage that has it, its type and the feature it needs.
@@ -211,12 +214,14 @@ struct sgl::check::stage_input_info
     /// The attribute without its `@`, which is also the input's name in a diagnostic.
     cc::string_view name;
     stage in_stage = stage::none;
-    /// The other stages that have it, each without a feature: a `stage_bit` mask.
+    /// The other stages that have it, each without a feature unless `needs_feature_everywhere`: a `stage_bit` mask.
     u16 also_in = 0;
     /// The name of its builtin type.
     cc::string_view type;
     /// -1 for an input every device has; otherwise a `feature` (check/features.hh).
     i32 feature = -1;
+    /// The feature is needed in the stages of `also_in` too, not in `in_stage` alone (CHK-272).
+    bool needs_feature_everywhere = false;
 };
 
 namespace sgl::check
@@ -243,6 +248,8 @@ struct sgl::check::type_info
     stage edge = stage::none;
     /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.
     bool is_no_padding = false;
+    /// `@swizzle`: every two to four of its one-letter fields read at once, `v.zyx`, as a plain vector (CHK-384).
+    bool has_swizzles = false;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
@@ -256,6 +263,8 @@ struct sgl::check::type_info
     /// A position in `k_image_formats` for an `image`; -1 for every other kind.
     i32 format = -1;
     access_mode access = access_mode::read;
+    /// An `@atomic` image: each texel is an atomic, which a subscript reaches and only an atomic's methods touch (CHK-372).
+    bool is_atomic = false;
     /// A `sampler` that compares.
     bool is_comparison = false;
     /// How a resource type is written, `out image_2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
@@ -331,6 +340,8 @@ struct sgl::check::member_info
     bool is_unfilterable = false;
     /// Carries `@non_filtering`: a sampler that never filters.
     bool is_non_filtering = false;
+    /// Carries `@coherent`: a `mut` buffer or image whose writes reach every workgroup of the dispatch (CHK-368).
+    bool is_coherent = false;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
     i32 static_sampler = -1;
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
@@ -450,8 +461,29 @@ struct sgl::check::constant_info
     f64 real = 0;
     /// A position in the `cases` of `type`, for an `enum_case`.
     i32 case_index = -1;
+    /// The `@option const` the value comes from, through any chain of consts naming it (CHK-353); `none` for a plain one.
+    symbol_id option = symbol_id::none;
 
     bool operator==(constant_info const&) const = default;
+};
+
+/// Where the source names an option, through a const naming it or directly: what an entry point's options are read from.
+struct sgl::check::option_use
+{
+    symbol_id option = symbol_id::none;
+    i32 file = 0;
+    source_span where;
+
+    bool operator==(option_use const&) const = default;
+};
+
+/// A value a compile gives an option, by the option's name, spelled as SGL spells it: `16`, `-3`, `true`, `.rgba16_float`.
+struct sgl::check::option_value
+{
+    cc::string name;
+    cc::string value;
+
+    bool operator==(option_value const&) const = default;
 };
 
 struct sgl::check::parameter
@@ -485,6 +517,8 @@ struct sgl::check::function_info
     stage entry_stage = stage::none;
     /// The grid a `@compute` entry point is dispatched in, from `@compute(x, y, z)`; 1 for an axis nobody wrote.
     i32 workgroup[3] = {1, 1, 1};
+    /// The subgroup size a `@compute` entry point asks for by `@preferred_subgroup_size(n)`; 0 where it asks none.
+    i32 preferred_subgroup_size = 0;
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
@@ -504,6 +538,17 @@ struct sgl::check::function_info
     constexpr bool operator==(function_info const&) const = default;
 };
 
+/// What a binding's `@layout` promises its constant block (CHK-369).
+enum class sgl::check::block_layout : sgl::u8
+{
+    /// No annotation: the compiler places the block, and promises nothing but the generated struct (EMIT-116).
+    unpromised,
+    /// `@layout(.hlsl)`: HLSL's constant-buffer packing in declaration order, never reordered (EMIT-153).
+    hlsl,
+    /// `@layout(.cpp)`: as a C++ compiler places a struct of the generated host types (EMIT-154).
+    cpp,
+};
+
 struct sgl::check::binding_info
 {
     symbol_id symbol = symbol_id::none;
@@ -513,6 +558,7 @@ struct sgl::check::binding_info
     bool is_workgroup = false;
     /// `@no_padding`: a gap before any member of its constant block is an error.
     bool is_no_padding = false;
+    block_layout layout = block_layout::unpromised;
     ast::range_of<member_info> members;
     /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
     feature_set declared;
@@ -647,6 +693,8 @@ enum class sgl::check::target_kind : sgl::u8
     receiver,
     /// On a `member`: an array's `length`, a constant (CHK-288).
     array_length,
+    /// On a `member`: a swizzle of the struct `symbol`, whose fields `index` packs (`swizzle::unpacked`, CHK-385).
+    swizzle,
     /// On a call: `T[N].filled(v)`, an array holding `v` in every element (CHK-289).
     array_filled,
     /// On a call: the prelude's `undefined()`, a value of the type the parameter it meets has, which nobody reads
@@ -664,6 +712,50 @@ struct sgl::check::target
     constexpr bool operator==(target const&) const = default;
 };
 
+/// The fields a swizzle reads, `v.zyx`: positions in its struct's `members`, in the order written (CHK-385).
+/// A `count` of one is a field; zero is no swizzle at all.
+struct sgl::check::swizzle
+{
+    i8 fields[4] = {};
+    i8 count = 0;
+
+    [[nodiscard]] constexpr bool has_repeats() const
+    {
+        for (auto i = 0; i < count; ++i)
+            for (auto j = 0; j < i; ++j)
+                if (fields[i] == fields[j])
+                    return true;
+        return false;
+    }
+
+    /// `inner.fields` read through this one: the swizzle of `v.zyx.yx` over `v`, which is `v.yz`.
+    [[nodiscard]] constexpr swizzle over(swizzle const& inner) const
+    {
+        auto result = swizzle{.count = count};
+        for (auto i = 0; i < count; ++i)
+            result.fields[i] = inner.fields[fields[i]];
+        return result;
+    }
+
+    /// As a `target::index` holds it: the count, then two bits per field.
+    [[nodiscard]] constexpr i32 packed() const
+    {
+        auto result = i32(count);
+        for (auto i = 0; i < count; ++i)
+            result |= i32(fields[i]) << (3 + 2 * i);
+        return result;
+    }
+    [[nodiscard]] static constexpr swizzle unpacked(i32 index)
+    {
+        auto result = swizzle{.count = i8(index & 7)};
+        for (auto i = 0; i < result.count; ++i)
+            result.fields[i] = i8((index >> (3 + 2 * i)) & 3);
+        return result;
+    }
+
+    constexpr bool operator==(swizzle const&) const = default;
+};
+
 /// `table[i](mut p)`: a call of callable `i` of a `callables` table (CHK-344).
 struct sgl::check::callable_call
 {
@@ -672,6 +764,20 @@ struct sgl::check::callable_call
     symbol_id table = symbol_id::none;
 
     constexpr bool operator==(callable_call const&) const = default;
+};
+
+/// `img[xy] = v` or `img[xy] op= v`: an assignment to an image's texel, which is a `store` of it (CHK-367).
+struct sgl::check::texel_store
+{
+    i32 file = 0;
+    /// The subscript the assignment names.
+    ast::expr_id place = ast::expr_id::none;
+    /// The `store`, whose value argument is the assignment's value; positions in `checked_module::call_records`.
+    i32 store = -1;
+    /// The `load` of a compound assignment, over the subscript's own arguments; -1 for a plain one.
+    i32 load = -1;
+
+    constexpr bool operator==(texel_store const&) const = default;
 };
 
 /// `trace(world, r, set.ray, mut payload)`: a trace of a ray-tracing pipeline's ray type (CHK-329).

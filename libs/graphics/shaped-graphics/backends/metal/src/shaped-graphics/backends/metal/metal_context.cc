@@ -159,6 +159,17 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::unaligned_block_compression:
         // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
         return false;
+    case sg::feature::shader_f16:
+    case sg::feature::shader_int16:
+    case sg::feature::subgroups:
+        // `half`, `short` and the SIMD-group and quad functions are on every Apple GPU, so nothing is probed.
+        return true;
+    case sg::feature::image_atomics:
+        // Inferred from the floor rather than probed: texture atomics need Apple7, below every Metal 4 device.
+        return true;
+    case sg::feature::device_coherence:
+        // Inferred from the floor rather than probed: `coherent(device)` is MSL 3.2, older than the macOS / iOS 26 floor.
+        return true;
     }
     return false;
 }

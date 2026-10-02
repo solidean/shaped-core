@@ -119,6 +119,7 @@ TEST("sgl emit - an exit out of an arm crosses the switch and takes a flag")
 TEST("sgl emit - a pattern that inlines a helper runs inside the branch that reaches it")
 {
     // EVAL-68: a pattern is evaluated only where it is reached, so the helper's body stands behind the first arm's test.
+    // The argument is no constant, or CHK-356 would leave only the side of the helper's `if` it takes.
     auto const wgsl = text_of("fun limit(x: float) -> float:\n"
                               "    if x > 1.0 => return 1.0\n"
                               "    return x\n"
@@ -126,7 +127,7 @@ TEST("sgl emit - a pattern that inlines a helper runs inside the branch that rea
                               "@pixel fun main_ps(p: pixel_input) -> frame:\n"
                               "    let v = case p.position.x:\n"
                               "        0.25 => 2.0\n"
-                              "        limit(0.5) => 1.0\n"
+                              "        limit(p.position.y) => 1.0\n"
                               "        _ => 0.0\n"
                               "    return {color = float4(v, v, v, 1.0)}\n",
                               target::wgsl);
@@ -143,7 +144,7 @@ TEST("sgl emit - a pattern that inlines a helper runs inside the branch that rea
                                                        "\n"
                                                        "@pixel fun main_ps(p: pixel_input) -> frame:\n"
                                                        "    let v = case p.position.x:\n"
-                                                       "        limit(0.5) => 1.0\n"
+                                                       "        limit(p.position.y) => 1.0\n"
                                                        "        _ => 0.0\n"
                                                        "    return {color = float4(v, v, v, 1.0)}\n",
                                                  0, t))

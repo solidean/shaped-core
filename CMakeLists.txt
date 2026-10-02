@@ -89,6 +89,11 @@ option(SC_MIMALLOC "Back the default memory resource with mimalloc; OFF uses the
 # The debug-nopch presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
 option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and preconditions at runtime" OFF)
 
+# Log a warning wherever a typed-geometry query meets an input it assumes away: parallel lines, a zero-length segment.
+# A warning rather than an assert, so a test can feed a special case on purpose and declare it; nexus fails the rest.
+# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug-nopch presets.
+option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-case assumptions at runtime" OFF)
+
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
 #

@@ -41,6 +41,10 @@ public:
     /// On a compile failure the node carries the Metal compiler's diagnostics, or this wrapper's, as an async error.
     [[nodiscard]] sg::async_compiled_shader compile(shader_description const& desc, compile_options const& options = {});
 
+    /// Whether this process found a Metal toolchain, so an `automatic` compile runs the metallib arm.
+    /// The source arm refuses a `language_version`, so a caller that sets one asks this first.
+    [[nodiscard]] bool has_toolchain() const;
+
     /// Runs bookkeeping (e.g. in-memory eviction) on all tiers.
     void apply_bookkeeping();
 

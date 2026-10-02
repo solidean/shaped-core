@@ -1,0 +1,58 @@
+// a branch on a constant is replaced by the side it takes, so the other side is in no text, no footprint and no verdict (CHK-356)
+
+// a literal argument stands for its parameter, so a helper called with a literal flag sheds the side it does not take
+fun scaled(x: float, .twice: bool) -> float:
+    if twice:
+        return x * 2.0
+    return x
+
+test scaled(1.5, twice = true) == 3.0 and scaled(1.5, twice = false) == 1.5
+
+// as a value too, and through an `else if`
+fun level(.coarse: bool, .fine: bool) => if coarse => 1 else if fine => 3 else 2
+
+test level(coarse = false, fine = true) == 3 and level(coarse = false, fine = false) == 2
+
+// a constant condition may be any constant: a const, a logical operator over constants, a comparison of literals
+const verbose = false
+
+test:
+    let mut runs = 0
+    if verbose or 1 > 2:
+        runs += 10
+    else:
+        runs += 1
+    runs == 1
+
+// a binding member read only in the side a constant leaves is not touched at all
+binding frame:
+    near: buffer[float]
+    far: buffer[float]
+    values: mut buffer[float]
+
+fun sample_depth(i: int, .from_far: bool){frame} -> float:
+    if from_far:
+        return frame.far[i]
+    return frame.near[i]
+
+@expect(footprint = "frame.near: read, frame.values: write")
+@compute(64) fun copy_near(@thread_id id: int3){frame}:
+    frame.values[id.x] = sample_depth(id.x, from_far = false)
+
+// a derivative under a branch on a varying value is refused, unless a constant removed the branch around it
+struct surface:
+    @position position: hpos4
+    shade: float
+
+@pixel struct target:
+    color: float4
+
+fun edge(v: float, .sharpen: bool) -> float:
+    if sharpen:
+        if v > 0.5:
+            return ddx(v)
+    return v
+
+@pixel fun soft_ps(s: surface) -> target:
+    let c = edge(s.shade, sharpen = false)
+    return target(float4(c, c, c, 1.0))

@@ -17,7 +17,7 @@ Call it through the thin wrappers over it: `tg::traits::has_sqrt<T>`, the free `
 - Add a scalar operation by extending `scalar_traits<T>` with a capability flag plus the operation, then a thin `tg::` free function and `tg::traits::` alias over it.
   Mirror the existing `has_sqrt` / `tg::sqrt` pair.
 - **Capability-gate** with `requires(tg::traits::has_*<T>)`, never by hard-coding floating-point.
-  `length()` / `normalized()` / `distance()` require `has_sqrt<T>`; `length_sqr()` / `distance_sqr()` work for every scalar.
+  `length()` / `normalized()` / `distance_to()` require `has_sqrt<T>`; `length_sqr()` / `distance_sqr_to()` work for every scalar.
 - `<cmath>` is permitted inside the `scalar_traits` specializations and nowhere else.
   clean-core forbids it outright; tg does not, because the specializations are where the platform math has to enter.
 
@@ -146,6 +146,17 @@ Use `tg::traits::is_zero(...)` for the degeneracy test, never `== 0`, so exotic 
 This is a judgement call per operation, not a blanket waiver.
 Keep asserting on genuine programmer errors: an out-of-range `operator[]`, a wrong-size initializer list.
 
+**Geometric queries never assert on their data at all.**
+They assume special cases away — collinear lines, a zero-length segment, a ray in a triangle's plane — and return whatever the formula gives there, `inf` and `NaN` included.
+Ordinary arithmetic already produces non-finite values once inputs are large enough, so guarding against them is the caller's job at its own boundaries.
+Building with `SC_CHECK_GEOMETRY_SPECIAL_CASES` makes each such assumption log a warning, which a nexus test turns into a failure unless it declared it.
+
+**An exact zero after a division is not a special case to assume away.**
+Unit basis vectors make exact zeros common: an axis-aligned ray against an axis-aligned plane divides by exactly zero.
+The division already costs more than a well-predicted branch on `tg::traits::is_zero(denom)` right after it, so that branch is worth its cost when it gives the correct answer.
+`TG_SPECIAL_CASE` then marks only the sub-case with no single answer, such as a line lying in the plane, and its condition is narrowed to exactly that.
+A query that returns `NaN` where its answer is well-defined is a defect, not a special case — a ball's center is its radius from its surface.
+
 ## Semantic typing
 
 The point of tg is that the type system encodes geometry, so keep the distinctions meaningful.
@@ -156,6 +167,16 @@ Do not add an operator that blurs them — `pos * scalar` is not meaningful, and
 
 ## Members vs free functions (tg flavor)
 
-Same spirit as the global rule: intrinsic, local, discoverable operations are members (`v.length()`, `v.normalized()`, `ray.at(t)`).
-Symmetric, cross-type, heavy or extensible operations are free functions (`dot(a, b)`, `distance(a, b)`, `intersection(a, b)`).
-Free functions for a type live in `<type>_ops.hh`, separate from the type header.
+**Geometric queries are members, and only members**: `a.intersects(b)`, `p.distance_to(seg)`, `ray.intersection_parameter_with(s)`, `tri.area()`.
+There is no free `tg::distance(a, b)` beside them; one spelling per verb keeps generic code, docs and tests on one form.
+A free forwarder can be added later if a caller wants one, which is additive.
+
+The member *declarations* are written per type, by hand, in one commented block in the type's header.
+Reading a type's header shows exactly what it can be asked.
+The *definitions* live per verb, in `geometry/query/<verb>.hh`, as one short forwarding block per type into the verb's generic `tg::impl` function.
+Including a verb's header is what makes it callable; a member used without its header is "function with deduced return type cannot be used before it is defined".
+[plans/geometry-query-matrix.md](plans/geometry-query-matrix.md) has the dispatch behind those definitions.
+
+Unary queries that belong to one family — `aabb.centroid()`, `ray.at(t)`, `sphere.volume()` — are inline members in that family's header, with no generic derivation.
+
+Linear algebra keeps its free functions: `dot(a, b)`, `cross(a, b)` and the other `<type>_ops.hh` operations are not object queries.

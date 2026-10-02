@@ -129,6 +129,8 @@ struct sgl::check::checked_module
     cc::vector<pipeline_setting> pipeline_settings;
     /// The value of every `const` that checked.
     cc::vector<constant_info> constants;
+    /// Every place the program names an option, in the order the pass met them (CHK-355).
+    cc::vector<option_use> option_uses;
     /// How each resolved call fills its callee's parameters; `file_tables::call_of` points in here.
     cc::vector<call_record> call_records;
     cc::vector<written_argument> written_arguments;
@@ -139,6 +141,8 @@ struct sgl::check::checked_module
     cc::vector<ray_trace> ray_traces;
     /// Every call of a callable by its table's index (CHK-344).
     cc::vector<callable_call> callable_calls;
+    /// Every assignment to an image's texel (CHK-367).
+    cc::vector<texel_store> texel_stores;
 
     /// One entry per file checked: the prelude's, then the library files the program reaches, then the program's.
     cc::vector<file_tables> files;
@@ -181,6 +185,9 @@ struct sgl::check::checked_module
             return {};
         return file_modules[file];
     }
+    /// The name the program names `id` by from outside any scope: bare for the prelude's and its own module's, and
+    /// `m.name` for another module's (CHK-348), which is also how a compile sets a module's option (CHK-354).
+    [[nodiscard]] cc::string qualified_name_of(symbol_id id) const;
 
     [[nodiscard]] symbol const& at(symbol_id id) const { return symbols[index_of(id)]; }
     [[nodiscard]] type_info const& at(type_id id) const { return types[index_of(id)]; }
@@ -289,9 +296,10 @@ struct sgl::check::checked_module
             && is_equal(binding_lists, rhs.binding_lists) && is_equal(type_lists, rhs.type_lists)
             && is_equal(samplers, rhs.samplers) && is_equal(pipelines, rhs.pipelines)
             && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
-            && is_equal(call_records, rhs.call_records) && is_equal(written_arguments, rhs.written_arguments)
-            && is_equal(call_slots, rhs.call_slots) && is_equal(near_misses, rhs.near_misses)
-            && is_equal(ray_traces, rhs.ray_traces) && is_equal(callable_calls, rhs.callable_calls)
+            && is_equal(option_uses, rhs.option_uses) && is_equal(call_records, rhs.call_records)
+            && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
+            && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
+            && is_equal(callable_calls, rhs.callable_calls) && is_equal(texel_stores, rhs.texel_stores)
             && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;

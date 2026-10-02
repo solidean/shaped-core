@@ -76,6 +76,24 @@ struct slib::preprocessed_source
     cc::vector<cc::string> used_modules;
 };
 
+/// A value one compile gives an option of an SGL source, by the option's name, spelled as SGL spells it: `16`, `true`, `.rgba16_float`.
+/// Only SGL has options; every other compiler takes none.
+struct slib::shader_option
+{
+    cc::string name;
+    cc::string value;
+
+    [[nodiscard]] bool operator==(shader_option const&) const = default;
+};
+
+namespace slib
+{
+/// An option's value as a compile takes it, from the C++ type a generated options struct holds it as.
+[[nodiscard]] shader_option option_of(cc::string_view name, bool value);
+[[nodiscard]] shader_option option_of(cc::string_view name, int value);
+[[nodiscard]] shader_option option_of(cc::string_view name, sg::pixel_format value);
+} // namespace slib
+
 /// One shader to compile.
 /// `source` is the shader text — flattened once preprocess has run.
 struct slib::shader_source_description
@@ -86,9 +104,17 @@ struct slib::shader_source_description
     /// What a diagnostic calls the source: a virtual path, or the label of an ad-hoc compile; may be empty.
     /// Never opened, and no part of what a compile depends on.
     cc::string label;
+    /// The values SGL's `preprocess` writes the text with; what it writes is all a compile reads, so the cache keys on that.
+    cc::vector<shader_option> options;
     /// The module library an SGL source may `use`, which every other language ignores.
     /// A file of it whose path is `label` is the source itself, and is left out.
     cc::span<module_source const> modules;
+    /// Raw DXC flags this compile needs, which a DXC compiler appends and its cache keys on; every other compiler ignores them.
+    /// SGL's edge sets what its text needs, so a caller wiring a DXC compiler behind it passes nothing.
+    cc::vector<cc::string> dxc_args;
+    /// The oldest MSL version the text compiles at, as `-std=` spells it: "metal3.2"; empty takes the toolchain's default.
+    /// Only a metal compiler building a metallib reads it, since the source arm's driver compiles at the device's newest.
+    cc::string metal_language_version;
 };
 
 /// One compilation edge: `source_language` -> `target_format`.

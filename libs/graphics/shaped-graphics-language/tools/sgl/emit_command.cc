@@ -25,6 +25,7 @@ COMMAND("emit")
     auto entry = cc::string();
     auto target_name = cc::string("hlsl-dx12");
     auto run_tests = false;
+    auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args({.name = "sgl emit",
                           .description = "Compiles one entry point of an SGL file and prints the target text, "
@@ -33,6 +34,9 @@ COMMAND("emit")
     args.arg({"entry"}, entry, {.desc = "the entry point, by name", .metavar = "NAME", .required = true});
     args.arg({"target"}, target_name, {.desc = "hlsl-dx12, hlsl-vulkan, wgsl or msl", .metavar = "TARGET"});
     args.arg({"run-tests"}, run_tests, {.desc = "run the file's tests first, and write nothing where one fails"});
+    args.arg(
+        {"option"}, option_arguments,
+        {.desc = "give an option of the source a value, `--option tile=16`; repeat for each", .metavar = "NAME=VALUE"});
     args.arg({"module-dir"}, module_dirs,
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())
@@ -58,6 +62,13 @@ COMMAND("emit")
         return exit_usage;
     }
 
+    auto const options = sgl_tool::parse_options(option_arguments);
+    if (options.has_error())
+    {
+        cc::eprintln("sgl emit: an option is given as `name=value`, and '{}' is not", options.error());
+        return exit_usage;
+    }
+
     auto const source = sgl_tool::read_file(path);
     if (source.has_error())
     {
@@ -70,6 +81,7 @@ COMMAND("emit")
                                             .library = sgl_tool::files_but(library.value(), path),
                                             .entry_point = entry,
                                             .target = target,
+                                            .options = options.value(),
                                             .run_tests = run_tests});
     if (text.has_error())
     {

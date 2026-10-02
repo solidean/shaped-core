@@ -51,8 +51,14 @@ public:
     /// False for WGSL: `if c {`, `loop {`, and a `once` that is `loop { … break; }`.
     [[nodiscard]] virtual bool is_c_like() const = 0;
 
+    /// True where `v.zy = value;` assigns through a swizzle; WGSL assigns one component at a time (EMIT-143).
+    [[nodiscard]] virtual bool assigns_through_swizzles() const { return true; }
+
     /// A `discard` as a whole statement: `discard;`, or MSL's `discard_fragment();` (EMIT-117).
     [[nodiscard]] virtual cc::string_view discard_statement() const { return "discard;"; }
+
+    /// True where a thread sees its own earlier store to an image only after `img.fence();`, which is MSL (EMIT-151).
+    [[nodiscard]] virtual bool fences_image_stores() const { return false; }
 
     /// The head of a `for` over an int range, without the brace: `for (int i = 0; i < n; ++i)`.
     virtual void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const

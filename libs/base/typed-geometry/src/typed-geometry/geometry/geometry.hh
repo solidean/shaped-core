@@ -1,6 +1,7 @@
 #pragma once
 
-/// Curated geometry include: the object_traits seam and the geometric primitive types.
+/// Curated geometry include: the object_traits seam, the geometric primitive types and their queries.
 
 #include <typed-geometry/geometry/primitives/primitives.hh>
+#include <typed-geometry/geometry/query/query.hh>
 #include <typed-geometry/geometry/traits.hh>

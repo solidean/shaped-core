@@ -40,8 +40,9 @@ Add one when a module lands, and cover the big rationales there; the small ones 
   This is the living design document; update it as modules land.
 - [coding-guidelines](coding-guidelines.md) — tg-specific conventions on top of the repo-wide ones.
   Extend it whenever generic advice turns out not to fit tg.
-- [plans/geometry-query-matrix](plans/geometry-query-matrix.md) — the agreed shape of the future `geometry/query/` layer.
-  Kernels vs. derived verbs, a generic convex GJK floor, symmetry, and discoverability.
+- [plans/geometry-query-matrix](plans/geometry-query-matrix.md) — the `geometry/query/` layer: member verbs, the per-pair seam and its fallback ladder.
+  Also the GJK / EPA floor and the special-case policy.
+- [plans/old-tg-carryover](plans/old-tg-carryover.md) — the object roster in waves, the unary verbs, measures, parameters and sampling, and what of the old tg was left out.
 - [TODO](TODO.md) — running list of known follow-ups.
 - [cheat-sheet](../cheat-sheet.md) — the public API at a glance, one symbol per line.
 

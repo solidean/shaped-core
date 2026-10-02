@@ -40,6 +40,9 @@ Back to the [specification](_index.md).
 * "record" - one ray type's closest hit and any hit in a hit group; `()` is an empty one
 * "callables table" - `callables name = (…)`: callable shaders of one parameter type, called by index
 * "trace graph" - the ray types of a pipeline, with an edge where a ray type's miss or closest hit traces another; its longest chain is the depth
+* "subgroup" - the invocations the hardware runs in lockstep: a wave, a warp, a SIMD-group; not "wave" ([checking](semantics/checking.md#subgroups))
+* "quad" - four invocations of a subgroup: a pixel's 2x2 neighbourhood, or four consecutive invocations of a compute subgroup
+* "coherent" - a `@coherent` member, whose writes one workgroup publishes to the others of its dispatch ([bindings](bindings.md#coherent-memory))
 
 ## Syntax terms
 
@@ -123,6 +126,10 @@ Each term links to the rule that defines it.
 | **function type** | `(A, B) -> R`, the type of a parameter and of nothing else (CHK-317) |
 | **type parameter** | `A` of `fun f[A](…)` or `struct name[A]:`, opaque where it is declared and deduced at a call (CHK-338, CHK-340) |
 | **generic struct** | a struct over a type parameter, which only the prelude declares; `name[T]` is an **instance** of it (CHK-339) |
+| **swizzle** | `v.zyx`: several fields of a `@swizzle` struct read at once, as a plain vector, and a place where its letters are distinct (CHK-385, CHK-352) |
+| **plain vector families** | `float2` to `float4`, `int2` to `int4`, `uint2` to `uint4` and the 16-bit vectors, whose arithmetic is componentwise ([checking](semantics/checking.md#vectors)) |
+| **option** | a file-scope `@option const`, which the host sets for each compile; its written value is its default (CHK-353) |
+| **subgroup operation** | a `subgroup_*` or `quad_*` builtin, which exchanges values within a subgroup and stands only in uniform control flow (CHK-376, CHK-377) |
 | **pipeline** | shader stages and the configuration compiled into them ([pipelines.md](pipelines.md)) |
 | **frozen part** | what a host's own code is built against: a pipeline's binding layout, vertex input, target set, features, formats and sample count; no hot reload changes it |
 | **open part** | a format or a sample count a pipeline leaves to the host with `.host` (CHK-180) |

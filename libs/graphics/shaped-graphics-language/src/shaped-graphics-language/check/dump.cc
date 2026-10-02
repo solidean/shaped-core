@@ -200,14 +200,19 @@ struct dumper
                      {
                          out += "(member ";
                          dump_expr(e, member.object, indent);
-                         auto name = cc::string_view("?");
-                         if (is_valid(member.object) && index_of(member.object) < e.exprs.size())
+                         auto const fields = is_valid(member.object) && index_of(member.object) < e.exprs.size()
+                                               ? m.at(m.at(e.at(member.object).type).members)
+                                               : cc::span<member_info const>();
+                         auto const name_of = [&](i32 field)
+                         { return field >= 0 && field < fields.size() ? cc::string_view(fields[field].name) : "?"; };
+                         if (!member.is_swizzle())
                          {
-                             auto const fields = m.at(m.at(e.at(member.object).type).members);
-                             if (member.member >= 0 && member.member < fields.size())
-                                 name = fields[member.member].name;
+                             out.appendf(" {}", name_of(member.member));
+                             return;
                          }
-                         out.appendf(" {}", name);
+                         out += " ";
+                         for (auto i = 0; i < member.letters.count; ++i)
+                             out += name_of(member.letters.fields[i]);
                      },
                      [&](flat_construct const& c)
                      {

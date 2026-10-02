@@ -19,11 +19,27 @@ enum class number_class : u8
     plain_float,
     /// Decimal digits, or hexadecimal or binary ones behind `0x` or `0b`, and nothing else.
     plain_integer,
-    /// A suffix or a `p` exponent: spellings whose meaning needs literal types.
+    /// One of the two above with a suffix, which names its type (CHK-357): `1u`, `0.5f`, `7i32`.
+    suffixed,
+    /// A `p` exponent, or anything else that reads as no number of the ones above.
     other,
 };
 
 [[nodiscard]] number_class classify_number(cc::string_view text);
+
+/// A `suffixed` number taken apart.
+struct suffixed_number
+{
+    /// The number without its suffix, a `plain_integer` or a `plain_float`.
+    cc::string_view body;
+    /// `i`, `u` or `f`.
+    char letter = 0;
+    /// 32 where the suffix writes none.
+    i32 width = 32;
+};
+
+/// Nothing where `text` is no `suffixed` number.
+[[nodiscard]] cc::optional<suffixed_number> split_suffix(cc::string_view text);
 
 /// `text` must be a `plain_float`; nullopt when the value does not fit an f64.
 [[nodiscard]] cc::optional<f64> parse_plain_float(cc::string_view text);
@@ -316,6 +332,8 @@ struct checker
     cc::span<module_file const> files;
     builtins::registry const& builtins;
     checked_module out;
+    /// The values this compile gives the options, by the name each is set by (CHK-354).
+    cc::span<option_value const> options;
 
     /// How many of `files` are the prelude's; every other file is a module's.
     i32 prelude_count = 0;
@@ -367,6 +385,14 @@ struct checker
     ast::expr_id binding_index = ast::expr_id::none;
     /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-206).
     cc::vector<ast::expr_id> handed;
+    /// The place of the assignment `check_assign` is checking right now, and whether it is a compound one.
+    ast::expr_id assigned = ast::expr_id::none;
+    bool is_compound_assigned = false;
+    /// What `check_texel` left of a texel that is that place: the subscript's arguments, the image first, which the
+    /// assignment's `store` takes with its value; and the `load` a compound one reads with.
+    ast::expr_id texel_place = ast::expr_id::none;
+    call_arguments texel_arguments;
+    i32 texel_load = -1;
     /// Parallel to `out.tests`: what a test in a function body sees of that function, and the function.
     cc::vector<cc::vector<local_name>> test_captures;
     cc::vector<symbol_id> test_enclosing;
@@ -507,6 +533,17 @@ struct checker
     void compile_enum(symbol_id id);
     /// A `const`: its value is a number literal, an enum case or another `const`, and anything else is `unsupported-yet`.
     void compile_const(symbol_id id);
+    /// CHK-354: `info` as the compile's value for option `id` sets it, or as written where it sets none.
+    /// A value of another type than the option's is `invalid-option`, and leaves the default.
+    void apply_option_value(symbol_id id, constant_info& info);
+    /// CHK-354: a value for a name no option is set by, or for a name given twice, is `invalid-option`.
+    void judge_option_values();
+    /// Records that `where` of `file` names the option `c` comes from, if it comes from one (CHK-355).
+    void note_option(i32 file, source_span where, constant_info const& c);
+    /// CHK-355: the options named by `function`, every function it calls, the bindings it lists, and the structs any of
+    /// those name, in declaration order.
+    /// `also` is a further function the tree inlines without a call of the source, such as a fused any hit; or `none`.
+    [[nodiscard]] cc::vector<symbol_id> options_reached(symbol_id function, symbol_id also);
     /// A file-scope `sampler name:`: its settings, and the sampler type they make (CHK-314).
     void compile_file_sampler(symbol_id id);
     /// False where `attributes` hold `@shadowable(false)`; a malformed one is reported when its declaration is compiled.
@@ -532,6 +569,10 @@ struct checker
     [[nodiscard]] interpolation interpolation_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
+    /// `@preferred_subgroup_size(n)`'s `n` (CHK-371); 0 without the attribute, and after a bad one, which it reports.
+    [[nodiscard]] i32 preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute);
+    /// `@layout(.hlsl)` or `@layout(.cpp)` on a binding; anything else reports and promises nothing.
+    [[nodiscard]] block_layout layout_of(i32 file, ast::attribute const* a, bool is_workgroup);
     /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
     [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
     struct tessellation_mode
@@ -569,6 +610,9 @@ struct checker
                                                              bool is_workgroup = false);
     /// The bytes a value of `type` takes in workgroup memory, laid out as WGSL lays out its workgroup variables.
     [[nodiscard]] i32 workgroup_size_of(type_id type) const;
+    /// The bytes one element of a `buffer[type]` takes by EMIT-111, before any stride rounding: each value aligned to
+    /// its scalar's size, and a struct sized to its largest scalar.
+    [[nodiscard]] i32 storage_size_of(type_id type) const;
     /// A `@workgroup` binding, whose members a shader writes and a test holds without listing it (CHK-292).
     [[nodiscard]] bool is_workgroup_binding(symbol_id id) const
     {
@@ -602,9 +646,19 @@ struct checker
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
     /// `resolve_type` for the type of a value — a field, a parameter, a result, a local — where a buffer cannot stand.
     /// A buffer is a resource a binding member names, and is only ever read through a subscript.
-    [[nodiscard]] type_id resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
+    /// `allows_resource` takes a texture, an image or a sampler, as a parameter of a function of the program (CHK-366).
+    [[nodiscard]] type_id resolve_value_type(i32 file,
+                                             ast::expr_id expr,
+                                             function_scope const* scope = nullptr,
+                                             bool allows_resource = false);
     /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
+    /// The name of the plain vector of `count` values of `element`, `float3`; empty for an element without vectors.
+    [[nodiscard]] cc::string vector_name_of(type_id element, isize count) const;
+    /// The swizzle `name` is of a value of `object`, a count of zero where it is none (CHK-385).
+    [[nodiscard]] swizzle swizzle_of(type_id object, cc::string_view name) const;
+    /// What an unknown member of a `@swizzle` struct says about its letters; empty for any other type.
+    [[nodiscard]] cc::string why_no_swizzle(type_id object, cc::string_view name) const;
     /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
@@ -651,7 +705,13 @@ struct checker
     /// where the call names none (CHK-279).
     void judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments);
     /// CHK-280: a texel offset and a gather's component are constants, and a compare's level is the literal 0.0.
+    /// CHK-378: so is a subgroup operation's lane.
     void judge_constant_arguments(i32 file, ast::expr_id id);
+    /// CHK-374: false, having reported, where `candidates` are the uniform load's and its argument is no member of
+    /// workgroup memory; true for every other call, which overload resolution goes on to judge.
+    [[nodiscard]] bool judge_uniform_load(i32 file,
+                                          cc::span<symbol_id const> candidates,
+                                          ast::range_of<ast::argument> arguments);
     void judge_offset_range(i32 file, ast::expr_id expr);
     void index_builtin_symbols();
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
@@ -675,6 +735,14 @@ struct checker
     feature_set read_require(i32 file, ast::require_decl const& r, require_scope scope, symbol_id owner);
     /// Records which features entry point `id` needs and reports every one it does not declare (CHK-263, CHK-264).
     void judge_entry_features(symbol_id id);
+    /// What a value of `type` needs of a device: its builtin's, or what any member or element holds (CHK-382).
+    /// A resource holds its element, so `buffer[half]` needs what `half` needs; a texture holds nothing.
+    [[nodiscard]] feature_set features_of_type(type_id type) const;
+    /// The path from `type` down to the first 16-bit value it holds, through struct members, as `.inner.gain: half`.
+    /// Empty when it holds none.
+    [[nodiscard]] cc::string sixteen_bit_path(type_id type) const;
+    /// CHK-383: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
+    void judge_edge_16_bit(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).
@@ -726,6 +794,9 @@ struct checker
     /// What a call stands where a type is expected, which a generic callee's result is deduced from where its
     /// arguments leave a parameter unbound (CHK-340); `none` elsewhere.
     type_id expected_result = type_id::none;
+    /// What `check_expected` expects of the `if` or `case` value it is about to check (CHK-166); `none` elsewhere.
+    /// The `check_expr` of that value takes it and clears it, so no expression inside sees it.
+    type_id expected_value = type_id::none;
 
     /// CHK-330: a `hit_group`, one row of a ray-tracing pipeline's table.
     void compile_hit_group(symbol_id id);
@@ -793,6 +864,11 @@ struct checker
     void report_capture(function_scope const& scope, source_span where, local_name const& local);
     /// `values[i]`, which today is a buffer element and nothing else; the error type where it is not one.
     [[nodiscard]] type_id check_index(function_scope& scope, ast::expr_id id, ast::index const& node);
+    /// `img[xy]`, a texel of `image`: the `load` it reads as, or the place an assignment stores to (CHK-367); or the
+    /// atomic of an `@atomic` image's texel (CHK-373).
+    [[nodiscard]] type_id check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image);
+    /// The `store` of an assignment to the texel `check_texel` left in `texel_place`, with `value` of `type` stored.
+    void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
     [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
 
@@ -819,13 +895,31 @@ struct checker
                                      ast::loop_expr const& loop,
                                      bool yields_value,
                                      bool& has_break);
+    /// The body of a `case` arm or of a branch of an `if` value: what it gives in `arm_type`, or that it leaves.
+    /// A value is checked against `expected` where that is valid, and one that does not convert gives the error type.
+    void check_arm_body(function_scope& scope,
+                        ast::body const& body,
+                        bool yields_value,
+                        type_id expected,
+                        type_id& arm_type,
+                        bool& arm_exits,
+                        bool& is_failed);
+    /// `if c => a else b`, read as a value where `yields_value`, and as an `if` statement otherwise (CHK-375).
+    /// `expected` is the type the context expects of the value, `none` where it expects none (CHK-166).
+    [[nodiscard]] type_id check_if_value(function_scope& scope,
+                                         ast::if_expr const& node,
+                                         bool yields_value,
+                                         flow* ending = nullptr,
+                                         type_id expected = type_id::none);
     /// A `case`; the result is the type of its arms, and `nothing` for one that is a statement.
     /// `ending`, where given, is how the `case` ends as a statement: it exits when it is exhaustive and every arm exits.
+    /// `expected` is the type the context expects of the value, `none` where it expects none (CHK-166).
     [[nodiscard]] type_id check_case(function_scope& scope,
                                      ast::expr_id id,
                                      ast::case_expr const& node,
                                      bool yields_value,
-                                     flow* ending = nullptr);
+                                     flow* ending = nullptr,
+                                     type_id expected = type_id::none);
     /// One arm's pattern, against the scrutinee's type; appends the enum cases it names, and says whether all were cases.
     void check_pattern(function_scope& scope,
                        ast::expr_id pattern,
@@ -840,6 +934,8 @@ struct checker
 
     [[nodiscard]] type_id check_expr(function_scope& scope, ast::expr_id expr);
     [[nodiscard]] type_id check_literal(function_scope& scope, ast::expr_id id, ast::literal const& literal);
+    /// `text` must be a `suffixed` number.
+    [[nodiscard]] type_id check_suffixed_literal(i32 file, source_span where, cc::string_view text);
     [[nodiscard]] type_id check_name(function_scope& scope, ast::expr_id id, ast::name const& name);
     /// A module-level name as a value, where `found` is what the name, bare or qualified, resolved to.
     [[nodiscard]] type_id check_symbol_value(function_scope& scope,

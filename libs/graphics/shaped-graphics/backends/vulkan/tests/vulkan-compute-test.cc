@@ -3,6 +3,7 @@
 #include <clean-core/thread/async.hh> // cc::shared_async
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_compute_pipeline.hh>
 
 // Embedded SPIR-V for double_compute.hlsl (Output[i] = i*2). See that file for the dxc command.
 #include "double_compute.spirv.h"
@@ -123,6 +124,51 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a group and a pipeline dropped between bind an
     cmd->compute.bind_group(0, *group);
     group = nullptr;
     pipeline = nullptr;
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer<u32>(buf, 0, count);
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    auto ok = true;
+    for (int i = 0; i < count; ++i)
+        ok &= data[i] == u32(i) * 2;
+    CHECK(ok);
+}
+
+// A preferred subgroup size is a requirement of the pipeline where the device can set a compute stage's size to it,
+// and nothing at all where it cannot: a preference never refuses a pipeline.
+// The validation layer judges the create info, so a malformed chain fails this test as an undeclared error.
+ASYNC_INVOCABLE_TEST("sg vulkan - a preferred subgroup size reaches pipeline creation where the device runs it",
+                     (vulkan::vulkan_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    auto const& control = ctx._subgroup_size_control;
+    if ((control.stages & VK_SHADER_STAGE_COMPUTE_BIT) == 0)
+        SKIP("this device sets no compute stage's subgroup size");
+    constexpr int count = 256;
+
+    auto shader = make_double_shader();
+    shader.preferred_subgroup_size = i32(control.max_size);
+    auto buf = ctx.persistent.create_raw_buffer(isize(count) * isize(sizeof(u32)),
+                                                sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto group_layout = ctx.uncached.create_binding_group_layout(shader.bindings);
+    auto pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {group_layout}});
+    auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    REQUIRE(pipeline != nullptr);
+    CHECK(static_cast<vulkan::vulkan_compute_pipeline const&>(*pipeline)._required_subgroup_size == control.max_size);
+
+    // twice the largest size the device runs is none it can set, which leaves the pipeline as it would be without
+    shader.preferred_subgroup_size = i32(control.max_size * 2);
+    auto const ignored = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    REQUIRE(ignored != nullptr);
+    CHECK(static_cast<vulkan::vulkan_compute_pipeline const&>(*ignored)._required_subgroup_size == 0u);
+
+    sg::named_view const out = {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
+    auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&out, 1));
+    auto cmd = ctx.create_command_list();
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);
     auto const future = cmd->download.data_from_buffer<u32>(buf, 0, count);
     ctx.submit_command_list(cc::move(cmd));

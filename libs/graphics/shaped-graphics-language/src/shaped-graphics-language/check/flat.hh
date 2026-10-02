@@ -256,11 +256,18 @@ struct sgl::check::flat_file_sampler
     constexpr bool operator==(flat_file_sampler const&) const = default;
 };
 
+/// `v.normal`, one field of a struct; or `v.zyx`, a swizzle of a prelude vector, whose value is the plain vector of
+/// its fields (CHK-385).
+/// A swizzle of a struct of the program never stands here: the check pass writes it as the construction it means.
 struct sgl::check::flat_member
 {
     flat_expr_id object = flat_expr_id::none;
-    /// A position in the `members` of the object's struct type.
+    /// A position in the `members` of the object's struct type; -1 for a swizzle.
     i32 member = -1;
+    /// The fields a swizzle reads, two to four of them; a `count` of zero for one field.
+    swizzle letters;
+
+    [[nodiscard]] constexpr bool is_swizzle() const { return letters.count > 0; }
 
     constexpr bool operator==(flat_member const&) const = default;
 };
@@ -406,6 +413,7 @@ struct sgl::check::flat_var
 
 /// `place` is a `flat_local_ref` of a mutable local, a chain of `flat_member` over one, or a `flat_buffer_element` of a
 /// `mut` buffer, whose index is evaluated before `value`.
+/// A swizzle stands only on top of a place, its fields distinct; over a buffer element its index is a local or a literal.
 struct sgl::check::flat_assign
 {
     flat_expr_id place = flat_expr_id::none;
@@ -682,8 +690,12 @@ struct sgl::check::flat_entry_point
     cc::vector<symbol_id> bindings;
     /// The grid a `compute` entry point is dispatched in; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
+    /// `function_info::preferred_subgroup_size`, which the host asks the device for and no text but dx12's states.
+    i32 preferred_subgroup_size = 0;
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
+    /// The options it reaches, each once, in declaration order (CHK-355); empty for a test.
+    cc::vector<symbol_id> options;
     /// The ray types it traces, by their position in their set, each once (CHK-332).
     cc::vector<flat_traced_ray> traced_rays;
     /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
@@ -729,11 +741,12 @@ struct sgl::check::flat_entry_point
         return entry_stage == rhs.entry_stage && name == rhs.name && function == rhs.function && input == rhs.input
             && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
             && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
-            && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
-            && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
-            && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
-            && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
-            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names
-            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes;
+            && preferred_subgroup_size == rhs.preferred_subgroup_size && is_equal(stage_inputs, rhs.stage_inputs)
+            && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels) && root == rhs.root
+            && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists)
+            && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites)
+            && is_equal(check_sites, rhs.check_sites) && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body
+            && names == rhs.names && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes
+            && is_equal(options, rhs.options);
     }
 };

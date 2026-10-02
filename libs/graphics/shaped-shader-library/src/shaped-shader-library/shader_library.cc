@@ -404,8 +404,12 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
         auto virtual_path = impl::join_path(package.name, definition.path);
         CC_ASSERT(virtual_path.has_value(), "a shader path must not escape its package");
 
-        auto asset = std::make_shared<shader_asset>(_alive, cc::move(virtual_path.value()), definition.stage,
-                                                    cc::string::create_copy_of(definition.entry_point));
+        auto options = cc::vector<cc::string>();
+        for (auto const name : definition.options)
+            options.push_back(cc::string(name));
+        auto asset
+            = std::make_shared<shader_asset>(_alive, cc::move(virtual_path.value()), definition.stage,
+                                             cc::string::create_copy_of(definition.entry_point), cc::move(options));
         *definition.asset = asset;
         _assets.push_back(cc::move(asset));
     }
@@ -449,7 +453,8 @@ void slib::shader_library::note_dependencies_changed()
 slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::string_view virtual_path,
                                                                            sg::shader_stage stage,
                                                                            cc::string_view entry_point,
-                                                                           sg::shader_format format) const
+                                                                           sg::shader_format format,
+                                                                           cc::span<shader_option const> options) const
 {
     compile_outcome outcome;
     outcome.dependencies.push_back(cc::string::create_copy_of(virtual_path));
@@ -465,7 +470,7 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
 
     // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
-                  package.host_namespace, package.language, stage, entry_point, format);
+                  package.host_namespace, package.language, stage, entry_point, format, options);
     return outcome;
 }
 
@@ -490,7 +495,8 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          shader_language language,
                                          sg::shader_stage stage,
                                          cc::string_view entry_point,
-                                         sg::shader_format format) const
+                                         sg::shader_format format,
+                                         cc::span<shader_option const> options) const
 {
     auto const compiler = find_shared_compiler(language, format);
     if (compiler == nullptr)
@@ -542,6 +548,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                       .stage = stage,
                                       .label = cc::string::create_copy_of(label),
                                       .modules = module_files};
+    desc.options.push_back_range(options);
 
     auto preprocessed = compiler->preprocess(desc, resolve);
     if (preprocessed.has_error())

@@ -37,6 +37,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_bit_math.cc
     src/shaped-graphics-language/builtins/register_math.cc
     src/shaped-graphics-language/builtins/register_sync.cc
+    src/shaped-graphics-language/builtins/register_subgroups.cc
     src/shaped-graphics-language/builtins/register_raytracing.cc
     src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
@@ -54,6 +55,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_features.cc
+    src/shaped-graphics-language/check/check_options.cc
     src/shaped-graphics-language/check/check_footprint.cc
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stages.cc
@@ -362,6 +364,8 @@ if(SC_BUILD_TESTS)
         tests/check/binding-check-test.cc
         tests/check/texture-check-test.cc
         tests/check/uniformity-check-test.cc
+        tests/check/subgroup-check-test.cc
+        tests/check/image-check-test.cc
         tests/check/case-check-test.cc
         tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc
@@ -399,14 +403,20 @@ if(SC_BUILD_TESTS)
         tests/emit/buffer-emit-test.cc
         tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc
+        tests/emit/subgroup-emit-test.cc
+        tests/emit/image-emit-test.cc
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
         tests/emit/raytracing-emit-test.cc
         tests/emit/msl-raytracing-emit-test.cc
         tests/emit/layout-emit-test.cc
+        tests/emit/swizzle-emit-test.cc
+        tests/emit/vector-emit-test.cc
+        tests/emit/sixteen-bit-emit-test.cc
 
         tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc
+        tests/driver/options-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
         tests/driver/test-source-test.cc

@@ -849,6 +849,7 @@ void add_image_shape(registry& r, shape_traits const& s)
                           .hlsl_names = k_textures_hlsl,
                           .wgsl_names = k_textures_wgsl,
                           .msl_names = k_textures_msl},
+                .is_image_store = true,
             });
         }
 }

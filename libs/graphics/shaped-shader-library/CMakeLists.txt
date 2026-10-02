@@ -121,6 +121,7 @@ endif()
 # Its target exists on Apple alone, and it needs no toolchain of its own to build — shaped-shader-compiler-msl
 # resolves `xcrun metal` at run time and falls back to MSL source where there is none.
 # This is also what carries an SGL package to metal: create_sgl_compiler(create_metal_compiler()).
+# The SGL edge asks each compile for the MSL version its text needs, so the inner compiler takes no setting.
 if(TARGET shaped-shader-compiler-msl)
     target_sources(shaped-shader-library PRIVATE src/shaped-shader-library/compiler/metal_compiler.cc)
     target_sources(shaped-shader-library
@@ -153,6 +154,8 @@ if(SC_BUILD_TESTS)
         tests/dxc_compiler-test.cc
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc
+        tests/sgl_options-test.cc
+        tests/sgl_layout-test.cc
         tests/sgl_modules-test.cc
         tests/metal_compiler-test.cc
         tests/pipeline-test.cc
@@ -258,6 +261,10 @@ if(SC_BUILD_TESTS)
             cube.sgl:vertex:main_vs
             cube.sgl:pixel:main_ps
             double_values.sgl:compute:main
+            listed.sgl:compute:spread
+            scaled.sgl:*
+            tapped.sgl:*
+            host_layout.sgl:*
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

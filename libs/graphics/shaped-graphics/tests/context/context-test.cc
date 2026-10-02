@@ -134,6 +134,19 @@ INVOCABLE_TEST("sg - capability queries agree with the context", (sg::context_ha
     ctx->drop_command_list(cc::move(cmd));
 }
 
+// Coherence and image atomics are an API fact rather than a device one: every device of three APIs has them, and WebGPU none.
+// 16-bit integers are the same on WebGPU, while the other 16-bit and subgroup answers are the device's.
+INVOCABLE_TEST("sg - coherence, image atomics and 16-bit integers follow the API", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const is_webgpu = ctx->backend() == sg::backend_kind::webgpu;
+    CHECK(ctx->supports(sg::feature::device_coherence) == !is_webgpu);
+    CHECK(ctx->supports(sg::feature::image_atomics) == !is_webgpu);
+    if (is_webgpu)
+        CHECK(!ctx->supports(sg::feature::shader_int16));
+}
+
 // The limits are floors a portable caller sizes against, so they must be reportable and sane on every backend.
 INVOCABLE_TEST("sg - limits report the portable floors", (sg::context_handle const& ctx))
 {

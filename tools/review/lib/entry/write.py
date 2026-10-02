@@ -11,6 +11,7 @@ which would in turn report a finalized question as modified — the tool accusin
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ..core.atomic import write_atomic
@@ -167,6 +168,31 @@ def attributes_read_as_prose(entry: Entry) -> list[tuple[Block, int, str]]:
         match = ATTR_RE.match(lines[first]) if first is not None else None
         if match and match.group(1) in allowed:
             out.append((block, block.line + 1 + first, match.group(1)))
+    return out
+
+
+_BARE_DISCHARGES_RE = re.compile(r"^discharges:\s*$")
+
+
+def empty_references(entry: Entry) -> list[tuple[int, str]]:
+    """(line, problem) for every `## changes` heading naming no change and every `discharges:` naming none.
+
+    Both parse, and both are what a script writes when the command that fed it the ids failed:
+    the entry then reads as covering an area while the coverage report counts nothing for it.
+    A bare `discharges:` with no space after it is no attribute and would end the prelude as prose, so it is caught here too.
+    """
+    out: list[tuple[int, str]] = []
+    for block in entry.blocks:
+        if block.type == "changes" and not block.change_ids:
+            out.append((block.line, "a `changes` heading names no change id"))
+        for offset, line in enumerate(block.raw.split("\n")[1:]):
+            match = ATTR_RE.match(line)
+            if match is None:
+                if _BARE_DISCHARGES_RE.match(line):
+                    out.append((block.line + 1 + offset, "a `discharges:` line names no change id"))
+                break
+            if match.group(1) == "discharges" and not match.group(2).split():
+                out.append((block.line + 1 + offset, "a `discharges:` line names no change id"))
     return out
 
 

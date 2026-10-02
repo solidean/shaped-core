@@ -52,7 +52,7 @@ public:
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
         // The cache keys on the flattened source and options: a reload that touched a file without changing what it expands to returns the node that already exists.
-        return _cache.compile(to_dxc(desc), {.target = _target});
+        return _cache.compile(to_dxc(desc), {.target = _target, .extra_args = desc.dxc_args});
     }
 
     /// SPIR-V states its layout in decorations; DXIL's would need the reflection container, which the bytecode does

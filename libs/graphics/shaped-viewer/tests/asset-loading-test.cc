@@ -14,8 +14,8 @@
 #include <shaped-viewer/material/material_type.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/stable_id.hh>
+#include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/linalg/pos.hh>
-#include <typed-geometry/linalg/pos_ops.hh>
 
 using namespace cc::primitive_defines;
 
@@ -393,7 +393,7 @@ TEST("sv::asset_loader - a glTF import places one mesh per primitive, mapped ont
     CHECK(a.meshes[0].geometry.vertex_count() == 3);
 
     // The node's transform is folded into the mesh, which is what "flattened by default" means.
-    CHECK(tg::distance(tg::pos3f(0, 0, 0).transformed(a.meshes[0].transform), tg::pos3f(1, 2, 3)) < 1e-5f);
+    CHECK(tg::pos3f(0, 0, 0).transformed(a.meshes[0].transform).distance_to(tg::pos3f(1, 2, 3)) < 1e-5f);
 
     // The hierarchy is kept as a record whatever the flattening did.
     REQUIRE(a.nodes.size() == 1);

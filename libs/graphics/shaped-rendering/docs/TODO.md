@@ -38,9 +38,10 @@ Bigger design intent lives in [structure.md](structure.md).
 - Half precision for the OIDN network, which is the one acceleration it could take that is portable.
   DX12 has it as SM 6.2 with `-enable-16bit-types`, Vulkan as `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, Metal has `half` outright, and WebGPU has the optional `shader-f16` feature.
   Optional on all four rather than guaranteed, so it wants a feature level rather than an assumption — but a shipped one, unlike the matrix instructions this network would really like.
-  Three pieces, none of them in sr: slib passes DXC no flag and has no option to (ssc has a raw `extra_args`, hashed into the shader cache key, that nothing plumbs);
-  sg has no capability to gate on, though the webgpu backend already has the shape for one in `k_optional_features`;
-  and the C++ mirror problem in [binding-preprocessor.md](../../shaped-shader-library/docs/binding-preprocessor.md) is about constant blocks, which this network does not use.
+  The gate exists: `sg::feature::shader_f16`, which every backend answers.
+  The flag exists for SGL: slib's SGL edge adds `-enable-16bit-types` through `shader_source_description::dxc_args`, so a network written in SGL takes `half` as it stands.
+  An HLSL package still has no way to set `dxc_args`, so a port that stays in HLSL needs that plumbed first.
+  The C++ mirror problem in [binding-preprocessor.md](../../shaped-shader-library/docs/binding-preprocessor.md) is about constant blocks, which this network does not use.
   Its weights already arrive as fp16, and `tg::f16` widens them on load.
   **Expect memory rather than speed.**
   The convolution is bound by cache lines rather than bytes, which is why reading four channels at once bought 1.4x and not 4x, and an 8-byte `half4` costs the same line as a 16-byte `float4`.

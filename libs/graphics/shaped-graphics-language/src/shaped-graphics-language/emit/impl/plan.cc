@@ -396,6 +396,7 @@ struct planner
                                        .type = is_array ? whole.element : members[i].type,
                                        .element = t.element,
                                        .is_mut = t.is_mut,
+                                       .is_coherent = members[i].is_coherent,
                                        .group = group,
                                        .slot = slot,
                                        .count = count});
@@ -428,7 +429,7 @@ struct planner
                     .group = group,
                     .slot = 0,
                 };
-                auto const placed = place_block(p.m, plain);
+                auto const placed = place_block(p.m, plain, block_space(b));
                 for (auto i = isize(0); i < planned.members.size(); ++i)
                     planned.members[i].offset = placed.offsets[i];
                 auto next = 0;
@@ -511,7 +512,7 @@ struct planner
         auto const form_of_block = [&](planned_constants& block)
         {
             auto const& b = p.m.bindings[p.m.at(block.symbol).info];
-            block.form = memory_form_of(p.m, plain_members_of(p.m, b), address_space::constants, 0, p.which);
+            block.form = memory_form_of(p.m, plain_members_of(p.m, b), block_space(b), 0, p.which);
             if (block.form.has_value())
                 block.form.value().name = block.block_name;
         };
@@ -583,7 +584,7 @@ struct planner
                 .block_name = p.names.mint(cc::format("{}_data", s.name)),
                 .members = members_of(b.members, false),
             };
-            auto const placed = place_block(p.m, p.m.at(b.members));
+            auto const placed = place_block(p.m, p.m.at(b.members), block_space(b));
             for (auto i = isize(0); i < planned.members.size(); ++i)
             {
                 planned.members[i].offset = placed.offsets[i];
@@ -805,6 +806,14 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
     if (!is_placed)
         return;
 
+    // EMIT-154: every target reads a `.cpp` block from its memory form, and HLSL has no expression that builds a
+    // struct value out of the fields
+    if (b.layout == check::block_layout::cpp)
+        for (auto const& member : plain_members_of(m, b))
+            if (member.type != check::checked_module::void_type && m.builtin_type_of(member.type) == nullptr)
+                report(error_kind::unsupported,
+                       cc::format("a struct member in a @layout(.cpp) block: '{}.{}'", s.name, member.name));
+
     // A struct has one layout, so it stands in one address space; two rules would give it two.
     for (auto const space : {address_space::constants, address_space::storage})
     {
@@ -830,7 +839,7 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
 
     auto const plain = plain_members_of(m, b);
     if (b.is_no_padding)
-        for (auto& gap : padding_of(m, plain, address_space::constants))
+        for (auto& gap : padding_of(m, plain, block_space(b)))
             report(error_kind::padding_forbidden, cc::format("in the block of @no_padding '{}': {}", s.name, gap));
     for (auto const space : {address_space::constants, address_space::storage})
     {
@@ -871,9 +880,10 @@ sgl::emit::impl::planned_constants const* sgl::emit::impl::block_of(plan const& 
 }
 
 sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_module const& m,
-                                                              cc::span<check::member_info const> members)
+                                                              cc::span<check::member_info const> members,
+                                                              address_space space)
 {
-    auto placed = place(m, members, address_space::constants);
+    auto placed = place(m, members, space);
     return {.offsets = cc::move(placed.offsets), .sizes = cc::move(placed.sizes), .size = placed.size};
 }
 
@@ -1057,6 +1067,10 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
     // its HLSL type is the domain's, which the parameter states: `float3` for triangles, `float2` otherwise
     static constexpr stage_input_spelling k_domain_location
         = {"float3", "SV_DomainLocation", "vec3f", "", "float3", ""};
+    static constexpr stage_input_spelling k_subgroup_size
+        = {"uint", "", "u32", "subgroup_size", "uint", "threads_per_simdgroup", "WaveGetLaneCount()"};
+    static constexpr stage_input_spelling k_subgroup_invocation_id
+        = {"uint", "", "u32", "subgroup_invocation_id", "uint", "thread_index_in_simdgroup", "WaveGetLaneIndex()"};
     switch (input)
     {
     case stage_input::vertex_index:
@@ -1081,6 +1095,10 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         return k_workgroup_id;
     case stage_input::domain_location:
         return k_domain_location;
+    case stage_input::subgroup_size:
+        return k_subgroup_size;
+    case stage_input::subgroup_invocation_id:
+        return k_subgroup_invocation_id;
     // a ray-tracing stage reads its launch through builtins, which flatten binds its parameters to
     case stage_input::launch_id:
     case stage_input::launch_size:
@@ -1093,9 +1111,13 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
 cc::string sgl::emit::impl::stage_input_value(plan const& p, isize index)
 {
     auto const& input = p.e.stage_inputs[index];
-    auto const& raw = p.stage_input_names[index];
-    auto const type = check::info_of(input.input).type;
     auto const is_wgsl = p.which == target::wgsl;
+    auto const is_hlsl = p.which == target::hlsl_dx12 || p.which == target::hlsl_vulkan;
+    // EMIT-147: an input HLSL has no semantic for is read where the entry point starts
+    auto const raw = is_hlsl && !spelling_of(input.input).hlsl_read.empty()
+                       ? spelling_of(input.input).hlsl_read
+                       : cc::string_view(p.stage_input_names[index]);
+    auto const type = check::info_of(input.input).type;
     // HLSL counts a vertex and an instance from the draw's base, and DXC keeps that meaning on vulkan (EMIT-128).
     auto const value
         = has_base(p, input.input) ? cc::format("{} + {}", raw, p.stage_input_bases[index]) : cc::string(raw);
@@ -1147,10 +1169,11 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
     auto result = cc::vector<emitted_layout>();
     auto const block = [&](planned_constants const& c)
     {
-        auto const plain = plain_members_of(p.m, p.m.bindings[p.m.at(c.symbol).info]);
+        auto const& b = p.m.bindings[p.m.at(c.symbol).info];
+        auto const plain = plain_members_of(p.m, b);
         result.push_back({.global = c.name,
                           .fields = c.form.has_value() ? fields_of(c.form.value())
-                                                       : fields_of(p, c.members, {}, plain, address_space::constants)});
+                                                       : fields_of(p, c.members, {}, plain, block_space(b))});
     };
     if (p.constants.has_value())
         block(p.constants.value());

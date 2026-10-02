@@ -199,6 +199,25 @@ TEST("sgl lsp - semantic tokens name what the checker resolved, relative to the 
     CHECK(data[2 * 5 + 2].as_double() == 5);
 }
 
+TEST("sgl lsp - a barrier call is a control builtin, a type the legend carries", main_thread)
+{
+    auto const legend = sgl_lsp::semantic_tokens_legend();
+    auto has_type = false;
+    for (auto const& t : legend.token_types)
+        has_type = has_type || t == "controlBuiltin";
+    CHECK(has_type);
+
+    auto s = session("fun sync():\n    workgroup_barrier()\n");
+    auto const r = s.ask(4, "textDocument/semanticTokens/full", R"({"textDocument":{"uri":"file:///t.sgl"}})");
+    auto const data = r["result"]["data"];
+    // `fun`, `sync`, and `workgroup_barrier` one line down; the brackets and the colon have no class
+    REQUIRE(data.size() >= 3 * 5);
+    auto const last = data.size() / 5 - 1;
+    CHECK(data[last * 5 + 0].as_double() == 1);
+    CHECK(data[last * 5 + 1].as_double() == 4);
+    CHECK(legend.token_types[isize(data[last * 5 + 3].as_double())] == "controlBuiltin");
+}
+
 TEST("sgl lsp - an unannotated let gets its type as a hint that inserts itself", main_thread)
 {
     auto s = session("fun f(v: vec3) -> float:\n    let d = dot(v, v)\n    let e : float = d\n    return e\n");

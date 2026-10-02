@@ -204,7 +204,7 @@ TEST("sgl check - a pipeline chains its stages, and the tessellation stages draw
                                  "    tessellation_evaluation = te\n    geometry = gs\n    pixel = ps\n{}",
                                  format))
           == "");
-    CHECK(with_stages(cc::format("pipeline short = (vs, tc, te, ps):\n{}", format)) == "");
+    CHECK(with_stages(cc::format("pipeline brief = (vs, tc, te, ps):\n{}", format)) == "");
 
     // CHK-307: the two tessellation stages come together
     CHECK(with_stages(

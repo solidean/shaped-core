@@ -1,0 +1,82 @@
+// half, short and ushort: the 16-bit float, int and uint, and their vectors (CHK-381)
+
+require shader_f16
+
+// a literal converts to a half by rounding to nearest, ties to even (CHK-253), and every result rounds the same way
+test:
+    let h: half = 0.1
+    // 0.1 is 0.0999755859375 as a half, which no float literal near it is
+    (h as float) == 0.0999755859375
+    // 2049 lies between the halves 2048 and 2050, and ties to the even one; an integer literal must be exact
+    let tie: half = 2049.0
+    (tie as float) == 2048.0
+    // 2048 + 1 rounds back to 2048, and 2048 + 3 up to 2052
+    (tie + 1.0) as float == 2048.0 and (tie + 3.0) as float == 2052.0
+    // a product rounds once: 0.333251953125 times 3 is 1 - 2^-12, a tie between two halves that goes to the even 1
+    let third: half = 0.333251953125
+    (third * 3.0) as float == 1.0
+
+// the largest half is 65504, and a result past it is infinite
+test:
+    let big: half = 65504
+    let doubled = big * 2.0
+    doubled > big and (doubled as float) > 3.0e38
+
+@expect(error = "literal-not-representable")
+test:
+    let h: half = 65520
+    h > 0.0
+
+// the families convert between their widths, and among themselves at 16 bits (CHK-197)
+test:
+    let f = 1.0009765625
+    (f as half) as float == 1.0009765625
+    // 1 + 2^-11 lies halfway between two halves, and ties to the even one
+    (1.00048828125 as half) as float == 1.0
+    (2.75 as half) as short == 2i16
+    (-2.75 as half as short) as int == -2
+    // a float past a short saturates in the interpreter, which no target is held to (CHK-197)
+    (40000.0 as half) as short == 32767i16
+    (-1i16 as ushort) == 65535u16
+    (65535u16 as short) == -1i16
+    (300i16 as half) as float == 300.0
+    (70000 as uint as ushort) == 4464u16
+
+// short and ushort wrap at 16 bits, as int and uint do at 32
+test:
+    let s = 32767i16
+    s + 1i16 == -32768i16
+    let u = 65535u16
+    u + 1u16 == 0u16 and 0u16 - 1u16 == 65535u16
+    300u16 * 300u16 == 24464u16
+    -7i16 / 2i16 == -3i16 and -7i16 % 3i16 == -1i16
+    abs(-5i16) == 5i16 and min(3u16, 9u16) == 3u16 and clamp(40i16, 0i16, 10i16) == 10i16
+
+// the vectors swizzle as the others do, and their vocabulary is the same
+test:
+    let v = half3(1.0, 2.0, 3.0)
+    v.zyx == half3(3.0, 2.0, 1.0)
+    v.xy * 2.0 == half2(2.0, 4.0)
+    let w = half4(0.5)
+    w == half4(0.5, 0.5, 0.5, 0.5)
+    any(v < half3(2.0)) and not all(v < half3(2.0))
+    select(v > half3(1.5), v, half3(0.0)) == half3(0.0, 2.0, 3.0)
+    max(v, half3(2.0)) == half3(2.0, 2.0, 3.0)
+    clamp(v, half3(1.5), half3(2.5)) == half3(1.5, 2.0, 2.5)
+    mix(half2(0.0, 4.0), half2(2.0, 8.0), 0.5) == half2(1.0, 6.0)
+    dot(v, half3(1.0)) == 6.0
+    saturate(half2(-1.0, 0.5)) == half2(0.0, 0.5)
+    v / 2.0 == half3(0.5, 1.0, 1.5)
+    (v as float3) == float3(1.0, 2.0, 3.0)
+    let s = short2(3i16, -4i16)
+    s.yx + 1i16 == short2(-3i16, 4i16) and abs(s) == short2(3i16, 4i16) and sign(s) == short2(1i16, -1i16)
+    (s as ushort2).y == 65532u16
+    -s == short2(-3i16, 4i16)
+
+// a value of half needs shader_f16 of every entry point that holds one (CHK-382); a test needs no feature
+binding scales:
+    factor: half
+    values: mut buffer[half2]
+
+@compute(64) fun scale(@thread_id id: int3){scales}:
+    scales.values[id.x] = scales.values[id.x] * scales.factor + 0.25f16

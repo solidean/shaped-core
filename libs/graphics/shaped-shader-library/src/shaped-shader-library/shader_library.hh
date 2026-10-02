@@ -155,12 +155,13 @@ public:
         cc::vector<cc::string> dependencies; ///< the source itself, each resolved include, each module file reached
     };
 
-    /// Reads, preprocesses and compiles one shader for `format`.
+    /// Reads, preprocesses and compiles one shader for `format`, with `options` given to an SGL source's options.
     /// A missing file, a missing compiler, or a compile error all come back as an async error on `shader` — never a throw.
     [[nodiscard]] compile_outcome compile_shader(cc::string_view virtual_path,
                                                  sg::shader_stage stage,
                                                  cc::string_view entry_point,
-                                                 sg::shader_format format) const;
+                                                 sg::shader_format format,
+                                                 cc::span<shader_option const> options = {}) const;
 
     /// Compiles HLSL (or whatever `opts.language` says) held in memory rather than mounted as a file.
     ///
@@ -228,7 +229,8 @@ private:
                        shader_language language,
                        sg::shader_stage stage,
                        cc::string_view entry_point,
-                       sg::shader_format format) const;
+                       sg::shader_format format,
+                       cc::span<shader_option const> options = {}) const;
 
     /// Alive-token handed to every asset as a weak reference, cleared first thing on destruction.
     /// Aliasing with a no-op deleter — it owns nothing, it only tracks whether we are still here.

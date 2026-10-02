@@ -36,3 +36,14 @@ TEST("tg triangle - equality")
     CHECK(t == tg::triangle2f(a, b, c));
     CHECK(t != tg::triangle2f(a, c, b));
 }
+
+TEST("tg triangle - a nearly collinear triangle has a finite, non-negative area")
+{
+    // Lagrange's identity cancels here and once went NaN; the cross product's length cannot
+    auto const t = tg::triangle3f(tg::pos3f(0, 0, 0), tg::pos3f(1.1f, 2.3f, 3.7f),
+                                  tg::pos3f(1.1f * 10.0f, 2.3f * 10.0f, 3.7f * 10.0f));
+    auto const a = t.area();
+    CHECK(a >= 0.0f);
+    CHECK(a < 1e-2f);
+    CHECK(tg::triangle3f(tg::pos3f(0, 0, 0), tg::pos3f(3, 0, 0), tg::pos3f(0, 4, 0)).area() == 6.0f);
+}

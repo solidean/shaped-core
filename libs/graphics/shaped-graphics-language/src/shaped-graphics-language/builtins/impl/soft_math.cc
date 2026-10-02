@@ -259,15 +259,21 @@ f64 impl::soft_atan2(f64 y, f64 x)
 
 u32 impl::half_bits_of(f32 x)
 {
-    auto const bits = cc::bit_cast<u32>(x);
-    auto const sign = (bits >> 16) & 0x8000u;
-    auto const exponent = int((bits >> 23) & 0xff);
-    auto mantissa = bits & 0x7fffffu;
+    // every f32 is an f64, so this rounds once
+    return half_bits_of(f64(x));
+}
 
-    if (exponent == 0xff)
+u32 impl::half_bits_of(f64 x)
+{
+    auto const bits = cc::bit_cast<u64>(x);
+    auto const sign = u32(bits >> 48) & 0x8000u;
+    auto const exponent = int((bits >> 52) & 0x7ff);
+    auto mantissa = bits & ((u64(1) << 52) - 1);
+
+    if (exponent == 0x7ff)
         return sign | 0x7c00u | (mantissa != 0 ? 0x200u : 0u);
 
-    auto const e = exponent - 127 + 15;
+    auto const e = exponent - 1023 + 15;
     if (e >= 31)
         return sign | 0x7c00u;
     if (e <= 0)
@@ -275,19 +281,20 @@ u32 impl::half_bits_of(f32 x)
         // a subnormal half, or zero: shift the full mantissa into place and round to even
         if (e < -10)
             return sign;
-        mantissa |= 0x800000u;
-        auto const shift = u32(14 - e);
+        mantissa |= u64(1) << 52;
+        auto const shift = u32(43 - e);
         auto const half = mantissa >> shift;
-        auto const rest = mantissa & ((1u << shift) - 1);
-        auto const midway = 1u << (shift - 1);
+        auto const rest = mantissa & ((u64(1) << shift) - 1);
+        auto const midway = u64(1) << (shift - 1);
         auto const rounded = half + ((rest > midway || (rest == midway && (half & 1u) != 0)) ? 1u : 0u);
-        return sign | rounded;
+        return sign | u32(rounded);
     }
 
-    auto half = sign | (u32(e) << 10) | (mantissa >> 13);
-    auto const rest = mantissa & 0x1fffu;
+    auto half = sign | (u32(e) << 10) | u32(mantissa >> 42);
+    auto const rest = mantissa & ((u64(1) << 42) - 1);
+    auto const midway = u64(1) << 41;
     // a carry out of the mantissa steps the exponent, and out of the largest one into infinity, as rounding should
-    if (rest > 0x1000u || (rest == 0x1000u && (half & 1u) != 0))
+    if (rest > midway || (rest == midway && (half & 1u) != 0))
         ++half;
     return half;
 }

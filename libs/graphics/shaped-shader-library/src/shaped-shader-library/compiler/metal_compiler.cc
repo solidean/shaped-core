@@ -29,7 +29,11 @@ public:
     /// The node runs later, on the scheduler, never inside the `acquire` that asked for it.
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
-        return _cache.compile({.source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage});
+        // the source arm's driver compiles at the newest version the device has, and refuses being told one
+        auto options = ssc::msl::compile_options();
+        if (_cache.has_toolchain())
+            options.language_version = desc.metal_language_version;
+        return _cache.compile({.source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage}, options);
     }
 
 private:

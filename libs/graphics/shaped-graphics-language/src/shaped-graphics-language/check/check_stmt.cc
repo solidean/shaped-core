@@ -114,6 +114,8 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
                      }
                      else if (auto const* const c = value.node.try_as<ast::case_expr>())
                          set_type(file, e.value, check_case(scope, e.value, *c, false, &result));
+                     else if (auto const* const i = value.node.try_as<ast::if_expr>())
+                         set_type(file, e.value, check_if_value(scope, *i, false, &result));
                      else if (auto const* const loop = value.node.try_as<ast::loop_expr>())
                      {
                          auto has_break = false;
@@ -223,6 +225,59 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         return false;
     };
 
+    auto const is_image_texel = [&](ast::index const& indexed)
+    {
+        auto const object = out.files[file].type_at(indexed.object);
+        return object != type_id::none && out.at(object).kind == type_kind::image;
+    };
+    // CHK-367: a texel is stored whole by an assignment, so neither a member of one nor a call writes through it
+    for (auto at = expr; ast::is_valid(at);)
+    {
+        auto const& node = ast.at(at).node;
+        if (auto const* const m = node.try_as<ast::member>())
+        {
+            at = m->object;
+            continue;
+        }
+        auto const* const texel = node.try_as<ast::index>();
+        if (texel == nullptr || !is_image_texel(*texel))
+            break;
+        if (at != expr)
+            return refuse(span_of(file, expr), "a texel is stored whole, so a part of one is no place: load it, change "
+                                               "it, and store it again");
+        if (!what.empty())
+            return refuse(span_of(file, expr), "a texel is stored by an assignment, and no call writes through one");
+        break;
+    }
+
+    // CHK-352: a swizzle, and a field of one, is a place where its operand is one and its letters are distinct
+    auto operand = expr;
+    while (ast::is_valid(operand))
+    {
+        auto const* const m = ast.at(operand).node.try_as<ast::member>();
+        if (m == nullptr)
+            break;
+        auto const& t = out.files[file].target_at(operand);
+        auto const is_swizzle = t.kind == target_kind::swizzle;
+        if (!is_swizzle
+            && (t.kind != target_kind::field || !ast::is_valid(m->object)
+                || out.files[file].target_at(m->object).kind != target_kind::swizzle))
+            break;
+        if (is_swizzle && swizzle::unpacked(t.index).has_repeats())
+            return refuse(span_of(file, expr), cc::format("{} names a field twice, and a swizzle that does is no place",
+                                                          text_of(file, span_of(file, operand))));
+        operand = m->object;
+    }
+    if (operand != expr)
+    {
+        if (!what.empty())
+        {
+            unsupported(file, span_of(file, expr), cc::format("a swizzle as {}", what));
+            return false;
+        }
+        return judge_place(scope, operand, what);
+    }
+
     // An array element is part of the local that holds it, and a buffer element is a place of its own.
     auto const kind_of_object = [&](ast::index const& indexed)
     {
@@ -306,8 +361,14 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
     auto const& ast = ast_of(file);
     auto const where = span_of(file, id);
 
-    auto const place = check_expr(scope, assign.target);
     auto const is_plain = sgl::is_valid(assign.op) && text_of(file, file_of(file).at(assign.op).where) == "=";
+    // CHK-367: a texel as the place is a `store`, which `check_texel` leaves for the value to complete
+    assigned = assign.target;
+    is_compound_assigned = !is_plain;
+    texel_place = ast::expr_id::none;
+    auto const place = check_expr(scope, assign.target);
+    assigned = ast::expr_id::none;
+    auto const is_texel = ast::is_valid(texel_place);
     // CHK-82: a plain assignment expects the place's type of its value, which a literal converts to
     auto const value = is_plain && place != error_type ? check_expected(scope, assign.value, place)
                                                        : check_expr(scope, assign.value);
@@ -316,11 +377,18 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
         (void)judge_place(scope, assign.target, {});
 
     if (place == error_type || value == error_type || !sgl::is_valid(assign.op))
+    {
+        texel_place = ast::expr_id::none;
         return;
+    }
 
     auto const op = text_of(file, file_of(file).at(assign.op).where);
     if (op == "=")
+    {
+        if (is_texel)
+            check_texel_store(scope, assign.value, place);
         return;
+    }
 
     // `x += v` is `x = x + v`: the operator resolves like any other, and its result has to fit the place again.
     auto const spelling = op.subview({.offset = 0, .size = op.size() - 1});
@@ -334,6 +402,9 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
         report(diagnostic_kind::type_mismatch, file, where,
                cc::format("{} {} {} is {}, and the place is {}", out.name_of(place), spelling, out.name_of(value),
                           out.name_of(result), out.name_of(place)));
+    else if (is_texel)
+        check_texel_store(scope, assign.value, place);
+    texel_place = ast::expr_id::none;
 }
 
 void checker::check_condition(function_scope& scope, ast::expr_id condition)

@@ -141,6 +141,7 @@
                 { "include": "#types-and-arrows" },
                 { "include": "#fields" },
                 { "include": "#prelude-type" },
+                { "include": "#control-builtin" },
                 { "include": "#application" },
                 { "include": "#keywords" },
                 { "include": "#numbers" },
@@ -476,11 +477,16 @@
             "name": "support.type.sgl",
             "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'.])(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
         },
+        "control-builtin": {
+            "comment": "A builtin whose name alone says it constrains control flow reads as a control keyword, as the language server colours it. An atomic's 'max' or 'add' and an implicit-derivative 'sample' share their names with ordinary functions, so only the language server colours those. The subgroup and quad operations are listed by name rather than prefix, since 'quad_count' is an ordinary name; tools/review/review-self-test.py holds them to the prelude. #application excludes these names as call heads.",
+            "name": "keyword.control.sgl",
+            "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'.])(?:ddx|ddy|fwidth|workgroup_barrier|storage_barrier|texture_barrier|workgroup_uniform_load|subgroup_all|subgroup_any|subgroup_ballot|subgroup_add|subgroup_mul|subgroup_min|subgroup_max|subgroup_bit_and|subgroup_bit_or|subgroup_bit_xor|subgroup_inclusive_add|subgroup_inclusive_mul|subgroup_exclusive_add|subgroup_exclusive_mul|subgroup_broadcast|subgroup_broadcast_first|subgroup_shuffle|subgroup_shuffle_up|subgroup_shuffle_down|subgroup_shuffle_xor|quad_broadcast|quad_swap_x|quad_swap_y|quad_swap_diagonal)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+        },
         "application": {
             "comment": "A call by juxtaposition: the head of 'f x', 'f \"s\"', 'f (x)' or 'f -1'. Only the first name of a run is the head, so a name that follows an operand and one space is an argument. After a keyword the lookbehind cannot tell, so that case is matched with its keyword.",
             "patterns": [
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(return|yield|break|if|else|while|case|assert|print|test|and|or|not|in)([ \\t]+)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|rays|hit_group|callables|const|use|module|type|notation|test|require|if|else|for|while|loop|return|yield|continue|discard|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(return|yield|break|if|else|while|case|assert|print|test|and|or|not|in)([ \\t]+)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|rays|hit_group|callables|const|use|module|type|notation|test|require|if|else|for|while|loop|return|yield|continue|discard|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:ddx|ddy|fwidth|workgroup_barrier|storage_barrier|texture_barrier|workgroup_uniform_load|subgroup_all|subgroup_any|subgroup_ballot|subgroup_add|subgroup_mul|subgroup_min|subgroup_max|subgroup_bit_and|subgroup_bit_or|subgroup_bit_xor|subgroup_inclusive_add|subgroup_inclusive_mul|subgroup_exclusive_add|subgroup_exclusive_mul|subgroup_broadcast|subgroup_broadcast_first|subgroup_shuffle|subgroup_shuffle_up|subgroup_shuffle_down|subgroup_shuffle_xor|quad_broadcast|quad_swap_x|quad_swap_y|quad_swap_diagonal)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))",
                     "captures": {
                         "1": {
                             "patterns": [
@@ -496,7 +502,7 @@
                 },
                 {
                     "name": "entity.name.function.call.sgl",
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]}\\\"`][ \\t])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<!\\.)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|rays|hit_group|callables|const|use|module|type|notation|test|require|if|else|for|while|loop|return|yield|continue|discard|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))"
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]}\\\"`][ \\t])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<!\\.)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|rays|hit_group|callables|const|use|module|type|notation|test|require|if|else|for|while|loop|return|yield|continue|discard|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:ddx|ddy|fwidth|workgroup_barrier|storage_barrier|texture_barrier|workgroup_uniform_load|subgroup_all|subgroup_any|subgroup_ballot|subgroup_add|subgroup_mul|subgroup_min|subgroup_max|subgroup_bit_and|subgroup_bit_or|subgroup_bit_xor|subgroup_inclusive_add|subgroup_inclusive_mul|subgroup_exclusive_add|subgroup_exclusive_mul|subgroup_broadcast|subgroup_broadcast_first|subgroup_shuffle|subgroup_shuffle_up|subgroup_shuffle_down|subgroup_shuffle_xor|quad_broadcast|quad_swap_x|quad_swap_y|quad_swap_diagonal)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))"
                 }
             ]
         },
@@ -558,7 +564,7 @@
             "patterns": [
                 {
                     "name": "constant.numeric.hex.sgl",
-                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))0[xX][0-9A-Fa-f](?:'?[0-9A-Fa-f])*(?:\\.[0-9](?:'?[0-9])*)?(?:[pP][-+]?[0-9]+(f[0-9]+)?)?([iu][0-9]+)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))0[xX][0-9A-Fa-f](?:'?[0-9A-Fa-f])*(?:\\.[0-9](?:'?[0-9])*)?(?:[pP][-+]?[0-9]+(f[0-9]*)?)?([iu][0-9]*)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
                     "captures": {
                         "1": { "name": "storage.type.numeric-suffix.sgl" },
                         "2": { "name": "storage.type.numeric-suffix.sgl" }
@@ -566,21 +572,21 @@
                 },
                 {
                     "name": "constant.numeric.binary.sgl",
-                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))0[bB][01](?:'?[01])*([iu][0-9]+)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))0[bB][01](?:'?[01])*([iu][0-9]*)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
                     "captures": {
                         "1": { "name": "storage.type.numeric-suffix.sgl" }
                     }
                 },
                 {
                     "name": "constant.numeric.float.sgl",
-                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))[0-9](?:'?[0-9])*(?:\\.(?:[0-9](?:'?[0-9])*|(?![.0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}]))(?:[eEpP][-+]?[0-9]+)?|[eEpP][-+]?[0-9]+)([iuf][0-9]+)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))[0-9](?:'?[0-9])*(?:\\.(?:[0-9](?:'?[0-9])*|(?![.0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}]))(?:[eEpP][-+]?[0-9]+)?|[eEpP][-+]?[0-9]+)([iuf][0-9]*)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
                     "captures": {
                         "1": { "name": "storage.type.numeric-suffix.sgl" }
                     }
                 },
                 {
                     "name": "constant.numeric.integer.sgl",
-                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))[0-9](?:'?[0-9])*([iuf][0-9]+)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))[0-9](?:'?[0-9])*([iuf][0-9]*)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
                     "captures": {
                         "1": { "name": "storage.type.numeric-suffix.sgl" }
                     }

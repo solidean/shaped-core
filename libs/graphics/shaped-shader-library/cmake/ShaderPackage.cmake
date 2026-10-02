@@ -72,11 +72,11 @@
 # That header's directory is PUBLIC on TARGET, so linking the package's target is what makes a module reachable.
 # A file whose entry point lists a module binding no package exports fails on that missing header.
 #
-# Those entries are read by the SGL compiler itself, `sgl describe`, because it is the one parser of the language.
-# So a package that has one needs a runnable `sgl` while it builds:
+# Every SGL entry is read by the SGL compiler itself, `sgl describe`, because it is the one parser of the language.
+# An entry point listed on its own is too, since its asset keys its compiles on the options it reaches.
+# So an SGL package needs a runnable `sgl` while it builds:
 # the tree's own `sgl` target in a native build, or SC_SGL_TOOL, which also serves a cross build and an
 # add_subdirectory consumer that builds no tools.
-# A package of entry points alone needs neither, which is why the wasm presets build today without one.
 
 set(SC_SHADER_PACKAGE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/generate_shader_package.py"
     CACHE INTERNAL "Generator script backing sc_add_shader_package")
@@ -159,18 +159,15 @@ function(sc_add_shader_package)
     # manifest's mtime and retrigger codegen + compile + link on every preset `dev.py check` builds.
     file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_text}" @ONLY)
 
-    # An SGL package whose entries the compiler has to read runs `sgl describe` while it builds.
-    # Only those: a package of entry points alone must keep building where no `sgl` can run.
+    # An SGL package runs `sgl describe` over its entries while it builds.
     set(_sgl_args "")
     set(_sgl_depends "")
     # `module:view` writes modules/sgl_modules/view.hh and .cc beside the package's own header
     set(_module_headers "")
     set(_module_sources "")
     if(PKG_LANGUAGE STREQUAL "sgl")
-        set(_needs_sgl OFF)
         foreach(_shader IN LISTS PKG_SHADERS)
             string(REPLACE ":" ";" _parts "${_shader}")
-            list(LENGTH _parts _count)
             list(GET _parts 0 _first)
             list(GET _parts 1 _kind)
             if(_first STREQUAL "module")
@@ -185,26 +182,22 @@ function(sc_add_shader_package)
                 set_property(GLOBAL PROPERTY "SC_SGL_EXPORTED_MODULE_${_kind}" "${PKG_TARGET}/${PKG_NAME}")
                 list(APPEND _module_headers "${_gen_dir}/modules/sgl_modules/${_kind}.hh")
                 list(APPEND _module_sources "${_gen_dir}/modules/sgl_modules/${_kind}.cc")
-                set(_needs_sgl ON)
-            elseif((_count EQUAL 2 AND _kind STREQUAL "*")
-               OR _kind STREQUAL "binding" OR _kind STREQUAL "vertex_input" OR _kind STREQUAL "render_target")
-                set(_needs_sgl ON)
             endif()
         endforeach()
 
-        if(_needs_sgl AND SC_SGL_TOOL)
+        if(SC_SGL_TOOL)
             set(_sgl_args --sgl-tool "${SC_SGL_TOOL}")
             set(_sgl_depends "${SC_SGL_TOOL}")
-        elseif(_needs_sgl AND CMAKE_CROSSCOMPILING)
+        elseif(CMAKE_CROSSCOMPILING)
             # The tree's `sgl` is built for the target here, so the build machine could not run it.
             message(FATAL_ERROR
-                "sc_add_shader_package(${PKG_NAME}): an SGL entry that generates C++ needs a runnable `sgl`, and this "
+                "sc_add_shader_package(${PKG_NAME}): an SGL package needs a runnable `sgl`, and this "
                 "build compiles for another machine. Set SC_SGL_TOOL to a natively built one.")
-        elseif(_needs_sgl AND NOT SC_BUILD_TOOLS)
+        elseif(NOT SC_BUILD_TOOLS)
             message(FATAL_ERROR
-                "sc_add_shader_package(${PKG_NAME}): an SGL entry that generates C++ needs `sgl`, which "
+                "sc_add_shader_package(${PKG_NAME}): an SGL package needs `sgl`, which "
                 "SC_BUILD_TOOLS=OFF does not build. Set SC_SGL_TOOL to one.")
-        elseif(_needs_sgl)
+        else()
             # A target defined after this call, which is legal: the generator expression and the edge resolve at generate time.
             set(_sgl_args --sgl-tool "$<TARGET_FILE:sgl>")
             set(_sgl_depends sgl)

@@ -1,13 +1,31 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/check/symbols.hh>
 
-/// The two file operations the commands share, with the reason a failure gives.
+/// The file operations the commands share, with the reason a failure gives, and the options they all take.
 namespace sgl_tool
 {
+/// `--option name=value` arguments as the values a compile gives the source's options; an error names one without `=`.
+inline cc::result<cc::vector<sgl::check::option_value>, cc::string> parse_options(cc::span<cc::string const> arguments)
+{
+    auto result = cc::vector<sgl::check::option_value>();
+    for (auto const& a : arguments)
+    {
+        auto const at = cc::string_view(a).find('=');
+        if (at <= 0)
+            return cc::error(cc::string(a));
+        auto const text = cc::string_view(a);
+        result.push_back(
+            {.name = cc::string(text.subview({.offset = 0, .size = at})), .value = cc::string(text.subview(at + 1))});
+    }
+    return result;
+}
+
 inline cc::result<cc::string, cc::string> read_file(cc::string_view path)
 {
     auto adapter = cc::file_read_stream_adapter::open(path);

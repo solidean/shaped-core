@@ -1,7 +1,7 @@
 #include <nexus/test.hh>
 #include <shaped-rendering/input.hh>
 #include <shaped-viewer/view/camera_controller.hh>
-#include <typed-geometry/linalg/pos_ops.hh> // tg::distance
+#include <typed-geometry/geometry/query/distance.hh>
 
 using namespace cc::primitive_defines;
 
@@ -139,7 +139,7 @@ TEST("sv - orbit_state and camera::orbiting agree")
 
     auto const from_orbit = o.to_camera();
     auto const direct = sv::camera::orbiting(o.target, o.distance, o.azimuth, o.elevation);
-    CHECK(tg::distance(from_orbit.position, direct.position) < 1e-9);
+    CHECK(from_orbit.position.distance_to(direct.position) < 1e-9);
 
     // The projection is the one thing to_camera carries that camera::orbiting does not.
     auto with_fov = o;
@@ -148,7 +148,7 @@ TEST("sv - orbit_state and camera::orbiting agree")
 
     // Round-tripping recovers the orbit, given the distance it was built at.
     auto const back = sv::orbit_state::from_camera(from_orbit, o.distance);
-    CHECK(tg::distance(back.target, o.target) < 1e-9);
+    CHECK(back.target.distance_to(o.target) < 1e-9);
     CHECK(abs_of(back.azimuth.degree() - o.azimuth.degree()) < 1e-9);
     CHECK(abs_of(back.elevation.degree() - o.elevation.degree()) < 1e-9);
 }
@@ -205,20 +205,20 @@ TEST("sv - fps controller moves only while update integrates")
     // A key press is not motion; it arms update, which is where the camera actually travels.
     CHECK(!c.handle(key(sr::scancode::w, true)));
     CHECK(c.is_moving());
-    CHECK(tg::distance(c.pose.position, tg::pos3d::zero) < eps);
+    CHECK(c.pose.position.distance_to(tg::pos3d::zero) < eps);
 
     // yaw 0 looks along +z, so a second of forward covers the base speed along +z.
     CHECK(c.update(1.0));
-    CHECK(tg::distance(c.pose.position, tg::pos3d(0, 0, 2)) < eps);
+    CHECK(c.pose.position.distance_to(tg::pos3d(0, 0, 2)) < eps);
 
     // Half the time is half the distance.
     CHECK(c.update(0.5));
-    CHECK(tg::distance(c.pose.position, tg::pos3d(0, 0, 3)) < eps);
+    CHECK(c.pose.position.distance_to(tg::pos3d(0, 0, 3)) < eps);
 
     // Shift accelerates, ctrl slows, and holding both multiplies.
     (void)c.handle(key(sr::scancode::left_shift, true));
     CHECK(c.update(1.0));
-    CHECK(tg::distance(c.pose.position, tg::pos3d(0, 0, 3 + 2 * c.config.fast_multiplier)) < eps);
+    CHECK(c.pose.position.distance_to(tg::pos3d(0, 0, 3 + 2 * c.config.fast_multiplier)) < eps);
     (void)c.handle(key(sr::scancode::left_shift, false));
 
     (void)c.handle(key(sr::scancode::w, false));
@@ -240,7 +240,7 @@ TEST("sv - fps controller normalizes its movement direction")
     (void)c.handle(key(sr::scancode::w, true));
     (void)c.handle(key(sr::scancode::d, true));
     CHECK(c.update(1.0));
-    CHECK(abs_of(tg::distance(c.pose.position, tg::pos3d::zero) - 2.0) < eps);
+    CHECK(abs_of(c.pose.position.distance_to(tg::pos3d::zero) - 2.0) < eps);
     CHECK(abs_of(c.pose.position[0] - c.pose.position[2]) < eps); // yaw 0: right is +x, forward is +z
 
     // Opposing keys cancel exactly rather than drifting or normalizing a zero vector.
@@ -249,7 +249,7 @@ TEST("sv - fps controller normalizes its movement direction")
     (void)c.handle(key(sr::scancode::s, true));
     CHECK(c.is_moving());
     CHECK(!c.update(1.0));
-    CHECK(tg::distance(c.pose.position, before) < eps);
+    CHECK(c.pose.position.distance_to(before) < eps);
 }
 
 TEST("sv - fps controller flies along its view direction")
@@ -261,13 +261,13 @@ TEST("sv - fps controller flies along its view direction")
 
     (void)c.handle(key(sr::scancode::w, true));
     CHECK(c.update(1.0));
-    CHECK(tg::distance(c.pose.position, tg::pos3d(1, 0, 0)) < 1e-12);
+    CHECK(c.pose.position.distance_to(tg::pos3d(1, 0, 0)) < 1e-12);
 
     // E and Q are world-vertical, independent of where the view points.
     (void)c.handle(key(sr::scancode::w, false));
     (void)c.handle(key(sr::scancode::e, true));
     CHECK(c.update(1.0));
-    CHECK(tg::distance(c.pose.position, tg::pos3d(1, 1, 0)) < 1e-12);
+    CHECK(c.pose.position.distance_to(tg::pos3d(1, 1, 0)) < 1e-12);
 
     // Pitched up, forward climbs — this is a free-fly camera, not a walking one.
     (void)c.handle(key(sr::scancode::e, false));
@@ -321,13 +321,13 @@ TEST("sv - fps_state and camera agree")
                                  .vertical_fov = tg::angle_d::make_from_degree(35)};
 
     auto const cam = s.to_camera();
-    CHECK(tg::distance(cam.position, s.position) < 1e-12);
+    CHECK(cam.position.distance_to(s.position) < 1e-12);
     CHECK(cam.projection.vertical_fov == s.vertical_fov);
     CHECK((cam.basis().forward - s.forward()).length() < 1e-12);
 
     // Unlike orbit_state::from_camera this recovers the pose exactly — there is no orbit centre to guess.
     auto const back = sv::fps_state::from_camera(cam);
-    CHECK(tg::distance(back.position, s.position) < 1e-12);
+    CHECK(back.position.distance_to(s.position) < 1e-12);
     CHECK(abs_of(back.yaw.degree() - s.yaw.degree()) < 1e-9);
     CHECK(abs_of(back.pitch.degree() - s.pitch.degree()) < 1e-9);
     CHECK(back.vertical_fov == s.vertical_fov);

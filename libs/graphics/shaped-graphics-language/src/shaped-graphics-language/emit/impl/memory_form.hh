@@ -7,7 +7,7 @@
 #include <shaped-graphics-language/emit/emit.hh>
 #include <shaped-graphics-language/emit/impl/layout.hh>
 
-/// How WGSL and MSL are made to follow SGL's layout where their own rules would place a member elsewhere.
+/// How WGSL and MSL, and HLSL for a `@layout(.cpp)` block, are made to follow SGL's layout where their own rules would place a member elsewhere.
 ///
 /// A memory root is a constant block or the element of a buffer.
 /// Where the target's own rule lands every value of a root at SGL's offset, the root is written as the program's structs
@@ -55,6 +55,7 @@ struct memory_form
 
 /// The memory form of `members` placed in `space` for target `t`, or nothing where `t`'s own rule already places every
 /// value there, which is also the answer for both HLSL targets.
+/// A `.cpp` block (`cpp_constants`) has one on every target, HLSL included, and it splits a vector that crosses a row.
 /// `stride` is the bytes one element takes where the root is a buffer's element, and 0 for a block.
 [[nodiscard]] cc::optional<memory_form> memory_form_of(check::checked_module const& m,
                                                        cc::span<check::member_info const> members,

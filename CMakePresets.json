@@ -333,34 +333,37 @@
         {
             "name": "x64-windows-clang-ninja-debug-nopch",
             "displayName": "Debug Clang, no PCH (Ninja, Windows)",
-            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH).",
+            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES).",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-                "SC_CHECK_WIDE_ARITH": "ON"
+                "SC_CHECK_WIDE_ARITH": "ON",
+                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON"
             }
         },
         {
             "name": "x64-linux-clang-ninja-debug-nopch",
             "displayName": "Debug Clang, no PCH (Ninja, Linux)",
-            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH).",
+            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES).",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-                "SC_CHECK_WIDE_ARITH": "ON"
+                "SC_CHECK_WIDE_ARITH": "ON",
+                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON"
             }
         },
         {
             "name": "macos-arm-llvm-debug-nopch",
             "displayName": "Debug Clang, no PCH (macOS ARM)",
-            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH).",
+            "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces. Also the one leg that checks typed-geometry's wide-arithmetic claims (SC_CHECK_WIDE_ARITH) and geometric special cases (SC_CHECK_GEOMETRY_SPECIAL_CASES).",
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
-                "SC_CHECK_WIDE_ARITH": "ON"
+                "SC_CHECK_WIDE_ARITH": "ON",
+                "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON"
             }
         },
         {

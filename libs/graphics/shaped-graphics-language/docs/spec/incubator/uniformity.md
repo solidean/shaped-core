@@ -45,9 +45,13 @@ No such program is known yet, so no mechanism exists for it; one is built when t
 The pass starts from WGSL's rules, and is coarser than them in one place:
 a local set anywhere in non-uniform control flow is non-uniform everywhere, where WGSL follows each assignment.
 
+Subgroup operations are judged as barriers are, in uniform control flow alone, and their results are non-uniform ([CHK-377](../semantics/checking.md#subgroups)).
+That is stricter than HLSL, which defines them over the active lanes, and it relaxes additively once a shader needs a ballot inside a branch.
+`workgroup_uniform_load` is the one read of workgroup memory whose result is uniform, so a branch on a flag one thread published may hold a barrier (CHK-374).
+
 ## Open
 
 * Whether a finer analysis proves more programs uniform than WGSL's rules, and what silencing Tint for them then looks like.
 * Where `@uniform` stands: on the branch, on the value it tests, or on a function's parameter.
 * Whether an annotated branch is trusted, or checked at run time in a debug build.
-* Subgroup operations, which need the same judgement once they exist.
+* Whether a subgroup operation may stand in non-uniform control flow, over the invocations that reach it, and what WGSL's text then silences.

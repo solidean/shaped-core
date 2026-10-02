@@ -1,0 +1,39 @@
+// a function of the program takes a texture, an image or a sampler, and the parameter stands for its argument (CHK-366)
+
+binding post:
+    source: texture_2d[float4]
+    target: out image_2d[.rgba8_unorm]
+    accumulated: mut image_2d[.r32_float]
+    sampler bilinear:
+        filter = .linear
+        address = .clamp_edge
+
+sampler nearest:
+    filter = .nearest
+
+fun neighbour(uv: float2) => uv + 0.25
+
+// a test samples no texture, so it reaches what is no resource alone
+test neighbour(float2(0.5, 0.0)) == float2(0.75, 0.25)
+
+fun blurred(t: texture_2d[float4], s: sampler, uv: float2) -> float4:
+    let a = t.sample(uv, s, level = 0.0)
+    let b = t.sample(neighbour(uv), s, level = 0.0)
+    return (a + b) * 0.5
+
+// a resource parameter is handed on as the member it stands for
+fun brightest(t: texture_2d[float4], s: sampler, uv: float2) => max(blurred(t, s, uv), blurred(t, s, uv.yx))
+
+// an image keeps the access its member has, `mut` included
+fun accumulate(img: mut image_2d[.r32_float], xy: int2, v: float):
+    img.store(xy, img.load(xy) + v)
+
+fun write(img: out image_2d[.rgba8_unorm], xy: int2, c: float4):
+    img.store(xy, c)
+
+@compute(8, 8) fun post_process(@thread_id id: int3){post}:
+    let xy = id.xy
+    let uv = (xy as float2) / 64.0
+    let c = brightest(post.source, post.bilinear, uv) + blurred(post.source, nearest, uv)
+    accumulate(post.accumulated, xy, c.x)
+    write(post.target, xy, c)

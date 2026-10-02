@@ -145,7 +145,8 @@ struct constant_pass
         {
             auto in = cc::vector<scalar>();
             for (auto const argument : arguments)
-                in.push_back_range(value_of(argument).result.leaves);
+                for (auto const& leaf : value_of(argument).result.leaves)
+                    in.push_back(leaf.widened());
             if (auto const why = record->unrepresentable_when_constant(in); !why.empty())
             {
                 report(id, diagnostic_kind::constant_not_representable,
@@ -153,8 +154,10 @@ struct constant_pass
                 return judged::reported;
             }
         }
-        for (auto const& leaf : folded.result.leaves)
-            if (leaf.kind == value_kind::scalar_float && !(leaf.as_float() - leaf.as_float() == 0.0f))
+        // a half past its range is infinite as well, which WGSL refuses alike
+        for (auto const& folded_leaf : folded.result.leaves)
+            if (auto const leaf = folded_leaf.widened();
+                leaf.kind == value_kind::scalar_float && !(leaf.as_float() - leaf.as_float() == 0.0f))
             {
                 report(id, diagnostic_kind::constant_not_representable,
                        leaf.as_float() == leaf.as_float() ? "is an infinite float, which WGSL refuses in a constant"

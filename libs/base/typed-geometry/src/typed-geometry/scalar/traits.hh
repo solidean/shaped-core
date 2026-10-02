@@ -56,6 +56,7 @@ struct tg::scalar_traits
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = false;
     static constexpr bool has_pow2 = false;
+    static constexpr bool is_exact = false;
 };
 
 // std::sqrt and the std trig functions honor errno, which costs codegen for a contract nobody wants.
@@ -159,6 +160,7 @@ struct tg::scalar_traits<T>
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = true;
     static constexpr bool has_pow2 = false;
+    static constexpr bool is_exact = true;
 
     [[nodiscard]] static constexpr T one() { return T(1); }
     [[nodiscard]] static constexpr bool is_zero(T x) { return x == T(0); }
@@ -183,6 +185,7 @@ struct tg::scalar_traits<bool>
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = false;
     static constexpr bool has_pow2 = false;
+    static constexpr bool is_exact = true;
 
     [[nodiscard]] static constexpr bool one() { return true; }
     [[nodiscard]] static constexpr bool is_zero(bool x) { return !x; }
@@ -219,6 +222,19 @@ inline constexpr bool has_abs = scalar_traits<T>::has_abs;
 /// Integers deliberately do not: shifting one truncates, which is a different operation wearing the same name.
 template <class T>
 inline constexpr bool has_pow2 = scalar_traits<T>::has_pow2;
+
+/// true if the scalar's arithmetic is exact: the integers, bool and tg::fixed_int.
+/// An exact scalar's caller wants an exact answer or a compile error, so a query that iterates to a tolerance (GJK)
+/// or produces rational coordinates (a projection) refuses it.
+/// A scalar_traits that does not mention it is not exact, so a float wrapper (autodiff, error tracking) is served by default.
+template <class T>
+inline constexpr bool is_exact = []
+{
+    if constexpr (requires { scalar_traits<T>::is_exact; })
+        return bool(scalar_traits<T>::is_exact);
+    else
+        return false;
+}();
 
 /// is the value the additive identity? Routed through scalar_traits so symbolic / bigint / ...
 /// scalars can supply a smarter test than a plain comparison.

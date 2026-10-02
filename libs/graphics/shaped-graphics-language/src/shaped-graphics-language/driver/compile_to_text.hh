@@ -23,7 +23,12 @@ struct sgl::text_request
     /// The stage the caller expects the entry point to be; `none` takes whichever it is.
     check::stage stage = check::stage::none;
     emit::target target = emit::target::hlsl_dx12;
+    /// The values this compile gives the source's options, by name (CHK-354); an option left out keeps its default.
+    /// A used module's option is named `module.name`.
+    /// A name no option has, a value of another type than the option's, and a name given twice are `invalid-option`.
+    cc::span<check::option_value const> options;
     /// Runs the source's own tests after it checked, and makes a test that does not pass an error like any other.
+    /// The tests run with every option at its default, whatever `options` says.
     bool run_tests = false;
 };
 
@@ -82,11 +87,15 @@ struct sgl::emitted_source
     cc::vector<interface_binding> bindings;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
+    /// The subgroup size a compute entry point prefers, which the host asks the device for; 0 where it prefers none.
+    i32 preferred_subgroup_size = 0;
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;
     cc::string target_struct;
     /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
     check::feature_set features;
+    /// The options the entry point reaches, by name, in declaration order (CHK-355).
+    cc::vector<cc::string> options;
     /// What the entry point's code does to each binding it lists, keyed by host name; a slot it never touches is absent.
     cc::vector<check::slot_footprint> footprint;
     /// Every constant block and buffer element as the text declares it, which a compiler reflecting the text reports.

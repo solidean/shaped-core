@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 
 namespace slib_test
@@ -71,6 +72,8 @@ public:
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
         _compile_count.fetch_add(1);
+        _last_settings.lock([&](settings& s)
+                            { s = {.dxc_args = desc.dxc_args, .metal_language_version = desc.metal_language_version}; });
 
         if (desc.source.contains(k_broken_source))
             return cc::make_async_from_error<sg::compiled_shader>(
@@ -91,6 +94,17 @@ public:
         return cc::string_view(reinterpret_cast<char const*>(shader.bytecode.data()), shader.bytecode.size());
     }
 
+    /// What the last compile was handed beside its source, which an edge in front of this compiler may set.
+    struct settings
+    {
+        cc::vector<cc::string> dxc_args;
+        cc::string metal_language_version;
+    };
+    [[nodiscard]] settings last_settings() const
+    {
+        return _last_settings.lock([](settings const& s) { return s; });
+    }
+
     [[nodiscard]] i64 compile_count() const { return _compile_count.load(); }
     [[nodiscard]] i64 preprocess_count() const { return _preprocess_count.load(); }
 
@@ -101,4 +115,5 @@ private:
     // Mutable so the const compile path can count; the tests read these to prove laziness and caching.
     mutable cc::atomic<i64> _compile_count = {0};
     mutable cc::atomic<i64> _preprocess_count = {0};
+    mutable cc::mutex<settings> _last_settings;
 };

@@ -134,10 +134,11 @@ bool is_well_formed_number(cc::string_view t, bool& has_underscore)
             return false;
     }
 
+    // NUM-15: the width is optional, and `1u` is `1u32`
     if (i < t.size() && (t[i] == 'i' || t[i] == 'u' || t[i] == 'f'))
     {
         ++i;
-        if (!skip_digits(t, i, 10))
+        if (i < t.size() && !skip_digits(t, i, 10))
             return false;
     }
     return i == t.size();
@@ -512,7 +513,25 @@ struct form_parser
             right = parse_computes_as();
             claim_attributes_at_cursor(right, operand_group);
         }
-        return binary(left, operator_group, right);
+        auto const result = binary(left, operator_group, right);
+
+        // AST-154: `if c => a else b` on one line, where `else` joins the `if` and what follows it as an operator would
+        if (at_end() || !is_word(c.at, "else") || !is_if_led(left))
+            return result;
+        auto const else_group = c.at;
+        advance();
+        auto const otherwise = at_end() ? missing(span_of_group(else_group)) : parse_computes_as();
+        return binary(result, else_group, otherwise);
+    }
+
+    /// A keyword form whose first keyword is `if`.
+    [[nodiscard]] bool is_if_led(form_id f) const
+    {
+        auto const& form = file.at(f);
+        if (form.kind != form_kind::keyword_form || !is_valid(form.first_child))
+            return false;
+        auto const& first = file.at(form.first_child);
+        return first.kind == form_kind::keyword && file.text_of(file.at(first.token).where) == "if";
     }
 
     /// A keyword form, or an expression — which becomes a keyword form without keywords when a block hangs off it.
@@ -535,7 +554,7 @@ struct form_parser
 
     [[nodiscard]] bool ends_keyword_arguments() const
     {
-        if (at_end() || here().kind == group_kind::block)
+        if (at_end() || here().kind == group_kind::block || is_word(c.at, "else"))
             return true;
         return is_token(c.at, token_kind::double_arrow) || is_token(c.at, token_kind::semicolon) || at_assignment()
             || (list_depth > 0 && is_token(c.at, token_kind::comma));
@@ -766,8 +785,9 @@ struct form_parser
 
         switch (file.at(g.token).kind)
         {
+        // an `else` inside a line ends what stands before it, which `parse_computes_as` joins it to (AST-154)
         case token_kind::symbol:
-            return !is_word_operator(c.at);
+            return !is_word_operator(c.at) && !is_word(c.at, "else");
         case token_kind::wildcard:
         case token_kind::error:
             return true;

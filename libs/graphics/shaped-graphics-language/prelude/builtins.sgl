@@ -20,18 +20,18 @@
 @builtin struct float
 
 @shadowable(false)
-@builtin struct float2:
+@builtin @swizzle struct float2:
     x: float
     y: float
 
 @shadowable(false)
-@builtin struct float3:
+@builtin @swizzle struct float3:
     x: float
     y: float
     z: float
 
 @shadowable(false)
-@builtin struct float4:
+@builtin @swizzle struct float4:
     x: float
     y: float
     z: float
@@ -39,21 +39,21 @@
 
 /// A direction: it has a length, and a translation leaves it alone.
 @shadowable(false)
-@builtin struct vec3:
+@builtin @swizzle struct vec3:
     x: float
     y: float
     z: float
 
 /// A position: a translation moves it.
 @shadowable(false)
-@builtin struct pos3:
+@builtin @swizzle struct pos3:
     x: float
     y: float
     z: float
 
 /// A position in clip space, before the divide.
 @shadowable(false)
-@builtin struct hpos4:
+@builtin @swizzle struct hpos4:
     x: float
     y: float
     z: float
@@ -73,18 +73,18 @@
 @builtin struct int
 
 @shadowable(false)
-@builtin struct int2:
+@builtin @swizzle struct int2:
     x: int
     y: int
 
 @shadowable(false)
-@builtin struct int3:
+@builtin @swizzle struct int3:
     x: int
     y: int
     z: int
 
 @shadowable(false)
-@builtin struct int4:
+@builtin @swizzle struct int4:
     x: int
     y: int
     z: int
@@ -95,18 +95,18 @@
 @builtin struct uint
 
 @shadowable(false)
-@builtin struct uint2:
+@builtin @swizzle struct uint2:
     x: uint
     y: uint
 
 @shadowable(false)
-@builtin struct uint3:
+@builtin @swizzle struct uint3:
     x: uint
     y: uint
     z: uint
 
 @shadowable(false)
-@builtin struct uint4:
+@builtin @swizzle struct uint4:
     x: uint
     y: uint
     z: uint
@@ -118,35 +118,159 @@
     true
 
 @shadowable(false)
-@builtin struct bool2:
+@builtin @swizzle struct bool2:
     x: bool
     y: bool
 
 @shadowable(false)
-@builtin struct bool3:
+@builtin @swizzle struct bool3:
     x: bool
     y: bool
     z: bool
 
 @shadowable(false)
-@builtin struct bool4:
+@builtin @swizzle struct bool4:
     x: bool
     y: bool
     z: bool
     w: bool
+
+// the 16-bit families (CHK-381), each needing a feature of the device (CHK-382); no value of one
+// crosses a stage edge (CHK-383)
+/// A 16-bit float; every operation rounds to it, to nearest and ties to even.
+@shadowable(false)
+@builtin struct half
+
+@shadowable(false)
+@builtin @swizzle struct half2:
+    x: half
+    y: half
+
+@shadowable(false)
+@builtin @swizzle struct half3:
+    x: half
+    y: half
+    z: half
+
+@shadowable(false)
+@builtin @swizzle struct half4:
+    x: half
+    y: half
+    z: half
+    w: half
+
+/// 16 bits, signed; its arithmetic wraps.
+@shadowable(false)
+@builtin struct short
+
+@shadowable(false)
+@builtin @swizzle struct short2:
+    x: short
+    y: short
+
+@shadowable(false)
+@builtin @swizzle struct short3:
+    x: short
+    y: short
+    z: short
+
+@shadowable(false)
+@builtin @swizzle struct short4:
+    x: short
+    y: short
+    z: short
+    w: short
+
+/// 16 bits, unsigned; its arithmetic wraps.
+@shadowable(false)
+@builtin struct ushort
+
+@shadowable(false)
+@builtin @swizzle struct ushort2:
+    x: ushort
+    y: ushort
+
+@shadowable(false)
+@builtin @swizzle struct ushort3:
+    x: ushort
+    y: ushort
+    z: ushort
+
+@shadowable(false)
+@builtin @swizzle struct ushort4:
+    x: ushort
+    y: ushort
+    z: ushort
+    w: ushort
+
+// a vector of one value, beside the constructor of its fields (CHK-360)
+/// Every component `x`.
+@builtin @pure fun float2(x: float) -> float2
+/// Every component `x`.
+@builtin @pure fun float3(x: float) -> float3
+/// Every component `x`.
+@builtin @pure fun float4(x: float) -> float4
+/// Every component `x`.
+@builtin @pure fun vec3(x: float) -> vec3
+/// Every component `x`.
+@builtin @pure fun pos3(x: float) -> pos3
+/// Every component `x`.
+@builtin @pure fun hpos4(x: float) -> hpos4
+/// Every component `x`.
+@builtin @pure fun int2(x: int) -> int2
+/// Every component `x`.
+@builtin @pure fun int3(x: int) -> int3
+/// Every component `x`.
+@builtin @pure fun int4(x: int) -> int4
+/// Every component `x`.
+@builtin @pure fun uint2(x: uint) -> uint2
+/// Every component `x`.
+@builtin @pure fun uint3(x: uint) -> uint3
+/// Every component `x`.
+@builtin @pure fun uint4(x: uint) -> uint4
+/// Every component `x`.
+@builtin @pure fun bool2(x: bool) -> bool2
+/// Every component `x`.
+@builtin @pure fun bool3(x: bool) -> bool3
+/// Every component `x`.
+@builtin @pure fun bool4(x: bool) -> bool4
+/// Every component `x`.
+@builtin @pure fun half2(x: half) -> half2
+/// Every component `x`.
+@builtin @pure fun half3(x: half) -> half3
+/// Every component `x`.
+@builtin @pure fun half4(x: half) -> half4
+/// Every component `x`.
+@builtin @pure fun short2(x: short) -> short2
+/// Every component `x`.
+@builtin @pure fun short3(x: short) -> short3
+/// Every component `x`.
+@builtin @pure fun short4(x: short) -> short4
+/// Every component `x`.
+@builtin @pure fun ushort2(x: ushort) -> ushort2
+/// Every component `x`.
+@builtin @pure fun ushort3(x: ushort) -> ushort3
+/// Every component `x`.
+@builtin @pure fun ushort4(x: ushort) -> ushort4
 
 // @pure: a call has no effect, so nobody can tell whether or when it ran.
 // A @builtin without it is assumed to have one, and the compiler then keeps its place among its neighbours.
 //
 // An @operator function is found through its operator alone: its name is documentation, and no lookup sees it.
 
-// float
+// float, and half, which computes as float does and rounds each result to 16 bits
 @builtin @pure @operator("*") fun multiply(a: float, b: float) -> float
 @builtin @pure @operator("/") fun divide(a: float, b: float) -> float
 @builtin @pure @operator("%") fun remainder(a: float, b: float) -> float
 @builtin @pure @operator("+") fun add(a: float, b: float) -> float
 @builtin @pure @operator("-") fun subtract(a: float, b: float) -> float
 @builtin @pure @operator("-") fun negate(x: float) -> float
+@builtin @pure @operator("*") fun multiply_half(a: half, b: half) -> half
+@builtin @pure @operator("/") fun divide_half(a: half, b: half) -> half
+@builtin @pure @operator("%") fun remainder_half(a: half, b: half) -> half
+@builtin @pure @operator("+") fun add_half(a: half, b: half) -> half
+@builtin @pure @operator("-") fun subtract_half(a: half, b: half) -> half
+@builtin @pure @operator("-") fun negate_half(x: half) -> half
 
 // int: `/` and `%` truncate toward zero, and a zero divisor has no value on any target
 @builtin @pure @operator("*") fun multiply_int(a: int, b: int) -> int
@@ -159,6 +283,16 @@
 @builtin @pure fun min(a: int, b: int) -> int
 @builtin @pure fun max(a: int, b: int) -> int
 @builtin @pure fun clamp(x: int, low: int, high: int) -> int
+@builtin @pure @operator("*") fun multiply_short(a: short, b: short) -> short
+@builtin @pure @operator("/") fun divide_short(a: short, b: short) -> short
+@builtin @pure @operator("%") fun remainder_short(a: short, b: short) -> short
+@builtin @pure @operator("+") fun add_short(a: short, b: short) -> short
+@builtin @pure @operator("-") fun subtract_short(a: short, b: short) -> short
+@builtin @pure @operator("-") fun negate_short(x: short) -> short
+@builtin @pure fun abs(x: short) -> short
+@builtin @pure fun min(a: short, b: short) -> short
+@builtin @pure fun max(a: short, b: short) -> short
+@builtin @pure fun clamp(x: short, low: short, high: short) -> short
 
 // uint: a zero divisor has no value, as for int
 @builtin @pure @operator("*") fun multiply_uint(a: uint, b: uint) -> uint
@@ -169,32 +303,58 @@
 @builtin @pure fun min(a: uint, b: uint) -> uint
 @builtin @pure fun max(a: uint, b: uint) -> uint
 @builtin @pure fun clamp(x: uint, low: uint, high: uint) -> uint
+@builtin @pure @operator("*") fun multiply_ushort(a: ushort, b: ushort) -> ushort
+@builtin @pure @operator("/") fun divide_ushort(a: ushort, b: ushort) -> ushort
+@builtin @pure @operator("%") fun remainder_ushort(a: ushort, b: ushort) -> ushort
+@builtin @pure @operator("+") fun add_ushort(a: ushort, b: ushort) -> ushort
+@builtin @pure @operator("-") fun subtract_ushort(a: ushort, b: ushort) -> ushort
+@builtin @pure fun min(a: ushort, b: ushort) -> ushort
+@builtin @pure fun max(a: ushort, b: ushort) -> ushort
+@builtin @pure fun clamp(x: ushort, low: ushort, high: ushort) -> ushort
 
-// comparisons, of float, of int and of uint
+// comparisons, of every numeric scalar
 @builtin @pure @operator("<") fun less(a: float, b: float) -> bool
 @builtin @pure @operator("<=") fun less_equal(a: float, b: float) -> bool
 @builtin @pure @operator(">") fun greater(a: float, b: float) -> bool
 @builtin @pure @operator(">=") fun greater_equal(a: float, b: float) -> bool
 @builtin @pure @operator("==") fun equal(a: float, b: float) -> bool
 @builtin @pure @operator("!=") fun not_equal(a: float, b: float) -> bool
+@builtin @pure @operator("<") fun less_half(a: half, b: half) -> bool
+@builtin @pure @operator("<=") fun less_equal_half(a: half, b: half) -> bool
+@builtin @pure @operator(">") fun greater_half(a: half, b: half) -> bool
+@builtin @pure @operator(">=") fun greater_equal_half(a: half, b: half) -> bool
+@builtin @pure @operator("==") fun equal_half(a: half, b: half) -> bool
+@builtin @pure @operator("!=") fun not_equal_half(a: half, b: half) -> bool
 @builtin @pure @operator("<") fun less_int(a: int, b: int) -> bool
 @builtin @pure @operator("<=") fun less_equal_int(a: int, b: int) -> bool
 @builtin @pure @operator(">") fun greater_int(a: int, b: int) -> bool
 @builtin @pure @operator(">=") fun greater_equal_int(a: int, b: int) -> bool
 @builtin @pure @operator("==") fun equal_int(a: int, b: int) -> bool
 @builtin @pure @operator("!=") fun not_equal_int(a: int, b: int) -> bool
+@builtin @pure @operator("<") fun less_short(a: short, b: short) -> bool
+@builtin @pure @operator("<=") fun less_equal_short(a: short, b: short) -> bool
+@builtin @pure @operator(">") fun greater_short(a: short, b: short) -> bool
+@builtin @pure @operator(">=") fun greater_equal_short(a: short, b: short) -> bool
+@builtin @pure @operator("==") fun equal_short(a: short, b: short) -> bool
+@builtin @pure @operator("!=") fun not_equal_short(a: short, b: short) -> bool
 @builtin @pure @operator("<") fun less_uint(a: uint, b: uint) -> bool
 @builtin @pure @operator("<=") fun less_equal_uint(a: uint, b: uint) -> bool
 @builtin @pure @operator(">") fun greater_uint(a: uint, b: uint) -> bool
 @builtin @pure @operator(">=") fun greater_equal_uint(a: uint, b: uint) -> bool
 @builtin @pure @operator("==") fun equal_uint(a: uint, b: uint) -> bool
 @builtin @pure @operator("!=") fun not_equal_uint(a: uint, b: uint) -> bool
+@builtin @pure @operator("<") fun less_ushort(a: ushort, b: ushort) -> bool
+@builtin @pure @operator("<=") fun less_equal_ushort(a: ushort, b: ushort) -> bool
+@builtin @pure @operator(">") fun greater_ushort(a: ushort, b: ushort) -> bool
+@builtin @pure @operator(">=") fun greater_equal_ushort(a: ushort, b: ushort) -> bool
+@builtin @pure @operator("==") fun equal_ushort(a: ushort, b: ushort) -> bool
+@builtin @pure @operator("!=") fun not_equal_ushort(a: ushort, b: ushort) -> bool
 
 // bool: `and`, `or` and `not` are the language's own, since no function could leave an operand unevaluated
 @builtin @pure @operator("==") fun equal_bool(a: bool, b: bool) -> bool
 @builtin @pure @operator("!=") fun not_equal_bool(a: bool, b: bool) -> bool
 
-// what a float and a plain vector of floats share, component by component
+// what a float and a plain vector of floats share, component by component, and so do the halves
 @builtin @pure fun saturate(x: float) -> float
 @builtin @pure fun abs(x: float) -> float
 @builtin @pure fun min(a: float, b: float) -> float
@@ -223,6 +383,34 @@
 @builtin @pure fun clamp(x: float4, low: float4, high: float4) -> float4
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: float4, b: float4, t: float) -> float4
+@builtin @pure fun saturate(x: half) -> half
+@builtin @pure fun abs(x: half) -> half
+@builtin @pure fun min(a: half, b: half) -> half
+@builtin @pure fun max(a: half, b: half) -> half
+@builtin @pure fun clamp(x: half, low: half, high: half) -> half
+/// `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: half, b: half, t: half) -> half
+@builtin @pure fun saturate(x: half2) -> half2
+@builtin @pure fun abs(x: half2) -> half2
+@builtin @pure fun min(a: half2, b: half2) -> half2
+@builtin @pure fun max(a: half2, b: half2) -> half2
+@builtin @pure fun clamp(x: half2, low: half2, high: half2) -> half2
+/// `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: half2, b: half2, t: half) -> half2
+@builtin @pure fun saturate(x: half3) -> half3
+@builtin @pure fun abs(x: half3) -> half3
+@builtin @pure fun min(a: half3, b: half3) -> half3
+@builtin @pure fun max(a: half3, b: half3) -> half3
+@builtin @pure fun clamp(x: half3, low: half3, high: half3) -> half3
+/// `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: half3, b: half3, t: half) -> half3
+@builtin @pure fun saturate(x: half4) -> half4
+@builtin @pure fun abs(x: half4) -> half4
+@builtin @pure fun min(a: half4, b: half4) -> half4
+@builtin @pure fun max(a: half4, b: half4) -> half4
+@builtin @pure fun clamp(x: half4, low: half4, high: half4) -> half4
+/// `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: half4, b: half4, t: half) -> half4
 
 // float3 and float4 are plain numbers, so all of their arithmetic is componentwise
 @builtin @pure @operator("+") fun add_float2(a: float2, b: float2) -> float2
@@ -240,6 +428,21 @@
 @builtin @pure @operator("*") fun multiply_float4(a: float4, b: float4) -> float4
 @builtin @pure @operator("/") fun divide_float4(a: float4, b: float4) -> float4
 @builtin @pure @operator("%") fun remainder_float4(a: float4, b: float4) -> float4
+@builtin @pure @operator("+") fun add_half2(a: half2, b: half2) -> half2
+@builtin @pure @operator("-") fun subtract_half2(a: half2, b: half2) -> half2
+@builtin @pure @operator("*") fun multiply_half2(a: half2, b: half2) -> half2
+@builtin @pure @operator("/") fun divide_half2(a: half2, b: half2) -> half2
+@builtin @pure @operator("%") fun remainder_half2(a: half2, b: half2) -> half2
+@builtin @pure @operator("+") fun add_half3(a: half3, b: half3) -> half3
+@builtin @pure @operator("-") fun subtract_half3(a: half3, b: half3) -> half3
+@builtin @pure @operator("*") fun multiply_half3(a: half3, b: half3) -> half3
+@builtin @pure @operator("/") fun divide_half3(a: half3, b: half3) -> half3
+@builtin @pure @operator("%") fun remainder_half3(a: half3, b: half3) -> half3
+@builtin @pure @operator("+") fun add_half4(a: half4, b: half4) -> half4
+@builtin @pure @operator("-") fun subtract_half4(a: half4, b: half4) -> half4
+@builtin @pure @operator("*") fun multiply_half4(a: half4, b: half4) -> half4
+@builtin @pure @operator("/") fun divide_half4(a: half4, b: half4) -> half4
+@builtin @pure @operator("%") fun remainder_half4(a: half4, b: half4) -> half4
 
 // integer vectors wrap componentwise, and divide componentwise as their scalars do
 @builtin @pure @operator("+") fun add_int2(a: int2, b: int2) -> int2
@@ -272,17 +475,224 @@
 @builtin @pure @operator("*") fun multiply_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("/") fun divide_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("%") fun remainder_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("+") fun add_short2(a: short2, b: short2) -> short2
+@builtin @pure @operator("-") fun subtract_short2(a: short2, b: short2) -> short2
+@builtin @pure @operator("*") fun multiply_short2(a: short2, b: short2) -> short2
+@builtin @pure @operator("/") fun divide_short2(a: short2, b: short2) -> short2
+@builtin @pure @operator("%") fun remainder_short2(a: short2, b: short2) -> short2
+@builtin @pure @operator("+") fun add_short3(a: short3, b: short3) -> short3
+@builtin @pure @operator("-") fun subtract_short3(a: short3, b: short3) -> short3
+@builtin @pure @operator("*") fun multiply_short3(a: short3, b: short3) -> short3
+@builtin @pure @operator("/") fun divide_short3(a: short3, b: short3) -> short3
+@builtin @pure @operator("%") fun remainder_short3(a: short3, b: short3) -> short3
+@builtin @pure @operator("+") fun add_short4(a: short4, b: short4) -> short4
+@builtin @pure @operator("-") fun subtract_short4(a: short4, b: short4) -> short4
+@builtin @pure @operator("*") fun multiply_short4(a: short4, b: short4) -> short4
+@builtin @pure @operator("/") fun divide_short4(a: short4, b: short4) -> short4
+@builtin @pure @operator("%") fun remainder_short4(a: short4, b: short4) -> short4
+@builtin @pure @operator("+") fun add_ushort2(a: ushort2, b: ushort2) -> ushort2
+@builtin @pure @operator("-") fun subtract_ushort2(a: ushort2, b: ushort2) -> ushort2
+@builtin @pure @operator("*") fun multiply_ushort2(a: ushort2, b: ushort2) -> ushort2
+@builtin @pure @operator("/") fun divide_ushort2(a: ushort2, b: ushort2) -> ushort2
+@builtin @pure @operator("%") fun remainder_ushort2(a: ushort2, b: ushort2) -> ushort2
+@builtin @pure @operator("+") fun add_ushort3(a: ushort3, b: ushort3) -> ushort3
+@builtin @pure @operator("-") fun subtract_ushort3(a: ushort3, b: ushort3) -> ushort3
+@builtin @pure @operator("*") fun multiply_ushort3(a: ushort3, b: ushort3) -> ushort3
+@builtin @pure @operator("/") fun divide_ushort3(a: ushort3, b: ushort3) -> ushort3
+@builtin @pure @operator("%") fun remainder_ushort3(a: ushort3, b: ushort3) -> ushort3
+@builtin @pure @operator("+") fun add_ushort4(a: ushort4, b: ushort4) -> ushort4
+@builtin @pure @operator("-") fun subtract_ushort4(a: ushort4, b: ushort4) -> ushort4
+@builtin @pure @operator("*") fun multiply_ushort4(a: ushort4, b: ushort4) -> ushort4
+@builtin @pure @operator("/") fun divide_ushort4(a: ushort4, b: ushort4) -> ushort4
+@builtin @pure @operator("%") fun remainder_ushort4(a: ushort4, b: ushort4) -> ushort4
 
-// integer vectors order componentwise as their scalars do, an int by value and a uint by its bits
+// a plain vector and its scalar, from either side, componentwise (CHK-358);
+// `*` and `/` of a float vector by a float are the scaling further below
+@builtin @pure @operator("+") fun add_float2_scalar(a: float2, b: float) -> float2
+@builtin @pure @operator("+") fun add_scalar_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("-") fun subtract_float2_scalar(a: float2, b: float) -> float2
+@builtin @pure @operator("-") fun subtract_scalar_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("/") fun divide_scalar_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("%") fun remainder_float2_scalar(a: float2, b: float) -> float2
+@builtin @pure @operator("%") fun remainder_scalar_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("+") fun add_color_scalar(a: float3, b: float) -> float3
+@builtin @pure @operator("+") fun add_scalar_color(a: float, b: float3) -> float3
+@builtin @pure @operator("-") fun subtract_color_scalar(a: float3, b: float) -> float3
+@builtin @pure @operator("-") fun subtract_scalar_color(a: float, b: float3) -> float3
+@builtin @pure @operator("/") fun divide_scalar_color(a: float, b: float3) -> float3
+@builtin @pure @operator("%") fun remainder_color_scalar(a: float3, b: float) -> float3
+@builtin @pure @operator("%") fun remainder_scalar_color(a: float, b: float3) -> float3
+@builtin @pure @operator("+") fun add_float4_scalar(a: float4, b: float) -> float4
+@builtin @pure @operator("+") fun add_scalar_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("-") fun subtract_float4_scalar(a: float4, b: float) -> float4
+@builtin @pure @operator("-") fun subtract_scalar_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("/") fun divide_scalar_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("%") fun remainder_float4_scalar(a: float4, b: float) -> float4
+@builtin @pure @operator("%") fun remainder_scalar_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("+") fun add_half2_scalar(a: half2, b: half) -> half2
+@builtin @pure @operator("+") fun add_scalar_half2(a: half, b: half2) -> half2
+@builtin @pure @operator("-") fun subtract_half2_scalar(a: half2, b: half) -> half2
+@builtin @pure @operator("-") fun subtract_scalar_half2(a: half, b: half2) -> half2
+@builtin @pure @operator("/") fun divide_scalar_half2(a: half, b: half2) -> half2
+@builtin @pure @operator("%") fun remainder_half2_scalar(a: half2, b: half) -> half2
+@builtin @pure @operator("%") fun remainder_scalar_half2(a: half, b: half2) -> half2
+@builtin @pure @operator("+") fun add_half3_scalar(a: half3, b: half) -> half3
+@builtin @pure @operator("+") fun add_scalar_half3(a: half, b: half3) -> half3
+@builtin @pure @operator("-") fun subtract_half3_scalar(a: half3, b: half) -> half3
+@builtin @pure @operator("-") fun subtract_scalar_half3(a: half, b: half3) -> half3
+@builtin @pure @operator("/") fun divide_scalar_half3(a: half, b: half3) -> half3
+@builtin @pure @operator("%") fun remainder_half3_scalar(a: half3, b: half) -> half3
+@builtin @pure @operator("%") fun remainder_scalar_half3(a: half, b: half3) -> half3
+@builtin @pure @operator("+") fun add_half4_scalar(a: half4, b: half) -> half4
+@builtin @pure @operator("+") fun add_scalar_half4(a: half, b: half4) -> half4
+@builtin @pure @operator("-") fun subtract_half4_scalar(a: half4, b: half) -> half4
+@builtin @pure @operator("-") fun subtract_scalar_half4(a: half, b: half4) -> half4
+@builtin @pure @operator("/") fun divide_scalar_half4(a: half, b: half4) -> half4
+@builtin @pure @operator("%") fun remainder_half4_scalar(a: half4, b: half) -> half4
+@builtin @pure @operator("%") fun remainder_scalar_half4(a: half, b: half4) -> half4
+@builtin @pure @operator("+") fun add_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("-") fun subtract_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("*") fun multiply_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("/") fun divide_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("%") fun remainder_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("+") fun add_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("-") fun subtract_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("*") fun multiply_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("/") fun divide_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("%") fun remainder_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("+") fun add_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("-") fun subtract_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("*") fun multiply_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("/") fun divide_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("%") fun remainder_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("+") fun add_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("-") fun subtract_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("*") fun multiply_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("/") fun divide_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("%") fun remainder_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("+") fun add_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("-") fun subtract_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("*") fun multiply_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("/") fun divide_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("%") fun remainder_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("+") fun add_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("-") fun subtract_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("*") fun multiply_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("/") fun divide_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("%") fun remainder_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("+") fun add_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("-") fun subtract_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("*") fun multiply_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("/") fun divide_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("%") fun remainder_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("+") fun add_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("-") fun subtract_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("*") fun multiply_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("/") fun divide_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("%") fun remainder_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("+") fun add_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("-") fun subtract_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("*") fun multiply_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("/") fun divide_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("%") fun remainder_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("+") fun add_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("-") fun subtract_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("*") fun multiply_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("/") fun divide_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("%") fun remainder_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("+") fun add_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("-") fun subtract_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("*") fun multiply_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("/") fun divide_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("%") fun remainder_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("+") fun add_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("-") fun subtract_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("*") fun multiply_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("/") fun divide_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("%") fun remainder_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("+") fun add_short2_scalar(a: short2, b: short) -> short2
+@builtin @pure @operator("-") fun subtract_short2_scalar(a: short2, b: short) -> short2
+@builtin @pure @operator("*") fun multiply_short2_scalar(a: short2, b: short) -> short2
+@builtin @pure @operator("/") fun divide_short2_scalar(a: short2, b: short) -> short2
+@builtin @pure @operator("%") fun remainder_short2_scalar(a: short2, b: short) -> short2
+@builtin @pure @operator("+") fun add_scalar_short2(a: short, b: short2) -> short2
+@builtin @pure @operator("-") fun subtract_scalar_short2(a: short, b: short2) -> short2
+@builtin @pure @operator("*") fun multiply_scalar_short2(a: short, b: short2) -> short2
+@builtin @pure @operator("/") fun divide_scalar_short2(a: short, b: short2) -> short2
+@builtin @pure @operator("%") fun remainder_scalar_short2(a: short, b: short2) -> short2
+@builtin @pure @operator("+") fun add_short3_scalar(a: short3, b: short) -> short3
+@builtin @pure @operator("-") fun subtract_short3_scalar(a: short3, b: short) -> short3
+@builtin @pure @operator("*") fun multiply_short3_scalar(a: short3, b: short) -> short3
+@builtin @pure @operator("/") fun divide_short3_scalar(a: short3, b: short) -> short3
+@builtin @pure @operator("%") fun remainder_short3_scalar(a: short3, b: short) -> short3
+@builtin @pure @operator("+") fun add_scalar_short3(a: short, b: short3) -> short3
+@builtin @pure @operator("-") fun subtract_scalar_short3(a: short, b: short3) -> short3
+@builtin @pure @operator("*") fun multiply_scalar_short3(a: short, b: short3) -> short3
+@builtin @pure @operator("/") fun divide_scalar_short3(a: short, b: short3) -> short3
+@builtin @pure @operator("%") fun remainder_scalar_short3(a: short, b: short3) -> short3
+@builtin @pure @operator("+") fun add_short4_scalar(a: short4, b: short) -> short4
+@builtin @pure @operator("-") fun subtract_short4_scalar(a: short4, b: short) -> short4
+@builtin @pure @operator("*") fun multiply_short4_scalar(a: short4, b: short) -> short4
+@builtin @pure @operator("/") fun divide_short4_scalar(a: short4, b: short) -> short4
+@builtin @pure @operator("%") fun remainder_short4_scalar(a: short4, b: short) -> short4
+@builtin @pure @operator("+") fun add_scalar_short4(a: short, b: short4) -> short4
+@builtin @pure @operator("-") fun subtract_scalar_short4(a: short, b: short4) -> short4
+@builtin @pure @operator("*") fun multiply_scalar_short4(a: short, b: short4) -> short4
+@builtin @pure @operator("/") fun divide_scalar_short4(a: short, b: short4) -> short4
+@builtin @pure @operator("%") fun remainder_scalar_short4(a: short, b: short4) -> short4
+@builtin @pure @operator("+") fun add_ushort2_scalar(a: ushort2, b: ushort) -> ushort2
+@builtin @pure @operator("-") fun subtract_ushort2_scalar(a: ushort2, b: ushort) -> ushort2
+@builtin @pure @operator("*") fun multiply_ushort2_scalar(a: ushort2, b: ushort) -> ushort2
+@builtin @pure @operator("/") fun divide_ushort2_scalar(a: ushort2, b: ushort) -> ushort2
+@builtin @pure @operator("%") fun remainder_ushort2_scalar(a: ushort2, b: ushort) -> ushort2
+@builtin @pure @operator("+") fun add_scalar_ushort2(a: ushort, b: ushort2) -> ushort2
+@builtin @pure @operator("-") fun subtract_scalar_ushort2(a: ushort, b: ushort2) -> ushort2
+@builtin @pure @operator("*") fun multiply_scalar_ushort2(a: ushort, b: ushort2) -> ushort2
+@builtin @pure @operator("/") fun divide_scalar_ushort2(a: ushort, b: ushort2) -> ushort2
+@builtin @pure @operator("%") fun remainder_scalar_ushort2(a: ushort, b: ushort2) -> ushort2
+@builtin @pure @operator("+") fun add_ushort3_scalar(a: ushort3, b: ushort) -> ushort3
+@builtin @pure @operator("-") fun subtract_ushort3_scalar(a: ushort3, b: ushort) -> ushort3
+@builtin @pure @operator("*") fun multiply_ushort3_scalar(a: ushort3, b: ushort) -> ushort3
+@builtin @pure @operator("/") fun divide_ushort3_scalar(a: ushort3, b: ushort) -> ushort3
+@builtin @pure @operator("%") fun remainder_ushort3_scalar(a: ushort3, b: ushort) -> ushort3
+@builtin @pure @operator("+") fun add_scalar_ushort3(a: ushort, b: ushort3) -> ushort3
+@builtin @pure @operator("-") fun subtract_scalar_ushort3(a: ushort, b: ushort3) -> ushort3
+@builtin @pure @operator("*") fun multiply_scalar_ushort3(a: ushort, b: ushort3) -> ushort3
+@builtin @pure @operator("/") fun divide_scalar_ushort3(a: ushort, b: ushort3) -> ushort3
+@builtin @pure @operator("%") fun remainder_scalar_ushort3(a: ushort, b: ushort3) -> ushort3
+@builtin @pure @operator("+") fun add_ushort4_scalar(a: ushort4, b: ushort) -> ushort4
+@builtin @pure @operator("-") fun subtract_ushort4_scalar(a: ushort4, b: ushort) -> ushort4
+@builtin @pure @operator("*") fun multiply_ushort4_scalar(a: ushort4, b: ushort) -> ushort4
+@builtin @pure @operator("/") fun divide_ushort4_scalar(a: ushort4, b: ushort) -> ushort4
+@builtin @pure @operator("%") fun remainder_ushort4_scalar(a: ushort4, b: ushort) -> ushort4
+@builtin @pure @operator("+") fun add_scalar_ushort4(a: ushort, b: ushort4) -> ushort4
+@builtin @pure @operator("-") fun subtract_scalar_ushort4(a: ushort, b: ushort4) -> ushort4
+@builtin @pure @operator("*") fun multiply_scalar_ushort4(a: ushort, b: ushort4) -> ushort4
+@builtin @pure @operator("/") fun divide_scalar_ushort4(a: ushort, b: ushort4) -> ushort4
+@builtin @pure @operator("%") fun remainder_scalar_ushort4(a: ushort, b: ushort4) -> ushort4
+
+// what the integers share with the floats, componentwise (CHK-359); `sign` of an int is an int,
+// and the signed families negate, wrapping as their scalars do (CHK-358)
+@builtin @pure fun sign(x: int) -> int
+@builtin @pure fun sign(x: short) -> short
 @builtin @pure fun min(a: int2, b: int2) -> int2
 @builtin @pure fun max(a: int2, b: int2) -> int2
 @builtin @pure fun clamp(x: int2, low: int2, high: int2) -> int2
+@builtin @pure fun abs(x: int2) -> int2
+@builtin @pure fun sign(x: int2) -> int2
+@builtin @pure @operator("-") fun negate_int2(x: int2) -> int2
 @builtin @pure fun min(a: int3, b: int3) -> int3
 @builtin @pure fun max(a: int3, b: int3) -> int3
 @builtin @pure fun clamp(x: int3, low: int3, high: int3) -> int3
+@builtin @pure fun abs(x: int3) -> int3
+@builtin @pure fun sign(x: int3) -> int3
+@builtin @pure @operator("-") fun negate_int3(x: int3) -> int3
 @builtin @pure fun min(a: int4, b: int4) -> int4
 @builtin @pure fun max(a: int4, b: int4) -> int4
 @builtin @pure fun clamp(x: int4, low: int4, high: int4) -> int4
+@builtin @pure fun abs(x: int4) -> int4
+@builtin @pure fun sign(x: int4) -> int4
+@builtin @pure @operator("-") fun negate_int4(x: int4) -> int4
 @builtin @pure fun min(a: uint2, b: uint2) -> uint2
 @builtin @pure fun max(a: uint2, b: uint2) -> uint2
 @builtin @pure fun clamp(x: uint2, low: uint2, high: uint2) -> uint2
@@ -292,9 +702,271 @@
 @builtin @pure fun min(a: uint4, b: uint4) -> uint4
 @builtin @pure fun max(a: uint4, b: uint4) -> uint4
 @builtin @pure fun clamp(x: uint4, low: uint4, high: uint4) -> uint4
-@builtin @pure fun abs(x: int2) -> int2
-@builtin @pure fun abs(x: int3) -> int3
-@builtin @pure fun abs(x: int4) -> int4
+@builtin @pure fun min(a: short2, b: short2) -> short2
+@builtin @pure fun max(a: short2, b: short2) -> short2
+@builtin @pure fun clamp(x: short2, low: short2, high: short2) -> short2
+@builtin @pure fun abs(x: short2) -> short2
+@builtin @pure fun sign(x: short2) -> short2
+@builtin @pure @operator("-") fun negate_short2(x: short2) -> short2
+@builtin @pure fun min(a: short3, b: short3) -> short3
+@builtin @pure fun max(a: short3, b: short3) -> short3
+@builtin @pure fun clamp(x: short3, low: short3, high: short3) -> short3
+@builtin @pure fun abs(x: short3) -> short3
+@builtin @pure fun sign(x: short3) -> short3
+@builtin @pure @operator("-") fun negate_short3(x: short3) -> short3
+@builtin @pure fun min(a: short4, b: short4) -> short4
+@builtin @pure fun max(a: short4, b: short4) -> short4
+@builtin @pure fun clamp(x: short4, low: short4, high: short4) -> short4
+@builtin @pure fun abs(x: short4) -> short4
+@builtin @pure fun sign(x: short4) -> short4
+@builtin @pure @operator("-") fun negate_short4(x: short4) -> short4
+@builtin @pure fun min(a: ushort2, b: ushort2) -> ushort2
+@builtin @pure fun max(a: ushort2, b: ushort2) -> ushort2
+@builtin @pure fun clamp(x: ushort2, low: ushort2, high: ushort2) -> ushort2
+@builtin @pure fun min(a: ushort3, b: ushort3) -> ushort3
+@builtin @pure fun max(a: ushort3, b: ushort3) -> ushort3
+@builtin @pure fun clamp(x: ushort3, low: ushort3, high: ushort3) -> ushort3
+@builtin @pure fun min(a: ushort4, b: ushort4) -> ushort4
+@builtin @pure fun max(a: ushort4, b: ushort4) -> ushort4
+@builtin @pure fun clamp(x: ushort4, low: ushort4, high: ushort4) -> ushort4
+
+// two vectors compared: an ordering per component (CHK-362), and `==` and `!=` of the whole value,
+// which `equal` and `not_equal` are per component (CHK-363)
+@builtin @pure @operator("<") fun less_float2(a: float2, b: float2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_float2(a: float2, b: float2) -> bool2
+@builtin @pure @operator(">") fun greater_float2(a: float2, b: float2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_float2(a: float2, b: float2) -> bool2
+@builtin @pure @operator("<") fun less_color(a: float3, b: float3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_color(a: float3, b: float3) -> bool3
+@builtin @pure @operator(">") fun greater_color(a: float3, b: float3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_color(a: float3, b: float3) -> bool3
+@builtin @pure @operator("<") fun less_float4(a: float4, b: float4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_float4(a: float4, b: float4) -> bool4
+@builtin @pure @operator(">") fun greater_float4(a: float4, b: float4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_float4(a: float4, b: float4) -> bool4
+@builtin @pure @operator("<") fun less_int2(a: int2, b: int2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_int2(a: int2, b: int2) -> bool2
+@builtin @pure @operator(">") fun greater_int2(a: int2, b: int2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_int2(a: int2, b: int2) -> bool2
+@builtin @pure @operator("<") fun less_int3(a: int3, b: int3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_int3(a: int3, b: int3) -> bool3
+@builtin @pure @operator(">") fun greater_int3(a: int3, b: int3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_int3(a: int3, b: int3) -> bool3
+@builtin @pure @operator("<") fun less_int4(a: int4, b: int4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_int4(a: int4, b: int4) -> bool4
+@builtin @pure @operator(">") fun greater_int4(a: int4, b: int4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_int4(a: int4, b: int4) -> bool4
+@builtin @pure @operator("<") fun less_uint2(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_uint2(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator(">") fun greater_uint2(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_uint2(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator("<") fun less_uint3(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_uint3(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator(">") fun greater_uint3(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_uint3(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator("<") fun less_uint4(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_uint4(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator(">") fun greater_uint4(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_uint4(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator("<") fun less_half2(a: half2, b: half2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_half2(a: half2, b: half2) -> bool2
+@builtin @pure @operator(">") fun greater_half2(a: half2, b: half2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_half2(a: half2, b: half2) -> bool2
+@builtin @pure @operator("<") fun less_half3(a: half3, b: half3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_half3(a: half3, b: half3) -> bool3
+@builtin @pure @operator(">") fun greater_half3(a: half3, b: half3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_half3(a: half3, b: half3) -> bool3
+@builtin @pure @operator("<") fun less_half4(a: half4, b: half4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_half4(a: half4, b: half4) -> bool4
+@builtin @pure @operator(">") fun greater_half4(a: half4, b: half4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_half4(a: half4, b: half4) -> bool4
+@builtin @pure @operator("<") fun less_short2(a: short2, b: short2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_short2(a: short2, b: short2) -> bool2
+@builtin @pure @operator(">") fun greater_short2(a: short2, b: short2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_short2(a: short2, b: short2) -> bool2
+@builtin @pure @operator("<") fun less_short3(a: short3, b: short3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_short3(a: short3, b: short3) -> bool3
+@builtin @pure @operator(">") fun greater_short3(a: short3, b: short3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_short3(a: short3, b: short3) -> bool3
+@builtin @pure @operator("<") fun less_short4(a: short4, b: short4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_short4(a: short4, b: short4) -> bool4
+@builtin @pure @operator(">") fun greater_short4(a: short4, b: short4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_short4(a: short4, b: short4) -> bool4
+@builtin @pure @operator("<") fun less_ushort2(a: ushort2, b: ushort2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_ushort2(a: ushort2, b: ushort2) -> bool2
+@builtin @pure @operator(">") fun greater_ushort2(a: ushort2, b: ushort2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_ushort2(a: ushort2, b: ushort2) -> bool2
+@builtin @pure @operator("<") fun less_ushort3(a: ushort3, b: ushort3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_ushort3(a: ushort3, b: ushort3) -> bool3
+@builtin @pure @operator(">") fun greater_ushort3(a: ushort3, b: ushort3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_ushort3(a: ushort3, b: ushort3) -> bool3
+@builtin @pure @operator("<") fun less_ushort4(a: ushort4, b: ushort4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_ushort4(a: ushort4, b: ushort4) -> bool4
+@builtin @pure @operator(">") fun greater_ushort4(a: ushort4, b: ushort4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_ushort4(a: ushort4, b: ushort4) -> bool4
+@builtin @pure @operator("==") fun same_float2(a: float2, b: float2) -> bool
+@builtin @pure @operator("!=") fun differs_float2(a: float2, b: float2) -> bool
+@builtin @pure fun equal(a: float2, b: float2) -> bool2
+@builtin @pure fun not_equal(a: float2, b: float2) -> bool2
+@builtin @pure @operator("==") fun same_color(a: float3, b: float3) -> bool
+@builtin @pure @operator("!=") fun differs_color(a: float3, b: float3) -> bool
+@builtin @pure fun equal(a: float3, b: float3) -> bool3
+@builtin @pure fun not_equal(a: float3, b: float3) -> bool3
+@builtin @pure @operator("==") fun same_float4(a: float4, b: float4) -> bool
+@builtin @pure @operator("!=") fun differs_float4(a: float4, b: float4) -> bool
+@builtin @pure fun equal(a: float4, b: float4) -> bool4
+@builtin @pure fun not_equal(a: float4, b: float4) -> bool4
+@builtin @pure @operator("==") fun same_int2(a: int2, b: int2) -> bool
+@builtin @pure @operator("!=") fun differs_int2(a: int2, b: int2) -> bool
+@builtin @pure fun equal(a: int2, b: int2) -> bool2
+@builtin @pure fun not_equal(a: int2, b: int2) -> bool2
+@builtin @pure @operator("==") fun same_int3(a: int3, b: int3) -> bool
+@builtin @pure @operator("!=") fun differs_int3(a: int3, b: int3) -> bool
+@builtin @pure fun equal(a: int3, b: int3) -> bool3
+@builtin @pure fun not_equal(a: int3, b: int3) -> bool3
+@builtin @pure @operator("==") fun same_int4(a: int4, b: int4) -> bool
+@builtin @pure @operator("!=") fun differs_int4(a: int4, b: int4) -> bool
+@builtin @pure fun equal(a: int4, b: int4) -> bool4
+@builtin @pure fun not_equal(a: int4, b: int4) -> bool4
+@builtin @pure @operator("==") fun same_uint2(a: uint2, b: uint2) -> bool
+@builtin @pure @operator("!=") fun differs_uint2(a: uint2, b: uint2) -> bool
+@builtin @pure fun equal(a: uint2, b: uint2) -> bool2
+@builtin @pure fun not_equal(a: uint2, b: uint2) -> bool2
+@builtin @pure @operator("==") fun same_uint3(a: uint3, b: uint3) -> bool
+@builtin @pure @operator("!=") fun differs_uint3(a: uint3, b: uint3) -> bool
+@builtin @pure fun equal(a: uint3, b: uint3) -> bool3
+@builtin @pure fun not_equal(a: uint3, b: uint3) -> bool3
+@builtin @pure @operator("==") fun same_uint4(a: uint4, b: uint4) -> bool
+@builtin @pure @operator("!=") fun differs_uint4(a: uint4, b: uint4) -> bool
+@builtin @pure fun equal(a: uint4, b: uint4) -> bool4
+@builtin @pure fun not_equal(a: uint4, b: uint4) -> bool4
+@builtin @pure @operator("==") fun same_bool2(a: bool2, b: bool2) -> bool
+@builtin @pure @operator("!=") fun differs_bool2(a: bool2, b: bool2) -> bool
+@builtin @pure fun equal(a: bool2, b: bool2) -> bool2
+@builtin @pure fun not_equal(a: bool2, b: bool2) -> bool2
+@builtin @pure @operator("==") fun same_bool3(a: bool3, b: bool3) -> bool
+@builtin @pure @operator("!=") fun differs_bool3(a: bool3, b: bool3) -> bool
+@builtin @pure fun equal(a: bool3, b: bool3) -> bool3
+@builtin @pure fun not_equal(a: bool3, b: bool3) -> bool3
+@builtin @pure @operator("==") fun same_bool4(a: bool4, b: bool4) -> bool
+@builtin @pure @operator("!=") fun differs_bool4(a: bool4, b: bool4) -> bool
+@builtin @pure fun equal(a: bool4, b: bool4) -> bool4
+@builtin @pure fun not_equal(a: bool4, b: bool4) -> bool4
+@builtin @pure @operator("==") fun same_vec3(a: vec3, b: vec3) -> bool
+@builtin @pure @operator("!=") fun differs_vec3(a: vec3, b: vec3) -> bool
+@builtin @pure fun equal(a: vec3, b: vec3) -> bool3
+@builtin @pure fun not_equal(a: vec3, b: vec3) -> bool3
+@builtin @pure @operator("==") fun same_pos3(a: pos3, b: pos3) -> bool
+@builtin @pure @operator("!=") fun differs_pos3(a: pos3, b: pos3) -> bool
+@builtin @pure fun equal(a: pos3, b: pos3) -> bool3
+@builtin @pure fun not_equal(a: pos3, b: pos3) -> bool3
+@builtin @pure @operator("==") fun same_hpos4(a: hpos4, b: hpos4) -> bool
+@builtin @pure @operator("!=") fun differs_hpos4(a: hpos4, b: hpos4) -> bool
+@builtin @pure fun equal(a: hpos4, b: hpos4) -> bool4
+@builtin @pure fun not_equal(a: hpos4, b: hpos4) -> bool4
+@builtin @pure @operator("==") fun same_half2(a: half2, b: half2) -> bool
+@builtin @pure @operator("!=") fun differs_half2(a: half2, b: half2) -> bool
+@builtin @pure fun equal(a: half2, b: half2) -> bool2
+@builtin @pure fun not_equal(a: half2, b: half2) -> bool2
+@builtin @pure @operator("==") fun same_half3(a: half3, b: half3) -> bool
+@builtin @pure @operator("!=") fun differs_half3(a: half3, b: half3) -> bool
+@builtin @pure fun equal(a: half3, b: half3) -> bool3
+@builtin @pure fun not_equal(a: half3, b: half3) -> bool3
+@builtin @pure @operator("==") fun same_half4(a: half4, b: half4) -> bool
+@builtin @pure @operator("!=") fun differs_half4(a: half4, b: half4) -> bool
+@builtin @pure fun equal(a: half4, b: half4) -> bool4
+@builtin @pure fun not_equal(a: half4, b: half4) -> bool4
+@builtin @pure @operator("==") fun same_short2(a: short2, b: short2) -> bool
+@builtin @pure @operator("!=") fun differs_short2(a: short2, b: short2) -> bool
+@builtin @pure fun equal(a: short2, b: short2) -> bool2
+@builtin @pure fun not_equal(a: short2, b: short2) -> bool2
+@builtin @pure @operator("==") fun same_short3(a: short3, b: short3) -> bool
+@builtin @pure @operator("!=") fun differs_short3(a: short3, b: short3) -> bool
+@builtin @pure fun equal(a: short3, b: short3) -> bool3
+@builtin @pure fun not_equal(a: short3, b: short3) -> bool3
+@builtin @pure @operator("==") fun same_short4(a: short4, b: short4) -> bool
+@builtin @pure @operator("!=") fun differs_short4(a: short4, b: short4) -> bool
+@builtin @pure fun equal(a: short4, b: short4) -> bool4
+@builtin @pure fun not_equal(a: short4, b: short4) -> bool4
+@builtin @pure @operator("==") fun same_ushort2(a: ushort2, b: ushort2) -> bool
+@builtin @pure @operator("!=") fun differs_ushort2(a: ushort2, b: ushort2) -> bool
+@builtin @pure fun equal(a: ushort2, b: ushort2) -> bool2
+@builtin @pure fun not_equal(a: ushort2, b: ushort2) -> bool2
+@builtin @pure @operator("==") fun same_ushort3(a: ushort3, b: ushort3) -> bool
+@builtin @pure @operator("!=") fun differs_ushort3(a: ushort3, b: ushort3) -> bool
+@builtin @pure fun equal(a: ushort3, b: ushort3) -> bool3
+@builtin @pure fun not_equal(a: ushort3, b: ushort3) -> bool3
+@builtin @pure @operator("==") fun same_ushort4(a: ushort4, b: ushort4) -> bool
+@builtin @pure @operator("!=") fun differs_ushort4(a: ushort4, b: ushort4) -> bool
+@builtin @pure fun equal(a: ushort4, b: ushort4) -> bool4
+@builtin @pure fun not_equal(a: ushort4, b: ushort4) -> bool4
+
+// a bool vector read whole (CHK-364), and `select`, which evaluates all three of its arguments
+// and gives `if_true` where `cond` holds (CHK-365)
+/// Whether some component of `m` is true.
+@builtin @pure fun any(m: bool2) -> bool
+/// Whether every component of `m` is true.
+@builtin @pure fun all(m: bool2) -> bool
+/// Whether some component of `m` is true.
+@builtin @pure fun any(m: bool3) -> bool
+/// Whether every component of `m` is true.
+@builtin @pure fun all(m: bool3) -> bool
+/// Whether some component of `m` is true.
+@builtin @pure fun any(m: bool4) -> bool
+/// Whether every component of `m` is true.
+@builtin @pure fun all(m: bool4) -> bool
+@builtin @pure fun select(cond: bool, if_true: float, if_false: float) -> float
+@builtin @pure fun select(cond: bool, if_true: float2, if_false: float2) -> float2
+@builtin @pure fun select(cond: bool2, if_true: float2, if_false: float2) -> float2
+@builtin @pure fun select(cond: bool, if_true: float3, if_false: float3) -> float3
+@builtin @pure fun select(cond: bool3, if_true: float3, if_false: float3) -> float3
+@builtin @pure fun select(cond: bool, if_true: float4, if_false: float4) -> float4
+@builtin @pure fun select(cond: bool4, if_true: float4, if_false: float4) -> float4
+@builtin @pure fun select(cond: bool, if_true: int, if_false: int) -> int
+@builtin @pure fun select(cond: bool, if_true: int2, if_false: int2) -> int2
+@builtin @pure fun select(cond: bool2, if_true: int2, if_false: int2) -> int2
+@builtin @pure fun select(cond: bool, if_true: int3, if_false: int3) -> int3
+@builtin @pure fun select(cond: bool3, if_true: int3, if_false: int3) -> int3
+@builtin @pure fun select(cond: bool, if_true: int4, if_false: int4) -> int4
+@builtin @pure fun select(cond: bool4, if_true: int4, if_false: int4) -> int4
+@builtin @pure fun select(cond: bool, if_true: uint, if_false: uint) -> uint
+@builtin @pure fun select(cond: bool, if_true: uint2, if_false: uint2) -> uint2
+@builtin @pure fun select(cond: bool2, if_true: uint2, if_false: uint2) -> uint2
+@builtin @pure fun select(cond: bool, if_true: uint3, if_false: uint3) -> uint3
+@builtin @pure fun select(cond: bool3, if_true: uint3, if_false: uint3) -> uint3
+@builtin @pure fun select(cond: bool, if_true: uint4, if_false: uint4) -> uint4
+@builtin @pure fun select(cond: bool4, if_true: uint4, if_false: uint4) -> uint4
+@builtin @pure fun select(cond: bool, if_true: bool, if_false: bool) -> bool
+@builtin @pure fun select(cond: bool, if_true: bool2, if_false: bool2) -> bool2
+@builtin @pure fun select(cond: bool2, if_true: bool2, if_false: bool2) -> bool2
+@builtin @pure fun select(cond: bool, if_true: bool3, if_false: bool3) -> bool3
+@builtin @pure fun select(cond: bool3, if_true: bool3, if_false: bool3) -> bool3
+@builtin @pure fun select(cond: bool, if_true: bool4, if_false: bool4) -> bool4
+@builtin @pure fun select(cond: bool4, if_true: bool4, if_false: bool4) -> bool4
+@builtin @pure fun select(cond: bool, if_true: vec3, if_false: vec3) -> vec3
+@builtin @pure fun select(cond: bool, if_true: pos3, if_false: pos3) -> pos3
+@builtin @pure fun select(cond: bool, if_true: hpos4, if_false: hpos4) -> hpos4
+@builtin @pure fun select(cond: bool, if_true: half, if_false: half) -> half
+@builtin @pure fun select(cond: bool, if_true: half2, if_false: half2) -> half2
+@builtin @pure fun select(cond: bool2, if_true: half2, if_false: half2) -> half2
+@builtin @pure fun select(cond: bool, if_true: half3, if_false: half3) -> half3
+@builtin @pure fun select(cond: bool3, if_true: half3, if_false: half3) -> half3
+@builtin @pure fun select(cond: bool, if_true: half4, if_false: half4) -> half4
+@builtin @pure fun select(cond: bool4, if_true: half4, if_false: half4) -> half4
+@builtin @pure fun select(cond: bool, if_true: short, if_false: short) -> short
+@builtin @pure fun select(cond: bool, if_true: short2, if_false: short2) -> short2
+@builtin @pure fun select(cond: bool2, if_true: short2, if_false: short2) -> short2
+@builtin @pure fun select(cond: bool, if_true: short3, if_false: short3) -> short3
+@builtin @pure fun select(cond: bool3, if_true: short3, if_false: short3) -> short3
+@builtin @pure fun select(cond: bool, if_true: short4, if_false: short4) -> short4
+@builtin @pure fun select(cond: bool4, if_true: short4, if_false: short4) -> short4
+@builtin @pure fun select(cond: bool, if_true: ushort, if_false: ushort) -> ushort
+@builtin @pure fun select(cond: bool, if_true: ushort2, if_false: ushort2) -> ushort2
+@builtin @pure fun select(cond: bool2, if_true: ushort2, if_false: ushort2) -> ushort2
+@builtin @pure fun select(cond: bool, if_true: ushort3, if_false: ushort3) -> ushort3
+@builtin @pure fun select(cond: bool3, if_true: ushort3, if_false: ushort3) -> ushort3
+@builtin @pure fun select(cond: bool, if_true: ushort4, if_false: ushort4) -> ushort4
+@builtin @pure fun select(cond: bool4, if_true: ushort4, if_false: ushort4) -> ushort4
 
 // a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no operator
 @builtin @pure @operator("+") fun add_vec3(a: vec3, b: vec3) -> vec3
@@ -317,6 +989,18 @@
 @builtin @pure @operator("*") fun prescale_vec3(a: float, b: vec3) -> vec3
 @builtin @pure @operator("/") fun unscale_vec3(a: vec3, b: float) -> vec3
 @builtin @pure @operator("-") fun negate_vec3(x: vec3) -> vec3
+@builtin @pure @operator("*") fun scale_half2(a: half2, b: half) -> half2
+@builtin @pure @operator("*") fun prescale_half2(a: half, b: half2) -> half2
+@builtin @pure @operator("/") fun unscale_half2(a: half2, b: half) -> half2
+@builtin @pure @operator("-") fun negate_half2(x: half2) -> half2
+@builtin @pure @operator("*") fun scale_half3(a: half3, b: half) -> half3
+@builtin @pure @operator("*") fun prescale_half3(a: half, b: half3) -> half3
+@builtin @pure @operator("/") fun unscale_half3(a: half3, b: half) -> half3
+@builtin @pure @operator("-") fun negate_half3(x: half3) -> half3
+@builtin @pure @operator("*") fun scale_half4(a: half4, b: half) -> half4
+@builtin @pure @operator("*") fun prescale_half4(a: half, b: half4) -> half4
+@builtin @pure @operator("/") fun unscale_half4(a: half4, b: half) -> half4
+@builtin @pure @operator("-") fun negate_half4(x: half4) -> half4
 
 // a position moves by a direction, and two positions differ by one; `pos3 + pos3` means nothing
 @builtin @pure @operator("+") fun translate_pos3(a: pos3, b: vec3) -> pos3
@@ -336,6 +1020,15 @@
 @builtin @pure fun dot(a: float4, b: float4) -> float
 @builtin @pure fun length(v: float4) -> float
 @builtin @pure fun normalize(v: float4) -> float4
+@builtin @pure fun dot(a: half2, b: half2) -> half
+@builtin @pure fun length(v: half2) -> half
+@builtin @pure fun normalize(v: half2) -> half2
+@builtin @pure fun dot(a: half3, b: half3) -> half
+@builtin @pure fun length(v: half3) -> half
+@builtin @pure fun normalize(v: half3) -> half3
+@builtin @pure fun dot(a: half4, b: half4) -> half
+@builtin @pure fun length(v: half4) -> half
+@builtin @pure fun normalize(v: half4) -> half4
 
 // A matrix stands on the left; what it does to its right side depends on what that is:
 // a position takes the translation (w = 1) and keeps its w, a direction does not (w = 0) and drops it.
@@ -344,31 +1037,80 @@
 @builtin @pure @operator("*") fun transform_float4(m: mat4, v: float4) -> float4
 @builtin @pure @operator("*") fun multiply_mat4(m: mat4, b: mat4) -> mat4
 
-// `x as T` between the numeric families, width for width; each target writes a conversion to `T`
+// `x as T` between the numeric families of one width, and between the widths of one family,
+// component for component; each target writes a conversion to `T`
 @builtin @pure @operator("as") fun convert_float_to_int(x: float) -> int
 @builtin @pure @operator("as") fun convert_float_to_uint(x: float) -> uint
+@builtin @pure @operator("as") fun convert_float_to_half(x: float) -> half
 @builtin @pure @operator("as") fun convert_int_to_float(x: int) -> float
 @builtin @pure @operator("as") fun convert_int_to_uint(x: int) -> uint
+@builtin @pure @operator("as") fun convert_int_to_short(x: int) -> short
 @builtin @pure @operator("as") fun convert_uint_to_float(x: uint) -> float
 @builtin @pure @operator("as") fun convert_uint_to_int(x: uint) -> int
+@builtin @pure @operator("as") fun convert_uint_to_ushort(x: uint) -> ushort
+@builtin @pure @operator("as") fun convert_half_to_float(x: half) -> float
+@builtin @pure @operator("as") fun convert_half_to_short(x: half) -> short
+@builtin @pure @operator("as") fun convert_half_to_ushort(x: half) -> ushort
+@builtin @pure @operator("as") fun convert_short_to_int(x: short) -> int
+@builtin @pure @operator("as") fun convert_short_to_half(x: short) -> half
+@builtin @pure @operator("as") fun convert_short_to_ushort(x: short) -> ushort
+@builtin @pure @operator("as") fun convert_ushort_to_uint(x: ushort) -> uint
+@builtin @pure @operator("as") fun convert_ushort_to_half(x: ushort) -> half
+@builtin @pure @operator("as") fun convert_ushort_to_short(x: ushort) -> short
 @builtin @pure @operator("as") fun convert_float2_to_int2(x: float2) -> int2
 @builtin @pure @operator("as") fun convert_float2_to_uint2(x: float2) -> uint2
+@builtin @pure @operator("as") fun convert_float2_to_half2(x: float2) -> half2
 @builtin @pure @operator("as") fun convert_int2_to_float2(x: int2) -> float2
 @builtin @pure @operator("as") fun convert_int2_to_uint2(x: int2) -> uint2
+@builtin @pure @operator("as") fun convert_int2_to_short2(x: int2) -> short2
 @builtin @pure @operator("as") fun convert_uint2_to_float2(x: uint2) -> float2
 @builtin @pure @operator("as") fun convert_uint2_to_int2(x: uint2) -> int2
+@builtin @pure @operator("as") fun convert_uint2_to_ushort2(x: uint2) -> ushort2
+@builtin @pure @operator("as") fun convert_half2_to_float2(x: half2) -> float2
+@builtin @pure @operator("as") fun convert_half2_to_short2(x: half2) -> short2
+@builtin @pure @operator("as") fun convert_half2_to_ushort2(x: half2) -> ushort2
+@builtin @pure @operator("as") fun convert_short2_to_int2(x: short2) -> int2
+@builtin @pure @operator("as") fun convert_short2_to_half2(x: short2) -> half2
+@builtin @pure @operator("as") fun convert_short2_to_ushort2(x: short2) -> ushort2
+@builtin @pure @operator("as") fun convert_ushort2_to_uint2(x: ushort2) -> uint2
+@builtin @pure @operator("as") fun convert_ushort2_to_half2(x: ushort2) -> half2
+@builtin @pure @operator("as") fun convert_ushort2_to_short2(x: ushort2) -> short2
 @builtin @pure @operator("as") fun convert_float3_to_int3(x: float3) -> int3
 @builtin @pure @operator("as") fun convert_float3_to_uint3(x: float3) -> uint3
+@builtin @pure @operator("as") fun convert_float3_to_half3(x: float3) -> half3
 @builtin @pure @operator("as") fun convert_int3_to_float3(x: int3) -> float3
 @builtin @pure @operator("as") fun convert_int3_to_uint3(x: int3) -> uint3
+@builtin @pure @operator("as") fun convert_int3_to_short3(x: int3) -> short3
 @builtin @pure @operator("as") fun convert_uint3_to_float3(x: uint3) -> float3
 @builtin @pure @operator("as") fun convert_uint3_to_int3(x: uint3) -> int3
+@builtin @pure @operator("as") fun convert_uint3_to_ushort3(x: uint3) -> ushort3
+@builtin @pure @operator("as") fun convert_half3_to_float3(x: half3) -> float3
+@builtin @pure @operator("as") fun convert_half3_to_short3(x: half3) -> short3
+@builtin @pure @operator("as") fun convert_half3_to_ushort3(x: half3) -> ushort3
+@builtin @pure @operator("as") fun convert_short3_to_int3(x: short3) -> int3
+@builtin @pure @operator("as") fun convert_short3_to_half3(x: short3) -> half3
+@builtin @pure @operator("as") fun convert_short3_to_ushort3(x: short3) -> ushort3
+@builtin @pure @operator("as") fun convert_ushort3_to_uint3(x: ushort3) -> uint3
+@builtin @pure @operator("as") fun convert_ushort3_to_half3(x: ushort3) -> half3
+@builtin @pure @operator("as") fun convert_ushort3_to_short3(x: ushort3) -> short3
 @builtin @pure @operator("as") fun convert_float4_to_int4(x: float4) -> int4
 @builtin @pure @operator("as") fun convert_float4_to_uint4(x: float4) -> uint4
+@builtin @pure @operator("as") fun convert_float4_to_half4(x: float4) -> half4
 @builtin @pure @operator("as") fun convert_int4_to_float4(x: int4) -> float4
 @builtin @pure @operator("as") fun convert_int4_to_uint4(x: int4) -> uint4
+@builtin @pure @operator("as") fun convert_int4_to_short4(x: int4) -> short4
 @builtin @pure @operator("as") fun convert_uint4_to_float4(x: uint4) -> float4
 @builtin @pure @operator("as") fun convert_uint4_to_int4(x: uint4) -> int4
+@builtin @pure @operator("as") fun convert_uint4_to_ushort4(x: uint4) -> ushort4
+@builtin @pure @operator("as") fun convert_half4_to_float4(x: half4) -> float4
+@builtin @pure @operator("as") fun convert_half4_to_short4(x: half4) -> short4
+@builtin @pure @operator("as") fun convert_half4_to_ushort4(x: half4) -> ushort4
+@builtin @pure @operator("as") fun convert_short4_to_int4(x: short4) -> int4
+@builtin @pure @operator("as") fun convert_short4_to_half4(x: short4) -> half4
+@builtin @pure @operator("as") fun convert_short4_to_ushort4(x: short4) -> ushort4
+@builtin @pure @operator("as") fun convert_ushort4_to_uint4(x: ushort4) -> uint4
+@builtin @pure @operator("as") fun convert_ushort4_to_half4(x: ushort4) -> half4
+@builtin @pure @operator("as") fun convert_ushort4_to_short4(x: ushort4) -> short4
 
 // A bool32 is a bool as GPU memory holds one, and `as` is how either becomes the other
 @builtin @pure @operator("as") fun convert_bool_to_bool32(x: bool) -> bool32
@@ -425,8 +1167,70 @@
 @builtin @pure @operator(">>") fun shift_right_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("~") fun bit_not_uint4(x: uint4) -> uint4
 
-// the maths of float and its plain vectors, componentwise; `round` is ties to even everywhere,
-// and a value a target leaves indeterminate - pow of a negative base, asin of 2 - has no behaviour
+// an integer vector and its scalar, from either side, componentwise (CHK-358)
+@builtin @pure @operator("&") fun bit_and_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("|") fun bit_or_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("^") fun bit_xor_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("<<") fun shift_left_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator(">>") fun shift_right_int2_scalar(a: int2, b: int) -> int2
+@builtin @pure @operator("&") fun bit_and_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("|") fun bit_or_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("^") fun bit_xor_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("<<") fun shift_left_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator(">>") fun shift_right_scalar_int2(a: int, b: int2) -> int2
+@builtin @pure @operator("&") fun bit_and_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("|") fun bit_or_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("^") fun bit_xor_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("<<") fun shift_left_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator(">>") fun shift_right_int3_scalar(a: int3, b: int) -> int3
+@builtin @pure @operator("&") fun bit_and_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("|") fun bit_or_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("^") fun bit_xor_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("<<") fun shift_left_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator(">>") fun shift_right_scalar_int3(a: int, b: int3) -> int3
+@builtin @pure @operator("&") fun bit_and_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("|") fun bit_or_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("^") fun bit_xor_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("<<") fun shift_left_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator(">>") fun shift_right_int4_scalar(a: int4, b: int) -> int4
+@builtin @pure @operator("&") fun bit_and_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("|") fun bit_or_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("^") fun bit_xor_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("<<") fun shift_left_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator(">>") fun shift_right_scalar_int4(a: int, b: int4) -> int4
+@builtin @pure @operator("&") fun bit_and_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("|") fun bit_or_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("^") fun bit_xor_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("<<") fun shift_left_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator(">>") fun shift_right_uint2_scalar(a: uint2, b: uint) -> uint2
+@builtin @pure @operator("&") fun bit_and_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("|") fun bit_or_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("^") fun bit_xor_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("<<") fun shift_left_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator(">>") fun shift_right_scalar_uint2(a: uint, b: uint2) -> uint2
+@builtin @pure @operator("&") fun bit_and_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("|") fun bit_or_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("^") fun bit_xor_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("<<") fun shift_left_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator(">>") fun shift_right_uint3_scalar(a: uint3, b: uint) -> uint3
+@builtin @pure @operator("&") fun bit_and_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("|") fun bit_or_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("^") fun bit_xor_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("<<") fun shift_left_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator(">>") fun shift_right_scalar_uint3(a: uint, b: uint3) -> uint3
+@builtin @pure @operator("&") fun bit_and_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("|") fun bit_or_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("^") fun bit_xor_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("<<") fun shift_left_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator(">>") fun shift_right_uint4_scalar(a: uint4, b: uint) -> uint4
+@builtin @pure @operator("&") fun bit_and_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("|") fun bit_or_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("^") fun bit_xor_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator("<<") fun shift_left_scalar_uint4(a: uint, b: uint4) -> uint4
+@builtin @pure @operator(">>") fun shift_right_scalar_uint4(a: uint, b: uint4) -> uint4
+
+// the maths of float, half and their plain vectors, componentwise; `round` is ties to even
+// everywhere, and a value a target leaves indeterminate - pow of a negative base, asin of 2 - has no behaviour
 @builtin @pure fun sin(x: float) -> float
 @builtin @pure fun cos(x: float) -> float
 @builtin @pure fun tan(x: float) -> float
@@ -543,25 +1347,153 @@
 @builtin @pure fun step(edge: float4, x: float4) -> float4
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: float4, high: float4, x: float4) -> float4
+@builtin @pure fun sin(x: half) -> half
+@builtin @pure fun cos(x: half) -> half
+@builtin @pure fun tan(x: half) -> half
+@builtin @pure fun asin(x: half) -> half
+@builtin @pure fun acos(x: half) -> half
+@builtin @pure fun atan(x: half) -> half
+@builtin @pure fun sinh(x: half) -> half
+@builtin @pure fun cosh(x: half) -> half
+@builtin @pure fun tanh(x: half) -> half
+@builtin @pure fun exp(x: half) -> half
+@builtin @pure fun exp2(x: half) -> half
+@builtin @pure fun log(x: half) -> half
+@builtin @pure fun log2(x: half) -> half
+@builtin @pure fun sqrt(x: half) -> half
+@builtin @pure fun inverse_sqrt(x: half) -> half
+@builtin @pure fun floor(x: half) -> half
+@builtin @pure fun ceil(x: half) -> half
+@builtin @pure fun trunc(x: half) -> half
+@builtin @pure fun round(x: half) -> half
+@builtin @pure fun fract(x: half) -> half
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: half) -> half
+/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.
+@builtin @pure fun atan2(y: half, x: half) -> half
+@builtin @pure fun pow(x: half, y: half) -> half
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: half, x: half) -> half
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: half, high: half, x: half) -> half
+@builtin @pure fun sin(x: half2) -> half2
+@builtin @pure fun cos(x: half2) -> half2
+@builtin @pure fun tan(x: half2) -> half2
+@builtin @pure fun asin(x: half2) -> half2
+@builtin @pure fun acos(x: half2) -> half2
+@builtin @pure fun atan(x: half2) -> half2
+@builtin @pure fun sinh(x: half2) -> half2
+@builtin @pure fun cosh(x: half2) -> half2
+@builtin @pure fun tanh(x: half2) -> half2
+@builtin @pure fun exp(x: half2) -> half2
+@builtin @pure fun exp2(x: half2) -> half2
+@builtin @pure fun log(x: half2) -> half2
+@builtin @pure fun log2(x: half2) -> half2
+@builtin @pure fun sqrt(x: half2) -> half2
+@builtin @pure fun inverse_sqrt(x: half2) -> half2
+@builtin @pure fun floor(x: half2) -> half2
+@builtin @pure fun ceil(x: half2) -> half2
+@builtin @pure fun trunc(x: half2) -> half2
+@builtin @pure fun round(x: half2) -> half2
+@builtin @pure fun fract(x: half2) -> half2
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: half2) -> half2
+/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.
+@builtin @pure fun atan2(y: half2, x: half2) -> half2
+@builtin @pure fun pow(x: half2, y: half2) -> half2
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: half2, x: half2) -> half2
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: half2, high: half2, x: half2) -> half2
+@builtin @pure fun sin(x: half3) -> half3
+@builtin @pure fun cos(x: half3) -> half3
+@builtin @pure fun tan(x: half3) -> half3
+@builtin @pure fun asin(x: half3) -> half3
+@builtin @pure fun acos(x: half3) -> half3
+@builtin @pure fun atan(x: half3) -> half3
+@builtin @pure fun sinh(x: half3) -> half3
+@builtin @pure fun cosh(x: half3) -> half3
+@builtin @pure fun tanh(x: half3) -> half3
+@builtin @pure fun exp(x: half3) -> half3
+@builtin @pure fun exp2(x: half3) -> half3
+@builtin @pure fun log(x: half3) -> half3
+@builtin @pure fun log2(x: half3) -> half3
+@builtin @pure fun sqrt(x: half3) -> half3
+@builtin @pure fun inverse_sqrt(x: half3) -> half3
+@builtin @pure fun floor(x: half3) -> half3
+@builtin @pure fun ceil(x: half3) -> half3
+@builtin @pure fun trunc(x: half3) -> half3
+@builtin @pure fun round(x: half3) -> half3
+@builtin @pure fun fract(x: half3) -> half3
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: half3) -> half3
+/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.
+@builtin @pure fun atan2(y: half3, x: half3) -> half3
+@builtin @pure fun pow(x: half3, y: half3) -> half3
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: half3, x: half3) -> half3
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: half3, high: half3, x: half3) -> half3
+@builtin @pure fun sin(x: half4) -> half4
+@builtin @pure fun cos(x: half4) -> half4
+@builtin @pure fun tan(x: half4) -> half4
+@builtin @pure fun asin(x: half4) -> half4
+@builtin @pure fun acos(x: half4) -> half4
+@builtin @pure fun atan(x: half4) -> half4
+@builtin @pure fun sinh(x: half4) -> half4
+@builtin @pure fun cosh(x: half4) -> half4
+@builtin @pure fun tanh(x: half4) -> half4
+@builtin @pure fun exp(x: half4) -> half4
+@builtin @pure fun exp2(x: half4) -> half4
+@builtin @pure fun log(x: half4) -> half4
+@builtin @pure fun log2(x: half4) -> half4
+@builtin @pure fun sqrt(x: half4) -> half4
+@builtin @pure fun inverse_sqrt(x: half4) -> half4
+@builtin @pure fun floor(x: half4) -> half4
+@builtin @pure fun ceil(x: half4) -> half4
+@builtin @pure fun trunc(x: half4) -> half4
+@builtin @pure fun round(x: half4) -> half4
+@builtin @pure fun fract(x: half4) -> half4
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: half4) -> half4
+/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.
+@builtin @pure fun atan2(y: half4, x: half4) -> half4
+@builtin @pure fun pow(x: half4, y: half4) -> half4
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: half4, x: half4) -> half4
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: half4, high: half4, x: half4) -> half4
 
 // derivatives across the 2x2 quad of pixels, which only a pixel stage has;
-// a run of one invocation has no neighbours, and reads 0
+// a run of one invocation has no neighbours, and reads 0; WGSL takes the derivative of no half
 @builtin @pure @stages(.pixel) fun ddx(x: float) -> float
 @builtin @pure @stages(.pixel) fun ddy(x: float) -> float
+/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
+@builtin @pure @stages(.pixel) fun fwidth(x: float) -> float
 @builtin @pure @stages(.pixel) fun ddx(x: float2) -> float2
 @builtin @pure @stages(.pixel) fun ddy(x: float2) -> float2
+/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
+@builtin @pure @stages(.pixel) fun fwidth(x: float2) -> float2
 @builtin @pure @stages(.pixel) fun ddx(x: float3) -> float3
 @builtin @pure @stages(.pixel) fun ddy(x: float3) -> float3
+/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
+@builtin @pure @stages(.pixel) fun fwidth(x: float3) -> float3
 @builtin @pure @stages(.pixel) fun ddx(x: float4) -> float4
 @builtin @pure @stages(.pixel) fun ddy(x: float4) -> float4
+/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.
+@builtin @pure @stages(.pixel) fun fwidth(x: float4) -> float4
 
 // geometry
 @builtin @pure fun cross(a: vec3, b: vec3) -> vec3
 @builtin @pure fun cross(a: float3, b: float3) -> float3
+@builtin @pure fun cross(a: half3, b: half3) -> half3
 @builtin @pure fun distance(a: pos3, b: pos3) -> float
 @builtin @pure fun distance(a: float2, b: float2) -> float
 @builtin @pure fun distance(a: float3, b: float3) -> float
 @builtin @pure fun distance(a: float4, b: float4) -> float
+@builtin @pure fun distance(a: half2, b: half2) -> half
+@builtin @pure fun distance(a: half3, b: half3) -> half
+@builtin @pure fun distance(a: half4, b: half4) -> half
 /// `v` mirrored at the plane whose unit normal is `n`.
 @builtin @pure fun reflect(v: vec3, n: vec3) -> vec3
 /// `v` bent through a surface of unit normal `n` by the ratio of indices `eta`; zero where it reflects entirely.
@@ -1290,6 +2222,70 @@
 /// Waits for every thread of the workgroup, after which each sees what the others stored to images.
 @builtin @stages(.compute) fun texture_barrier()
 
+// The uniform load, a barrier that then reads workgroup memory and gives every thread the same value (CHK-374).
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: float) -> float
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: float2) -> float2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: float3) -> float3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: float4) -> float4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: int) -> int
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: int2) -> int2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: int3) -> int3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: int4) -> int4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: uint) -> uint
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: uint2) -> uint2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: uint3) -> uint3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: uint4) -> uint4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: bool) -> bool
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: bool2) -> bool2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: bool3) -> bool3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: bool4) -> bool4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: vec3) -> vec3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: pos3) -> pos3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: hpos4) -> hpos4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: half) -> half
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: half2) -> half2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: half3) -> half3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: half4) -> half4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: short) -> short
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: short2) -> short2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: short3) -> short3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: short4) -> short4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ushort) -> ushort
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ushort2) -> ushort2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ushort3) -> ushort3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ushort4) -> ushort4
+
 // Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.
 // Each is relaxed, and each but a store gives the value before; a vertex stage has none (CHK-296).
 /// Adds `v`, wrapping, and gives the value before.
@@ -1332,6 +2328,1179 @@
 @builtin @stages(.pixel, .compute) fun load(a: atomic[int]) -> int
 /// Stores `v` in one step.
 @builtin @stages(.pixel, .compute) fun store(a: out atomic[int], v: int)
+
+// The atomics of an `@atomic` image's texels, which the flat tree calls for `img[xy].max(v)` (CHK-373).
+// Each takes the image, the coordinate and an array's layer where the buffer atomic takes the atomic.
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_1d[uint], xy: int, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_1d[uint], xy: int) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d[uint], xy: int, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d[int], xy: int, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_1d[int], xy: int, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_1d[int], xy: int, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_1d[int], xy: int, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_1d[int], xy: int, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_1d[int], xy: int, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_1d[int], xy: int, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_1d[int], xy: int, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_1d[int], xy: int) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d[int], xy: int, v: int)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_1d_array[uint], xy: int, layer: int) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d_array[uint], xy: int, layer: int, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_1d_array[int], xy: int, layer: int) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d_array[int], xy: int, layer: int, v: int)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_2d[uint], xy: int2, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_2d[uint], xy: int2) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d[uint], xy: int2, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_2d[int], xy: int2, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_2d[int], xy: int2, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_2d[int], xy: int2) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d[int], xy: int2, v: int)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_2d_array[uint], xy: int2, layer: int) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_2d_array[int], xy: int2, layer: int) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d_array[int], xy: int2, layer: int, v: int)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_3d[uint], xy: int3, v: uint) -> uint
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_3d[uint], xy: int3) -> uint
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_3d[uint], xy: int3, v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_subtract(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_min(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_max(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_and(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_or(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_bit_xor(i: mut image_3d[int], xy: int3, v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @internal @stages(.pixel, .compute) fun texel_exchange(i: mut image_3d[int], xy: int3, v: int) -> int
+/// The value, read in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_load(i: mut image_3d[int], xy: int3) -> int
+/// Stores `v` in one step.
+@builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_3d[int], xy: int3, v: int)
+
+// Subgroup operations, which exchange values between the invocations the hardware runs together.
+// Each needs `subgroups`, stands only in uniform control flow, and gives a value that differs
+// within a workgroup (CHK-376, CHK-377).
+/// Whether `b` holds in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_all(b: bool) -> bool
+/// Whether `b` holds in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_any(b: bool) -> bool
+/// Bit `i` set where invocation `i`'s `b` holds.
+@builtin @stages(.pixel, .compute) fun subgroup_ballot(b: bool) -> uint4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: float) -> float
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: float2) -> float2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: float3) -> float3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: float4) -> float4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: int) -> int
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: int2) -> int2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: int3) -> int3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: int4) -> int4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint) -> uint
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint2) -> uint2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint3) -> uint3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: uint4) -> uint4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: half) -> half
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: half2) -> half2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: half3) -> half3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: half4) -> half4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: short) -> short
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: short2) -> short2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: short3) -> short3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: short4) -> short4
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: ushort) -> ushort
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: ushort2) -> ushort2
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: ushort3) -> ushort3
+/// The sum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_add(x: ushort4) -> ushort4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float) -> float
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float2) -> float2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float3) -> float3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: float4) -> float4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int) -> int
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int2) -> int2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int3) -> int3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: int4) -> int4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint) -> uint
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint2) -> uint2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint3) -> uint3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: uint4) -> uint4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: half) -> half
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: half2) -> half2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: half3) -> half3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: half4) -> half4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: short) -> short
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: short2) -> short2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: short3) -> short3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: short4) -> short4
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: ushort) -> ushort
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: ushort2) -> ushort2
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: ushort3) -> ushort3
+/// The product of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_mul(x: ushort4) -> ushort4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: float) -> float
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: float2) -> float2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: float3) -> float3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: float4) -> float4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: int) -> int
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: int2) -> int2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: int3) -> int3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: int4) -> int4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint) -> uint
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint2) -> uint2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint3) -> uint3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: uint4) -> uint4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: half) -> half
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: half2) -> half2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: half3) -> half3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: half4) -> half4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: short) -> short
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: short2) -> short2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: short3) -> short3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: short4) -> short4
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: ushort) -> ushort
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: ushort2) -> ushort2
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: ushort3) -> ushort3
+/// The minimum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_min(x: ushort4) -> ushort4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: float) -> float
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: float2) -> float2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: float3) -> float3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: float4) -> float4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: int) -> int
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: int2) -> int2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: int3) -> int3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: int4) -> int4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint) -> uint
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint2) -> uint2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint3) -> uint3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: uint4) -> uint4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: half) -> half
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: half2) -> half2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: half3) -> half3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: half4) -> half4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: short) -> short
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: short2) -> short2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: short3) -> short3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: short4) -> short4
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: ushort) -> ushort
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: ushort2) -> ushort2
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: ushort3) -> ushort3
+/// The maximum of `x` over the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_max(x: ushort4) -> ushort4
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int) -> int
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int2) -> int2
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int3) -> int3
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: int4) -> int4
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint) -> uint
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint2) -> uint2
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint3) -> uint3
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: uint4) -> uint4
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: short) -> short
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: short2) -> short2
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: short3) -> short3
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: short4) -> short4
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: ushort) -> ushort
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: ushort2) -> ushort2
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: ushort3) -> ushort3
+/// The bits `x` has in every invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_and(x: ushort4) -> ushort4
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int) -> int
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int2) -> int2
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int3) -> int3
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: int4) -> int4
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint) -> uint
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint2) -> uint2
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint3) -> uint3
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: uint4) -> uint4
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: short) -> short
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: short2) -> short2
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: short3) -> short3
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: short4) -> short4
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: ushort) -> ushort
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: ushort2) -> ushort2
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: ushort3) -> ushort3
+/// The bits `x` has in any invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_or(x: ushort4) -> ushort4
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int) -> int
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int2) -> int2
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int3) -> int3
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: int4) -> int4
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint) -> uint
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint2) -> uint2
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint3) -> uint3
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: uint4) -> uint4
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: short) -> short
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: short2) -> short2
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: short3) -> short3
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: short4) -> short4
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: ushort) -> ushort
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: ushort2) -> ushort2
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: ushort3) -> ushort3
+/// The bits `x` has in an odd number of invocations of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_bit_xor(x: ushort4) -> ushort4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float) -> float
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float2) -> float2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float3) -> float3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: float4) -> float4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int) -> int
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int2) -> int2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int3) -> int3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: int4) -> int4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint) -> uint
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint2) -> uint2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint3) -> uint3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: uint4) -> uint4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: half) -> half
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: half2) -> half2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: half3) -> half3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: half4) -> half4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: short) -> short
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: short2) -> short2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: short3) -> short3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: short4) -> short4
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: ushort) -> ushort
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: ushort2) -> ushort2
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: ushort3) -> ushort3
+/// The sum of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_add(x: ushort4) -> ushort4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float) -> float
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float2) -> float2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float3) -> float3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: float4) -> float4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int) -> int
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int2) -> int2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int3) -> int3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: int4) -> int4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint) -> uint
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint2) -> uint2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint3) -> uint3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: uint4) -> uint4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: half) -> half
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: half2) -> half2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: half3) -> half3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: half4) -> half4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: short) -> short
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: short2) -> short2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: short3) -> short3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: short4) -> short4
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: ushort) -> ushort
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: ushort2) -> ushort2
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: ushort3) -> ushort3
+/// The product of `x` over the invocations below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_exclusive_mul(x: ushort4) -> ushort4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float) -> float
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float2) -> float2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float3) -> float3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: float4) -> float4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int) -> int
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int2) -> int2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int3) -> int3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: int4) -> int4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint) -> uint
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint2) -> uint2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint3) -> uint3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: uint4) -> uint4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: half) -> half
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: half2) -> half2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: half3) -> half3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: half4) -> half4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: short) -> short
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: short2) -> short2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: short3) -> short3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: short4) -> short4
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: ushort) -> ushort
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: ushort2) -> ushort2
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: ushort3) -> ushort3
+/// The sum of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_add(x: ushort4) -> ushort4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float) -> float
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float2) -> float2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float3) -> float3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: float4) -> float4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int) -> int
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int2) -> int2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int3) -> int3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: int4) -> int4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint) -> uint
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint2) -> uint2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint3) -> uint3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: uint4) -> uint4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: half) -> half
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: half2) -> half2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: half3) -> half3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: half4) -> half4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: short) -> short
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: short2) -> short2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: short3) -> short3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: short4) -> short4
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: ushort) -> ushort
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: ushort2) -> ushort2
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: ushort3) -> ushort3
+/// The product of `x` over the invocations below this one and this one.
+@builtin @stages(.pixel, .compute) fun subgroup_inclusive_mul(x: ushort4) -> ushort4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float, lane: int) -> float
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float2, lane: int) -> float2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float3, lane: int) -> float3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: float4, lane: int) -> float4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int, lane: int) -> int
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int2, lane: int) -> int2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int3, lane: int) -> int3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: int4, lane: int) -> int4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint, lane: int) -> uint
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint2, lane: int) -> uint2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint3, lane: int) -> uint3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: uint4, lane: int) -> uint4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: half, lane: int) -> half
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: half2, lane: int) -> half2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: half3, lane: int) -> half3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: half4, lane: int) -> half4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: short, lane: int) -> short
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: short2, lane: int) -> short2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: short3, lane: int) -> short3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: short4, lane: int) -> short4
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: ushort, lane: int) -> ushort
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: ushort2, lane: int) -> ushort2
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: ushort3, lane: int) -> ushort3
+/// `x` of the invocation `lane`, a constant from 0 to 127 (CHK-378).
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast(x: ushort4, lane: int) -> ushort4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float) -> float
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float2) -> float2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float3) -> float3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: float4) -> float4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int) -> int
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int2) -> int2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int3) -> int3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: int4) -> int4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint) -> uint
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint2) -> uint2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint3) -> uint3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: uint4) -> uint4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: half) -> half
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: half2) -> half2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: half3) -> half3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: half4) -> half4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: short) -> short
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: short2) -> short2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: short3) -> short3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: short4) -> short4
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: ushort) -> ushort
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: ushort2) -> ushort2
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: ushort3) -> ushort3
+/// `x` of the first active invocation of the subgroup.
+@builtin @stages(.pixel, .compute) fun subgroup_broadcast_first(x: ushort4) -> ushort4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float, lane: int) -> float
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float2, lane: int) -> float2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float3, lane: int) -> float3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: float4, lane: int) -> float4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int, lane: int) -> int
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int2, lane: int) -> int2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int3, lane: int) -> int3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: int4, lane: int) -> int4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint, lane: int) -> uint
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint2, lane: int) -> uint2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint3, lane: int) -> uint3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: uint4, lane: int) -> uint4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: half, lane: int) -> half
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: half2, lane: int) -> half2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: half3, lane: int) -> half3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: half4, lane: int) -> half4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: short, lane: int) -> short
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: short2, lane: int) -> short2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: short3, lane: int) -> short3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: short4, lane: int) -> short4
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: ushort, lane: int) -> ushort
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: ushort2, lane: int) -> ushort2
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: ushort3, lane: int) -> ushort3
+/// `x` of the invocation `lane`, computed at run time.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle(x: ushort4, lane: int) -> ushort4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float, mask: int) -> float
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float2, mask: int) -> float2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float3, mask: int) -> float3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: float4, mask: int) -> float4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int, mask: int) -> int
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int2, mask: int) -> int2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int3, mask: int) -> int3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: int4, mask: int) -> int4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint, mask: int) -> uint
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint2, mask: int) -> uint2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint3, mask: int) -> uint3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: uint4, mask: int) -> uint4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: half, mask: int) -> half
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: half2, mask: int) -> half2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: half3, mask: int) -> half3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: half4, mask: int) -> half4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: short, mask: int) -> short
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: short2, mask: int) -> short2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: short3, mask: int) -> short3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: short4, mask: int) -> short4
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: ushort, mask: int) -> ushort
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: ushort2, mask: int) -> ushort2
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: ushort3, mask: int) -> ushort3
+/// `x` of the invocation whose index is this one's `^ mask`.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_xor(x: ushort4, mask: int) -> ushort4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float, delta: int) -> float
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float2, delta: int) -> float2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float3, delta: int) -> float3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: float4, delta: int) -> float4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int, delta: int) -> int
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int2, delta: int) -> int2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int3, delta: int) -> int3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: int4, delta: int) -> int4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint, delta: int) -> uint
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint2, delta: int) -> uint2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint3, delta: int) -> uint3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: uint4, delta: int) -> uint4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: half, delta: int) -> half
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: half2, delta: int) -> half2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: half3, delta: int) -> half3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: half4, delta: int) -> half4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: short, delta: int) -> short
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: short2, delta: int) -> short2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: short3, delta: int) -> short3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: short4, delta: int) -> short4
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: ushort, delta: int) -> ushort
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: ushort2, delta: int) -> ushort2
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: ushort3, delta: int) -> ushort3
+/// `x` of the invocation `delta` below this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_up(x: ushort4, delta: int) -> ushort4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float, delta: int) -> float
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float2, delta: int) -> float2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float3, delta: int) -> float3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: float4, delta: int) -> float4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int, delta: int) -> int
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int2, delta: int) -> int2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int3, delta: int) -> int3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: int4, delta: int) -> int4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint, delta: int) -> uint
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint2, delta: int) -> uint2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint3, delta: int) -> uint3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: uint4, delta: int) -> uint4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: half, delta: int) -> half
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: half2, delta: int) -> half2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: half3, delta: int) -> half3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: half4, delta: int) -> half4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: short, delta: int) -> short
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: short2, delta: int) -> short2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: short3, delta: int) -> short3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: short4, delta: int) -> short4
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: ushort, delta: int) -> ushort
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: ushort2, delta: int) -> ushort2
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: ushort3, delta: int) -> ushort3
+/// `x` of the invocation `delta` above this one.
+@builtin @stages(.pixel, .compute) fun subgroup_shuffle_down(x: ushort4, delta: int) -> ushort4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: float) -> float
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: float2) -> float2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: float3) -> float3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: float4) -> float4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: int) -> int
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: int2) -> int2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: int3) -> int3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: int4) -> int4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: uint) -> uint
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: uint2) -> uint2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: uint3) -> uint3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: uint4) -> uint4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: half) -> half
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: half2) -> half2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: half3) -> half3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: half4) -> half4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: short) -> short
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: short2) -> short2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: short3) -> short3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: short4) -> short4
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: ushort) -> ushort
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: ushort2) -> ushort2
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: ushort3) -> ushort3
+/// `x` of the quad's horizontal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_x(x: ushort4) -> ushort4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: float) -> float
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: float2) -> float2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: float3) -> float3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: float4) -> float4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: int) -> int
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: int2) -> int2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: int3) -> int3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: int4) -> int4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: uint) -> uint
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: uint2) -> uint2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: uint3) -> uint3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: uint4) -> uint4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: half) -> half
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: half2) -> half2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: half3) -> half3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: half4) -> half4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: short) -> short
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: short2) -> short2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: short3) -> short3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: short4) -> short4
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: ushort) -> ushort
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: ushort2) -> ushort2
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: ushort3) -> ushort3
+/// `x` of the quad's vertical neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_y(x: ushort4) -> ushort4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: float) -> float
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: float2) -> float2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: float3) -> float3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: float4) -> float4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: int) -> int
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: int2) -> int2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: int3) -> int3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: int4) -> int4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: uint) -> uint
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: uint2) -> uint2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: uint3) -> uint3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: uint4) -> uint4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: half) -> half
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: half2) -> half2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: half3) -> half3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: half4) -> half4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: short) -> short
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: short2) -> short2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: short3) -> short3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: short4) -> short4
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: ushort) -> ushort
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: ushort2) -> ushort2
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: ushort3) -> ushort3
+/// `x` of the quad's diagonal neighbour.
+@builtin @stages(.pixel, .compute) fun quad_swap_diagonal(x: ushort4) -> ushort4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: float, lane: int) -> float
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: float2, lane: int) -> float2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: float3, lane: int) -> float3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: float4, lane: int) -> float4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: int, lane: int) -> int
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: int2, lane: int) -> int2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: int3, lane: int) -> int3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: int4, lane: int) -> int4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: uint, lane: int) -> uint
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: uint2, lane: int) -> uint2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: uint3, lane: int) -> uint3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: uint4, lane: int) -> uint4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: half, lane: int) -> half
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: half2, lane: int) -> half2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: half3, lane: int) -> half3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: half4, lane: int) -> half4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: short, lane: int) -> short
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: short2, lane: int) -> short2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: short3, lane: int) -> short3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: short4, lane: int) -> short4
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort, lane: int) -> ushort
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort2, lane: int) -> ushort2
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort3, lane: int) -> ushort3
+/// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
+@builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort4, lane: int) -> ushort4
 
 // Ray tracing: what a ray is traced with, and what a trace reads.
 // A shader calls `trace` of raytracing.sgl, never these: each is a step of HLSL's `RayQuery` and MSL's `intersection_query`.

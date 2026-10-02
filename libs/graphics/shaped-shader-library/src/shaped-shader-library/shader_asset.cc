@@ -1,4 +1,6 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
@@ -14,13 +16,28 @@ sg::async_compiled_shader make_failed_shader(cc::string message)
 {
     return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::move(message))));
 }
+
+bool is_same(cc::span<slib::shader_option const> a, cc::span<slib::shader_option const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (auto i = isize(0); i < a.size(); ++i)
+        if (!(a[i] == b[i]))
+            return false;
+    return true;
+}
 } // namespace
 
 slib::shader_asset::shader_asset(std::weak_ptr<shader_library> library,
                                  cc::string virtual_path,
                                  sg::shader_stage stage,
-                                 cc::string entry_point)
-  : _library(cc::move(library)), _virtual_path(cc::move(virtual_path)), _stage(stage), _entry_point(cc::move(entry_point))
+                                 cc::string entry_point,
+                                 cc::vector<cc::string> options)
+  : _library(cc::move(library)),
+    _virtual_path(cc::move(virtual_path)),
+    _stage(stage),
+    _entry_point(cc::move(entry_point)),
+    _options(cc::move(options))
 {
 }
 
@@ -54,11 +71,32 @@ void slib::shader_asset::promote_pending(shader_library& library, state& s, form
     entry.pending = nullptr;
 }
 
-sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format) const
+sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, cc::span<shader_option const> options) const
 {
     auto const library = _library.lock();
     if (library == nullptr)
         return make_failed_shader(cc::format("the shader library that owns '{}' is gone", _virtual_path));
+
+    // A name given twice is the caller's mistake whichever value was meant, so it is said rather than settled silently.
+    for (auto i = isize(0); i < options.size(); ++i)
+        for (auto j = isize(0); j < i; ++j)
+            if (options[j].name == options[i].name)
+            {
+                CC_LOG_ERROR("'{}' {} is given the option {} twice, '{}' and '{}'; the first is taken", _virtual_path,
+                             _entry_point, options[i].name, options[j].value, options[i].value);
+                break;
+            }
+
+    // The key: only the options the entry point reaches, by name, so an order or an option of another stage splits nothing.
+    auto key = cc::vector<shader_option>();
+    for (auto const& name : _options)
+        for (auto const& o : options)
+            if (o.name == name)
+            {
+                key.push_back(o);
+                break;
+            }
+    cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });
 
     bool recorded_dependencies = false;
     auto shader = _state.lock(
@@ -66,20 +104,20 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format) 
         {
             format_entry* entry = nullptr;
             for (auto& e : s.formats)
-                if (e.format == format)
+                if (e.format == format && is_same(e.options, key))
                     entry = &e;
 
             if (entry == nullptr)
             {
-                s.formats.push_back(format_entry{.format = format});
+                s.formats.push_back(format_entry{.format = format, .options = key});
                 entry = &s.formats.back();
             }
 
             promote_pending(*library, s, *entry);
 
-            if (entry->current == nullptr) // first acquire for this format
+            if (entry->current == nullptr) // first acquire for this format and option set
             {
-                auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format);
+                auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
                 entry->current = cc::move(outcome.shader);
                 entry->dependencies = cc::move(outcome.dependencies);
                 recorded_dependencies = true;
@@ -115,12 +153,12 @@ bool slib::shader_asset::can_acquire(sg::context const& ctx) const
     return false;
 }
 
-sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx) const
+sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx, cc::span<shader_option const> options) const
 {
     // The context lists what it takes in preference order, so the first one we can actually build wins.
     for (auto const format : ctx.accepted_shader_formats())
         if (this->can_build(format))
-            return acquire(format);
+            return acquire(format, options);
 
     if (_library.expired())
         return make_failed_shader(cc::format("the shader library that owns '{}' is gone", _virtual_path));
@@ -180,21 +218,26 @@ void slib::shader_asset::stage_reload()
     if (library == nullptr)
         return;
 
-    // Only formats someone has actually asked for: staging a compile for a format nobody acquired would
+    // Only pairs someone has actually asked for: staging a compile for one nobody acquired would
     // burn the compiler on a shader that is never used.
-    cc::small_vector<sg::shader_format, 2> formats;
+    struct acquired
+    {
+        sg::shader_format format;
+        cc::vector<shader_option> options;
+    };
+    cc::small_vector<acquired, 2> pairs;
     _state.lock(
         [&](state const& s)
         {
             for (auto const& entry : s.formats)
                 if (entry.current != nullptr)
-                    formats.push_back(entry.format);
+                    pairs.push_back({.format = entry.format, .options = entry.options});
         });
 
-    for (auto const format : formats)
+    for (auto const& [format, options] : pairs)
     {
         // Read, preprocess and compile off the lock, so a consumer's acquire only ever waits for the swap below.
-        auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format);
+        auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, options);
 
         // Drive the compile here, on the watcher's own thread.
         // A cc::async node is cold until a scheduler runs it, and nothing else ever looks at this one — a consumer only sees it after promotion, and promotion needs it ready.
@@ -206,7 +249,7 @@ void slib::shader_asset::stage_reload()
             {
                 for (auto& entry : s.formats)
                 {
-                    if (entry.format != format)
+                    if (entry.format != format || !is_same(entry.options, options))
                         continue;
                     entry.pending = cc::move(outcome.shader);
                     entry.dependencies = cc::move(outcome.dependencies);
@@ -217,8 +260,9 @@ void slib::shader_asset::stage_reload()
 
 sg::async_compute_pipeline slib::acquire_compute_pipeline(sg::context* ctx,
                                                           shader_asset_handle asset,
-                                                          sg::pipeline_layout_handle layout)
+                                                          sg::pipeline_layout_handle layout,
+                                                          cc::vector<shader_option> options)
 {
-    auto const shader = co_await asset->acquire(*ctx);
+    auto const shader = co_await asset->acquire(*ctx, options);
     co_return co_await ctx->cached.acquire_compute_pipeline({.shader = shader, .layout = layout});
 }

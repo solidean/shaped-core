@@ -280,7 +280,7 @@ An example of an AST kind is an `sgl sketch`, since examples are checked through
 | `mixed-struct-type` | a curly paren literal that holds both `name: type` and `name = value` elements |
 | `misplaced-splat` | a splat that is not a whole element of a paren group |
 | `misplaced-attribute-on-expression` | an attribute on an expression that stands in no type position |
-| `statement-in-expression` | an assignment, a `let`, an `if` or a declaration where a value is expected |
+| `statement-in-expression` | an assignment, a `let`, an `if` without an `else` or a declaration where a value is expected |
 | `unexpected-keyword` | keywords that head nothing together, such as `mut` without `let` |
 | `too-many-arguments` | a keyword form that holds more expressions than it takes: `return a, b`, `continue x` |
 | `for-takes-name-in-range` | a `for` that is not `for name in expression` or `for name : type in expression` |

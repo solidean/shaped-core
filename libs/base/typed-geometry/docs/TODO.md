@@ -52,15 +52,11 @@ Add entries as we discover them, and remove them as they land.
 
 ## geometry
 
-- **`obb`.**
-  Missing, and it is what a rotated `aabb` becomes — until it exists, that combination is a deliberate compile error.
-- **The affine image of an embedded `sphere`.**
-  It is an `ellipsoid<D, DAmbient, T>`, but building one means turning the circle's normal into an orthonormal basis of its plane, which `linalg` has no routine for.
-  What is missing is a `tg::any_orthogonal(vec)` / `tg::orthonormal_basis(vec)`.
-  Until it lands, that pair is a compile error while every non-embedded sphere maps fine.
 - **`quadric`.**
   What a `sphere` or `ellipsoid` becomes under a projective map, so those pairs are unregistered rather than approximated.
 - **A clipped / half-open segment.**
   What a `ray` becomes under a projective map, for the same reason.
-- **`ball`.**
-  The solid counterpart to `sphere`, reusing the same `{center, radius}` encoding, the way the planned `halfspace` will reuse `plane`'s.
+- **Measures that stay exact on an exact scalar.**
+  `triangle::area()` is refused for an exact scalar, since halving an odd doubled area truncates.
+  A "twice the area" member stays in `T` there, and a tetrahedron's volume times six is its integer-exact sibling.
+  Spelling and placement wait for a caller.

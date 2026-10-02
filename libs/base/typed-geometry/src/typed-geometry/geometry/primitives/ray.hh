@@ -2,9 +2,11 @@
 
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/primitives/line.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
 /// Ray: a half-line from an origin along a direction.
@@ -51,6 +53,55 @@ public:
             static_assert(false, "tg: a ray only survives an affine map. Its projective image is a bounded segment, "
                                  "so transform the endpoints of the piece you care about instead.");
     }
+
+    // readings
+public:
+    [[nodiscard]] constexpr pos<D, T> any_point() const { return origin; }
+    [[nodiscard]] constexpr line<D, T> unbounded() const { return line<D, T>(origin, dir); }
+
+    // parameters
+public:
+    /// origin + t * dir; the ray is t >= 0.
+    [[nodiscard]] constexpr pos<D, T> at(T t) const { return origin + dir * t; }
+    /// the parameter of p's projection onto the ray, so always >= 0.
+    [[nodiscard]] constexpr T parameter_of(pos<D, T> const& p) const
+    {
+        auto const t = tg::dot(p - origin, dir) / tg::dot(dir, dir);
+        return t < T(0) ? T(0) : t;
+    }
+
+    // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
+public:
+    template <class Obj>
+    [[nodiscard]] constexpr auto project_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_points_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_point_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_sqr_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto signed_distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto contains(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto separation_from(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersection_with(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersection_parameter_with(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_intersection_parameter_with(Obj const& obj) const;
 
     // comparison
 public:

@@ -1,0 +1,27 @@
+// `img[xy]` is a texel of an image: a read is the image's `load`, and an assignment to it the image's `store` (CHK-367)
+// A test lists no binding that holds an image, so the refusals are tests/check/image-check-test.cc's
+
+binding canvas:
+    weights: mut image_2d[.r32_float]
+    target: out image_2d[.rgba8_unorm]
+    source: image_2d[.rgba8_unorm]
+    layers: mut image_2d_array[.r32_float]
+
+fun luminance(c: float4) -> float => c.x * 0.25 + c.y * 0.5 + c.z * 0.25
+
+test luminance(float4(1.0, 1.0, 1.0, 0.0)) == 1.0
+
+// a resource parameter takes a subscript as the member it stands for does (CHK-366)
+fun brighten(img: mut image_2d[.r32_float], xy: int2):
+    img[xy] *= 2.0
+
+@compute(8, 8) fun blend(@thread_id id: int3){canvas}:
+    let xy = id.xy
+    canvas.target[xy] = canvas.source[xy]
+    // a compound assignment reads the texel and stores it back, as `img.store(xy, img.load(xy) + v)` does
+    canvas.weights[xy] += luminance(canvas.source[xy])
+    brighten(canvas.weights, xy)
+    // an array's layer is named, as `load` and `store` name it
+    canvas.layers[xy, layer = 1] = canvas.weights[xy] * 0.5
+    // a member of a texel is read as a member of any value is
+    canvas.layers[xy, layer = 0] = canvas.source[xy * 2].y

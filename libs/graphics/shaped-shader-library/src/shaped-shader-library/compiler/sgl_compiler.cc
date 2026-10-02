@@ -220,6 +220,9 @@ public:
             return cc::error(cc::format("SGL has no entry point of the stage '{}' is declared as", desc.entry_point));
         }
 
+        auto options = cc::vector<sgl::check::option_value>();
+        for (auto const& o : desc.options)
+            options.push_back({.name = o.name, .value = o.value});
         auto const library = slib::impl::sgl_library_of(desc.modules);
         auto text = sgl::compile_to_text(
             {.source = desc.source,
@@ -227,7 +230,8 @@ public:
              .library = library,
              .entry_point = desc.entry_point,
              .stage = stage,
-             .target = _target});
+             .target = _target,
+             .options = options});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
@@ -247,6 +251,8 @@ public:
         if (stage == sgl::check::stage::compute)
             shader.workgroup_size
                 = sg::compute_dimensions{.x = emitted.workgroup[0], .y = emitted.workgroup[1], .z = emitted.workgroup[2]};
+        if (emitted.preferred_subgroup_size > 0)
+            shader.preferred_subgroup_size = emitted.preferred_subgroup_size;
         if (emitted.color_targets >= 0)
             shader.color_output_count = emitted.color_targets;
         shader.target_set = emitted.target_struct;
@@ -284,7 +290,15 @@ public:
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
-        return _inner->compile(desc);
+        // EMIT-4: what the emitted text needs of the compiler that builds it, whoever wired that compiler
+        auto inner = desc;
+        if (_target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan)
+            // a half is `float16_t`, which DXC compiles only with 16-bit types on, and SGL writes no spelling the flag changes
+            inner.dxc_args.push_back(cc::string("-enable-16bit-types"));
+        if (_target == sgl::emit::target::msl)
+            // `coherent(device)` and texture atomics, which a metallib compiles from MSL 3.2 on
+            inner.metal_language_version = "metal3.2";
+        return _inner->compile(inner);
     }
 
     [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
@@ -297,6 +311,24 @@ private:
     sgl::emit::target _target;
 };
 } // namespace
+
+slib::shader_option slib::option_of(cc::string_view name, bool value)
+{
+    return {.name = cc::string(name), .value = cc::string(value ? "true" : "false")};
+}
+
+slib::shader_option slib::option_of(cc::string_view name, int value)
+{
+    return {.name = cc::string(name), .value = cc::format("{}", value)};
+}
+
+slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value)
+{
+    for (auto const& c : slib::impl::fields::cases_pixel_format)
+        if (c.value == int(value))
+            return {.name = cc::string(name), .value = cc::format(".{}", c.name)};
+    CC_UNREACHABLE("every sg::pixel_format has a name");
+}
 
 std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
 {

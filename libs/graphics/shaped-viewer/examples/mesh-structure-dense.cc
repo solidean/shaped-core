@@ -3,8 +3,8 @@
 #include <clean-core/record/log.hh> // CC_LOG_INFO
 #include <nexus/test.hh>
 #include <shaped-viewer/all.hh>
+#include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/linalg/cross.hh>   // tg::cross, tg::dual
-#include <typed-geometry/linalg/pos_ops.hh> // tg::distance
 #include <typed-geometry/linalg/vec_ops.hh> // tg::dot, tg::normalize
 
 using namespace cc::primitive_defines;
@@ -77,7 +77,7 @@ indexed_mesh icosahedron()
         }
 
     // A face is three mutually adjacent vertices; on this solid adjacency is exactly "the minimum distance apart".
-    auto const adjacent = [&](int a, int b) { return tg::distance(m.vertices[a], m.vertices[b]) < 2.1f; };
+    auto const adjacent = [&](int a, int b) { return m.vertices[a].distance_to(m.vertices[b]) < 2.1f; };
 
     for (auto i = 0; i < int(m.vertices.size()); ++i)
         for (auto j = i + 1; j < int(m.vertices.size()); ++j)
@@ -207,7 +207,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
     auto longest = 0.0f;
     for (auto const& e : edges)
     {
-        auto const len = tg::distance(mesh.vertices[e[0]], mesh.vertices[e[1]]);
+        auto const len = mesh.vertices[e[0]].distance_to(mesh.vertices[e[1]]);
         shortest = cc::min(shortest, len);
         longest = cc::max(longest, len);
     }
@@ -216,7 +216,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
     // filling it in solid.
     auto total_length = 0.0f;
     for (auto const& e : edges)
-        total_length += tg::distance(mesh.vertices[e[0]], mesh.vertices[e[1]]);
+        total_length += mesh.vertices[e[0]].distance_to(mesh.vertices[e[1]]);
     auto const mean_edge = total_length / float(edges.size());
 
     auto const vertex_radius = mean_edge * 0.30f;
@@ -243,7 +243,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
         // Closing them is one bit per primitive and no change to the box.
         structure.add_line(tg::segment3f(mesh.vertices[e[0]], mesh.vertices[e[1]]), tube_radius);
 
-        auto const len = tg::distance(mesh.vertices[e[0]], mesh.vertices[e[1]]);
+        auto const len = mesh.vertices[e[0]].distance_to(mesh.vertices[e[1]]);
         colors.push_back(ramp((len - shortest) / cc::max(longest - shortest, 1e-6f)));
     }
 

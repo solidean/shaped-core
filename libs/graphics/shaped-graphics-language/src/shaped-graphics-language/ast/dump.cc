@@ -337,6 +337,24 @@ struct dumper
                 }
                 out += ")";
             },
+            [&](if_expr const& n)
+            {
+                out += "(if-expr";
+                for (auto const& branch : ast.at(n.branches))
+                {
+                    new_line(depth + 1);
+                    if (is_valid(branch.condition))
+                    {
+                        out += "(branch ";
+                        dump_expr(branch.condition, depth + 1);
+                    }
+                    else
+                        out += "(else";
+                    dump_body(branch.then, depth + 1);
+                    out += ")";
+                }
+                out += ")";
+            },
             [&](loop_expr const& n)
             {
                 out += "(loop";

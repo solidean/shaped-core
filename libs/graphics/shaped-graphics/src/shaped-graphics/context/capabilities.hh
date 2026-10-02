@@ -85,9 +85,39 @@ enum class sg::feature
     /// A texture or a raster pipeline may use `pixel_format::depth32_float_stencil8`, sg's one format with a stencil aspect.
     /// WebGPU has it only with the optional `depth32float-stencil8` feature, and Vulkan asks the device per format.
     depth32_float_stencil8,
+
+    /// A shader may compute and store 16-bit floats (SGL's `half`), in registers and in buffers.
+    /// D3D12 grants it with `Native16BitShaderOpsSupported`, Vulkan with `shaderFloat16` plus 16-bit buffer storage.
+    /// Where Vulkan grants `subgroups` too it also needs `shaderSubgroupExtendedTypes`, since a subgroup operation takes 16-bit values.
+    /// It promises no 16-bit push constant on Vulkan, and SGL refuses a 16-bit member in an `@inline` binding.
+    /// WebGPU grants it with the optional `shader-f16` feature, and Metal always.
+    shader_f16,
+
+    /// A shader may compute and store 16-bit integers (SGL's `short` and `ushort`), in registers and in buffers.
+    /// D3D12 grants it with `Native16BitShaderOpsSupported`, Vulkan with `shaderInt16` plus 16-bit buffer storage.
+    /// Where Vulkan grants `subgroups` too it also needs `shaderSubgroupExtendedTypes`, since a subgroup operation takes 16-bit values.
+    /// It promises no 16-bit push constant on Vulkan, and SGL refuses a 16-bit member in an `@inline` binding.
+    /// WebGPU has no 16-bit integers at all, and Metal always has them.
+    shader_int16,
+
+    /// A compute or pixel shader may use subgroup operations: vote, ballot, reductions, prefix sums, shuffles and quads.
+    /// D3D12 grants them with `WaveOps`, Vulkan when its subgroup properties cover those stages and operations.
+    /// Vulkan also needs linear compute derivatives, the groups DXC writes a compute stage's quad operations in.
+    /// WebGPU grants them with the optional `subgroups` feature, and Metal always.
+    subgroups,
+
+    /// A buffer or image member may be coherent across the whole device, so one workgroup sees another's writes.
+    /// D3D12 (`globallycoherent`) and Vulkan (`Coherent`) always have it, Metal from MSL 3.2's `coherent(device)`.
+    /// WebGPU has no such qualifier.
+    device_coherence,
+
+    /// A shader may update a 32-bit integer image atomically.
+    /// D3D12 requires typed UAV atomics on r32 formats and Vulkan requires storage-image atomics on them, Metal has them from Apple7.
+    /// WebGPU has no image atomics.
+    image_atomics,
 };
 
-CC_FLAG_ENUM_INDEXED(sg, feature, cc::u16);
+CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
 
 namespace sg
 {
@@ -112,8 +142,13 @@ inline constexpr feature k_all_features[] = {
     feature::sample_rate_shading,
     feature::wireframe_fill,
     feature::depth32_float_stencil8,
+    feature::shader_f16,
+    feature::shader_int16,
+    feature::subgroups,
+    feature::device_coherence,
+    feature::image_atomics,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::depth32_float_stencil8) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::image_atomics) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -153,6 +188,16 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "wireframe_fill";
     case feature::depth32_float_stencil8:
         return "depth32_float_stencil8";
+    case feature::shader_f16:
+        return "shader_f16";
+    case feature::shader_int16:
+        return "shader_int16";
+    case feature::subgroups:
+        return "subgroups";
+    case feature::device_coherence:
+        return "device_coherence";
+    case feature::image_atomics:
+        return "image_atomics";
     }
     return "";
 }

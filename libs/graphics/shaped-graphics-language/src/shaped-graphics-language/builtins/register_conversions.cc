@@ -6,25 +6,40 @@ using namespace sgl::builtins;
 
 namespace
 {
+using check::is_16_bit;
 using check::scalar;
 using check::value_kind;
+using check::wide_kind_of;
 using leaves = cc::span<scalar const>;
 using result = cc::vector<scalar>;
 
-/// One numeric family: its SGL stem, and its scalar as WGSL spells it.
+/// One numeric family: its SGL stem, which is MSL's too, and its scalar as HLSL and WGSL spell it.
 struct numeric
 {
     cc::string_view name;
+    cc::string_view hlsl;
     cc::string_view wgsl_scalar;
     cc::string_view wgsl_vector_suffix;
     value_kind kind;
 };
 
+// WGSL has no 16-bit integer, so no text holds the spellings of short and ushort there (EMIT-109).
 constexpr numeric k_numerics[] = {
-    {.name = "float", .wgsl_scalar = "f32", .wgsl_vector_suffix = "f", .kind = value_kind::scalar_float},
-    {.name = "int", .wgsl_scalar = "i32", .wgsl_vector_suffix = "i", .kind = value_kind::scalar_int},
-    {.name = "uint", .wgsl_scalar = "u32", .wgsl_vector_suffix = "u", .kind = value_kind::scalar_uint},
+    {.name = "float", .hlsl = "float", .wgsl_scalar = "f32", .wgsl_vector_suffix = "f", .kind = value_kind::scalar_float},
+    {.name = "int", .hlsl = "int", .wgsl_scalar = "i32", .wgsl_vector_suffix = "i", .kind = value_kind::scalar_int},
+    {.name = "uint", .hlsl = "uint", .wgsl_scalar = "u32", .wgsl_vector_suffix = "u", .kind = value_kind::scalar_uint},
+    {.name = "half", .hlsl = "float16_t", .wgsl_scalar = "f16", .wgsl_vector_suffix = "h", .kind = value_kind::scalar_half},
+    {.name = "short", .hlsl = "int16_t", .wgsl_scalar = "i16", .wgsl_vector_suffix = "", .kind = value_kind::scalar_short},
+    {.name = "ushort", .hlsl = "uint16_t", .wgsl_scalar = "u16", .wgsl_vector_suffix = "", .kind = value_kind::scalar_ushort},
 };
+
+/// CHK-197: the families of one width convert among themselves, and each family between its widths.
+bool converts(numeric const& from, numeric const& to)
+{
+    if (from.name == to.name)
+        return false;
+    return is_16_bit(from.kind) == is_16_bit(to.kind) || wide_kind_of(from.kind) == wide_kind_of(to.kind);
+}
 
 /// A float to an integer truncates toward zero; out of range, and for a NaN, the value is unspecified (CHK-197).
 /// This is the interpreter's choice of it: saturation at the integer's bounds, and 0 for a NaN.
@@ -47,6 +62,19 @@ u32 saturated_uint(f32 x)
         return 0xffffffffu;
     return u32(x);
 }
+/// The same at 16 bits, whose bounds are exact floats as well.
+i32 saturated_short(f32 x)
+{
+    if (!(x == x))
+        return 0;
+    return x >= 32767.0f ? 32767 : x <= -32768.0f ? -32768 : i32(x);
+}
+u32 saturated_ushort(f32 x)
+{
+    if (!(x > 0.0f))
+        return 0;
+    return x >= 65535.0f ? 65535u : u32(x);
+}
 
 scalar converted(scalar from, value_kind to)
 {
@@ -67,6 +95,18 @@ scalar converted(scalar from, value_kind to)
         if (from.kind == value_kind::scalar_float)
             return scalar::of_uint(saturated_uint(from.as_float()));
         return scalar::of_uint(from.bits);
+    // a 16-bit result: a float saturates at the 16-bit bounds, and an integer keeps its low 16 bits
+    case value_kind::scalar_short:
+    case value_kind::scalar_ushort:
+    {
+        auto const bits = from.kind != value_kind::scalar_float ? from.bits
+                        : to == value_kind::scalar_short        ? u32(saturated_short(from.as_float()))
+                                                                : saturated_ushort(from.as_float());
+        return {.kind = to, .bits = bits & 0xffffu};
+    }
+    // a half is rounded from the float the interpreter narrows the result to
+    case value_kind::scalar_half:
+        return converted(from, value_kind::scalar_float);
     default:
         return from;
     }
@@ -87,6 +127,12 @@ evaluator converter_to(value_kind kind)
         return convert<value_kind::scalar_float>;
     case value_kind::scalar_int:
         return convert<value_kind::scalar_int>;
+    case value_kind::scalar_half:
+        return convert<value_kind::scalar_half>;
+    case value_kind::scalar_short:
+        return convert<value_kind::scalar_short>;
+    case value_kind::scalar_ushort:
+        return convert<value_kind::scalar_ushort>;
     default:
         return convert<value_kind::scalar_uint>;
     }
@@ -128,17 +174,20 @@ cc::string type_name(numeric const& n, i32 width)
 
 void sgl::builtins::register_conversions(registry& r)
 {
-    r.add_comment("// `x as T` between the numeric families, width for width; each target writes a conversion to `T`");
+    r.add_comment("// `x as T` between the numeric families of one width, and between the widths of one family,\n"
+                  "// component for component; each target writes a conversion to `T`");
     for (auto width = 1; width <= 4; ++width)
         for (auto const& from : k_numerics)
             for (auto const& to : k_numerics)
             {
-                if (from.name == to.name)
+                if (!converts(from, to))
                     continue;
                 auto const source = type_name(from, width);
                 auto const target = type_name(to, width);
-                auto const wgsl
-                    = width == 1 ? cc::string(to.wgsl_scalar) : cc::format("vec{}{}", width, to.wgsl_vector_suffix);
+                auto const hlsl = width == 1 ? cc::string(to.hlsl) : cc::format("{}{}", to.hlsl, width);
+                auto const wgsl = width == 1                    ? cc::string(to.wgsl_scalar)
+                                : to.wgsl_vector_suffix.empty() ? cc::format("vec{}<{}>", width, to.wgsl_scalar)
+                                                                : cc::format("vec{}{}", width, to.wgsl_vector_suffix);
                 r.add(function_record{
                     .signature = cc::format("@pure @operator(\"as\") fun convert_{}_to_{}(x: {}) -> {}", source, target,
                                             source, target),
@@ -147,7 +196,7 @@ void sgl::builtins::register_conversions(registry& r)
                     .unrepresentable_when_constant
                     = from.kind == value_kind::scalar_int && to.kind == value_kind::scalar_uint ? impl::negative_as_uint
                                                                                                 : nullptr,
-                    .write = {.hlsl = target, .wgsl = wgsl, .msl = target},
+                    .write = {.hlsl = hlsl, .wgsl = wgsl, .msl = target},
                 });
             }
 

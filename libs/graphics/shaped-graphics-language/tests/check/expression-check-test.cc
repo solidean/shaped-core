@@ -122,22 +122,22 @@ TEST("sgl check - juxtaposition and parens are one call")
 
 TEST("sgl check - a call of a function of the program resolves like any other, overloads included")
 {
-    CHECK(reports_for("fun half(x: float) -> float => x * 0.5\nfun f(k: float) -> float:\n    return half k\n") == "");
-    CHECK(reports_for("fun half(x: float) -> float => x * 0.5\nfun f(v: vec3) -> float:\n    return half v\n")
-          == "no-matching-overload user:[half v] half(vec3)\n");
+    CHECK(reports_for("fun halve(x: float) -> float => x * 0.5\nfun f(k: float) -> float:\n    return halve k\n") == "");
+    CHECK(reports_for("fun halve(x: float) -> float => x * 0.5\nfun f(v: vec3) -> float:\n    return halve v\n")
+          == "no-matching-overload user:[halve v] halve(vec3)\n");
 
-    auto const checked = check_sources(read_prelude(), "fun half(x: float) -> float => x * 0.5\n"
-                                                       "fun half(v: vec3) -> vec3 => v * 0.5\n"
+    auto const checked = check_sources(read_prelude(), "fun halve(x: float) -> float => x * 0.5\n"
+                                                       "fun halve(v: vec3) -> vec3 => v * 0.5\n"
                                                        "fun f(v: vec3, k: float) -> float:\n"
-                                                       "    return dot(half(v), v) * half(k)\n");
+                                                       "    return dot(halve(v), v) * halve(k)\n");
     CHECK(reports_of(checked) == "");
     auto const& tables = checked.tables();
-    auto const on_vec3 = tables.target_at(find_expr(checked, "half(v)"));
-    auto const on_float = tables.target_at(find_expr(checked, "half(k)"));
+    auto const on_vec3 = tables.target_at(find_expr(checked, "halve(v)"));
+    auto const on_float = tables.target_at(find_expr(checked, "halve(k)"));
     REQUIRE(on_vec3.kind == target_kind::overload);
     REQUIRE(on_float.kind == target_kind::overload);
     CHECK(on_vec3.symbol != on_float.symbol);
-    CHECK(checked.module.name_of(tables.type_at(find_expr(checked, "half(v)"))) == "vec3");
+    CHECK(checked.module.name_of(tables.type_at(find_expr(checked, "halve(v)"))) == "vec3");
 }
 
 TEST("sgl check - a struct's constructor takes its fields in order, and a splat spreads a struct")
@@ -202,14 +202,27 @@ TEST("sgl check - a number literal with a dot or an exponent is a float, and not
     CHECK(body_reports("let i: int = 1.0\nreturn k\n")
           == "literal-not-representable user:[1.0] int does not hold 1.0 exactly\n");
     CHECK(body_reports("let i = 1'000 + -3\nreturn k\n") == "");
+    // only a number type converts a literal: a vector expected of one is no question of precision
+    CHECK(body_reports("let w: float2 = 1.0\nreturn k\n") == "type-mismatch user:[1.0] expected float2, got float\n");
+    CHECK(body_reports("let mut v = float3(0.0)\nv.xy = 1.0\nreturn k\n")
+          == "type-mismatch user:[1.0] expected float2, got float\n");
     // CHK-61: held in 64 bits, and refused where it keeps a type that does not hold it
     CHECK(body_reports("let i = 3'000'000'000\nreturn k\n")
           == "literal-not-representable user:[3'000'000'000] int does not hold 3'000'000'000\n");
     CHECK(body_reports("let u: uint = 3'000'000'000\nreturn k\n") == "");
     CHECK(body_reports("let i = 99'999'999'999'999'999'999\nreturn k\n")
           == "unsupported-yet user:[99'999'999'999'999'999'999] an integer literal beyond 64 bits\n");
-    CHECK(body_reports("return 0.5f32\n")
-          == "unsupported-yet user:[0.5f32] a number literal with a suffix or a p exponent\n");
+    // CHK-357: a suffix names the type, the 16-bit ones included, and any other width names none
+    CHECK(body_reports("return 0.5f32 + 1f\n") == "");
+    CHECK(body_reports("return 0.5f16\n") == "type-mismatch user:[0.5f16] expected float, got half\n");
+    CHECK(body_reports("return (0.5f16 * 2f16) as float\n") == "");
+    CHECK(body_reports("let s = 40000i16\nreturn k\n")
+          == "literal-not-representable user:[40000i16] short does not hold 40000i16\n");
+    CHECK(body_reports("let h = 70000f16\nreturn k\n")
+          == "literal-not-representable user:[70000f16] half does not hold 70000f16\n");
+    CHECK(body_reports("let i = 1i8\nreturn k\n")
+          == "unsupported-yet user:[1i8] a literal of 8 bits, which no type of the prelude is\n");
+    CHECK(body_reports("return 1p8\n") == "unsupported-yet user:[1p8] a number literal with a p exponent\n");
     // CHK-269: a hex or binary literal is a number like any other, held to the type asked of it
     CHECK(body_reports("return 0xff\n") == "");
     CHECK(body_reports("let u: uint = 0xffff'ffff\nreturn k\n") == "");

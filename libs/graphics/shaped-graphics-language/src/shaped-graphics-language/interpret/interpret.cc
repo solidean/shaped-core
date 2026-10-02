@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/builtins/impl/soft_math.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
@@ -178,6 +179,13 @@ struct machine
         return {};
     }
 
+    /// A texel's atomic, whose first argument is the image rather than the atomic.
+    [[nodiscard]] bool is_texel_atomic(flat_call const& c) const
+    {
+        auto const arguments = e.at(c.arguments);
+        return !arguments.empty() && is_known(e, arguments[0]) && m.at(e.at(arguments[0]).type).kind == type_kind::image;
+    }
+
     /// EVAL-93: the atomic's place, then the other arguments, then the update, in one step.
     flow atomic_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
     {
@@ -253,7 +261,9 @@ struct machine
 
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
-        if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->is_atomic)
+        // a texel of an `@atomic` image is no memory a test holds, so its update is evaluated as a load of one is
+        if (auto const* const record = m.builtin_function(c.intrinsic);
+            record != nullptr && record->is_atomic && !is_texel_atomic(c))
             return atomic_call(x, c, *record, result);
         auto args = cc::vector<value>();
         if (auto const f = eval_all(c.arguments, args); !f.is_normal())
@@ -281,6 +291,9 @@ struct machine
                 is_typed = is_typed && leaf.kind == m.builtins->at(type).leaf_kind;
             in.push_back_range(args[k].leaves);
         }
+        // An evaluator computes at 32 bits, and a 16-bit result is rounded once from what it gives.
+        for (auto& leaf : in)
+            leaf = leaf.widened();
         if (is_typed && record->undefined_when != nullptr)
             if (auto const why = record->undefined_when(in); !why.empty())
                 return fail(run_status::program_error, cc::format("{}, in a call of '{}'", why, record->name));
@@ -292,8 +305,11 @@ struct machine
         {
             auto const& returned = m.builtins->at(record->result);
             is_result_typed = result.leaves.size() == returned.leaf_count;
-            for (auto const& leaf : result.leaves)
+            for (auto& leaf : result.leaves)
+            {
+                leaf = leaf.narrowed_to(returned.leaf_kind);
                 is_result_typed = is_result_typed && leaf.kind == returned.leaf_kind;
+            }
         }
         if (!is_typed || !is_result_typed || result.leaves.size() != leaf_count_of(m, x.type))
             return type_error(cc::format("a call of '{}' with arguments or a result of the wrong type", record->name));
@@ -404,14 +420,19 @@ struct machine
 
         if (x.node.is<flat_invalid>())
             return type_error("an unfilled expression");
+        // a literal of a 16-bit type is that type's value, whatever text spelled it (CHK-253)
+        auto const* const builtin = m.builtin_type_of(x.type);
+        auto const kind = builtin != nullptr ? builtin->leaf_kind : value_kind::none;
         if (auto const* const l = x.node.try_as<flat_literal>())
         {
-            result.leaves.push_back(scalar::of(f32(l->value)));
+            result.leaves.push_back(kind == value_kind::scalar_half ? scalar::of_half(l->value)
+                                                                    : scalar::of(f32(l->value)));
             return {};
         }
         if (auto const* const l = x.node.try_as<flat_int_literal>())
         {
-            result.leaves.push_back(l->is_unsigned ? scalar::of_uint(u32(l->value)) : scalar::of(l->value));
+            result.leaves.push_back(
+                (l->is_unsigned ? scalar::of_uint(u32(l->value)) : scalar::of(l->value)).narrowed_to(kind));
             return {};
         }
         if (auto const* const l = x.node.try_as<flat_bool_literal>())
@@ -497,9 +518,24 @@ struct machine
             if (auto const f = eval(member->object, object); !f.is_normal())
                 return f;
             auto const type = x.type;
-            if (auto const f = slice_member(object, member->member, result); !f.is_normal())
-                return f;
+            if (!member->is_swizzle())
+            {
+                if (auto const f = slice_member(object, member->member, result); !f.is_normal())
+                    return f;
+                result.type = type;
+                return {};
+            }
+            // a swizzle is its fields' values one after another, in the order its letters are written
+            auto leaves = cc::vector<scalar>();
+            for (auto i = 0; i < member->letters.count; ++i)
+            {
+                auto field = value();
+                if (auto const f = slice_member(object, member->letters.fields[i], field); !f.is_normal())
+                    return f;
+                leaves.push_back_range(field.leaves);
+            }
             result.type = type;
+            result.leaves = cc::move(leaves);
             return {};
         }
         if (auto const* const construct = x.node.try_as<flat_construct>())
@@ -598,7 +634,7 @@ struct machine
                 return b->is_workgroup;
             if (auto const* const element = node.try_as<flat_element>())
                 id = element->object;
-            else if (auto const* const member = node.try_as<flat_member>())
+            else if (auto const* const member = node.try_as<flat_member>(); member != nullptr && !member->is_swizzle())
                 id = member->object;
             else
                 return false;
@@ -724,6 +760,63 @@ struct machine
                 workgroup[where.cell].is_written[offset + i] = true;
         else
             is_set[index_of(where.local)] = true;
+        return {};
+    }
+
+    /// CHK-352: the operand's indices first, then the value, then one store per letter.
+    flow assign_swizzle(flat_member const& place, flat_expr_id stored)
+    {
+        if (!is_known(e, place.object))
+            return type_error("an expression id that names nothing");
+        auto const object_type = e.at(place.object).type;
+        auto const members = members_of(m, object_type);
+        auto field_offset = [&](i32 field)
+        {
+            auto offset = isize(0);
+            for (auto i = 0; i < field; ++i)
+                offset += leaf_count_of(m, members[i].type);
+            return offset;
+        };
+        for (auto i = 0; i < place.letters.count; ++i)
+            if (place.letters.fields[i] < 0 || place.letters.fields[i] >= members.size()
+                || leaf_count_of(m, members[place.letters.fields[i]].type) != 1)
+                return type_error("a swizzle of a field its type does not have");
+
+        if (auto const* const element = e.at(place.object).node.try_as<flat_buffer_element>())
+        {
+            auto buffer = isize(-1);
+            auto offset = isize(0);
+            if (auto const f = locate(*element, object_type, buffer, offset); !f.is_normal())
+                return f;
+            auto v = value();
+            if (auto const f = eval(stored, v); !f.is_normal())
+                return f;
+            if (v.leaves.size() != place.letters.count)
+                return type_error("a store of a value of the wrong size");
+            for (auto i = 0; i < place.letters.count; ++i)
+                out.buffers[buffer].leaves[offset + field_offset(place.letters.fields[i])] = v.leaves[i];
+            is_stored[buffer] = true;
+            return {};
+        }
+
+        auto where = place_ref();
+        auto offset = isize(0);
+        auto type = type_id::none;
+        if (auto const f = locate_place(place.object, where, offset, type); !f.is_normal())
+            return f;
+        auto v = value();
+        if (auto const f = eval(stored, v); !f.is_normal())
+            return f;
+        if (v.leaves.size() != place.letters.count)
+            return type_error("an assignment of a value of the wrong size");
+        for (auto i = 0; i < place.letters.count; ++i)
+        {
+            auto const field = place.letters.fields[i];
+            auto component = value();
+            component.leaves.push_back(v.leaves[i]);
+            if (auto const f = write(where, offset + field_offset(field), members[field].type, component); !f.is_normal())
+                return f;
+        }
         return {};
     }
 
@@ -909,6 +1002,9 @@ struct machine
         }
         if (auto const* const a = s.node.try_as<flat_assign>())
         {
+            if (auto const* const member = is_known(e, a->place) ? e.at(a->place).node.try_as<flat_member>() : nullptr;
+                member != nullptr && member->is_swizzle())
+                return assign_swizzle(*member, a->value);
             auto const* const element
                 = is_known(e, a->place) ? e.at(a->place).node.try_as<flat_buffer_element>() : nullptr;
             if (element != nullptr)
@@ -1069,9 +1165,38 @@ scalar sgl::check::scalar::of(bool v)
     return {.kind = value_kind::boolean, .bits = v ? 1u : 0u};
 }
 
+scalar sgl::check::scalar::of_half(f64 v)
+{
+    return {.kind = value_kind::scalar_half, .bits = builtins::impl::half_bits_of(v)};
+}
+
 sgl::f32 sgl::check::scalar::as_float() const
 {
     return cc::bit_cast<f32>(bits);
+}
+
+scalar sgl::check::scalar::widened() const
+{
+    switch (kind)
+    {
+    case value_kind::scalar_half:
+        return of(builtins::impl::float_of_half_bits(bits));
+    case value_kind::scalar_short:
+        return of(i32(i16(u16(bits))));
+    case value_kind::scalar_ushort:
+        return of_uint(bits & 0xffffu);
+    default:
+        return *this;
+    }
+}
+
+scalar sgl::check::scalar::narrowed_to(value_kind to) const
+{
+    if (!is_16_bit(to) || wide_kind_of(to) != wide_kind_of(kind) || is_16_bit(kind))
+        return *this;
+    if (to == value_kind::scalar_half)
+        return {.kind = to, .bits = builtins::impl::half_bits_of(as_float())};
+    return {.kind = to, .bits = bits & 0xffffu};
 }
 
 cc::string_view sgl::check::to_string(run_status s)
@@ -1174,7 +1299,9 @@ void read_leaves(cc::span<byte const> bytes, cc::span<scalar> leaves)
         auto word = u32(0);
         for (auto b = 0; b < 4; ++b)
             word |= u32(bytes[i * 4 + b]) << (8 * b);
-        leaves[i].bits = leaves[i].kind == value_kind::boolean ? u32(word != 0) : word;
+        leaves[i].bits = leaves[i].kind == value_kind::boolean ? u32(word != 0)
+                       : is_16_bit(leaves[i].kind)             ? word & 0xffffu
+                                                               : word;
     }
 }
 
@@ -1326,12 +1453,13 @@ cc::string sgl::check::dump(outcome const& o)
     {
         for (auto const& leaf : v.leaves)
         {
-            if (leaf.kind == value_kind::scalar_float)
-                out.appendf(" {}", leaf.as_float());
-            else if (leaf.kind == value_kind::scalar_int)
-                out.appendf(" {}", leaf.as_int());
-            else if (leaf.kind == value_kind::scalar_uint)
-                out.appendf(" {}u", leaf.as_uint());
+            auto const wide = leaf.widened();
+            if (wide.kind == value_kind::scalar_float)
+                out.appendf(" {}{}", wide.as_float(), leaf.kind == value_kind::scalar_half ? "f16" : "");
+            else if (wide.kind == value_kind::scalar_int)
+                out.appendf(" {}{}", wide.as_int(), leaf.kind == value_kind::scalar_short ? "i16" : "");
+            else if (wide.kind == value_kind::scalar_uint)
+                out.appendf(" {}u{}", wide.as_uint(), leaf.kind == value_kind::scalar_ushort ? "16" : "");
             else
                 out.appendf(" {}", leaf.as_bool() ? "true" : "false");
         }

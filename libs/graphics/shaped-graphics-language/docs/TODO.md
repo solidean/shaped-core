@@ -26,6 +26,10 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   Folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in their place.
 - **Re-run [tools/msl-probe](../tools/msl-probe/readme.md) when the Metal toolchain is bumped.** MSL's generated reserved words are taken from one toolchain's headers, which grow every release.
   A name a newer one adds fails as `quad` did, naming a header the program's author never wrote, until the block is regenerated.
+- **Run MSL's two memory-ordering spellings on a Mac.** Both were read off the MSL spec, and no Metal device has run them.
+  One is the device-scoped `atomic_thread_fence` behind a barrier in an entry point holding a `@coherent` member (EMIT-150).
+  sg's `compute-coherence-test.cc`, spread over many workgroups, is what shows it publishes across threadgroups.
+  The other is `img.fence();` behind a store to an image the entry point also reads (EMIT-151), which wants a read-after-write test of one texel.
 - **What `discard` does to a quad's derivatives, per target.** SGL writes `discard;` and MSL `discard_fragment();`, which every target reads as "no effect after this".
   Whether the pixel keeps running as a helper is where they differ, and a sample after a discard in a neighbouring pixel depends on it.
   sg's tier-1 pixel-semantics test pins it on every backend, and dx12 and vulkan keep the pixel as a helper.
@@ -69,17 +73,13 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **A `misplaced-not` inside a `test` body was seen to pass silently**, while writing the ray-tracing tests.
   It does not reproduce in a plain test body: `test:` ending in `not a and b` reports it, as a function body does.
   The likelier case is a test with an `error` or `warning` expectation, which takes every diagnostic inside it as its own (CHK-232); pin whichever it was with a corpus test.
-- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, and gathers of integer textures.
+- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: a texture's subscripts, and gathers of integer textures.
 - **A `require` inside a nested block, and `if feature f:` to branch on one.** A builtin's call counts its feature where the entry point reaches it (CHK-322), so a body uses features now.
   What is missing is scoping a grant to a block, and a branch that leaves a use out on a device without the feature.
 - **Features used through another symbol.** A binding's `required` counts only the uses resolved while its members compile, and `checker::compile` clears the grant around any symbol they demand.
   No such symbol can hold a resource yet; once a type alias or a struct field can, its use has to reach every binding that names it.
 - **Features across a hot reload outside a `pipeline`.** A declared pipeline freezes its features, so a reload needing another one keeps what it had.
   A compute shader or a stage acquired on its own has no frozen part: its reload compiles, and its pipeline is then refused by the feature's name.
-- **Multi-component swizzles.** A vector has the fields `x y z w` and nothing else, so `.xy` or `.zw` is `unknown-member`, and code ported from HLSL writes a constructor for each.
-  Even read-only swizzles are a design: assignment through one, repeated components, and how they meet the `..v` splat.
-- **Unsigned literals by suffix.** A literal takes a `uint` wherever one is expected (CHK-253), and `1u` is `unsupported-yet` (CHK-61).
-  Whether the suffix is needed at all is the question [literal-types.md](spec/incubator/literal-types.md) holds.
 - **Arrays and `mat3` in GPU memory, and matrices and arrays across a stage edge.** An array is a value everywhere else (CHK-285).
   It is `unsupported-yet` wherever GPU memory or a stage edge holds one (CHK-291).
   `mat3` does not exist yet.
@@ -93,7 +93,8 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **A linter for SGL's own style, starting with `@expect` on its own line.** An `@expect(…)` stands on the line above its `test`, never before it on the same line; every file here follows that.
   It is a rule of `@expect` and not of attributes: `@vertex fun main(…)` on one line reads fine and stays.
   The parser takes both spellings, so only a linter can hold the line.
-- **One test that the highlighters agree with the compiler.** The VS Code grammar and the review tool's lexer each copy the syntax, and only the lexer's keyword set is checked today.
+- **One test that the highlighters agree with the compiler.** The VS Code grammar and the review tool's lexer each copy the syntax.
+  Only the lexer's keyword set and both copies' subgroup and quad names are checked today.
   The test tokenizes a corpus, `tools/vscode-extension/examples/sample.sgl` at least, with the compiler, the grammar and the lexer.
   It compares the class each assigns to every token: keyword, name, number, string, comment, operator.
   The compiler's side is `sgl::classify` without a checked module: the syntactic classes, plus a class for each name the file declares.
@@ -102,3 +103,13 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   So CHK-225's warning is too coarse there, and a `void` line is exempt from it today.
   The precise rule wants the check pass to know more about the effects of an expression and of a function, "could reach an assert" among them.
   A line of a test is then `no-effect` exactly when it has no effect and cannot reach an assert.
+- **A subgroup size a shader requires.** `@preferred_subgroup_size` asks and promises nothing (CHK-371), which is what a tuning hint on code correct at any size means.
+  A shader correct at one size alone needs a separate spelling, behind a feature, which a device that cannot run that size refuses.
+  It lands once a shader needs one; turning the preference into a requirement instead would refuse shaders that work today.
+- **Quads of a two-dimensional compute workgroup.** CHK-380 holds a compute stage's quad operations to a workgroup of one row, the one shape whose quads every target forms alike.
+  HLSL forms 2x2 squares of the threads' ids in any other, which WGSL and MSL can only reach by shuffling with lanes computed from `@local_thread_id`.
+  It lands once a shader wants square quads, written as such a shuffle wherever the target's own quads are lanes.
+- **A format-less storage image, `image_2d[.host]`.** An `out` image written as `float4` and bound to whatever float format the host has, one compile for every format.
+  dx12 and MSL have it, vulkan needs `shaderStorageImageWriteWithoutFormat`, and WGSL can never have it, so it is a feature.
+  Reading one is vulkan's separate `shaderStorageImageReadWithoutFormat`, so a `mut` or read-only `.host` image waits for a shader that wants it.
+  It is additive: the portable route is an option as the format, one compile per format ([bindings.md](spec/bindings.md#image-formats)).

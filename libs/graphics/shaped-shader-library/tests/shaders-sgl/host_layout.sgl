@@ -1,0 +1,21 @@
+// Constant blocks a host fills from its own struct: `@layout(.cpp)` places each as C++ places a struct of tg types.
+// So the generated types are the struct a host would write by hand, byte for byte.
+
+@layout(.cpp) @inline binding host_push:
+    scale: float
+    tint: float3
+    bias: float
+    shift: float2
+    weights: float4
+    count: uint
+
+@layout(.cpp)
+binding host_group:
+    gain: float
+    dir: float3
+    after: float
+    values: mut buffer[float]
+
+@compute(1) fun echo(){host_group, host_push}:
+    host_group.values[0] = host_push.scale + host_push.tint.y + host_push.weights.w + (host_push.count as float)
+    host_group.values[1] = host_group.gain + host_group.dir.z + host_group.after

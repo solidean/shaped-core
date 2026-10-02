@@ -45,6 +45,10 @@ struct writer
     cc::string out;
     /// How many levels the next line is indented by; the body of the function is level 1.
     int depth = 1;
+    /// The entry point holds a `@coherent` member (EMIT-150).
+    bool is_device_coherent = false;
+    /// The images the entry point loads a texel of, where the target fences a store before a load (EMIT-151).
+    cc::vector<flat_binding_member> fenced_images;
 
     /// The name a target writes member `name` of struct `type` with, which the plan may have renamed.
     [[nodiscard]] cc::string_view member_of(type_id type, cc::string_view name) const
@@ -120,15 +124,18 @@ struct writer
                 .binds = own};
     }
 
-    /// True when writing `id` puts lines in front of the statement that holds it: a struct built member by member.
+    /// True when writing `id` puts lines in front of the statement that holds it: a struct built member by member, or
+    /// a builtin whose writer says it may in this language.
     /// Such an expression cannot stand where it is evaluated more than once, or behind an `else`.
     bool writes_lines(flat_expr_id id) const
     {
         auto const& x = p.e.at(id);
         if (needs_member_assignment(x))
             return true;
-        if (is_hlsl_atomic(id))
-            return true;
+        if (auto const* const c = x.node.try_as<flat_call>())
+            if (auto const* const record = p.m.builtin_function(c->intrinsic);
+                record != nullptr && record->write.writes_lines != nullptr && record->write.writes_lines(d.language()))
+                return true;
         auto result = false;
         check::impl::for_each_operand(p.e, x, [&](flat_expr_id operand) { result = result || writes_lines(operand); });
         return result;
@@ -142,6 +149,44 @@ struct writer
         auto const* const c = p.e.at(id).node.try_as<flat_call>();
         auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
         return record != nullptr && record->is_atomic;
+    }
+
+    /// The image member whose texel `x` loads or, with `is_store`, stores; null for any other expression.
+    /// An element of a binding array of images is its array's member.
+    [[nodiscard]] flat_binding_member const* image_accessed_by(flat_expr const& x, bool is_store) const
+    {
+        auto const* const c = x.node.try_as<flat_call>();
+        auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
+        if (record == nullptr || p.e.at(c->arguments).empty())
+            return nullptr;
+        if (is_store ? !record->is_image_store : record->is_image_store || record->name != "load")
+            return nullptr;
+        auto const image = p.e.at(c->arguments)[0];
+        if (p.m.at(p.e.at(image).type).kind != check::type_kind::image)
+            return nullptr;
+        auto member = image;
+        if (auto const* const element = p.e.at(member).node.try_as<flat_element>())
+            member = element->object;
+        return p.e.at(member).node.try_as<flat_binding_member>();
+    }
+    [[nodiscard]] flat_binding_member const* image_loaded_by(flat_expr const& x) const
+    {
+        return image_accessed_by(x, false);
+    }
+
+    /// `img.fence();` behind a store to an image the entry point also loads, so this thread's later load sees it.
+    void fence_after(flat_expr_id id)
+    {
+        auto const* const b = image_accessed_by(p.e.at(id), true);
+        if (b == nullptr)
+            return;
+        for (auto const& loaded : fenced_images)
+            if (loaded.binding == b->binding && loaded.member == b->member)
+            {
+                auto const* const c = p.e.at(id).node.try_as<flat_call>();
+                line(cc::format("{}.fence();", wrapped(expr(p.e.at(c->arguments)[0]), level::primary)));
+                return;
+            }
     }
 
     bool needs_member_assignment(flat_expr const& x) const
@@ -314,7 +359,14 @@ struct writer
                 return field_text(r, leaf, 0);
             auto const& record = *p.m.builtin_type_of(r.type);
             auto pieces = cc::vector<cc::string>();
-            if (record.leaf_count > 4 && !d.has_struct_constructor())
+            if (record.leaf_count > 4 && d.language() == builtins::language::hlsl)
+            {
+                // HLSL fills a matrix row by row from its scalars, and the fields hold it column by column.
+                for (auto row = 0; row < 4; ++row)
+                    for (auto column = 0; column < 4; ++column)
+                        pieces.push_back(field_text(r, leaf, column * 4 + row));
+            }
+            else if (record.leaf_count > 4 && !d.has_struct_constructor())
             {
                 // MSL builds a matrix from its columns, not from its scalars.
                 auto const column = cc::string(builtin_spelling(p, "float4"));
@@ -415,9 +467,51 @@ struct writer
         }
     }
 
+    /// The letters of a swizzle of a vector of `type`, `zyx`.
+    cc::string letters_text(type_id type, swizzle const& letters) const
+    {
+        auto const fields = p.m.at(p.m.at(type).members);
+        auto text = cc::string();
+        for (auto i = 0; i < letters.count; ++i)
+            text += fields[letters.fields[i]].name;
+        return text;
+    }
+
+    /// `v.zy = value;` where the target assigns through a swizzle, and one component at a time from a local that holds
+    /// the value where it does not, or where the vector is in a memory form (EMIT-143).
+    void assign_swizzle(flat_member const& place, flat_expr_id stored)
+    {
+        auto const value = expr(stored, true).text;
+        auto const object_type = p.e.at(place.object).type;
+        auto const memory = memory_of(place.object);
+        auto const object = wrapped(expr(place.object), level::primary);
+        if (!memory.has_value() && d.assigns_through_swizzles())
+            return line(cc::format("{}.{} = {};", object, letters_text(object_type, place.letters), value));
+
+        auto const value_type = p.e.at(stored).type;
+        auto const name = p.names.mint("swizzled");
+        auto declaration = cc::string();
+        d.write_local(declaration, {.name = name, .type = type_text(p, d, value_type), .value = value});
+        line(declaration);
+        auto const fields = p.m.at(p.m.at(object_type).members);
+        auto const components = p.m.at(p.m.at(value_type).members);
+        for (auto i = 0; i < place.letters.count; ++i)
+        {
+            auto const field = place.letters.fields[i];
+            auto const component = cc::format("{}.{}", name, components[i].name);
+            if (memory.has_value())
+                write_memory(memory.value(), field, component, fields[field].type);
+            else
+                line(cc::format("{}.{} = {};", object, fields[field].name, component));
+        }
+    }
+
     /// `place = value;`, through a memory form where the place is in one.
     void assign(flat_assign const& a)
     {
+        if (auto const* const member = p.e.at(a.place).node.try_as<flat_member>();
+            member != nullptr && member->is_swizzle())
+            return assign_swizzle(*member, a.value);
         auto const value = expr(a.value, true).text;
         auto target = memory_of(a.place);
         auto component = -1;
@@ -434,7 +528,7 @@ struct writer
     }
 
     /// Every call is written from its registry record; nothing here knows one builtin from another.
-    rendered call(flat_call const& c)
+    rendered call(flat_call const& c, check::type_id type)
     {
         auto const& record = *p.m.builtin_function(c.intrinsic);
         auto arguments = cc::vector<rendered>();
@@ -454,7 +548,13 @@ struct writer
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
             auto result = how.custom(
-                {.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins, .data = how.data, .mint = mint});
+                {.target = d.language(),
+                 .arguments = arguments,
+                 .builtins = *p.m.builtins,
+                 .data = how.data,
+                 .mint = mint,
+                 .result_type = p.m.builtin_type_of(type) != nullptr ? type_text(p, d, type) : cc::string_view(),
+                 .is_device_coherent = is_device_coherent});
             // the statements its value needs, ahead of the one that holds it
             for (auto const& l : result.lines)
                 line(l);
@@ -483,7 +583,7 @@ struct writer
         if (auto const memory = memory_of(id); memory.has_value())
             return {.text = read_memory(memory.value())};
         // A component of a vector in a memory form is read from the field that holds it, not from the rebuilt vector.
-        if (auto const* const member = x.node.try_as<flat_member>())
+        if (auto const* const member = x.node.try_as<flat_member>(); member != nullptr && !member->is_swizzle())
             if (auto const* const record = p.m.builtin_type_of(p.e.at(member->object).type);
                 record != nullptr && record->leaf_count <= 4)
                 if (auto const object = memory_of(member->object); object.has_value())
@@ -495,14 +595,23 @@ struct writer
                     return {.text = cc::format("{}.{}", field_text(object.value(), leaf, 0), component)};
                 }
         auto result = rendered();
+        // EMIT-140: a literal of a 16-bit type is a construction of its type, since a bare one is 32 bits in MSL
+        auto const* const literal_type = p.m.builtin_type_of(x.type);
+        auto const narrow = [&](rendered r)
+        {
+            if (literal_type == nullptr || !is_16_bit(literal_type->leaf_kind))
+                return r;
+            return rendered{.text = cc::format("{}({})", literal_type->spelled_in(d.language()), r.text)};
+        };
         x.node.visit(
             [&](flat_invalid const&) {}, [&](flat_literal const& l)
-            { result = {.text = literal_text(l.value), .binds = l.value < 0 ? level::unary : level::primary}; },
+            { result = narrow({.text = literal_text(l.value), .binds = l.value < 0 ? level::unary : level::primary}); },
             [&](flat_int_literal const& l)
             {
                 auto const is_wrapped = l.value == -2147483647 - 1;
                 auto text = l.is_unsigned ? cc::to_string(u32(l.value)) + "u" : int_literal_text(l.value);
-                result = {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary};
+                result = narrow(
+                    {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary});
             },
             [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
             [&](flat_enum_value const& v)
@@ -544,6 +653,12 @@ struct writer
             {
                 auto const object_type = p.e.at(member.object).type;
                 auto object = wrapped(expr(member.object), level::primary);
+                // EMIT-142: a prelude vector's swizzle is the target's own, spelled alike everywhere
+                if (member.is_swizzle())
+                {
+                    result = {.text = cc::format("{}.{}", object, letters_text(object_type, member.letters))};
+                    return;
+                }
                 // A builtin's fields are spelled alike everywhere: x, y, z, w.
                 if (is_builtin_type(p.m, object_type))
                 {
@@ -555,7 +670,7 @@ struct writer
                 result = {.text = cc::format("{}.{}", object, planned.members[planned.member_of[member.member]].name)};
             },
             [&](flat_construct const&) { result = construct(x, is_broken); },
-            [&](flat_call const& c) { result = call(c); }, [&](flat_not const& n)
+            [&](flat_call const& c) { result = call(c, x.type); }, [&](flat_not const& n)
             { result = {.text = cc::format("!{}", wrapped(expr(n.operand), level::primary)), .binds = level::unary}; },
             [&](flat_and const& a) { result = logical("&&", level::logical_and, expr(a.lhs), expr(a.rhs)); },
             [&](flat_or const& o) { result = logical("||", level::logical_or, expr(o.lhs), expr(o.rhs)); },
@@ -725,6 +840,7 @@ struct writer
                 else
                     d.write_eval(text, expr(v.value).text);
                 line(text);
+                fence_after(v.value);
             },
             [&](flat_if const& i) { branch(i, false); },
             // none of the three is in a core tree
@@ -917,6 +1033,12 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
 cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
 {
     auto w = writer{.p = p, .d = d};
+    for (auto const& r : p.resources)
+        w.is_device_coherent = w.is_device_coherent || r.is_coherent;
+    if (d.fences_image_stores())
+        for (auto const& x : p.e.exprs)
+            if (auto const* const b = w.image_loaded_by(x))
+                w.fenced_images.push_back(*b);
     w.out.appendf("// SGL {} entry point '{}', written as {}.\n", check::stage_name(p.e.entry_stage), p.entry_name,
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";

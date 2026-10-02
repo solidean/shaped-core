@@ -24,6 +24,18 @@ _DECLARATION_KEYWORDS = frozenset({
 _TYPE_QUALIFIERS = frozenset({"mut", "out"})
 _CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "discard", "break",
                                "case"})
+# Builtins whose name alone says they constrain control flow, drawn as control keywords as the VS Code grammar draws them.
+# An atomic's `max` or an implicit-derivative `sample` shares its name with an ordinary function, so neither is here.
+# Exact names rather than a `subgroup_` or `quad_` prefix, since `quad_count` is an ordinary geometry name.
+# The self-test holds the subgroup and quad names to the prelude's.
+_CONTROL_BUILTINS = frozenset({
+    "ddx", "ddy", "fwidth", "workgroup_barrier", "storage_barrier", "texture_barrier", "workgroup_uniform_load",
+    "subgroup_all", "subgroup_any", "subgroup_ballot", "subgroup_add", "subgroup_mul", "subgroup_min", "subgroup_max",
+    "subgroup_bit_and", "subgroup_bit_or", "subgroup_bit_xor", "subgroup_inclusive_add", "subgroup_inclusive_mul",
+    "subgroup_exclusive_add", "subgroup_exclusive_mul", "subgroup_broadcast", "subgroup_broadcast_first",
+    "subgroup_shuffle", "subgroup_shuffle_up", "subgroup_shuffle_down", "subgroup_shuffle_xor",
+    "quad_broadcast", "quad_swap_x", "quad_swap_y", "quad_swap_diagonal",
+})
 _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
 _CONSTANTS = frozenset({"true", "false"})
 # A symbol directly after one of these names a function or a type.
@@ -175,7 +187,8 @@ def _code_tokens(line: str, closes: str):
                 yield i, Number, line[i:end], code
             else:
                 fused_call = line.startswith("(", end)
-                token = _classify(word, previous_symbol, expects_type or type_arguments > 0, fused_call)
+                member = i > 0 and line[i - 1] == "."
+                token = _classify(word, previous_symbol, expects_type or type_arguments > 0, fused_call, member)
                 yield i, token, word, code
                 last_was_type = token is Name.Class
                 expects_type = expects_type and word in _TYPE_QUALIFIERS
@@ -214,7 +227,7 @@ def _code_tokens(line: str, closes: str):
         last_was_type = False
 
 
-def _classify(word: str, previous_symbol: str, expects_type: bool, fused_call: bool):
+def _classify(word: str, previous_symbol: str, expects_type: bool, fused_call: bool, member: bool):
     if word.startswith("@"):
         # The VS Code grammar scopes an attribute as an escape for its colour, since a theme paints a decorator like a
         # function; the page follows the editor rather than Pygments' default.
@@ -231,7 +244,12 @@ def _classify(word: str, previous_symbol: str, expects_type: bool, fused_call: b
         return Operator.Word
     if word in _CONSTANTS:
         return Keyword.Constant
-    if previous_symbol in _NAMES_FUNCTION or fused_call:
+    if previous_symbol in _NAMES_FUNCTION:
+        return Name.Function
+    # A name after `.` is a member, which the grammar's lookbehind leaves uncoloured too.
+    if word in _CONTROL_BUILTINS and not member:
+        return Keyword.Namespace
+    if fused_call:
         return Name.Function
     if previous_symbol in _NAMES_TYPE or expects_type:
         return Name.Class

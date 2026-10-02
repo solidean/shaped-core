@@ -26,6 +26,14 @@ cc::vector<sgl::check::module_file> sgl::driver::impl::module_files_of(front_end
     return files;
 }
 
+cc::vector<cc::string> sgl::driver::impl::option_names_of(check::checked_module const& m, check::flat_entry_point const& e)
+{
+    auto names = cc::vector<cc::string>();
+    for (auto const id : e.options)
+        names.push_back(m.qualified_name_of(id));
+    return names;
+}
+
 namespace
 {
 /// False only where `text` plainly declares no module: its first line that is neither blank nor a `//` comment is
@@ -54,7 +62,8 @@ bool may_declare_module(cc::string_view text)
 
 sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view source,
                                                               cc::string_view source_name,
-                                                              cc::span<library_file const> library)
+                                                              cc::span<library_file const> library,
+                                                              cc::span<check::option_value const> options)
 {
     auto result = front_end{.prelude = prelude_files(), .source_name = source_name};
     auto const own = prelude_file_of(source_name);
@@ -96,8 +105,9 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     for (auto i = isize(0); i < result.prelude.size(); ++i)
         modules.push_back({.file = *result.files[i], .ast = *result.asts[i]});
     auto const* const checked = own >= 0 ? nullptr : checked_prelude();
-    result.module = checked != nullptr ? check::check(*checked, library_files, user)
-                                       : check::check(modules, library_files, user, builtins::default_registry());
+    result.module = checked != nullptr
+                      ? check::check(*checked, library_files, user, options)
+                      : check::check(modules, library_files, user, builtins::default_registry(), options);
 
     // The files as the check placed them: the prelude, the library files the source reached, then the source.
     for (auto const i : result.module.library_files)

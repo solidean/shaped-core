@@ -65,6 +65,11 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
     o.write("inline", b.is_inline);
     o.write("shape", cc::string_view(b.shape));
     o.write("block_size", b.block_size);
+    {
+        auto list = o.write_array("options", babel::json::layout::compact);
+        for (auto const& name : b.options)
+            list.write(cc::string_view(name));
+    }
     if (b.block_slot >= 0)
     {
         o.write("block_slot", b.block_slot);
@@ -100,6 +105,8 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         optional("texture_dimension", m.texture_dimension);
         optional("sample_type", m.sample_type);
         optional("image_format", m.image_format);
+        optional("format_option", m.format_option);
+        optional("count_option", m.count_option);
         optional("sampler_type", m.sampler_type);
         if (m.static_sampler.has_value())
         {
@@ -162,6 +169,9 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const n : e.workgroup)
             grid.write(n);
     }
+    // CHK-371: only an entry point that asks for a size says so
+    if (e.preferred_subgroup_size > 0)
+        o.write("preferred_subgroup_size", e.preferred_subgroup_size);
     {
         auto list = o.write_array("bindings", babel::json::layout::compact);
         for (auto const& name : e.bindings)
@@ -175,6 +185,11 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
     {
         auto list = o.write_array("samplers", babel::json::layout::compact);
         for (auto const& name : e.samplers)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("options", babel::json::layout::compact);
+        for (auto const& name : e.options)
             list.write(cc::string_view(name));
     }
     o.write("payload", cc::string_view(e.payload));
@@ -245,6 +260,7 @@ void write_raytracing_pipeline(babel::json::object_writer& o, sgl::described_ray
     o.write("host_callable_parameter", cc::string_view(p.host_callable_parameter));
     o.write("host_callable_shape", cc::string_view(p.host_callable_shape));
     write_names(o, "samplers", p.samplers);
+    write_names(o, "options", p.options);
     auto frozen = o.write_array("frozen");
     for (auto const& line : p.frozen)
         frozen.write(cc::string_view(line));
@@ -330,6 +346,11 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
         for (auto const& path : p.open)
             open.write(cc::string_view(path));
     }
+    {
+        auto list = o.write_array("options", babel::json::layout::compact);
+        for (auto const& name : p.options)
+            list.write(cc::string_view(name));
+    }
     auto frozen = o.write_array("frozen");
     for (auto const& line : p.frozen)
         frozen.write(cc::string_view(line));
@@ -340,6 +361,16 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
     auto w = babel::json::string_writer({.indent = 2});
     {
         auto root = w.object();
+        {
+            auto options = root.write_array("options");
+            for (auto const& option : d.options)
+            {
+                auto o = options.write_object(babel::json::layout::compact);
+                o.write("name", cc::string_view(option.name));
+                o.write("type", cc::string_view(option.type));
+                o.write("value", cc::string_view(option.value));
+            }
+        }
         {
             auto bindings = root.write_array("bindings");
             for (auto const& b : d.bindings)
@@ -429,6 +460,7 @@ COMMAND("describe")
 {
     auto path = cc::string();
     auto out_path = cc::string();
+    auto option_arguments = cc::vector<cc::string>();
     auto module = cc::string();
     auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args(
@@ -437,6 +469,9 @@ COMMAND("describe")
                         "pipelines of an SGL file as JSON, or prints the diagnostics that keep it from compiling."});
     args.positional("FILE", path, {.desc = "the SGL source; none with --module"});
     args.arg({"out"}, out_path, {.desc = "write the JSON here instead of to stdout", .metavar = "PATH"});
+    args.arg({"option"}, option_arguments,
+             {.desc = "describe with an option of the source set, `--option tile=16`; repeat for each",
+              .metavar = "NAME=VALUE"});
     args.arg({"module-dir"}, module_dirs,
              {.desc = "a directory whose .sgl files are modules the file may use", .metavar = "DIR"});
     args.arg({"module"}, module,
@@ -455,6 +490,13 @@ COMMAND("describe")
         return exit_usage;
     }
 
+    auto const options = sgl_tool::parse_options(option_arguments);
+    if (options.has_error())
+    {
+        cc::eprintln("sgl describe: an option is given as `name=value`, and '{}' is not", options.error());
+        return exit_usage;
+    }
+
     auto source = cc::result<cc::string, cc::string>(cc::string());
     if (!path.empty())
         source = sgl_tool::read_file(path);
@@ -466,6 +508,7 @@ COMMAND("describe")
 
     auto const described = sgl::describe({.source = source.value(),
                                           .source_name = path,
+                                          .options = options.value(),
                                           .library = sgl_tool::files_but(library.value(), path),
                                           .module = module});
     if (described.has_error())

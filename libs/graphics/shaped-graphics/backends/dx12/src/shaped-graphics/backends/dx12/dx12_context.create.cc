@@ -450,6 +450,16 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &bgra8, sizeof(bgra8)))
        && (bgra8.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) != 0;
 
+    // A failed query is an older runtime, which has neither.
+    D3D12_FEATURE_DATA_D3D12_OPTIONS4 options4 = {};
+    auto const native_16bit_shader_ops
+        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4, sizeof(options4)))
+       && options4.Native16BitShaderOpsSupported;
+    D3D12_FEATURE_DATA_D3D12_OPTIONS1 options1 = {};
+    auto const wave_ops
+        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1)))
+       && options1.WaveOps;
+
     auto ctx = std::make_shared<dx12_context>();
     ctx->set_adapter_info(describe_adapter(adapter.Get()));
     // IDXGIAdapter3 is where QueryVideoMemoryInfo lives; an older runtime leaves this null and the query then refuses.
@@ -461,6 +471,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_raytracing_tier = raytracing_tier;
     ctx->_unaligned_block_textures = unaligned_block_textures;
     ctx->_extended_image_formats = extended_image_formats;
+    ctx->_native_16bit_shader_ops = native_16bit_shader_ops;
+    ctx->_wave_ops = wave_ops;
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 

@@ -62,6 +62,11 @@ struct sgl::builtins::call_context
     u32 data = 0;
     /// A fresh name of the text, for a local that `written::lines` declares; none where no text is being written.
     cc::function_ref<cc::string(cc::string_view)> mint = {};
+    /// The call's result type as the target spells it, for such a local; empty where no text is being written, and
+    /// for a result of no builtin type.
+    cc::string_view result_type;
+    /// The entry point holds a `@coherent` member, whose writes a barrier publishes to the whole dispatch (EMIT-150).
+    bool is_device_coherent = false;
 };
 
 /// What a helper writer is given: the target, and each argument's type as the target spells it.
@@ -79,6 +84,21 @@ using custom_writer = written (*)(call_context const&);
 /// A function the text declares once, ahead of the entry point, for a call the target cannot write as one expression.
 /// Empty for a target that needs none; two calls needing the same text get it once, so a helper may be an overload.
 using helper_writer = cc::string (*)(helper_context const&);
+/// Whether a custom writer may hand back `written::lines` in this language.
+using lines_predicate = bool (*)(language);
+
+[[nodiscard]] inline bool is_hlsl(language l)
+{
+    return l == language::hlsl;
+}
+[[nodiscard]] inline bool is_msl(language l)
+{
+    return l == language::msl;
+}
+[[nodiscard]] inline bool is_not_wgsl(language l)
+{
+    return l != language::wgsl;
+}
 
 /// Appends the result's scalars to `out`.
 /// `in` holds the scalars of every argument, one argument behind the other.
@@ -127,6 +147,9 @@ struct sgl::builtins::spelling
     precedence binds = precedence::primary;
     custom_writer custom = nullptr;
     helper_writer helper = nullptr;
+    /// True in every language where `custom` may hand back `written::lines`; a writer that ever does must set it.
+    /// Such a call cannot stand where it is evaluated more than once, such as a `while` condition.
+    lines_predicate writes_lines = nullptr;
     /// Whatever `custom` and `helper` read to tell the records they serve apart, such as which texture call it is.
     u32 data = 0;
     /// Every name `custom` and `helper` write in one language besides the arguments: a function called or declared, a
@@ -169,6 +192,9 @@ struct sgl::builtins::type_record
     /// A bool crosses none in WGSL; an int crosses only flat, which the check pass holds it to (CHK-273).
     bool crosses_edges = false;
 
+    /// What a device needs for a value of it, which an entry point holding one needs too (CHK-382).
+    check::feature_set features;
+
     /// Read back from the declaration by `finalize`.
     cc::string name;
 
@@ -204,6 +230,18 @@ struct sgl::builtins::function_record
     /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
     /// the other arguments, and gives what the atomic holds after; the call gives what it held before, or nothing.
     bool is_atomic = false;
+    /// Stores a texel of its first argument, an image, which MSL fences before the same thread reads it (EMIT-151).
+    bool is_image_store = false;
+    /// Exchanges values between the invocations of a subgroup, so every one of them reaches the call or none does, and
+    /// what it gives differs within a workgroup (CHK-377).
+    bool is_subgroup_operation = false;
+    /// A subgroup operation within a quad, which a compute stage forms along one axis (CHK-380).
+    bool is_quad_operation = false;
+    /// `workgroup_uniform_load`: a barrier whose argument is workgroup memory and whose result is uniform (CHK-374).
+    bool is_uniform_load = false;
+    /// The second argument is a lane, a mask or a delta, a constant `int` from 0 to below this (CHK-378); 0 for a call
+    /// without one.
+    i32 constant_lane_below = 0;
     /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
     bool is_nonuniform_mark = false;
     /// Takes one argument more than its signature names, of a struct of the program: a stream's `emit` its vertex, of
@@ -235,6 +273,13 @@ struct sgl::builtins::function_record
     [[nodiscard]] cc::span<cc::string_view const> names_in(language l) const;
     /// True for the name a `call` has in `l`, and for every name of `names_in(l)`: a name of the program must not be it.
     [[nodiscard]] bool writes_name(language l, cc::string_view name) const;
+
+    /// Whether where a call of it stands is constrained, so an editor shows it as it shows a control keyword.
+    /// A flag that adds such a constraint joins here.
+    [[nodiscard]] bool constrains_control_flow() const
+    {
+        return uses_derivatives || is_barrier || is_atomic || is_subgroup_operation;
+    }
 };
 
 /// One piece of the generated file, in the order it was registered.
@@ -307,6 +352,9 @@ constexpr cc::string_view k_float = "float";
 constexpr cc::string_view k_int = "int";
 constexpr cc::string_view k_uint = "uint";
 constexpr cc::string_view k_bool = "bool";
+constexpr cc::string_view k_half = "half";
+constexpr cc::string_view k_short = "short";
+constexpr cc::string_view k_ushort = "ushort";
 constexpr cc::string_view k_hpos4 = "hpos4";
 
 /// Every builtin SGL has, registered in a fixed order and finalized.

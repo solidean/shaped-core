@@ -78,14 +78,48 @@ public:
             for (int i = 0; i < D; ++i)
                 n.data[i] = image.data[i];
 
+            // a degenerate image (the plane mapped to infinity) has len == 0 and yields non-finite values
             auto const len = n.length();
-            CC_ASSERT(!tg::traits::is_zero(len), "the projective image of this plane is degenerate");
             return plane(n / len, -image.data[D] / len);
         }
         else
             static_assert(false, "tg: a plane can be transformed by an affine or a projective map over a scalar with "
                                  "sqrt");
     }
+
+    // readings
+public:
+    /// the foot of the perpendicular from the origin.
+    [[nodiscard]] constexpr pos<D, T> any_point() const { return pos<D, T>() + normal * dist; }
+
+    // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
+public:
+    template <class Obj>
+    [[nodiscard]] constexpr auto project_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_points_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_point_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_sqr_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto signed_distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto contains(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto separation_from(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersection_with(Obj const& obj) const;
 
     // comparison
 public:
@@ -99,3 +133,18 @@ struct tg::object_traits<tg::plane<D, T>>
     static constexpr int ambient_dim = D;
     static constexpr bool is_finite = false;
 };
+
+namespace tg::impl
+{
+/// whether plane::transformed turns a normal around: its affine path takes the cofactor, which carries the sign of the
+/// linear part's determinant.
+/// The projective path maps (normal, -dist) by the inverse transpose, which keeps every side where w stays positive.
+template <int D, class T, class TransformT>
+[[nodiscard]] constexpr bool flips_plane_normals(TransformT const& t)
+{
+    if constexpr (requires { tg::affine_transform<D, T>(t); })
+        return tg::affine_transform<D, T>(t).linear_mat().determinant() < T(0);
+    else
+        return false;
+}
+} // namespace tg::impl

@@ -368,8 +368,10 @@ Letting a listed binding carry its needs to the entry point on its own would era
 
 The floor is defined by what the language counts, never by what an optimizer happens to remove.
 A floor that followed dead-code elimination would change with a compiler version or an unrelated refactor, and the host would find out on a device that lacks the feature.
-So every use the entry point reaches counts, including one behind a condition that is always false.
-A compile-time branch on a feature, `if feature ray_query:`, is the form that may leave a use out, and it is not built.
+So every use the entry point reaches counts, including one behind a condition that is false at run time.
+A branch on a constant is the one exception, and it keeps the floor the language's: CHK-356 removes it on every compiler alike, so the floor cannot move with an optimizer.
+It is what lets an option turn a 16-bit path off without asking the device for the 16-bit feature.
+A compile-time branch on a feature, `if feature ray_query:`, is the form that would leave a use out on purpose, and it is not built.
 
 ## CHK-265
 
@@ -480,3 +482,167 @@ The attributes are a struct of the program because every target passes them as a
 A table belongs to the module rather than to a pipeline so that its place in the callable section is a constant of the module.
 Were a table the pipeline's, a stage calling it would compile once per pipeline, with another offset each time, and a stage shared by two pipelines would be two shaders.
 The cost is that every pipeline of the module holds every callable, which costs table space and nothing else.
+
+## CHK-381
+
+AMD's fast FSR build is its 16-bit path, and a port without 16-bit types runs everything in fp32, losing the packed-math rate and doubling workgroup memory and registers.
+`half3` sits beside `float3` and `int3` as one family, which `f16x3` or `float16x3` would not; `half` is every shading language's word and MSL's spelling.
+`short` says nothing of its width, and the 64-bit types follow the same pattern as `long`, `ulong` and `double` when they come.
+One feature for 16-bit floats, storage and arithmetic together, is the shape WebGPU's `shader-f16` has.
+16-bit ints are a second feature because WGSL has none, and one feature for both would cost WebGPU its 16-bit floats.
+A device with 16-bit storage and no 16-bit arithmetic grants neither, which sg's coarse features accept for a difference of degree on old hardware.
+A buffer of lone halves would stride by 2 bytes, which sg refuses for every element type: a GPU loads a buffer in whole words.
+Padding each half to 4 bytes would make `buffer[half]` a buffer the host cannot fill with a plain array of `tg::f16`, which is the one thing it would be for.
+So the element is `half2`, or a struct that fills its words, until a packed buffer of halves is asked for.
+
+## CHK-384
+
+The rule is the same for any struct, since SGL's vectors are prelude structs of one-character fields and not a type the checker knows apart.
+The annotation keeps it opt-in: a struct of `a` and `b` fields does not grow `e.ba` and `e.aa` by accident.
+Adding swizzles to such a struct later breaks nothing, where removing them would.
+`rgba` is not a second alphabet: the letters are the field names, so a port writes `.xyz` for `.rgb`, one spelling per read.
+
+## CHK-385
+
+A permuted position is no position, and a swizzle is the everyday way out of the strong types into plain numbers, `clip.xyz`.
+So the result is the plain vector whatever the source, and `bool` vectors have swizzles too, since nothing in the rule is numeric.
+
+## CHK-386
+
+A swizzle found only after a failed lookup would mean whatever else is in scope, and in SGL that is not hypothetical: a dot call has the free function's candidates (CHK-247).
+A module that declared `fun xy(a: float4)` would then silently retarget every `v.xy` in every file that sees it.
+Found where a field is found, `v.xy` depends on the type of `v` alone.
+The price is that a prelude vector cannot later grow a method named like a swizzle.
+
+## CHK-387
+
+An `@inline` binding is a push constant on vulkan, and a 16-bit member of one needs `storagePushConstant16`, a device bit of its own.
+Folding that bit into `shader_f16` and `shader_int16` would cost 16-bit types to the mobile drivers that lack only it.
+So the member is refused instead, and a 16-bit constant travels as a 32-bit one converted in the shader, or in a group's constant block.
+
+## CHK-353
+
+FSR's permutations are read deep in shared helpers, and an option is the one shape where a helper reads one without every caller learning of it.
+A compile per set of values is what dx12 pays under any mechanism, since it has no specialization constants.
+slib's content-keyed cache makes the second acquire of a set free.
+The targets' own specialization constants were the alternative, and they keep both sides of every branch in the text.
+The footprint and the bound resources would then be the union of every variant, which is exactly what FSR's binding swap exists to avoid.
+A switch that changes an image's format specializes on no target at all.
+A preprocessor would break what the syntax is built on: local errors, lossless parsing, and one tree for the language server.
+
+An option naming another would make the named one a second way to set it, and a host that set only the first would not see the second follow.
+No use asks for that chain yet, so it is refused rather than given a meaning that would have to be kept.
+
+## CHK-354
+
+A shared helper is where a permutation flag naturally lives, so a module's option has to be settable or the helper cannot have one.
+Its qualified name is the one the program already names the module's declarations by, so nothing new is learned to spell it.
+A bare name would make a program's own option and a module's collide, and adding an option to a module would then change what an existing value sets.
+A name given twice is a mistake whichever value was meant, and taking either one silently would hide it.
+
+## CHK-355
+
+The host is generated from the options an entry point reaches, before any value is chosen, so the set must be one for every value.
+A set read off the flat tree would lose an option named only inside a branch another option removes, and the host could then never set it.
+Counting what the declarations name is a little wider than what one compile reads, and an option too many costs only a key.
+A struct is emitted with the arrays its fields size, so an option its field names shapes the text of every entry point that names the struct.
+An option the text follows and the set lacks is one the host sets to no effect, which is the failure the set exists to prevent.
+
+## CHK-356
+
+An option is only worth having if what it turns off is gone.
+It leaves the text, so the target compiler never sees it, and the footprint, so a binding the branch alone used is bound by nobody.
+Leaving it to the target compiler would strip the code and still leave the footprint covering it, which is the cost FSR's permutations exist to avoid.
+The guarantee holds for any constant, so a helper called with a literal flag sheds its other side too.
+
+## CHK-357
+
+`1u` and `0.5f` port as written, and the width defaults to 32 because that is what every target's own short suffix means.
+A suffix fixes the type outright, since saying the type is the only reason to write one where CHK-253 would have converted the literal anyway.
+
+## CHK-358
+
+The prelude's own comment calls the plain vectors plain numbers, all of whose arithmetic is componentwise, and this is that sentence taken literally.
+Every target mixes a vector with its scalar under every operator, so `uv + 0.5` and `id.xy % 2` are what ported code writes.
+`vec3`, `pos3` and `hpos4` are left out because their arithmetic is the point of having them.
+
+## CHK-362
+
+`==` is what a `case` matches with, so it means "equal" on every type, a vector included, and gives one `bool`.
+An ordering has no whole-value meaning, so componentwise is its only reading, and it is the comparison ported code writes most.
+The cost falls on one spelling: a port's `all(a == b)` is `a == b`, and its `select(a == b, …)` is `select(equal(a, b), …)`.
+
+## CHK-365
+
+HLSL's `?:` hides two different things: control flow, where only the chosen arm runs, and data selection, where both values exist and each component picks.
+`select` is the second, and the only consumer a `bool` vector has; the `if` of CHK-375 is the first.
+Having both makes a port say which one it meant.
+
+## CHK-366
+
+Every call is inlined, so a resource parameter is substitution, exactly as a parameter of function type is (CHK-318), and no local ever holds a resource.
+That is why the footprint follows the member through the call as it follows it through a builtin.
+
+## CHK-367
+
+A subscript is the spelling every port writes for a texel, and the one an `@atomic` image needs for its texel to have methods (CHK-373).
+It is sugar over `load` and `store`, so a texel can never mean anything those calls do not.
+
+## CHK-368
+
+`globallycoherent` is the attribute every port of a cross-workgroup handoff already has, one to one, and a per-member fact sg can carry.
+Device-scope acquire and release on atomics would be the precise tool, and HLSL has no orderings on `Interlocked*`.
+So dx12 would write `globallycoherent` and fences anyway, and the memory model they need is the hardest text a language spec holds.
+WGSL has neither coherence nor ordering across workgroups, so a WebGPU build of such a pass is two dispatches whatever SGL offers.
+
+## CHK-369
+
+A host that stages a whole C struct, as AMD's FSR host code does, needs the layout promised rather than generated.
+`.hlsl` promises what is emitted today, so it costs nothing but the freedom to reorder that block.
+`.cpp` is for a host struct written with no knowledge of HLSL's rows; it costs a memory form or offsets on every target, HLSL included.
+
+## CHK-371
+
+RDNA runs a compute shader in subgroups of 32 or 64, and AMD tunes some of FSR's passes for 64, which are correct at either size.
+A preference is exactly what that annotation means, and it keeps a portable shader portable: no feature, and no device refuses it.
+A shader that is correct at one size alone needs a requirement, a later and separate spelling, since turning a preference into one would refuse shaders that work today.
+The name is not `@subgroup_size`, which is the stage input that reads the size the shader got.
+
+## CHK-372
+
+A buffer's atomic is a property of the place, not of the call, so a plain access can never race an update; an atomic image keeps that by type.
+Methods on any 32-bit integer image were the alternative, and they allow a plain `store` to race an atomic update of the same texel.
+An image used atomically in one pass and plainly in another is two members, or two bindings of one view.
+
+## CHK-374
+
+CHK-283 makes every read of workgroup memory non-uniform, since a thread may store between a barrier and the read.
+So a branch on a flag one thread published cannot hold a barrier.
+Proving the read uniform in the pass would be an analysis of memory, which crosses every inlined call and loop, and WGSL's own analysis would still refuse the text.
+A trusted annotation would be a hang where it is wrong.
+WGSL's `workgroupUniformLoad` is sound by construction, and HLSL and MSL need nothing but a barrier before the load.
+
+## CHK-375
+
+An `if` with an `else` is a `case` over a `bool` in all but its spelling, and it is lazy.
+An arm with an effect, or one that must not be computed, runs only where it is taken.
+That is the control-flow half of HLSL's `?:`; `select` is the other half (CHK-365).
+
+## CHK-376
+
+The whole family is designed at once so that it has one naming pass, one feature and one uniformity rule; the quad swaps a single-pass mip reduction needs are three of them.
+`subgroup_` is WGSL's and Vulkan's word, and no one vendor's, where `Wave` is HLSL's and `simd` MSL's.
+One feature is the shape WebGPU's own has, and splitting quad operations out would buy only devices that report a partial set.
+
+## CHK-377
+
+Every target defines a subgroup operation over the invocations active at the call, and they disagree on what is active after a divergent branch.
+Requiring uniform control flow is sound on every target with no new analysis, and it relaxes additively, where a permissive rule could not be taken back.
+A result is non-uniform for SGL's pass because uniform across a subgroup is not uniform across a workgroup.
+
+## CHK-380
+
+HLSL forms a compute stage's quads from its threads' ids, as it forms the quads a derivative compares: four consecutive ones of a workgroup that is one row, and 2x2 squares of one that is not.
+DXC writes them for vulkan in the same derivative groups, which is why sg's vulkan grants `subgroups` only with linear compute derivatives.
+WGSL and MSL form quads of four consecutive invocations of a subgroup, which agree with the row and with no square.
+One row whose length is a multiple of 4 is the one shape every target forms alike, and it is the shape a single-pass reduction already takes.
