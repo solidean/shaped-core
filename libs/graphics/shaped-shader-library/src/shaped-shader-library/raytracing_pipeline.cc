@@ -8,6 +8,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-shader-library/impl/frozen.hh>
+#include <shaped-shader-library/impl/kept_builds.hh>
 #include <shaped-shader-library/impl/sgl_library.hh>
 #include <shaped-shader-library/raytracing_pipeline.hh>
 #include <shaped-shader-library/shader_asset.hh>
@@ -54,13 +55,9 @@ struct live_raytracing_pipeline
     /// What moved at that read; empty while the source states the build's frozen part.
     cc::string frozen_moved;
 
-    /// The module's part of the description last built on a context while the frozen part still matched the build.
-    struct kept
-    {
-        sg::context const* ctx = nullptr;
-        sg::raytracing_pipeline_description module;
-    };
-    cc::vector<kept> kept_modules;
+    /// The module's part of the description last built on a context with a set of option values, while the frozen part
+    /// still matched the build.
+    slib::impl::kept_builds<sg::raytracing_pipeline_description> kept;
 };
 
 cc::mutex<cc::vector<cc::unique_ptr<live_raytracing_pipeline>>>& live_raytracing_pipelines()
@@ -213,26 +210,12 @@ cc::shared_async<sg::raytracing_pipeline_description> slib::describe_raytracing_
     for (auto const* const callable : d.callables)
         (void)desc.add_callable_shader(co_await (*callable)->acquire(*ctx, host.options));
 
-    // Where the frozen part moved, the module's shaders this context last built with are what the host's code fits.
+    // Where the frozen part moved, the module's shaders this context last built with these values are what the host's
+    // code fits.
     auto const moved = frozen_moved_of(d);
     auto const is_kept = live_raytracing_pipelines().lock(
         [&](cc::vector<cc::unique_ptr<live_raytracing_pipeline>>& all) -> bool
-        {
-            auto& live = live_of(all, d);
-            for (auto& k : live.kept_modules)
-                if (k.ctx == ctx)
-                {
-                    if (moved.empty())
-                        k.module = desc;
-                    else
-                        desc = k.module;
-                    return true;
-                }
-            if (!moved.empty())
-                return false;
-            live.kept_modules.push_back({.ctx = ctx, .module = desc});
-            return true;
-        });
+        { return live_of(all, d).kept.keep_or_restore(ctx, host.options, !moved.empty(), desc); });
     if (!is_kept)
         throw sg::pipeline_creation_exception(
             cc::string(d.name),

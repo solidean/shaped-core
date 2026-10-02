@@ -1,5 +1,6 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
@@ -75,6 +76,16 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
     auto const library = _library.lock();
     if (library == nullptr)
         return make_failed_shader(cc::format("the shader library that owns '{}' is gone", _virtual_path));
+
+    // A name given twice is the caller's mistake whichever value was meant, so it is said rather than settled silently.
+    for (auto i = isize(0); i < options.size(); ++i)
+        for (auto j = isize(0); j < i; ++j)
+            if (options[j].name == options[i].name)
+            {
+                CC_LOG_ERROR("'{}' {} is given the option {} twice, '{}' and '{}'; the first is taken", _virtual_path,
+                             _entry_point, options[i].name, options[j].value, options[i].value);
+                break;
+            }
 
     // The key: only the options the entry point reaches, by name, so an order or an option of another stage splits nothing.
     auto key = cc::vector<shader_option>();

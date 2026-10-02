@@ -1,9 +1,11 @@
 // A compute shader with options, which an acquire sets: each set of values it reaches is a shader of its own.
-// Declared whole, so its entry point's options struct is generated beside its binding group.
+// Declared whole, so the file's options struct is generated beside its binding group.
 
 @option const factor = 2
 @option const negate = false
 @option const tile = 64
+// read by no entry point: the file's options struct holds it, and no compile keys on it
+@option const unreached = 7
 
 binding scaled_work:
     values: mut buffer[float]

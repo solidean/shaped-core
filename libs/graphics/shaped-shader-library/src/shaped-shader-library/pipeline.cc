@@ -12,6 +12,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-shader-library/impl/frozen.hh>
+#include <shaped-shader-library/impl/kept_builds.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh>
 #include <shaped-shader-library/impl/sgl_library.hh>
 #include <shaped-shader-library/shader_asset.hh>
@@ -204,38 +205,36 @@ struct live_pipeline
     cc::fixed_array<u64, 5> generations = {};
     slib::pipeline_configuration configuration;
 
-    /// The stages last described on a context while the frozen part still matched the build.
+    /// The stages last described on a context with a set of option values, while the frozen part still matched.
     /// A compiled shader carries its own bytecode, so keeping one keeps what the host's code fits.
-    struct kept
+    struct stages
     {
-        sg::context const* ctx = nullptr;
         sg::compiled_shader vertex;
         cc::optional<sg::compiled_shader> pixel;
         cc::optional<sg::compiled_shader> geometry;
         cc::optional<sg::compiled_shader> tessellation_control;
         cc::optional<sg::compiled_shader> tessellation_evaluation;
     };
-    cc::vector<kept> kept_stages;
+    slib::impl::kept_builds<stages> kept;
 };
 
-/// The stages `desc` was described with on `ctx`, to fall back to after a reload moves the frozen part.
-live_pipeline::kept kept_of(sg::context const* ctx, sg::raster_pipeline_description const& desc)
+/// The stages `desc` was described with, to fall back to after a reload moves the frozen part.
+live_pipeline::stages stages_in(sg::raster_pipeline_description const& desc)
 {
-    return {.ctx = ctx,
-            .vertex = desc.vertex_shader,
+    return {.vertex = desc.vertex_shader,
             .pixel = desc.fragment_shader,
             .geometry = desc.geometry_shader,
             .tessellation_control = desc.tessellation_control_shader,
             .tessellation_evaluation = desc.tessellation_evaluation_shader};
 }
 
-void use_kept(sg::raster_pipeline_description& desc, live_pipeline::kept const& k)
+void use_stages(sg::raster_pipeline_description& desc, live_pipeline::stages const& s)
 {
-    desc.vertex_shader = k.vertex;
-    desc.fragment_shader = k.pixel;
-    desc.geometry_shader = k.geometry;
-    desc.tessellation_control_shader = k.tessellation_control;
-    desc.tessellation_evaluation_shader = k.tessellation_evaluation;
+    desc.vertex_shader = s.vertex;
+    desc.fragment_shader = s.pixel;
+    desc.geometry_shader = s.geometry;
+    desc.tessellation_control_shader = s.tessellation_control;
+    desc.tessellation_evaluation_shader = s.tessellation_evaluation;
 }
 
 cc::mutex<cc::vector<cc::unique_ptr<live_pipeline>>>& live_pipelines()
@@ -386,26 +385,17 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
 
     auto const configuration = configuration_of(d);
 
-    // Where the frozen part moved, the stages this context last built with are what the host's code still fits.
+    // Where the frozen part moved, the stages this context last built with these values are what the host's code fits.
     if (!latest)
     {
         auto const is_moved = !configuration.frozen_moved.empty();
         auto const is_kept = live_pipelines().lock(
             [&](cc::vector<cc::unique_ptr<live_pipeline>>& all) -> bool
             {
-                auto& live = live_of(all, d);
-                for (auto& k : live.kept_stages)
-                    if (k.ctx == ctx)
-                    {
-                        if (is_moved)
-                            use_kept(desc, k);
-                        else
-                            k = kept_of(ctx, desc);
-                        return true;
-                    }
-                if (is_moved)
+                auto stages = stages_in(desc);
+                if (!live_of(all, d).kept.keep_or_restore(ctx, options, is_moved, stages))
                     return false;
-                live.kept_stages.push_back(kept_of(ctx, desc));
+                use_stages(desc, stages);
                 return true;
             });
         if (!is_kept)

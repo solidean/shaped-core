@@ -45,8 +45,9 @@ sc_add_shader_package(
 #   cube.sgl:pipeline:pipeline          # a `pipeline` declaration
 #   `*` needs no stage word: an SGL entry point carries its stage in the source.
 #   module:view                         # every binding and @vertex / @pixel struct of module `view` (see modules below)
-#   those need a runnable `sgl` while building: the tree's own natively, SC_SGL_TOOL otherwise (a cross build,
-#   SC_BUILD_TOOLS=OFF). dev.py builds the host one for a cross preset itself. Entry points alone need neither.
+#   an SGL package needs a runnable `sgl` while building, entry points alone too (each is described, for its options):
+#   the tree's own natively, SC_SGL_TOOL otherwise (a cross build, SC_BUILD_TOOLS=OFF). dev.py builds the host one
+#   for a cross preset itself.
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
 #   includes) regenerates; a reconfigure that changes nothing rebuilds nothing.
 # a binding entry generates from the NAMED FILE and never from its includes, so an .hlsli that declares a
@@ -378,16 +379,22 @@ auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  
 //   it also holds the file-scope samplers the entry point reaches, as sg::bound_samplers: s<i> of
 //   slib::bound_samplers_space (10) on dx12, binding i + 1 of sg's reserved group elsewhere, a `pipeline`'s the same.
 auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx); // compute: needs nothing else
-// an entry point that reaches `@option const`s gets <file>_<entry>_t::options: one field per option, at the source's default
-auto const tuned = co_await shaders::taa.reproject.acquire_pipeline(ctx, {.tile = 16, .lowres = true}); // a compile per set
-shaders::taa.reproject.acquire(ctx, {.tile = 16})  // the shader alone; .values() is the struct as an acquire's span takes it
-//   an option of a type the generator has no C++ for (a program's own enum) is a generator error;
+// a file with `@option const`s gets ONE struct, shaders::<file>_options: every option at the source's default,
+//   which every wrapper of the file takes (acquire, acquire_layout, acquire_pipeline, a group's declared_bindings)
+//   a module's options nest under its name: {.common = {.taps = 8}} sets `common.taps`, apart from the file's own `taps`
+auto const quality = shaders::taa_options{.tile = 16, .lowres = true};
+auto const tuned = co_await shaders::taa.reproject.acquire_pipeline(ctx, quality); // a compile per set it reaches
+shaders::taa.reproject.acquire(ctx, quality)       // the shader alone; .values() is the struct as an acquire's span takes it
+shaders::taa_reproject_t::reached_options          // span<string_view const>: the names it keys on; the rest multiply nothing
+//   an option of a type the generator has no C++ for (a program's own enum) is left out of the struct, and a wrapper
+//   reaching one is a generator error
 // an image whose format names an option is an sg::any_texture_view field, and the group's layout is per set of values:
-auto const values = shaders::upscale_main_t::options{.output_format = sg::pixel_format::rgba16_float};
+auto const values = shaders::upscale_options{.output_format = sg::pixel_format::rgba16_float};
 auto const upscale = co_await shaders::upscale.main.acquire_pipeline(ctx, values);   // its layout follows the values
-auto const group_layout = ctx.cached.acquire_binding_group_layout(shaders::outputs::declared_bindings({.output_format = f}),
+auto const group_layout = ctx.cached.acquire_binding_group_layout(shaders::outputs::declared_bindings(values),
                                                                   shaders::outputs::declared_samplers());
-//   a binding array whose length names an option, and a `pipeline` over such a group, have no generated type yet
+//   a binding array whose length names an option has no generated type yet: the group is refused outright
+//   a `pipeline` over a group whose image FORMAT names an option is refused: its layout takes no values yet
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
 // a wrapper's layout holds only the samplers ITS entry point reaches, so a file used as a library never fills the sampler slots:
 //   a raster pipeline whose stages reach file samplers is built from the file's `pipeline`, whose layout holds every stage's.
@@ -396,13 +403,13 @@ auto const group_layout = ctx.cached.acquire_binding_group_layout(shaders::outpu
 //   It is an sg::raster_pipeline_source, so ctx.cached acquires it like a description:
 auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = swapchain_format}); // open: one field per `.host` part
 //   nothing `.host` -> acquire_raster_pipeline(shaders::cube.pipeline); a last argument customize(sg::raster_pipeline_description&) runs last
-//   options its stages reach ride in the open parts: {.color = f, .options = {.tile = 16}}, every stage keying on its own
+//   the file's options ride in the open parts: {.color = f, .options = {.tile = 16}}, every stage keying on its own
 //   .description(ctx, parts)          the description itself, to build or inspect
 //   .description_latest(ctx, parts)   the newest stages and settings even where the frozen part moved; acquire it yourself
 //   an open field left unset (a format still `undefined`, a sample count still 0) asserts: the declaration said the host would state it
 //   the build's settings are generated field writes (slib::impl::fields, from impl/pipeline_fields.hh, which `sgl pipeline-fields` writes)
 //   hot reload: cull, depth, blend… follow the source; a moved frozen part (layout, vertex input, targets, features, formats, samples,
-//   each struct by name AND shape) keeps the stages and settings this context last built with, and logs what moved
+//   each struct by name AND shape) keeps the stages and settings this context last built with THOSE option values, and logs what moved
 // `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
@@ -448,7 +455,7 @@ auto hits = co_await slib::compile_hit_group(&ctx, &library, &open_t::definition
 auto sq = co_await slib::compile_callable(&ctx, &library, &open_t::definition(), source, "squared", "label.sgl");
 //   -> sg::compiled_shader; it must take the parameter of the pipeline's `.host` callables, by name and shape
 auto host = slib::raytracing_host_parts{.hit_groups = hits, .callables = {sq}};
-//   a pipeline whose shaders reach options: .options = path_t::options{.bounces = 2}.values(), handed to every shader
+//   a pipeline of a file with options: .options = path_t::options{.bounces = 2}.values() (the file's struct), handed to every shader
 auto desc2 = co_await shaders::rt.open_path.description(ctx, host);
 open_t::table_description(pipeline, host);     // the same host parts: a record for each of the host's callables
 open_t::add_row(table_desc, open_t::first_host_hit_group);
@@ -456,7 +463,8 @@ open_t::add_row(table_desc, open_t::first_host_hit_group);
 // metal: a procedural record's intersection + any hit become ONE fused traversal function, and an empty closest-hit
 //   slot gets sgl_empty_closest_hit — description() and compile_hit_group() both do it; nothing changes for the host
 // hot reload: a shader body follows; a moved frozen part (ray set, payload sizes, records, sizes, layout, samplers,
-//   features) keeps the module's shaders last built on that ctx and logs why; slib::frozen_moved_of(def) says what moved
+//   features) keeps the module's shaders last built on that ctx with those option values and logs why;
+//   slib::frozen_moved_of(def) says what moved
 // refused at generation: a ray type without a miss; a binding list naming a group that was not generated
 // webgpu has no pipeline: gate on ctx.supports(sg::feature::raytracing_pipeline)
 ```

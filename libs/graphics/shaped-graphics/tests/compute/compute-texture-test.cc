@@ -451,15 +451,16 @@ namespace
 template <sg::pixel_format Format>
 cc::shared_async<cc::vector<byte>> fill_image(sg::context_handle ctx)
 {
-    auto const values = shaders::option_formats_fill_t::options{.output_format = Format};
+    // one value of the file's options, which the entry point and the group both take
+    auto const values = shaders::option_formats_options{.output_format = Format};
     auto const pipeline = co_await shaders::option_formats.fill.acquire_pipeline(*ctx, values);
     // a helper is an unhomed async: it moves to where the device lives before its first bound call
     if (auto* const home = ctx->device_home())
         co_await cc::async_resume_on(*home);
 
     // the group's layout follows the format its option has, as the shader's does
-    auto const layout = ctx->cached.acquire_binding_group_layout(
-        shaders::paint::declared_bindings({.output_format = Format}), shaders::paint::declared_samplers());
+    auto const layout = ctx->cached.acquire_binding_group_layout(shaders::paint::declared_bindings(values),
+                                                                 shaders::paint::declared_samplers());
     auto const image = make_texture(ctx, Format, sg::texture_usage::image);
 
     auto cmd = ctx->create_command_list();

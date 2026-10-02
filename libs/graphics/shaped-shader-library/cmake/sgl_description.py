@@ -111,8 +111,11 @@ class SglEntries:
     described_entry_points: dict[tuple[str, str], dict] = field(default_factory=dict)
     # path -> the file-scope samplers of a file the compiler described, which its entry points' layouts name.
     file_samplers: dict[str, list[dict]] = field(default_factory=dict)
-    # path -> the options of a file the compiler described, which its entry points' option structs are made of.
+    # path -> the options of a file the compiler described: its own and those of the modules it uses, `common.taps`.
     file_options: dict[str, list[dict]] = field(default_factory=dict)
+    # path -> the C++ name of the struct holding a file's options, which every wrapper of the file takes.
+    # The generator names it, since the name follows the file's C++ identifier; empty until it does.
+    option_structs: dict[str, str] = field(default_factory=dict)
     # (file, the described binding)
     bindings: list[tuple[SglFile, dict]] = field(default_factory=list)
     vertex_inputs: list[tuple[SglFile, dict]] = field(default_factory=list)
@@ -173,7 +176,8 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
     """Every entry of an SGL package, with `*` expanded and every declared name found in its file.
 
     `module_dirs` are where a `use` is looked for, the package's own source dir among them.
-    An entry naming an entry point needs no compiler, so a package of those alone works where no `sgl` can run.
+    An entry point listed on its own is described like one `*` expands to, since its asset keys its compiles on the
+    options it reaches, and without the description it would drop every value the host gives.
     """
     out = SglEntries()
     files: dict[str, SglFile] = {}
@@ -193,6 +197,8 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
                 files[path] = describe(need_tool(path), source_dir / path, path, dirs)
             except DescriptionError as e:
                 raise DescriptionError(f"shader package '{package}': {e}") from e
+            out.file_samplers[path] = files[path].samplers
+            out.file_options[path] = files[path].options
         return files[path]
 
     def add(kind: str, key: tuple, item) -> None:
@@ -215,7 +221,7 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
                 described = describe(need_tool(shown_as), None, shown_as, dirs, module=name)
             except DescriptionError as e:
                 raise DescriptionError(f"shader package '{package}': {e}") from e
-            unit = SglEntries(module=name)
+            unit = SglEntries(module=name, file_options={shown_as: described.options})
             unit_seen: set[tuple] = set()
             for b in described.bindings:
                 add_declared(unit, unit_seen, "bindings", (shown_as, b["name"]), (described, b))
@@ -230,8 +236,6 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
             for e in described.entry_points:
                 add("entry_points", (path, e["name"]), (path, e["stage"], e["name"]))
                 out.described_entry_points[(path, e["name"])] = e
-            out.file_samplers[path] = described.samplers
-            out.file_options[path] = described.options
             for b in described.bindings:
                 add("bindings", (path, b["name"]), (described, b))
             for s in described.structs:
@@ -251,7 +255,19 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
         _, kind, name = parts
 
         if kind in SGL_STAGES:
+            described = file_of(path)
+            found = described.entry_point(name)
+            if found is None:
+                held = ", ".join(f"{e['stage']}:{e['name']}" for e in described.entry_points) or "none"
+                raise DescriptionError(
+                    f"shader package '{package}': entry '{entry}' names '{name}', which '{path}' does not declare as an "
+                    f"entry point (it holds: {held})")
+            if found["stage"] != kind:
+                raise DescriptionError(
+                    f"shader package '{package}': entry '{entry}' lists '{name}' as {kind}, and '{path}' declares it "
+                    f"{found['stage']}")
             add("entry_points", (path, name), (path, kind, name))
+            out.described_entry_points[(path, name)] = found
             continue
 
         if kind not in TYPED_KINDS:

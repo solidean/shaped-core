@@ -261,7 +261,9 @@ if(SC_BUILD_TESTS)
             cube.sgl:vertex:main_vs
             cube.sgl:pixel:main_ps
             double_values.sgl:compute:main
+            listed.sgl:compute:spread
             scaled.sgl:*
+            tapped.sgl:*
             host_layout.sgl:*
     )
 

@@ -7,6 +7,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   The group's field is a `cc::fixed_array` of that length, so the type would change with the value; `sgl_host_code.py` refuses it, and the file's entry points are listed alone.
   A field of a run-time length, `cc::vector` or a span, with `declared_bindings(values)` setting the binding's count, would close it.
   A raster or ray-tracing pipeline over a group whose image format names an option is refused for a kindred reason: `pipeline_definition::acquire_layout` takes the context alone, not the values.
+- **An `@inline` binding that names an SGL option has no generated type.**
+  Its type is the block's bytes at the defaults, so a value that moved them would leave the host writing the wrong layout; `sgl_host_code.py` refuses it.
+  A block laid out per set of values, as a group's layout already is, would close it.
+- **A program's own enum option has no C++ type.**
+  `sgl_host_code.py` types `bool`, `int` and `pixel_format` alone, so the file's options struct leaves such an option out, and a wrapper reaching one is a generator error.
+  Generating the enum beside the struct, from the cases `sgl describe` would have to report, would close it.
 - **SGL modules are read whole on every compile.** Every SGL compile lists and reads every module directory of the library.
 - **A module file that appears is not seen by hot reload.** A shader depends on the module files it reached, or on every one that existed when it failed.
   So a file created later is nobody's dependency.

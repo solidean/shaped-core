@@ -247,6 +247,11 @@ def parse_sgl_entries(manifest: Manifest, sgl_tool: Path | None) -> Entries:
                                   all_module_dirs(manifest))
     except DescriptionError as e:
         raise GeneratorError(str(e)) from e
+    # One options struct per file that has options, named after the file as its entry points' object is.
+    entries.sgl.option_structs = {path: f"{identifier_of(path)}_options"
+                                  for path, options in entries.sgl.file_options.items() if options}
+    for name, unit in entries.sgl.modules.items():
+        unit.option_structs = {path: f"{name}_options" for path, options in unit.file_options.items() if options}
 
     by_stem: dict[str, ShaderFile] = {}
     for path, stage, entry_point in entries.sgl.entry_points:
@@ -888,7 +893,7 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
 
     # The definition table carries the declared path through verbatim rather than rebuilding it from the
     # folder and stem, and emits the sg::shader_stage enumerator rather than a string to parse back.
-    # The options each described SGL entry point reaches, which its asset keys its compiles on.
+    # The options each SGL entry point reaches, which its asset keys its compiles on; every one is described.
     reached = {key: e.get("options", []) for key, e in sgl.described_entry_points.items() if e.get("options")}
     for index, names in enumerate(reached.values()):
         listed = ", ".join(f'"{name}"' for name in names)

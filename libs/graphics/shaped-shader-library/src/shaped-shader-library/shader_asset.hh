@@ -39,6 +39,7 @@ public:
     /// The result carries an async error if no registered compiler connects this package's language to any format the context takes.
     /// `options` sets the SGL source's options by name; one the entry point does not reach is dropped, so it never splits a compile.
     /// An option left out keeps its default, and a value the source refuses is the shader's error.
+    /// A name must be given once; a second value is logged as an error, and the first is taken.
     /// The key is the values given, so a default left out and one given are two entries of one text, which the compiler's cache shares.
     [[nodiscard]] sg::async_compiled_shader acquire(sg::context const& ctx,
                                                     cc::span<shader_option const> options = {}) const;

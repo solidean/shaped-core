@@ -77,6 +77,8 @@ src/shaped-shader-library/
   impl/
     reload_watcher.hh/.cc         [done]        cc::threaded_actor; parks on the mailbox and lets the
                                                 filesystem wake it, else polls; stages + drives recompiles
+    kept_builds.hh                [done]        a pipeline's last build per context and per set of option values,
+                                                which a reload that moves its frozen part falls back to
 tests/data/
   binding-corpus.txt              [done]        HLSL snippets and their expected parse, or the exact error;
                                                 read by both halves of the pass, so a case is added once
@@ -88,8 +90,8 @@ cmake/
                                                 a registered file with; kept in step by the shared corpus
   binding-grammar-self-test.py    [done]        that corpus against the Python half, and the two halves'
                                                 image-format lists as sets; `dev.py check`'s `shader-grammar` gate
-  sgl-host-code-self-test.py      [done]        the C++ sgl_host_code.py writes for a group's textures, images
-                                                and samplers, fed describe entries directly
+  sgl-host-code-self-test.py      [done]        the C++ sgl_host_code.py writes for a group's textures, images,
+                                                samplers and a file's options, fed describe entries directly
 ```
 
 Each embedded source is emitted as a run of ~8 KB adjacent raw string literals rather than as one literal.
@@ -116,8 +118,13 @@ The shape the seam is built for, and what is still `[planned]`:
   It carries [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the tier-1 compute and raster fixtures.
   A package generates host types from it: groups, `@inline` constants, vertex inputs, render targets, and raster and ray-tracing pipelines.
   A ray-tracing pipeline's type is [raytracing-pipelines](raytracing-pipelines.md); the SGL compiler maps all six ray-tracing stages.
-  **An SGL option is set per acquire**: a generated options struct per entry point and pipeline that reaches one, at the source's defaults.
-  A `shader_asset` keys its compiles by format and by the values of the options its entry point reaches, and a reload recompiles each set.
+  **An SGL option is set per acquire**: one generated options struct per file, every option at the source's defaults, which every wrapper of the file takes.
+  So a host keeps one value for a file's quality settings, and an option a shared helper starts reading changes no wrapper's signature.
+  A module's options nest in it under the module's name, as the compile sets them, `common.taps`.
+  Each wrapper states the names it reaches as `reached_options`, and a `shader_asset` keys its compiles by format and by the values of those alone.
+  So an option an entry point does not reach multiplies nothing, and a reload recompiles each set acquired so far.
+  Every SGL entry point is described, one the package lists on its own too, so its asset always knows what it reaches.
+  A pipeline keeps its last stages per context and per set of values, which a reload that moves its frozen part falls back to.
   An image whose format names an option is a format-erased `sg::any_texture_view`, and its group states `declared_bindings(values)` beside the defaults' table.
   An entry point's layout is then built from the values it is acquired with.
   A binding array whose length names an option generates no type yet, since its field fixes the length (the TODO).
