@@ -196,6 +196,8 @@ struct tg::impl::intersection_parameter_op<L, tg::capsule_boundary<3, T>>
 // --- cylinder
 
 /// The end farther along the direction, pushed out by the radius along the direction's part perpendicular to the axis.
+/// The axis is projected out twice: for a direction (anti)parallel to it, one pass leaves rounding noise of its own size.
+/// Normalising that noise would push the support up to a radius sideways, off the cap's center.
 template <int D, class T>
     requires(tg::traits::has_sqrt<T>)
 struct tg::impl::support_op<tg::cylinder<D, T>>
@@ -204,7 +206,9 @@ struct tg::impl::support_op<tg::cylinder<D, T>>
     {
         auto const u = c.axis.pos1 - c.axis.pos0;
         auto const p = tg::dot(u, dir) > T(0) ? c.axis.pos1 : c.axis.pos0;
-        auto const perp = dir - u * (tg::dot(dir, u) / tg::dot(u, u));
+        auto const uu = tg::dot(u, u);
+        auto const once = dir - u * (tg::dot(dir, u) / uu);
+        auto const perp = once - u * (tg::dot(once, u) / uu);
         auto const l = perp.length();
         return tg::traits::is_zero(l) ? p : p + perp * (c.radius / l);
     }

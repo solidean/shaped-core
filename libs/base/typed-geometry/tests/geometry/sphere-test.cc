@@ -144,3 +144,12 @@ TEST("tg sphere - an affine map turns a disk in 3D into an ellipse in 3D")
     CHECK(tgtest::approx(e.semi_axes[1].data[2], 0.0f));
     CHECK(tgtest::approx(e.area(), 6.0f * tg::pi<float>, 1e-3f));
 }
+
+TEST("tg sphere - a disk's bounds survive a normal an ulp over unit")
+{
+    // 1 - n_z^2 is slightly negative here, which an unclamped sqrt turns into NaN bounds
+    auto const n = tg::vec3f(0, 0, 1.0000001f);
+    auto const d = tg::disk3f(tg::pos3f(0, 0, 0), 1.0f, n);
+    CHECK(d.bounds() == tg::aabb3f(tg::pos3f(-1, -1, 0), tg::pos3f(1, 1, 0)));
+    CHECK(d.boundary().bounds() == tg::aabb3f(tg::pos3f(-1, -1, 0), tg::pos3f(1, 1, 0)));
+}

@@ -38,10 +38,10 @@ template <class A, class B>
         return impl::any_parameter(intersection_parameter_op<B, A>::apply(b, a));
     else if constexpr (gjk_pair<A, B>)
         return impl::gjk(a, b).overlapping;
-    // a boundary meets b exactly when its solid meets b without swallowing it whole
-    else if constexpr (is_boundary<A> && has_intersects_direct<solid_t<A>, B> && has_contains<solid_t<A>, B>)
+    // a boundary meets b, not a point, when its solid meets b without swallowing it whole; a point is contains' alone
+    else if constexpr (meets_through_solid<A, B>)
         return impl::intersects(a.solid(), b) && !impl::contains(a.solid(), b);
-    else if constexpr (is_boundary<B> && has_intersects_direct<solid_t<B>, A> && has_contains<solid_t<B>, A>)
+    else if constexpr (meets_through_solid<B, A>)
         return impl::intersects(b.solid(), a) && !impl::contains(b.solid(), a);
     else
         static_assert(false, "tg: no intersects for this pair of types; tg::has_intersects<A, B> is the probe");
@@ -65,6 +65,8 @@ template <class A, class B, class T>
 template <class A, class B>
 [[nodiscard]] constexpr bool may_intersect(A const& a, B const& b)
 {
+    static_assert(written_once<may_intersect_op, A, B>, "tg: a may_intersect kernel is written in both orders");
+
     if constexpr (has_op<may_intersect_op, A, B>)
         return may_intersect_op<A, B>::apply(a, b);
     else if constexpr (has_op<may_intersect_op, B, A>)

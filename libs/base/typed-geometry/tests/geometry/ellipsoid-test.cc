@@ -2,6 +2,7 @@
 
 #include <nexus/test.hh>
 #include <typed-geometry/geometry/primitives/ellipsoid.hh>
+#include <typed-geometry/geometry/query/query.hh>
 #include <typed-geometry/geometry/traits.hh>
 
 #include <type_traits>
@@ -124,4 +125,20 @@ TEST("tg ellipsoid - an ellipse embedded in 3D stays 2D")
 
     CHECK(tgtest::approx(r.semi_axes[0], tg::vec3f(2, 0, 0), 1e-4f));
     CHECK(tgtest::approx(r.semi_axes[1], tg::vec3f(0, 0, 1), 1e-4f));
+}
+
+TEST("tg ellipsoid - a point meets the surface exactly when it lies on it")
+{
+    static_assert(tg::has_intersects<tg::pos3f, tg::ellipsoid3f_surface>);
+    static_assert(tg::has_intersects<tg::ellipsoid3f_surface, tg::pos3f>);
+
+    // power-of-two semi-axes, so the unit-ball frame is exact
+    auto const e = tg::ellipsoid3f(tg::pos3f(0, 0, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 2, 0), tg::vec3f(0, 0, 4));
+    auto const s = e.boundary();
+    CHECK(s.contains(tg::pos3f(1, 0, 0)));
+    CHECK(s.intersects(tg::pos3f(0, 2, 0)));
+    CHECK(tg::pos3f(0, 0, -4).intersects(s));
+    CHECK(!s.intersects(tg::pos3f(0, 1, 0)));
+    CHECK(!tg::pos3f(0, 1, 0).intersects(s));
+    CHECK(!s.intersects(tg::pos3f(0, 0, 5)));
 }

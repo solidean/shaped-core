@@ -56,3 +56,7 @@ Add entries as we discover them, and remove them as they land.
   What a `sphere` or `ellipsoid` becomes under a projective map, so those pairs are unregistered rather than approximated.
 - **A clipped / half-open segment.**
   What a `ray` becomes under a projective map, for the same reason.
+- **Measures that stay exact on an exact scalar.**
+  `triangle::area()` is refused for an exact scalar, since halving an odd doubled area truncates.
+  A "twice the area" member stays in `T` there, and a tetrahedron's volume times six is its integer-exact sibling.
+  Spelling and placement wait for a caller.

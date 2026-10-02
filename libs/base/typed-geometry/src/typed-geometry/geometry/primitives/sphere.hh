@@ -2,6 +2,7 @@
 
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/impl/bounds_of.hh>
 #include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/primitives/ellipsoid.hh>
@@ -253,9 +254,7 @@ public:
     [[nodiscard]] constexpr aabb<3, T> bounds() const
         requires(tg::traits::has_sqrt<T>)
     {
-        auto e = vec<3, T>();
-        for (int k = 0; k < 3; ++k)
-            e.data[k] = radius * tg::sqrt(T(1) - normal.data[k] * normal.data[k]);
+        auto const e = tg::impl::disk_reach(normal, radius);
         return aabb<3, T>(center - e, center + e);
     }
     [[nodiscard]] constexpr tg::plane<3, T> plane() const
@@ -449,9 +448,7 @@ public:
     [[nodiscard]] constexpr aabb<3, T> bounds() const
         requires(tg::traits::has_sqrt<T>)
     {
-        auto e = vec<3, T>();
-        for (int k = 0; k < 3; ++k)
-            e.data[k] = radius * tg::sqrt(T(1) - normal.data[k] * normal.data[k]);
+        auto const e = tg::impl::disk_reach(normal, radius);
         return aabb<3, T>(center - e, center + e);
     }
     [[nodiscard]] constexpr tg::plane<3, T> plane() const

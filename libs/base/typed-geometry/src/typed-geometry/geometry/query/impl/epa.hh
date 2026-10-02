@@ -15,7 +15,7 @@
 /// 2D and 3D only; both stop at a relative tolerance or a fixed step count, and the latter returns the best face so far.
 
 /// How far, and which way, b has to move to stop overlapping a: by `normal * depth`.
-/// `normal` is unit length.
+/// `normal` is unit length, and `depth` is never negative.
 template <int D, class T>
 struct tg::separation
 {
@@ -148,7 +148,8 @@ template <class A, class B>
                     best_n = nrm;
                 }
             }
-            best = {.normal = best_n, .depth = best_d};
+            // GJK calls an overlap within its tolerance, so the origin can lie a rounding outside the nearest face
+            best = {.normal = best_n, .depth = best_d > T(0) ? best_d : T(0)};
 
             auto const w = support(best_n);
             if (tg::dot(w.w, best_n) - best_d <= tol * scale || nv == max_vertices)
@@ -199,7 +200,8 @@ template <class A, class B>
             for (auto i = 1; i < nf; ++i)
                 if (faces[i].dist < faces[bi].dist)
                     bi = i;
-            best = {.normal = faces[bi].normal, .depth = faces[bi].dist};
+            // GJK calls an overlap within its tolerance, so the origin can lie a rounding outside the nearest face
+            best = {.normal = faces[bi].normal, .depth = faces[bi].dist > T(0) ? faces[bi].dist : T(0)};
 
             auto const w = support(faces[bi].normal);
             if (tg::dot(w.w, faces[bi].normal) - faces[bi].dist <= tol * scale || nv == max_vertices)

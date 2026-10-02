@@ -47,6 +47,9 @@ The old tg instead had one struct with a trailing `boundary_tag` / `boundary_no_
 - **The frustum stores planes only**, one canonical encoding; a caller that needs the corners repeatedly caches `.vertices()`.
 
 **Not carried**: the generic `pyramid<BaseT>` (and `box_pyramid3`, `triangle_pyramid3`), and `inf_frustum`.
+`tg::frustum` covers the infinite case instead, with an absent far plane, and support-based queries on it answer for the near rectangle.
+A separate infinite frustum type is the way out if GJK on one is ever wanted: only the bounded type would have a support, so GJK on a far-less frustum becomes a compile error.
+It was not done because `make_from_view_projection`'s result type would then depend on the matrix.
 
 ## Unary members
 
@@ -96,7 +99,8 @@ On a triangle, an aabb or a box it is the unclamped extension of the map: baryce
 
 ## Sampling
 
-`o.sample_uniform(rng)` for every finite object, taking a `cc::random&`; widening it to any generator with `uniform(T, T)` is additive.
+`o.sample_uniform(rng)` for the finite objects, taking a `cc::random&`; widening it to any generator with `uniform(T, T)` is additive.
+Not yet: the bilinear quad, an ellipsoid's surface, a frustum's faces, and a capsule's surface outside 3D.
 The type says which set is sampled: `sphere3` the ball, `sphere3_surface` its surface, `cylinder_mantle` the tube alone.
 **Direct methods first**, with a fixed number of draws per sample.
 Where a direct method looks expensive, a nexus benchmark compares it against rejection sampling, and the faster one is kept.
@@ -115,7 +119,7 @@ How each object answers, by query.
 | `plane`, `halfspace` | C | D | – (unbounded) | C | against anything with a support: intersects C, halfspace contains C |
 | `aabb` | C | D | G | C | aabb–aabb, ball–aabb C; `aabb_boundary` project / parameters C |
 | `box` | – (not orthogonal) | C | G | C (own frame) | box–box intersects C (SAT) |
-| `sphere` (ball) | C | D | G | C | ball–ball C; surface, disk, circle C |
+| `sphere` (ball) | C | D | G | C | ball–ball C; surface C; disk line parameters C |
 | `ellipsoid` | – | C | G | C (unit-ball frame) | |
 | `capsule` | C | D | G | C | |
 | `cylinder` | C | D | G | C | surface and tube C |

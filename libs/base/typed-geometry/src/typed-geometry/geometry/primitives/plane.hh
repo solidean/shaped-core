@@ -133,3 +133,18 @@ struct tg::object_traits<tg::plane<D, T>>
     static constexpr int ambient_dim = D;
     static constexpr bool is_finite = false;
 };
+
+namespace tg::impl
+{
+/// whether plane::transformed turns a normal around: its affine path takes the cofactor, which carries the sign of the
+/// linear part's determinant.
+/// The projective path maps (normal, -dist) by the inverse transpose, which keeps every side where w stays positive.
+template <int D, class T, class TransformT>
+[[nodiscard]] constexpr bool flips_plane_normals(TransformT const& t)
+{
+    if constexpr (requires { tg::affine_transform<D, T>(t); })
+        return tg::affine_transform<D, T>(t).linear_mat().determinant() < T(0);
+    else
+        return false;
+}
+} // namespace tg::impl

@@ -24,11 +24,12 @@
 namespace tg::impl
 {
 /// the smallest e with 1 + e != 1, found by halving, so a scalar needs no epsilon of its own.
+/// The halving is capped because an exact scalar that does not declare `is_exact` never reaches 1 + e/2 == 1.
 template <class T>
 [[nodiscard]] constexpr T machine_epsilon()
 {
     auto e = T(1);
-    while (T(1) + e / T(2) != T(1))
+    for (auto i = 0; i < 4096 && T(1) + e / T(2) != T(1); ++i)
         e = e / T(2);
     return e;
 }

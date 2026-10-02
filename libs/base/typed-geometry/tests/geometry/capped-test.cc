@@ -94,3 +94,41 @@ TEST("tg capped - hemisphere")
         CHECK(dome.mantle().sample_uniform(rng).distance_to(dome.mantle()) < 1e-9);
     }
 }
+
+TEST("tg capped - a point on a cone's axis is inside, at every height")
+{
+    // the old inside test projected onto the profile triangle, whose rounding moved points on the axis
+    for (auto const h : {3.0, 0.7, 10.0, 1e-3})
+    {
+        auto const tall = tg::cone3d(tg::pos3d(0, 0, 0), tg::vec3d(0, 0, h), 1.0);
+        auto const slant = 1.0 / tg::sqrt(h * h + 1.0); // the sine of the half opening angle
+        for (auto const f : {0.01, 0.003, 0.25, 0.5, 0.999})
+        {
+            auto const p = tg::pos3d(0, 0, f * h);
+            CHECK(tall.contains(p));
+            CHECK(p.project_to(tall) == p);
+            // from the axis, the nearer of the slant and the base
+            auto const expected = f * h * slant < h - f * h ? f * h * slant : h - f * h;
+            CHECK(tgtest::approx(p.distance_to(tall.boundary()), expected, 1e-12));
+        }
+        CHECK(!tall.contains(tg::pos3d(0, 0, -0.01 * h)));
+        CHECK(!tall.contains(tg::pos3d(0, 0, 1.01 * h)));
+    }
+
+    auto const tilted = tg::cone3d(tg::pos3d(1, 2, 3), tg::vec3d(1.1, -2.3, 0.7), 0.4);
+    for (auto const f : {0.01, 0.3, 0.9})
+        CHECK(tilted.contains(tilted.apex + tilted.axis * f));
+}
+
+TEST("tg capped - a negative uniform scale turns a hemisphere around")
+{
+    auto const h = tg::hemisphere3f(tg::pos3f(0, 0, 0), 1.0f, tg::vec3f(0, 0, 1));
+    auto const r = h.transformed(tg::signed_similarity_transform3f::make_uniform_scaling(-1.0f));
+    CHECK(tgtest::approx(r.normal, tg::vec3f(0, 0, -1)));
+    CHECK(tgtest::approx(r.radius, 1.0f));
+    CHECK(r.contains(tg::pos3f(0, 0, -0.5f)));
+    CHECK(!r.contains(tg::pos3f(0, 0, 0.5f)));
+    auto const doubled = h.transformed(tg::signed_similarity_transform3f::make_uniform_scaling(-2.0f));
+    CHECK(tgtest::approx(doubled.normal, tg::vec3f(0, 0, -1)));
+    CHECK(tgtest::approx(doubled.radius, 2.0f));
+}

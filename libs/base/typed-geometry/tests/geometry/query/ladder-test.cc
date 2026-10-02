@@ -53,6 +53,24 @@ static_assert(tg::has_intersects<tg::sphere3f, tg::pos3f>);
 static_assert(!tg::has_project_to<tg::pos3i, tg::segment3i>, "a projection is rational, so an exact scalar has none");
 static_assert(tg::has_project_to<tg::pos3i, tg::aabb3i>, "clamping needs only comparisons");
 
+// the probes for the verbs that derive from another: true exactly when the member compiles
+static_assert(tg::has_may_intersect<tg::frustum3d, tg::sphere3d>, "the plane-by-plane kernel");
+static_assert(tg::has_may_intersect<tg::sphere3d, tg::frustum3d>, "the kernel in the other order");
+static_assert(tg::has_may_intersect<tg::sphere3f, tg::pos3f>, "the fallback to intersects");
+static_assert(!tg::has_may_intersect<tg::pos2f, probe_none>);
+static_assert(tg::has_closest_point_to<tg::aabb3f, tg::pos3f>, "a projection");
+static_assert(tg::has_closest_point_to<tg::pos2f, probe_direct>, "closest points derived from a projection");
+static_assert(!tg::has_closest_point_to<tg::pos2f, probe_mirror>, "a distance alone gives no point");
+static_assert(!tg::has_closest_point_to<tg::pos2f, probe_none>);
+static_assert(!tg::has_closest_point_to<tg::pos3i, tg::segment3i>);
+static_assert(tg::has_intersects_eps<tg::segment3f, tg::triangle3f>);
+static_assert(tg::has_intersects_eps<tg::pos2f, probe_mirror>, "a distance is all it needs");
+static_assert(!tg::has_intersects_eps<tg::pos2f, probe_none>);
+static_assert(!tg::has_intersects_eps<tg::aabb3i, tg::triangle3i>, "GJK refuses an exact scalar");
+static_assert(tg::has_contains_eps<tg::triangle3f, tg::pos3f>);
+static_assert(!tg::has_contains_eps<tg::pos3f, tg::triangle3f>, "contains(b, eps) is for a point b");
+static_assert(!tg::has_contains_eps<tg::sphere3f, tg::segment3f>, "even where a distance exists");
+
 TEST("tg query - the ladder prefers a direct kernel over every derivation")
 {
     auto const p = tg::pos2f(3, 4);

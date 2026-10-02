@@ -20,7 +20,10 @@ static_assert(has_length<tg::sphere2f_boundary>, "a circle's measure is its leng
 static_assert(!has_length<tg::sphere2f>, "a disk's outline is perimeter(), not length()");
 
 static_assert(tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(3, 2)).area() == 6, "exact on ints");
-static_assert(tg::triangle2i(tg::pos2i(0, 0), tg::pos2i(4, 0), tg::pos2i(0, 4)).area() == 8);
+template <class T>
+concept has_area = requires(T const& t) { t.area(); };
+static_assert(!has_area<tg::triangle2i>, "half an odd integer area would truncate, so exact scalars have no area()");
+static_assert(has_area<tg::triangle2f>);
 } // namespace
 
 TEST("tg measures - by intrinsic dimension")

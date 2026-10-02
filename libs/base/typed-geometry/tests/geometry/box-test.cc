@@ -3,6 +3,7 @@
 #include <nexus/test.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/primitives/box.hh>
+#include <typed-geometry/geometry/query/query.hh>
 #include <typed-geometry/geometry/traits.hh>
 
 #include <type_traits>
@@ -58,4 +59,28 @@ TEST("tg box - a shear keeps it a box")
 
     auto const r = b.transformed(shear);
     CHECK(tgtest::approx(r.half_extents.cols[1], tg::vec3f(1, 1, 0)));
+}
+
+TEST("tg box - a point meets the surface exactly when it lies on it")
+{
+    static_assert(tg::has_intersects<tg::pos3f, tg::box3f_surface>);
+    static_assert(tg::has_intersects<tg::box3f_surface, tg::pos3f>);
+
+    auto const b = tg::box3f(tg::pos3f(0, 0, 0),
+                             tg::mat3f::make_from_cols(tg::vec3f(1, 0, 0), tg::vec3f(0, 2, 0), tg::vec3f(0, 0, 4)));
+    auto const s = b.boundary();
+    auto const face_center = tg::pos3f(1, 0, 0);
+    auto const corner = tg::pos3f(-1, 2, 4);
+    CHECK(s.contains(face_center));
+    CHECK(s.intersects(face_center));
+    CHECK(face_center.intersects(s));
+    CHECK(s.intersects(corner));
+    CHECK(corner.intersects(s));
+    CHECK(s.intersects(b.vertices()[0]));
+
+    // inside the solid but off the surface, and outside both
+    CHECK(!s.intersects(tg::pos3f(0.5f, 0, 0)));
+    CHECK(!tg::pos3f(0.5f, 0, 0).intersects(s));
+    CHECK(!s.intersects(tg::pos3f(2, 0, 0)));
+    CHECK(b.intersects(tg::pos3f(0.5f, 0, 0)));
 }

@@ -2,6 +2,7 @@
 
 #include <nexus/test.hh>
 #include <typed-geometry/geometry/primitives/halfspace.hh>
+#include <typed-geometry/geometry/query/query.hh>
 #include <typed-geometry/geometry/traits.hh>
 
 #include <type_traits>
@@ -31,4 +32,16 @@ TEST("tg halfspace - transforms as its plane does")
     static_assert(std::is_same_v<decltype(r), tg::halfspace3f const>);
     CHECK(tgtest::approx(r.normal, tg::vec3f(0, 0, 1)));
     CHECK(tgtest::approx(r.dist, 5.0f));
+}
+
+TEST("tg halfspace - a mirror keeps the inside inside")
+{
+    // the plane's cofactor normal flips with the determinant's sign, which would turn {z <= 2} into {z <= -2}
+    auto const h = tg::halfspace3f(tg::vec3f(0, 0, 1), 2.0f);
+    auto const r = h.transformed(tg::signed_scaling_transform3f::make_scaling(tg::vec3f(1, 1, -1)));
+    CHECK(tgtest::approx(r.normal, tg::vec3f(0, 0, -1)));
+    CHECK(tgtest::approx(r.dist, 2.0f));
+    CHECK(r.contains(tg::pos3f(0, 0, 0)));
+    CHECK(r.contains(tg::pos3f(0, 0, -2)));
+    CHECK(!r.contains(tg::pos3f(0, 0, -5)));
 }

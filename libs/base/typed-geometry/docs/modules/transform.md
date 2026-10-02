@@ -323,7 +323,7 @@ Which registrations exist is a statement about geometry, not about effort:
 
 | primitive | registered at | result |
 |---|---|---|
-| `sphere` | similarity / affine (unless embedded) | `sphere` / **`ellipsoid`** |
+| `sphere` | similarity / affine | `sphere` / **`ellipsoid`** (an embedded one too: a disk becomes an ellipse in space) |
 | `ellipsoid` | affine | `ellipsoid` |
 | `aabb` | scaling + translation / affine | `aabb` / **`box`** |
 | `box` | affine | `box` |
@@ -332,6 +332,9 @@ Which registrations exist is a statement about geometry, not about effort:
 | `triangle`, `segment` | affine, projective | unchanged |
 | `plane` | affine, projective | `plane` |
 | `ray`, `line` | affine **only** | unchanged |
+| `tetrahedron`, `quad` | affine | unchanged |
+| `frustum` | affine, projective (as its planes) | `frustum` |
+| round objects: `capsule`, `cylinder`, `cone`, `hemisphere`, their unbounded forms | similarity **only**, signed included | unchanged; an affine image is elliptic, which no type encodes |
 
 An *embedded* `sphere` maps affinely to an ellipse in the ambient space, its semi-axes the images of two radius vectors from `tg::orthonormal_basis` of its plane.
 

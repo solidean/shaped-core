@@ -28,7 +28,7 @@ template <int D, class T>
 }
 
 /// a vector perpendicular to v, of no particular length; the zero vector only for a zero v.
-/// In 3D it zeroes the component of v that is smallest in magnitude, which keeps the result well away from zero.
+/// In 3D it zeroes x or z, whichever is smaller in magnitude, which keeps the squared result at least half of v's.
 template <class T>
 [[nodiscard]] constexpr vec<2, T> any_orthogonal(vec<2, T> const& v)
 {

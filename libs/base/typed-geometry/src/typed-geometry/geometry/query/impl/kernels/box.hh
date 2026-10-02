@@ -38,3 +38,22 @@ struct tg::impl::contains_op<tg::box<D, D, T>, tg::pos<D, T>>
         return true;
     }
 };
+
+/// In the solid and on a face: every coordinate in [-1, 1] and one of them exactly at an end, compared exactly.
+template <int D, class T>
+    requires(!tg::traits::is_exact<T>)
+struct tg::impl::contains_op<tg::box_boundary<D, D, T>, tg::pos<D, T>>
+{
+    [[nodiscard]] static constexpr bool apply(box_boundary<D, D, T> const& b, pos<D, T> const& p)
+    {
+        auto const c = b.solid().parameter_of(p);
+        auto on_face = false;
+        for (int i = 0; i < D; ++i)
+        {
+            if (c.data[i] < T(-1) || c.data[i] > T(1))
+                return false;
+            on_face = on_face || c.data[i] == T(-1) || c.data[i] == T(1);
+        }
+        return on_face;
+    }
+};

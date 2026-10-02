@@ -149,20 +149,45 @@ template <class T>
 // --- cone
 
 /// The apex or the base rim point farthest along the direction, whichever reaches farther.
+/// The axis is projected out twice: for a direction (anti)parallel to it, one pass leaves rounding noise of its own size.
+/// Normalising that noise would push the support up to a radius off the axis, out of the solid.
 template <int D, class T>
     requires(tg::traits::has_sqrt<T>)
 struct tg::impl::support_op<tg::cone<D, T>>
 {
     [[nodiscard]] static constexpr pos<D, T> apply(cone<D, T> const& c, vec<D, T> const& dir)
     {
-        auto const perp = dir - c.axis * (tg::dot(dir, c.axis) / tg::dot(c.axis, c.axis));
+        auto const aa = tg::dot(c.axis, c.axis);
+        auto const once = dir - c.axis * (tg::dot(dir, c.axis) / aa);
+        auto const perp = once - c.axis * (tg::dot(once, c.axis) / aa);
         auto const l = perp.length();
         auto const rim = tg::traits::is_zero(l) ? c.apex + c.axis : c.apex + c.axis + perp * (c.radius / l);
         return tg::dot(rim - c.apex, dir) > T(0) ? rim : c.apex;
     }
 };
 
-/// In the profile half-plane the cone is the triangle apex, base rim, base center.
+namespace tg::impl
+{
+/// whether a profile point lies in the cone's profile triangle {0 <= z <= h, rho * h <= radius * z}.
+/// Decided by these comparisons, not by projecting onto the triangle, whose rounding moves points on the axis.
+template <class T>
+[[nodiscard]] constexpr bool in_cone_profile(profile<T> const& k, T h, T radius)
+{
+    return T(0) <= k.z && k.z <= h && k.rho * h <= radius * k.z;
+}
+} // namespace tg::impl
+
+template <int D, class T>
+    requires(tg::traits::has_sqrt<T> && !tg::traits::is_exact<T>)
+struct tg::impl::contains_op<tg::cone<D, T>, tg::pos<D, T>>
+{
+    [[nodiscard]] static constexpr bool apply(cone<D, T> const& c, pos<D, T> const& p)
+    {
+        return impl::in_cone_profile(impl::profile_of(p, c.apex, c.axis), c.axis.length(), c.radius);
+    }
+};
+
+/// Inside, the point itself; outside, its projection onto the profile triangle apex, base rim, base center.
 template <int D, class T>
     requires(tg::traits::has_sqrt<T> && !tg::traits::is_exact<T>)
 struct tg::impl::project_op<tg::pos<D, T>, tg::cone<D, T>>
@@ -171,11 +196,10 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::cone<D, T>>
     {
         auto const k = impl::profile_of(p, c.apex, c.axis);
         auto const h = c.axis.length();
+        if (impl::in_cone_profile(k, h, c.radius))
+            return p;
         auto const tri = triangle<2, T>(pos<2, T>(T(0), T(0)), pos<2, T>(h, c.radius), pos<2, T>(h, T(0)));
-        auto const profile_p = pos<2, T>(k.z, k.rho);
-        auto const q = project_op<pos<2, T>, triangle<2, T>>::apply(profile_p, tri);
-        // a point inside is its own projection, returned as given so contains can rely on equality
-        return q == profile_p ? p : impl::from_profile(k, c.apex, q);
+        return impl::from_profile(k, c.apex, project_op<pos<2, T>, triangle<2, T>>::apply(pos<2, T>(k.z, k.rho), tri));
     }
 };
 
@@ -190,9 +214,8 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::cone_boundary<D, T>>
         auto const h = c.axis.length();
         auto const q = pos<2, T>(k.z, k.rho);
         auto const tri = triangle<2, T>(pos<2, T>(T(0), T(0)), pos<2, T>(h, c.radius), pos<2, T>(h, T(0)));
-        auto const solid = project_op<pos<2, T>, triangle<2, T>>::apply(q, tri);
-        if (solid != q)
-            return impl::from_profile(k, c.apex, solid);
+        if (!impl::in_cone_profile(k, h, c.radius))
+            return impl::from_profile(k, c.apex, project_op<pos<2, T>, triangle<2, T>>::apply(q, tri));
 
         auto const slant = project_op<pos<2, T>, segment<2, T>>::apply(q, segment<2, T>(tri.pos0, tri.pos1));
         auto const base = project_op<pos<2, T>, segment<2, T>>::apply(q, segment<2, T>(tri.pos2, tri.pos1));
@@ -275,6 +298,7 @@ struct tg::impl::intersection_parameter_op<L, tg::cone_mantle<3, T>>
 // --- hemisphere
 
 /// Above the base the ball's support; below, the base rim point farthest along the direction.
+/// Below, the normal is projected out twice, for the same reason as the cone's support: one pass leaves noise to normalise.
 template <int D, class T>
     requires(tg::traits::has_sqrt<T>)
 struct tg::impl::support_op<tg::hemisphere<D, T>>
@@ -282,7 +306,8 @@ struct tg::impl::support_op<tg::hemisphere<D, T>>
     [[nodiscard]] static constexpr pos<D, T> apply(hemisphere<D, T> const& h, vec<D, T> const& dir)
     {
         auto const up = tg::dot(dir, h.normal);
-        auto const d = up >= T(0) ? dir : dir - h.normal * up;
+        auto const once = dir - h.normal * up;
+        auto const d = up >= T(0) ? dir : once - h.normal * tg::dot(once, h.normal);
         auto const l = d.length();
         return tg::traits::is_zero(l) ? h.center : h.center + d * (h.radius / l);
     }

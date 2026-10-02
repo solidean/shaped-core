@@ -33,7 +33,7 @@ public:
 
     // transformation
 public:
-    /// The boundary plane maps as a plane does, and the inside stays on the side the normal points away from.
+    /// The boundary plane maps as a plane does, and the inside stays on the side the normal points away from, under a mirror too.
     template <class TransformT>
     [[nodiscard]] constexpr auto transformed(TransformT const& t) const
     {
@@ -42,6 +42,9 @@ public:
         else
         {
             auto const p = this->boundary().transformed(t);
+            // a mirror turns the plane's normal into the inside, so it is turned back out
+            if (tg::impl::flips_plane_normals<D, T>(t))
+                return halfspace(-p.normal, -p.dist);
             return halfspace(p.normal, p.dist);
         }
     }

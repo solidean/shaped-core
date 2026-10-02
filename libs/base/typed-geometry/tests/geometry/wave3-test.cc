@@ -28,6 +28,29 @@ tg::frustum3d view_frustum()
                          tg::plane3d(tg::vec3d(0, -s, -s), 0), tg::plane3d(tg::vec3d(0, s, -s), 0),
                          tg::plane3d(tg::vec3d(0, 0, -1), -1), tg::plane3d(tg::vec3d(0, 0, 1), 3));
 }
+
+/// left-handed, looking down +z, 90 degrees vertically, square; reverse-Z with near 1, and far 10 or at infinity
+tg::frustum3d reverse_z_frustum(bool infinite_far)
+{
+    auto const n = 1.0;
+    auto const f = 10.0;
+    auto m = tg::mat4d::zero;
+    m[0, 0] = 1.0;
+    m[1, 1] = 1.0;
+    m[2, 2] = infinite_far ? 0.0 : -n / (f - n);
+    m[3, 2] = infinite_far ? n : n * f / (f - n);
+    m[2, 3] = 1.0;
+    return tg::frustum3d::make_from_view_projection(tg::projective_transform3d::make_from_mat(m));
+}
+
+bool approx_planes(tg::frustum3d const& a, tg::frustum3d const& b)
+{
+    for (auto i = 0; i < 6; ++i)
+        if (!tgtest::approx(a.planes[i].normal, b.planes[i].normal, 1e-12)
+            || !tgtest::approx(a.planes[i].dist, b.planes[i].dist, 1e-12))
+            return false;
+    return true;
+}
 } // namespace
 
 TEST("tg wave3 - infinite cylinder")
@@ -170,4 +193,73 @@ TEST("tg wave3 - an infinite reverse-Z projection gives a frustum without a far 
     auto const in = tg::ray3d(tg::pos3d(0, 0, 0), tg::vec3d(0, 0, 1)).intersection_parameter_with(fr).value();
     CHECK(tgtest::approx(in.start, 1.0));
     CHECK(in.end > 1e30);
+}
+
+TEST("tg wave3 - the boundary of a frustum without a far plane has no crossing at infinity")
+{
+    auto const fr = reverse_z_frustum(true);
+
+    // from the camera: it crosses the near plane, and the open end is not a second crossing
+    auto const from_camera = tg::ray3d(tg::pos3d(0, 0, 0), tg::vec3d(0, 0, 1)).intersection_parameter_with(fr.boundary());
+    REQUIRE(from_camera.size() == 1);
+    CHECK(tgtest::approx(from_camera.first(), 1.0));
+
+    // from inside, looking down the view axis: it never leaves
+    auto const inside = tg::ray3d(tg::pos3d(0, 0, 2), tg::vec3d(0, 0, 1));
+    CHECK(inside.intersection_parameter_with(fr.boundary()).is_empty());
+    CHECK(!inside.intersects(fr.boundary()));
+
+    // with a far plane the same ray still leaves through it
+    CHECK(inside.intersection_parameter_with(reverse_z_frustum(false).boundary()).size() == 1);
+}
+
+TEST("tg wave3 - a transformed frustum keeps its inside, mirrored or without a far plane")
+{
+    auto const fr = reverse_z_frustum(false);
+    auto const mirror = tg::signed_scaling_transform3d::make_scaling(tg::vec3d(-1, 1, 1));
+    auto const mirrored = fr.transformed(mirror);
+    CHECK(mirrored.contains(tg::pos3d(0, 0, 5)));
+    CHECK(mirrored.contains(tg::pos3d(-2, 1, 5)));
+    CHECK(!mirrored.contains(tg::pos3d(0, 0, 11)));
+    CHECK(approx_planes(mirrored.transformed(mirror), fr));
+
+    // the absent far plane's zero normal maps to zero, so it stays absent under a translation and a mirror alike
+    auto const open = reverse_z_frustum(true);
+    auto const moved = open.transformed(tg::translation_transform3d::make_translation(tg::vec3d(1, 0, 0)));
+    CHECK(!moved.has_far_plane());
+    CHECK(moved.contains(tg::pos3d(1, 0, 1e9)));
+    auto const open_mirrored = open.transformed(mirror);
+    CHECK(!open_mirrored.has_far_plane());
+    CHECK(open_mirrored.contains(tg::pos3d(0, 0, 1e9)));
+    CHECK(!open_mirrored.contains(tg::pos3d(0, 0, 0.5)));
+}
+
+TEST("tg wave3 - a negative uniform scale turns an infinite cone around")
+{
+    auto const c = tg::inf_cone3d(tg::pos3d(0, 0, 0), tg::vec3d(0, 0, 1), tg::angle_d::make_from_degree(60));
+    auto const r = c.transformed(tg::signed_similarity_transform3d::make_uniform_scaling(-1.0));
+    CHECK(tgtest::approx(r.dir, tg::vec3d(0, 0, -1)));
+    CHECK(r.contains(tg::pos3d(0, 0, -1)));
+    CHECK(!r.contains(tg::pos3d(0, 0, 1)));
+    auto const doubled = c.transformed(tg::signed_similarity_transform3d::make_uniform_scaling(-2.0));
+    CHECK(tgtest::approx(doubled.dir, tg::vec3d(0, 0, -1)));
+}
+
+TEST("tg wave3 - a point meets a frustum's surface exactly when it lies on a face")
+{
+    static_assert(tg::has_intersects<tg::pos3d, tg::frustum3d_surface>);
+    static_assert(tg::has_intersects<tg::frustum3d_surface, tg::pos3d>);
+
+    auto const s = unit_frustum().boundary();
+    CHECK(s.contains(tg::pos3d(1, 0, 0)));
+    CHECK(s.intersects(tg::pos3d(1, 1, 1)));
+    CHECK(tg::pos3d(0, -1, 0.5).intersects(s));
+    CHECK(!s.intersects(tg::pos3d(0, 0, 0)));
+    CHECK(!tg::pos3d(0, 0, 0).intersects(s));
+    CHECK(!s.intersects(tg::pos3d(2, 0, 0)));
+
+    // an absent far plane is satisfied with equality everywhere, and still no point lies on it
+    auto const open = reverse_z_frustum(true);
+    CHECK(open.contains(tg::pos3d(0, 0, 5)));
+    CHECK(!open.boundary().intersects(tg::pos3d(0, 0, 5)));
 }

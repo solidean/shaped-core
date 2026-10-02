@@ -71,17 +71,24 @@ public:
 
     // measures and readings
 public:
-    /// half the parallelogram the two edges at pos0 span; in 2D exact for every scalar with abs.
+    /// half the parallelogram the two edges at pos0 span.
+    /// Refused for an exact scalar, where halving an odd doubled area would truncate.
+    /// In 3D the cross product's length, which stays finite and non-negative for a nearly collinear triangle.
     [[nodiscard]] constexpr T area() const
+        requires(!tg::traits::is_exact<T> && (D == 2 || tg::traits::has_sqrt<T>))
     {
         auto const ab = pos1 - pos0;
         auto const ac = pos2 - pos0;
         if constexpr (D == 2)
             return tg::abs(ab.data[0] * ac.data[1] - ab.data[1] * ac.data[0]) / T(2);
+        else if constexpr (D == 3)
+            return tg::dual(tg::cross(ab, ac)).length() / T(2);
         else
         {
+            // Lagrange's identity cancels for a sliver, so its rounding is clamped back to a degenerate zero
             auto const d = tg::dot(ab, ac);
-            return tg::sqrt(ab.length_sqr() * ac.length_sqr() - d * d) / T(2);
+            auto const s = ab.length_sqr() * ac.length_sqr() - d * d;
+            return tg::sqrt(s > T(0) ? s : T(0)) / T(2);
         }
     }
     [[nodiscard]] constexpr T perimeter() const

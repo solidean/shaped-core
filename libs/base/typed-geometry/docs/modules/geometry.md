@@ -5,7 +5,9 @@
 ## What this module is
 
 `geometry/` holds the geometric primitive *types* and the `object_traits` seam that classifies them.
-The types are `aabb`, `box`, `triangle`, `segment`, `ray`, `line`, `plane`, `halfspace`, `sphere`, `ellipsoid`, and the boundaries of the solids among them.
+The types are point sets of every kind the old tg had: linear objects, flats, polytopes such as `box`, round objects such as `capsule`, their unbounded forms, and the frustum.
+Each solid has its boundary as a type of its own.
+[plans/old-tg-carryover.md](../plans/old-tg-carryover.md) is the roster.
 It depends on `linalg/`, since the primitives are phrased in `pos`/`vec`, and on `scalar/`.
 Geometric *queries* (containment, distance, closest point, intersection) are member functions whose definitions live in `geometry/query/`, one header per verb.
 [plans/geometry-query-matrix.md](../plans/geometry-query-matrix.md) is that layer, and [plans/old-tg-carryover.md](../plans/old-tg-carryover.md) the object roster and the per-type verbs.

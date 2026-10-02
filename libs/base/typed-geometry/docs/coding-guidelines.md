@@ -17,7 +17,7 @@ Call it through the thin wrappers over it: `tg::traits::has_sqrt<T>`, the free `
 - Add a scalar operation by extending `scalar_traits<T>` with a capability flag plus the operation, then a thin `tg::` free function and `tg::traits::` alias over it.
   Mirror the existing `has_sqrt` / `tg::sqrt` pair.
 - **Capability-gate** with `requires(tg::traits::has_*<T>)`, never by hard-coding floating-point.
-  `length()` / `normalized()` / `distance()` require `has_sqrt<T>`; `length_sqr()` / `distance_sqr()` work for every scalar.
+  `length()` / `normalized()` / `distance_to()` require `has_sqrt<T>`; `length_sqr()` / `distance_sqr_to()` work for every scalar.
 - `<cmath>` is permitted inside the `scalar_traits` specializations and nowhere else.
   clean-core forbids it outright; tg does not, because the specializations are where the platform math has to enter.
 
@@ -177,6 +177,6 @@ The *definitions* live per verb, in `geometry/query/<verb>.hh`, as one short for
 Including a verb's header is what makes it callable; a member used without its header is "function with deduced return type cannot be used before it is defined".
 [plans/geometry-query-matrix.md](plans/geometry-query-matrix.md) has the dispatch behind those definitions.
 
-Unary queries that belong to one family — `aabb.center()`, `ray.at(t)`, `sphere.volume()` — are inline members in that family's header, with no generic derivation.
+Unary queries that belong to one family — `aabb.centroid()`, `ray.at(t)`, `sphere.volume()` — are inline members in that family's header, with no generic derivation.
 
 Linear algebra keeps its free functions: `dot(a, b)`, `cross(a, b)` and the other `<type>_ops.hh` operations are not object queries.

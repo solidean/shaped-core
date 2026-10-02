@@ -153,11 +153,35 @@ concept has_intersects_direct = impl::has_op<impl::intersects_op, A, B> //
                              || (impl::is_linear<A> && impl::has_op<impl::intersection_parameter_op, A, B>)
                              || (impl::is_linear<B> && impl::has_op<impl::intersection_parameter_op, B, A>);
 
+namespace impl
+{
+/// the boundary rung of intersects: Boundary meets Other when its solid does without swallowing Other whole.
+/// That fails for a point, which a solid swallows whenever it meets it, so a point is left to contains.
+/// The conjunction is what keeps solid_t from being formed for a type without a solid.
+template <class Boundary, class Other>
+concept meets_through_solid = !is_pos<Other> && is_boundary<Boundary> && has_intersects_direct<solid_t<Boundary>, Other>
+                           && has_contains<solid_t<Boundary>, Other>;
+} // namespace impl
+
 template <class A, class B>
-concept has_intersects
-    = has_intersects_direct<A, B> //
-   || (impl::is_boundary<A> && has_intersects_direct<impl::solid_t<A>, B> && has_contains<impl::solid_t<A>, B>)
-   || (impl::is_boundary<B> && has_intersects_direct<impl::solid_t<B>, A> && has_contains<impl::solid_t<B>, A>);
+concept has_intersects = has_intersects_direct<A, B> //
+                      || impl::meets_through_solid<A, B> || impl::meets_through_solid<B, A>;
+
+/// may_intersect falls back to the exact intersects, so a cheap kernel is not required.
+template <class A, class B>
+concept has_may_intersect = impl::has_op<impl::may_intersect_op, A, B> //
+                         || impl::has_op<impl::may_intersect_op, B, A> || has_intersects<A, B>;
+
+template <class A, class B>
+concept has_closest_point_to = (impl::is_pos<B> && has_project_to<B, A>) || has_closest_points_to<A, B>;
+
+/// `a.intersects(b, eps)` is the distance test, so it needs a distance rather than an intersects.
+template <class A, class B>
+concept has_intersects_eps = has_distance_sqr_to<A, B>;
+
+/// `a.contains(p, eps)` is defined for a point only.
+template <class A, class B>
+concept has_contains_eps = impl::is_pos<B> && has_distance_sqr_to<A, B>;
 
 template <class A, class B>
 concept has_separation_from = impl::has_op<impl::separation_op, A, B> || impl::epa_pair<A, B>;

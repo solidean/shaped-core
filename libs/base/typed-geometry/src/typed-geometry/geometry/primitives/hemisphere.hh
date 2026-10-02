@@ -82,9 +82,9 @@ public:
         {
             auto const s = tg::signed_similarity_transform<D, T>(t);
             auto const scale = s.uniform_scale();
-            auto const r = radius * (scale < T(0) ? -scale : scale);
-            // the image of the normal keeps pointing into the half it bounded, so a signed scale divides back out
-            return hemisphere(center.transformed(s), r, normal.transformed(s) / scale);
+            auto const abs_scale = scale < T(0) ? -scale : scale;
+            // the image of the normal points into the image of the half it bounded, so only the magnitude divides out
+            return hemisphere(center.transformed(s), radius * abs_scale, normal.transformed(s) / abs_scale);
         }
         else
             static_assert(false, "tg: a hemisphere only survives a similarity; under a wider map it is half an "

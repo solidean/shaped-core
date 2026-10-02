@@ -7,6 +7,7 @@
 #include <typed-geometry/geometry/query/impl/kernels/parameters.hh>
 #include <typed-geometry/geometry/query/impl/kernels/round.hh>
 #include <typed-geometry/geometry/query/impl/ops.hh>
+#include <typed-geometry/geometry/query/impl/special_case.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
@@ -284,11 +285,14 @@ struct tg::impl::intersection_parameter_op<L, tg::inf_cone_boundary<D, T>>
 // --- frustum
 
 /// The farthest of its eight corners.
+/// A frustum without a far plane is unbounded and has no support.
+/// It is a special case: its far corners are NaN, so this answers for the near rectangle.
 template <int D, class T>
 struct tg::impl::support_op<tg::frustum<D, T>>
 {
     [[nodiscard]] static constexpr pos<D, T> apply(frustum<D, T> const& f, vec<D, T> const& dir)
     {
+        TG_SPECIAL_CASE(!f.has_far_plane(), "the support of a frustum without a far plane");
         auto const v = f.vertices();
         auto best = 0;
         auto best_d = tg::dot(v[0] - pos<D, T>(), dir);
@@ -315,6 +319,26 @@ struct tg::impl::contains_op<tg::frustum<D, T>, tg::pos<D, T>>
             if (tg::dot(pl.normal, p - pos<D, T>()) > pl.dist)
                 return false;
         return true;
+    }
+};
+
+/// Inside every plane and exactly on one of them; an absent far plane bounds nothing, so a point is never on it.
+template <int D, class T>
+struct tg::impl::contains_op<tg::frustum_boundary<D, T>, tg::pos<D, T>>
+{
+    [[nodiscard]] static constexpr bool apply(frustum_boundary<D, T> const& f, pos<D, T> const& p)
+    {
+        auto const far_present = f.solid().has_far_plane();
+        auto on_plane = false;
+        for (int i = 0; i < 6; ++i)
+        {
+            auto const& pl = f.planes[i];
+            auto const d = tg::dot(pl.normal, p - pos<D, T>());
+            if (d > pl.dist)
+                return false;
+            on_plane = on_plane || (d == pl.dist && (i < 5 || far_present));
+        }
+        return on_plane;
     }
 };
 
@@ -373,7 +397,8 @@ struct tg::impl::intersection_parameter_op<L, tg::frustum_boundary<3, T>>
         auto const r = impl::frustum_interval(v, f.solid());
         if (!r.has_value())
             return {};
-        return impl::crossings<2>(v, r.value().start, r.value().end);
+        // without a far plane the interval can end at infinity, which is not a crossing
+        return impl::finite_ends(v, r.value());
     }
 };
 

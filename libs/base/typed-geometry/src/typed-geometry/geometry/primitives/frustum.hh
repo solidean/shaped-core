@@ -21,8 +21,9 @@
 ///
 /// The far plane is last by convention, and it may be absent: a zero normal with dist 0, which every point satisfies.
 /// That is what a reverse-Z projection with an infinite far plane gives, and `has_far_plane()` says which case this is.
-/// Queries that only test planes work either way — contains, line parameters (the interval stays open), may_intersect.
-/// Those that need the corners — vertices, bounds, volume, centroid, sampling, and GJK through the support — need it.
+/// Queries that only test planes work either way: contains, may_intersect against an object with a support, ray intervals through the solid (which stay open).
+/// Those that need the corners need a far plane: vertices, bounds, volume, centroid and sampling.
+/// So does everything support-based — GJK, EPA, halfspace or plane vs frustum, may_intersect against another frustum — which without one answers for the near rectangle.
 /// tg::frustum_boundary is its six faces.
 template <int D, class T>
 struct tg::frustum
@@ -111,7 +112,8 @@ public:
 
     // transformation
 public:
-    /// Every plane maps as a plane, and an affine map keeps the outward sides outward.
+    /// Every plane maps as a plane, and the outward sides stay outward, under a mirror too.
+    /// An absent far plane stays absent: its zero normal maps to zero.
     template <class TransformT>
     [[nodiscard]] constexpr auto transformed(TransformT const& t) const
     {
@@ -119,9 +121,13 @@ public:
             return t.custom_transform(*this);
         else
         {
+            auto const flip = tg::impl::flips_plane_normals<D, T>(t);
             frustum r;
             for (int i = 0; i < 6; ++i)
-                r.planes[i] = planes[i].transformed(t);
+            {
+                auto const p = planes[i].transformed(t);
+                r.planes[i] = flip ? plane<D, T>(-p.normal, -p.dist) : p;
+            }
             return r;
         }
     }

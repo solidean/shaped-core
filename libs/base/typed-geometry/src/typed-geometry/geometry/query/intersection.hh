@@ -39,6 +39,8 @@ template <class L, class B>
 template <class A, class B>
 [[nodiscard]] constexpr auto intersection_with(A const& a, B const& b)
 {
+    static_assert(written_once<intersection_op, A, B>, "tg: an intersection kernel is written in both orders");
+
     if constexpr (has_op<intersection_op, A, B>)
         return intersection_op<A, B>::apply(a, b);
     else if constexpr (has_op<intersection_op, B, A>)

@@ -273,3 +273,17 @@ struct tg::impl::contains_op<tg::ellipsoid<D, D, T>, tg::pos<D, T>>
         return (m.inverse() * (p - e.center)).length_sqr() <= T(1);
     }
 };
+
+/// The point in the semi-axis frame lies on the unit sphere, compared exactly.
+template <int D, class T>
+    requires(!tg::traits::is_exact<T>)
+struct tg::impl::contains_op<tg::ellipsoid_boundary<D, D, T>, tg::pos<D, T>>
+{
+    [[nodiscard]] static constexpr bool apply(ellipsoid_boundary<D, D, T> const& e, pos<D, T> const& p)
+    {
+        mat<D, D, T> m;
+        for (int i = 0; i < D; ++i)
+            m.cols[i] = e.semi_axes[i];
+        return (m.inverse() * (p - e.center)).length_sqr() == T(1);
+    }
+};

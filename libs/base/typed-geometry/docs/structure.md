@@ -387,7 +387,7 @@ The top-level `<typed-geometry/all.hh>` pulls in everything.
 3.  linalg: bivec + cross/dual/undual  [done]
 4.  linalg: mat, quat                  [done]
 5.  transform: the flag lattice, homogeneous_transform, transformed(pos/vec/bivec), the object handshake   [done]
-6.  geometry primitives + object_traits   [in progress]  wave 1 of plans/old-tg-carryover.md
+6.  geometry primitives + object_traits   [in progress]  waves 1–3 of plans/old-tg-carryover.md; polygon and polyline remain
 7.  geometry queries: member verbs, kernel seam, GJK / EPA   [in progress]
 8.  curves                             [planned]
 9.  symbolic scalars                   [planned]

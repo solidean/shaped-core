@@ -192,7 +192,9 @@ public:
         else if constexpr (requires { tg::signed_similarity_transform<D, T>(t); })
         {
             auto const s = tg::signed_similarity_transform<D, T>(t);
-            return inf_cone(apex.transformed(s), dir.transformed(s) / s.uniform_scale(), opening_angle);
+            auto const scale = s.uniform_scale();
+            // the image of dir points into the image of the cone, so only the scale's magnitude divides out
+            return inf_cone(apex.transformed(s), dir.transformed(s) / (scale < T(0) ? -scale : scale), opening_angle);
         }
         else
             static_assert(false, "tg: an infinite cone only survives a similarity; its affine image is elliptic.");

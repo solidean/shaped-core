@@ -44,7 +44,7 @@ Source lives in `src/typed-geometry/`, grouped by module:
 | `scalar/`    | the `scalar_traits<T>` seam, `tg::sqrt` and the trig functions, `angle`, `pi` |
 | `linalg/`    | `vec`, `pos`, `comp`, `bivec`, `mat`, `quat` and their `_ops` free functions |
 | `transform/` | `homogeneous_transform<DSource, DTarget, T, Flags>`, `composed`/`inverse`, and the object handshake |
-| `geometry/`  | the `object_traits` seam and the primitives (`aabb`, `box`, `triangle`, `segment`, `ray`, `line`, `plane`, `halfspace`, `sphere`, `ellipsoid`, and their boundaries), and their queries as members |
+| `geometry/`  | the `object_traits` seam and the primitives (polytopes, round objects such as `capsule` and `cone`, their unbounded forms, the frustum, and their boundaries), and their queries as members |
 
 ## Building & testing
 

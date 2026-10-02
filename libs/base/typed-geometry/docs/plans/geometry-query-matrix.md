@@ -32,12 +32,12 @@ The goal: the hand-written surface grows with the number of objects rather than 
 | `a.closest_point_to(b)` | the point of `a` nearest `b`; `obj.closest_point_to(p) == p.project_to(obj)` |
 | `a.distance_to(b)` / `a.distance_sqr_to(b)` | `T` |
 | `a.signed_distance_to(b)` | `T`, negative inside `b`; only for `b` with an inside |
-| `a.project_to(b)` | `a` mapped onto `b`: a `pos` for a `pos`, a segment for a segment onto a plane |
+| `a.project_to(b)` | `a` mapped onto `b`; today `a` is always a `pos`, and the result is the nearest `pos` of `b` |
 | `r.intersection_parameter_with(b)` | `tg::hits<N, T>` for a surface, `cc::optional<tg::hit_interval<T>>` for a solid |
-| `r.closest_intersection_parameter_with(b)` | `cc::optional<T>` — the first hit, or the interval's start (0 from inside) |
+| `r.closest_intersection_parameter_with(b)` | `cc::optional<T>` — the first hit, or the interval's start (a ray's 0 from inside; a line's entry, possibly negative) |
 | `a.may_intersect(b)` | `bool`: false only when certainly apart — a cheap culling test (frustum, plane by plane), exact `intersects` otherwise |
 | `a.separation_from(b)` | `cc::optional<tg::separation<D, T>>`, `{normal, depth}`; bounded convex solids only |
-| `a.intersects(b, eps)`, `a.contains(b, eps)` | `bool`, the bracket contract of §6; only where a kernel can give it cheaply |
+| `a.intersects(b, eps)`, `a.contains(b, eps)` | `bool`, the bracket contract of §6; wherever a distance exists |
 
 The suffix rule: a preposition where the relation reads from the subject (`_to`, `_with`, `_from`), bare names for predicates.
 The unary verbs — measures, bounds, parameters, sampling — are per-type members and live in [old-tg-carryover.md](old-tg-carryover.md).
@@ -105,23 +105,24 @@ else { auto const [pa, pb] = a.closest_points_to(b); return (pb - pa).length_sqr
 **Symmetry is the second rung.**
 A kernel is written once in whichever order is natural, and a verb returning per-argument data (`closest_points_to`) swaps its result back.
 A ranking (`object_order`) was considered and dropped: a synthetic TU with 40 types and all 1,600 ordered pair calls compiled in the same median time either way.
-**A pair with a kernel in both orders is an error**, which a test checks, because the first rung would silently shadow the second.
+**A pair with a kernel in both orders is an error**, because the first rung would silently shadow the second.
+Each verb that tries both orders `static_assert`s it, so the error surfaces when such a pair is first called.
 
 A concept's result is cached per TU, so `has_op<A, B>` evaluated before the kernel's header and again after is ill-formed with no diagnostic required.
 Each verb header includes its kernels before it defines anything, which is what keeps a call site from seeing both answers.
 
-**Fast paths beat the floor by partial ordering.**
-`distance_sqr_op<pos<D, T>, aabb<D, T>>` is more specialized by type than the constrained `<A, B>` GJK specialization, and constraints only break ties.
+**Fast paths beat the floor by rung order.**
+GJK is the ladder's last rung, an `if constexpr` branch rather than a specialization, so any kernel for the pair is tried before it.
 
 ## 4. The convex floor: GJK and EPA
 
-Most objects are convex: point, segment, triangle, aabb, box, sphere, capsule, cylinder, cone, ellipsoid, tetrahedron.
+Most bounded objects are convex — a box, a capsule, a cone — and every bounded convex type is expected to carry a support.
 For convex sets `closest_points` / `intersects` is one algorithm — GJK over the Minkowski difference — parameterized only by a **support function**, the point of an object farthest along a direction.
 Support is `tg::impl::support_op<Obj>`, a kernel like any other, and not a public member until a caller needs one.
 
 - **It is a permanent floor**, not scaffolding: a new convex type writes one support function and gets distance, closest points and intersects against every other.
   Closed forms are added top-down by profiled call frequency, and GJK is their test oracle.
-- **The unbounded types** (ray, line, plane, halfspace) have support functions that run off to infinity, so they get closed forms from day one.
+- **The unbounded types** (a ray, a half-space, an infinite cylinder) have no support function, since theirs would run off to infinity, so they answer only through closed forms.
 - **GJK iterates to a relative tolerance and carries an iteration cap**; hitting the cap returns its current best answer.
 - **Measured, it is slower than the estimate this plan started from** (5–10x a closed form for box–box).
   On a Ryzen 9 5900X in a release build, distance through GJK takes 75x the closed form for aabb–aabb and 103x for ball–aabb.
@@ -135,7 +136,9 @@ Support is `tg::impl::support_op<Obj>`, a kernel like any other, and not a publi
   It is defined only where the overlap is a representable primitive, and a pair whose overlap has no type has no `intersection_with` at all.
 
 **Boundary types are not convex**: a sphere's surface is not a convex set.
-They derive `intersects` from their solid: a boundary meets `b` exactly when the solid meets `b` and does not swallow it, `solid.intersects(b) && !solid.contains(b)`.
+They derive `intersects` from their solid: a boundary meets `b` when the solid meets `b` and does not swallow it, `solid.intersects(b) && !solid.contains(b)`.
+That holds for a `b` that is not a point, up to tangency: a `b` inside the solid touching its boundary is swallowed and still meets it, a special case.
+A point meets anything exactly when it is contained, so a point never takes this rung: a boundary answers it with its own `contains` kernel.
 Distance from inside a solid to its boundary needs one kernel per family.
 
 ### What a scalar must provide for GJK
@@ -147,6 +150,9 @@ Every other scalar is supported by default, wrappers included (an autodiff or an
 - **a relative tolerance can be formed** from the scalar's own values (`tol * max(|a|, |b|)`), so no global epsilon is needed.
 
 An interval scalar whose `<` is not a total order cannot uphold the first, and should set `is_exact` or simply not be passed to a GJK pair.
+
+The tolerance is 64 machine epsilons relative to the shapes' scale, which is coarse for a narrow scalar.
+`tg::f16` reaches GJK at 64 × 2^-10, 6.25% of the scale, so two shapes that close count as overlapping.
 
 ## 5. Results
 
@@ -195,7 +201,7 @@ A verb compiles for an exact scalar only where a kernel is exact on it, and GJK 
 
 ## 8. Discoverability
 
-- **Capability concepts** — `has_distance_sqr<A, B>`, `has_intersection<A, B>` — are the machine-readable registry: true exactly when a kernel or a ladder rung serves the pair.
+- **Capability concepts** — `has_distance_sqr_to<A, B>`, `has_intersection_with<A, B>` — are the machine-readable registry: true exactly when a kernel or a ladder rung serves the pair.
   Calling a member for an unsupported pair is a `static_assert` at the bottom of the verb's ladder, naming the concept to probe instead.
 - **A support matrix** in [old-tg-carryover.md](old-tg-carryover.md): rows × columns × verbs, each cell a closed form, the GJK floor, a derivation, or unsupported.
 
@@ -205,12 +211,13 @@ A verb compiles for an exact scalar only where a kernel is exact on it, and GJK 
 geometry/query/
   intersects.hh  contains.hh  intersection.hh  closest_points.hh
   distance.hh    project.hh   parameter.hh     separation.hh
-  hits.hh                     # tg::hits, tg::hit_interval, tg::separation
-  query.hh  all.hh
+  hits.hh                     # tg::hits, tg::hit_interval
+  query.hh                    # every verb
   impl/
     ops.hh                    # the op primaries, has_op, capability concepts
     special_case.hh           # TG_SPECIAL_CASE
-    support.hh  gjk.hh  epa.hh
+    kernels.hh                # every kernel header, included before any verb defines anything
+    gjk.hh  epa.hh            # GJK, and EPA with tg::separation
     kernels/                  # closed forms, one header per object family they are written for
 ```
 

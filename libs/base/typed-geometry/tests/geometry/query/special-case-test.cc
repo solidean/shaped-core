@@ -65,3 +65,24 @@ TEST("tg query - two coincident planes or spheres give no overlap")
     auto const s = tg::sphere3d(tg::pos3d(1, 1, 1), 2.0).boundary();
     CHECK(!s.intersection_with(s).has_value());
 }
+
+TEST("tg query - GJK against a frustum without a far plane is a special case")
+{
+#if TG_CHECK_SPECIAL_CASES
+    nx::expect_warning("frustum without a far plane", {.domain = "tg"});
+#endif
+
+    // reverse-Z with the far plane at infinity: the z row has no xyz part
+    auto m = tg::mat4d::zero;
+    m[0, 0] = 1.0;
+    m[1, 1] = 1.0;
+    m[3, 2] = 1.0;
+    m[2, 3] = 1.0;
+    auto const fr = tg::frustum3d::make_from_view_projection(tg::projective_transform3d::make_from_mat(m));
+    REQUIRE(!fr.has_far_plane());
+
+    // the support answers for the near rectangle, so a sphere far down the view axis reads as apart
+    CHECK(!fr.intersects(tg::sphere3d(tg::pos3d(0, 0, 1e6), 1.0)));
+    // the plane-by-plane culling test needs no support of the frustum, and sees it
+    CHECK(fr.may_intersect(tg::sphere3d(tg::pos3d(0, 0, 1e6), 1.0)));
+}
