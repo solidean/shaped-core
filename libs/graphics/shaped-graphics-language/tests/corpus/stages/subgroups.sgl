@@ -1,0 +1,88 @@
+// a subgroup is the invocations the hardware runs together, and its operations exchange values between them
+
+require subgroups
+
+binding work:
+    input: buffer[float]
+    output: mut buffer[float]
+    counter: mut buffer[atomic[uint]]
+    groups: uint
+
+@workgroup binding spd:
+    finished: uint
+    total: float
+
+const first_lane = 0
+const wave = 64
+
+// a reduction over the quad, then over the subgroup, at the size the shader prefers and runs correctly without
+@compute(64) @preferred_subgroup_size(wave) fun reduce(@local_thread_index li: int, @subgroup_invocation_id lane: int){work, spd}:
+    let v = work.input[li]
+    let quad_max = max(max(v, quad_swap_x(v)), max(quad_swap_y(v), quad_swap_diagonal(v)))
+    let total = subgroup_add(quad_max)
+    // a butterfly step: every invocation shuffles by the same constant mask
+    let pair = total + subgroup_shuffle_xor(total, 1)
+    let leader = subgroup_broadcast(total, first_lane)
+    let mine = quad_broadcast(v, 3) + subgroup_shuffle(v, lane ^ 1) + subgroup_inclusive_add(v)
+    if subgroup_all(v > 0.0) and lane == 0:
+        spd.total = leader + mine + pair
+    // the last workgroup alone goes on, which a uniform load lets every thread of it agree on
+    if li == 0:
+        spd.finished = work.counter[0].add(1u)
+    if workgroup_uniform_load(spd.finished) == work.groups - 1u:
+        workgroup_barrier()
+        work.output[li] = workgroup_uniform_load(spd.total)
+
+struct varyings:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct target:
+    color: float4
+
+// a pixel stage has subgroups too, whose quads are the pixels a derivative compares
+@pixel fun edge_ps(p: varyings, @subgroup_size size: int) -> target:
+    let across = p.uv.x - quad_swap_x(p.uv.x)
+    let votes = subgroup_ballot(across > 0.0)
+    return { color = float4(across, count_bits(votes.x) as float, size as float, 1.0) }
+
+// a test is one invocation, whose uniform load reads what it stored
+test:
+    spd.finished = 3u
+    workgroup_uniform_load(spd.finished) == 3u
+
+// a lane every target takes as a constant is one, within the subgroup or the quad
+@expect(error = "invalid-constant-argument")
+test:
+    let lane = 1
+    subgroup_broadcast(1.0, lane) == 1.0
+
+@expect(error = "invalid-constant-argument")
+test quad_broadcast(1.0, 4) == 1.0
+
+// so is a shuffle's mask or delta, which every invocation shares
+@expect(error = "invalid-constant-argument")
+test:
+    let mask = 1
+    subgroup_shuffle_xor(1.0, mask) == 1.0
+
+@expect(error = "invalid-constant-argument")
+test subgroup_shuffle_down(1.0, 128) == 1.0
+
+// the uniform load reads workgroup memory, and nothing else
+@expect(error = "wrong-kind-of-name")
+test:
+    let x = 1u
+    workgroup_uniform_load(x) == 1u
+
+// a run is one invocation, which has no subgroup to exchange values in (CHK-379)
+@expect(error = "unsupported-yet")
+test subgroup_add(1.0) == 1.0
+
+fun widest(b: bool) -> float:
+    if b => return subgroup_max(2.0)
+    return 1.0
+
+// reached through a helper, it is the test's own call that is refused
+@expect(error = "unsupported-yet")
+test widest(true) == 2.0

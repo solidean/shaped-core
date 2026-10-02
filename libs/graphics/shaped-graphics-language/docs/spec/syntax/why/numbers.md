@@ -38,3 +38,9 @@ It follows from the spacing rule: a `-` fused to the right only is a prefix.
 `1_000` is what several languages write, and `_` is a symbol character, so the tokenizer accepts it without complaint.
 SGL uses `'`, as C++ does, so that `_` keeps one role inside symbols: joining the words of a name.
 Because the intent of `1_000` is obvious, it is a normal error with a fix, and the value is what the author meant.
+
+## NUM-15
+
+Ported shader text is full of `1u` and `0.5f`, and every one would otherwise be an edit.
+A literal already takes `uint` or `float` wherever one is expected, so the short suffix adds no meaning SGL lacked, only a spelling ports already use.
+32 is the width every target's own short suffix means, and the 16-bit types are `1u16` and `0.5f16` with nothing new.

@@ -77,9 +77,13 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
           == "unknown-feature user:[timestamp_query] timestamp_query; a shader may require binding_arrays, "
              "extended_image_formats, readwrite_image_formats, multisampled_array_textures, ray_query, "
              "raytracing_pipeline, primitive_index, "
-             "sample_rate_shading, geometry_shader, tessellation_shader\n");
+             "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
+             "device_coherence, image_atomics\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
+
+    // The 16-bit types, the subgroup operations, coherent memory and image atomics are names too.
+    CHECK(reports_for("require shader_f16, shader_int16, subgroups, device_coherence, image_atomics\n") == "");
 }
 
 TEST("sgl check - a require in a body that nothing needs is unused, and one of a file or a binding never is")
@@ -191,4 +195,63 @@ TEST("sgl check - a stage input some device lacks needs its feature, as a bindin
                       + "@pixel fun ps(v: vout, @is_front_facing f: bool) -> target:\n"
                         "    return { c = float4(1.0, 1.0, 1.0, 1.0) }\n")
           == "");
+}
+
+TEST("sgl check - a 16-bit value needs its feature wherever an entry point or a binding holds one")
+{
+    // CHK-382: a value in the body, which the entry point declares like a call's feature
+    auto const body = cc::string("@compute(64) fun cs(@thread_id id: int3):\n"
+                                 "    let h = (id.x as float) as half\n"
+                                 "    let s = h * 2.0\n");
+    CHECK(reports_for(body)
+          == "feature-not-declared user:[cs] cs needs shader_f16, which neither its file, a binding it lists nor its "
+             "body requires\n"
+             "  note user:[(id.x as float) as half] a value that needs it\n");
+    CHECK(reports_for(cc::string("require shader_f16\n\n") + body) == "");
+    CHECK(reports_for("@compute(64) fun cs(@thread_id id: int3):\n    let s = 3i16 + 1i16\n")
+              .contains("cs needs shader_int16"));
+    // a test runs on no device, and needs nothing
+    CHECK(reports_for("test (0.5f16 * 2f16) as float == 1.0\n") == "");
+
+    // CHK-201: a binding member holding one is a form some backend lacks
+    CHECK(reports_for(listing("", "    gain: half\n"))
+          == "needs-feature user:[half] a value of half needs shader_f16, which `require shader_f16` grants\n");
+    CHECK(reports_for(listing("", "    counts: mut buffer[ushort2]\n")).contains("needs shader_int16"));
+    CHECK(reports_for(listing("require shader_f16\n\n", "    gain: half\n")) == "");
+}
+
+TEST("sgl check - no 16-bit value crosses a stage edge, and no buffer strides by part of a word")
+{
+    // CHK-383: at any depth of the struct an entry point takes or returns
+    CHECK(reports_for("require shader_f16\n\n"
+                      "struct shade:\n"
+                      "    tint: half3\n"
+                      "\n"
+                      "struct varyings:\n"
+                      "    @position position: hpos4\n"
+                      "    s: shade\n"
+                      "\n"
+                      "@vertex fun vs() -> varyings:\n"
+                      "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), s = {tint = half3(1.0)}}\n")
+              .contains("unsupported-yet user:[vs] a 16-bit value crossing a stage edge, in varyings.s.tint: half3"));
+
+    // CHK-381: a buffer strides by whole 4-byte words, which a lone half or a half3 does not fill
+    CHECK(reports_for(listing("require shader_f16\n\n", "    values: buffer[half]\n"))
+          == "unsupported-yet user:[buffer[half]] a buffer of half, whose element takes 2 bytes, which is no whole "
+             "number of 4-byte words\n");
+    CHECK(reports_for(listing("require shader_f16\n\n", "    values: buffer[half3]\n")).contains("takes 6 bytes"));
+    CHECK(reports_for(listing("require shader_f16\n\n", "    values: buffer[half2]\n")) == "");
+}
+
+TEST("sgl check - an @inline binding holds no 16-bit value, at any depth")
+{
+    // CHK-387: a push constant on vulkan, where a 16-bit member needs a device bit the 16-bit features leave out
+    CHECK(reports_for(listing("require shader_f16\n\n@inline ", "    gain: half\n"))
+          == "unsupported-yet user:[half] a 16-bit value in an @inline binding, in work.gain: half\n");
+    CHECK(reports_for(listing("require shader_int16\n\nstruct tint:\n    level: ushort2\n\n@inline ",
+                              "    scale: float\n    t: tint\n"))
+              .contains("a 16-bit value in an @inline binding, in work.t.level: ushort2"));
+    // a group's constant block holds one, and an @inline binding a 32-bit value
+    CHECK(reports_for(listing("require shader_f16\n\n", "    gain: half\n")) == "");
+    CHECK(reports_for(listing("@inline ", "    gain: float\n")) == "");
 }

@@ -315,12 +315,12 @@ cc::string type_name(cc::string_view stem, int width)
     return width == 1 ? cc::string(stem) : cc::format("{}{}", stem, width);
 }
 
-/// HLSL's `sign` of a float is an int, so it converts back.
-template <int Width>
+/// HLSL's `sign` of a float is an int, so it converts back to the type `data` names.
 written write_sign(call_context const& c)
 {
     if (c.target == language::hlsl)
-        return {.text = cc::format("{}(sign({}))", type_name("float", Width), c.arguments[0].text)};
+        return {.text
+                = cc::format("{}(sign({}))", c.builtins.at(builtin_type_id(i32(c.data))).hlsl, c.arguments[0].text)};
     return {.text = cc::format("sign({})", c.arguments[0].text)};
 }
 
@@ -514,11 +514,6 @@ constexpr cc::string_view k_pack_half_wgsl[] = {"pack2x16float"};
 constexpr cc::string_view k_unpack_half_hlsl[] = {"sgl_unpack_half2x16", "f16tof32"};
 constexpr cc::string_view k_unpack_half_wgsl[] = {"unpack2x16float"};
 
-struct float_type
-{
-    cc::string_view name;
-    custom_writer sign;
-};
 
 struct integer_type
 {
@@ -568,12 +563,7 @@ void add(registry& r,
 
 void sgl::builtins::register_math(registry& r)
 {
-    float_type const floats[] = {
-        {.name = "float", .sign = write_sign<1>},
-        {.name = "float2", .sign = write_sign<2>},
-        {.name = "float3", .sign = write_sign<3>},
-        {.name = "float4", .sign = write_sign<4>},
-    };
+    cc::string_view const floats[] = {"float", "float2", "float3", "float4", "half", "half2", "half3", "half4"};
 
     struct unary_function
     {
@@ -607,42 +597,53 @@ void sgl::builtins::register_math(registry& r)
         {.name = "fract", .evaluate = unary<fract_of>, .write = {.hlsl = "frac"}},
     };
 
-    r.add_comment("// the maths of float and its plain vectors, componentwise; `round` is ties to even everywhere,\n"
-                  "// and a value a target leaves indeterminate - pow of a negative base, asin of 2 - has no "
-                  "behaviour");
-    for (auto const& t : floats)
+    r.add_comment("// the maths of float, half and their plain vectors, componentwise; `round` is ties to even\n"
+                  "// everywhere, and a value a target leaves indeterminate - pow of a negative base, asin of 2 - has "
+                  "no behaviour");
+    for (auto const t : floats)
     {
         for (auto const& f : unaries)
-            add(r, cc::format("@pure fun {}(x: {}) -> {}", f.name, t.name, t.name), f.evaluate, f.write,
-                f.undefined_when);
-        add(r, cc::format("@pure fun sign(x: {}) -> {}", t.name, t.name), unary<sign_of>,
-            {.kind = spelling_kind::custom, .custom = t.sign, .hlsl_names = k_sign, .wgsl_names = k_sign, .msl_names = k_sign},
+            add(r, cc::format("@pure fun {}(x: {}) -> {}", f.name, t, t), f.evaluate, f.write, f.undefined_when);
+        add(r, cc::format("@pure fun sign(x: {}) -> {}", t, t), unary<sign_of>,
+            {.kind = spelling_kind::custom,
+             .custom = write_sign,
+             .data = u32(index_of(impl::registered_type(r, t))),
+             .hlsl_names = k_sign,
+             .wgsl_names = k_sign,
+             .msl_names = k_sign},
             nullptr, false, "/// -1, 0 or 1, by the sign of each component.");
-        add(r, cc::format("@pure fun atan2(y: {0}, x: {0}) -> {0}", t.name), binary<soft_atan2>, {}, atan2_undefined,
-            false, "/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.");
-        add(r, cc::format("@pure fun pow(x: {0}, y: {0}) -> {0}", t.name), binary<pow_of>, {}, pow_undefined);
-        add(r, cc::format("@pure fun step(edge: {0}, x: {0}) -> {0}", t.name), binary<step_of>, {}, nullptr, false,
+        add(r, cc::format("@pure fun atan2(y: {0}, x: {0}) -> {0}", t), binary<soft_atan2>, {}, atan2_undefined, false,
+            "/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.");
+        add(r, cc::format("@pure fun pow(x: {0}, y: {0}) -> {0}", t), binary<pow_of>, {}, pow_undefined);
+        add(r, cc::format("@pure fun step(edge: {0}, x: {0}) -> {0}", t), binary<step_of>, {}, nullptr, false,
             "/// 0 where `x` is below `edge`, and 1 from it on.");
-        add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t.name), smoothstep, {},
+        add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep, {},
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
     }
 
     r.add_comment("// derivatives across the 2x2 quad of pixels, which only a pixel stage has;\n"
-                  "// a run of one invocation has no neighbours, and reads 0");
-    for (auto const& t : floats)
+                  "// a run of one invocation has no neighbours, and reads 0; WGSL takes the derivative of no half");
+    for (auto const t : floats)
     {
-        add(r, cc::format("@pure @stages(.pixel) fun ddx(x: {0}) -> {0}", t.name), no_derivative,
+        if (t.starts_with("half"))
+            continue;
+        add(r, cc::format("@pure @stages(.pixel) fun ddx(x: {0}) -> {0}", t), no_derivative,
             {.wgsl = "dpdx", .msl = "dfdx"}, nullptr, true);
-        add(r, cc::format("@pure @stages(.pixel) fun ddy(x: {0}) -> {0}", t.name), no_derivative,
+        add(r, cc::format("@pure @stages(.pixel) fun ddy(x: {0}) -> {0}", t), no_derivative,
             {.wgsl = "dpdy", .msl = "dfdy"}, nullptr, true);
+        add(r, cc::format("@pure @stages(.pixel) fun fwidth(x: {0}) -> {0}", t), no_derivative, {}, nullptr, true,
+            "/// `abs(ddx(x)) + abs(ddy(x))`: how much `x` changes from one pixel to the next.");
     }
 
     r.add_comment("// geometry");
     add(r, "@pure fun cross(a: vec3, b: vec3) -> vec3", cross, {});
     add(r, "@pure fun cross(a: float3, b: float3) -> float3", cross, {});
+    add(r, "@pure fun cross(a: half3, b: half3) -> half3", cross, {});
     add(r, "@pure fun distance(a: pos3, b: pos3) -> float", distance, {});
     for (auto const t : {cc::string_view("float2"), cc::string_view("float3"), cc::string_view("float4")})
         add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> float", t), distance, {});
+    for (auto const t : {cc::string_view("half2"), cc::string_view("half3"), cc::string_view("half4")})
+        add(r, cc::format("@pure fun distance(a: {0}, b: {0}) -> half", t), distance, {});
     add(r, "@pure fun reflect(v: vec3, n: vec3) -> vec3", reflect, {}, nullptr, false,
         "/// `v` mirrored at the plane whose unit normal is `n`.");
     add(r, "@pure fun refract(v: vec3, n: vec3, eta: float) -> vec3", refract, {}, nullptr, false,

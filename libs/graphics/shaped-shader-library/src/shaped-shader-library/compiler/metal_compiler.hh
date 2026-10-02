@@ -17,5 +17,7 @@ namespace slib
 /// A compile is an `ssc::msl::shader_cache` node: it runs on the scheduler rather than inside `acquire`, and it is kept
 /// in memory and in the blob cache like DXC's.
 /// Exists only on Apple targets, which is what `SLIB_HAS_METAL` says.
+///
+/// A metallib is compiled at its description's `metal_language_version`, which SGL's edge sets to what its text needs.
 [[nodiscard]] std::unique_ptr<shader_compiler> create_metal_compiler();
 } // namespace slib

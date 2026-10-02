@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -201,21 +202,68 @@ cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute cons
     for (auto i = isize(0); i < arguments.size(); ++i)
     {
         auto const& argument = arguments[i];
-        auto const text
-            = ast::is_valid(argument.value) ? text_of(file, span_of(file, argument.value)) : cc::string_view();
-        auto const value = ast::is_valid(argument.value) && ast_of(file).at(argument.value).node.is<ast::literal>()
-                                && classify_number(text) == number_class::plain_integer
-                             ? parse_plain_integer(text)
-                             : cc::optional<i32>();
+        // CHK-370: an int literal, or the name of an int const
+        auto const value = ast::is_valid(argument.value) && !argument.is_splat ? constant_count(file, argument.value)
+                                                                               : cc::optional<i32>();
         if (!argument.name.empty() || argument.is_splat || !value.has_value() || value.value() < 1)
         {
             report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-                   "a workgroup size is a positive int literal");
+                   "a workgroup size is a positive int literal, or the name of a positive int const");
             return {1, 1, 1};
         }
         result[i] = value.value();
     }
     return result;
+}
+
+/// `@preferred_subgroup_size(64)`: a power of two from 4 to 128, on a compute entry point alone.
+sgl::i32 checker::preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute)
+{
+    if (a == nullptr)
+        return 0;
+    auto const arguments = ast_of(file).at(a->arguments);
+    // CHK-371: an int literal, or the name of an int const
+    auto const value = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                            && ast::is_valid(arguments[0].value)
+                         ? constant_count(file, arguments[0].value)
+                         : cc::optional<i32>();
+    auto const n = value.has_value() ? value.value() : 0;
+    if (!is_compute)
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "@preferred_subgroup_size asks for the subgroups of a compute entry point, and stands on one alone");
+    else if (n < 4 || n > 128 || (n & (n - 1)) != 0)
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "a preferred subgroup size is a power of two from 4 to 128, written as an int literal or the name of "
+               "an int const");
+    else
+        return n;
+    return 0;
+}
+
+/// CHK-369: `@layout(.hlsl)` or `@layout(.cpp)`, on a binding whose block a host fills.
+sgl::check::block_layout checker::layout_of(i32 file, ast::attribute const* a, bool is_workgroup)
+{
+    if (a == nullptr)
+        return block_layout::unpromised;
+    auto const arguments = ast_of(file).at(a->arguments);
+    auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                                 && ast::is_valid(arguments[0].value)
+                              ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
+                              : nullptr;
+    auto const rule = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+    if (rule != "hlsl" && rule != "cpp")
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "@layout takes the rule a constant block is placed by: `@layout(.hlsl)` or `@layout(.cpp)`");
+        return block_layout::unpromised;
+    }
+    if (is_workgroup)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "@layout promises a constant block's layout to the host, and @workgroup memory has none a host sees");
+        return block_layout::unpromised;
+    }
+    return rule == "hlsl" ? block_layout::hlsl : block_layout::cpp;
 }
 
 /// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
@@ -429,7 +477,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     return result;
 }
 
-type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope)
+type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope, bool allows_resource)
 {
     auto const type = resolve_type(file, expr, scope);
     if (type == checked_module::error_type)
@@ -467,6 +515,8 @@ type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope 
         unsupported(file, span_of(file, expr), "an array of resources as a value; a binding array is a binding member");
         return checked_module::error_type;
     }
+    if (allows_resource && out.at(type).kind != type_kind::buffer)
+        return type;
     unsupported(file, span_of(file, expr),
                 out.at(type).kind == type_kind::buffer
                     ? "a buffer as a value; a buffer is a binding member, read as `values[i]`"
@@ -487,6 +537,18 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
     }
     report(diagnostic_kind::unknown_name, file, where, cc::format("{}, which the prelude must declare @builtin", name));
     return checked_module::error_type;
+}
+
+cc::string checker::vector_name_of(type_id element, isize count) const
+{
+    // CHK-384: the element types that have a vector family, each named after it and its width
+    cc::string_view const families[] = {"float", "int", "uint", "bool", "half", "short", "ushort"};
+    if (element == checked_module::error_type || out.builtin_type_of(element) == nullptr)
+        return {};
+    for (auto const family : families)
+        if (out.name_of(element) == family)
+            return cc::format("{}{}", family, count);
+    return {};
 }
 
 // ---- structs and bindings -------------------------------------------------------------------------------------------
@@ -569,7 +631,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
-        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler"};
+        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
@@ -700,6 +762,66 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             report(diagnostic_kind::wrong_kind_of_name, file, non_filtering->name,
                    "only a `sampler` member can be @non_filtering");
 
+        // CHK-368 and CHK-372: what a written resource is besides its type, said of the element of a binding array
+        auto const* const coherent = is_struct ? nullptr : find_attribute(file, f.attributes, "coherent");
+        auto const* const atomic = is_struct ? nullptr : find_attribute(file, f.attributes, "atomic");
+        auto is_coherent = false;
+        auto innermost = type;
+        while (innermost != checked_module::error_type && out.at(innermost).kind == type_kind::array)
+            innermost = out.at(innermost).element;
+        if (coherent != nullptr && type != checked_module::error_type)
+        {
+            auto const& r = out.at(innermost);
+            if ((r.kind == type_kind::buffer && r.is_mut)
+                || (r.kind == type_kind::image && r.access == access_mode::read_write))
+            {
+                judge_feature(file, coherent->name, "a @coherent member", feature::device_coherence);
+                is_coherent = true;
+            }
+            else
+                report(diagnostic_kind::wrong_kind_of_name, file, coherent->name,
+                       "only a `mut buffer` or a `mut` image is written by one workgroup for another, so only one can "
+                       "be @coherent");
+        }
+        if (atomic != nullptr && type != checked_module::error_type)
+        {
+            auto const& r = out.at(innermost);
+            auto const format
+                = r.kind == type_kind::image && r.format >= 0 ? k_image_formats[r.format].name : cc::string_view();
+            if (r.kind != type_kind::image || r.access != access_mode::read_write
+                || (format != "r32_uint" && format != "r32_sint"))
+                report(diagnostic_kind::wrong_kind_of_name, file, atomic->name,
+                       "only a `mut` image of .r32_uint or .r32_sint has atomic texels, so only one can be @atomic");
+            else
+            {
+                judge_feature(file, atomic->name, "an @atomic image", feature::image_atomics);
+                auto texels = r;
+                texels.is_atomic = true;
+                auto const atomic_image = resource_type(cc::move(texels));
+                type = innermost == type ? atomic_image : array_type(atomic_image, out.at(type).count);
+            }
+        }
+
+        // CHK-382: a binding member holding a 16-bit value is a form some device lacks, as CHK-201 judges one
+        if (!is_struct && type != checked_module::error_type)
+        {
+            auto const needs = features_of_type(type);
+            for (auto i = isize(0); i < k_feature_count; ++i)
+                if (needs.has(feature(i)))
+                    judge_feature(file, span_of(file, f.type), cc::format("a value of {}", out.name_of(type)),
+                                  feature(i));
+            // CHK-381: a buffer strides by whole 4-byte words, which an element of 16-bit values may not fill
+            auto const& buffer = out.at(innermost);
+            if (buffer.kind == type_kind::buffer && storage_size_of(buffer.element) % 4 != 0)
+            {
+                unsupported(file, span_of(file, f.type),
+                            cc::format("a buffer of {}, whose element takes {} bytes, which is no whole number of "
+                                       "4-byte words",
+                                       out.name_of(buffer.element), storage_size_of(buffer.element)));
+                type = checked_module::error_type;
+            }
+        }
+
         collected.push_back({
             .name = name,
             .type = type,
@@ -717,6 +839,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .stream = name_argument_of(file, find_attribute(file, f.attributes, "stream")),
             .is_unfilterable = unfilterable != nullptr,
             .is_non_filtering = non_filtering != nullptr,
+            .is_coherent = is_coherent,
         });
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(
@@ -790,7 +913,7 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal"};
+    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding", "internal", "swizzle"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -837,6 +960,34 @@ void checker::compile_struct(symbol_id id)
                        cc::format("{} is a ray type, whose payload is a struct, and this is {}", m.name,
                                   out.name_of(m.type)));
 
+    // CHK-384: a swizzle names fields by their letters and is a vector of their one element type
+    auto has_swizzles = false;
+    if (auto const* const swizzled = find_attribute(file, d.attributes, "swizzle"))
+    {
+        auto const fields = out.at(members);
+        auto why = cc::string();
+        if (fields.size() < 2 || fields.size() > 4)
+            why = cc::format("a swizzle reads two to four fields, and {} has {}", out.at(id).name, fields.size());
+        for (auto const& f : fields)
+        {
+            if (!why.empty() || f.type == checked_module::error_type || fields[0].type == checked_module::error_type)
+                continue;
+            if (f.name.size() != 1)
+                why = cc::format("{} is no one-letter field, and a swizzle names its fields by their letters", f.name);
+            else if (f.type != fields[0].type)
+                why = cc::format("{} is {} and {} is {}, and a swizzle's fields are of one type", f.name,
+                                 out.name_of(f.type), fields[0].name, out.name_of(fields[0].type));
+            else if (vector_name_of(f.type, 2).empty())
+                why = cc::format("{} is {}, which has no vectors", f.name, out.name_of(f.type));
+        }
+        if (!why.empty())
+            report(diagnostic_kind::invalid_attribute_arguments, file, swizzled->name, why);
+        auto is_typed = !fields.empty();
+        for (auto const& f : fields)
+            is_typed = is_typed && f.type != checked_module::error_type;
+        has_swizzles = why.empty() && is_typed;
+    }
+
     // The type exists only now, so a field that needs its own struct found a cycle and not a type.
     auto const type = type_id(out.types.size());
     out.types.push_back({
@@ -847,6 +998,7 @@ void checker::compile_struct(symbol_id id)
         // A struct has no compute edge: a compute entry point has no stage struct at all.
         .edge = stage_of(is_vertex, is_pixel, false, false, false, false),
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
+        .has_swizzles = has_swizzles,
         .element = parameter,
         .is_template = is_valid(parameter),
     });
@@ -982,7 +1134,7 @@ void checker::compile_const(symbol_id id)
     auto const& c = d.node.as<ast::const_decl>();
     constexpr auto error_type = checked_module::error_type;
 
-    cc::string_view const known[] = {"shadowable"};
+    cc::string_view const known[] = {"shadowable", "option"};
     judge_attributes(file, d.attributes, known, "a const");
 
     auto const fail = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
@@ -1028,6 +1180,37 @@ void checker::compile_const(symbol_id id)
             return fail();
         }
     }
+    else if (auto const* const dot = value.node.try_as<ast::leading_dot>())
+    {
+        // `const f: pixel_format = .rgba16_float`: the written type is what the leading dot is resolved against
+        auto const declared = ast::is_valid(c.type) ? resolve_value_type(file, c.type) : error_type;
+        if (declared == error_type)
+        {
+            // CHK-152: nothing else says which enum the case is of
+            if (!ast::is_valid(c.type))
+                unsupported(file, where, "a leading dot without the const's type: `const f: e = .a`");
+            return fail();
+        }
+        if (out.at(declared).kind != type_kind::enumeration)
+        {
+            report(diagnostic_kind::unknown_member, file, where,
+                   cc::format("{} is no enum, so it has no case to name with a leading dot", out.name_of(declared)));
+            return fail();
+        }
+        auto const name = text_of(file, dot->name);
+        auto const cases = out.at(out.at(declared).cases);
+        for (auto i = isize(0); i < cases.size(); ++i)
+            if (cases[i].name == name)
+                info = {.symbol = id, .type = declared, .kind = constant_kind::enum_case, .case_index = i32(i)};
+        if (info.kind != constant_kind::enum_case)
+        {
+            report(diagnostic_kind::unknown_member, file, where,
+                   cc::format("the enum {} has no case {}", out.name_of(declared), name));
+            return fail();
+        }
+        set_target(file, c.value,
+                   {.kind = target_kind::enum_case, .symbol = out.at(declared).symbol, .index = info.case_index});
+    }
     else if (value.node.is<ast::member>() || value.node.is<ast::name>())
     {
         auto scope = function_scope{.file = file};
@@ -1072,6 +1255,24 @@ void checker::compile_const(symbol_id id)
         }
     }
 
+    // CHK-353: an option is a bool, an int or an enum case, and the compile may give it another value of its type
+    if (find_attribute(file, d.attributes, "option") != nullptr)
+    {
+        if (info.kind == constant_kind::real)
+        {
+            unsupported(file, c.name, "an option of float; an option is a bool, an int or an enum case");
+            return fail();
+        }
+        // the host would set the named option and not see this one follow it
+        if (is_valid(info.option))
+        {
+            unsupported(file, where, "an option whose value names another option");
+            return fail();
+        }
+        info.option = id;
+        apply_option_value(id, info);
+    }
+
     set_type(file, c.value, info.type);
     out.symbols[index_of(id)].type = info.type;
     out.symbols[index_of(id)].info = i32(out.constants.size());
@@ -1085,9 +1286,10 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding"};
+    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "layout"};
     judge_attributes(file, d.attributes, known, "a binding");
     auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
+    auto const layout = layout_of(file, find_attribute(file, d.attributes, "layout"), is_workgroup);
 
     if (ast::is_valid(b.composition))
     {
@@ -1141,12 +1343,20 @@ void checker::compile_binding(symbol_id id)
             if (auto const* const smp = ast_of(file).at(member).node.try_as<ast::sampler_decl>())
                 report(diagnostic_kind::wrong_kind_of_name, file, smp->name,
                        "an @inline binding holds constants only, and a sampler is none");
+    // CHK-387: an `@inline` binding is a vulkan push constant, where a 16-bit member needs a bit of its own
+    if (is_inline)
+        for (auto const& m : out.at(members))
+            if (auto const path = sixteen_bit_path(m.type); !path.empty())
+                unsupported(
+                    file, span_of(file, ast_of(file).at(m.field).type),
+                    cc::format("a 16-bit value in an @inline binding, in {}.{}{}", out.at(id).name, m.name, path));
     out.symbols[index_of(id)].info = i32(out.bindings.size());
     out.bindings.push_back({
         .symbol = id,
         .is_inline = is_inline,
         .is_workgroup = is_workgroup,
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
+        .layout = layout,
         .members = members,
         .declared = declared,
         .required = declared | used,
@@ -1257,6 +1467,7 @@ void checker::compile_function(symbol_id id)
                                      "vertex",
                                      "pixel",
                                      "compute",
+                                     "preferred_subgroup_size",
                                      "geometry",
                                      "tessellation_control",
                                      "tessellation_evaluation",
@@ -1356,8 +1567,20 @@ void checker::compile_function(symbol_id id)
         // CHK-315: `p: mut T` over a value type is the caller's place; over a resource or a stream `mut` is its access
         auto is_mut_parameter = false;
         allows_function_type = !is_builtin && geometry == nullptr;
+        // CHK-366: a function of the program takes a texture, an image or a sampler, which inlining substitutes
+        auto const is_entry = is_raster_entry || ray_stage != stage::none || geometry != nullptr || control != nullptr
+                           || is_evaluation || find_attribute(file, d.attributes, "compute") != nullptr;
+        auto const takes_resources = !is_builtin && !is_entry && !is_prelude_file(file);
+        // `mut image_2d[…]` is the access of an image, and no place
+        auto const names_image = [&](ast::expr_id t)
+        {
+            auto const* const i = ast.at(t).node.try_as<ast::index>();
+            auto const* const n = i != nullptr ? ast.at(i->object).node.try_as<ast::name>() : nullptr;
+            return n != nullptr && text_of(file, n->where).starts_with("image_");
+        };
         if (auto const* const q = ast::is_valid(p.type) ? ast.at(p.type).node.try_as<ast::qualified_type>() : nullptr;
-            q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr)
+            q != nullptr && q->access == ast::type_access::read_write && !is_builtin && geometry == nullptr
+            && !(takes_resources && names_image(q->type)))
         {
             is_mut_parameter = true;
             // a function is no place, so a function type is not the whole type here (CHK-317)
@@ -1384,9 +1607,10 @@ void checker::compile_function(symbol_id id)
         // CHK-302: a geometry stage's stream is a parameter of its entry point, and of no other function
         else if (ast::is_valid(p.type))
             // CHK-324: a function of the prelude may take a resource, which inlining substitutes as its argument
-            type = is_builtin                                   ? resolve_pattern_type(file, p.type)
-                 : geometry != nullptr || is_prelude_file(file) ? resolve_type(file, p.type)
-                                                                : resolve_value_type(file, p.type);
+            type = is_builtin ? resolve_pattern_type(file, p.type)
+                 : geometry != nullptr || is_prelude_file(file)
+                     ? resolve_type(file, p.type)
+                     : resolve_value_type(file, p.type, nullptr, takes_resources);
         else if (is_receiver)
             type = receiver;
         else
@@ -1461,6 +1685,8 @@ void checker::compile_function(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     auto const* const compute = find_attribute(file, d.attributes, "compute");
     auto const workgroup = workgroup_of(file, compute);
+    auto const preferred_subgroup_size = preferred_subgroup_size_of(
+        file, find_attribute(file, d.attributes, "preferred_subgroup_size"), compute != nullptr);
     auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : 0;
     auto const tessellation = control != nullptr ? tessellation_of(file, *control) : tessellation_mode();
 
@@ -1474,6 +1700,7 @@ void checker::compile_function(symbol_id id)
                                                 : stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr,
                                                            control != nullptr, is_evaluation),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
+        .preferred_subgroup_size = preferred_subgroup_size,
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
         .max_vertices = max_vertices,
         .partitioning = tessellation.partitioning,
@@ -1639,8 +1866,12 @@ void checker::judge_entry_point(symbol_id id)
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
     for (auto const& parameter : parameters)
         if (parameter.input == stage_input::none)
+        {
             judge_edge_arrays(file, where, parameter.type);
+            judge_edge_16_bit(file, where, parameter.type);
+        }
     judge_edge_arrays(file, where, info.result);
+    judge_edge_16_bit(file, where, info.result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
     if (info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control
@@ -1675,7 +1906,17 @@ void checker::judge_entry_point(symbol_id id)
         }
         auto const& input = info_of(parameter.input);
         if (input.in_stage != info.entry_stage && (input.also_in & stage_bit(info.entry_stage)) == 0)
-            invalid(cc::format("@{} is an input of the {} stage", input.name, stage_name(input.in_stage)));
+        {
+            auto stages = cc::vector<stage>();
+            stages.push_back(input.in_stage);
+            for (auto k = u8(stage::vertex); k <= u8(stage::callable); ++k)
+                if (stage(k) != input.in_stage && (input.also_in & stage_bit(stage(k))) != 0)
+                    stages.push_back(stage(k));
+            auto listed = cc::string(stage_name(stages[0]));
+            for (auto i = isize(1); i < stages.size(); ++i)
+                listed.appendf("{}{}", i + 1 == stages.size() ? " and " : ", ", stage_name(stages[i]));
+            invalid(cc::format("@{} is an input of the {} stage{}", input.name, listed, stages.size() > 1 ? "s" : ""));
+        }
         else if (out.name_of(parameter.type) != input.type)
             invalid(cc::format("a @{} parameter is an {}", input.name, input.type));
         for (auto const other : seen)
@@ -1817,6 +2058,21 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
          .also_in = u16(stage_bit(stage::miss) | stage_bit(stage::closest_hit) | stage_bit(stage::any_hit)
                         | stage_bit(stage::intersection) | stage_bit(stage::callable)),
          .type = "int3"},
+        // CHK-272: a subgroup is a feature in every stage that has one
+        {.input = stage_input::subgroup_size,
+         .name = "subgroup_size",
+         .in_stage = stage::pixel,
+         .also_in = u16(stage_bit(stage::compute)),
+         .type = "int",
+         .feature = i32(feature::subgroups),
+         .needs_feature_everywhere = true},
+        {.input = stage_input::subgroup_invocation_id,
+         .name = "subgroup_invocation_id",
+         .in_stage = stage::pixel,
+         .also_in = u16(stage_bit(stage::compute)),
+         .type = "int",
+         .feature = i32(feature::subgroups),
+         .needs_feature_everywhere = true},
     };
     return k_inputs;
 }

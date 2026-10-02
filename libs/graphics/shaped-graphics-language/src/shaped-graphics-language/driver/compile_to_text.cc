@@ -122,6 +122,7 @@ cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
                                       .color_targets = emitted.color_targets,
                                       .target_struct = cc::move(emitted.target_struct),
                                       .features = e.features,
+                                      .options = driver::impl::option_names_of(m, e),
                                       .footprint = check::footprint_of(m, legal),
                                       .layouts = cc::move(emitted.layouts)};
     // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
@@ -130,23 +131,31 @@ cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
             result.target_struct = cc::format("{}.{}", module, result.target_struct);
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
+    result.preferred_subgroup_size = e.preferred_subgroup_size;
     return result;
 }
 } // namespace
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
 {
-    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library);
+    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
     if (!front.errors.empty())
         return cc::error(front.errors);
     auto const& m = front.module;
 
     if (request.run_tests)
     {
+        // CHK-354: a test runs with every option at its default, so the compile's values need a check of their own
+        auto const defaults = request.options.empty()
+                                ? cc::optional<driver::impl::front_end>()
+                                : cc::optional<driver::impl::front_end>(driver::impl::run_front_end(
+                                      request.source, request.source_name, request.library));
+        auto const& tested = defaults.has_value() ? defaults.value() : front;
         auto failed = cc::string();
-        for (auto const& r : test::run_tests(m, driver::impl::module_files_of(front), {.file = front.program_file()}))
+        for (auto const& r :
+             test::run_tests(tested.module, driver::impl::module_files_of(tested), {.file = tested.program_file()}))
             if (!r.is_passed())
-                failed += driver::impl::format_located(front, test::diagnostic_of(m, r));
+                failed += driver::impl::format_located(tested, test::diagnostic_of(tested.module, r));
         if (!failed.empty())
             return cc::error(cc::move(failed));
     }

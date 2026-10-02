@@ -8,6 +8,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing/raytracing_shader_table.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh> // slib::shader_option
 #include <shaped-shader-library/fwd.hh>
 
 /// A ray-tracing pipeline an SGL `@raytracing pipeline` declaration states, as slib describes it.
@@ -39,6 +40,8 @@ struct slib::raytracing_host_parts
 {
     cc::vector<sg::hit_shader> hit_groups;
     cc::vector<sg::compiled_shader> callables;
+    /// The values of the module's options, handed to every shader, each of which keys on those it reaches.
+    cc::vector<shader_option> options;
 };
 
 /// Everything a generated ray-tracing pipeline symbol knows about its declaration.

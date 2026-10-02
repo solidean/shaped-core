@@ -29,7 +29,7 @@ MOJIBAKE_MARKERS = ("â€", "Ã¢", "Ãƒ", "Â ")
 def mojibake_warnings(entry) -> list[str]:
     """One warning per line that looks like UTF-8 read as cp1252."""
     out: list[str] = []
-    for number, line in enumerate(entry.text.splitlines(), start=1):
+    for number, line in enumerate(entry.text.split("\n"), start=1):
         for marker in MOJIBAKE_MARKERS:
             if marker in line:
                 out.append(
@@ -115,6 +115,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     for entry in entries:
         warnings.extend(mojibake_warnings(entry))
+        problems.extend(f"{entry.slug}:{line}: {problem}" for line, problem in review.empty_references(entry))
         answers = ctx.answers(paths, entry)
         open_asks = {b.name for b in entry.asks if (answers.get(b.name) is None or answers.get(b.name).tentative)}
         if not review.is_orientation(entry.group):

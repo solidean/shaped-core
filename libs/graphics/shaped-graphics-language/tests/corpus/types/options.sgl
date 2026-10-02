@@ -1,0 +1,38 @@
+// an option is a const the host sets for each compile, and its written value is its default (CHK-353)
+
+@option const taps = 4
+@option const sharpen = false
+@option const output_format: pixel_format = .rgba8_unorm
+@option const mode_of_blur: blur_mode = .box
+
+enum blur_mode:
+    box
+    tent
+
+// a test runs with every option at its default
+test taps == 4 and mode_of_blur == blur_mode.box and not sharpen
+
+// an option is read like any const: it sizes an array, and a case names the case it holds
+fun weights() -> float[taps] => float[taps].filled(1.0 / (taps as float))
+
+fun spread(m: blur_mode) -> float:
+    return case m:
+        .box => 1.0
+        .tent => 2.0
+
+test weights().length == 4 and weights()[3] == 0.25
+test spread(mode_of_blur) == 1.0
+
+// an option sizes a workgroup and formats an image, and a branch on it leaves the text with what only that branch used
+binding sources:
+    plain: buffer[float]
+    sharpened: buffer[float]
+
+binding outputs:
+    image: out image_2d[output_format]
+
+@expect(footprint = "sources.plain: read, outputs.image: write")
+@compute(taps, taps) fun blur(@thread_id id: int3){sources, outputs}:
+    let i = id.x + id.y * taps
+    let v = if sharpen => sources.sharpened[i] else sources.plain[i] * spread(mode_of_blur)
+    outputs.image.store(id.xy, float4(v, v, v, 1.0))

@@ -113,6 +113,8 @@ struct planned_resource
     /// The element of a buffer; `none` for every other kind.
     check::type_id element = check::type_id::none;
     bool is_mut = false;
+    /// `@coherent`: HLSL declares it `globallycoherent`, and MSL `coherent(device)` (EMIT-150).
+    bool is_coherent = false;
     i32 group = 0;
     /// The first of the `count` consecutive slots it takes: a binding array takes one per element (CHK-299).
     i32 slot = 0;
@@ -256,6 +258,8 @@ struct stage_input_spelling
     cc::string_view wgsl_builtin;
     cc::string_view msl_type;
     cc::string_view msl_attribute;
+    /// What HLSL reads instead of a parameter, for an input it has no semantic for: `WaveGetLaneCount()` (EMIT-147).
+    cc::string_view hlsl_read = {};
 };
 [[nodiscard]] stage_input_spelling const& spelling_of(check::stage_input input);
 
@@ -279,7 +283,7 @@ void validate_edge_struct(check::checked_module const& m, check::type_id type, s
 /// What only a list can get wrong, an `@inline` binding that does not stand last, is `validate`'s.
 void validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors);
 
-/// Where the members of a constant block land, by HLSL's constant-buffer packing on every target (layout.hh).
+/// Where the members of a constant block land, by the rule its binding's `@layout` names (layout.hh).
 struct block_placement
 {
     /// Parallel to the members.
@@ -291,7 +295,9 @@ struct block_placement
 };
 
 /// `members` must belong to a binding that passed `validate_binding`.
-[[nodiscard]] block_placement place_block(check::checked_module const& m, cc::span<check::member_info const> members);
+[[nodiscard]] block_placement place_block(check::checked_module const& m,
+                                          cc::span<check::member_info const> members,
+                                          address_space space);
 
 /// Every constant block and buffer element of `p`, as its target's text declares it.
 [[nodiscard]] cc::vector<emitted_layout> layouts_of(plan const& p);

@@ -209,11 +209,18 @@ public:
         case sg::feature::sample_rate_shading:
         case sg::feature::wireframe_fill:
         case sg::feature::depth32_float_stencil8:
+        case sg::feature::device_coherence: // `globallycoherent` is core HLSL
+        case sg::feature::image_atomics:    // typed UAV atomics on r32 integer formats are required
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
         case sg::feature::unaligned_block_compression:
             return _unaligned_block_textures;
+        case sg::feature::shader_f16:
+        case sg::feature::shader_int16:
+            return _native_16bit_shader_ops;
+        case sg::feature::subgroups:
+            return _wave_ops;
         }
         return false;
     }
@@ -620,6 +627,8 @@ public:
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
     bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
+    bool _native_16bit_shader_ops = false;  // D3D12_OPTIONS4, cached at creation
+    bool _wave_ops = false;                 // D3D12_OPTIONS1, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.

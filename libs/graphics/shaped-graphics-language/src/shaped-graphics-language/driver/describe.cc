@@ -1,5 +1,6 @@
 #include "describe.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/check/structural_hash.hh>
@@ -147,8 +148,7 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
 /// module's (CHK-348).
 cc::string host_name_of(check::checked_module const& m, check::symbol_id id)
 {
-    auto const module = m.foreign_module_of(id);
-    return module.empty() ? cc::string(m.at(id).name) : cc::format("{}.{}", module, m.at(id).name);
+    return m.qualified_name_of(id);
 }
 
 /// `host_name_of` the type's declaration, for a type a module declares; its spelling for any other.
@@ -194,6 +194,42 @@ cc::vector<cc::string> feature_names(check::feature_set features)
     return result;
 }
 
+/// The names a compile sets `options` by, which holds each once, in declaration order (CHK-354).
+cc::vector<cc::string> option_names(check::checked_module const& m, cc::vector<check::symbol_id> options)
+{
+    cc::sort(options);
+    auto result = cc::vector<cc::string>();
+    for (auto const id : options)
+        result.push_back(host_name_of(m, id));
+    return result;
+}
+
+/// Adds the options the entry point of `function` reaches to `into`, each once.
+void add_options_of(check::checked_module const& m, check::symbol_id function, cc::vector<check::symbol_id>& into)
+{
+    for (auto const& e : m.entry_points)
+        if (e.function == function)
+            for (auto const id : e.options)
+            {
+                auto is_known = false;
+                for (auto const known : into)
+                    is_known = is_known || known == id;
+                if (!is_known)
+                    into.push_back(id);
+            }
+}
+
+/// An option the file sets, by the name it sets it by, spelled with the value the module was checked with.
+described_option describe_option(check::checked_module const& m, check::symbol_id id)
+{
+    auto const& s = m.at(id);
+    auto const& c = m.constants[s.info];
+    auto value = c.kind == check::constant_kind::integer ? cc::format("{}", c.integer)
+               : m.name_of(c.type) == "bool" ? cc::string(m.at(m.at(c.type).cases)[c.case_index].name)
+                                             : cc::format(".{}", m.at(m.at(c.type).cases)[c.case_index].name);
+    return {.name = host_name_of(m, id), .type = cc::string(m.name_of(c.type)), .value = cc::move(value)};
+}
+
 /// `legal` is `e` legalized, which is the tree the footprint is read from.
 described_entry_point describe_entry_point(check::checked_module const& m,
                                            check::flat_entry_point const& e,
@@ -202,10 +238,12 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     auto result = described_entry_point{.name = e.name, .stage = e.entry_stage};
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
+    result.preferred_subgroup_size = e.preferred_subgroup_size;
     for (auto const id : e.bindings)
         if (!m.bindings[m.at(id).info].is_workgroup)
             result.bindings.push_back(host_name_of(m, id));
     result.features = feature_names(e.features);
+    result.options = option_names(m, e.options);
     result.footprint = check::footprint_of(m, legal);
     for (auto const id : driver::impl::file_samplers_of(legal))
         result.samplers.push_back(m.at(id).name);
@@ -220,8 +258,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
 /// A binding as a frozen line names it: by its name and its shape.
 cc::string bound_text(check::checked_module const& m, check::symbol_id b)
 {
-    return cc::format("{}@{}", m.at(b).name,
-                      check::hex_of(check::structural_hash(m, m.at(m.bindings[m.at(b).info].members))));
+    return cc::format("{}@{}", m.at(b).name, check::hex_of(check::structural_hash(m, m.bindings[m.at(b).info])));
 }
 
 /// A binding list as a frozen line names it.
@@ -309,11 +346,16 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
                                                 .max_recursion_depth = p.max_recursion_depth,
                                                 .inline_constants = name_or_empty(m, p.inline_constants)};
     auto features = m.functions[m.at(p.raygen).info].features;
+    auto options = cc::vector<check::symbol_id>();
+    add_options_of(m, p.raygen, options);
     for (auto const miss : m.at(p.misses))
     {
         result.misses.push_back(name_or_empty(m, miss));
         if (check::is_valid(miss))
+        {
             features |= m.functions[m.at(miss).info].features;
+            add_options_of(m, miss, options);
+        }
     }
     for (auto const group : m.at(p.hit_groups))
     {
@@ -321,9 +363,15 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
         result.hit_groups.push_back(m.at(group).name);
         for (auto const entry : m.at(g.records))
             if (check::is_valid(entry))
+            {
                 features |= m.functions[m.at(entry).info].features;
+                add_options_of(m, entry, options);
+            }
         if (check::is_valid(g.intersection))
+        {
             features |= m.functions[m.at(g.intersection).info].features;
+            add_options_of(m, g.intersection, options);
+        }
     }
     for (auto const& ray : m.at(m.at(m.at(p.ray_set).type).members))
         result.max_payload_size = cc::max(result.max_payload_size, m.ray_data_bytes(ray.type));
@@ -353,6 +401,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
         {
             result.callables.push_back(m.at(entry).name);
             features |= m.functions[m.at(entry).info].features;
+            add_options_of(m, entry, options);
         }
         result.has_host_callables = result.has_host_callables || t->has_host_callables;
         // CHK-343: only the module's last table takes the host's
@@ -363,6 +412,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
         }
     }
     result.features = feature_names(features);
+    result.options = option_names(m, cc::move(options));
 
     // One layout serves every shader, so it carries what any of them reaches, in index order.
     auto is_reached = cc::vector<u8>::create_filled(m.symbols.size(), 0);
@@ -445,6 +495,7 @@ described_pipeline describe_pipeline(check::checked_module const& m,
 {
     auto result = described_pipeline{.name = m.at(p.symbol).name};
     auto features = check::feature_set();
+    auto options = cc::vector<check::symbol_id>();
     struct named_stage
     {
         check::symbol_id entry;
@@ -460,6 +511,7 @@ described_pipeline describe_pipeline(check::checked_module const& m,
         {
             *s.name = m.at(s.entry).name;
             features |= m.functions[m.at(s.entry).info].features;
+            add_options_of(m, s.entry, options);
             mark_samplers(m, s.entry, legal, is_reached);
         }
     // One layout serves every stage, so it carries what any of them reaches, in index order.
@@ -481,6 +533,7 @@ described_pipeline describe_pipeline(check::checked_module const& m,
                 result.targets.push_back(member.name);
     }
     result.features = feature_names(features);
+    result.options = option_names(m, cc::move(options));
 
     auto const settings = m.at(p.settings);
     for (auto const& s : settings)
@@ -550,11 +603,11 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
     auto const members = m.at(b.members);
     auto result = described_binding{.name = s.name,
                                     .is_inline = b.is_inline,
-                                    .shape = check::hex_of(check::structural_hash(m, members))};
+                                    .shape = check::hex_of(check::structural_hash(m, b))};
 
     if (b.is_inline)
     {
-        auto const placed = sgl::emit::impl::place_block(m, members);
+        auto const placed = sgl::emit::impl::place_block(m, members, sgl::emit::impl::block_space(b));
         for (auto i = isize(0); i < members.size(); ++i)
             result.members.push_back({.name = members[i].name,
                                       .kind = described_member_kind::constant,
@@ -568,7 +621,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
     // Numbered as the emitter numbers them: the constant block first when there is one, then the resources in
     // declaration order, each the next slot of its group.
     auto const plain = sgl::emit::impl::plain_members_of(m, b);
-    auto const placed = sgl::emit::impl::place_block(m, plain);
+    auto const placed = sgl::emit::impl::place_block(m, plain, sgl::emit::impl::block_space(b));
     if (!plain.empty())
     {
         result.block_size = placed.size;
@@ -652,12 +705,53 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto const is_module = !request.module.empty();
     auto const joining = cc::format("module {}\n", request.module);
     auto const program_name = cc::format("<module {}>", request.module);
-    auto const front = is_module ? driver::impl::run_front_end(joining, program_name, request.library)
-                                 : driver::impl::run_front_end(request.source, request.source_name, request.library);
+    auto const front
+        = is_module ? driver::impl::run_front_end(joining, program_name, request.library, request.options)
+                    : driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
     if (!front.errors.empty())
         return cc::error(front.errors);
 
     auto const& m = front.module;
+    // the options named within `span` of `file`, each once
+    auto const options_within = [&](i32 file, source_span span)
+    {
+        auto options = cc::vector<check::symbol_id>();
+        for (auto const& use : m.option_uses)
+        {
+            auto is_known = false;
+            for (auto const known : options)
+                is_known = is_known || known == use.option;
+            if (use.file == file && use.where.offset >= span.offset && use.where.end() <= span.end() && !is_known)
+                options.push_back(use.option);
+        }
+        return options;
+    };
+    // The options a binding's declaration names, which its layout and its formats then follow.
+    // A member says which of them its own type names, so a host can take that format or that length at run time.
+    auto const describe_options = [&](check::symbol const& s, described_binding& b)
+    {
+        auto const& ast = *front.asts[s.file];
+        auto const& file = *front.files[s.file];
+        auto const& decl = ast.at(s.declaration);
+        b.options = option_names(m, options_within(s.file, file.at(decl.form).where));
+        for (auto const member : ast.at(decl.node.as<ast::binding_decl>().members))
+        {
+            auto const* const f = ast.at(member).node.try_as<ast::field_decl>();
+            if (f == nullptr)
+                continue;
+            auto const& field = ast.at(f->field);
+            for (auto& described : b.members)
+            {
+                if (described.name != file.text_of(field.name))
+                    continue;
+                for (auto const option : options_within(s.file, file.at(field.form).where))
+                {
+                    auto const is_format = m.name_of(m.constants[m.at(option).info].type) == "pixel_format";
+                    (is_format ? described.format_option : described.count_option) = host_name_of(m, option);
+                }
+            }
+        }
+    };
     if (is_module && m.library_files.empty())
         return cc::error(
             cc::format("{}: error: no file of the library declares module {}\n", program_name, request.module));
@@ -676,7 +770,13 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     {
         auto const id = check::symbol_id(i);
         auto const& s = m.at(id);
-        if (!is_own(s.file) || s.state != check::symbol_state::checked)
+        if (s.state != check::symbol_state::checked)
+            continue;
+        // an option of a module the source uses is the source's to set too, by its qualified name (CHK-354)
+        auto const is_option = s.kind == check::symbol_kind::constant && m.constants[s.info].option == id;
+        if (is_option && s.file >= m.prelude_file_count())
+            result.options.push_back(describe_option(m, id));
+        if (!is_own(s.file) || is_option)
             continue;
 
         // workgroup memory has no host side, so the host is told nothing of it
@@ -689,6 +789,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             if (errors.size() == before)
             {
                 result.bindings.push_back(driver::impl::describe_binding(m, s));
+                describe_options(s, result.bindings.back());
                 described.push_back(id);
             }
         }

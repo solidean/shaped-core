@@ -147,7 +147,133 @@ void checker::check_yield(function_scope& scope, source_span where, ast::expr_id
                cc::format("this block yields {}, and this yield carries a {}", out.name_of(expected), out.name_of(type)));
 }
 
-type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_expr const& node, bool yields_value, flow* ending)
+void checker::check_arm_body(function_scope& scope,
+                             ast::body const& body,
+                             bool yields_value,
+                             type_id expected,
+                             type_id& arm_type,
+                             bool& arm_exits,
+                             bool& is_failed)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+
+    // A value block of its own, so a `yield` inside it names this arm (AST-107).
+    auto const visible = scope.locals.size();
+    ++scope.depth;
+    auto const is_expected = yields_value && is_valid(expected);
+    if (yields_value)
+        scope.value_blocks.push_back({.value = expected, .is_expected = is_expected});
+
+    if (body.kind == ast::body_kind::arrow && ast::is_valid(body.value))
+    {
+        if (is_jump(ast, body.value))
+        {
+            arm_exits = true;
+            auto const& jump = ast.at(body.value);
+            auto const jump_where = span_of(file, body.value);
+            if (auto const* const r = jump.node.try_as<ast::return_expr>())
+                check_return(scope, jump_where, r->value);
+            else if (auto const* const b = jump.node.try_as<ast::break_expr>())
+                check_break(scope, jump_where, b->value);
+            set_type(file, body.value, void_type);
+        }
+        else if (is_expected)
+        {
+            // a value that does not convert was reported here, and the `if` or the `case` says nothing more of it
+            arm_type = check_expected(scope, body.value, expected);
+            if (arm_type != expected)
+                arm_type = error_type;
+        }
+        else
+            arm_type = check_expr(scope, body.value);
+    }
+    else
+    {
+        auto const ends = check_statements(scope, body.statements);
+        // A `yield` ends its list too, so an arm counts as exiting only where it yielded nothing.
+        arm_exits = ends == flow::exits;
+        if (ends == flow::unknown)
+            is_failed = true;
+    }
+
+    if (yields_value)
+    {
+        auto const block = scope.value_blocks.back();
+        scope.value_blocks.remove_back();
+        if (block.has_yield)
+        {
+            arm_exits = false;
+            if (!is_valid(arm_type))
+                arm_type = block.value;
+        }
+    }
+    --scope.depth;
+    scope.locals.resize_down_to(visible);
+}
+
+type_id checker::check_if_value(function_scope& scope,
+                                ast::if_expr const& node,
+                                bool yields_value,
+                                flow* ending,
+                                type_id expected)
+{
+    // CHK-375: each condition is judged as an `if` judges one, and each branch as an arm of a `case` value
+    if (ending != nullptr)
+        *ending = flow::falls_through;
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto result = yields_value ? expected : void_type;
+    auto is_failed = false;
+    auto every_branch_exits = true;
+
+    for (auto const& branch : ast.at(node.branches))
+    {
+        if (ast::is_valid(branch.condition))
+            check_condition(scope, branch.condition);
+
+        auto branch_type = type_id::none;
+        auto branch_exits = false;
+        check_arm_body(scope, branch.then, yields_value, expected, branch_type, branch_exits, is_failed);
+        every_branch_exits = every_branch_exits && branch_exits;
+
+        if (!yields_value || branch_exits)
+            continue;
+        if (!is_valid(branch_type) || branch_type == void_type)
+        {
+            report(diagnostic_kind::missing_value_in_arm, file, span_of(file, branch.form),
+                   "this if is a value, so every branch gives one or leaves");
+            is_failed = true;
+            continue;
+        }
+        if (branch_type == error_type)
+        {
+            is_failed = true;
+            continue;
+        }
+        if (!is_valid(result) || result == error_type)
+            result = branch_type;
+        else if (branch_type != result)
+            report(
+                diagnostic_kind::type_mismatch, file, span_of(file, branch.form),
+                cc::format("this if is {}, and this branch gives a {}", out.name_of(result), out.name_of(branch_type)));
+    }
+
+    if (ending != nullptr && every_branch_exits)
+        *ending = flow::exits;
+    if (is_failed)
+        return error_type;
+    if (!yields_value)
+        return void_type;
+    return is_valid(result) ? result : error_type;
+}
+
+type_id checker::check_case(function_scope& scope,
+                            ast::expr_id id,
+                            ast::case_expr const& node,
+                            bool yields_value,
+                            flow* ending,
+                            type_id expected)
 {
     if (ending != nullptr)
         *ending = flow::falls_through;
@@ -172,7 +298,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
     auto named_cases = cc::vector<i32>();
     auto is_all_constant = true;
     auto has_wildcard = false;
-    auto result = yields_value ? type_id::none : void_type;
+    auto result = yields_value ? expected : void_type;
     auto is_failed = false;
     auto reported_unreachable = false;
     // CHK-123: whether every arm leaves the list the `case` stands in
@@ -205,52 +331,9 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
         else
             check_pattern(scope, arm.pattern, scrutinee, named_cases, is_all_constant);
 
-        // The arm's body: a value block of its own, so a `yield` inside it names this arm (AST-107).
-        auto const visible = scope.locals.size();
-        ++scope.depth;
-        if (yields_value)
-            scope.value_blocks.push_back({});
-
         auto arm_type = type_id::none;
         auto arm_exits = false;
-        if (arm.result.kind == ast::body_kind::arrow && ast::is_valid(arm.result.value))
-        {
-            if (is_jump(ast, arm.result.value))
-            {
-                arm_exits = true;
-                auto const& jump = ast.at(arm.result.value);
-                auto const jump_where = span_of(file, arm.result.value);
-                if (auto const* const r = jump.node.try_as<ast::return_expr>())
-                    check_return(scope, jump_where, r->value);
-                else if (auto const* const b = jump.node.try_as<ast::break_expr>())
-                    check_break(scope, jump_where, b->value);
-                set_type(file, arm.result.value, void_type);
-            }
-            else
-                arm_type = check_expr(scope, arm.result.value);
-        }
-        else
-        {
-            auto const ends = check_statements(scope, arm.result.statements);
-            // A `yield` ends its list too, so an arm counts as exiting only where it yielded nothing.
-            arm_exits = ends == flow::exits;
-            if (ends == flow::unknown)
-                is_failed = true;
-        }
-
-        if (yields_value)
-        {
-            auto const block = scope.value_blocks.back();
-            scope.value_blocks.remove_back();
-            if (block.has_yield)
-            {
-                arm_exits = false;
-                if (!is_valid(arm_type))
-                    arm_type = block.value;
-            }
-        }
-        --scope.depth;
-        scope.locals.resize_down_to(visible);
+        check_arm_body(scope, arm.result, yields_value, expected, arm_type, arm_exits, is_failed);
         every_arm_exits = every_arm_exits && arm_exits;
 
         if (!yields_value || arm_exits)

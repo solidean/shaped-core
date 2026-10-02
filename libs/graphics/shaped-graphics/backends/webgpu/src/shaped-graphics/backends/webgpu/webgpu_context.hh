@@ -132,6 +132,10 @@ public:
             return _depth32_float_stencil8;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::shader_f16:
+            return _shader_f16;
+        case sg::feature::subgroups:
+            return _subgroups;
         case sg::feature::sample_rate_shading:
             // `@builtin(sample_index)` and `@interpolate(…, sample)` are core WGSL.
             return true;
@@ -145,6 +149,11 @@ public:
         case sg::feature::multisampled_array_textures:
         case sg::feature::primitive_index:
             // `primitive-index` is a WebGPU extension the emdawnwebgpu this builds against does not request.
+            return false;
+        case sg::feature::shader_int16:
+        case sg::feature::device_coherence:
+        case sg::feature::image_atomics:
+            // WGSL has no 16-bit integers, no coherence qualifier and no atomic texel, on any device.
             return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
@@ -461,6 +470,8 @@ public:
         bool float32_filtering = false;       ///< float32-filterable
         bool depth32_float_stencil8 = false;  ///< depth32float-stencil8
         bool extended_image_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
+        bool shader_f16 = false;              ///< shader-f16
+        bool subgroups = false;               ///< subgroups
     };
 
     // Set once at creation.
@@ -480,6 +491,8 @@ private:
     bool _float32_filtering = false;
     bool _depth32_float_stencil8 = false;
     bool _extended_image_formats = false;
+    bool _shader_f16 = false; // shader-f16 was granted
+    bool _subgroups = false;  // subgroups was granted
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);

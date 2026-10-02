@@ -117,6 +117,41 @@ TEST("slib sgl compiler - over a metal_lib compiler the flattened source is MSL"
     CHECK(text.value().source.contains("fragment frame main_ps(pixel_input p [[stage_in]])"));
 }
 
+TEST("slib sgl compiler - each compile hands the inner compiler what SGL's text needs, however it was built")
+{
+    auto const settings_through = [](sg::shader_format format, cc::vector<cc::string> caller_args)
+    {
+        auto inner = std::make_unique<slib_test::fake_compiler>(slib::shader_language::hlsl, format);
+        auto const* const seen = inner.get();
+        auto const sgl = slib::create_sgl_compiler(cc::move(inner));
+        (void)sgl->compile({.source = "text", .entry_point = "main", .dxc_args = cc::move(caller_args)});
+        return seen->last_settings();
+    };
+
+    // a half is `float16_t` in HLSL, which DXC compiles only with 16-bit types on
+    for (auto const format : {sg::shader_format::dxil, sg::shader_format::spirv})
+    {
+        auto const s = settings_through(format, {});
+        REQUIRE(s.dxc_args.size() == 1);
+        CHECK(s.dxc_args[0] == "-enable-16bit-types");
+        CHECK(s.metal_language_version.empty());
+    }
+    // a caller's own flags stay, and the edge's come after them
+    auto const kept = settings_through(sg::shader_format::spirv, {cc::string("-Zi")});
+    REQUIRE(kept.dxc_args.size() == 2);
+    CHECK(kept.dxc_args[0] == "-Zi");
+    CHECK(kept.dxc_args[1] == "-enable-16bit-types");
+
+    // `coherent(device)` and texture atomics compile into a metallib from MSL 3.2 on
+    auto const metal = settings_through(sg::shader_format::metal_lib, {});
+    CHECK(metal.dxc_args.empty());
+    CHECK(metal.metal_language_version == "metal3.2");
+
+    auto const wgsl = settings_through(sg::shader_format::wgsl, {});
+    CHECK(wgsl.dxc_args.empty());
+    CHECK(wgsl.metal_language_version.empty());
+}
+
 TEST("slib sgl compiler - the edge is sgl to whatever the inner compiler builds")
 {
     auto const compiler = slib::create_sgl_compiler(slib::create_wgsl_compiler());
@@ -360,6 +395,116 @@ ASYNC_TEST("slib sgl compiler - the control flow the legalizer writes is accepte
                                              {.language = slib::shader_language::sgl, .label = "control-flow.sgl"});
         co_await cc::async_settled(node);
         CHECK(value_of(node).bytecode.size() > 0);
+    }
+}
+
+namespace
+{
+/// Each spelling of the vector vocabulary a target writes in its own way: a one-value constructor, `select` in both
+/// orders, the whole-value `==`, a scalar spread over a vector, `fwidth`, an integer `sign`, and an `if` as a value.
+constexpr auto k_vector_source
+    = cc::string_view("@pixel struct target:\n"
+                      "    color: float4\n"
+                      "\n"
+                      "struct pixel_input:\n"
+                      "    @position position: hpos4\n"
+                      "    uv: float2\n"
+                      "\n"
+                      "@pixel fun main_ps(p: pixel_input) -> target:\n"
+                      "    let v = p.uv\n"
+                      "    let w = fwidth(v) + float2(0.5)\n"
+                      "    let id = p.position.xy as int2\n"
+                      "    let cell = (id & 7) ^ 1\n"
+                      "    let u = (1u << (id.x as uint)) | uint2(3u, 5u)\n"
+                      "    let picked = select(v.x > 0.5, v, w)\n"
+                      "    let each = select(v > w, v, w % 0.25)\n"
+                      "    let same = if v == w or any(equal(cell, int2(0))) => 1.0 else 0.0\n"
+                      "    let s = sign(cell) * clamp(cell, int2(0), int2(4))\n"
+                      "    return { color = float4(picked.x + each.y + same, (s.x + s.y) as float, "
+                      "(u.x as float) + 1f, 1.0) }\n");
+} // namespace
+
+ASYNC_TEST("slib sgl compiler - the vector vocabulary SGL writes is accepted by every compiler behind an edge",
+           exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+
+    for (auto const format : lib.supported_formats(slib::shader_language::sgl))
+    {
+        auto const node = lib.compile_source(k_vector_source, sg::shader_stage::fragment, "main_ps", format,
+                                             {.language = slib::shader_language::sgl, .label = "vectors.sgl"});
+        co_await cc::async_settled(node);
+        CHECK(value_of(node).bytecode.size() > 0);
+    }
+}
+
+namespace
+{
+/// Halves in a constant block, in a buffer's element, in workgroup memory and in arithmetic, with literals of their
+/// own type.
+constexpr auto k_half_source
+    = cc::string_view("require shader_f16\n"
+                      "\n"
+                      "struct sample:\n"
+                      "    weight: float\n"
+                      "    tint: half3\n"
+                      "    scale: half\n"
+                      "\n"
+                      "binding work:\n"
+                      "    gain: half\n"
+                      "    offset: float\n"
+                      "    bias: half3\n"
+                      "    input: buffer[sample]\n"
+                      "    halves: mut buffer[half2]\n"
+                      "\n"
+                      "@workgroup binding scratch:\n"
+                      "    partial: half2\n"
+                      "\n"
+                      "@compute(64) fun main(@thread_id id: int3){work, scratch}:\n"
+                      "    let s = work.input[id.x]\n"
+                      "    let v = s.tint * 0.5 + half3(1.0, 2.0, 0.1) * work.gain + work.bias\n"
+                      "    let w = normalize(v).zyx * s.scale\n"
+                      "    scratch.partial = w.xy\n"
+                      "    workgroup_barrier()\n"
+                      "    work.halves[id.x] = half2(max(w.x, 0.0) + (s.weight as half) - 0.25f16, "
+                      "scratch.partial.y)\n");
+
+/// 16-bit integers, which WGSL has none of.
+constexpr auto k_short_source
+    = cc::string_view("require shader_int16\n"
+                      "\n"
+                      "binding work:\n"
+                      "    counts: mut buffer[ushort2]\n"
+                      "    deltas: buffer[short2]\n"
+                      "\n"
+                      "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                      "    let d = work.deltas[id.x]\n"
+                      "    let sum = d.x * 3i16 + abs(d.y) - (-d.x) / 2i16\n"
+                      "    work.counts[id.x] = work.counts[id.x] * 2u16 + ushort2(sum as ushort, 1u16)\n");
+} // namespace
+
+ASYNC_TEST("slib sgl compiler - the 16-bit types SGL writes are accepted by every compiler behind an edge",
+           exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+
+    for (auto const format : lib.supported_formats(slib::shader_language::sgl))
+    {
+        auto const node = lib.compile_source(k_half_source, sg::shader_stage::compute, "main", format,
+                                             {.language = slib::shader_language::sgl, .label = "halves.sgl"});
+        co_await cc::async_settled(node);
+        CHECK(value_of(node).bytecode.size() > 0);
+        CHECK(value_of(node).required_features == cc::optional<sg::feature_set>(sg::feature::shader_f16));
+        // EMIT-109: WGSL has no 16-bit integer
+        if (format == sg::shader_format::wgsl)
+            continue;
+        auto const shorts = lib.compile_source(k_short_source, sg::shader_stage::compute, "main", format,
+                                               {.language = slib::shader_language::sgl, .label = "shorts.sgl"});
+        co_await cc::async_settled(shorts);
+        CHECK(value_of(shorts).bytecode.size() > 0);
+        CHECK(value_of(shorts).required_features == cc::optional<sg::feature_set>(sg::feature::shader_int16));
     }
 }
 

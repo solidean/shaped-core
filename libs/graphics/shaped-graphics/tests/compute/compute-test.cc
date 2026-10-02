@@ -12,6 +12,9 @@
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/shader_asset.hh>
+#include <typed-geometry/linalg/mat.hh>
+#include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/scalar/half_float.hh>
 
 using namespace cc::primitive_defines;
 
@@ -91,6 +94,33 @@ ASYNC_INVOCABLE_TEST("sg - one group binds at whichever slot the entry point lis
     REQUIRE(data.size() == isize(count));
     for (auto i = 0; i < count; ++i)
         CHECK(data[i] == float(i) * 3.0f);
+}
+
+ASYNC_INVOCABLE_TEST("sg - the pipeline cache keeps one pipeline per preferred subgroup size of one bytecode",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::subgroups))
+        SKIP("this context has no subgroup operations");
+
+    // On vulkan the size is in no text, so an `@option` naming it gives one SPIR-V that wants two sizes.
+    auto const& shader = co_await shaders::subgroups.reduce->acquire(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::wave_io>();
+    auto const layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+    auto const at_size = [&](i32 size)
+    {
+        auto sized = shader;
+        sized.preferred_subgroup_size = size;
+        return ctx->cached.acquire_compute_pipeline(sg::compute_pipeline_description{.shader = sized, .layout = layout});
+    };
+
+    auto const at_32 = co_await at_size(32);
+    auto const at_64 = co_await at_size(64);
+    auto const at_32_again = co_await at_size(32);
+    CHECK(at_32.get() != at_64.get());
+    CHECK(at_32.get() == at_32_again.get());
 }
 
 ASYNC_INVOCABLE_TEST("sg - a group's plain members reach the shader through the constant buffer it owns",
@@ -230,6 +260,125 @@ ASYNC_INVOCABLE_TEST("sg - a buffer's element packs tight on every backend, acro
         CHECK(got_pairs[i].b == tg::vec3f(1 + float(i), 2, float(i) + 1));
         CHECK(got_dirs[i] == tg::vec3f(float(3 * i), 0, 3));
     }
+}
+
+namespace
+{
+/// What a host writes with no knowledge of HLSL's rows: `host_params` of layout.sgl is placed as this struct is.
+struct plain_params
+{
+    float scale;
+    tg::vec3f tint;
+    float bias;
+    tg::vec2f shift;
+    tg::vec4f weights;
+    u32 count;
+};
+static_assert(sizeof(plain_params) == 48);
+
+/// The plain members of `host_echo` and `host_halves` as C++ places them, which `@layout(.cpp)` promises the GPU reads.
+struct plain_echo
+{
+    float gain;
+    tg::vec3f dir;
+    float after;
+    tg::mat4f to_world;
+};
+static_assert(offsetof(plain_echo, after) == 16);
+static_assert(offsetof(plain_echo, to_world) == 20);
+
+struct plain_halves
+{
+    float gain;
+    tg::f16 h;
+    tg::vec<3, tg::f16> tint;
+    u16 count;
+    float after;
+};
+static_assert(offsetof(plain_halves, h) == 4);
+static_assert(offsetof(plain_halves, tint) == 6);
+static_assert(offsetof(plain_halves, count) == 12);
+static_assert(offsetof(plain_halves, after) == 16);
+static_assert(sizeof(plain_halves) == 20);
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - a @layout(.cpp) block is filled from a plain C++ struct, float3s and all",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::layout.echo.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::host_echo>();
+    constexpr auto count = 33;
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::vector<float>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    // column c, row r holds 18 + 4c + r, which the shader reads back column by column
+    auto to_world = tg::mat4f();
+    for (auto c = 0; c < 4; ++c)
+        for (auto r = 0; r < 4; ++r)
+            to_world.col(c)[r] = float(18 + 4 * c + r);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::host_echo{.gain = 13.0f,
+                                                                              .dir = tg::vec3f(14, 15, 16),
+                                                                              .after = 17.0f,
+                                                                              .to_world = to_world,
+                                                                              .values = values.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.set_inline_constants(plain_params{.scale = 1.0f,
+                                                   .tint = tg::vec3f(2, 3, 4),
+                                                   .bias = 5.0f,
+                                                   .shift = tg::vec2f(6, 7),
+                                                   .weights = tg::vec4f(8, 9, 10, 11),
+                                                   .count = 12});
+    cmd->compute.dispatch_threads(1);
+    auto const future = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(data[i] == float(i + 1)).context(cc::format("value {}", i));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a @layout(.cpp) block places its 16-bit members as tg does", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::shader_f16) || !ctx->supports(sg::feature::shader_int16))
+        SKIP("this context has no 16-bit floats and integers");
+
+    auto const pipeline = co_await shaders::layout.echo_halves.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::host_halves>();
+    constexpr auto count = 7;
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::vector<float>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout,
+        shaders::host_halves{.gain = 1.0f,
+                             .h = tg::f16(2.0f),
+                             .tint = tg::vec<3, tg::f16>(tg::f16(3.0f), tg::f16(4.0f), tg::f16(5.0f)),
+                             .count = 6,
+                             .after = 7.0f,
+                             .values = values.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(1);
+    auto const future = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(data[i] == float(i + 1)).context(cc::format("value {}", i));
 }
 
 ASYNC_INVOCABLE_TEST("sg - a pipeline whose shader does not fit its layout is refused at creation",

@@ -49,6 +49,7 @@ public:
     bool is_c_like() const override { return true; }
     /// MSL's is a function; whether it terminates or demotes the pixel is for the metal backend's tests to pin.
     [[nodiscard]] cc::string_view discard_statement() const override { return "discard_fragment();"; }
+    [[nodiscard]] bool fences_image_stores() const override { return true; }
 
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
     {
@@ -176,9 +177,14 @@ public:
             out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, block->block_name, block->name, block->slot);
         for (auto const& b : buffers)
         {
-            auto const type = b.element_form.has_value()
-                                ? cc::format("{}device {}*", b.is_mut ? "" : "const ", b.element_form.value().name)
-                                : resource_text(p, b.type);
+            auto type = b.element_form.has_value()
+                          ? cc::format("{}device {}*", b.is_mut ? "" : "const ", b.element_form.value().name)
+                          : resource_text(p, b.type);
+            // EMIT-150: a buffer's coherence qualifies the memory it points at, and a texture's the texture
+            if (b.is_coherent && type.starts_with("device "))
+                type = cc::format("device coherent(device) {}", type.subview({.start = 7, .end = type.size()}));
+            else if (b.is_coherent)
+                type = cc::format("coherent(device) {}", type);
             out.appendf("{}{} {} [[id({})]]", k_indent, type, b.name, b.slot);
             if (b.count > 1)
                 out.appendf("[{}]", b.count);

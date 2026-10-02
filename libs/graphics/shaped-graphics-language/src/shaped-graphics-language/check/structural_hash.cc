@@ -124,6 +124,15 @@ cc::hash128 check::structural_hash(checked_module const& m, cc::span<member_info
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
+cc::hash128 check::structural_hash(checked_module const& m, binding_info const& binding)
+{
+    auto b = cc::byte_stream_builder();
+    b.add_pod(u8(binding.layout));
+    b.add_bool(binding.is_inline);
+    fold_members(b, m, m.at(binding.members));
+    return cc::hash128::create(b.written_bytes(), 0);
+}
+
 cc::hash128 check::structural_hash(sampler_state const& s)
 {
     auto b = cc::byte_stream_builder();

@@ -1,0 +1,11 @@
+// A program with an option of its own beside one of a module it uses, both named `taps`: two options, set apart.
+
+use weights
+
+@option const taps = 2
+
+binding tapped_work:
+    values: mut buffer[float]
+
+@compute(64) fun tap(@thread_id id: int3){tapped_work}:
+    tapped_work.values[id.x] = weights.weight() * (taps as float)

@@ -57,6 +57,8 @@ What each part of the record is for:
   `infix("+")` is an operator at its usual level, `spelling_kind::prefix` a prefix operator.
   `spelling_kind::custom` is a function that writes the call itself, for the few that are no call and no operator.
   `transform_position` is one: it widens its position by `1.0`, and HLSL writes the product as `mul(m, v)`.
+  A custom writer that hands back statements of its own, `written::lines`, names the languages it does so in with `writes_lines`.
+  The emitter reads that to keep the call out of a place evaluated more than once, such as a loop's condition, and a registry test holds every writer to it.
 * **`@pure` stands in the signature**, and a record without it is a function with an effect, which the legalizer then keeps in its place.
 * **The name a target calls is reserved in that target from the record**, so a local named `frac` is renamed in HLSL without an entry in any list.
   A custom writer or a helper lists every other name it writes in `hlsl_names`, `wgsl_names` and `msl_names`: `mul`, `asuint`, a helper's own name.

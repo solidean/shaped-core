@@ -19,6 +19,10 @@ namespace sgl::check
 /// The shape of a member list: a struct's fields or a binding's members.
 [[nodiscard]] cc::hash128 structural_hash(checked_module const& m, cc::span<member_info const> members);
 
+/// The shape of a binding: its members, and the rule that places its constant block (`@layout`, `@inline`), since the
+/// generated host code writes every constant at the offset that rule gives it.
+[[nodiscard]] cc::hash128 structural_hash(checked_module const& m, binding_info const& binding);
+
 /// The shape of a static sampler: its settings, which a layout bakes.
 [[nodiscard]] cc::hash128 structural_hash(sampler_state const& s);
 

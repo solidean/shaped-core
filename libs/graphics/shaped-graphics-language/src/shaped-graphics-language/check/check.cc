@@ -63,24 +63,29 @@ void apply_plan(checker& c, module_plan& plan, i32 prelude_count)
 checked_module sgl::check::check(cc::span<module_file const> prelude,
                                  cc::span<module_file const> library,
                                  module_file program,
-                                 builtins::registry const& builtins)
+                                 builtins::registry const& builtins,
+                                 cc::span<option_value const> options)
 {
     auto planned = plan_files(prelude, library, program);
     auto c = checker{.files = planned.files, .builtins = builtins};
     c.out.builtins = &builtins;
     apply_plan(c, planned.plan, i32(prelude.size()));
+    c.options = options;
     c.run();
     return cc::move(c.out);
 }
 
-checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user, builtins::registry const& builtins)
+checked_module sgl::check::check(cc::span<module_file const> prelude,
+                                 module_file user,
+                                 builtins::registry const& builtins,
+                                 cc::span<option_value const> options)
 {
-    return check(prelude, {}, user, builtins);
+    return check(prelude, {}, user, builtins, options);
 }
 
-checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user)
+checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user, cc::span<option_value const> options)
 {
-    return check(prelude, user, builtins::default_registry());
+    return check(prelude, user, builtins::default_registry(), options);
 }
 
 sgl::check::checked_prelude::checked_prelude() = default;
@@ -125,24 +130,37 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     return result;
 }
 
-checked_module sgl::check::check(checked_prelude const& prelude, cc::span<module_file const> library, module_file program)
+checked_module sgl::check::check(checked_prelude const& prelude,
+                                 cc::span<module_file const> library,
+                                 module_file program,
+                                 cc::span<option_value const> options)
 {
     auto planned = plan_files(prelude._files, library, program);
     auto c = *prelude._state;
     c.files = planned.files;
     apply_plan(c, planned.plan, i32(prelude._files.size()));
+    c.options = options;
     c.run(prelude._resume);
     return cc::move(c.out);
 }
 
-checked_module sgl::check::check(checked_prelude const& prelude, module_file user)
+checked_module sgl::check::check(checked_prelude const& prelude, module_file user, cc::span<option_value const> options)
 {
-    return check(prelude, {}, user);
+    return check(prelude, {}, user, options);
+}
+
+cc::string sgl::check::checked_module::qualified_name_of(symbol_id id) const
+{
+    auto const module = foreign_module_of(id);
+    return module.empty() ? cc::string(at(id).name) : cc::format("{}.{}", module, at(id).name);
 }
 
 // ---- number literals ------------------------------------------------------------------------------------------------
 
-number_class impl::classify_number(cc::string_view text)
+namespace
+{
+/// `classify_number` of a number without a suffix.
+number_class classify_unsuffixed(cc::string_view text)
 {
     auto const is_digit = [](char c) { return c >= '0' && c <= '9'; };
     auto at = isize(0);
@@ -195,6 +213,44 @@ number_class impl::classify_number(cc::string_view text)
             return number_class::other;
     }
     return is_float && at == size ? number_class::plain_float : number_class::other;
+}
+} // namespace
+
+cc::optional<suffixed_number> impl::split_suffix(cc::string_view text)
+{
+    auto const is_digit = [](char c) { return c >= '0' && c <= '9'; };
+    auto end = text.size();
+    while (end > 0 && is_digit(text[end - 1]))
+        --end;
+    if (end < 2)
+        return {};
+    auto const letter = text[end - 1];
+    if (letter != 'i' && letter != 'u' && letter != 'f')
+        return {};
+    auto const body = text.subview({.offset = 0, .size = end - 1});
+    // NUM-16: `f` is a digit of a hexadecimal number
+    auto const unsigned_body = body.starts_with('-') || body.starts_with('+') ? body.subview(1) : body;
+    if (letter == 'f' && (unsigned_body.starts_with("0x") || unsigned_body.starts_with("0X")))
+        return {};
+    auto const kind = classify_unsuffixed(body);
+    if (kind != number_class::plain_integer && kind != number_class::plain_float)
+        return {};
+    auto result = suffixed_number{.body = body, .letter = letter};
+    if (end < text.size())
+    {
+        // a width this long names no type either way, and is kept from overflowing
+        result.width = 0;
+        for (auto i = end; i < text.size() && result.width < 100'000; ++i)
+            result.width = result.width * 10 + (text[i] - '0');
+    }
+    return result;
+}
+
+number_class impl::classify_number(cc::string_view text)
+{
+    if (split_suffix(text).has_value())
+        return number_class::suffixed;
+    return classify_unsuffixed(text);
 }
 
 cc::optional<f64> impl::parse_plain_float(cc::string_view text)
@@ -385,9 +441,10 @@ void checker::judge_attributes(i32 file,
                 report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
                        "@shadowable takes `false` or `true`, as in @shadowable(false)");
         }
-        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream" && name != "stages"
-                 && name != "shadowable" && name != "expect" && name != "interpolate" && name != "format"
-                 && name != "depth" && name != "sampler" && name != "geometry" && name != "tessellation_control")
+        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "preferred_subgroup_size"
+                 && name != "stream" && name != "stages" && name != "shadowable" && name != "expect"
+                 && name != "interpolate" && name != "format" && name != "depth" && name != "sampler"
+                 && name != "geometry" && name != "tessellation_control" && name != "layout")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }
@@ -441,6 +498,7 @@ void checker::run(resume_point from)
             compile(symbol_id(i));
 
     judge_redeclarations(from.symbols);
+    judge_option_values();
 
     // A default is checked where it is declared, once, and a call binds against the signature alone (CHK-243).
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
@@ -581,6 +639,24 @@ cc::string_view checker::member_kind_of(symbol_id owner, cc::string_view name) c
             return "field";
         if (auto const* const c = d.try_as<ast::enum_case_decl>(); c != nullptr && text_of(o.file, c->name) == name)
             return "case";
+    }
+    // CHK-386: every swizzle is a member as a field is, and a function of its name would never be reached
+    if (s != nullptr && find_attribute(o.file, ast.at(o.declaration).attributes, "swizzle") != nullptr
+        && name.size() >= 2 && name.size() <= 4)
+    {
+        auto is_swizzle = true;
+        for (auto const letter : name)
+        {
+            auto is_field = false;
+            for (auto const member : ast.at(members))
+                if (auto const* const f = ast.at(member).node.try_as<ast::field_decl>();
+                    f != nullptr && ast::is_valid(f->field) && text_of(o.file, ast.at(f->field).name).size() == 1
+                    && text_of(o.file, ast.at(f->field).name)[0] == letter)
+                    is_field = true;
+            is_swizzle = is_swizzle && is_field;
+        }
+        if (is_swizzle)
+            return "swizzle";
     }
     auto const* const scope = type_scopes.get_ptr(i32(index_of(owner)));
     auto const* const found = scope != nullptr ? scope->get_ptr(name) : nullptr;

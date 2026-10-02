@@ -55,9 +55,9 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
         // and a bare one takes every image of the shape (CHK-194).
         if (t.format < 0 && t.element == type_id::none)
             return cc::string(shape.image);
-        return t.format < 0
-                 ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
-                 : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_image_formats[t.format].name);
+        return t.format < 0 ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
+                            : cc::format("{}{}{}[.{}]", t.is_atomic ? "@atomic " : "", access_prefix(t.access),
+                                         shape.image, k_image_formats[t.format].name);
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
     case type_kind::acceleration_structure:
@@ -217,14 +217,32 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
-    // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats.
+    // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats, or a const of one.
     // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
-    auto const* const dot = ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>();
-    auto const format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
+    auto const argument = arguments[0].value;
+    auto const* const dot = ast_of(file).at(argument).node.try_as<ast::leading_dot>();
+    auto format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
+    if (auto const* const n = ast_of(file).at(argument).node.try_as<ast::name>())
+    {
+        auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+        auto const id = found != nullptr && !found->empty() ? found->front() : symbol_id::none;
+        if (is_valid(id) && out.at(id).kind == symbol_kind::constant)
+        {
+            set_target(file, argument, {.kind = target_kind::symbol, .symbol = id});
+            if (demand(id, file, n->where) != symbol_state::checked)
+                return checked_module::error_type;
+            auto const& c = out.constants[out.at(id).info];
+            if (c.kind == constant_kind::enum_case && out.name_of(c.type) == "pixel_format")
+            {
+                format = find_image_format(out.at(out.at(c.type).cases)[c.case_index].name);
+                note_option(file, n->where, c);
+            }
+        }
+    }
     if (format < 0)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[0].value),
-               "an image takes one of sg's image formats as an enum case: `.rgba8_unorm`");
+               "an image takes one of sg's image formats, as an enum case or a const of one: `.rgba8_unorm`");
         return checked_module::error_type;
     }
     if (!k_image_formats[format].is_portable)
@@ -583,6 +601,19 @@ void checker::judge_constant_arguments(i32 file, ast::expr_id id)
         return;
     auto const written = out.at(r.written);
     auto const slots = out.at(r.slots);
+    // CHK-378: a lane, mask or delta that every invocation shares, which WGSL and MSL require
+    if (callee->constant_lane_below > 0 && slots.size() >= 2 && slots[1] >= 0)
+    {
+        auto const expr = written[slots[1]].expr;
+        auto const lane = constant_index(file, expr);
+        auto const& s = out.at(r.callee);
+        auto const parameters = out.at(out.functions[s.info].parameters);
+        if (!lane.has_value() || lane.value() < 0 || lane.value() >= callee->constant_lane_below)
+            report(diagnostic_kind::invalid_constant_argument, file, span_of(file, expr),
+                   cc::format("the {} of {} is a constant from 0 to {}: an int literal, or the name of an int const",
+                              parameters.size() >= 2 ? cc::string_view(parameters[1].name) : "lane", callee->name,
+                              callee->constant_lane_below - 1));
+    }
     auto is_compare = false;
     for (auto const& n : callee->named_only)
         is_compare = is_compare || n == "reference";
@@ -746,6 +777,9 @@ bool checker::takes(type_id parameter, type_id argument) const
     if (is_bare && p.kind == type_kind::image)
         return a.kind == type_kind::image && a.format >= 0 && a.shape == p.shape;
     if (p.kind != type_kind::image || p.format >= 0 || a.kind != type_kind::image || a.format < 0 || p.shape != a.shape)
+        return false;
+    // CHK-373: a texel of an `@atomic` image is read and written by its atomic alone, never by the image's own methods
+    if (a.is_atomic)
         return false;
     if (out.name_of(p.element) != texel_name_of(a.format))
         return false;

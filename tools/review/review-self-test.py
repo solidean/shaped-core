@@ -926,6 +926,12 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     lexed = sgl_lexer._DECLARATION_KEYWORDS | sgl_lexer._CONTROL_KEYWORDS
     assert lexed == keywords, f"the lexer draws {sorted(lexed - keywords)} and misses {sorted(keywords - lexed)}"
 
+    # A builtin whose name alone says it constrains control flow is drawn as a control keyword.
+    called = "fun f():\n    workgroup_barrier()\n    let d = ddx(v) + subgroup_add(v)\n    return max(a, b)\n"
+    drawn_calls = {value: str(kind) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(called)}
+    assert drawn_calls["workgroup_barrier"] == drawn_calls["ddx"] == drawn_calls["subgroup_add"] == drawn_calls["return"]
+    assert drawn_calls["max"] == "Token.Name.Function", "an atomic's name is an ordinary function's too, so only the server tells"
+
     declared = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed("pipeline shadow:\n")]
     assert ("Token.Keyword.Declaration", "pipeline") in declared or ("Token.Keyword", "pipeline") in declared
     assert ("Token.Name.Class", "shadow") in declared, "a pipeline's name is drawn like a declared type's"
@@ -939,6 +945,32 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
 
     html = render_markdown("\n".join(["```sgl", "fun shade() -> vec3:", "```", ""]))
     assert "pg-nf" in html, "an `sgl` fence must reach this lexer rather than fall through as plain text"
+
+
+def test_highlighted_subgroup_and_quad_names_are_the_prelude_s(root: Path) -> None:
+    """Both highlighters name the subgroup and quad operations one by one, so a renamed or added one drifts silently.
+
+    A prefix would need no list, and it coloured every `quad_count` and `quad_uv` in a mesh shader as a control keyword.
+    """
+    from tools.review.lib.render import sgl_lexer
+    sgl = REPO_ROOT / "libs/graphics/shaped-graphics-language"
+    prelude = (sgl / "prelude/builtins.sgl").read_text(encoding="utf-8")
+    declared = set(re.findall(r"\bfun ((?:subgroup|quad)_[0-9A-Za-z_]*)", prelude))
+    assert len(declared) > 20, f"the prelude no longer declares the subgroup operations as `fun subgroup_*`: {declared}"
+
+    lexed = {name for name in sgl_lexer._CONTROL_BUILTINS if name.startswith(("subgroup_", "quad_"))}
+    assert lexed == declared, f"the lexer lists {sorted(lexed - declared)} and misses {sorted(declared - lexed)}"
+
+    grammar = json.loads((sgl / "tools/vscode-extension/syntaxes/sgl.tmLanguage.json").read_text(encoding="utf-8"))
+    rule = grammar["repository"]["control-builtin"]["match"]
+    named = set(re.findall(r"(?:subgroup|quad)_[0-9A-Za-z_]*", rule))
+    # A prefix pattern reads here as the bare name `subgroup_`, which no builtin is.
+    assert named == declared, f"the grammar lists {sorted(named - declared)} and misses {sorted(declared - named)}"
+
+    source = "struct mesh_quad:\n    quad_count: int\nfun f(m: mesh_quad):\n    let quad_uv = m.quad_count + x.subgroup_add(1)\n"
+    drawn = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(source)]
+    control = {value for kind, value in drawn if kind == "Token.Keyword.Namespace"}
+    assert not control, f"ordinary names and members must not read as control builtins: {sorted(control)}"
 
 
 def test_sgl_type_positions_survive_qualifiers_and_arguments(root: Path) -> None:
@@ -2475,6 +2507,47 @@ def test_an_ask_answered_only_in_the_text_box_is_answered(root: Path) -> None:
     assert code == 0 and '"which"' not in out, f"status still lists the ask as open: {out}"
     row = next(r for r in app.state()["entries"] if r["slug"] == "010-x")
     assert row["answered"] == 1, f"the nav counts the text-only answer as missing: {row}"
+
+
+def test_an_empty_changes_heading_or_discharges_is_refused(root: Path) -> None:
+    """Both parse, and both are what a script writes when the command feeding it ids failed.
+
+    The entry then reads as covering an area, and coverage silently counts nothing for it.
+    A bare `discharges:` is no attribute at all, so it would end the prelude as a sentence instead.
+    """
+    front = "---\nid: {n}\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhat, and the options.\n\n"
+    ask = "## ask  which\n{line}\n\nWhich way?\n\n- radio: this\n"
+    run = design_review(root, {
+        "010-heading": front.format(n="010") + "## changes  \nshow: collapsed\n\n" + ask.format(line="discharges: X-1"),
+        "020-spaced": front.format(n="020") + ask.format(line="discharges:   "),
+        "030-bare": front.format(n="030") + ask.format(line="discharges:"),
+        "040-fine": front.format(n="040") + "## changes  X-1\nshow: collapsed\n\n" + ask.format(line="discharges: X-1"),
+    })
+    code, out = run("validate", "d")
+    assert code != 0, out
+    assert "010-heading:11: a `changes` heading names no change id" in out, out
+    assert "020-spaced:12: a `discharges:` line names no change id" in out, out
+    assert "030-bare:12: a `discharges:` line names no change id" in out, out
+    assert "040-fine" not in out, out
+
+
+def test_a_stray_carriage_return_does_not_end_a_line(root: Path) -> None:
+    """`ids=$(review changes --ids | tr '\\n' ' ')` keeps the `\\r` of a CRLF tool's last line, mid-line.
+
+    `str.splitlines` ends a line there, which split a `## changes` heading from its `show:` below.
+    The heading's length was never the cause, so a long one is held to parse as well.
+    """
+    ids = [f"CHANGE-{i:05d}" for i in range(500)]
+    for joined in (" ".join(ids[:48]) + "\r ", " ".join(ids)):
+        text = (f"---\nid: 1\ntitle: t\n---\n\n## changes  {joined}\nshow: collapsed\n\n"
+                f"## ask  which\ndischarges: {joined}\n\nWhich way?\n\n- radio: this\n")
+        entry = parse_text(text, Path("x.md"))
+        changes, which = entry.blocks
+        assert changes.attrs.get("show") == "collapsed", changes.attrs
+        expected = joined.split()
+        assert changes.change_ids == expected and which.discharges == expected
+        assert which.line == 9, f"a stray `\\r` must not shift the line numbers after it: {which.line}"
+    assert stamp_rounds(entry, 1).count("round: 1") == 2, "the splice offsets must agree with the parse"
 
 
 def test_an_addresses_naming_no_comment_of_its_entry_is_refused(root: Path) -> None:

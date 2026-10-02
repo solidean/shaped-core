@@ -63,6 +63,8 @@ operator_level builder::level_of(form_id op) const
     case token_kind::double_arrow:
         return operator_level::computes_as;
     case token_kind::symbol:
+        if (text == "else")
+            return operator_level::alternative;
         return text == "and" || text == "or" ? operator_level::connective : operator_level::ascription;
     default:
         break;

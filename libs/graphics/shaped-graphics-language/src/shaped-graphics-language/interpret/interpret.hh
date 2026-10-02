@@ -83,6 +83,7 @@ struct sgl::check::run_inputs
 
 /// What a driver binds to one member of a binding, found by the member's name.
 /// A value is its scalars in field order, 4 bytes each and never padded: a `float3` is 12 bytes, a `float4x4` 64 of them, column by column.
+/// A 16-bit scalar takes 4 bytes too, its bits in the low two.
 /// A buffer is its elements one after another, each laid out so, and never as a target lays it out; a `bool` is a 32-bit 0 or 1.
 struct sgl::check::member_data
 {

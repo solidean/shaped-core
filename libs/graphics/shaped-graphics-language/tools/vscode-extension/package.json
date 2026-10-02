@@ -93,6 +93,23 @@
                 "id": "mutable",
                 "description": "A binding that can change: a `let mut` local."
             }
+        ],
+        "semanticTokenTypes": [
+            {
+                "id": "controlBuiltin",
+                "superType": "function",
+                "description": "A call of a builtin whose record constrains control flow."
+            }
+        ],
+        "semanticTokenScopes": [
+            {
+                "language": "sgl",
+                "scopes": {
+                    "controlBuiltin": [
+                        "keyword.control.sgl"
+                    ]
+                }
+            }
         ]
     },
     "scripts": {

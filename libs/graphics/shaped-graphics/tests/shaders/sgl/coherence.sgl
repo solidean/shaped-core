@@ -1,0 +1,29 @@
+// Atomic images and coherent memory, as the GPU runs them: neither has a WGSL text, so WebGPU skips both.
+
+require image_atomics
+require device_coherence
+
+binding texel_maxima:
+    values: buffer[uint]
+    @atomic maxima: mut image_2d[.r32_uint]
+    @atomic counts: mut image_2d[.r32_uint]
+
+// Each of 16 texels takes every 16th invocation's value, so it ends at the largest of its 64 and has counted all of them.
+@compute(64) fun reduce_max(@thread_id id: int3){texel_maxima}:
+    let t = id.x % 16
+    let xy = int2(t % 4, t / 4)
+    texel_maxima.maxima[xy].max(texel_maxima.values[id.x])
+    texel_maxima.counts[xy].add(1u)
+
+binding handoff:
+    @coherent partials: mut buffer[uint]
+    @coherent counter: mut buffer[atomic[uint]]
+    @coherent mip: mut image_2d[.r32_float]
+
+// Every invocation publishes its value and its texel, and each workgroup counts itself in once both are visible.
+@compute(64) fun publish(@thread_id id: int3, @local_thread_index li: int){handoff}:
+    handoff.partials[id.x] = (id.x as uint) * 3u
+    handoff.mip[int2(id.x % 16, id.x / 16)] = id.x as float
+    storage_barrier()
+    texture_barrier()
+    if li == 0 => handoff.counter[0].add(1u)

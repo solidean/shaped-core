@@ -1,0 +1,7 @@
+// A module whose helper reads an option of its own, which a program using it sets as `weights.taps`.
+
+module weights
+
+@option const taps = 4
+
+fun weight() -> float => 1.0 / (taps as float)

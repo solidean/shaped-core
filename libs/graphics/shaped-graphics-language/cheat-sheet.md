@@ -33,9 +33,14 @@ sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = 
                                            // from ONE check; compile_to_text per entry point and target checks that many times
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
-sgl::text_request                          // source, source_name ("<sgl>"), library, entry_point, stage (none = any), target, run_tests
+sgl::text_request                          // source, source_name ("<sgl>"), library, entry_point, stage (none = any), target, options, run_tests
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
+                                           // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:
+                                           // `16`, `-3`, `true`, `.rgba16_float`; the rest keep their defaults, tests always run at them
+                                           // a used module's option is named `common.taps`; a name no option has, a value of
+                                           // another type, or a name given twice: `invalid-option`
+r.value().options                          // the options the entry point reaches, by name: each set of their values is one text
 r.value().library_files                    // the names of the library files the source reached: what an edit of it depends on
 
 #include <shaped-graphics-language/driver/library_file.hh>
@@ -62,6 +67,8 @@ d.value().structs                          // the @vertex / @pixel structs: name
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint,
                                            // samplers: the file-scope samplers its code reaches
 d.value().samplers                         // the file-scope samplers: name, index (declaration order), sampler_type, settings, shape
+d.value().options                          // every `@option const`: name, type (`bool`, `int`, an enum's name), value as described
+                                           // entry points, pipelines and bindings each carry the `options` they reach or name
 @expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
 d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths),
                                            // samplers: the file-scope ones any stage reaches, which its one layout holds
@@ -192,7 +199,7 @@ sgl::ast::dump_diagnostics(ast)            // `stray-else @6+4`, one per line
 ```
 
 Expressions: `invalid_expr` `literal` `name` `self_ref` `wildcard` `leading_dot` `member` `index` `call` `tuple` `array` `object`
-`comparison_chain` `cast` `membership` `ascription` `range` `lambda` `case_expr` `loop_expr` `return_expr` `yield_expr`
+`comparison_chain` `cast` `membership` `ascription` `range` `lambda` `case_expr` `if_expr` `loop_expr` `return_expr` `yield_expr`
 `break_expr` `continue_expr` `struct_type` `function_type` `with_bindings`.
 
 - `call` is every application: `spelling` is `paren` / `juxtaposition` / `infix` / `prefix`, and an operator call has `op` instead of `callee`.
@@ -205,6 +212,7 @@ Expressions: `invalid_expr` `literal` `name` `self_ref` `wildcard` `leading_dot`
   Only the `fun` spelling has `type_parameters`, `bindings` and a `return_type`, and only it can be left with `return`.
 - `function_type` is every `a -> b` that is not the return arrow of a signature; its form is a two-operand run.
 - `with_bindings` is `f(x){…}`, reserved and always reported.
+- `if_expr` is `if c => a else b` on one line, as `if_branch`es with the closing `else` last; its `else` is an `op` leaf of its form.
 
 Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, as `if_branch`es) `for_stmt` `while_stmt`
 `assert_stmt` `print_stmt` `decl_stmt` `expr_stmt`.
@@ -250,6 +258,8 @@ impl::add_function(r, "mix", {"a", t, "b", t, "t", "float"}, t, eval, {.hlsl = "
 #include <shaped-graphics-language/check/check.hh>
 auto const m = sgl::check::check(prelude_files, {.file = user, .ast = user_ast});   // + a registry; default_registry() without
                                            // -> sgl::check::checked_module; TOTAL; a module_file is two REFERENCES
+sgl::check::check(prelude_files, library, program, registry, options)   // library: the files `use` may reach;
+                                           // options: an option_value per `@option const` the program sets; both optional
                                            // prelude_files: cc::span<module_file const>, from sgl::parsed_prelude() or a test's own
                                            // file i is prelude file i, and the program is the LAST file; never concatenated
                                            // carried: let / let mut, assignment and `op=`, if chains, while, for over `a ..< b`, loop with
@@ -389,6 +399,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
 uv run dev.py run sgl -- describe --module view --module-dir shaders     # a module of the directories, as its package entry reads it
@@ -449,6 +460,12 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 ## The language: places, function values, generics
 
 ```sgl sketch
+@option const tile = 8                   // the host sets it per compile, and this is its default (CHK-353)
+@compute(tile, tile) fun blur(...)       // an option stands where a const stands: a workgroup size, an array length, an image format
+                                         // a used module's option is set as `common.taps`, apart from the program's `taps` (CHK-354)
+if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
+fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
+
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by
 bump(mut c, 2.0)                         // the call marks it; exact type, indices evaluated once (CHK-316)
@@ -596,6 +613,9 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
   Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
 - **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+- **`img[xy]` is the image's `load`, and `img[xy] = v` its `store`** (CHK-367): the check pass records the call at the subscript, and `m.texel_stores` holds each assignment's.
+  `@atomic` on a `mut` image of `.r32_uint` or `.r32_sint` makes `img[xy]` an atomic, `img[xy].max(v)` (CHK-372), which the flat tree calls as the prelude's internal `texel_max`.
+  `@coherent` on a `mut buffer` or image is `globallycoherent` in HLSL and `coherent(device)` in MSL (CHK-368); both features are WGSL's `target-lacks-feature`.
 - **A binding array, `texture_2d[float4][64]`, needs `binding_arrays`** and is read by element alone (CHK-299).
   An index the uniformity pass cannot prove uniform is `nonuniform i`, or it is `non-uniform-index`; a needless mark is a warning (CHK-300).
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
@@ -660,6 +680,11 @@ ops[i](mut v)                                            // raygen, miss, closes
   A constant block packs as an HLSL constant buffer does, and a buffer's element as a dx12 structured buffer: tight, like a `tg` struct.
   WGSL and MSL are made to follow by a memory form, where a vector their own rule would place elsewhere is split or packed.
   A struct in both a block and a buffer is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
+  Only the generated struct is promised, unless `@layout(.hlsl)` (today's packing, never reordered) or `@layout(.cpp)` on the binding promises one (CHK-369).
+  `.cpp` places a block as C++ places a struct of `tg` types, so a host's own struct fills it; every target then reads it through a memory form.
+- **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
+  HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
+  A 16-bit value packs at 2 bytes, crosses no stage edge and sits in no `@inline` binding (CHK-387), and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
 - **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.

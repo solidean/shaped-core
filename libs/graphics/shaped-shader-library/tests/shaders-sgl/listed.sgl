@@ -1,0 +1,10 @@
+// An entry point the package lists on its own, `listed.sgl:compute:spread`, with no `*` and no typed entry beside it.
+// It is described all the same, so its asset knows the option it reaches and a value for it is a compile of its own.
+
+@option const tile = 64
+
+binding listed_work:
+    values: mut buffer[float]
+
+@compute(tile) fun spread(@thread_id id: int3){listed_work}:
+    listed_work.values[id.x] = 1.0

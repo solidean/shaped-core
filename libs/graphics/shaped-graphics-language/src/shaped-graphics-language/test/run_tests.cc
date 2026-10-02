@@ -185,8 +185,21 @@ cc::string_view sgl::test::to_string(test_status s)
 
 cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
 {
-    auto const scalar_text = [](scalar const& leaf)
+    auto const scalar_text = [](scalar const& leaf) -> cc::string
     {
+        // a 16-bit value reads as its family's, with the suffix that spells its literal (CHK-357)
+        if (is_16_bit(leaf.kind))
+        {
+            auto const wide = leaf.widened();
+            if (wide.kind == value_kind::scalar_int)
+                return cc::format("{}i16", wide.as_int());
+            if (wide.kind == value_kind::scalar_uint)
+                return cc::format("{}u16", wide.as_uint());
+            auto const f = wide.as_float();
+            if (f != f || f - f != 0.0f)
+                return cc::format("{}", f != f ? "nan" : f < 0.0f ? "-inf" : "inf");
+            return cc::format("{}f16", f);
+        }
         switch (leaf.kind)
         {
         case value_kind::scalar_float:
@@ -208,6 +221,8 @@ cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
             return cc::format("{}u", leaf.as_uint());
         case value_kind::boolean:
             return cc::string(leaf.as_bool() ? "true" : "false");
+        default:
+            break;
         }
         return cc::string("?");
     };

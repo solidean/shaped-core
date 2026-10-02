@@ -2,6 +2,8 @@
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/resources.hh>
+#include <shaped-graphics-language/interpret/interpret.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
@@ -59,6 +61,8 @@ struct stage_violation
     i32 file = 0;
     ast::expr_id call = ast::expr_id::none;
     symbol_id callee = symbol_id::none;
+    /// The call written in the tree's own body that reaches it, the call itself where it stands there.
+    call_site written = {};
 };
 
 /// Reads the checked ASTs through the side tables and writes the STRUCTURED form of one entry point's flat tree.
@@ -76,11 +80,16 @@ struct flattener
     cc::vector<stage_violation> stage_violations;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
+    /// A test's calls of a subgroup operation, which a run of one invocation has no subgroup for (CHK-379).
+    cc::vector<stage_violation> subgroup_calls;
+    /// A compute entry point's calls of a quad operation, whose workgroup then forms its quads along one axis (CHK-380).
+    cc::vector<stage_violation> quad_calls;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
     cc::vector<origin> discards;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
+    /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
     {
         i32 file = 0;
@@ -88,8 +97,26 @@ struct flattener
         feature_set features;
         /// The functions whose bodies the call stands in, the tree's own first, each of which uses what it needs.
         cc::vector<symbol_id> within;
+        /// A value rather than a call, which the note says.
+        bool is_value = false;
     };
     cc::vector<feature_use> feature_uses;
+
+    /// CHK-382: a value of `type` at `from` needs what the type needs, once per function it stands in.
+    void note_value_use(type_id type, ast::expr_id from)
+    {
+        auto const needs = c.features_of_type(type);
+        if (needs.is_empty() || frames.empty() || !ast::is_valid(from))
+            return;
+        for (auto const& u : feature_uses)
+            if (u.is_value && u.features == needs && !u.within.empty() && u.within.back() == frames.back().function)
+                return;
+        auto within = cc::vector<symbol_id>();
+        for (auto const& fr : frames)
+            within.push_back(fr.function);
+        feature_uses.push_back(
+            {.file = file(), .call = from, .features = needs, .within = cc::move(within), .is_value = true});
+    }
     /// CHK-345: an intersection entry point fused with the any hit of one record, which its own `return` runs.
     struct fusion
     {
@@ -118,15 +145,22 @@ struct flattener
             auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
             if (record != nullptr && record->uses_derivatives)
                 stage_violations.push_back({.file = file(), .call = call, .callee = callee});
+            auto const chain = entry.at(current()->chain);
+            auto const written = chain.empty() ? call_site{.file = file(), .call = call} : chain[0];
+            if (record != nullptr && record->is_subgroup_operation)
+                subgroup_calls.push_back({.file = file(), .call = call, .callee = callee, .written = written});
             auto const ray_stages = stage_bit(stage::raygen) | stage_bit(stage::miss) | stage_bit(stage::closest_hit)
                                   | stage_bit(stage::any_hit) | stage_bit(stage::intersection)
                                   | stage_bit(stage::callable);
             if (auto const& s = c.out.at(callee); s.info >= 0 && (c.out.functions[s.info].stages & ~ray_stages) == 0)
-                ray_stage_calls.push_back({.file = file(), .call = call, .callee = callee});
+                ray_stage_calls.push_back({.file = file(), .call = call, .callee = callee, .written = written});
             return;
         }
         if (entry.entry_stage == stage::none)
             return;
+        if (auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+            record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
+            quad_calls.push_back({.file = file(), .call = call, .callee = callee});
         auto const& s = c.out.at(callee);
         if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
             stage_violations.push_back({.file = file(), .call = call, .callee = callee});
@@ -305,6 +339,7 @@ struct flattener
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
         type = concrete(type);
+        note_value_use(type, from);
         // A builtin with an effect may give nothing, `store`, and its call is only ever an `eval`'s value.
         auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::void_type;
         is_failed = is_failed || (!c.is_sound(type) && !is_effect_call);
@@ -419,20 +454,21 @@ struct flattener
         if (auto const* const element = x.node.try_as<flat_element>())
         {
             auto const object = again(element->object, from);
-            auto const index = again(element->index, from);
+            auto const index = again_as_written(element->index, from);
             return add_expr(x.type, from, flat_element{.object = object, .index = index});
         }
         // a place a `mut` parameter stands for, whose indices were pinned when it was bound (`pin_place`)
         if (auto const* const member = x.node.try_as<flat_member>())
         {
             auto const index = member->member;
+            auto const letters = member->letters;
             auto const object = again(member->object, from);
-            return add_expr(x.type, from, flat_member{.object = object, .member = index});
+            return add_expr(x.type, from, flat_member{.object = object, .member = index, .letters = letters});
         }
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
             auto const buffer = again(element->buffer, from);
-            auto const index = again(element->index, from);
+            auto const index = again_as_written(element->index, from);
             return add_expr(x.type, from, flat_buffer_element{.buffer = buffer, .index = index});
         }
         // the mark stays where it was written, which is what a diagnostic about it points at
@@ -457,24 +493,56 @@ struct flattener
         return fail();
     }
 
+    /// `index` as it may stand in several places: itself where it is substitutable, and otherwise a local of `kind`
+    /// bound at `from`.
+    /// `nonuniform i` binds `i` and marks the bound local, since a mark is read only where it indexes (CHK-300).
+    flat_expr_id bound_index(flat_expr_id index, local_kind kind, cc::string_view name, origin from)
+    {
+        if (is_substitutable_index(index))
+            return index;
+        auto const marked = marked_by_nonuniform(index);
+        auto const value = is_valid(marked) ? marked : index;
+        auto const local = add_local(kind, name, entry.at(value).type);
+        add_stmt(from, flat_let{.local = local, .value = value});
+        if (!is_valid(marked))
+            return local_ref(local, from.expr);
+        flat_expr_id const arguments[] = {local_ref(local, from.expr)};
+        auto mark = entry.at(index);
+        mark.node.as<flat_call>().arguments = add_list(arguments);
+        entry.exprs.push_back(cc::move(mark));
+        return flat_expr_id(entry.exprs.size() - 1);
+    }
+
+    /// `again` for an index, which keeps the place it was written: a diagnostic about the index of an element a
+    /// parameter stands for belongs to the caller that wrote it, not to wherever the callee names the parameter.
+    flat_expr_id again_as_written(flat_expr_id index, ast::expr_id from)
+    {
+        if (!is_substitutable_index(index))
+            return again(index, from);
+        // by value: the copy of a mark's argument appends to the arrays
+        auto copy = entry.at(index);
+        if (auto const marked = marked_by_nonuniform(index); is_valid(marked))
+        {
+            flat_expr_id const arguments[] = {again_as_written(marked, from)};
+            copy.node.as<flat_call>().arguments = add_list(arguments);
+        }
+        entry.exprs.push_back(cc::move(copy));
+        return flat_expr_id(entry.exprs.size() - 1);
+    }
+
     /// `place` with every index it holds evaluated now, into a local where it is no substitutable value, so the place
     /// can stand wherever a `mut` parameter is named and mean the same element each time (CHK-316).
     flat_expr_id pin_place(flat_expr_id place)
     {
         auto const x = entry.at(place);
-        auto const pin_index = [&](flat_expr_id index)
-        {
-            if (is_substitutable_index(index))
-                return index;
-            auto const local = add_local(local_kind::let, "at", entry.at(index).type);
-            add_stmt(entry.at(index).from, flat_let{.local = local, .value = index});
-            return local_ref(local, entry.at(index).from.expr);
-        };
+        auto const pin_index
+            = [&](flat_expr_id index) { return bound_index(index, local_kind::let, "at", entry.at(index).from); };
         if (auto const* const member = x.node.try_as<flat_member>())
         {
             auto const index = member->member;
+            auto const letters = member->letters;
             auto const object = pin_place(member->object);
-            return add_expr(x.type, x.from.expr, flat_member{.object = object, .member = index});
+            return add_expr(x.type, x.from.expr, flat_member{.object = object, .member = index, .letters = letters});
         }
         if (auto const* const element = x.node.try_as<flat_element>())
         {
@@ -529,6 +597,126 @@ struct flattener
         };
         return {.first = add_expr(type, from, flat_block{.label = label, .body = add_list(body)}),
                 .later = local_ref(local, from)};
+    }
+
+    // ---- swizzles ---------------------------------------------------------------------------------------------------
+
+    /// The fields of `operand` a swizzle reads.
+    struct swizzled
+    {
+        ast::expr_id operand = ast::expr_id::none;
+        swizzle letters;
+    };
+
+    /// True for the member `id` that is a swizzle, or a field of one.
+    [[nodiscard]] bool is_swizzled(ast::expr_id id) const
+    {
+        auto const* const m = ast::is_valid(id) ? ast().at(id).node.try_as<ast::member>() : nullptr;
+        if (m == nullptr)
+            return false;
+        auto const kind = tables().target_at(id).kind;
+        return kind == target_kind::swizzle
+            || (kind == target_kind::field && ast::is_valid(m->object)
+                && tables().target_at(m->object).kind == target_kind::swizzle);
+    }
+
+    /// What the `is_swizzled` member `id` reads, through every swizzle below it: `v.zyx.yx` reads `v.yz`, and `v.zy.x`
+    /// reads `v.z`.
+    [[nodiscard]] swizzled swizzled_at(ast::expr_id id) const
+    {
+        auto const& where = tables().target_at(id);
+        auto result = swizzled{
+            .operand = ast().at(id).node.as<ast::member>().object,
+            .letters = where.kind == target_kind::swizzle ? swizzle::unpacked(where.index)
+                                                          : swizzle{.fields = {i8(where.index)}, .count = 1},
+        };
+        while (tables().target_at(result.operand).kind == target_kind::swizzle)
+        {
+            result.letters = result.letters.over(swizzle::unpacked(tables().target_at(result.operand).index));
+            result.operand = ast().at(result.operand).node.as<ast::member>().object;
+        }
+        return result;
+    }
+
+    /// The type of field `field` of a value of `type`.
+    [[nodiscard]] type_id field_type(type_id type, i32 field) const
+    {
+        return c.out.at(c.out.at(type).members)[field].type;
+    }
+
+    /// One field of `object`, or the swizzle `letters` of it, which is `type`.
+    /// A prelude vector's swizzle is a member of its own; a struct of the program's is the construction of the vector it
+    /// means, from an operand that is no local evaluated once (EMIT-142).
+    flat_expr_id swizzle_of(flat_expr_id object, swizzle letters, type_id type, ast::expr_id id)
+    {
+        if (!is_valid(object))
+            return fail();
+        auto const object_type = entry.at(object).type;
+        if (letters.count == 1)
+            return add_expr(type, id, flat_member{.object = object, .member = letters.fields[0]});
+        if (c.out.builtin_type_of(object_type) != nullptr)
+            return add_expr(type, id, flat_member{.object = object, .letters = letters});
+        auto const once = entry.at(object).node.is<flat_local_ref>() ? evaluated_once{.first = object, .later = object}
+                                                                     : evaluate_once(object, "swizzled", id);
+        auto arguments = cc::vector<flat_expr_id>();
+        for (auto i = 0; i < letters.count; ++i)
+        {
+            auto const operand = i == 0 ? once.first : again(once.later, id);
+            arguments.push_back(add_expr(field_type(object_type, letters.fields[i]), id,
+                                         flat_member{.object = operand, .member = letters.fields[i]}));
+        }
+        return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
+    }
+
+    flat_expr_id read_swizzle(swizzled const& s, type_id type, ast::expr_id id)
+    {
+        return swizzle_of(flatten_expr(s.operand), s.letters, type, id);
+    }
+
+    /// `v.zy = value`, and `v.zy op= value`, whose operand's indices are evaluated once, before the value (CHK-352).
+    void flatten_swizzle_assign(origin from, ast::assign_stmt const& assign, cc::string_view op)
+    {
+        auto const s = swizzled_at(assign.target);
+        auto const type = tables().type_at(assign.target);
+        auto const operand = pin_place(flatten_expr(s.operand));
+        auto value = flatten_expr(assign.value);
+        if (!is_valid(operand) || !is_valid(value))
+        {
+            is_failed = true;
+            return;
+        }
+        auto const operand_type = entry.at(operand).type;
+        if (op != "=")
+        {
+            type_id const types[] = {type, entry.at(value).type};
+            auto const callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
+            if (!is_valid(callee))
+            {
+                is_failed = true;
+                return;
+            }
+            auto const read = swizzle_of(again(operand, assign.target), s.letters, type, assign.target);
+            flat_expr_id const arguments[] = {read, value};
+            value = builtin_call(assign.value, callee, arguments);
+        }
+        if (s.letters.count == 1 || c.out.builtin_type_of(operand_type) != nullptr)
+        {
+            add_stmt(from, flat_assign{.place = swizzle_of(operand, s.letters, type, assign.target), .value = value});
+            return;
+        }
+        // EMIT-143: a struct of the program takes one component at a time, from the value held once
+        auto const held = add_local(local_kind::temporary, "swizzled", type);
+        add_stmt(from, flat_let{.local = held, .value = value});
+        for (auto i = 0; i < s.letters.count; ++i)
+        {
+            auto const element = field_type(operand_type, s.letters.fields[i]);
+            auto const object = i == 0 ? operand : again(operand, assign.target);
+            auto const place
+                = add_expr(element, assign.target, flat_member{.object = object, .member = s.letters.fields[i]});
+            auto const component
+                = add_expr(element, assign.target, flat_member{.object = local_ref(held, assign.target), .member = i});
+            add_stmt(from, flat_assign{.place = place, .value = component});
+        }
     }
 
     // ---- expressions ------------------------------------------------------------------------------------------------
@@ -598,6 +786,8 @@ struct flattener
                     add_stmt({.file = file(), .expr = id}, flat_eval{.value = object});
                 return add_expr(type, id, flat_int_literal{.value = where.index});
             }
+            if (is_swizzled(id))
+                return read_swizzle(swizzled_at(id), type, id);
             if (where.kind != target_kind::field)
                 return fail();
             auto const object = flatten_expr(m->object);
@@ -607,6 +797,11 @@ struct flattener
         {
             auto const arguments = ast().at(indexed->arguments);
             auto const object_type = tables().type_at(indexed->object);
+            // CHK-367: a texel read is the `load` the check pass resolved it as
+            if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::image)
+                return tables().call_at(id) >= 0 && !c.out.at(object_type).is_atomic
+                         ? flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)])
+                         : fail();
             // CHK-287: one element per index, `grid[i, j]` being `grid[i][j]`
             if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::array)
             {
@@ -652,6 +847,8 @@ struct flattener
             return flatten_value_loop(id, type, *loop);
         if (auto const* const c = e.node.try_as<ast::case_expr>())
             return flatten_value_case(id, type, *c);
+        if (auto const* const i = e.node.try_as<ast::if_expr>())
+            return flatten_value_if(id, type, *i);
         return fail();
     }
 
@@ -687,24 +884,32 @@ struct flattener
     /// A number literal as the type it was checked as, which a conversion may have made other than its default.
     flat_expr_id flatten_number(ast::expr_id id, type_id type)
     {
-        auto const text = c.text_of(file(), c.span_of(file(), id));
-        auto const is_float = type == c.prelude_type(builtins::k_float);
+        auto text = c.text_of(file(), c.span_of(file(), id));
+        // CHK-357: a suffix named the type already, and the value is the number before it
+        if (auto const suffixed = split_suffix(text); suffixed.has_value())
+            text = suffixed.value().body;
+        auto const is_half = type == c.prelude_type(builtins::k_half);
+        auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+        // CHK-253: a half literal is the half nearest its value, which every target's text then spells exactly
+        auto const literal = [&](f64 v)
+        { return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v}); };
         if (classify_number(text) == number_class::plain_integer)
         {
             auto const value = parse_literal_integer(text);
             if (!value.has_value())
                 return fail();
             if (is_float)
-                return add_expr(type, id, flat_literal{.value = f64(value.value())});
+                return literal(f64(value.value()));
             // an unsigned literal keeps its bits in `value`
-            auto const is_unsigned = type == c.prelude_type(builtins::k_uint);
+            auto const is_unsigned
+                = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);
             auto const v = value.value();
             if (is_unsigned ? v < 0 || v > 4294967295ll : v < -2147483647 - 1 || v > 2147483647)
                 return fail();
             return add_expr(type, id, flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned});
         }
         auto const value = parse_plain_float(text);
-        return value.has_value() ? add_expr(type, id, flat_literal{.value = value.value()}) : fail();
+        return value.has_value() ? literal(value.value()) : fail();
     }
 
     /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
@@ -1037,22 +1242,7 @@ struct flattener
         // by value: binding adds nodes, and the arrays move
         auto const x = entry.at(place);
         auto bind = [&](flat_expr_id index)
-        {
-            if (is_substitutable_index(index))
-                return index;
-            // `nonuniform i` binds `i`, and marks the bound local, since a mark is read only where it indexes (CHK-300)
-            auto const marked = marked_by_nonuniform(index);
-            auto const value = is_valid(marked) ? marked : index;
-            auto const local = add_local(local_kind::temporary, "index", entry.at(value).type);
-            add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = value});
-            if (!is_valid(marked))
-                return local_ref(local, id);
-            flat_expr_id const arguments[] = {local_ref(local, id)};
-            auto mark = entry.at(index);
-            mark.node.as<flat_call>().arguments = add_list(arguments);
-            entry.exprs.push_back(cc::move(mark));
-            return flat_expr_id(entry.exprs.size() - 1);
-        };
+        { return bound_index(index, local_kind::temporary, "index", {.file = file(), .expr = id}); };
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
             auto const buffer = element->buffer;
@@ -1080,6 +1270,8 @@ struct flattener
     {
         if (is_by_target(record.callee))
             return flatten_by_target(id, type, record);
+        if (auto const texel = atomic_texel_of(record); ast::is_valid(texel))
+            return flatten_texel_atomic(id, type, record, texel);
         auto const values = flatten_written(c.out.at(record.written));
         auto const handed = written_closures;
         auto const slots = c.out.at(record.slots);
@@ -1089,6 +1281,68 @@ struct flattener
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         return target_call(id, type, record.callee, values, slots);
+    }
+
+    /// The subscript `img[xy]` of an `@atomic` image a call updates as its first argument; none for any other call.
+    [[nodiscard]] ast::expr_id atomic_texel_of(call_record const& record) const
+    {
+        auto const written = c.out.at(record.written);
+        if (written.empty())
+            return ast::expr_id::none;
+        auto const* const indexed = ast().at(written[0].expr).node.try_as<ast::index>();
+        if (indexed == nullptr)
+            return ast::expr_id::none;
+        auto const image = tables().type_at(indexed->object);
+        return is_valid(image) && c.out.at(image).kind == type_kind::image && c.out.at(image).is_atomic
+                 ? written[0].expr
+                 : ast::expr_id::none;
+    }
+
+    /// CHK-373: `img[xy].max(v)` is the texel's own atomic, which takes the image, its coordinates and the operands.
+    /// The coordinates are those of the plain image's `load`, which the check pass resolved at the subscript.
+    flat_expr_id flatten_texel_atomic(ast::expr_id id, type_id type, call_record const& record, ast::expr_id texel)
+    {
+        auto const* const atomic = c.out.builtin_function(c.out.at(record.callee).intrinsic);
+        auto const located = tables().call_at(texel);
+        if (atomic == nullptr || located < 0)
+            return fail();
+        auto const& image = c.out.at(tables().type_at(ast().at(texel).node.as<ast::index>().object));
+        auto const callee = texel_atomic(cc::format("texel_{}", atomic->name), image);
+        if (!is_valid(callee))
+            return fail();
+        // the internal atomic takes what the image's `load` does, in the same order, and the operands after it
+        auto const& load = c.out.call_records[located];
+        auto values = flatten_written(c.out.at(load.written));
+        auto slots = cc::vector<i32>::create_copy_of(c.out.at(load.slots));
+        auto const written = c.out.at(record.written);
+        for (auto i = isize(1); i < written.size(); ++i)
+        {
+            slots.push_back(i32(values.size()));
+            values.push_back(flatten_expr(written[i].expr));
+        }
+        return target_call(id, type, callee, values, slots);
+    }
+
+    /// The prelude's internal atomic `name` of a texel of `image`, by the image's shape and texel.
+    [[nodiscard]] symbol_id texel_atomic(cc::string_view name, check::type_info const& image) const
+    {
+        auto const* const found = c.prelude_names.get_ptr(cc::string(name));
+        if (found == nullptr)
+            return symbol_id::none;
+        auto const texel = texel_name_of(image.format);
+        for (auto const f : *found)
+        {
+            auto const& s = c.out.at(f);
+            if (s.kind != symbol_kind::function || s.info < 0)
+                continue;
+            auto const parameters = c.out.at(c.out.functions[s.info].parameters);
+            if (parameters.empty())
+                continue;
+            auto const& p = c.out.at(parameters[0].type);
+            if (p.kind == type_kind::image && p.shape == image.shape && c.out.name_of(p.element) == texel)
+                return f;
+        }
+        return symbol_id::none;
     }
 
     /// A builtin or a construction over `values`, written in the order the call wrote them.
@@ -1198,8 +1452,9 @@ struct flattener
         return add_expr(type, id, flat_block{.label = label, .body = body});
     }
 
-    /// True where evaluating `id` calls a builtin with an effect outside any block.
-    /// A block is the legalizer's to order: it moves in front of its statement and pins what stands left of it (LEGAL-16).
+    /// True where evaluating `id` has an effect, an inlined call's body included.
+    /// A block whose only leave is its last statement leaves its value where it stood (LEGAL-15).
+    /// So an inlined `fun f() => counter.add(1)` is an impure call in the text, written wherever the target puts it.
     [[nodiscard]] bool calls_impure(flat_expr_id id, int depth) const
     {
         if (!is_valid(id) || depth > k_max_inline_depth)
@@ -1207,8 +1462,8 @@ struct flattener
         auto const& x = entry.at(id);
         if (auto const* const call = x.node.try_as<flat_call>(); call != nullptr && !call->is_pure)
             return true;
-        if (x.node.is<flat_block>())
-            return false;
+        if (auto const* const block = x.node.try_as<flat_block>())
+            return writes_outside(entry, block->body, depth + 1);
         auto result = false;
         for_each_operand(entry, x, [&](flat_expr_id operand) { result = result || calls_impure(operand, depth + 1); });
         return result;
@@ -1320,6 +1575,7 @@ struct flattener
         auto result = cc::vector<flat_expr_id>();
         auto handed = cc::vector<i32>();
         auto splat = evaluated_once{};
+        auto splat_letters = swizzle();
         for (auto const& w : written)
         {
             handed.push_back(w.is_function ? closure_of(w.expr) : -1);
@@ -1336,7 +1592,16 @@ struct flattener
             }
             if (w.splat_member == 0)
             {
-                auto const value = flatten_expr(w.expr);
+                // EMIT-142: a splat of a swizzle reads its operand's fields, and binds no vector of them
+                splat_letters = {};
+                auto read = w.expr;
+                if (is_swizzled(w.expr))
+                {
+                    auto const s = swizzled_at(w.expr);
+                    read = s.operand;
+                    splat_letters = s.letters;
+                }
+                auto const value = flatten_expr(read);
                 auto const is_local = is_valid(value) && entry.at(value).node.is<flat_local_ref>();
                 splat = !is_valid(value) || is_local ? evaluated_once{.first = value, .later = value}
                                                      : evaluate_once(value, "splat", w.expr);
@@ -1347,9 +1612,9 @@ struct flattener
                 continue;
             }
             auto const object = w.splat_member == 0 ? splat.first : again(splat.later, w.expr);
-            auto const members = c.out.at(c.out.at(entry.at(object).type).members);
-            result.push_back(add_expr(members[w.splat_member].type, w.expr,
-                                      flat_member{.object = object, .member = w.splat_member}));
+            auto const field = splat_letters.count > 0 ? i32(splat_letters.fields[w.splat_member]) : w.splat_member;
+            result.push_back(add_expr(field_type(entry.at(object).type, field), w.expr,
+                                      flat_member{.object = object, .member = field}));
         }
         written_closures = cc::move(handed);
         return result;
@@ -1553,7 +1818,7 @@ struct flattener
             auto patterns = cc::vector<flat_expr_id>();
             if (!is_wildcard)
                 collect_patterns(arm.pattern, patterns);
-            auto const body = flatten_arm_body(arm, value_block);
+            auto const body = flatten_arm_body(arm.result, value_block);
             if (is_wildcard)
             {
                 result.default_body = body;
@@ -1821,32 +2086,33 @@ struct flattener
         into.push_back(flatten_expr(id));
     }
 
-    ast::range_of<flat_stmt_id> flatten_arm_body(ast::case_arm const& arm, label_id value_block)
+    /// The body of a `case` arm or of a branch of an `if` value; `value_block` is what its value leaves, or none.
+    ast::range_of<flat_stmt_id> flatten_arm_body(ast::body const& result, label_id value_block)
     {
         auto const outer = cc::move(block);
         block = {};
         if (is_valid(value_block))
             current()->value_blocks.push_back(value_block);
 
-        if (arm.result.kind == ast::body_kind::arrow && ast::is_valid(arm.result.value))
+        if (result.kind == ast::body_kind::arrow && ast::is_valid(result.value))
         {
-            auto const where = origin{.file = file(), .expr = arm.result.value};
-            auto const& e = ast().at(arm.result.value);
+            auto const where = origin{.file = file(), .expr = result.value};
+            auto const& e = ast().at(result.value);
             auto const is_jump = e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>()
                               || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>()
                               || e.node.is<ast::discard_expr>();
             if (is_jump)
-                flatten_expr_stmt(where, arm.result.value);
+                flatten_expr_stmt(where, result.value);
             else if (is_valid(value_block))
             {
-                auto const value = flatten_expr(arm.result.value);
+                auto const value = flatten_expr(result.value);
                 add_stmt(where, flat_leave{.target = value_block, .value = value});
             }
             else
-                flatten_expr_stmt(where, arm.result.value);
+                flatten_expr_stmt(where, result.value);
         }
         else
-            for (auto const stmt : ast().at(arm.result.statements))
+            for (auto const stmt : ast().at(result.statements))
                 flatten_stmt(stmt);
 
         if (is_valid(value_block))
@@ -1864,6 +2130,108 @@ struct flattener
         auto const where = origin{.file = file(), .expr = id};
         flat_stmt_id const statements[] = {make_stmt(where, parts)};
         return add_expr(type, id, flat_block{.label = value_block, .body = add_list(statements)});
+    }
+
+    /// `if c => a else b` somebody reads the value of: a block around an `if` whose branches leave it (CHK-375).
+    /// Only the branch the condition takes runs.
+    /// A branch CHK-356 resolves is the taken side alone, and an arrow side that is a value is its expression.
+    flat_expr_id flatten_value_if(ast::expr_id id, type_id type, ast::if_expr const& node)
+    {
+        auto branches = ast().at(node.branches);
+        auto condition = flat_expr_id::none;
+        while (branches.size() >= 2 && ast::is_valid(branches.front().condition))
+        {
+            condition = flatten_expr(branches.front().condition);
+            auto const taken = constant_condition(condition);
+            if (!taken.has_value())
+                break;
+            condition = flat_expr_id::none;
+            if (taken.value())
+                return taken_value(id, type, branches.front().then);
+            branches = branches.subspan({.offset = 1, .size = branches.size() - 1});
+            if (branches.size() == 1)
+                return taken_value(id, type, branches.front().then);
+        }
+        auto const value_block = add_label("if");
+        auto const outer = cc::move(block);
+        block = {};
+        flatten_if_branches({.file = file(), .expr = id}, branches, value_block, condition);
+        auto const body = add_list(block);
+        block = cc::move(outer);
+        return add_expr(type, id, flat_block{.label = value_block, .body = body});
+    }
+
+    /// The value of the side of an `if` value that a constant takes: an arrow's expression, or a block it leaves.
+    flat_expr_id taken_value(ast::expr_id id, type_id type, ast::body const& then)
+    {
+        if (then.kind == ast::body_kind::arrow && ast::is_valid(then.value))
+        {
+            auto const& e = ast().at(then.value);
+            auto const is_jump = e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>()
+                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>()
+                              || e.node.is<ast::discard_expr>();
+            if (!is_jump)
+                return flatten_expr(then.value);
+        }
+        auto const value_block = add_label("if");
+        auto const body = flatten_arm_body(then, value_block);
+        return add_expr(type, id, flat_block{.label = value_block, .body = body});
+    }
+
+    /// CHK-356: the value of `condition` where it is a constant, which a branch on it is replaced by the taken side of.
+    /// Nothing for a condition that is no constant, and for one with no value, which `judge_constants` reports.
+    [[nodiscard]] cc::optional<bool> constant_condition(flat_expr_id condition) const
+    {
+        if (!is_valid(condition) || !is_constant(c.out, entry, condition))
+            return {};
+        auto const o = evaluate_constant(c.out, entry, condition);
+        if (o.status != run_status::ok || o.result.leaves.size() != 1 || o.result.leaves[0].kind != value_kind::boolean)
+            return {};
+        return o.result.leaves[0].as_bool();
+    }
+
+    /// The taken side of a branch on a constant, as a block of its own, so its locals stay in its scope.
+    void add_taken(origin from, ast::range_of<flat_stmt_id> body)
+    {
+        add_stmt(from, flat_block{.label = add_label("if"), .body = body});
+    }
+
+    /// The branches of an `if` value, each an `if` nested in the `else` of the one before; the last has no condition.
+    /// `first`, where valid, is the first condition flattened already.
+    void flatten_if_branches(origin from,
+                             cc::span<ast::if_branch const> branches,
+                             label_id value_block,
+                             flat_expr_id first = flat_expr_id::none)
+    {
+        if (branches.size() < 2 || !ast::is_valid(branches.front().condition))
+        {
+            is_failed = true;
+            return;
+        }
+        auto const condition = is_valid(first) ? first : flatten_expr(branches.front().condition);
+        auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
+        // CHK-356: only the side a constant takes is flattened, so nothing judges what the other side would use
+        if (auto const taken = constant_condition(condition); taken.has_value())
+        {
+            if (taken.value())
+                return add_taken(from, flatten_arm_body(branches.front().then, value_block));
+            if (rest.size() == 1)
+                return add_taken(from, flatten_arm_body(rest.front().then, value_block));
+            return flatten_if_branches(from, rest, value_block);
+        }
+        auto const then_body = flatten_arm_body(branches.front().then, value_block);
+        auto else_body = ast::range_of<flat_stmt_id>();
+        if (rest.size() == 1)
+            else_body = flatten_arm_body(rest.front().then, value_block);
+        else
+        {
+            auto const outer = cc::move(block);
+            block = {};
+            flatten_if_branches(from, rest, value_block);
+            else_body = add_list(block);
+            block = cc::move(outer);
+        }
+        add_stmt(from, flat_if{.condition = condition, .then_body = then_body, .else_body = else_body});
     }
 
     // ---- calls ------------------------------------------------------------------------------------------------------
@@ -2031,6 +2399,9 @@ struct flattener
             // CHK-324: a resource stands wherever the parameter is named, since no target holds one in a local
             else if (is_substitutable(argument) || is_resource_member(argument))
                 bound.push_back({.where = where, .literal = argument});
+            // an element of a binding array at an index computed once, named again wherever the parameter is (CHK-366)
+            else if (is_resource(c.out.at(x.type).kind) && x.node.is<flat_element>())
+                bound.push_back({.where = where, .literal = pin_place(argument)});
             else
             {
                 auto const local = add_local(local_kind::let, parameters[i].name, x.type);
@@ -2066,7 +2437,10 @@ struct flattener
         // a property's `=>:` block has its value through `yield`, which leaves the property's block
         if (property != nullptr && !ast::is_valid(source->value))
             current()->value_blocks.push_back(label);
-        if (ast::is_valid(source->value))
+        // an arrow body of no value is a statement, such as `=> img.store(xy, v)`, which a leave would drop
+        if (ast::is_valid(source->value) && info.result == checked_module::void_type)
+            flatten_expr_stmt({.file = s.file, .expr = source->value}, source->value);
+        else if (ast::is_valid(source->value))
             flatten_return({.file = s.file, .expr = source->value}, source->value);
         for (auto const stmt : ast().at(source->statements))
             flatten_stmt(stmt);
@@ -2119,10 +2493,19 @@ struct flattener
             return;
         }
         auto const condition = flatten_expr(first.condition);
+        auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
+        // CHK-356: only the side a constant takes is flattened, so nothing judges what the other side would use
+        if (auto const taken = constant_condition(condition); taken.has_value())
+        {
+            if (taken.value())
+                return add_taken(from, flatten_body(first.then));
+            if (!rest.empty() && !ast::is_valid(rest.front().condition))
+                return add_taken(from, flatten_body(rest.front().then));
+            return flatten_if(from, rest);
+        }
         auto const then_body = flatten_body(first.then);
 
         auto else_body = ast::range_of<flat_stmt_id>();
-        auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
         if (!rest.empty() && !ast::is_valid(rest.front().condition))
             else_body = flatten_body(rest.front().then);
         else if (!rest.empty())
@@ -2138,6 +2521,11 @@ struct flattener
 
     void flatten_assign(origin from, ast::assign_stmt const& assign)
     {
+        for (auto const& t : c.out.texel_stores)
+            if (t.place == assign.target && t.file == file())
+                return flatten_texel_store(from, assign, t);
+        if (is_swizzled(assign.target) && sgl::is_valid(assign.op))
+            return flatten_swizzle_assign(from, assign, c.text_of(file(), c.file_of(file()).at(assign.op).where));
         auto const place = flatten_expr(assign.target);
         auto value = flatten_expr(assign.value);
         auto const op = sgl::is_valid(assign.op) ? c.text_of(file(), c.file_of(file()).at(assign.op).where) : "";
@@ -2159,6 +2547,59 @@ struct flattener
             value = builtin_call(assign.value, callee, arguments);
         }
         add_stmt(from, flat_assign{.place = place, .value = value});
+    }
+
+    /// CHK-367: `img[xy] = v` is the `store` the check pass resolved, and `img[xy] op= v` loads the texel first.
+    /// A compound one evaluates the image's index and the coordinates once, which the load and the store both read.
+    void flatten_texel_store(origin from, ast::assign_stmt const& assign, texel_store const& t)
+    {
+        auto const& store = c.out.call_records[t.store];
+        if (t.load < 0)
+        {
+            add_stmt(from, flat_eval{.value = flatten_bound_call(assign.target, checked_module::void_type, store)});
+            return;
+        }
+        auto const& load = c.out.call_records[t.load];
+        auto coordinates = flatten_written(c.out.at(load.written));
+        for (auto i = isize(0); i < coordinates.size(); ++i)
+        {
+            if (!is_valid(coordinates[i]))
+            {
+                is_failed = true;
+                return;
+            }
+            if (i == 0)
+            {
+                coordinates[i] = with_bound_index(coordinates[i], assign.target);
+                continue;
+            }
+            if (is_substitutable(coordinates[i]))
+                continue;
+            auto const local = add_local(local_kind::temporary, "coordinate", entry.at(coordinates[i]).type);
+            add_stmt(from, flat_let{.local = local, .value = coordinates[i]});
+            coordinates[i] = local_ref(local, assign.target);
+        }
+        auto const texel = tables().type_at(assign.target);
+        auto const loaded = target_call(assign.target, texel, load.callee, coordinates, c.out.at(load.slots));
+        auto const value = flatten_expr(assign.value);
+        auto const op = c.text_of(file(), c.file_of(file()).at(assign.op).where);
+        type_id const types[] = {texel, is_valid(value) ? entry.at(value).type : type_id::none};
+        auto const operator_callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
+        if (!is_valid(loaded) || !is_valid(value) || !is_valid(operator_callee))
+        {
+            is_failed = true;
+            return;
+        }
+        flat_expr_id const operands[] = {loaded, value};
+        auto const combined = builtin_call(assign.value, operator_callee, operands);
+
+        // the store's written arguments are the load's, then the value
+        auto values = cc::vector<flat_expr_id>();
+        for (auto const coordinate : coordinates)
+            values.push_back(again(coordinate, assign.target));
+        values.push_back(combined);
+        add_stmt(from, flat_eval{.value = target_call(assign.target, checked_module::void_type, store.callee, values,
+                                                      c.out.at(store.slots))});
     }
 
     /// What `place op= value` reads the place as, which is the place read a second time.
@@ -2214,8 +2655,10 @@ struct flattener
         auto const x = entry.at(id);
         if (auto const* const member = x.node.try_as<flat_member>())
         {
+            auto const index = member->member;
+            auto const letters = member->letters;
             auto const object = reread(member->object, from);
-            return add_expr(x.type, from, flat_member{.object = object, .member = member->member});
+            return add_expr(x.type, from, flat_member{.object = object, .member = index, .letters = letters});
         }
         if (auto const* const element = x.node.try_as<flat_element>())
         {
@@ -2374,6 +2817,8 @@ struct flattener
         }
         if (auto const* const c = x.node.try_as<ast::case_expr>())
             return add_stmt(from, flatten_case_parts(*c, label_id::none));
+        if (auto const* const i = x.node.try_as<ast::if_expr>())
+            return flatten_if_branches(from, ast().at(i->branches), label_id::none);
 
         // CHK-225: a line of type bool of the test's own body is a check.
         if (is_test && frames.size() == 1 && tables().type_at(value) == bool_type())
@@ -2435,6 +2880,21 @@ void checker::flatten_test(i32 index)
     for (auto const& u : f.feature_uses)
         mark_requires_used(u.within, u.features);
 
+    // Reported for a test that expects it too, which is how a corpus file pins the rule.
+    // There it stands at the test's own call, so a helper the test reaches it through carries no error of the test's.
+    auto const report_reached = [&](stage_violation const& v, cc::string_view why)
+    {
+        auto const site = test.expects_diagnostics() ? v.written : call_site{.file = v.file, .call = v.call};
+        unsupported(site.file, span_of(site.file, site.call),
+                    cc::format("a test that reaches {}{}", out.at(v.callee).name, why));
+    };
+    // a pipeline's trace or callable runs against tables a test has none of
+    for (auto const& v : f.ray_stage_calls)
+        report_reached(v, ", which only the ray-tracing stages run");
+    // CHK-379
+    for (auto const& v : f.subgroup_calls)
+        report_reached(v, ": a run is one invocation, and has no subgroup");
+
     // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
     // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
     if (test.expects_diagnostics())
@@ -2455,13 +2915,9 @@ void checker::flatten_test(i32 index)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
                           out.at(v.callee).name));
-    // a pipeline's trace or callable runs against tables a test has none of
-    for (auto const& v : f.ray_stage_calls)
-        unsupported(v.file, span_of(v.file, v.call),
-                    cc::format("a test that reaches {}, which only the ray-tracing stages run", out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
-    if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty())
+    if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty() || !f.subgroup_calls.empty())
         return;
     f.entry.body = f.add_list(f.block);
     judge_constants(f.entry);
@@ -2507,6 +2963,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];
+    f.entry.preferred_subgroup_size = info.preferred_subgroup_size;
     f.entry.features = info.features;
     for (auto const binding : out.at(info.bindings))
         f.entry.bindings.push_back(binding);
@@ -2640,8 +3097,9 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             for (auto const& u : f.feature_uses)
                 if (u.features.has(needed))
                 {
-                    d.notes.push_back(
-                        {.file = u.file, .where = span_of(u.file, u.call), .message = "the call that needs it"});
+                    d.notes.push_back({.file = u.file,
+                                       .where = span_of(u.file, u.call),
+                                       .message = u.is_value ? "a value that needs it" : "the call that needs it"});
                     break;
                 }
         }
@@ -2659,6 +3117,13 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
                           check::stage_name(info.entry_stage), out.at(v.callee).name));
+    // CHK-380: HLSL forms a compute stage's quads from its threads' ids, which only one axis keeps consecutive
+    auto const is_linear = info.workgroup[0] % 4 == 0 && info.workgroup[1] == 1 && info.workgroup[2] == 1;
+    for (auto const& q : is_linear ? cc::span<stage_violation const>() : cc::span<stage_violation const>(f.quad_calls))
+        report(diagnostic_kind::invalid_entry_point, q.file, span_of(q.file, q.call),
+               cc::format("{} forms quads along one axis, so a compute entry point that reaches it has a workgroup of "
+                          "(x, 1, 1) whose x is a multiple of 4, and {}'s is ({}, {}, {})",
+                          out.at(q.callee).name, s.name, info.workgroup[0], info.workgroup[1], info.workgroup[2]));
     auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
     for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
         report(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
@@ -2672,7 +3137,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                     cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));
-    if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0)
+    if (f.is_failed || !f.stage_violations.empty() || reaches_discard
+        || (info.stages & stage_bit(info.entry_stage)) == 0 || (!is_linear && !f.quad_calls.empty()))
         return;
     f.entry.body = f.add_list(f.block);
 
@@ -2690,6 +3156,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     }
     judge_constants(f.entry);
     judge_uniformity(f.entry);
+    f.entry.options = options_reached(id, traversal != nullptr ? traversal->any_hit : symbol_id::none);
     out.entry_points.push_back(cc::move(f.entry));
 }
 

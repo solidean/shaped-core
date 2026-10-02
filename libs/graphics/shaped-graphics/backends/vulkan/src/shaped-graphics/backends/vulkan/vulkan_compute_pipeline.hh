@@ -43,6 +43,8 @@ public:
     vulkan_pipeline_layout_handle layout;
     VkPipeline _pipeline = VK_NULL_HANDLE;
     VkPipelineCache _cache = VK_NULL_HANDLE;
+    /// The subgroup size creation required, the shader's preferred one where the device can run it; 0 where none.
+    u32 _required_subgroup_size = 0;
 };
 
 namespace sg::backend::vulkan
@@ -53,4 +55,9 @@ namespace sg::backend::vulkan
 /// disagrees — without telling the caller.
 /// Running the same check is what turns "we handed one over" into "it was used", which is what sg asks for.
 [[nodiscard]] bool is_usable_pipeline_cache_blob(vulkan_context const& ctx, cc::span<byte const> blob);
+
+/// The subgroup size to require of a compute pipeline built from `shader`: its preferred one where the device can set
+/// a compute stage's size to it for the shader's workgroup, and 0 everywhere else.
+/// A preference never refuses a pipeline, so a size the device cannot run is ignored rather than reported.
+[[nodiscard]] u32 subgroup_size_to_require(vulkan_context const& ctx, sg::compiled_shader const& shader);
 } // namespace sg::backend::vulkan

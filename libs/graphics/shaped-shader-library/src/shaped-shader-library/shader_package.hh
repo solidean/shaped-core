@@ -14,6 +14,8 @@ struct slib::shader_definition
     cc::string_view path; ///< package-relative and must stay inside the package, e.g. "compute/invert.hlsl"
     sg::shader_stage stage;
     cc::string_view entry_point;
+    /// The options of its SGL source the entry point reaches, by name; an acquire keys its compiles on these alone.
+    cc::span<cc::string_view const> options;
 
     /// The generated global that call sites read; shader_library::add_package fills it in.
     /// Required — add_package asserts on a definition that names no global.

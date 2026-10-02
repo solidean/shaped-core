@@ -200,6 +200,15 @@ struct sgl::ast::case_expr
     constexpr bool operator==(case_expr const&) const = default;
 };
 
+/// `if c => a else b`, the chain of an `if` statement with a value per branch (AST-154).
+/// The last branch is the closing `else`, without a condition; every other has one.
+struct sgl::ast::if_expr
+{
+    range_of<if_branch> branches;
+
+    constexpr bool operator==(if_expr const&) const = default;
+};
+
 /// Yields through `break value`.
 struct sgl::ast::loop_expr
 {
@@ -318,6 +327,7 @@ struct sgl::ast::expr
                 range,
                 lambda,
                 case_expr,
+                if_expr,
                 loop_expr,
                 return_expr,
                 yield_expr,

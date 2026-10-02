@@ -45,7 +45,8 @@ let h = pair.0
 * **NUM-12** `_` inside a number is the normal error `underscore-in-number`, with a fix that writes `'` ([why](why/numbers.md#num-12)).
 * **NUM-13** The exponent marker is `e` in a decimal number, and `p` in any number.
 * **NUM-14** The exponent is decimal digits, after an optional sign by NUM-6.
-* **NUM-15** A number may end in a suffix: `i`, `u` or `f`, and a bit width.
+* **NUM-15** A number may end in a suffix: `i`, `u` or `f`, and an optional bit width, which is 32 where it is left out ([why](why/numbers.md#num-15)).
+  So `1u` is `1u32`, and `0.5f` is `0.5f32`.
 * **NUM-16** A hexadecimal number without an exponent takes no `f` suffix, because `f` is a digit there.
 * **NUM-17** A number with a DOT or an exponent is a float literal, and any other number is an integer literal.
 * **NUM-18** The bit width is not checked here; a later phase validates it.
@@ -59,6 +60,13 @@ let scale = 1p8
 let half = 0.5f32
 let count = 100u32
 let small = 18u8
+```
+
+A suffix without its width is 32 bits wide.
+
+```sgl sketch
+let one = 1u
+let factor = 0.5f
 ```
 
 `1_000` reports `underscore-in-number`, and it reads as `1'000`.
@@ -75,7 +83,6 @@ let x = 10a7
 
 ## Open
 
-* Whether the bit width of a suffix is optional, as in `1f` or `10u`.
 * Whether hexadecimal digits, the prefixes and the exponent markers accept upper case.
 * Whether a hexadecimal number takes a fraction: by NUM-3 `0x1.8p1` assembles and `0x1.ap1` is member access, because `ap1` starts with a letter.
 * What the exponent `p` means in a decimal number such as `1p8`.

@@ -425,6 +425,9 @@ fun blend(base: vec3, top: vec3, mask: float) -> vec3:
 * **AST-51** An `else` or an `else if` pairs with the form directly above it among its siblings, which must be an `if` or an `else if`.
 * **AST-52** Blank lines and comment lines are no forms, so they may stand between the two.
 * **AST-53** An `else` that pairs with nothing is a normal error, and it reads as an `if` statement with a missing condition, so its body is still read.
+* **AST-154** An `if` with an `else` where a value is expected reads as an `if` expression, the chain of AST-50 with a body per branch: `let y = if c => a else b`.
+  An `if` without an `else` there is still `statement-in-expression`, since it has no value where its condition is false.
+  The `else` joins the `if` on its own line, so a statement written that way is the same chain, and it gives no value.
 
 ```sgl
 if count > 0:
@@ -848,3 +851,4 @@ The ideas these records serve are in the [incubator](../incubator/_index.md):
 * A pattern as the variable of a `for`, which waits for custom iterators.
 * Whether single-quoted and backquoted literals are reported until their semantics exist.
 * Partial assignment, `x .= {.1 = 8}`, is an idea only.
+* Whether an `if` expression spans sibling lines, as the statement does, or stays on the one line of AST-154.

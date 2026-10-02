@@ -64,6 +64,8 @@ struct sgl::check::flat_builder
     flat_expr_id member(flat_expr_id object, i32 index);
     /// `name` must be a field of the object's type.
     flat_expr_id member(flat_expr_id object, cc::string_view name);
+    /// `object.zyx`, a swizzle of a prelude vector by the letters of its fields, of the plain vector they make.
+    flat_expr_id swizzle_of(flat_expr_id object, cc::string_view letters);
     flat_expr_id construct(type_id type, cc::span<flat_expr_id const> arguments);
     /// `binding.member`, of the member's type; `member` is a position in the binding's members.
     flat_expr_id binding_member(symbol_id binding, i32 member);

@@ -8,6 +8,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-shader-library/impl/frozen.hh>
+#include <shaped-shader-library/impl/kept_builds.hh>
 #include <shaped-shader-library/impl/sgl_library.hh>
 #include <shaped-shader-library/raytracing_pipeline.hh>
 #include <shaped-shader-library/shader_asset.hh>
@@ -54,13 +55,9 @@ struct live_raytracing_pipeline
     /// What moved at that read; empty while the source states the build's frozen part.
     cc::string frozen_moved;
 
-    /// The module's part of the description last built on a context while the frozen part still matched the build.
-    struct kept
-    {
-        sg::context const* ctx = nullptr;
-        sg::raytracing_pipeline_description module;
-    };
-    cc::vector<kept> kept_modules;
+    /// The module's part of the description last built on a context with a set of option values, while the frozen part
+    /// still matched the build.
+    slib::impl::kept_builds<sg::raytracing_pipeline_description> kept;
 };
 
 cc::mutex<cc::vector<cc::unique_ptr<live_raytracing_pipeline>>>& live_raytracing_pipelines()
@@ -172,18 +169,18 @@ cc::shared_async<sg::raytracing_pipeline_description> slib::describe_raytracing_
     desc.max_attribute_size = d.max_attribute_size;
 
     // The module's shaders first: awaiting them is what promotes a reload, which the frozen part is then read against.
-    auto const raygen = co_await (*d.raygen)->acquire(*ctx);
+    auto const raygen = co_await (*d.raygen)->acquire(*ctx, host.options);
     // metal runs traversal and closest hits otherwise than DXR does: a procedural group's any hit fused into its
     // intersection, and a function in every closest-hit slot
     auto const is_metal = raygen.format == sg::shader_format::msl || raygen.format == sg::shader_format::metal_lib;
     auto empty_closest_hit = cc::optional<sg::compiled_shader>();
     if (is_metal && d.empty_closest_hit != nullptr)
-        empty_closest_hit = co_await (*d.empty_closest_hit)->acquire(*ctx);
+        empty_closest_hit = co_await (*d.empty_closest_hit)->acquire(*ctx, host.options);
     (void)desc.add_raygen_shader(raygen);
     for (auto const* const miss : d.misses)
     {
         CC_ASSERTF(miss != nullptr, "{}'s {}: every ray type has a miss", d.file, d.name);
-        (void)desc.add_miss_shader(co_await (*miss)->acquire(*ctx));
+        (void)desc.add_miss_shader(co_await (*miss)->acquire(*ctx, host.options));
     }
     for (auto const& group : d.hit_groups)
     {
@@ -191,48 +188,34 @@ cc::shared_async<sg::raytracing_pipeline_description> slib::describe_raytracing_
         auto const is_fused = is_metal && group.intersection != nullptr && !group.metal_traversals.empty();
         auto intersection = cc::optional<sg::compiled_shader>();
         if (group.intersection != nullptr && !is_fused)
-            intersection = co_await (*group.intersection)->acquire(*ctx);
+            intersection = co_await (*group.intersection)->acquire(*ctx, host.options);
         for (auto r = 0; r < d.ray_count; ++r)
         {
             auto shader = sg::hit_shader{.intersection = intersection};
             if (auto const* const h = group.closest_hits[r]; h != nullptr)
-                shader.closest_hit = co_await (*h)->acquire(*ctx);
+                shader.closest_hit = co_await (*h)->acquire(*ctx, host.options);
             else if (is_metal)
                 shader.closest_hit = empty_closest_hit;
             if (is_fused)
             {
                 CC_ASSERTF(r < group.metal_traversals.size() && group.metal_traversals[r] != nullptr,
                            "{}'s {}: a procedural group has a traversal per ray type on metal", d.file, d.name);
-                shader.intersection = co_await (*group.metal_traversals[r])->acquire(*ctx);
+                shader.intersection = co_await (*group.metal_traversals[r])->acquire(*ctx, host.options);
             }
             else if (auto const* const h = group.any_hits[r]; h != nullptr)
-                shader.any_hit = co_await (*h)->acquire(*ctx);
+                shader.any_hit = co_await (*h)->acquire(*ctx, host.options);
             (void)desc.add_hit_shader(cc::move(shader));
         }
     }
     for (auto const* const callable : d.callables)
-        (void)desc.add_callable_shader(co_await (*callable)->acquire(*ctx));
+        (void)desc.add_callable_shader(co_await (*callable)->acquire(*ctx, host.options));
 
-    // Where the frozen part moved, the module's shaders this context last built with are what the host's code fits.
+    // Where the frozen part moved, the module's shaders this context last built with these values are what the host's
+    // code fits.
     auto const moved = frozen_moved_of(d);
     auto const is_kept = live_raytracing_pipelines().lock(
         [&](cc::vector<cc::unique_ptr<live_raytracing_pipeline>>& all) -> bool
-        {
-            auto& live = live_of(all, d);
-            for (auto& k : live.kept_modules)
-                if (k.ctx == ctx)
-                {
-                    if (moved.empty())
-                        k.module = desc;
-                    else
-                        desc = k.module;
-                    return true;
-                }
-            if (!moved.empty())
-                return false;
-            live.kept_modules.push_back({.ctx = ctx, .module = desc});
-            return true;
-        });
+        { return live_of(all, d).kept.keep_or_restore(ctx, host.options, !moved.empty(), desc); });
     if (!is_kept)
         throw sg::pipeline_creation_exception(
             cc::string(d.name),

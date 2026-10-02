@@ -300,6 +300,33 @@ TEST("sgl emit - WGSL refuses an entry point needing a feature WebGPU never has,
     CHECK(text_of(layered, target::hlsl_vulkan).contains("[[vk::binding(0, 0)]] Texture2DMSArray<float4> set_layers;\n"));
 }
 
+TEST("sgl emit - WGSL refuses an entry point needing 16-bit integers, coherence or image atomics")
+{
+    // EMIT-109: core WebGPU has none of the three on any device, and a binding's `require` is enough to need one.
+    for (auto const feature : {"shader_int16", "device_coherence", "image_atomics"})
+    {
+        auto const source = cc::format("binding set:\n"
+                                       "    require {}\n"
+                                       "    a: float\n"
+                                       "\n"
+                                       "@compute(1) fun cs(@thread_id id: int3){{set}}:\n"
+                                       "    let unused = id.x\n",
+                                       feature);
+        CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::wgsl))
+              == cc::format("target-lacks-feature cs needs {}, which WebGPU does not have\n", feature));
+        CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::hlsl_dx12)) == "");
+    }
+
+    // shader_f16 and subgroups are optional WebGPU features, so a device may have them.
+    constexpr auto optional = "binding set:\n"
+                              "    require shader_f16, subgroups\n"
+                              "    a: float\n"
+                              "\n"
+                              "@compute(1) fun cs(@thread_id id: int3){set}:\n"
+                              "    let unused = id.x\n";
+    CHECK(sgl::emit::dump_errors(emit_source(optional, 0, target::wgsl)) == "");
+}
+
 TEST("sgl emit - a static sampler that compares is a comparison sampler, and its settings stay out of the text")
 {
     constexpr auto shadowed = "binding set:\n"
@@ -508,6 +535,24 @@ TEST("sgl emit - a marked index keeps its mark when a later argument moves it in
     auto const dx12 = text_of(pinned, target::hlsl_dx12);
     CHECK(dx12.contains("const int index = id.x % 4;\n"));
     CHECK(dx12.contains("mats_texs[NonUniformResourceIndex(index)].Load("));
+}
+
+TEST("sgl emit - a marked index keeps its mark when its element is handed to a resource parameter")
+{
+    // binding arrays exist on no WebGPU, so this cannot be a corpus file, whose every entry point is written for all
+    constexpr auto handed = "require binding_arrays\n"
+                            "\n"
+                            "binding post:\n"
+                            "    arr: mut image_2d[.r32_float][4]\n"
+                            "\n"
+                            "fun read_it(a: mut image_2d[.r32_float], xy: int2) -> float => a.load(xy)\n"
+                            "\n"
+                            "@compute(8, 8) fun cs(@thread_id id: int3){post}:\n"
+                            "    let j = id.z\n"
+                            "    post.arr[0].store(id.xy, read_it(post.arr[nonuniform (j + 1)], id.xy))\n";
+    auto const dx12 = text_of(handed, target::hlsl_dx12);
+    CHECK(dx12.contains("const int at = j + 1;\n"));
+    CHECK(dx12.contains("post_arr[NonUniformResourceIndex(at)]"));
 }
 
 TEST("sgl emit - a depth texture's level is an int, which WGSL takes whole and the others convert")

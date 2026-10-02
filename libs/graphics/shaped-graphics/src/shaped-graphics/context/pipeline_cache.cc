@@ -142,6 +142,10 @@ void add_shader(cc::byte_stream_builder& b, compiled_shader const& s)
         b.add_pod(slot.access.bits);
         b.add_bool(slot.dynamic_index);
     }
+
+    // On vulkan no text states it, so two acquires of one SPIR-V at two sizes differ here alone.
+    b.add_bool(s.preferred_subgroup_size.has_value());
+    b.add_pod(i32(s.preferred_subgroup_size.value_or(0)));
 }
 
 void add_optional_shader(cc::byte_stream_builder& b, cc::optional<compiled_shader> const& s)

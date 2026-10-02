@@ -324,6 +324,22 @@ TEST("sgl check - a compute entry point takes the thread id and returns nothing"
                       + "@compute(0) fun go(@thread_id id: int3){work}:\n"
                         "    work.values[0] = 1.0\n")
               .contains("a workgroup size is a positive int literal"));
+    // CHK-370: a size may name an int const, and the const is judged by its value
+    CHECK(reports_for(cc::string(work)
+                      + "const width = 8\n"
+                        "@compute(width, width) fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+          == "");
+    CHECK(reports_for(cc::string(work)
+                      + "const none = 0\n"
+                        "@compute(none) fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+              .contains("a workgroup size is a positive int literal, or the name of a positive int const"));
+    CHECK(reports_for(cc::string(work)
+                      + "const wide = 8.0\n"
+                        "@compute(wide) fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+              .contains("invalid-attribute-arguments"));
 }
 
 TEST("sgl check - a buffer's host name is its path, so no two buffers of a module share one (CHK-171)")
@@ -368,6 +384,31 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
                                     "@pixel fun ps(p: pixel_input){tile} -> target:\n"
                                     "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n");
     CHECK(raster.contains("tile is @workgroup memory, which only a compute stage has"));
+}
+
+TEST("sgl check - @layout names the rule a binding's constant block is placed by (CHK-369)")
+{
+    CHECK(reports_for(cc::string("@layout(.hlsl)\n") + listing("    scale: float\n")) == "");
+    CHECK(reports_for(cc::string("@layout(.cpp)\n") + listing("    scale: float\n    dst: mut buffer[float]\n")) == "");
+    CHECK(reports_for("@layout(.cpp) @inline binding look:\n    scale: float\n") == "");
+
+    constexpr auto expected
+        = "@layout takes the rule a constant block is placed by: `@layout(.hlsl)` or `@layout(.cpp)`";
+    for (auto const attribute :
+         {"@layout", "@layout(.std140)", "@layout(hlsl)", "@layout(.hlsl, .cpp)", "@layout(rule = .cpp)"})
+    {
+        auto const reported = reports_for(cc::format("{}\n{}", attribute, listing("    scale: float\n")));
+        CHECK(reported.contains("invalid-attribute-arguments"));
+        CHECK(reported.contains(expected));
+    }
+
+    auto const workgroup = reports_for("@layout(.cpp) @workgroup binding tile:\n    x: float\n");
+    CHECK(workgroup.contains("invalid-attribute-arguments"));
+    CHECK(workgroup.contains("@layout promises a constant block's layout to the host, and @workgroup memory has none a "
+                             "host sees"));
+
+    // a binding's attribute, and no other declaration's
+    CHECK(reports_for("@layout(.cpp)\nstruct look:\n    scale: float\n").contains("the attribute @layout on a struct"));
 }
 
 TEST("sgl check - an atomic is memory a builtin updates, in a mut buffer or in workgroup memory, and never a value")

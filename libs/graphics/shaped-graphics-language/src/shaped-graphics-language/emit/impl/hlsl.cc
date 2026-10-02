@@ -324,6 +324,27 @@ public:
         out.appendf("static const int {} = {};\n", name, value);
     }
 
+    /// A block's struct: its members, or its memory form where it has one (EMIT-154).
+    /// Every field states its offset on vulkan, as the push-constant block's do, so no compiler flag decides the layout.
+    /// dx12 states none: each field of a form fits its row and padding fills every gap, so its own packing lands each
+    /// at its offset.
+    void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
+    {
+        out.appendf("struct {}\n{{\n", block.block_name);
+        if (!block.form.has_value())
+            for (auto const& member : block.members)
+                write_member(out, nullptr, member, p);
+        else
+            for (auto const& f : block.form.value().fields)
+            {
+                out += k_indent;
+                if (_is_vulkan)
+                    out.appendf("[[vk::offset({})]] ", f.offset);
+                out.appendf("{}{} {};\n", f.type == "float4x4" ? "column_major " : "", f.type, f.name);
+            }
+        out += "};\n\n";
+    }
+
     /// Each resource of a group carries its final address: `space` is the group and the register is the slot on
     /// dx12, `[[vk::binding(slot, group)]]` on vulkan.
     /// A group's block is a `ConstantBuffer` of a struct declared ahead of it.
@@ -333,14 +354,7 @@ public:
                      cc::span<planned_resource const> buffers) const override
     {
         if (block != nullptr)
-        {
-            // Every member states its offset on vulkan, as the push-constant block's do, so no compiler flag decides
-            // the layout.
-            out.appendf("struct {}\n{{\n", block->block_name);
-            for (auto const& member : block->members)
-                write_member(out, nullptr, member, p);
-            out += "};\n\n";
-        }
+            write_block_struct(out, p, *block);
         if (block != nullptr)
             write_addressed(out, cc::format("ConstantBuffer<{}>", block->block_name), block->name, 'b', block->group,
                             block->slot, {});
@@ -355,7 +369,10 @@ public:
         auto const format = t.kind == type_kind::image ? k_image_formats[t.format].spirv : cc::string_view();
         // a binding array takes `count` consecutive registers from its first
         auto const name = b.count > 1 ? cc::format("{}[{}]", b.name, b.count) : cc::string(b.name);
-        write_addressed(out, resource_text(p, b.type), name, register_class_of(t), b.group, b.slot, format);
+        // EMIT-150: DXC writes it as SPIR-V's `Coherent` for vulkan
+        auto const type
+            = b.is_coherent ? cc::format("globallycoherent {}", resource_text(p, b.type)) : resource_text(p, b.type);
+        write_addressed(out, type, name, register_class_of(t), b.group, b.slot, format);
     }
 
     /// One declaration of a group with its address; `format` is an image's `[[vk::image_format]]`, which vulkan's
@@ -446,10 +463,7 @@ public:
         if (!p.constants.has_value())
             return;
         auto const& c = p.constants.value();
-        out.appendf("struct {}\n{{\n", c.block_name);
-        for (auto const& member : c.members)
-            write_member(out, nullptr, member, p);
-        out += "};\n\n";
+        write_block_struct(out, p, c);
         if (_is_vulkan)
             out.appendf("[[vk::push_constant]] ConstantBuffer<{}> {};\n\n", c.block_name, c.name);
         else
@@ -576,6 +590,8 @@ public:
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
+            if (!spelled.hlsl_read.empty())
+                continue;
             parameters.push_back(
                 cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
             // EMIT-128: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
@@ -614,6 +630,9 @@ public:
         if (p.e.entry_stage == stage::compute)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
+            // EMIT-148: the range form, which every dx12 device runs, prefers the size where the device has it
+            if (!_is_vulkan && p.e.preferred_subgroup_size > 0)
+                out.appendf("[WaveSize(4, 128, {})]\n", p.e.preferred_subgroup_size);
             out.appendf("void {}({})\n{{\n", p.entry_name, list);
         }
         else

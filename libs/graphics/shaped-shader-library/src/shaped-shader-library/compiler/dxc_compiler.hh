@@ -21,6 +21,7 @@ namespace slib
 /// Fails only on a broken DXC install; a shader that does not compile is an error on the async node, not here.
 ///
 /// Compiles are deduplicated and cached by content: identical flattened source with the same entry point, stage and options compiles once.
+/// A compile appends its description's `dxc_args`, which is how SGL's edge passes the flags its text needs.
 /// Compilation runs on the installed compute async scheduler (cc::install_compute_async_scheduler); with none installed the node stays cold until something drives it.
 ///
 /// **Windows only in practice.** DXIL reflection reads a container beside the bytecode through the Windows SDK's

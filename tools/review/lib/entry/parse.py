@@ -249,12 +249,24 @@ def _unquote(value: str) -> str:
     return value
 
 
+def _lines(text: str, *, keepends: bool = False) -> list[str]:
+    """`text` split at `\\n` alone, where `str.splitlines` also breaks at a lone `\\r`, a form feed and five more.
+
+    A shell joining a CRLF tool's output with `tr '\\n' ' '` leaves a `\\r` inside a line, and it must not end one.
+    At the end of a `## changes` heading it pushed the `show:` below out of the prelude, refused as missing.
+    """
+    parts = text.split("\n")
+    if keepends:
+        return [part + "\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+    return parts[:-1] if not parts[-1] else parts
+
+
 def _split_front(text: str, path: Path) -> tuple[dict[str, str], int, int]:
     """(front matter, character offset the body starts at, line the body starts on)."""
     if not text.startswith("---"):
         return {}, 0, 1
 
-    lines = text.splitlines(keepends=True)
+    lines = _lines(text, keepends=True)
     front: dict[str, str] = {}
     offset = len(lines[0])
     for number, raw in enumerate(lines[1:], start=2):
@@ -289,7 +301,7 @@ def _validate_front(front: dict[str, str], path: Path) -> None:
 
 def _parse_body(block: Block, body: str, first_line: int, path: Path) -> None:
     """Split a block body into its attribute prelude, its options and its prose."""
-    lines = body.splitlines()
+    lines = _lines(body)
     allowed = BLOCK_TYPES[block.type]
 
     consumed = 0
@@ -492,7 +504,7 @@ def parse_text(text: str, path: Path, slug: str = "", pending_round: int = 0) ->
     entry = Entry(path=path, slug=slug or path.stem, front=front, text=text,
                   body_start=body_offset, newline=newline)
 
-    lines = text[body_offset:].splitlines(keepends=True)
+    lines = _lines(text[body_offset:], keepends=True)
     fenced = _fenced_lines(lines, body_line, path)
     starts: list[tuple[int, int, str]] = []
     offset = body_offset

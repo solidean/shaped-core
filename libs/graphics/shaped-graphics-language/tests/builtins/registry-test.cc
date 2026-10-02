@@ -105,8 +105,11 @@ TEST("sgl builtins - what means nothing is not there: a position plus a position
         auto const is_pair = [&](cc::string_view a, cc::string_view b)
         { return f.parameters.size() == 2 && f.parameters[0] == a && f.parameters[1] == b; };
         // an operator, that is: `distance(a, b)` of two positions is a length, and means something
+        // two positions differ by a direction, and compare equal or not; no other operator takes two
         if (is_pair("pos3", "pos3") && f.signature.contains("@operator"))
-            CHECK(f.result == vec3);
+            CHECK((f.result == vec3) == f.signature.contains("@operator(\"-\")"));
+        if (is_pair("pos3", "pos3") && f.signature.contains("@operator") && f.result != vec3)
+            CHECK((f.signature.contains("@operator(\"==\")") || f.signature.contains("@operator(\"!=\")")));
         CHECK(!(is_pair("vec3", "vec3") && f.name.starts_with("multiply")));
     }
 }
@@ -289,6 +292,27 @@ TEST("sgl builtins - every name a custom writer or a helper writes is reserved b
         }
     }
     CHECK(unreserved == "");
+}
+
+TEST("sgl builtins - a custom writer that writes lines in a language says so in its spelling")
+{
+    auto const& r = builtins::default_registry();
+    auto unannounced = cc::string();
+    for (auto const& f : r.functions)
+    {
+        if (f.write.kind != builtins::spelling_kind::custom || sgl::is_valid(f.with_default_sampler))
+            continue;
+        for (auto const l : {builtins::language::hlsl, builtins::language::wgsl, builtins::language::msl})
+        {
+            auto arguments = cc::vector<builtins::written>();
+            for (auto i = isize(0); i < f.parameters.size() + (f.takes_element ? 1 : 0); ++i)
+                arguments.push_back({.text = "1"});
+            auto const w = f.write.custom({.target = l, .arguments = arguments, .builtins = r, .data = f.write.data});
+            if (!w.lines.empty() && (f.write.writes_lines == nullptr || !f.write.writes_lines(l)))
+                unannounced.appendf("{} of '{}'\n", int(l), f.signature);
+        }
+    }
+    CHECK(unannounced == "");
 }
 
 TEST("sgl builtins - a texture method's MSL and a barrier's, pinned as text")

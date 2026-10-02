@@ -346,7 +346,223 @@ def a_pipelines_layout_holds_the_file_samplers_any_stage_reaches():
     expect_in("acquire_pipeline_layout<ns::shadow>();", plain, "no sampler")
 
 
+# ---- options --------------------------------------------------------------------------------------------------------
+
+OPTIONS = [{"name": "tile", "type": "int", "value": "8"}, {"name": "sharpen", "type": "bool", "value": "false"},
+           {"name": "output_format", "type": "pixel_format", "value": ".rgba16_float"}]
+
+
+@test
+def a_files_options_are_one_struct_at_the_sources_defaults_with_a_modules_nested():
+    options = OPTIONS + [{"name": "common.taps", "type": "int", "value": "4"},
+                         {"name": "mode", "type": "blur_mode", "value": ".box"}]
+    header = sgl_host_code.options_struct("pkg", "shadow.sgl", "shadow_options", options)
+    expect_in("struct shadow_options\n{\n    int tile = 8;", header, "an int option, defaulted")
+    expect_in("    bool sharpen = false;", header, "every option of the file, whoever reaches it")
+    expect_in("    sg::pixel_format output_format = sg::pixel_format::rgba16_float;", header, "a format option")
+    expect_in("    struct\n    {\n        int taps = 4;", header, "a module's option nests under the module")
+    expect_in("    } common;\n", header, "the member named after the module")
+    expect_in('slib::option_of("common.taps", common.taps)', header, "set by its qualified name")
+    # an option the generator has no C++ type for is left out, and refused only where a wrapper reaches it
+    expect_not_in("mode", header, "an enum option of the file's own")
+    try:
+        sgl_host_code.options_struct("pkg", "shadow.sgl", "shadow_options",
+                                     OPTIONS + [{"name": "common", "type": "int", "value": "1"},
+                                                {"name": "common.taps", "type": "int", "value": "4"}])
+        raise AssertionError("an option named like a module whose options nest under that name generated a struct")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("common", str(e), "the refusal names the clash")
+
+
+@test
+def an_entry_point_takes_its_files_options_and_states_the_ones_it_reaches():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["shadow"], "options": ["tile", "output_format"]}
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)],
+                                         described_entry_points={(FILE.path, "cs"): entry},
+                                         file_options={FILE.path: OPTIONS},
+                                         option_structs={FILE.path: "shadow_options"})
+    header = sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"}, "pkg")
+    expect_in('inline constexpr cc::string_view shadow_cs_t_reached_options[] = {"tile", "output_format"};', header,
+              "the names it reaches, in the order reached")
+    expect_in("    using options = shadow_options;", header, "the wrapper names its file's struct")
+    expect_in("static constexpr cc::span<cc::string_view const> reached_options = shadow_cs_t_reached_options;", header,
+              "the wrapper names its table")
+    expect_in("acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx, values), values.values());", header,
+              "the compute pipeline takes them")
+    expect_in("<shaped-shader-library/compiler/shader_compiler.hh>", " ".join(sgl_host_code.includes(entries)),
+              "slib::option_of's header")
+    # one reaching none takes the struct too, so a host hands one value to every wrapper of the file
+    other = {"name": "plain", "stage": "compute", "bindings": ["shadow"], "options": []}
+    entries.described_entry_points[(FILE.path, "plain")] = other
+    header = sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"}, "pkg")
+    expect_in("struct shadow_plain_t\n{\n    /// The options of shadow.sgl, which every wrapper of the file takes.\n"
+              "    using options = shadow_options;\n", header, "a wrapper reaching no option")
+    expect_in("static constexpr cc::span<cc::string_view const> reached_options = {};", header, "an empty table")
+
+
+@test
+def a_reached_name_the_file_does_not_declare_or_cannot_type_is_refused():
+    for reached, wanted in (("missing", "does not list"), ("mode", "no C++ type")):
+        entry = {"name": "cs", "stage": "compute", "bindings": ["shadow"], "options": [reached]}
+        entries = sgl_description.SglEntries(
+            bindings=[(FILE, GROUP)], described_entry_points={(FILE.path, "cs"): entry},
+            file_options={FILE.path: OPTIONS + [{"name": "mode", "type": "blur_mode", "value": ".box"}]},
+            option_structs={FILE.path: "shadow_options"})
+        try:
+            sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"}, "pkg")
+            raise AssertionError(f"a wrapper reaching '{reached}' generated")
+        except sgl_host_code.HostCodeError as e:
+            expect_in(wanted, str(e), f"the refusal of '{reached}'")
+
+
+@test
+def a_pipelines_options_ride_in_its_open_parts():
+    file = SglFile(path="shadow.sgl", options=OPTIONS)
+    pipeline = {**TESSELLATED, "options": ["sharpen"]}
+    entries = sgl_description.SglEntries(bindings=[(file, GROUP)], pipelines=[(file, pipeline)],
+                                         option_structs={file.path: "shadow_options"})
+    header = sgl_host_code.emit_pipelines(entries, {file.path: "shadow"}, "pkg")
+    expect_in("    shadow_options options;\n};", header, "the file's struct, a member of the open parts")
+    expect_in("reached_options = shadow_tessellated_t_reached_options;", header, "the names its stages reach")
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {file.path: "shadow"}, {})
+    expect_in("cc::move(customize), false, parts.options.values());", source, "the description takes them")
+
+
+FORMATTED = {
+    "name": "upscaled",
+    "inline": False,
+    "options": ["output_format"],
+    "members": [
+        {"kind": "buffer", "name": "weights", "type": "float", "host_name": "upscaled_weights", "slot": 0,
+         "access": "read"},
+        {"kind": "image", "name": "output", "type": "out image_2d[output_format]", "host_name": "upscaled_output",
+         "slot": 1, "texture_dimension": "tex_2d", "image_format": "rgba16_float", "format_option": "output_format",
+         "access": "write"},
+    ],
+}
+FORMATTED_FILE = SglFile(path="upscale.sgl", options=OPTIONS)
+
+
+@test
+def an_image_whose_format_is_an_option_is_taken_format_erased_and_its_layout_per_value():
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FORMATTED_FILE, FORMATTED, "upscale_options")
+    expect_in("    using options = upscale_options;", header, "the group names its file's struct")
+    expect_in("reached_options = upscaled_reached_options;", header, "the formats it follows, by name")
+    expect_in("    sg::any_texture_view<sg::tv_2d> output; ///< `out image_2d[output_format]`, an image of the format "
+              "`output_format` names", header, "the image's field, its format taken at run time")
+    expect_in("[[nodiscard]] static cc::vector<sg::binding> declared_bindings(options const& values);", header,
+              "the bindings per set of values")
+    expect_in("[[nodiscard]] static cc::span<sg::binding const> declared_bindings();", header,
+              "the defaults' bindings, which keep it a declared_binding_set")
+    try:
+        sgl_host_code.emit_group("pkg", {}, "ns", FORMATTED_FILE, FORMATTED)
+        raise AssertionError("a group following options generated without its file's options struct")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("options struct", str(e), "the refusal says what is missing")
+    source = sgl_host_code.emit_group_impl("pkg", {}, "ns", FORMATTED_FILE, FORMATTED)
+    expect_in("cc::vector<sg::binding> ns::upscaled::declared_bindings(options const& values)\n{\n"
+              "    auto bindings = cc::vector<sg::binding>::create_copy_of(k_sgl_bindings_upscaled);\n"
+              "    bindings[1].image_format = values.output_format;\n"
+              "    return bindings;\n}\n", source, "the image's entry takes the value's format")
+    expect_in(".image_format = sg::pixel_format::rgba16_float}", source, "the defaults' table")
+
+
+@test
+def an_entry_point_reaching_a_groups_format_option_builds_its_layout_from_the_values():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["upscaled", "shadow"],
+             "options": ["tile", "output_format"]}
+    shadow_here = SglFile(path=FORMATTED_FILE.path)
+    entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED), (shadow_here, GROUP)],
+                                         described_entry_points={(FORMATTED_FILE.path, "cs"): entry},
+                                         file_options={FORMATTED_FILE.path: OPTIONS},
+                                         option_structs={FORMATTED_FILE.path: "upscale_options"})
+    header = sgl_host_code.emit_entry_wrappers(entries, {FORMATTED_FILE.path: "upscale"}, "pkg")
+    expect_in("acquire_layout(sg::context& ctx, options const& values = {}) const", header, "the layout takes values")
+    expect_in("        desc.groups.push_back(\n"
+              "            ctx.cached.acquire_binding_group_layout(upscaled::declared_bindings(values), "
+              "upscaled::declared_samplers()));\n", header, "the optioned group's layout, from the file's values")
+    expect_in("        desc.groups.push_back(ctx.cached.acquire_binding_group_layout<shadow>());\n", header,
+              "a plain group's layout, as declared")
+    expect_in("acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx, values), values.values());", header,
+              "the pipeline's layout follows its values")
+    expect_in("<shaped-graphics/binding/pipeline_layout.hh>", " ".join(sgl_host_code.includes(entries)),
+              "sg::pipeline_layout_description's header")
+
+
+@test
+def another_modules_binding_in_a_layout_per_value_asks_its_type_whether_it_is_inline():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["upscaled", "common.lights"],
+             "options": ["output_format"]}
+    entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED)],
+                                         described_entry_points={(FORMATTED_FILE.path, "cs"): entry},
+                                         file_options={FORMATTED_FILE.path: OPTIONS},
+                                         option_structs={FORMATTED_FILE.path: "upscale_options"})
+    header = sgl_host_code.emit_entry_wrappers(entries, {FORMATTED_FILE.path: "upscale"}, "pkg")
+    expect_in("        if constexpr (sg::declared_inline_constants<::sgl_modules::common::lights>)\n"
+              "            desc.inline_constants = ::sgl_modules::common::lights::inline_binding();\n"
+              "        else\n"
+              "            desc.groups.push_back(ctx.cached.acquire_binding_group_layout<::sgl_modules::common::lights>());\n",
+              header, "the module's binding, inline or a group by its own generated type")
+    expect_in("upscaled::declared_bindings(values)", header, "the optioned group beside it, from the values")
+
+
+@test
+def a_binding_array_sized_by_an_option_and_a_pipeline_over_an_optioned_group_are_refused():
+    counted = {**ARRAYS, "options": ["layers"],
+               "members": [{**ARRAYS["members"][0], "count_option": "layers"}, ARRAYS["members"][1]]}
+    try:
+        sgl_host_code.emit_group("pkg", {}, "ns", FILE, counted)
+        raise AssertionError("a binding array sized by an option generated a type")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("layers", str(e), "the refusal names the option")
+    pipeline = {**TESSELLATED, "layout": ["upscaled"]}
+    entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED)],
+                                         pipelines=[(FORMATTED_FILE, pipeline)])
+    try:
+        sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {FORMATTED_FILE.path: "upscale"}, {})
+        raise AssertionError("a pipeline over a group with an option format generated a layout")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("upscaled", str(e), "the refusal names the group")
+
+
+@test
+def an_inline_block_naming_an_option_is_refused_in_words_of_its_own():
+    block = {"name": "push", "inline": True, "options": ["tile"], "block_size": 4,
+             "members": [{"kind": "constant", "name": "scale", "type": "float", "offset": 0, "size": 4}]}
+    try:
+        sgl_host_code.emit_inline("pkg", {}, "ns", FILE, block)
+        raise AssertionError("an inline block naming an option generated a type")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("`@inline binding push` names the option(s) tile", str(e), "the inline block's own refusal")
+        expect_not_in("binding array", str(e), "the binding array's refusal")
+
+
+@test
+def an_options_struct_is_a_generated_name_like_any_other():
+    entries = sgl_description.SglEntries(option_structs={"shadow.sgl": "shadow_options"})
+    try:
+        sgl_host_code.check_names("pkg", entries, {"shadow_options": "`binding shadow_options` of 'other.sgl'"})
+        raise AssertionError("an options struct took a name already generated")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("shadow_options", str(e), "the clash names the struct")
+
+
 # ---- the runner -----------------------------------------------------------------------------------------------------
+
+
+@test
+def a_16_bit_value_is_its_host_type_and_a_2_byte_gap_a_u16():
+    members = [
+        {"name": "weight", "type": "float", "offset": 0, "size": 4},
+        {"name": "tint", "type": "half3", "offset": 4, "size": 6},
+        {"name": "count", "type": "ushort", "offset": 12, "size": 2},
+        {"name": "dir", "type": "float", "offset": 16, "size": 4},
+    ]
+    fields = sgl_host_code.padded_fields("p", {}, "here", members, "")
+    expect_in("tg::vec<3, tg::f16> tint; ///< `half3`, at byte 4\n", fields, "a half3 is typed-geometry's")
+    expect_in("cc::u16 _pad0 = {}; ///< 2 bytes SGL's layout leaves free\n", fields, "a 2-byte gap")
+    expect_in("cc::u16 count;", fields, "a ushort is clean-core's")
+    expect_in("cc::u16 _pad1 = {}; ///< 2 bytes", fields, "a gap of 2 after a ushort")
 
 
 def main() -> int:

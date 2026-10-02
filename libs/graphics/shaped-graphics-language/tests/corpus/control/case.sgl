@@ -23,6 +23,20 @@ test:
         stepped(n) <= 1.0
     stepped 2 == 0.5
 
+// where a type is expected the case is that type, and each arm's value converts to it as a literal does (CHK-166)
+test:
+    let c = true
+    let y: float = case c:
+        true => 1
+        _ => 2
+    y == 1.0
+
+fun halved(n: int) -> float => case n:
+    0 => 0
+    _ => 0.5
+
+test halved(0) == 0.0 and halved(3) == 0.5
+
 // an arm of a case in a test may be a check
 test:
     let k = light_kind.spot

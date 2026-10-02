@@ -127,3 +127,37 @@ TEST("sgl check - an offset, a gather's component and a compare's level are cons
     CHECK(reports("    let a = work.d.sample_compare(uv, reference = 0.5, level = 1.0)\n")
               .contains("a comparison samples level 0.0 alone"));
 }
+
+TEST("sgl check - a function of the program takes a texture, an image or a sampler, handed as a member is (CHK-366)")
+{
+    auto const members = cc::string_view("    t: texture_2d[float4]\n"
+                                         "    img: mut image_2d[.r32_float]\n"
+                                         "    s: sampler\n");
+    auto const with = [&](cc::string_view functions, cc::string_view body)
+    { return reports_for(cc::format("{}\n{}", functions, listing(members, body))); };
+
+    auto const fetch = cc::string_view("fun fetch(t: texture_2d[float4], s: sampler) => t.sample(float2(0.5, 0.5), s, "
+                                       "level = 0.0)\n");
+    CHECK(with(fetch, "    let c = fetch(work.t, work.s)\n") == "");
+    // handed on through a second function, and an image with its access
+    CHECK(with(cc::format("{}fun twice(t: texture_2d[float4], s: sampler) => fetch(t, s) * 2.0\n"
+                          "fun bump(i: mut image_2d[.r32_float]) => i.store(int2(0, 0), i.load(int2(0, 0)) + 1.0)\n",
+                          fetch),
+               "    let c = twice(work.t, work.s)\n    bump(work.img)\n")
+          == "");
+
+    // the parameter stands where its member would, and a member is no value of a local or a result
+    CHECK(with("fun keep(t: texture_2d[float4]):\n    let u = t\n", "")
+              .contains("unsupported-yet user:[t] texture_2d[float4] as a value"));
+    CHECK(with("fun pass(t: texture_2d[float4]) -> texture_2d[float4] => t\n", "").contains("unsupported-yet"));
+    // a buffer is read through its binding alone, and an entry point is handed values
+    CHECK(with("fun first(b: buffer[float]) -> float => b[0]\n", "").contains("unsupported-yet"));
+    CHECK(reports_for("@pixel struct target:\n    color: float4\n"
+                      "@pixel fun main_ps(t: texture_2d[float4]) -> target => {color = float4(1.0, 1.0, 1.0, 1.0)}\n")
+              .contains("unsupported-yet"));
+
+    // an argument of another type does not match, and an image of another access is another type
+    CHECK(with(fetch, "    let c = fetch(uv, work.s)\n").contains("no-matching-overload"));
+    CHECK(with("fun write(i: out image_2d[.r32_float]) => i.store(int2(0, 0), 1.0)\n", "    write(work.img)\n")
+              .contains("no-matching-overload"));
+}

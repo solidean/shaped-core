@@ -58,12 +58,17 @@ struct front_end
 /// The files of `front` as the check pass takes them, prelude first, which is what a test run quotes.
 [[nodiscard]] cc::vector<check::module_file> module_files_of(front_end const& front);
 
+/// The names of the options `e` reaches, in declaration order (CHK-355).
+[[nodiscard]] cc::vector<cc::string> option_names_of(check::checked_module const& m, check::flat_entry_point const& e);
+
 /// Parses, builds and checks `source` behind the prelude and the modules of `library` it reaches, or as the prelude's
 /// file where `source_name` names one.
 /// In the second case the file behind the prelude is empty, and the library is not read.
 /// A source with errors still yields a module, whose `errors` say why nothing should be read from it.
 /// Only the reached library files' parse and AST diagnostics are reported, since only those were checked.
+/// `options` are the values the compile gives the source's options (CHK-354).
 [[nodiscard]] front_end run_front_end(cc::string_view source,
                                       cc::string_view source_name,
-                                      cc::span<library_file const> library = {});
+                                      cc::span<library_file const> library = {},
+                                      cc::span<check::option_value const> options = {});
 } // namespace sgl::driver::impl

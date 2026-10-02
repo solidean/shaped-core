@@ -1,0 +1,35 @@
+// 16-bit values as the GPU runs them: halves where a device has shader_f16, and shorts where it has shader_int16.
+// WGSL has no 16-bit integer, so WebGPU runs the halves alone.
+
+require shader_f16
+require shader_int16
+
+// In a buffer's element a half3 packs at its scalar's 2 bytes: `tint` sits at 4 and `scale` at 10, 12 bytes in all.
+struct weighted:
+    weight: float
+    tint: half3
+    scale: half
+
+// In a constant block a half takes 2 bytes, and the float after it starts at 4.
+// A buffer strides by whole 4-byte words, so its element is a half2 and not a half.
+binding blend:
+    gain: half
+    offset: float
+    inputs: buffer[weighted]
+    halves: mut buffer[half2]
+
+@compute(64) fun mix_halves(@thread_id id: int3){blend}:
+    let w = blend.inputs[id.x]
+    let v = w.tint * w.scale + half3(0.5, 0.25, 0.125) * blend.gain
+    let sum = v.x + v.y + v.z + ((w.weight + blend.offset) as half)
+    blend.halves[id.x] = half2(sum, -sum)
+
+binding short_sums:
+    deltas: buffer[short2]
+    totals: mut buffer[ushort2]
+
+// A ushort wraps at 16 bits: 40000 plus twice a value past 12768 comes around past 65535.
+@compute(64) fun sum_shorts(@thread_id id: int3){short_sums}:
+    let d = short_sums.deltas[id.x]
+    let total = ((d.x * 3i16 + d.y) as ushort) * 2u16 + 40000u16
+    short_sums.totals[id.x] = ushort2(total, (d.y as ushort) - 1u16)

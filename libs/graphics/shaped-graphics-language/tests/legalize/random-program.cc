@@ -130,8 +130,32 @@ struct generator
             return b.member(b.local(local_id(0)), chance(50) ? "a" : "b");
         if (type == float_type && chance(30))
             if (auto const s = any_struct_var(); is_valid(s))
+            {
+                // a component of a swizzle, its letters repeated now and then: `s.zxz.y`
+                if (chance(30))
+                {
+                    auto const read = letters(2 + pick(2), false);
+                    return b.member(b.swizzle_of(b.local(s), read), pick(int(read.size())));
+                }
                 return b.member(b.local(s), pick(3));
+            }
         return literal(type);
+    }
+
+    /// `count` letters of `xyz`, distinct where a swizzle is a place.
+    cc::string letters(int count, bool is_distinct)
+    {
+        char pool[] = {'x', 'y', 'z'};
+        auto left = 3;
+        auto result = cc::string();
+        for (auto i = 0; i < count; ++i)
+        {
+            auto const at = pick(left);
+            result += pool[at];
+            if (is_distinct)
+                pool[at] = pool[--left];
+        }
+        return result;
     }
 
     local_id any_struct_var()
@@ -478,6 +502,16 @@ struct generator
         if (r >= 45 && r < 49)
             if (auto const s = any_struct_var(); is_valid(s))
             {
+                // through a swizzle now and then, whose value a block may compute: `s.zxy = float3(…)`
+                if (chance(40))
+                {
+                    auto const x = expr(float_type, 1);
+                    auto const y = expr(float_type, 1);
+                    auto const z = expr(float_type, 1);
+                    list.push_back(
+                        b.assign(b.swizzle_of(b.local(s), letters(3, true)), b.construct(float3_type, {x, y, z})));
+                    return false;
+                }
                 list.push_back(b.assign(b.member(b.local(s), pick(3)), expr(float_type, 2)));
                 return false;
             }

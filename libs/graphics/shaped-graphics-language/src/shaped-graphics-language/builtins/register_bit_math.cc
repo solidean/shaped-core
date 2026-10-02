@@ -90,11 +90,26 @@ written write_shift(call_context const& c)
 
 constexpr cc::string_view k_as_type[] = {"as_type"};
 
+/// `Write` over a vector and a scalar: WGSL takes no scalar beside a vector here, and MSL reinterprets a left operand
+/// as the vector it shifts, so the scalar is written as the vector `c.data` names where either needs it (CHK-358).
+template <custom_writer Write, bool IsScalarLeft>
+written write_spread(call_context const& c)
+{
+    if (c.target == language::hlsl || (c.target == language::msl && !IsScalarLeft))
+        return Write(c);
+    auto const spread = impl::spread_arguments(c, IsScalarLeft ? 0 : 1);
+    auto copy = c;
+    copy.arguments = spread;
+    return Write(copy);
+}
+
 struct integer_type
 {
     cc::string_view name;
     custom_writer shift_left;
     custom_writer shift_right;
+    /// The writers of a vector and its scalar, the scalar right and then left; none for a scalar type.
+    custom_writer spread[2][5];
 };
 
 template <int Width, bool IsSigned>
@@ -102,7 +117,13 @@ constexpr integer_type integer_of(cc::string_view name)
 {
     return {.name = name,
             .shift_left = write_shift<true, Width, IsSigned>,
-            .shift_right = write_shift<false, Width, IsSigned>};
+            .shift_right = write_shift<false, Width, IsSigned>,
+            .spread = {{write_spread<write_bitwise<'&'>, false>, write_spread<write_bitwise<'|'>, false>,
+                        write_spread<write_bitwise<'^'>, false>, write_spread<write_shift<true, Width, IsSigned>, false>,
+                        write_spread<write_shift<false, Width, IsSigned>, false>},
+                       {write_spread<write_bitwise<'&'>, true>, write_spread<write_bitwise<'|'>, true>,
+                        write_spread<write_bitwise<'^'>, true>, write_spread<write_shift<true, Width, IsSigned>, true>,
+                        write_spread<write_shift<false, Width, IsSigned>, true>}}};
 }
 } // namespace
 
@@ -139,5 +160,42 @@ void sgl::builtins::register_bit_math(registry& r)
             .evaluate = bit_not,
             .write = {.kind = spelling_kind::prefix, .text = "~", .binds = precedence::unary},
         });
+    }
+
+    r.add_comment("// an integer vector and its scalar, from either side, componentwise (CHK-358)");
+    for (auto const& t : types)
+    {
+        if (t.name == "int" || t.name == "uint")
+            continue;
+        auto const element = t.name.starts_with("uint") ? cc::string_view("uint") : cc::string_view("int");
+        auto const data = u32(index_of(registered_type(r, t.name)));
+        auto const suffix = suffix_of(t.name);
+        for (auto const left : {false, true})
+        {
+            auto const name = [&](cc::string_view stem)
+            { return left ? cc::format("{}_scalar{}", stem, suffix) : cc::format("{}{}_scalar", stem, suffix); };
+            auto const lhs = left ? element : t.name;
+            auto const rhs = left ? t.name : element;
+            auto const& w = t.spread[left ? 1 : 0];
+            add_operator(r, "&", name("bit_and"), lhs, rhs, t.name,
+                         left ? spread_evaluate<bit_and, true> : spread_evaluate<bit_and, false>,
+                         {.kind = spelling_kind::custom, .custom = w[0], .data = data});
+            add_operator(r, "|", name("bit_or"), lhs, rhs, t.name,
+                         left ? spread_evaluate<bit_or, true> : spread_evaluate<bit_or, false>,
+                         {.kind = spelling_kind::custom, .custom = w[1], .data = data});
+            add_operator(r, "^", name("bit_xor"), lhs, rhs, t.name,
+                         left ? spread_evaluate<bit_xor, true> : spread_evaluate<bit_xor, false>,
+                         {.kind = spelling_kind::custom, .custom = w[2], .data = data});
+            add_operator(r, "<<", name("shift_left"), lhs, rhs, t.name,
+                         left ? spread_evaluate<shift_left, true> : spread_evaluate<shift_left, false>,
+                         {.kind = spelling_kind::custom, .custom = w[3], .data = data, .msl_names = k_as_type});
+            r.functions.back().unrepresentable_when_constant = left ? spread_check<shift_left_unrepresentable, true>
+                                                                    : spread_check<shift_left_unrepresentable, false>;
+            r.functions.back().judged_last = judged_operand::shift_count;
+            add_operator(r, ">>", name("shift_right"), lhs, rhs, t.name,
+                         left ? spread_evaluate<shift_right, true> : spread_evaluate<shift_right, false>,
+                         {.kind = spelling_kind::custom, .custom = w[4], .data = data});
+            r.functions.back().judged_last = judged_operand::shift_count;
+        }
     }
 }

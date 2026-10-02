@@ -1,3 +1,4 @@
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -118,7 +119,13 @@ struct uniformity_pass
         auto const& x = e.at(id);
         auto result = divergence::none();
         x.node.visit(
-            [&](flat_local_ref const& l) { result = locals[index_of(l.local)]; },
+            [&](flat_local_ref const& l)
+            {
+                result = locals[index_of(l.local)];
+                // a stage input differs from the start, and is first seen where it is read
+                if (result.is && !ast::is_valid(result.where.expr) && !ast::is_valid(result.where.stmt))
+                    result.where = x.from;
+            },
             [&](flat_binding_member const& b)
             {
                 // WGSL takes workgroup memory as different in every thread, whatever was stored to it
@@ -187,15 +194,25 @@ struct uniformity_pass
 
     divergence call(flat_expr_id id, flat_call const& c, divergence const& flow)
     {
+        auto const* const record = record_of(c);
+        // CHK-374: the load reads workgroup memory once every thread has arrived, and hands each the same value
+        if (record != nullptr && record->is_uniform_load)
+        {
+            if (flow.is && is_reporting)
+                violations.push_back({.call = id, .flow = flow});
+            return {};
+        }
         auto result = divergence::none();
         auto const arguments = e.at(c.arguments);
         for (auto const a : arguments)
             result = first_of(result, value(a, flow));
-        auto const* const record = record_of(c);
         if (record == nullptr)
             return result;
-        if ((record->is_barrier || record->uses_derivatives) && flow.is && is_reporting)
+        if ((record->is_barrier || record->uses_derivatives || record->is_subgroup_operation) && flow.is && is_reporting)
             violations.push_back({.call = id, .flow = flow});
+        // CHK-377: what the subgroup agrees on may still differ between the subgroups of a workgroup
+        if (record->is_subgroup_operation && !result.is)
+            result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
         // what another thread did to it first is what an atomic gives
         if (record->is_atomic && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
@@ -398,7 +415,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
     {
         if (auto const* const c = x.node.try_as<flat_call>())
             if (auto const* const record = out.builtin_function(c->intrinsic))
-                asks = asks || record->is_barrier || record->uses_derivatives;
+                asks = asks || record->is_barrier || record->uses_derivatives || record->is_subgroup_operation;
         if (x.node.is<flat_element>())
             asks = asks || is_resource(out.at(x.type).kind);
     }
@@ -427,16 +444,17 @@ void checker::judge_uniformity(flat_entry_point const& structured)
     pass.is_reporting = true;
     pass.walk();
 
-    auto reported = cc::vector<flat_expr_id>();
+    // an index a parameter names several times is one index where it was written
+    auto reported_indices = cc::vector<origin>();
     for (auto const& f : pass.index_findings)
     {
+        auto const& index = e.at(f.index);
         auto is_seen = false;
-        for (auto const r : reported)
-            is_seen = is_seen || r == f.index;
+        for (auto const& r : reported_indices)
+            is_seen = is_seen || r == index.from;
         if (is_seen)
             continue;
-        reported.push_back(f.index);
-        auto const& index = e.at(f.index);
+        reported_indices.push_back(index.from);
         auto const where = span_of(index.from.file, index.from.expr);
         if (f.is_marked)
         {
@@ -444,14 +462,19 @@ void checker::judge_uniformity(flat_entry_point const& structured)
                    "this index is the same in every invocation, so marking it `nonuniform` pays for nothing");
             continue;
         }
+        auto const text = text_of(index.from.file, where);
+        auto is_operand = true;
+        for (auto const ch : text)
+            is_operand = is_operand && (cc::is_alphanumeric(ch) || ch == '_' || ch == '.');
         auto& d = report(diagnostic_kind::non_uniform_index, index.from.file, where,
                          cc::format("an index into a binding array that may differ between invocations: mark it "
                                     "`nonuniform {}`, or make it the same in all of them",
-                                    text_of(index.from.file, where)));
+                                    is_operand ? cc::string(text) : cc::format("({})", text)));
         auto const& from = f.value.where;
         auto const span = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt);
         d.notes.push_back({.file = from.file, .where = span, .message = cc::format("this value {}", f.value.why)});
     }
+    auto reported = cc::vector<flat_expr_id>();
     for (auto const& v : pass.violations)
     {
         auto is_seen = false;
@@ -469,6 +492,9 @@ void checker::judge_uniformity(flat_entry_point const& structured)
             diagnostic_kind::non_uniform_control_flow, call.from.file, where,
             record->is_barrier
                 ? cc::format("{} waits for every thread of the workgroup, and not every one reaches it here", record->name)
+            : record->is_subgroup_operation
+                ? cc::format("{} exchanges values within the subgroup, and not every invocation of it reaches it here",
+                             record->name)
                 : cc::format("{} takes derivatives across a quad of pixels, and not every pixel of the "
                              "quad reaches it here{}",
                              record->name,

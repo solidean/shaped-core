@@ -52,7 +52,10 @@ The AST pass is per file and name-free: a name is a span, and nothing is looked 
 One is the VS Code grammar, [sgl.tmLanguage.json](../tools/vscode-extension/syntaxes/sgl.tmLanguage.json).
 The other is the review tool's Pygments lexer, [sgl_lexer.py](../../../../tools/review/lib/render/sgl_lexer.py).
 A new keyword, operator, literal form or line-tree rule is not done until both draw it.
-The review tool's self-test holds the lexer's keywords to the form parser's `sgl_keywords`; nothing else is checked yet ([TODO](TODO.md)).
+Both colour as control keywords the builtins whose names alone constrain control flow: `ddx`, `ddy`, `fwidth`, the barriers, `workgroup_uniform_load`, and the subgroup and quad operations.
+Those last two are listed by exact name, never by prefix, since `quad_count` is an ordinary name.
+The review tool's self-test holds the lexer's keywords to the form parser's `sgl_keywords`, and both highlighters' subgroup and quad names to the prelude's.
+Nothing else is checked yet ([TODO](TODO.md)).
 
 ## The check pass
 
@@ -93,6 +96,15 @@ A block named after the callee stands where the call stood, its arguments bound 
 A builtin call whose parameters take the arguments in another order, or two of whose arguments have an effect, binds them to lets first.
 Beyond that the flattener never hoists and never reorders, since evaluation order is the legalizer's job.
 Each body is checked once on its own, and each default once where it is declared.
+
+**A branch on a constant is flattened on the side it takes, and nothing else** (CHK-356).
+The flattener folds an `if` whose condition is a constant, a literal argument included, so the other side never enters the tree.
+The text, the footprint, the uniformity pass and the features an entry point needs all read that tree, so none of them sees it.
+
+**An option is substituted where its `const` compiles**, so every reader of a const reads the compile's value unaware.
+`checker::options` holds the values, and `option_uses` records where the program names an option.
+An entry point's options are the uses inside its declaration, its callees', its bindings' and the structs any of those name, which no value changes.
+A module's option is matched by its qualified name, `checked_module::qualified_name_of`, which `describe` reports too.
 
 **Compiling a function means its signature, with one exception.**
 A body is checked after every signature is known, which is what lets a function call one declared below it.
@@ -208,7 +220,7 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 ## What does not exist yet
 
 Generic structs of the program, lambdas beyond an arrow body, and `mut self`.
-GLSL, and in MSL a compute entry point and a group.
+GLSL.
 Iterative walks: `interpret`'s `eval` and the legalizer's expression walks recurse, so the smallest stack a walk runs on bounds `k_max_depth`.
 That makes a 40-term sum `nesting-too-deep` (CHK-268).
 Over an explicit work stack, with a cycle caught by an on-path bit rather than by depth, the limit could be far higher.

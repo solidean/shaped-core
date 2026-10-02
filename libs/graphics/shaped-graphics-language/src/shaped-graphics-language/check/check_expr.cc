@@ -2,6 +2,7 @@
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -181,14 +182,19 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
 
     auto const outer = subscripted;
     subscripted = node.object;
+    // CHK-367: an image is handed to the `load` or the `store` its subscript stands for
+    handed.push_back(node.object);
     auto const object = check_expr(scope, node.object);
+    handed.pop_back();
     subscripted = outer;
     if (object == error_type)
         return error_type;
     auto const kind = out.at(object).kind;
+    if (kind == type_kind::image)
+        return check_texel(scope, id, node, object);
     if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer or an array");
+        unsupported(file, where, "a subscript on anything but a buffer, an image or an array");
         return error_type;
     }
 
@@ -254,6 +260,76 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     return result;
 }
 
+type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image)
+{
+    auto const file = scope.file;
+    // the subscript's arguments are what `load` takes past the image, which stands first as a method's receiver
+    auto arguments = check_arguments(scope, node.arguments, false);
+    arguments.written.insert_at(0, {.expr = node.object});
+    arguments.types.insert_at(0, image);
+    arguments.names.insert_at(0, {});
+    arguments.numbers.insert_at(0, number_of(file, node.object));
+    arguments.literals.insert_at(0, -1);
+    arguments.functions.insert_at(0, -1);
+    arguments.undefineds.insert_at(0, false);
+
+    auto const& info = out.at(image);
+    auto const texel = type_of_builtin(texel_name_of(info.format), file, span_of(file, id));
+    if (texel == error_type)
+        return error_type;
+
+    // CHK-373: an `@atomic` image's texel is an atomic, which stands only as a builtin's argument (CHK-297).
+    // Its coordinates are what the plain image's `load` takes, which the record left here says to the flat tree.
+    if (info.is_atomic)
+    {
+        auto const atomic = resource_type({.kind = type_kind::atomic, .element = texel});
+        if (!judge_atomic_use(file, id, atomic))
+            return error_type;
+        auto plain = info;
+        plain.is_atomic = false;
+        auto const plain_image = resource_type(cc::move(plain));
+        arguments.types[0] = plain_image;
+        auto const loaded = resolve_overload(scope, id, ast::expr_id::none, candidates_of(file, "load", plain_image),
+                                             arguments, "load", call_spelling::dot_call);
+        return loaded == error_type ? error_type : atomic;
+    }
+
+    // A plain assignment stores alone, and its `store` is resolved once its value is known.
+    auto const is_place = id == assigned;
+    if (is_place && !is_compound_assigned)
+    {
+        texel_place = id;
+        texel_arguments = cc::move(arguments);
+        texel_load = -1;
+        return texel;
+    }
+    auto const loaded = resolve_overload(scope, id, ast::expr_id::none, candidates_of(file, "load", image), arguments,
+                                         "load", call_spelling::dot_call);
+    if (loaded == error_type || !is_place)
+        return loaded;
+    texel_place = id;
+    texel_load = out.files[file].call_at(id);
+    texel_arguments = cc::move(arguments);
+    return loaded;
+}
+
+void checker::check_texel_store(function_scope& scope, ast::expr_id value, type_id type)
+{
+    auto const file = scope.file;
+    auto const place = texel_place;
+    texel_place = ast::expr_id::none;
+    // named, since an array's layer is a named argument written before it
+    auto arguments = cc::move(texel_arguments);
+    add_argument(arguments, {.expr = value}, type, "value");
+    auto const image = arguments.types[0];
+    auto const stored = resolve_overload(scope, place, ast::expr_id::none, candidates_of(file, "store", image),
+                                         arguments, "store", call_spelling::dot_call);
+    if (stored == error_type)
+        return;
+    out.texel_stores.push_back(
+        {.file = file, .place = place, .store = out.files[file].call_at(place), .load = texel_load});
+}
+
 // ---- expressions ----------------------------------------------------------------------------------------------------
 
 type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node)
@@ -297,6 +373,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
     auto const file = scope.file;
     auto const& e = ast_of(file).at(expr);
     auto const where = span_of(file, expr);
+    auto const expected = expected_value;
+    expected_value = type_id::none;
     judge_attributes(file, e.attributes, {}, "an expression");
 
     auto const not_yet = [&](cc::string_view construct)
@@ -341,7 +419,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         { return check_cast(scope, expr, node); }, [&](ast::membership const&) { return not_yet("in"); },
         [&](ast::ascription const&) { return not_yet("a type ascription"); },
         [&](ast::range const&) { return not_yet("a range"); }, [&](ast::lambda const&) { return not_yet("a lambda"); },
-        [&](ast::case_expr const& c) { return check_case(scope, expr, c, true); },
+        [&](ast::case_expr const& c) { return check_case(scope, expr, c, true, nullptr, expected); },
+        [&](ast::if_expr const& i) { return check_if_value(scope, i, true, nullptr, expected); },
         [&](ast::loop_expr const& loop)
         {
             auto has_break = false;
@@ -390,8 +469,10 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
             wide_literals.push_back({.file = file, .expr = id, .function = scope.function});
         return type_of_builtin(builtins::k_int, file, where);
     }
+    case number_class::suffixed:
+        return check_suffixed_literal(file, where, text);
     case number_class::other:
-        unsupported(file, where, "a number literal with a suffix or a p exponent");
+        unsupported(file, where, "a number literal with a p exponent");
         return error_type;
     case number_class::plain_float:
         break;
@@ -411,6 +492,62 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
     return float_type;
 }
 
+type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_view text)
+{
+    // CHK-357: the suffix names the type, and the literal converts to no other
+    auto const s = split_suffix(text).value();
+    if (s.width != 32 && s.width != 16)
+    {
+        unsupported(file, where, cc::format("a literal of {} bits, which no type of the prelude is", s.width));
+        return error_type;
+    }
+    auto const is_narrow = s.width == 16;
+    auto const is_float_body = classify_number(s.body) == number_class::plain_float;
+    if (is_float_body && s.letter != 'f')
+    {
+        report(diagnostic_kind::literal_not_representable, file, where,
+               cc::format("{} is a float literal, and its suffix names an integer type", text));
+        return error_type;
+    }
+
+    auto const name = s.letter == 'f' ? (is_narrow ? builtins::k_half : builtins::k_float)
+                    : s.letter == 'u' ? (is_narrow ? builtins::k_ushort : builtins::k_uint)
+                                      : (is_narrow ? builtins::k_short : builtins::k_int);
+    auto const type = type_of_builtin(name, file, where);
+    if (type == error_type)
+        return error_type;
+    if (s.letter == 'f')
+    {
+        auto const value = is_float_body ? parse_plain_float(s.body) : cc::optional<f64>();
+        auto const integer = is_float_body ? cc::optional<i64>() : parse_literal_integer(s.body);
+        if (!value.has_value() && !integer.has_value())
+        {
+            unsupported(file, where, "a float literal this large");
+            return error_type;
+        }
+        auto const real = value.has_value() ? value.value() : f64(integer.value());
+        if (!holds({.is_number = true, .real = real}, type))
+        {
+            report(diagnostic_kind::literal_not_representable, file, where,
+                   cc::format("{} does not hold {}", name, text));
+            return error_type;
+        }
+        return type;
+    }
+    auto const value = parse_literal_integer(s.body);
+    if (!value.has_value())
+    {
+        unsupported(file, where, "an integer literal beyond 64 bits");
+        return error_type;
+    }
+    if (!holds({.is_number = true, .is_integer = true, .integer = value.value()}, type))
+    {
+        report(diagnostic_kind::literal_not_representable, file, where, cc::format("{} does not hold {}", name, text));
+        return error_type;
+    }
+    return type;
+}
+
 type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name const& name)
 {
     auto const file = scope.file;
@@ -424,6 +561,20 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         {
             report_capture(scope, where, *local);
             return error_type;
+        }
+        // CHK-366: a resource parameter stands where its binding member would, which is as a call's argument
+        if (local->type != error_type && is_resource(out.at(local->type).kind)
+            && out.at(local->type).kind != type_kind::buffer)
+        {
+            auto is_handed = false;
+            for (auto const h : handed)
+                is_handed = is_handed || h == id;
+            if (!is_handed)
+            {
+                unsupported(file, where,
+                            cc::format("{} as a value; hand it to a call, as in `t.load(xy)`", out.name_of(local->type)));
+                return error_type;
+            }
         }
         return local->type;
     }
@@ -479,7 +630,10 @@ type_id checker::check_symbol_value(function_scope& scope,
     case symbol_kind::constant:
         // CHK-219: a const is its value, and one that did not check is silent here, as a failed symbol always is.
         if (demand(symbol, file, where) == symbol_state::checked)
+        {
+            note_option(file, where, out.constants[out.at(symbol).info]);
             return out.at(symbol).type;
+        }
         break;
     case symbol_kind::sampler:
     {
@@ -656,16 +810,62 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         set_target(file, id, {.kind = target_kind::field, .symbol = type.symbol, .index = i32(index)});
         return out.at(type.members)[index].type;
     }
+    // CHK-386: a swizzle is found where a field is, so no function in scope ever stands for `v.xy`
+    auto const letters = swizzle_of(object, name);
+    if (letters.count > 0)
+    {
+        set_target(file, id, {.kind = target_kind::swizzle, .symbol = type.symbol, .index = letters.packed()});
+        auto const element = out.at(type.members)[letters.fields[0]].type;
+        return type_of_builtin(vector_name_of(element, letters.count), file, span_of(file, id));
+    }
     auto const candidates = candidates_of(file, name, object);
     if (candidates.empty())
     {
         report(diagnostic_kind::unknown_member, file, member.name,
-               cc::format("{} has no member {}", out.name_of(object), name));
+               cc::format("{} has no member {}{}", out.name_of(object), name, why_no_swizzle(object, name)));
         return error_type;
     }
     auto arguments = call_arguments();
     add_argument(arguments, {.expr = member.object}, object, {}, number_of(file, member.object));
     return resolve_overload(scope, id, ast::expr_id::none, candidates, arguments, name, call_spelling::dot_read);
+}
+
+swizzle checker::swizzle_of(type_id object, cc::string_view name) const
+{
+    if (object == error_type || !out.at(object).has_swizzles || name.size() < 2 || name.size() > 4)
+        return {};
+    auto const fields = out.at(out.at(object).members);
+    auto result = swizzle{.count = i8(name.size())};
+    for (auto i = isize(0); i < name.size(); ++i)
+    {
+        auto found = isize(-1);
+        for (auto f = isize(0); f < fields.size(); ++f)
+            if (fields[f].name.size() == 1 && fields[f].name[0] == name[i])
+                found = f;
+        if (found < 0)
+            return {};
+        result.fields[i] = i8(found);
+    }
+    return result;
+}
+
+cc::string checker::why_no_swizzle(type_id object, cc::string_view name) const
+{
+    if (object == error_type || !out.at(object).has_swizzles || name.size() < 2)
+        return {};
+    // CHK-385: the detail names the letter that is no field, or the letter one too many
+    auto letters = cc::string();
+    for (auto const& f : out.at(out.at(object).members))
+        letters += f.name;
+    for (auto const c : name)
+    {
+        auto is_field = false;
+        for (auto i = isize(0); i < letters.size(); ++i)
+            is_field = is_field || letters[i] == c;
+        if (!is_field)
+            return cc::format(": its swizzle letters are {}, and {} is none", letters, c);
+    }
+    return cc::format(": a swizzle reads at most four fields, and {} is its fifth letter", name[4]);
 }
 
 // ---- calls ----------------------------------------------------------------------------------------------------------
@@ -810,6 +1010,8 @@ number_literal checker::number_of(i32 file, ast::expr_id expr) const
             return {};
         return {.is_number = true, .real = value.value()};
     }
+    // CHK-357: a suffix names the literal's type, so it converts to no other
+    case number_class::suffixed:
     case number_class::other:
         break;
     }
@@ -1067,6 +1269,8 @@ type_id checker::check_named_call(function_scope& scope,
             report(diagnostic_kind::unknown_name, file, callee_where, text_of(file, callee_where));
         return error_type;
     }
+    if (!judge_uniform_load(file, candidates, call.arguments))
+        return error_type;
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
     if (result != error_type)
     {
@@ -1074,6 +1278,66 @@ type_id checker::check_named_call(function_scope& scope,
         judge_constant_arguments(file, id);
     }
     return result;
+}
+
+bool checker::judge_uniform_load(i32 file, cc::span<symbol_id const> candidates, ast::range_of<ast::argument> arguments)
+{
+    auto is_load = !candidates.empty();
+    for (auto const c : candidates)
+    {
+        auto const* const record = out.builtin_function(out.at(c).intrinsic);
+        is_load = is_load && record != nullptr && record->is_uniform_load;
+    }
+    auto const& ast = ast_of(file);
+    auto const written = ast.at(arguments);
+    // a call of another shape matches no overload, which resolution says
+    if (!is_load || written.size() != 1 || !written[0].name.empty() || written[0].is_splat
+        || !ast::is_valid(written[0].value))
+        return true;
+    auto const& tables = out.files[file];
+    auto const refuse = [&](ast::expr_id at)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, at),
+               "workgroup_uniform_load reads a member of a @workgroup binding, or a field of one");
+        return false;
+    };
+    // the path down to the member it starts from, which decides whether the argument is workgroup memory at all
+    auto index = ast::expr_id::none;
+    auto component = ast::expr_id::none;
+    for (auto expr = written[0].value; ast::is_valid(expr);)
+    {
+        auto const& node = ast.at(expr).node;
+        if (auto const* const i = node.try_as<ast::index>())
+        {
+            index = expr;
+            expr = i->object;
+            continue;
+        }
+        auto const* const member = node.try_as<ast::member>();
+        if (member == nullptr)
+            return refuse(written[0].value);
+        auto const& where = tables.target_at(expr);
+        if (where.kind == target_kind::binding_member)
+        {
+            auto const& binding = out.bindings[out.at(where.symbol).info];
+            auto const type = tables.type_at(expr);
+            if (!binding.is_workgroup || (is_valid(type) && out.at(type).kind == type_kind::atomic))
+                return refuse(written[0].value);
+            if (ast::is_valid(index))
+                unsupported(file, span_of(file, index), "an index on the way to the memory workgroup_uniform_load reads");
+            // WGSL takes no pointer to a vector's component
+            else if (ast::is_valid(component))
+                unsupported(file, span_of(file, component), "a component of a vector, read by workgroup_uniform_load");
+            return !ast::is_valid(index) && !ast::is_valid(component);
+        }
+        if ((where.kind == target_kind::field || where.kind == target_kind::swizzle)
+            && out.builtin_type_of(tables.type_at(member->object)) != nullptr)
+            component = expr;
+        else if (where.kind != target_kind::field)
+            return refuse(written[0].value);
+        expr = member->object;
+    }
+    return refuse(written[0].value);
 }
 
 type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::call const& call)
@@ -1138,6 +1402,13 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     auto arguments = check_arguments(scope, call.arguments, false);
     if (receiver == error_type || member.name.empty())
         return error_type;
+    // CHK-373: an `@atomic` image's texels are read and written by their atomics alone
+    if (out.at(receiver).kind == type_kind::image && out.at(receiver).is_atomic && (name == "load" || name == "store"))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, id),
+               cc::format("the texels of an @atomic image are atomics, so `{0}` is the texel's: `img[xy].{0}(…)`", name));
+        return error_type;
+    }
     arguments.written.insert_at(0, {.expr = member.object});
     arguments.types.insert_at(0, receiver);
     arguments.names.insert_at(0, {});
@@ -1197,11 +1468,19 @@ type_id checker::resolve_overload(function_scope& scope,
             return error_type;
         note_near_misses(file, id, candidates, arguments);
         // A struct's one constructor says what it takes, which is what a reader needs to fix the call.
-        auto const is_constructor = candidates.size() == 1 && out.at(candidates[0]).role == function_role::constructor;
-        if (is_constructor)
+        // The functions of the struct's name beside it, such as `float3(x)`, change nothing about that.
+        auto constructor = symbol_id::none;
+        auto constructor_count = 0;
+        for (auto const candidate : candidates)
+            if (out.at(candidate).role == function_role::constructor)
+            {
+                constructor = candidate;
+                ++constructor_count;
+            }
+        if (constructor_count == 1)
         {
             auto expected = cc::vector<type_id>();
-            for (auto const& p : out.at(out.functions[out.at(candidates[0]).info].parameters))
+            for (auto const& p : out.at(out.functions[out.at(constructor).info].parameters))
                 expected.push_back(p.type);
             report(diagnostic_kind::no_matching_overload, file, where,
                    cc::format("{}, and the constructor is {}", call_text(file, spelling, arguments),
@@ -1726,6 +2005,18 @@ type_id checker::prelude_type(cc::string_view name) const
     return out.at(found->front()).type;
 }
 
+namespace
+{
+/// Whether a half holds `n` exactly: 11 significant bits at most.
+bool is_exact_half(i64 n)
+{
+    auto magnitude = u64(n < 0 ? -n : n);
+    while (magnitude > 2048 && magnitude % 2 == 0)
+        magnitude /= 2;
+    return magnitude <= 2048;
+}
+} // namespace
+
 bool checker::holds(number_literal const& n, type_id to) const
 {
     if (!is_valid(to))
@@ -1742,6 +2033,18 @@ bool checker::holds(number_literal const& n, type_id to) const
             return f64(f32(n.integer)) == f64(n.integer);
         auto const magnitude = n.real < 0 ? -n.real : n.real;
         return magnitude < 3.4028235677973366e38;
+    }
+    if (to == prelude_type(builtins::k_short))
+        return n.is_integer && n.integer >= -32768 && n.integer <= 32767;
+    if (to == prelude_type(builtins::k_ushort))
+        return n.is_integer && n.integer >= 0 && n.integer <= 65535;
+    if (to == prelude_type(builtins::k_half))
+    {
+        // as for float: an integer exactly, and a float below the largest half plus half an ulp, 65504 + 16
+        if (n.is_integer)
+            return n.integer >= -65504 && n.integer <= 65504 && is_exact_half(n.integer);
+        auto const magnitude = n.real < 0 ? -n.real : n.real;
+        return magnitude < 65520.0;
     }
     return false;
 }
@@ -1845,13 +2148,22 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
         return check_array_literal(scope, expr, to);
     auto const outer_expected = expected_result;
     expected_result = to;
+    // CHK-166: an `if` or a `case` value is the type expected of it, which each branch's value converts to
+    if ((node.is<ast::if_expr>() || node.is<ast::case_expr>()) && to != error_type)
+        expected_value = to;
     auto const type = check_expr(scope, expr);
     expected_result = outer_expected;
     if (type == error_type || to == error_type)
         return type;
-    // CHK-253: a number literal where one type is expected converts to it where it holds exactly
+    // CHK-253: a number literal where a number type is expected converts to it where it holds exactly; anything else,
+    // a vector included, is no number and the literal is simply of another type
     auto const number = number_of(file, expr);
-    if (number.is_number && type != to && prelude_type(out.name_of(to)) == to)
+    cc::string_view const number_types[] = {builtins::k_int,   builtins::k_uint,   builtins::k_float,
+                                            builtins::k_short, builtins::k_ushort, builtins::k_half};
+    auto is_number_type = false;
+    for (auto const name : number_types)
+        is_number_type = is_number_type || to == prelude_type(name);
+    if (number.is_number && type != to && is_number_type)
     {
         if (!holds(number, to))
         {

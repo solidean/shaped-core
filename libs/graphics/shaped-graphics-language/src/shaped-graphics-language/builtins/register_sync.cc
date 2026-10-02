@@ -1,6 +1,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/register.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
 using namespace sgl::builtins;
@@ -40,8 +41,11 @@ constexpr barrier k_barriers[] = {
 
 constexpr cc::string_view k_barriers_hlsl[] = {"GroupMemoryBarrierWithGroupSync", "DeviceMemoryBarrierWithGroupSync"};
 constexpr cc::string_view k_barriers_wgsl[] = {"workgroupBarrier", "storageBarrier", "textureBarrier"};
-constexpr cc::string_view k_barriers_msl[] = {"threadgroup_barrier", "mem_flags"};
+constexpr cc::string_view k_barriers_msl[]
+    = {"threadgroup_barrier", "mem_flags", "atomic_thread_fence", "memory_order_seq_cst", "thread_scope_device"};
 
+/// EMIT-150: Metal's barrier orders memory within the threadgroup alone, so where a `@coherent` member's writes must
+/// reach the whole dispatch, a device-scoped fence follows it.
 written write_barrier(call_context const& ctx)
 {
     auto const& b = k_barriers[ctx.data];
@@ -52,9 +56,45 @@ written write_barrier(call_context const& ctx)
     case language::wgsl:
         return {.text = cc::format("{}()", b.wgsl)};
     case language::msl:
-        return {.text = cc::format("threadgroup_barrier(mem_flags::{})", b.msl_memory)};
+    {
+        auto const barrier = cc::format("threadgroup_barrier(mem_flags::{})", b.msl_memory);
+        if (!ctx.is_device_coherent || b.msl_memory == "mem_threadgroup")
+            return {.text = barrier};
+        auto result = written{.text = cc::format("atomic_thread_fence(mem_flags::{}, memory_order_seq_cst, "
+                                                 "thread_scope_device)",
+                                                 b.msl_memory)};
+        result.lines.push_back(cc::format("{};", barrier));
+        return result;
+    }
     }
     return {};
+}
+// ---- the uniform load ----------------------------------------------------------------------------------------------
+
+constexpr cc::string_view k_uniform_load_wgsl[] = {"workgroupUniformLoad"};
+
+/// EMIT-149: WGSL's own; elsewhere the workgroup barrier, the read into a local, and the barrier again, so no thread
+/// stores to the memory before every one has read it.
+written write_uniform_load(call_context const& ctx)
+{
+    auto const& m = ctx.arguments[0].text;
+    if (ctx.target == language::wgsl)
+        return {.text = cc::format("workgroupUniformLoad(&{})", m)};
+    auto const barrier = ctx.target == language::hlsl
+                           ? cc::string_view("GroupMemoryBarrierWithGroupSync();")
+                           : cc::string_view("threadgroup_barrier(mem_flags::mem_threadgroup);");
+    auto const loaded = ctx.mint.is_valid() ? ctx.mint("uniform_load") : cc::string("uniform_load");
+    auto result = written{.text = loaded};
+    result.lines.push_back(cc::string(barrier));
+    result.lines.push_back(cc::format("{} {} = {};", ctx.result_type, loaded, m));
+    result.lines.push_back(cc::string(barrier));
+    return result;
+}
+
+/// A test runs one invocation, whose load is a plain read.
+void loaded(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
+{
+    out.push_back_range(in);
 }
 // ---- atomics ------------------------------------------------------------------------------------------------------
 
@@ -221,6 +261,81 @@ evaluator evaluator_of(atomic_op op)
     }
     return nullptr;
 }
+// ---- the texels of an `@atomic` image -------------------------------------------------------------------------
+
+using check::texture_shape;
+
+/// The data word of a texel's atomic: the atomic's own, and the image's shape above it.
+u32 texel_atomic_data(atomic_op op, bool is_signed, texture_shape shape)
+{
+    return atomic_data(op, is_signed) | u32(shape) << 12;
+}
+
+/// The image, the coordinate, an array's layer, and the operand: EMIT-151's spelling of a buffer atomic's update.
+written write_texel_atomic(call_context const& ctx)
+{
+    auto const& info = k_atomics[ctx.data & 0xffu];
+    auto const is_signed = (ctx.data & 0x100u) != 0;
+    auto const shape = texture_shape((ctx.data >> 12) & 15u);
+    auto const is_array = shape == texture_shape::d1_array || shape == texture_shape::d2_array;
+    auto const dim = shape == texture_shape::d1 || shape == texture_shape::d1_array ? 1
+                   : shape == texture_shape::d3                                     ? 3
+                                                                                    : 2;
+    auto const& image = ctx.arguments[0].text;
+    auto const& xy = ctx.arguments[1].text;
+    auto const operand = is_array ? 3 : 2;
+    auto const has_operand = ctx.arguments.size() > operand;
+    switch (ctx.target)
+    {
+    case language::hlsl:
+    {
+        // the texel is a place `Interlocked*` takes as a buffer's element, so the buffer atomic writes the rest
+        auto const index = is_array ? cc::format("int{}({}, {})", dim + 1, xy, ctx.arguments[2].text) : cc::string(xy);
+        auto arguments = cc::vector<written>();
+        arguments.push_back({.text = cc::format("{}[{}]", image, index)});
+        if (has_operand)
+            arguments.push_back(ctx.arguments[operand]);
+        return write_atomic({.target = ctx.target,
+                             .arguments = arguments,
+                             .builtins = ctx.builtins,
+                             .data = ctx.data & 0x1ffu,
+                             .mint = ctx.mint,
+                             .result_type = ctx.result_type});
+    }
+    case language::msl:
+    {
+        // a texture's atomics take a four-wide value to store and give a four-wide one back, of which x is the texel
+        auto coordinate = dim == 1 ? cc::format("uint({})", xy) : cc::format("uint{}({})", dim, xy);
+        if (is_array)
+            coordinate.appendf(", uint({})", ctx.arguments[2].text);
+        auto const vector = is_signed ? "int4" : "uint4";
+        auto const v = has_operand ? cc::string(ctx.arguments[operand].text) : cc::string();
+        switch (info.op)
+        {
+        case atomic_op::load:
+            return {.text = cc::format("{}.atomic_load({}).x", image, coordinate)};
+        case atomic_op::store:
+            return {.text = cc::format("{}.atomic_store({}, {}({}))", image, coordinate, vector, v)};
+        case atomic_op::exchange:
+            return {.text = cc::format("{}.atomic_exchange({}, {}({})).x", image, coordinate, vector, v)};
+        default:
+            return {.text = cc::format("{}.atomic_{}({}, {}).x", image, info.msl, coordinate, v)};
+        }
+    }
+    case language::wgsl:
+        // WGSL lacks `image_atomics` (EMIT-109), so no entry point that reaches one is written for it
+        return {};
+    }
+    return {};
+}
+
+/// A test's image has no texels, so an update of one finds zero, as a load of it does.
+template <bool IsSigned>
+void texel_zero(cc::span<scalar const>, cc::vector<scalar>& out)
+{
+    out.push_back({.kind = IsSigned ? value_kind::scalar_int : value_kind::scalar_uint, .bits = 0});
+}
+
 // ---- a geometry stage's streams ---------------------------------------------------------------------------------
 
 /// The data word: 0 for `emit`, 1 for `end_strip`.
@@ -264,11 +379,30 @@ void sgl::builtins::register_sync(registry& r)
             .evaluate = nothing,
             .write = {.kind = spelling_kind::custom,
                       .custom = write_barrier,
+                      .writes_lines = is_msl,
                       .data = i,
                       .hlsl_names = k_barriers_hlsl,
                       .wgsl_names = k_barriers_wgsl,
                       .msl_names = k_barriers_msl},
             .is_barrier = true,
+        });
+
+    r.add_comment("// The uniform load, a barrier that then reads workgroup memory and gives every thread the same "
+                  "value "
+                  "(CHK-374).");
+    for (auto const type : impl::k_selectable)
+        r.add(function_record{
+            .signature = cc::format("@stages(.compute) fun workgroup_uniform_load(m: {0}) -> {0}", type),
+            .doc = "/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.",
+            .evaluate = loaded,
+            .write = {.kind = spelling_kind::custom,
+                      .custom = write_uniform_load,
+                      .writes_lines = is_not_wgsl,
+                      .hlsl_names = k_barriers_hlsl,
+                      .wgsl_names = k_uniform_load_wgsl,
+                      .msl_names = k_barriers_msl},
+            .is_barrier = true,
+            .is_uniform_load = true,
         });
 
     r.add_comment("// Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.\n"
@@ -289,12 +423,53 @@ void sgl::builtins::register_sync(registry& r)
                 .evaluate = is_signed ? evaluator_of<true>(info.op) : evaluator_of<false>(info.op),
                 .write = {.kind = spelling_kind::custom,
                           .custom = write_atomic,
+                          .writes_lines = is_hlsl,
                           .data = atomic_data(info.op, is_signed),
                           .hlsl_names = k_atomics_hlsl,
                           .wgsl_names = k_atomics_wgsl,
                           .msl_names = k_atomics_msl},
                 .is_atomic = true,
             });
+        }
+    }
+
+    r.add_comment("// The atomics of an `@atomic` image's texels, which the flat tree calls for `img[xy].max(v)` "
+                  "(CHK-373).\n"
+                  "// Each takes the image, the coordinate and an array's layer where the buffer atomic takes the "
+                  "atomic.");
+    for (auto const& entry : check::k_shapes)
+    {
+        if (entry.image.empty())
+            continue;
+        auto const is_array = entry.shape == texture_shape::d1_array || entry.shape == texture_shape::d2_array;
+        auto const coordinate = entry.shape == texture_shape::d1 || entry.shape == texture_shape::d1_array ? "int"
+                              : entry.shape == texture_shape::d3                                           ? "int3"
+                                                                                                           : "int2";
+        for (auto const is_signed : {false, true})
+        {
+            auto const t = is_signed ? "int" : "uint";
+            auto const texel
+                = cc::format("i: mut {}[{}], xy: {}{}", entry.image, t, coordinate, is_array ? ", layer: int" : "");
+            for (auto const& info : k_atomics)
+            {
+                auto const signature = info.op == atomic_op::load ? cc::format("fun texel_load({}) -> {}", texel, t)
+                                     : info.op == atomic_op::store
+                                         ? cc::format("fun texel_store({}, v: {})", texel, t)
+                                         : cc::format("fun texel_{}({}, v: {}) -> {}", info.name, texel, t, t);
+                r.add(function_record{
+                    .signature = cc::format("@internal @stages(.pixel, .compute) {}", signature),
+                    .doc = info.doc,
+                    .evaluate = info.op == atomic_op::store ? nothing
+                              : is_signed                   ? texel_zero<true>
+                                                            : texel_zero<false>,
+                    .write = {.kind = spelling_kind::custom,
+                              .custom = write_texel_atomic,
+                              .writes_lines = is_hlsl,
+                              .data = texel_atomic_data(info.op, is_signed, entry.shape),
+                              .hlsl_names = k_atomics_hlsl},
+                    .is_atomic = true,
+                });
+            }
         }
     }
 }

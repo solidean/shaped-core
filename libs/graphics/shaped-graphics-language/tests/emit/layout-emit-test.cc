@@ -387,3 +387,138 @@ TEST("sgl emit layout - a bool has no layout, and bool32 is the bool GPU memory 
     auto const d = described(source);
     CHECK(d.bindings[0].members[0].stride == 4);
 }
+
+namespace
+{
+// Placed as a C++ struct of tg types is: `tint` at 4, `bias` right behind it at 16, and `weights` from 28 across a row.
+constexpr auto k_cpp_block = cc::string_view("@layout(.cpp)\n"
+                                             "binding params:\n"
+                                             "    scale: float\n"
+                                             "    tint: float3\n"
+                                             "    bias: float\n"
+                                             "    shift: float2\n"
+                                             "    weights: float4\n"
+                                             "    values: mut buffer[float]\n"
+                                             "\n"
+                                             "@compute(1) fun main(){params}:\n"
+                                             "    params.values[0] = params.tint.y + params.bias\n"
+                                             "    params.values[1] = params.weights.w + params.shift.x\n");
+} // namespace
+
+TEST("sgl emit layout - a @layout(.cpp) block is placed as C++ places the host struct, on every target")
+{
+    auto const d = described(k_cpp_block);
+    REQUIRE(d.bindings.size() == 1);
+    CHECK(d.bindings[0].members[1].offset == 4);
+    CHECK(d.bindings[0].members[2].offset == 16);
+    CHECK(d.bindings[0].members[3].offset == 20);
+    CHECK(d.bindings[0].members[4].offset == 28);
+    CHECK(d.bindings[0].block_size == 44);
+
+    // dx12's own packing lands every field of the memory form at its offset: each fits its row.
+    auto const dx12 = text_of(k_cpp_block, target::hlsl_dx12);
+    CHECK(dx12.contains("struct params_data\n"
+                        "{\n"
+                        "    float scale;\n"
+                        "    float3 tint;\n"
+                        "    float bias;\n"
+                        "    float2 shift;\n"
+                        "    float weights_x;\n"
+                        "    float weights_y;\n"
+                        "    float weights_z;\n"
+                        "    float weights_w;\n"
+                        "};\n"));
+    CHECK(dx12.contains("params_values[1] = params.weights_w + params.shift.x;\n"));
+
+    auto const vulkan = text_of(k_cpp_block, target::hlsl_vulkan);
+    CHECK(vulkan.contains("    [[vk::offset(0)]] float scale;\n"
+                          "    [[vk::offset(4)]] float3 tint;\n"
+                          "    [[vk::offset(16)]] float bias;\n"
+                          "    [[vk::offset(20)]] float2 shift;\n"
+                          "    [[vk::offset(28)]] float weights_x;\n"
+                          "    [[vk::offset(32)]] float weights_y;\n"
+                          "    [[vk::offset(36)]] float weights_z;\n"
+                          "    [[vk::offset(40)]] float weights_w;\n"));
+
+    auto const wgsl = text_of(k_cpp_block, target::wgsl);
+    CHECK(wgsl.contains("struct params_data {\n"
+                        "    scale: f32,\n"
+                        "    tint_x: f32,\n"
+                        "    tint_y: f32,\n"
+                        "    tint_z: f32,\n"
+                        "    bias: f32,\n"
+                        "    shift_x: f32,\n"
+                        "    shift_y: f32,\n"
+                        "    weights_x: f32,\n"
+                        "    weights_y: f32,\n"
+                        "    weights_z: f32,\n"
+                        "    weights_w: f32,\n"
+                        "}\n"));
+
+    // MSL packs what stays in its row, and splits the float4 that crosses one.
+    auto const msl = text_of(k_cpp_block, target::msl);
+    CHECK(msl.contains("    float scale;\n"
+                       "    packed_float3 tint;\n"
+                       "    float bias_;\n"
+                       "    packed_float2 shift;\n"
+                       "    float weights_x;\n"
+                       "    float weights_y;\n"
+                       "    float weights_z;\n"
+                       "    float weights_w;\n"));
+}
+
+TEST("sgl emit layout - @layout(.hlsl) promises the placement the block has without it")
+{
+    auto unannotated = cc::string(k_cpp_block);
+    unannotated.replace_first("@layout(.cpp)\n", "");
+    auto promised = cc::string(k_cpp_block);
+    promised.replace_first("@layout(.cpp)\n", "@layout(.hlsl)\n");
+    for (auto const t : sgl::emit::all_targets())
+        CHECK(text_of(promised, t) == text_of(unannotated, t));
+    CHECK(described(promised).bindings[0].members[4].offset == 32);
+}
+
+TEST("sgl emit layout - a @layout(.cpp) block places 16-bit values and matrices as C++ does")
+{
+    auto const source = cc::string_view("require shader_f16\n"
+                                        "\n"
+                                        "@layout(.cpp)\n"
+                                        "binding look:\n"
+                                        "    a: half\n"
+                                        "    b: float\n"
+                                        "    to_world: mat4\n"
+                                        "\n"
+                                        "binding sink:\n"
+                                        "    values: mut buffer[float]\n"
+                                        "\n"
+                                        "@compute(1) fun main(){sink, look}:\n"
+                                        "    sink.values[0] = (look.to_world * float4(look.b, 0.0, 0.0, 1.0)).x\n"
+                                        "    sink.values[1] = look.a as float\n");
+    auto const d = described(source);
+    CHECK(d.bindings[0].members[1].offset == 4);
+    CHECK(d.bindings[0].members[2].offset == 8);
+    CHECK(d.bindings[0].block_size == 72);
+
+    // A matrix off a row is split into its scalars; HLSL builds it row by row, and the fields hold it column by column.
+    auto const dx12 = text_of(source, target::hlsl_dx12);
+    CHECK(dx12.contains("    float16_t a;\n    uint16_t _pad0;\n    float b;\n    float to_world_0;\n"));
+    CHECK(dx12.contains("float4x4(look.to_world_0, look.to_world_4, look.to_world_8, look.to_world_12, "
+                        "look.to_world_1, "));
+    CHECK(text_of(source, target::hlsl_vulkan).contains("    [[vk::offset(8)]] float to_world_0;\n"));
+    CHECK(text_of(source, target::wgsl).contains("mat4x4f(look.to_world_0, look.to_world_1, "));
+}
+
+TEST("sgl emit layout - a @layout(.cpp) block holds no struct yet")
+{
+    CHECK(errors_of("struct pair:\n"
+                    "    a: float\n"
+                    "    b: float\n"
+                    "\n"
+                    "@layout(.cpp)\n"
+                    "binding work:\n"
+                    "    one: pair\n"
+                    "\n"
+                    "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                    "    let x = work.one.a\n")
+          == "unsupported a struct member in a @layout(.cpp) block: 'work.one'\n");
+}

@@ -25,6 +25,23 @@ test:
     let i: int = 2.0
     true
 
+// only a number type takes a literal by conversion: a vector or a bool expected of one is a plain mismatch
+@expect(error = "type-mismatch")
+test:
+    let w: float2 = 1.0
+    true
+
+@expect(error = "type-mismatch")
+test:
+    let mut v = float3(0.0)
+    v.xy = 1.0
+    true
+
+@expect(error = "type-mismatch")
+test:
+    let b: bool = 1
+    b
+
 // a tuple or an object literal is a call of the name of the struct expected where it stands
 struct span2:
     lo: float
