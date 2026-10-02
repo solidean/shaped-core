@@ -115,6 +115,44 @@ TEST("sgl emit - the uniform load is WGSL's own, and a barrier on either side of
                        "    if (uniform_load == 7u)\n"));
 }
 
+TEST("sgl emit - a uniform load in a loop's condition is read again on every iteration")
+{
+    constexpr auto polling = "binding work:\n"
+                             "    limit: uint\n"
+                             "\n"
+                             "@workgroup binding spd:\n"
+                             "    count: uint\n"
+                             "\n"
+                             "@compute(64) fun poll(@local_thread_index li: int){work, spd}:\n"
+                             "    if li == 0:\n"
+                             "        spd.count = 0u\n"
+                             "    while workgroup_uniform_load(spd.count) < work.limit:\n"
+                             "        if li == 0:\n"
+                             "            spd.count = spd.count + 1u\n";
+    auto const dx12 = text_of(polling, target::hlsl_dx12);
+    CHECK(dx12.contains("    while (true)\n"
+                        "    {\n"
+                        "        GroupMemoryBarrierWithGroupSync();\n"
+                        "        uint uniform_load = spd_count;\n"
+                        "        GroupMemoryBarrierWithGroupSync();\n"
+                        "        if (!(uniform_load < work.limit))\n"
+                        "        {\n"
+                        "            break;\n"
+                        "        }\n"));
+    auto const msl = text_of(polling, target::msl);
+    CHECK(msl.contains("    while (true)\n"
+                       "    {\n"
+                       "        threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+                       "        uint uniform_load = spd_count;\n"
+                       "        threadgroup_barrier(mem_flags::mem_threadgroup);\n"
+                       "        if (!(uniform_load < work.limit))\n"
+                       "        {\n"
+                       "            break;\n"
+                       "        }\n"));
+    // WGSL's own load is one call, which stays in the condition
+    CHECK(text_of(polling, target::wgsl).contains("    while workgroupUniformLoad(&spd_count) < work.limit {\n"));
+}
+
 TEST("sgl emit - the rest of the subgroup family, with a lane converted to the target's lane type")
 {
     constexpr auto family = "require subgroups\n"

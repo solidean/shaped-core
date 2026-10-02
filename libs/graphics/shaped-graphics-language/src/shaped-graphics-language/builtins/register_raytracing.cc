@@ -596,6 +596,7 @@ spelling query_spelling(query_op op)
     return {.kind = spelling_kind::custom,
             .custom = write_query,
             .helper = op == query_op::trace ? msl_params_helper : nullptr,
+            .writes_lines = op == query_op::trace ? is_not_wgsl : nullptr,
             .data = u32(op),
             .hlsl_names = k_query_hlsl,
             .msl_names = k_query_msl};
@@ -720,6 +721,7 @@ void sgl::builtins::register_raytracing(registry& r)
             .write = {.kind = spelling_kind::custom,
                       .custom = write_trace_ray,
                       .helper = msl_trace_helper,
+                      .writes_lines = is_not_wgsl,
                       .hlsl_names = k_trace_ray_hlsl,
                       .msl_names = k_trace_ray_msl},
             .takes_element = true,

@@ -82,6 +82,17 @@ using custom_writer = written (*)(call_context const&);
 /// A function the text declares once, ahead of the entry point, for a call the target cannot write as one expression.
 /// Empty for a target that needs none; two calls needing the same text get it once, so a helper may be an overload.
 using helper_writer = cc::string (*)(helper_context const&);
+/// Whether a custom writer may hand back `written::lines` in this language.
+using lines_predicate = bool (*)(language);
+
+[[nodiscard]] inline bool is_hlsl(language l)
+{
+    return l == language::hlsl;
+}
+[[nodiscard]] inline bool is_not_wgsl(language l)
+{
+    return l != language::wgsl;
+}
 
 /// Appends the result's scalars to `out`.
 /// `in` holds the scalars of every argument, one argument behind the other.
@@ -130,6 +141,9 @@ struct sgl::builtins::spelling
     precedence binds = precedence::primary;
     custom_writer custom = nullptr;
     helper_writer helper = nullptr;
+    /// True in every language where `custom` may hand back `written::lines`; a writer that ever does must set it.
+    /// Such a call cannot stand where it is evaluated more than once, such as a `while` condition.
+    lines_predicate writes_lines = nullptr;
     /// Whatever `custom` and `helper` read to tell the records they serve apart, such as which texture call it is.
     u32 data = 0;
     /// Every name `custom` and `helper` write in one language besides the arguments: a function called or declared, a

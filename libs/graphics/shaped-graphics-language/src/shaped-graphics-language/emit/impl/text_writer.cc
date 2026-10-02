@@ -120,15 +120,18 @@ struct writer
                 .binds = own};
     }
 
-    /// True when writing `id` puts lines in front of the statement that holds it: a struct built member by member.
+    /// True when writing `id` puts lines in front of the statement that holds it: a struct built member by member, or
+    /// a builtin whose writer says it may in this language.
     /// Such an expression cannot stand where it is evaluated more than once, or behind an `else`.
     bool writes_lines(flat_expr_id id) const
     {
         auto const& x = p.e.at(id);
         if (needs_member_assignment(x))
             return true;
-        if (is_hlsl_atomic(id))
-            return true;
+        if (auto const* const c = x.node.try_as<flat_call>())
+            if (auto const* const record = p.m.builtin_function(c->intrinsic);
+                record != nullptr && record->write.writes_lines != nullptr && record->write.writes_lines(d.language()))
+                return true;
         auto result = false;
         check::impl::for_each_operand(p.e, x, [&](flat_expr_id operand) { result = result || writes_lines(operand); });
         return result;
