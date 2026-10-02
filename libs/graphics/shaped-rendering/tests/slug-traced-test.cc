@@ -18,10 +18,12 @@
 using namespace cc::primitive_defines;
 
 namespace probes = sr_test::sgl_shaders;
+using path_t = probes::slug_traced_pipeline_slug_path_t;
 
 // Slug shapes as traced geometry on a live device, every ray held to the CPU reference.
 // The quads lie at z = 0 in pixel space, and each ray of a 128 × 128 grid runs along +z through its pixel's centre:
-// tests/shaders/slug_traced.sgl.
+// tests/shaders/slug_traced.sgl traces inline, and slug_traced_pipeline.sgl through a pipeline whose hit group carries
+// the same `slug.decide` as its any-hit.
 
 namespace
 {
@@ -67,20 +69,40 @@ struct traced_fixture
         return em[0] >= b[0] && em[0] <= b[2] && em[1] >= b[1] && em[1] <= b[3];
     }
 
-    /// Traces the grid with `pipeline` and reads back one float4 per ray.
+    /// Traces the grid and reads back one float4 per ray: inline through `compute`, or through `raytraced`'s tables when
+    /// it is set.
     [[nodiscard]] cc::shared_async<cc::vector<tg::vec4f>> trace(sg::context_handle ctx,
-                                                                sg::compute_pipeline_handle pipeline)
+                                                                sg::compute_pipeline_handle compute,
+                                                                sg::raytracing_pipeline_handle raytraced = nullptr)
     {
         if (auto* const home = ctx->device_home())
             co_await cc::async_resume_on(*home);
 
+        // The scene's instance table, as a scene would keep it: instance id 1 reads its run's first record, 0.
+        // An id that is not the record's index, so a trace that took the id for the record would read past it.
+        i32 const firsts_data[] = {-1, 0};
+        auto const firsts = ctx->persistent.create_buffer_from_data(firsts_data, sg::buffer_usage::readonly_buffer);
         auto const hits
             = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid),
                                                       sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+        auto table = sg::raytracing_shader_table_handle();
+        auto hit_group_offset = u32(0);
+        if (raytraced != nullptr)
+        {
+            auto table_desc = path_t::table_description(raytraced);
+            auto const row = path_t::add_row(table_desc, path_t::hit_groups_t::slug_quads);
+            table = ctx->uncached.create_raytracing_shader_table(table_desc);
+            hit_group_offset = table->offset_of(row);
+        }
+
         auto cmd = ctx->create_command_list();
         auto const records = sr::upload_slug_records(*cmd, atlas, instances);
-        auto const blas = sr::build_slug_blas(*cmd, instances);
-        sg::tlas_instance const placed[] = {{.blas = blas, .instance_id = 0, .cull_mode = sg::instance_cull_mode::none}};
+        auto const blas = sr::build_slug_blas(*cmd, instances, raytraced != nullptr ? path_t::ray_count : 1);
+        sg::tlas_instance const placed[] = {{.blas = blas,
+                                             .instance_id = 1,
+                                             .hit_group_offset = hit_group_offset,
+                                             .cull_mode = sg::instance_cull_mode::none}};
         auto const tlas = cmd->raytracing.build_tlas(placed);
 
         auto const tables = ctx->transient.create_binding_group(
@@ -90,15 +112,35 @@ struct traced_fixture
         auto const shapes = ctx->transient.create_binding_group(
             *cmd, ctx->cached.acquire_binding_group_layout<sgl_modules::slug::shapes>(),
             sgl_modules::slug::shapes{.instances = records.as_readonly_buffer()});
-        auto const probe = ctx->transient.create_binding_group(
-            *cmd, ctx->cached.acquire_binding_group_layout<probes::probe>(),
-            probes::probe{.world = tlas->as_view(), .width = grid, .hits = hits.as_readwrite_buffer()});
 
-        cmd->compute.bind_pipeline(*pipeline);
-        cmd->compute.bind_group(0, *tables);
-        cmd->compute.bind_group(1, *shapes);
-        cmd->compute.bind_group(2, *probe);
-        cmd->compute.dispatch_threads(grid, grid);
+        if (raytraced != nullptr)
+        {
+            auto const probe = ctx->transient.create_binding_group(
+                *cmd, ctx->cached.acquire_binding_group_layout<probes::pipeline_probe>(),
+                probes::pipeline_probe{.world = tlas->as_view(),
+                                       .width = grid,
+                                       .firsts = firsts.as_readonly_buffer(),
+                                       .hits = hits.as_readwrite_buffer()});
+            cmd->raytracing.bind_pipeline(*raytraced);
+            cmd->raytracing.bind_group(0, *tables);
+            cmd->raytracing.bind_group(1, *shapes);
+            cmd->raytracing.bind_group(2, *probe);
+            cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+        }
+        else
+        {
+            auto const probe
+                = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<probes::probe>(),
+                                                      probes::probe{.world = tlas->as_view(),
+                                                                    .width = grid,
+                                                                    .firsts = firsts.as_readonly_buffer(),
+                                                                    .hits = hits.as_readwrite_buffer()});
+            cmd->compute.bind_pipeline(*compute);
+            cmd->compute.bind_group(0, *tables);
+            cmd->compute.bind_group(1, *shapes);
+            cmd->compute.bind_group(2, *probe);
+            cmd->compute.dispatch_threads(grid, grid);
+        }
         auto const back = cmd->download.data_from_buffer(hits);
         ctx->submit_command_list(cc::move(cmd));
         auto const got = co_await back.data();
@@ -138,6 +180,52 @@ struct traced_fixture
     return f;
 }
 
+/// Checks column `column` of every ray against the CPU point test: 1 where the ray met a shape, 0 where it did not.
+/// Where `checks_quad` holds, a hit also names the shape's quad in column 1 and its t in column 2.
+void check_cut(traced_fixture const& f, cc::span<tg::vec4f const> got, int column, bool checks_quad)
+{
+    auto compared = 0;
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+        {
+            auto want = false;
+            auto want_shape = -1;
+            auto is_edge = false;
+            for (auto i = isize(0); i < f.instances.size(); ++i)
+            {
+                auto const em = f.em_at(i, x, y);
+                if (!f.on_quad(i, em))
+                    continue;
+                // within a hundredth of a pixel of a curve, the GPU and the CPU may round to either side
+                auto const per = f.placements[i].em_scale / f.placements[i].scale * 0.01f;
+                auto const c = sr::impl::slug_reference_coverage(f.atlas, f.instances[i], em, tg::vec2f(per, per), false);
+                is_edge = is_edge || (c > 0.0f && c < 1.0f);
+                if (sr::impl::slug_reference_contains(f.atlas, f.instances[i], em))
+                {
+                    want = true;
+                    want_shape = int(i);
+                }
+            }
+            if (is_edge)
+                continue;
+            ++compared;
+            auto const& h = got[y * grid + x];
+            auto const where = cc::format("pixel ({}, {})", x, y);
+            CHECK((h[column] == 1.0f) == want).context(where);
+            if (checks_quad && want && h[column] == 1.0f)
+            {
+                CHECK(int(h[1]) / 2 == want_shape).context(where);
+                CHECK(tg::abs(h[2] - 1.0f) < 1e-4f).context(where);
+            }
+        }
+    CHECK(compared > grid * grid * 9 / 10);
+
+    // and the picture is the one meant: inside the rectangle, inside the ring's band, and through its hole
+    CHECK(got[45 * grid + 28][column] == 1.0f);
+    CHECK(got[64 * grid + 112][column] == 1.0f);
+    CHECK(got[64 * grid + 90][column] == 0.0f);
+}
+
 [[nodiscard]] bool can_trace(sg::context_handle const& ctx)
 {
     return ctx->supports(sg::feature::ray_query);
@@ -159,47 +247,27 @@ ASYNC_INVOCABLE_TEST("sr::slug traced - the any-hit decision keeps exactly the r
     auto const got = co_await f->trace(ctx, *building->try_value());
     REQUIRE(got.size() == grid * grid);
 
-    auto compared = 0;
-    for (auto y = 0; y < grid; ++y)
-        for (auto x = 0; x < grid; ++x)
-        {
-            auto want = false;
-            auto want_shape = -1;
-            auto is_edge = false;
-            for (auto i = isize(0); i < f->instances.size(); ++i)
-            {
-                auto const em = f->em_at(i, x, y);
-                if (!f->on_quad(i, em))
-                    continue;
-                // within a hundredth of a pixel of a curve, the GPU and the CPU may round to either side
-                auto const per = f->placements[i].em_scale / f->placements[i].scale * 0.01f;
-                auto const c
-                    = sr::impl::slug_reference_coverage(f->atlas, f->instances[i], em, tg::vec2f(per, per), false);
-                is_edge = is_edge || (c > 0.0f && c < 1.0f);
-                if (sr::impl::slug_reference_contains(f->atlas, f->instances[i], em))
-                {
-                    want = true;
-                    want_shape = int(i);
-                }
-            }
-            if (is_edge)
-                continue;
-            ++compared;
-            auto const& h = got[y * grid + x];
-            auto const where = cc::format("pixel ({}, {})", x, y);
-            CHECK((h[0] == 1.0f) == want).context(where);
-            if (want && h[0] == 1.0f)
-            {
-                CHECK(int(h[1]) / 2 == want_shape).context(where);
-                CHECK(tg::abs(h[2] - 1.0f) < 1e-4f).context(where);
-            }
-        }
-    CHECK(compared > grid * grid * 9 / 10);
+    check_cut(*f, got, 0, true);
+}
 
-    // and the picture is the one meant: inside the rectangle, inside the ring's band, and through its hole
-    CHECK(got[45 * grid + 28][0] == 1.0f);
-    CHECK(got[64 * grid + 112][0] == 1.0f);
-    CHECK(got[64 * grid + 90][0] == 0.0f);
+ASYNC_INVOCABLE_TEST("sr::slug traced - a pipeline's hit group cuts the same rays with slug.decide as its any-hit",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+    auto const f = make_scene();
+
+    auto const desc = co_await probes::slug_traced_pipeline.slug_path.description(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
+    REQUIRE(pipeline != nullptr);
+    auto const got = co_await f->trace(ctx, nullptr, pipeline);
+    REQUIRE(got.size() == grid * grid);
+
+    // the surface ray through its closest hit, and the occlusion ray through its own payload's any-hit alone
+    check_cut(*f, got, 0, true);
+    check_cut(*f, got, 3, false);
 }
 
 ASYNC_INVOCABLE_TEST("sr::slug traced - a decal's coverage at a traced hit matches the CPU reference at the same "

@@ -310,7 +310,7 @@ font.line_width("text", size);  font.atlas();  font.glyph(g);
 #include <shaped-rendering/slug_traced.hh>     // shapes as ray-traced geometry
 auto const records = sr::upload_slug_records(cmd, atlas, instances);   // buffer<sgl_modules::slug::shape_instance>; prepares atlas
 auto const blas = sr::build_slug_blas(cmd, instances.subspan({.offset = first, .size = count}));   // two NON-OPAQUE triangles per instance
-sg::tlas_instance{.blas = blas, .instance_id = u32(first), .cull_mode = sg::instance_cull_mode::none};   // instance_id IS the first record
+sg::tlas_instance{.blas = blas, .instance_id = scene_id, .cull_mode = sg::instance_cull_mode::none};   // the SCENE maps scene_id -> first
 ```
 
 - **Output is linear and premultiplied**, blended premultiplied; an instance's colour is 8-bit sRGB, straight alpha.
@@ -319,9 +319,11 @@ sg::tlas_instance{.blas = blas, .instance_id = u32(first), .cull_mode = sg::inst
 - **Any pixel shader can cover a shape**: `use slug`, list `{slug.tables}` and call `slug.coverage(em, banding, glyph, weight_boost)`.
   It takes its footprint from `ddx` / `ddy`, so call it in uniform control flow; the other overload takes `em_per_pixel`.
   The host binds `sgl_modules::slug::tables` (`<sgl_modules/slug.hh>`) from the atlas; another package lists `SR_SGL_MODULE_DIR` in its `MODULE_DIRS`.
-- **A trace meets shapes through one decision**: list `{slug.tables, slug.shapes}` and trace with `world.trace(r, c => slug.decide(c))`.
-  `slug.decide` is a point test with a hard edge, so the rays a pixel casts antialias it; every non-opaque triangle must be a slug quad.
-  A lambda, since a module's function cannot be handed over by name yet.
+- **A trace meets shapes through one any-hit**, `slug.decide(c, first)`: list `{slug.tables, slug.shapes}`, and `first` is the run's first record.
+  Inline, the scene's decision branches to it: `world.trace(r, c => scene_any_hit(c))`, a lambda since a module function cannot be handed over by name yet.
+  In a pipeline, an `@any_hit` per payload type wraps it and the run's hit group routes slug quads there; the ray set is the pipeline's, so slug ships no wrapper.
+  It is a point test with a hard edge, so the rays a pixel casts antialias it.
+  `slug.shape_of(first, primitive_index)` is a hit's or a candidate's record.
 - **A traced decal** passes `slug.coverage` its footprint: the em span to where neighbouring rays meet the surface's plane (`graphics/slug-traced`).
 - `impl::slug_reference_coverage(atlas, instance, em, em_per_pixel, weight_boost)` is the pixel shader on the CPU, for tests.
   `impl::slug_reference_contains(atlas, instance, em)` is `slug.contains`, the point test.
