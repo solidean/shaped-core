@@ -4,6 +4,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/slug_atlas.hh>
@@ -35,6 +36,7 @@ public:
     [[nodiscard]] slug_atlas const& atlas() const { return _atlas; }
 
     /// The glyph's place in the atlas, compiling and adding it on first use.
+    /// A glyph that fails is remembered, so asking again returns the same error without compiling it again.
     [[nodiscard]] cc::result<slug_shape_ref> glyph(babel::font::glyph_id g);
 
     /// Appends one instance per visible glyph of the UTF-8 `text`, the baseline starting at `origin`.
@@ -55,4 +57,5 @@ private:
     babel::font::face _face;
     slug_atlas _atlas;
     cc::map<u16, slug_shape_ref> _glyphs;
+    cc::map<u16, cc::string> _failures; ///< why each glyph that did not compile failed
 };

@@ -287,16 +287,18 @@ auto o = sr::slug_outline();                   // closed contours of quadratics,
 o.move_to(p); o.line_to(p); o.quad_to(c, p); o.cubic_to(c0, c1, p, tolerance); o.close();
 o.fill_rule = sr::slug_fill_rule::even_odd;    // nonzero by default
 sr::slug_outline::rectangle(box);  sr::slug_outline_of(face, glyph);   // -> result: a TrueType glyph, composites resolved
+o.is_closed();                                 // every contour back at its start; compile_slug_shape ASSERTS it
 auto const shape = sr::compile_slug_shape(o);  // device-free curve + band tables, rounded to half floats before banding
 
 auto atlas = sr::slug_atlas();                 // CALLER-OWNED, move-only, append-only; no device until prepare
 auto const ref = atlas.add(shape).value();     // slug_shape_ref; ref.is_drawable is false for an empty shape
 atlas.prepare(cmd);                            // creates / grows / uploads — BEFORE the rendering scope
 
-auto const inst = sr::make_slug_instance(ref, origin, x_axis, y_axis, srgb_rgba);   // 68 bytes; axes per OUTLINE unit
+auto const inst = sr::make_slug_instance(ref, origin, x_axis, y_axis, srgb_rgba);   // 68 bytes; axes per OUTLINE unit; ref must be drawable
 auto const prepared = sr::slug_routine::prepare(cmd, atlas, instances);           // atlas.prepare + instance upload
 (void)sr::slug_routine::execute(scope, atlas, prepared, {.object_to_clip = m, .depth_bias = 0, .weight_boost = false});
 (void)sr::slug_routine::execute(scope, atlas, retained_buffer, first, count, view);  // instances the caller keeps
+// execute ASSERTS the atlas has no pending upload: a glyph added after prepare would otherwise draw nothing
 sr::slug_routine::prewarm(ctx, {.color = f, .depth = sg::pixel_format::undefined});  // one pipeline per format pair
 
 auto font = sr::slug_font::load_system_ui_font().value();   // or slug_font::load(path); owns its own atlas

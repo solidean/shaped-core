@@ -59,12 +59,16 @@ struct sr::slug_outline
 
     [[nodiscard]] bool is_empty() const { return curves.empty(); }
 
+    /// Whether `contour_ends` covers every curve and each contour ends exactly where it started.
+    /// An outline built with the path calls is closed once `close()` has run after its last curve.
+    [[nodiscard]] bool is_closed() const;
+
     /// A rectangle as one contour, counter-clockwise.
     [[nodiscard]] static slug_outline rectangle(tg::aabb2f box);
 
 private:
-    tg::pos2f _start;
-    tg::pos2f _cursor;
+    tg::pos2f _start = tg::pos2f(0, 0);
+    tg::pos2f _cursor = tg::pos2f(0, 0);
     bool _open = false;
 };
 
@@ -112,6 +116,7 @@ namespace sr
 [[nodiscard]] cc::result<slug_outline> slug_outline_of(babel::font::face const& face, babel::font::glyph_id glyph);
 
 /// Compiles `outline` into Slug's tables.
+/// `outline` must be closed (`slug_outline::is_closed`): an open contour would still fill, with its missing edge aliased.
 /// An empty outline compiles to an empty shape, which draws nothing.
 [[nodiscard]] slug_compiled_shape compile_slug_shape(slug_outline const& outline);
 } // namespace sr

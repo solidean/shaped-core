@@ -28,7 +28,7 @@ struct sr::slug_shape_ref
     /// Stored units per outline unit.
     f32 em_scale = 1.0f;
 
-    /// False for an empty shape — a space — which an instance skips.
+    /// False for an empty shape — a space — which the caller skips rather than make an instance of.
     bool is_drawable = false;
 };
 

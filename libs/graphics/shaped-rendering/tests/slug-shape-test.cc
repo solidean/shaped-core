@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <font/font_builder.hh>
 #include <nexus/test.hh>
 #include <shaped-rendering/impl/slug_reference.hh>
 #include <shaped-rendering/slug_atlas.hh>
@@ -202,4 +203,63 @@ TEST("sr::slug - an empty outline places nothing and is not drawable")
     REQUIRE(ref.has_value());
     CHECK(!ref.value().is_drawable);
     CHECK(!atlas.has_pending_upload());
+}
+
+TEST("sr::slug - an outline is closed once every contour ends where it starts and contour_ends covers every curve")
+{
+    auto o = sr::slug_outline();
+    o.move_to(tg::pos2f(0, 0));
+    o.line_to(tg::pos2f(100, 0));
+    o.line_to(tg::pos2f(100, 100));
+    // The open contour still fills, with its missing edge aliased; compilation refuses it rather than draw that.
+    CHECK(!o.is_closed());
+    CHECK_ASSERTS(sr::compile_slug_shape(o));
+
+    o.close();
+    CHECK(o.is_closed());
+
+    // Filled directly: the trailing curves need their contour_ends entry, and the contour has to come back to its start.
+    auto direct = sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(10, 10)));
+    direct.curves.push_back({.p1 = tg::pos2f(20, 20), .p2 = tg::pos2f(30, 20), .p3 = tg::pos2f(30, 20)});
+    CHECK(!direct.is_closed());
+    direct.contour_ends.push_back(i32(direct.curves.size()));
+    CHECK(!direct.is_closed());
+    direct.curves.push_back({.p1 = tg::pos2f(30, 20), .p2 = tg::pos2f(20, 20), .p3 = tg::pos2f(20, 20)});
+    direct.contour_ends.back() = i32(direct.curves.size());
+    CHECK(direct.is_closed());
+}
+
+TEST("sr::slug - a composite glyph that fans out exponentially is refused, not resolved")
+{
+    // Glyph 1 is a triangle; each glyph above it places the one below it `fan` times, so glyph n costs fan^(n-1).
+    auto font = babel_test::test_font();
+    font.glyphs.push_back({}); // .notdef
+    auto triangle = babel_test::test_glyph();
+    triangle.points.push_back({.position = tg::pos2i(0, 0), .on_curve = true});
+    triangle.points.push_back({.position = tg::pos2i(100, 0), .on_curve = true});
+    triangle.points.push_back({.position = tg::pos2i(50, 80), .on_curve = true});
+    triangle.contour_ends.push_back(2);
+    font.glyphs.push_back(triangle);
+    auto const fan = 40;
+    for (auto level = 0; level < 4; ++level)
+    {
+        auto g = babel_test::test_glyph();
+        for (auto k = 0; k < fan; ++k)
+        {
+            auto const more = k + 1 < fan ? u16(0x0020) : u16(0);
+            g.components.push_back(
+                {.glyph = babel::font::glyph_id(u16(font.glyphs.size() - 1)), .flags = u16(0x0002 | more)});
+        }
+        font.glyphs.push_back(g);
+    }
+    auto const bytes = babel_test::build_font(font);
+    auto const face = babel::font::read(cc::span<byte const>(bytes)).value();
+
+    // two levels: 40 records of 3 points each, well within the bound
+    CHECK(sr::slug_outline_of(face, babel::font::glyph_id(2)).has_value());
+
+    // five levels would be 40^4 triangles; the bound stops it long before
+    auto const deep = sr::slug_outline_of(face, babel::font::glyph_id(5));
+    REQUIRE(deep.has_error());
+    CHECK(deep.error().to_string().contains("expands past"));
 }

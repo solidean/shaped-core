@@ -86,7 +86,7 @@ public:
                                                      slug_view const& view);
 
     /// Draws `count` instances from `first` of a buffer the caller keeps — retained text uploads once and redraws free.
-    /// The buffer needs vertex_buffer usage, and `atlas.prepare` must have run since its shapes were added.
+    /// The buffer needs vertex_buffer usage, and `atlas` must have no pending upload: prepare it after its last `add`.
     [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope,
                                                      slug_atlas const& atlas,
                                                      sg::buffer<slug_instance> const& instances,
@@ -109,6 +109,7 @@ namespace sr
 {
 /// An instance drawing `shape` with its outline's origin at `origin`, one outline unit along x on `x_axis` and along y on
 /// `y_axis` — all in object space.
+/// `shape` must be drawable: an empty shape — a space — has no instance, so the caller skips it.
 /// `srgb_color` is straight-alpha, sRGB-encoded, in [0, 1].
 [[nodiscard]] slug_instance make_slug_instance(slug_shape_ref const& shape,
                                                tg::pos2f origin,

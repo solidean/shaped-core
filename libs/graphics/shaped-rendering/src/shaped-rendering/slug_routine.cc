@@ -133,6 +133,9 @@ sg::routine_outcome slug_routine::execute(sg::rendering_scope& scope,
         return sg::routine_outcome::executed;
     CC_ASSERT(atlas.curve_texture().raw() != nullptr, "the atlas was never prepared; call slug_routine::prepare or "
                                                       "atlas.prepare first");
+    CC_ASSERT(!atlas.has_pending_upload(),
+              "the atlas gained shapes since its last prepare, so the GPU cannot see them; "
+              "prepare it before the rendering scope opens");
 
     auto& ctx = cmd.context();
     auto const group = ctx.transient.create_binding_group(
@@ -171,6 +174,8 @@ slug_instance make_slug_instance(slug_shape_ref const& shape,
                                  tg::vec2f y_axis,
                                  tg::vec4f srgb_color)
 {
+    CC_ASSERT(shape.is_drawable, "an empty shape has nothing to draw; skip refs whose is_drawable is false");
+
     // Stored em is the outline scaled by em_scale, so one stored unit is 1 / em_scale of an outline unit.
     auto const inv = 1.0f / shape.em_scale;
     return {.em_to_object = tg::vec4f(x_axis[0] * inv, x_axis[1] * inv, y_axis[0] * inv, y_axis[1] * inv),

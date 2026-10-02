@@ -105,11 +105,21 @@ cc::result<slug_shape_ref> slug_font::glyph(babel::font::glyph_id g)
 {
     if (auto const* known = _glyphs.get_ptr(u16(g)))
         return *known;
+    if (auto const* failed = _failures.get_ptr(u16(g)))
+        return cc::error(*failed);
 
     auto outline = slug_outline_of(_face, g);
-    CC_RETURN_IF_ERROR(outline);
+    if (outline.has_error())
+    {
+        _failures[u16(g)] = outline.error().to_string();
+        return cc::error(_failures[u16(g)]);
+    }
     auto placed = _atlas.add(compile_slug_shape(outline.value()));
-    CC_RETURN_IF_ERROR(placed);
+    if (placed.has_error())
+    {
+        _failures[u16(g)] = placed.error().to_string();
+        return cc::error(_failures[u16(g)]);
+    }
     _glyphs[u16(g)] = placed.value();
     return placed.value();
 }
@@ -130,11 +140,13 @@ void slug_font::append_line(cc::vector<slug_instance>& out,
                         [&](char32_t c)
                         {
                             auto const g = glyph_of(_face, c);
+                            auto const failed_before = _failures.get_ptr(u16(g)) != nullptr;
                             auto const shape = glyph(g);
                             if (shape.has_error())
                             {
-                                CC_LOG_WARNING("glyph {} of the font did not compile: {}", u16(g),
-                                               shape.error().to_string());
+                                if (!failed_before)
+                                    CC_LOG_WARNING("glyph {} of the font did not compile: {}", u16(g),
+                                                   shape.error().to_string());
                             }
                             else if (shape.value().is_drawable)
                             {

@@ -340,6 +340,7 @@ if(SC_BUILD_TESTS)
         shaped-graphics-language # the slug module's own tests run on SGL's interpreter
     )
     target_compile_definitions(shaped-rendering-test PRIVATE SR_SGL_MODULE_DIR="${SR_SGL_MODULE_DIR}")
+    target_include_directories(shaped-rendering-test PRIVATE "${BABEL_TEST_DIR}") # font/font_builder.hh, for crafted fonts
 
     sc_target_pch(shaped-rendering-test SG NEXUS) # 0.44
 

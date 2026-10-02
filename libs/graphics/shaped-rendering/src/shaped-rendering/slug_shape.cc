@@ -1,4 +1,5 @@
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/common/asserts.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-rendering/slug_shape.hh>
@@ -17,7 +18,11 @@ constexpr f32 exact_half_range = 2048.0f;
 constexpr int max_bands_per_axis = 16;
 
 /// A run takes one texel per curve plus its closing texel, and must fit one row of the 4096-wide curve texture.
-constexpr isize max_curves_per_run = 2047;
+constexpr isize max_curves_per_run = 4095;
+
+/// What resolving one glyph may cost, counted as one per record visited plus one per point it yields.
+/// Depth alone does not bound a composite: components that each repeat the level below grow exponentially with it.
+constexpr isize max_glyph_work = 65536;
 
 [[nodiscard]] tg::pos2f midpoint(tg::pos2f a, tg::pos2f b)
 {
@@ -41,7 +46,11 @@ struct flat_glyph
     cc::vector<i32> contour_ends; // index of each contour's last point
 };
 
-[[nodiscard]] cc::result<flat_glyph> flatten(babel::font::face const& face, babel::font::glyph_id glyph, int depth)
+/// `work` is what this glyph may still cost, shared by every level of the recursion.
+[[nodiscard]] cc::result<flat_glyph> flatten(babel::font::face const& face,
+                                             babel::font::glyph_id glyph,
+                                             int depth,
+                                             isize& work)
 {
     if (depth > 16)
         return cc::error("a composite glyph nests deeper than 16 levels");
@@ -49,6 +58,10 @@ struct flat_glyph
     auto record = face.outline(glyph);
     CC_RETURN_IF_ERROR(record);
     auto const& o = record.value();
+
+    work -= 1 + o.points.size();
+    if (work < 0)
+        return cc::error(cc::format("a composite glyph expands past {} records and points", max_glyph_work));
 
     auto out = flat_glyph();
     if (!o.is_composite())
@@ -61,7 +74,7 @@ struct flat_glyph
 
     for (auto const& c : o.components)
     {
-        auto child = flatten(face, c.glyph, depth + 1);
+        auto child = flatten(face, c.glyph, depth + 1, work);
         CC_RETURN_IF_ERROR(child);
         auto& part = child.value();
         for (auto& q : part.points)
@@ -266,6 +279,20 @@ slug_outline slug_outline::rectangle(tg::aabb2f box)
     return o;
 }
 
+bool slug_outline::is_closed() const
+{
+    auto first = i32(0);
+    for (auto const end : contour_ends)
+    {
+        if (end < first || end > curves.size())
+            return false;
+        if (end > first && curves[end - 1].p3 != curves[first].p1)
+            return false;
+        first = end;
+    }
+    return first == curves.size();
+}
+
 isize slug_compiled_shape::band_texel_count() const
 {
     auto n = horizontal_bands.size() + vertical_bands.size();
@@ -278,7 +305,8 @@ isize slug_compiled_shape::band_texel_count() const
 
 cc::result<slug_outline> slug_outline_of(babel::font::face const& face, babel::font::glyph_id glyph)
 {
-    auto flat = flatten(face, glyph, 0);
+    auto work = max_glyph_work;
+    auto flat = flatten(face, glyph, 0, work);
     CC_RETURN_IF_ERROR(flat);
     auto const& g = flat.value();
 
@@ -344,6 +372,8 @@ cc::result<slug_outline> slug_outline_of(babel::font::face const& face, babel::f
 
 slug_compiled_shape compile_slug_shape(slug_outline const& outline)
 {
+    CC_ASSERT(outline.is_closed(), "the outline has an open contour; call close() after its last curve");
+
     auto out = slug_compiled_shape();
     out.fill_rule = outline.fill_rule;
 
