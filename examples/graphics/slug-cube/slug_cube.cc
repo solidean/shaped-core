@@ -182,6 +182,54 @@ constexpr int decal_face = 5; // the top face carries the star
     return o;
 }
 
+/// A heart of four cubic Béziers, the classic SVG one in a 100-unit box, y up: the curves are split into quadratics on the CPU.
+[[nodiscard]] sr::slug_outline heart()
+{
+    auto const p = [](f32 x, f32 y) { return tg::pos2f(x, 100.0f - y); };
+    auto o = sr::slug_outline();
+    o.move_to(p(50, 30));
+    o.cubic_to(p(50, 27), p(45, 15), p(25, 15), 0.05f);
+    o.cubic_to(p(0, 15), p(0, 42.5f), p(0, 42.5f), 0.05f);
+    o.cubic_to(p(0, 60), p(20, 77), p(50, 95), 0.05f);
+    o.cubic_to(p(80, 77), p(100, 60), p(100, 42.5f), 0.05f);
+    o.cubic_to(p(100, 42.5f), p(100, 15), p(75, 15), 0.05f);
+    o.cubic_to(p(60, 15), p(50, 27), p(50, 30), 0.05f);
+    o.close();
+    return o;
+}
+
+/// Moves every instance from `first` on by `offset` in the face's plane, which is how a run laid out from 0 is centred.
+void shift(cc::vector<sr::slug_instance>& instances, isize first, tg::vec2f offset)
+{
+    for (auto i = first; i < instances.size(); ++i)
+        instances[i].origin = instances[i].origin + offset;
+}
+
+/// `text` around a circle of `radius`, reading clockwise from the top, each glyph turned to stand on the circle.
+/// The size is chosen so the text closes the circle.
+/// Every glyph is its own instance with its own basis, which is what a per-shape 2x2 placement buys.
+void append_circle(cc::vector<sr::slug_instance>& out, sr::slug_font& font, cc::string_view text, f32 radius, tg::vec4f color)
+{
+    auto const size = 6.2831853f * radius / font.line_width(text, 1.0f);
+    auto const unit = size / f32(font.face().units_per_em());
+    auto angle = 1.5707963f;
+    for (auto const c : text) // ASCII only, so one byte is one character
+    {
+        auto const g = font.face().glyph_for(char32_t(u8(c)));
+        auto const id = g.has_value() ? g.value() : babel::font::glyph_id::notdef;
+        auto const advance = f32(font.face().horizontal(id).advance) * unit;
+        // Around the glyph's middle rather than its start, so it stands square to the circle.
+        auto const a = tg::angle_f::make_from_radians(angle - advance * 0.5f / radius);
+        auto const up = tg::vec2f(tg::cos(a), tg::sin(a));
+        auto const right = tg::vec2f(up[1], -up[0]);
+        auto const start = tg::angle_f::make_from_radians(angle);
+        auto const at = tg::pos2f(radius * tg::cos(start), radius * tg::sin(start));
+        if (auto const shape = font.glyph(id); shape.has_value() && shape.value().is_drawable)
+            out.push_back(sr::make_slug_instance(shape.value(), at, right * unit, up * unit, color));
+        angle -= advance / radius;
+    }
+}
+
 /// The matrix taking a face's label plane to the cube's object space: x along the face's right, y up, at the face.
 [[nodiscard]] tg::mat4f face_frame(int face)
 {
@@ -278,19 +326,113 @@ ASYNC_EXAMPLE("graphics/slug-cube")
     auto const vertices = ctx->persistent.create_buffer_from_data(build_cube_mesh(star.em_bounds), sg::buffer_usage::vertex_buffer);
     auto const indices = ctx->persistent.create_buffer_from_data(build_cube_indices(), sg::buffer_usage::index_buffer);
 
-    // The labels never change, so they are laid out once: one run of glyph quads per side face.
-    // Each face's run is a range of one instance array, drawn with that face's own matrix.
-    char const* const labels[] = {"SLUG", "SGL", "4 sides", "any size"};
-    int const label_faces[] = {0, 3, 1, 2};
-    auto instances = cc::vector<sr::slug_instance>();
-    auto ranges = cc::vector<tg::vec2i>(); // first, count per label
-    for (auto i = 0; i < 4; ++i)
+    // A second font for the Japanese face: the UI font has no kana, so this one comes from the OS's Japanese faces.
+    // Each font has its own atlas, so its shapes are a draw of their own.
+    auto japanese = cc::optional<sr::slug_font>();
+    for (auto const path : {"C:/Windows/Fonts/YuGothM.ttc", "C:/Windows/Fonts/meiryo.ttc", "C:/Windows/Fonts/msgothic.ttc",
+                            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf"})
     {
-        auto const em = 0.2f;
-        auto const width = font.line_width(labels[i], em);
-        auto const first = i32(instances.size());
-        font.append_line(instances, labels[i], tg::pos2f(-width * 0.5f, -em * 0.35f), em, tg::vec4f(0.98f, 0.97f, 0.92f, 1.0f));
-        ranges.push_back(tg::vec2i(first, i32(instances.size()) - first));
+        auto candidate = sr::slug_font::load(path);
+        if (candidate.has_value())
+        {
+            japanese.emplace_value(cc::move(candidate).value());
+            break;
+        }
+    }
+
+    // Every face's content never changes, so it is laid out once, in the face's own plane: x right, y up, the face
+    // spanning -0.5 to 0.5.
+    // One instance array per atlas; each face draws its ranges of them with its own matrix.
+    struct face_draw
+    {
+        sr::slug_font* font = nullptr;
+        int face = 0;
+        isize first = 0;
+        isize count = 0;
+    };
+    auto latin = cc::vector<sr::slug_instance>();
+    auto kana = cc::vector<sr::slug_instance>();
+    auto draws = cc::vector<face_draw>();
+    auto const begin_run = [&](sr::slug_font& f, cc::vector<sr::slug_instance>& to, int face)
+    { draws.push_back({.font = &f, .face = face, .first = to.size()}); };
+    auto const end_run = [&](cc::vector<sr::slug_instance>& to) { draws.back().count = to.size() - draws.back().first; };
+    auto const ink = tg::vec4f(0.98f, 0.97f, 0.92f, 1.0f);
+    auto const muted = tg::vec4f(0.78f, 0.82f, 0.90f, 1.0f);
+
+    // +z: Gauss's sum, set from pieces — a large sigma with its limits, a fraction whose bar is a rectangle shape.
+    {
+        begin_run(font, latin, 1);
+        auto const first = latin.size();
+        auto const sigma = "\xCE\xA3"; // U+03A3, spelled as UTF-8 so no source encoding can misread it
+        auto const big = 0.30f;
+        auto const limit_size = 0.085f;
+        auto const mid = 0.15f;
+        auto const baseline = -0.07f;
+        auto const sigma_width = font.line_width(sigma, big);
+        font.append_line(latin, sigma, tg::pos2f(0, baseline), big, ink);
+        font.append_line(latin, "n", tg::pos2f((sigma_width - font.line_width("n", limit_size)) * 0.5f, baseline + big * 0.78f), limit_size, muted);
+        font.append_line(latin, "i=1", tg::pos2f((sigma_width - font.line_width("i=1", limit_size)) * 0.5f, baseline - 0.10f), limit_size, muted);
+        auto x = sigma_width + 0.02f;
+        font.append_line(latin, "i = ", tg::pos2f(x, baseline + 0.035f), mid, ink);
+        x += font.line_width("i = ", mid);
+        auto const numerator = 0.11f;
+        auto const top_width = font.line_width("n(n+1)", numerator);
+        font.append_line(latin, "n(n+1)", tg::pos2f(x, baseline + 0.105f), numerator, ink);
+        font.append_line(latin, "2", tg::pos2f(x + (top_width - font.line_width("2", numerator)) * 0.5f, baseline - 0.035f), numerator, ink);
+        auto const bar = font.atlas().add(sr::compile_slug_shape(sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1))))).value();
+        latin.push_back(sr::make_slug_instance(bar, tg::pos2f(x, baseline + 0.075f), tg::vec2f(top_width, 0), tg::vec2f(0, 0.012f), ink));
+        shift(latin, first, tg::vec2f(-(x + top_width) * 0.5f, 0));
+        font.append_line(latin, "sum of 1 .. n", tg::pos2f(-font.line_width("sum of 1 .. n", 0.06f) * 0.5f, 0.33f), 0.06f, muted);
+        end_run(latin);
+    }
+
+    // +x: konnichiwa in hiragana, from the Japanese font, with its reading under it in the UI font.
+    {
+        auto const hiragana = "\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF"; // こんにちは, U+3053 3093 306B 3061 306F
+        if (japanese.has_value())
+        {
+            auto& jp = japanese.value();
+            auto const em = cc::min(0.84f / jp.line_width(hiragana, 1.0f), 0.2f);
+            begin_run(jp, kana, 3);
+            jp.append_line(kana, hiragana, tg::pos2f(-jp.line_width(hiragana, em) * 0.5f, -0.02f), em, ink);
+            end_run(kana);
+        }
+        begin_run(font, latin, 3);
+        auto const reading = japanese.has_value() ? "konnichiwa" : "(no Japanese font found)";
+        font.append_line(latin, reading, tg::pos2f(-font.line_width(reading, 0.075f) * 0.5f, -0.2f), 0.075f, muted);
+        end_run(latin);
+    }
+
+    // -z: text around a circle, every glyph turned by its own basis, around a heart of cubic curves.
+    {
+        begin_run(font, latin, 0);
+        append_circle(latin, font, "SHAPES * TEXT * OUTLINES * ANY ANGLE * ", 0.36f, ink);
+        auto const love = font.atlas().add(sr::compile_slug_shape(heart())).value();
+        auto const s = 0.0042f;
+        latin.push_back(sr::make_slug_instance(love, tg::pos2f(-50 * s, -55 * s), tg::vec2f(s, 0), tg::vec2f(0, s), tg::vec4f(1.0f, 0.62f, 0.68f, 1)));
+        end_run(latin);
+    }
+
+    // -x: one word at many sizes and colours, and a line slanted by shearing its basis.
+    {
+        begin_run(font, latin, 2);
+        struct line
+        {
+            f32 size = 0;
+            tg::vec4f color;
+        };
+        line const lines[] = {{.size = 0.05f, .color = tg::vec4f(0.40f, 0.85f, 0.80f, 1)},
+                              {.size = 0.08f, .color = tg::vec4f(0.98f, 0.70f, 0.30f, 1)},
+                              {.size = 0.12f, .color = tg::vec4f(0.95f, 0.45f, 0.65f, 1)},
+                              {.size = 0.18f, .color = ink}};
+        auto y = 0.34f;
+        for (auto const& l : lines)
+        {
+            y -= l.size * 1.05f;
+            font.append_line(latin, "Slug", tg::pos2f(-0.4f, y), l.size, l.color);
+        }
+        font.append_line(latin, "oblique by shear", tg::pos2f(-0.4f, -0.32f), 0.085f, muted, tg::vec2f(1, 0), tg::vec2f(0.25f, 1));
+        end_run(latin);
     }
 
     cc::unique_ptr<sr::window_system> wsys;
@@ -376,12 +518,14 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         auto overlay = cc::vector<sr::slug_instance>();
         font.append_line(overlay, "Slug: text and shapes from their outlines", tg::pos2f(28, 52), 34.0f, tg::vec4f(1, 1, 1, 1),
                          tg::vec2f(1, 0), tg::vec2f(0, -1));
-        font.append_line(overlay, "labels are glyph quads on each face, the star is drawn by the cube's own shader",
+        font.append_line(overlay, "each side is quads from the routine, the star on top is drawn by the cube's own shader",
                          tg::pos2f(30, 86), 18.0f, tg::vec4f(0.75f, 0.78f, 0.85f, 1), tg::vec2f(1, 0), tg::vec2f(0, -1));
 
         auto cmd = ctx->create_command_list();
         // Uploads first, on the list but outside the pass: the atlas's new glyphs and both instance arrays.
-        auto const labels_prepared = sr::slug_routine::prepare(*cmd, font.atlas(), instances);
+        auto const latin_prepared = sr::slug_routine::prepare(*cmd, font.atlas(), latin);
+        auto const kana_prepared
+            = japanese.has_value() ? sr::slug_routine::prepare(*cmd, japanese.value().atlas(), kana) : sr::slug_routine::prepared_shapes{};
         auto const overlay_prepared = sr::slug_routine::prepare(*cmd, font.atlas(), overlay);
         auto const tables = ctx->transient.create_binding_group(
             *cmd, tables_layout,
@@ -409,10 +553,13 @@ ASYNC_EXAMPLE("graphics/slug-cube")
             pass.set_inline_constants(shaders::constants{.view_projection = view_projection}.to_block());
             pass.draw_indexed({.index_range = {.offset = 0, .size = 36}});
 
-            // Each label with its face's frame; the bias keeps it in front of the face it lies on.
-            for (auto i = 0; i < 4; ++i)
-                (void)sr::slug_routine::execute(pass, font.atlas(), labels_prepared.instances, ranges[i][0], ranges[i][1],
-                                                {.object_to_clip = view_projection * face_frame(label_faces[i]), .depth_bias = 0.0005f});
+            // Each face's runs with its face's frame; the bias keeps them in front of the face they lie on.
+            for (auto const& d : draws)
+            {
+                auto const& instances = d.font == &font ? latin_prepared.instances : kana_prepared.instances;
+                (void)sr::slug_routine::execute(pass, d.font->atlas(), instances, d.first, d.count,
+                                                {.object_to_clip = view_projection * face_frame(d.face), .depth_bias = 0.0005f});
+            }
 
             // Depth zero passes any depth the cube left.
             (void)sr::slug_routine::execute(pass, font.atlas(), overlay_prepared, {.object_to_clip = pixels_to_clip(target_size)});
@@ -444,6 +591,8 @@ ASYNC_EXAMPLE("graphics/slug-cube")
 
     // The atlas's textures are the context's, so they go before it shuts down rather than with the font afterwards.
     font.atlas() = sr::slug_atlas();
+    if (japanese.has_value())
+        japanese.value().atlas() = sr::slug_atlas();
     ctx->advance_epoch();
     co_await ctx->idle_completion();
     ctx->shutdown();
