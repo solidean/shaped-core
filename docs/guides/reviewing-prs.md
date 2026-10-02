@@ -405,6 +405,19 @@ ehm dont just drop things that are definitely coming up. like that's a really na
 **SGL is where shaders are going, so growing HLSL-specific infrastructure is deferred rather than done.**
 A finding whose fix is "teach the HLSL path what the SGL path already does" is recorded as a TODO beside the port, never prescribed in the PR.
 
+### A capability reaches a high-level library through that library's model, never through a side hook
+
+**A lower library offers the capability in a general form; the library above exposes it in its own terms.**
+A branch adding GPU text to sr also gave shaped-viewer `frame::draw_overlay`, a per-frame callback handed the command list after every view was composited, marked TEMPORARY in every place it appeared.
+The review waved it through as an honest stopgap, and got this back:
+
+```raw
+Slug shoudl be accessible via shaped rendering in a general form, but the viewer should be able to use it. It should be exposed via it's canvas api (that can be one layer), in the same level as a (3D) scene is handeled.
+```
+
+The hook came out of the branch, the viewer's 2D layer was renamed `canvas` to match, and the canvas was left to a design of its own.
+**A TEMPORARY label does not exempt a public hook from API review**: review it as the API it is, and when it bypasses the library's model, the finding is the model's missing piece.
+
 ### A local helper is either a duplicate or a recorded gap, and it has to say which
 
 Every codec, parser and backend grows small private helpers written without checking whether `cc` already has them.
