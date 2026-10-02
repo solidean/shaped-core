@@ -200,6 +200,26 @@ constexpr cc::string_view k_msl_names[] = {
     "quad_broadcast",
 };
 
+/// The unsigned integer type of the width and component count of the signed one `language` spells `type`; empty where
+/// `type` is no signed integer type.
+cc::string_view unsigned_twin(registry const& r, language l, cc::string_view type)
+{
+    for (auto const& t : r.types)
+    {
+        if (t.spelled_in(l) != type)
+            continue;
+        if (t.leaf_kind != check::value_kind::scalar_int && t.leaf_kind != check::value_kind::scalar_short)
+            return {};
+        auto const kind = t.leaf_kind == check::value_kind::scalar_int ? check::value_kind::scalar_uint
+                                                                       : check::value_kind::scalar_ushort;
+        for (auto const& u : r.types)
+            if (u.leaf_kind == kind && u.leaf_count == t.leaf_count)
+                return u.spelled_in(l);
+        return {};
+    }
+    return {};
+}
+
 /// EMIT-146: the target's own operation, a lane converted to the target's lane type.
 written write_subgroup(call_context const& ctx)
 {
@@ -217,9 +237,10 @@ written write_subgroup(call_context const& ctx)
                                        : info.op == subgroup_op::quad_swap_y ? 2
                                                                              : 3)};
         // HLSL's bitwise reductions take unsigned integers alone
-        if (ctx.target == language::hlsl && ctx.result_type.starts_with("int")
+        if (ctx.target == language::hlsl
             && (info.op == subgroup_op::bit_and || info.op == subgroup_op::bit_or || info.op == subgroup_op::bit_xor))
-            return {.text = cc::format("{}({}(uint{}({})))", ctx.result_type, name, ctx.result_type.subview(3), x)};
+            if (auto const as_unsigned = unsigned_twin(ctx.builtins, ctx.target, ctx.result_type); !as_unsigned.empty())
+                return {.text = cc::format("{}({}({}({})))", ctx.result_type, name, as_unsigned, x)};
         return {.text = cc::format("{}({})", name, x)};
     }
     auto const lane_type = ctx.target == language::hlsl ? "uint" : ctx.target == language::wgsl ? "u32" : "ushort";

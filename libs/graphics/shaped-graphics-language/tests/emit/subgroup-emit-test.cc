@@ -153,6 +153,25 @@ TEST("sgl emit - a uniform load in a loop's condition is read again on every ite
     CHECK(text_of(polling, target::wgsl).contains("    while workgroupUniformLoad(&spd_count) < work.limit {\n"));
 }
 
+TEST("sgl emit - HLSL reduces signed integers bitwise as their unsigned twins, and converts back")
+{
+    constexpr auto signed_bits = "require subgroups\n"
+                                 "require shader_int16\n"
+                                 "\n"
+                                 "binding work:\n"
+                                 "    output: mut buffer[int]\n"
+                                 "\n"
+                                 "@compute(64) fun cs(@local_thread_index li: int){work}:\n"
+                                 "    let a = subgroup_bit_or(li)\n"
+                                 "    let b = subgroup_bit_and(int3(li))\n"
+                                 "    let c = subgroup_bit_xor(short2(li as short))\n"
+                                 "    work.output[li] = a + b.y + (c.x as int)\n";
+    auto const dx12 = text_of(signed_bits, target::hlsl_dx12);
+    CHECK(dx12.contains("    const int a = int(WaveActiveBitOr(uint(li)));\n"));
+    CHECK(dx12.contains("int3(WaveActiveBitAnd(uint3(")).dump("text", dx12);
+    CHECK(dx12.contains("int16_t2(WaveActiveBitXor(uint16_t2(")).dump("text", dx12);
+}
+
 TEST("sgl emit - the rest of the subgroup family, with a lane converted to the target's lane type")
 {
     constexpr auto family = "require subgroups\n"
