@@ -34,15 +34,16 @@ namespace
         if (p.record_count == 0)
             continue;
 
-        // A 2D position measured from a right or bottom edge points into the view, and is where the drawing's far edge
-        // sits, so it counts back from that edge by the distance and by how far the drawing reaches.
+        // A 2D position measured from a right or bottom edge points into the view, and is where the block's far edge
+        // sits: the block's anchor counts back from that edge by the distance and by how far the block reaches, and
+        // the placement keeps its offset within the block.
         auto at = p.at;
         if (!job.is_3d)
         {
             if (p.from == corner::top_right || p.from == corner::bottom_right)
-                at[0] = job.logical_size[0] - at[0] - p.reach[0];
+                at[0] = job.logical_size[0] - (at[0] - p.offset[0]) - p.reach[0] + p.offset[0];
             if (p.from == corner::bottom_left || p.from == corner::bottom_right)
-                at[1] = job.logical_size[1] - at[1] - p.reach[1];
+                at[1] = job.logical_size[1] - (at[1] - p.offset[1]) - p.reach[1] + p.offset[1];
         }
 
         auto const frame = u32(frames.size());

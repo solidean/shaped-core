@@ -24,7 +24,7 @@ cc::result<slug_font> slug_font::load(cc::string_view path, i32 face_index)
     return slug_font(cc::move(face).value());
 }
 
-cc::result<slug_font> slug_font::load_system_ui_font()
+cc::optional<cc::string_view> system_ui_font_path()
 {
     // TrueType-outlined faces only: CFF is not read yet, which rules out most .otf files.
     cc::string_view const candidates[] = {
@@ -39,12 +39,17 @@ cc::result<slug_font> slug_font::load_system_ui_font()
         "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
     };
     for (auto const path : candidates)
-    {
-        auto font = load(path);
-        if (font.has_value())
-            return font;
-    }
-    return cc::error("no TrueType UI font in any of the places this looks");
+        if (cc::file_read_stream_adapter::open(path).has_value())
+            return path;
+    return {};
+}
+
+cc::result<slug_font> slug_font::load_system_ui_font()
+{
+    auto const path = system_ui_font_path();
+    if (!path.has_value())
+        return cc::error("no TrueType UI font in any of the places this looks");
+    return load(path.value());
 }
 
 cc::result<slug_shape_ref> slug_font::glyph(babel::font::glyph_id g)

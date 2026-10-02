@@ -64,6 +64,9 @@ struct sv::drawing_placement
 
     sv::corner from = sv::corner::top_left;
 
-    /// 2D: how far the placed drawing reaches right of and below `at`, so a right or bottom corner aligns its far edge.
+    /// 2D: how far the placed block reaches right of and below its anchor, so a right or bottom corner aligns its far
+    /// edge; and where this placement sits within that block, which a corner leaves as it is.
+    /// A drawing is a block of its own, at offset zero; a glyph of a string is one of many in its string's block.
     tg::vec2f reach = tg::vec2f(0, 0);
+    tg::vec2f offset = tg::vec2f(0, 0);
 };

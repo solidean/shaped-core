@@ -537,7 +537,12 @@ canvas.add_drawing(set, arrow, {.at = tg::pos2f(16, 16), .scale = 48, .from = sv
 canvas.add_drawing(d, {...});                    // a lone drawing: an implicit one-element set
 // point (x, y) lands at at + scale * (x * x_axis + y * y_axis); the axes are FREE (stretch, shear)
 // from a right/bottom corner, `at` is where the drawing's FAR edge sits in from that edge
+canvas.add_text("fps 144", tg::pos2f(16, 16), {.size = 14, .color = c});   // logical px; + an instance_2d overload (corners, axes)
+scene.add_text("+X", {.at = p, .x_axis = r, .y_axis = down}, {.size = 0.1f});  // world units: SET the size
+auto const mono = sv::font::from_bytes(pinned).value();   // TrueType only; keyed by the file's hash
+sv::default_font();                              // the OS's UI font, loaded once; null where there is none
 // resources.drawings: sv::drawing_manager, an lru_pool over one sr::slug_atlas; one Slug job (one draw) per layer
+// glyphs reach the GPU as glyph_set(font, g): 64 consecutive glyph ids per set, compiled on first use
 ```
 
 ## Asset loading — a file into `sv::mesh`

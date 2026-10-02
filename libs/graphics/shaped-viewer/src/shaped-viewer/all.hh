@@ -27,6 +27,7 @@
 
 // drawings
 #include <shaped-viewer/drawing/drawing.hh>
+#include <shaped-viewer/drawing/font.hh>
 #include <shaped-viewer/drawing/instance.hh>
 
 // loading an asset from a file

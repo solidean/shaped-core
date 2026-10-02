@@ -4,6 +4,8 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-viewer/drawing/font.hh>
+#include <shaped-viewer/drawing/instance.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/box_style.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
@@ -217,6 +219,11 @@ public:
     /// The same for a lone drawing, acquired as a one-element set of its own.
     void add_drawing(drawing const& d, instance_3d const& instance);
 
+    /// Sets the UTF-8 `text` in `style` and places it on the plane `instance` spans, its box's top-left at `at`.
+    /// The style's size is in world units here, so a label one tenth of a unit tall is `{.size = 0.1f}`.
+    /// One drawing per glyph, from the font's glyph sets — see `sv::font`.
+    void add_text(cc::string_view text, instance_3d const& instance, text_style const& style = {});
+
 private:
     [[nodiscard]] layer& target() const;
 
@@ -240,6 +247,17 @@ public:
 
     /// The same for a lone drawing, acquired as a one-element set of its own.
     void add_drawing(drawing const& d, instance_2d const& instance);
+
+    /// Sets the UTF-8 `text` in `style`, its box's top-left at `instance.at` — or, from another corner, its box's far
+    /// edges that far in.
+    /// The style's size is in logical pixels, 14 by default; one drawing per glyph, from the font's glyph sets.
+    void add_text(cc::string_view text, instance_2d const& instance, text_style const& style = {});
+
+    /// The same at `at`, unscaled.
+    void add_text(cc::string_view text, tg::pos2f at, text_style const& style = {})
+    {
+        add_text(text, instance_2d{.at = at}, style);
+    }
 
 private:
     [[nodiscard]] layer& target() const;

@@ -110,8 +110,31 @@ EXAMPLE("shaped-viewer/drawings")
                                    .tint = tg::vec4f(0.15f, 0.9f, 1.0f, 1)});
             }
 
+        // A label on each side face, lying on it: x along the face, y down it, lifted a hair off it.
+        struct face_label
+        {
+            char const* text;
+            tg::vec3f normal;
+            tg::vec3f right;
+        };
+        face_label const labels[] = {{"+X", tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1)},
+                                     {"-X", tg::vec3f(-1, 0, 0), tg::vec3f(0, 0, -1)},
+                                     {"+Z", tg::vec3f(0, 0, 1), tg::vec3f(-1, 0, 0)},
+                                     {"-Z", tg::vec3f(0, 0, -1), tg::vec3f(1, 0, 0)}};
+        for (auto const& l : labels)
+            scene.add_text(l.text,
+                           {.at = tg::pos3f(0, 0, 0) + l.normal * 1.003f - l.right * 0.25f + tg::vec3f(0, 0.2f, 0),
+                            .x_axis = l.right,
+                            .y_axis = tg::vec3f(0, -1, 0)},
+                           {.size = 0.4f, .color = tg::vec4f(1, 0.85f, 0.3f, 1)});
+
         auto canvas = view.add_canvas();
         canvas.add_drawing(set, logo_id, {.at = tg::pos2f(16, 16), .scale = 48});
+        canvas.add_text("Drawings", tg::pos2f(76, 18), {.size = 22});
+        canvas.add_text("halfedge arrows, face labels, a badge", tg::pos2f(76, 46),
+                        {.size = 13, .color = tg::vec4f(0.08f, 0.1f, 0.14f, 1)});
         canvas.add_drawing(set, logo_id, {.at = tg::pos2f(16, 16), .scale = 32, .from = sv::corner::bottom_right});
+        canvas.add_text("bottom-right, 16 px in", {.at = tg::pos2f(56, 22), .from = sv::corner::bottom_right},
+                        {.size = 13});
     }
 }

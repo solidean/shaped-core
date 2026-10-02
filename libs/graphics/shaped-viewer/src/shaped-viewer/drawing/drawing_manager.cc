@@ -1,7 +1,9 @@
 #include <clean-core/record/log.hh>
 #include <shaped-rendering/slug_routine.hh>
+#include <shaped-rendering/slug_shape.hh>
 #include <shaped-viewer/drawing/drawing.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
+#include <shaped-viewer/drawing/font.hh>
 #include <shaped-viewer/impl/content_hash.hh>
 
 namespace sv
@@ -40,6 +42,30 @@ u32 drawing_manager::first_record(drawing_set_id id, u32 index)
 u32 drawing_manager::record_count(drawing_set_id id, u32 index)
 {
     return get(id).record_count[isize(index)];
+}
+
+drawing_set_id drawing_manager::glyph_set(font const& f, babel::font::glyph_id g)
+{
+    auto const first = u32(g) / glyphs_per_set * glyphs_per_set;
+    u64 const key[] = {u64(first), impl::glyph_set_hash_seed};
+    auto const hash = impl::combine_digests(f.hash(), cc::hash128::create(cc::span<u64 const>(key).as_bytes(), 0));
+    if (auto const resident = find_by_hash(hash); resident.has_value())
+        return resident.value();
+
+    // Every glyph of the run, an empty drawing for one with no outline — a space — or one that does not convert.
+    auto glyphs = cc::vector<drawing>();
+    auto const end = cc::min(first + glyphs_per_set, u32(f.face().glyph_count()));
+    for (auto id = first; id < end; ++id)
+    {
+        auto d = drawing();
+        auto outline = sr::slug_outline_of(f.face(), babel::font::glyph_id(u16(id)));
+        if (outline.has_value() && !outline.value().is_empty())
+            d.add_fill(cc::move(outline).value());
+        else if (outline.has_error())
+            CC_LOG_WARNING("glyph {} of a font did not convert: {}", id, outline.error().to_string());
+        glyphs.push_back(cc::move(d));
+    }
+    return _place(hash, glyphs);
 }
 
 tg::aabb2f drawing_manager::bounds(drawing_set_id id, u32 index)

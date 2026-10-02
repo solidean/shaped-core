@@ -19,6 +19,7 @@ add_library(shaped-viewer
     src/shaped-viewer/scene/quadric_set.cc
     src/shaped-viewer/drawing/drawing.cc
     src/shaped-viewer/drawing/drawing_manager.cc
+    src/shaped-viewer/drawing/font.cc
     src/shaped-viewer/material/material_type.cc
     src/shaped-viewer/material/material.cc
     src/shaped-viewer/material/material_library.cc
@@ -82,6 +83,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/drawing/drawing.hh
     src/shaped-viewer/drawing/drawing_manager.hh
     src/shaped-viewer/drawing/instance.hh
+    src/shaped-viewer/drawing/font.hh
     src/shaped-viewer/asset/uri_resolver.hh
     src/shaped-viewer/asset/asset_data.hh
     src/shaped-viewer/asset/asset.hh

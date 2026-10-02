@@ -1,5 +1,6 @@
 #pragma once
 
+#include <babel-serializer/font/font.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-rendering/slug_atlas.hh>
 #include <shaped-viewer/fwd.hh>
@@ -37,6 +38,15 @@ public:
     /// The record range of drawing `index` of the set `id` names, which must be resident.
     [[nodiscard]] u32 first_record(drawing_set_id id, u32 index);
     [[nodiscard]] u32 record_count(drawing_set_id id, u32 index);
+
+    /// Glyphs per glyph set: a font's glyphs reach the GPU in fixed sets of this many consecutive glyph ids.
+    static constexpr u32 glyphs_per_set = 64;
+
+    /// The set holding glyph `g` of `f` and its neighbours, each glyph a drawing of its outline in font units, y up.
+    /// Compiled the first time any of its glyphs is asked for; keyed by the font's hash and the set's place, so the
+    /// same glyphs are never compiled twice.
+    /// The glyph is drawing `u32(g) % glyphs_per_set` of the set.
+    [[nodiscard]] drawing_set_id glyph_set(font const& f, babel::font::glyph_id g);
 
     /// The extent of drawing `index` of the set `id` names, in the drawing's own units.
     [[nodiscard]] tg::aabb2f bounds(drawing_set_id id, u32 index);

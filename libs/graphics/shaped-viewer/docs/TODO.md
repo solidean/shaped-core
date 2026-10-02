@@ -494,7 +494,7 @@ What follows is everything else the importer left behind.
   scene layer above expensive to find.
   The viewer's destructor should be able to tear down a viewer whose frame did not complete.
 - **A view's display name is stored and never drawn.** `impl::view_state` keeps it (defaulting to the id up to its `##`) for the title bar a view has no way to draw yet —
-  The canvas draws now; what it waits on is text, the first of the drawing utilities (docs/canvas.md).
+  The canvas draws text now; what is missing is the title strip a leaf reserves for it (docs/canvas.md).
 - **`per_edge` attributes need an edge table on `triangle_geometry`.**
   The enumerator exists and `mesh_attribute::create` rejects it; what is missing is the numbering — the edges themselves (each naming its two vertices) plus each triangle's three edge indices.
   That table also decides whether opposite half-edges share one entry, which is the real design question.

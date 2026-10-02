@@ -154,6 +154,8 @@ enum class corner : u8;
 struct instance_2d;
 struct instance_3d;
 struct drawing_placement;
+class font;        // a TrueType face and its hash, the content text is drawn from
+struct text_style; // a string's font, size, layout and colour
 namespace impl
 {
 struct drawing_set_gpu_slot;

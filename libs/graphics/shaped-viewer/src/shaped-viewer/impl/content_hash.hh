@@ -22,6 +22,8 @@ inline constexpr u64 material_type_hash_seed = 0x31f0a6;
 inline constexpr u64 material_definition_hash_seed = 0x8e2b53;
 inline constexpr u64 drawing_hash_seed = 0x5d7e19;
 inline constexpr u64 drawing_set_hash_seed = 0xc1a84e;
+inline constexpr u64 font_hash_seed = 0x3f9b62;
+inline constexpr u64 glyph_set_hash_seed = 0x7d21c5;
 
 // The two keys a resolved material carries, and the reason there are two.
 // A permutation key covers only the SHAPE of the resolution — which attribute won at which frequency, and what a sampled one

@@ -36,6 +36,17 @@ A set is acquired whole, through the frame's resource manager, into `sv::drawing
 On a miss its outlines are compiled on the CPU and its shapes and records land in the manager's atlas; a hit is a pointer compare against the set's cache slot.
 The atlas is the manager's private storage, as a texture's memory is the texture manager's.
 
+## Text
+
+Text is drawings: a font's glyphs reach the GPU as drawing sets of a fixed 64 consecutive glyph ids, compiled the first time a string needs one.
+A string is then one glyph instance per visible glyph.
+`canvas_ref::add_text` and `scene_ref::add_text` lay the string out through `sr::layout_text`: kerned, broken at line breaks, wrapped and aligned.
+They place it like any instance: on a canvas in logical pixels from any corner, in a scene on a plane.
+A glyph's outline is y up and a drawing's coordinates are y down, so a glyph is placed with its y axis negated.
+`sv::font` is a value keyed by the hash of its file, so two loads of one font share their glyph sets.
+The default font is a sans-serif TrueType font the operating system ships.
+shaped-core ships none, so captures with it differ between operating systems, and a platform without one draws no default text.
+
 ## Drawing
 
 Each layer's instances become one **render job**: one draw call, through `sr::slug_routine`'s job form.
@@ -52,7 +63,7 @@ A job's draw sits in its view target's pass at the layer's place, so a canvas dr
 | canvas layer and 2D instances | [done] |
 | 3D instances, drawn over the trace and occluded by its primary-hit depth | [done] |
 | atlas pages when one fills, and freeing on eviction | [planned] |
-| text: fonts, a vendored default font, kerned multi-line layout, one-line `add_text` | [planned] |
+| text: `sv::font`, the system UI font by default, kerned multi-line layout, `add_text` on canvas and scene | [done] |
 | strokes, with dashes, as filled outlines | [planned] |
 | annotations: a 2D box placed near a 3D anchor, a marker, a leader, hidden-line occlusion | [planned] |
 | view titles, drawn by default and opted out per leaf | [planned] |

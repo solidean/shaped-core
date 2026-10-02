@@ -3,6 +3,7 @@
 #include <babel-serializer/font/font.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -56,3 +57,10 @@ private:
     cc::map<u16, slug_shape_ref> _glyphs;
     cc::map<u16, cc::string> _failures; ///< why each glyph that did not compile failed
 };
+
+namespace sr
+{
+/// Where a sans-serif TrueType font the operating system ships lives, if any of the usual places holds one.
+/// What `slug_font::load_system_ui_font` loads, for a caller that wants the file itself.
+[[nodiscard]] cc::optional<cc::string_view> system_ui_font_path();
+} // namespace sr
