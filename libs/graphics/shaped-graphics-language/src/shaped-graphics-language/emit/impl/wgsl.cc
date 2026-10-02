@@ -191,6 +191,9 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
+        // EMIT-141: a 16-bit float is an extension of WGSL, which the text enables where the entry point needs it
+        if (p.e.features.has(check::feature::shader_f16))
+            out += "enable f16;\n\n";
         // EMIT-127: `@builtin(primitive_index)` is an extension of WGSL, which the text enables first.
         for (auto const& input : p.e.stage_inputs)
             if (input.input == check::stage_input::primitive_id)

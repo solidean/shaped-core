@@ -35,7 +35,24 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "atomic[uint]": ("cc::u32", 4, None),
     "atomic[int]": ("cc::i32", 4, None),
     "bool32": ("slib::gpu_bool", 4, None),
+    # the 16-bit families: typed-geometry's IEEE binary16, and clean-core's 16-bit integers
+    "half": ("tg::f16", 2, None),
+    "half2": ("tg::vec<2, tg::f16>", 4, None),
+    "half3": ("tg::vec<3, tg::f16>", 6, None),
+    "half4": ("tg::vec<4, tg::f16>", 8, None),
+    "short": ("cc::i16", 2, None),
+    "short2": ("tg::vec<2, cc::i16>", 4, None),
+    "short3": ("tg::vec<3, cc::i16>", 6, None),
+    "short4": ("tg::vec<4, cc::i16>", 8, None),
+    "ushort": ("cc::u16", 2, None),
+    "ushort2": ("tg::vec<2, cc::u16>", 4, None),
+    "ushort3": ("tg::vec<3, cc::u16>", 6, None),
+    "ushort4": ("tg::vec<4, cc::u16>", 8, None),
 }
+
+# The 16-bit types the generated code names, and the vectors among them.
+HALF_TYPES = {"half", "half2", "half3", "half4"}
+SIXTEEN_BIT_VECTORS = {"half2", "half3", "half4", "short2", "short3", "short4", "ushort2", "ushort3", "ushort4"}
 
 
 # An option as the host sets it: its C++ type, and its default as `describe` spells it, written as a C++ value.
@@ -151,9 +168,11 @@ def includes(entries: SglEntries) -> list[str]:
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
     types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
     types |= {m["type"] for _, s in entries.memory_structs for m in s["members"]}
-    if types & {"int", "uint", "atomic[int]", "atomic[uint]"}:
+    if types & {"int", "uint", "atomic[int]", "atomic[uint]", "short", "ushort"}:
         out.append("<clean-core/fwd.hh>")
-    if types & {"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"}:
+    if types & HALF_TYPES:
+        out.append("<typed-geometry/scalar/half_float.hh>")
+    if types & ({"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"} | SIXTEEN_BIT_VECTORS):
         out.append("<typed-geometry/linalg/vec.hh>")
     if any(m["kind"] == "sampler" for _, b in entries.bindings for m in b["members"]):
         out.append("<shaped-graphics/binding/sampler.hh>")
@@ -412,7 +431,7 @@ def padded_fields(package: str, memory: dict[str, int], where: str, members: lis
     """Each member as a field, with a named padding field wherever SGL's layout leaves a gap before one.
 
     Padding is visible rather than implied, and `= {}`, so a designated initializer never has to name it.
-    Every gap is a whole number of 4-byte words, since every value in GPU memory is.
+    A gap is a whole number of 4-byte words, or of 2-byte ones where a 16-bit value leaves room of 2.
     """
     out = []
     end = 0
@@ -420,9 +439,10 @@ def padded_fields(package: str, memory: dict[str, int], where: str, members: lis
     for member in members:
         gap = member["offset"] - end
         if gap > 0:
-            words = gap // 4
+            word, size = ("cc::u32", 4) if gap % 4 == 0 else ("cc::u16", 2)
+            words = gap // size
             extent = "" if words == 1 else f"[{words}]"
-            out.append(f"{indent}cc::u32 _pad{padding}{extent} = {{}}; ///< {gap} bytes SGL's layout leaves free\n")
+            out.append(f"{indent}{word} _pad{padding}{extent} = {{}}; ///< {gap} bytes SGL's layout leaves free\n")
             padding += 1
         cpp = host_type(package, memory, f"{where} member '{member['name']}'", member["type"])
         out.append(f"{indent}{cpp} {member['name']}; ///< `{member['type']}`, at byte {member['offset']}\n")

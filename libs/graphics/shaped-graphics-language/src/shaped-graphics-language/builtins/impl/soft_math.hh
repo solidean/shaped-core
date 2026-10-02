@@ -27,7 +27,12 @@ namespace sgl::builtins::impl
 /// Ties to even, as WGSL's `round` and HLSL's do.
 [[nodiscard]] f64 soft_round(f64 x);
 
-/// The half closest to `x`, ties to even, as its bits; what `pack_half2x16` stores.
+/// The half closest to `x`, ties to even, as its bits; what `pack_half2x16` stores and what a `half` holds.
+/// TEMPORARY: clean-core has no half type yet, and typed-geometry's `tg::f16` is out of reach, since SGL depends on
+/// clean-core alone; docs/lower-library-gaps.md records the gap.
 [[nodiscard]] u32 half_bits_of(f32 x);
+/// The same from an f64, rounded once: a literal's exact value, which an f32 in between would round twice.
+[[nodiscard]] u32 half_bits_of(f64 x);
+/// Exact, since every half is an f32.
 [[nodiscard]] f32 float_of_half_bits(u32 h);
 } // namespace sgl::builtins::impl

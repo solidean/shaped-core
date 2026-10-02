@@ -11,18 +11,29 @@ using check::value_kind;
 /// How each target spells one scalar family, and what its values are to the interpreter.
 struct scalar_family
 {
-    cc::string_view name;               ///< `float`, and the stem of `float2` to `float4`
+    cc::string_view name;               ///< `float`, and the stem of `float2` to `float4`; MSL's spelling too
+    cc::string_view hlsl;               ///< `float`, or `float16_t`, never `half` (EMIT-140)
     cc::string_view wgsl;               ///< `f32`
     cc::string_view wgsl_vector_suffix; ///< `f` of `vec3f`, or empty where WGSL has no alias and writes `vec3<bool>`
     value_kind leaf_kind;
     bool has_layout;    ///< a bool has a different size in every target's block, so it has no place in one
     bool crosses_edges; ///< WGSL passes no bool; an int crosses only flat, which the check pass holds it to
+    i32 scalar_size = 4;
+    check::feature_set features = {};
 };
 
-constexpr scalar_family k_float_family = {"float", "f32", "f", value_kind::scalar_float, true, true};
-constexpr scalar_family k_int_family = {"int", "i32", "i", value_kind::scalar_int, true, true};
-constexpr scalar_family k_uint_family = {"uint", "u32", "u", value_kind::scalar_uint, true, true};
-constexpr scalar_family k_bool_family = {"bool", "bool", "", value_kind::boolean, false, false};
+constexpr scalar_family k_float_family = {"float", "float", "f32", "f", value_kind::scalar_float, true, true};
+constexpr scalar_family k_int_family = {"int", "int", "i32", "i", value_kind::scalar_int, true, true};
+constexpr scalar_family k_uint_family = {"uint", "uint", "u32", "u", value_kind::scalar_uint, true, true};
+constexpr scalar_family k_bool_family = {"bool", "bool", "bool", "", value_kind::boolean, false, false};
+// CHK-346 and CHK-348: no 16-bit value crosses a stage edge.
+// WGSL has no 16-bit integer at all, so `i16` and `u16` are spellings no text ever holds (EMIT-109).
+constexpr scalar_family k_half_family
+    = {"half", "float16_t", "f16", "h", value_kind::scalar_half, true, false, 2, check::feature::shader_f16};
+constexpr scalar_family k_short_family
+    = {"short", "int16_t", "i16", "", value_kind::scalar_short, true, false, 2, check::feature::shader_int16};
+constexpr scalar_family k_ushort_family
+    = {"ushort", "uint16_t", "u16", "", value_kind::scalar_ushort, true, false, 2, check::feature::shader_int16};
 
 /// A vector of `width` scalars of `family` with the fields `x y [z [w]]`, which every target spells as its own vector.
 /// Its swizzles are the target's own too (EMIT-142).
@@ -33,26 +44,27 @@ type_record vector_of(scalar_family const& family, cc::string_view name, i32 wid
     for (auto i = 0; i < width; ++i)
         declaration.appendf("\n    {}: {}", fields[i], family.name);
 
-    auto const native = cc::format("{}{}", family.name, width);
     auto record = type_record{
         .declaration = cc::move(declaration),
         .doc = doc,
-        .hlsl = native,
+        .hlsl = cc::format("{}{}", family.hlsl, width),
         .wgsl = family.wgsl_vector_suffix.empty() ? cc::format("vec{}<{}>", width, family.wgsl)
                                                   : cc::format("vec{}{}", width, family.wgsl_vector_suffix),
-        .msl = native,
+        .msl = cc::format("{}{}", family.name, width),
         .leaf_kind = family.leaf_kind,
         .leaf_count = width,
         .crosses_edges = family.crosses_edges,
+        .features = family.features,
     };
     if (family.has_layout)
     {
-        // WGSL and MSL align a two-vector at 8 and a wider one at 16, and MSL also sizes a three-vector 16:
-        // nothing fits into its tail.
-        auto const aligned = width == 2 ? 8 : 16;
-        record.hlsl_layout = {.size = width * 4, .alignment = 4};
-        record.wgsl_layout = {.size = width * 4, .alignment = aligned};
-        record.msl_layout = {.size = width == 3 ? 16 : width * 4, .alignment = aligned};
+        // WGSL and MSL align a two-vector at twice its scalar and a wider one at four times, and MSL also sizes a
+        // three-vector as four scalars: nothing fits into its tail.
+        auto const b = family.scalar_size;
+        auto const aligned = width == 2 ? 2 * b : 4 * b;
+        record.hlsl_layout = {.size = width * b, .alignment = b};
+        record.wgsl_layout = {.size = width * b, .alignment = aligned};
+        record.msl_layout = {.size = width == 3 ? 4 * b : width * b, .alignment = aligned};
     }
     return record;
 }
@@ -63,18 +75,20 @@ type_record scalar_of(scalar_family const& family, cc::string_view doc)
     auto record = type_record{
         .declaration = cc::format("struct {}", family.name),
         .doc = doc,
-        .hlsl = cc::string(family.name),
+        .hlsl = cc::string(family.hlsl),
         .wgsl = cc::string(family.wgsl),
         .msl = cc::string(family.name),
         .leaf_kind = family.leaf_kind,
         .leaf_count = 1,
         .crosses_edges = family.crosses_edges,
+        .features = family.features,
     };
     if (family.has_layout)
     {
-        record.hlsl_layout = {.size = 4, .alignment = 4};
-        record.wgsl_layout = {.size = 4, .alignment = 4};
-        record.msl_layout = {.size = 4, .alignment = 4};
+        auto const b = family.scalar_size;
+        record.hlsl_layout = {.size = b, .alignment = b};
+        record.wgsl_layout = {.size = b, .alignment = b};
+        record.msl_layout = {.size = b, .alignment = b};
     }
     return record;
 }
@@ -173,6 +187,15 @@ void sgl::builtins::register_types(registry& r)
     boolean.declaration = "enum bool:\n    false\n    true";
     r.add(cc::move(boolean));
     add_vectors(r, k_bool_family, vectors);
+
+    r.add_comment("// the 16-bit families (CHK-346), each needing a feature of the device (CHK-347); no value of one\n"
+                  "// crosses a stage edge (CHK-348)");
+    r.add(scalar_of(k_half_family, "/// A 16-bit float; every operation rounds to it, to nearest and ties to even."));
+    add_vectors(r, k_half_family, vectors);
+    r.add(scalar_of(k_short_family, "/// 16 bits, signed; its arithmetic wraps."));
+    add_vectors(r, k_short_family, vectors);
+    r.add(scalar_of(k_ushort_family, "/// 16 bits, unsigned; its arithmetic wraps."));
+    add_vectors(r, k_ushort_family, vectors);
 
     r.add_comment("// a vector of one value, beside the constructor of its fields (CHK-360)");
     evaluator const fills[] = {nullptr, nullptr, fill<2>, fill<3>, fill<4>};

@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/builtins/impl/soft_math.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
@@ -290,6 +291,9 @@ struct machine
                 is_typed = is_typed && leaf.kind == m.builtins->at(type).leaf_kind;
             in.push_back_range(args[k].leaves);
         }
+        // An evaluator computes at 32 bits, and a 16-bit result is rounded once from what it gives.
+        for (auto& leaf : in)
+            leaf = leaf.widened();
         if (is_typed && record->undefined_when != nullptr)
             if (auto const why = record->undefined_when(in); !why.empty())
                 return fail(run_status::program_error, cc::format("{}, in a call of '{}'", why, record->name));
@@ -301,8 +305,11 @@ struct machine
         {
             auto const& returned = m.builtins->at(record->result);
             is_result_typed = result.leaves.size() == returned.leaf_count;
-            for (auto const& leaf : result.leaves)
+            for (auto& leaf : result.leaves)
+            {
+                leaf = leaf.narrowed_to(returned.leaf_kind);
                 is_result_typed = is_result_typed && leaf.kind == returned.leaf_kind;
+            }
         }
         if (!is_typed || !is_result_typed || result.leaves.size() != leaf_count_of(m, x.type))
             return type_error(cc::format("a call of '{}' with arguments or a result of the wrong type", record->name));
@@ -413,14 +420,19 @@ struct machine
 
         if (x.node.is<flat_invalid>())
             return type_error("an unfilled expression");
+        // a literal of a 16-bit type is that type's value, whatever text spelled it (CHK-253)
+        auto const* const builtin = m.builtin_type_of(x.type);
+        auto const kind = builtin != nullptr ? builtin->leaf_kind : value_kind::none;
         if (auto const* const l = x.node.try_as<flat_literal>())
         {
-            result.leaves.push_back(scalar::of(f32(l->value)));
+            result.leaves.push_back(kind == value_kind::scalar_half ? scalar::of_half(l->value)
+                                                                    : scalar::of(f32(l->value)));
             return {};
         }
         if (auto const* const l = x.node.try_as<flat_int_literal>())
         {
-            result.leaves.push_back(l->is_unsigned ? scalar::of_uint(u32(l->value)) : scalar::of(l->value));
+            result.leaves.push_back(
+                (l->is_unsigned ? scalar::of_uint(u32(l->value)) : scalar::of(l->value)).narrowed_to(kind));
             return {};
         }
         if (auto const* const l = x.node.try_as<flat_bool_literal>())
@@ -1153,9 +1165,38 @@ scalar sgl::check::scalar::of(bool v)
     return {.kind = value_kind::boolean, .bits = v ? 1u : 0u};
 }
 
+scalar sgl::check::scalar::of_half(f64 v)
+{
+    return {.kind = value_kind::scalar_half, .bits = builtins::impl::half_bits_of(v)};
+}
+
 sgl::f32 sgl::check::scalar::as_float() const
 {
     return cc::bit_cast<f32>(bits);
+}
+
+scalar sgl::check::scalar::widened() const
+{
+    switch (kind)
+    {
+    case value_kind::scalar_half:
+        return of(builtins::impl::float_of_half_bits(bits));
+    case value_kind::scalar_short:
+        return of(i32(i16(u16(bits))));
+    case value_kind::scalar_ushort:
+        return of_uint(bits & 0xffffu);
+    default:
+        return *this;
+    }
+}
+
+scalar sgl::check::scalar::narrowed_to(value_kind to) const
+{
+    if (!is_16_bit(to) || wide_kind_of(to) != wide_kind_of(kind) || is_16_bit(kind))
+        return *this;
+    if (to == value_kind::scalar_half)
+        return {.kind = to, .bits = builtins::impl::half_bits_of(as_float())};
+    return {.kind = to, .bits = bits & 0xffffu};
 }
 
 cc::string_view sgl::check::to_string(run_status s)
@@ -1258,7 +1299,9 @@ void read_leaves(cc::span<byte const> bytes, cc::span<scalar> leaves)
         auto word = u32(0);
         for (auto b = 0; b < 4; ++b)
             word |= u32(bytes[i * 4 + b]) << (8 * b);
-        leaves[i].bits = leaves[i].kind == value_kind::boolean ? u32(word != 0) : word;
+        leaves[i].bits = leaves[i].kind == value_kind::boolean ? u32(word != 0)
+                       : is_16_bit(leaves[i].kind)             ? word & 0xffffu
+                                                               : word;
     }
 }
 
@@ -1410,12 +1453,13 @@ cc::string sgl::check::dump(outcome const& o)
     {
         for (auto const& leaf : v.leaves)
         {
-            if (leaf.kind == value_kind::scalar_float)
-                out.appendf(" {}", leaf.as_float());
-            else if (leaf.kind == value_kind::scalar_int)
-                out.appendf(" {}", leaf.as_int());
-            else if (leaf.kind == value_kind::scalar_uint)
-                out.appendf(" {}u", leaf.as_uint());
+            auto const wide = leaf.widened();
+            if (wide.kind == value_kind::scalar_float)
+                out.appendf(" {}{}", wide.as_float(), leaf.kind == value_kind::scalar_half ? "f16" : "");
+            else if (wide.kind == value_kind::scalar_int)
+                out.appendf(" {}{}", wide.as_int(), leaf.kind == value_kind::scalar_short ? "i16" : "");
+            else if (wide.kind == value_kind::scalar_uint)
+                out.appendf(" {}u{}", wide.as_uint(), leaf.kind == value_kind::scalar_ushort ? "16" : "");
             else
                 out.appendf(" {}", leaf.as_bool() ? "true" : "false");
         }

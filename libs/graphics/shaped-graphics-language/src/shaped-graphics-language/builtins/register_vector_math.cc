@@ -190,15 +190,20 @@ void sign_ints(leaves in, result& out)
         out.push_back(scalar::of(x.as_int() < 0 ? -1 : x.as_int() > 0 ? 1 : 0));
 }
 
-/// MSL has no `sign` of an integer, and `clamp(x, -1, 1)` is one.
-template <int Width>
+/// MSL has no `sign` of an integer, and `clamp(x, T(-1), T(1))` is one; `data` names `T`.
+/// HLSL's `sign` gives an `int` whatever it takes, which a 16-bit integer converts back.
 written write_sign_ints(call_context const& c)
 {
-    if (c.target != language::msl)
-        return {.text = cc::format("sign({})", c.arguments[0].text)};
-    if (Width == 1)
-        return {.text = cc::format("clamp({}, -1, 1)", c.arguments[0].text)};
-    return {.text = cc::format("clamp({0}, int{1}(-1), int{1}(1))", c.arguments[0].text, Width)};
+    auto const& type = c.builtins.at(builtin_type_id(i32(c.data)));
+    if (c.target == language::msl)
+    {
+        if (type.leaf_count == 1 && !check::is_16_bit(type.leaf_kind))
+            return {.text = cc::format("clamp({}, -1, 1)", c.arguments[0].text)};
+        return {.text = cc::format("clamp({0}, {1}(-1), {1}(1))", c.arguments[0].text, type.msl)};
+    }
+    if (c.target == language::hlsl && check::is_16_bit(type.leaf_kind))
+        return {.text = cc::format("{}(sign({}))", type.hlsl, c.arguments[0].text)};
+    return {.text = cc::format("sign({})", c.arguments[0].text)};
 }
 constexpr cc::string_view k_sign[] = {"sign"};
 constexpr cc::string_view k_clamp[] = {"clamp"};
@@ -312,6 +317,21 @@ written write_select(call_context const& c)
 }
 constexpr cc::string_view k_select[] = {"select"};
 
+/// The scalar of a prelude vector or scalar by its name: `half` of `half3`, and `float` of `vec3`, `pos3` and `hpos4`.
+cc::string_view element_of(cc::string_view type)
+{
+    for (auto const family : {"half", "ushort", "short", "uint", "int", "bool"})
+        if (type.starts_with(family))
+            return family;
+    return "float";
+}
+
+bool is_16_bit_name(cc::string_view type)
+{
+    auto const element = element_of(type);
+    return element == "half" || element == "short" || element == "ushort";
+}
+
 /// `v % s` in MSL is `fmod` of two vectors, since MSL's `fmod` takes no scalar beside a vector.
 template <bool IsScalarLeft>
 written write_spread_remainder(call_context const& c)
@@ -347,21 +367,23 @@ void sgl::builtins::register_vector_math(registry& r)
     auto const named
         = [](cc::string_view name, cc::string_view type) { return cc::format("{}{}", name, suffix_of(type)); };
 
-    cc::string_view const numbers[] = {"float", "float2", "float3", "float4"};
-    cc::string_view const plain_vectors[] = {"float2", "float3", "float4"};
-    cc::string_view const scaled[] = {"float2", "float3", "float4", "vec3"};
-    cc::string_view const measured[] = {"vec3", "float2", "float3", "float4"};
-    cc::string_view const integer_vectors[] = {"int2", "int3", "int4", "uint2", "uint3", "uint4"};
+    cc::string_view const numbers[] = {"float", "float2", "float3", "float4", "half", "half2", "half3", "half4"};
+    cc::string_view const plain_vectors[] = {"float2", "float3", "float4", "half2", "half3", "half4"};
+    cc::string_view const scaled[] = {"float2", "float3", "float4", "vec3", "half2", "half3", "half4"};
+    cc::string_view const measured[] = {"vec3", "float2", "float3", "float4", "half2", "half3", "half4"};
+    cc::string_view const integer_vectors[] = {"int2",   "int3",   "int4",   "uint2",   "uint3",   "uint4",
+                                               "short2", "short3", "short4", "ushort2", "ushort3", "ushort4"};
 
-    r.add_comment("// what a float and a plain vector of floats share, component by component");
+    r.add_comment("// what a float and a plain vector of floats share, component by component, and so do the halves");
     for (auto const type : numbers)
     {
+        auto const element = element_of(type);
         add_function(r, "saturate", {"x", type}, type, saturate);
         add_function(r, "abs", {"x", type}, type, abs_of);
         add_function(r, "min", {"a", type, "b", type}, type, min_of);
         add_function(r, "max", {"a", type, "b", type}, type, max_of);
         add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp, {}, {}, clamp_undefined);
-        add_function(r, "mix", {"a", type, "b", type, "t", "float"}, type, mix, {.hlsl = "lerp"},
+        add_function(r, "mix", {"a", type, "b", type, "t", element}, type, mix, {.hlsl = "lerp"},
                      "/// `a` where `t` is 0 and `b` where it is 1.");
     }
 
@@ -376,14 +398,20 @@ void sgl::builtins::register_vector_math(registry& r)
     }
 
     r.add_comment("// integer vectors wrap componentwise, and divide componentwise as their scalars do");
+    // WGSL, whose constant rules these are, has no 16-bit integer (EMIT-109)
+    auto const constant_rule = [&](cc::string_view type, undefined_check unrepresentable)
+    {
+        if (!is_16_bit_name(type))
+            r.functions.back().unrepresentable_when_constant = unrepresentable;
+    };
     for (auto const type : integer_vectors)
     {
         add_infix(r, "+", named("add", type), type, type, type, add_bits);
-        r.functions.back().unrepresentable_when_constant = sum_unrepresentable;
+        constant_rule(type, sum_unrepresentable);
         add_infix(r, "-", named("subtract", type), type, type, type, subtract_bits);
-        r.functions.back().unrepresentable_when_constant = difference_unrepresentable;
+        constant_rule(type, difference_unrepresentable);
         add_infix(r, "*", named("multiply", type), type, type, type, multiply_bits);
-        r.functions.back().unrepresentable_when_constant = product_unrepresentable;
+        constant_rule(type, product_unrepresentable);
         add_infix(r, "/", named("divide", type), type, type, type, divide_integers, integer_division_undefined);
         r.functions.back().judged_last = judged_operand::divisor;
         add_infix(r, "%", named("remainder", type), type, type, type, remainder_integers, integer_division_undefined);
@@ -403,35 +431,36 @@ void sgl::builtins::register_vector_math(registry& r)
     for (auto const type : plain_vectors)
     {
         auto const data = u32(index_of(registered_type(r, type)));
-        spread_infix("+", "add", type, "float", false, spread_evaluate<add, false>, infix("+"));
-        spread_infix("+", "add", type, "float", true, spread_evaluate<add, true>, infix("+"));
-        spread_infix("-", "subtract", type, "float", false, spread_evaluate<subtract, false>, infix("-"));
-        spread_infix("-", "subtract", type, "float", true, spread_evaluate<subtract, true>, infix("-"));
-        spread_infix("/", "divide", type, "float", true, spread_evaluate<divide, true>, infix("/"));
+        auto const element = element_of(type);
+        spread_infix("+", "add", type, element, false, spread_evaluate<add, false>, infix("+"));
+        spread_infix("+", "add", type, element, true, spread_evaluate<add, true>, infix("+"));
+        spread_infix("-", "subtract", type, element, false, spread_evaluate<subtract, false>, infix("-"));
+        spread_infix("-", "subtract", type, element, true, spread_evaluate<subtract, true>, infix("-"));
+        spread_infix("/", "divide", type, element, true, spread_evaluate<divide, true>, infix("/"));
         spread_infix(
-            "%", "remainder", type, "float", false, spread_evaluate<remainder_floats, false>,
+            "%", "remainder", type, element, false, spread_evaluate<remainder_floats, false>,
             {.kind = spelling_kind::custom, .custom = write_spread_remainder<false>, .data = data, .msl_names = k_fmod});
         spread_infix(
-            "%", "remainder", type, "float", true, spread_evaluate<remainder_floats, true>,
+            "%", "remainder", type, element, true, spread_evaluate<remainder_floats, true>,
             {.kind = spelling_kind::custom, .custom = write_spread_remainder<true>, .data = data, .msl_names = k_fmod});
     }
     for (auto const type : integer_vectors)
     {
-        auto const element = type.starts_with("uint") ? cc::string_view("uint") : cc::string_view("int");
+        auto const element = element_of(type);
         for (auto const left : {false, true})
         {
             spread_infix("+", "add", type, element, left,
                          left ? spread_evaluate<add_bits, true> : spread_evaluate<add_bits, false>, infix("+"));
-            r.functions.back().unrepresentable_when_constant
-                = left ? spread_check<sum_unrepresentable, true> : spread_check<sum_unrepresentable, false>;
+            constant_rule(type,
+                          left ? spread_check<sum_unrepresentable, true> : spread_check<sum_unrepresentable, false>);
             spread_infix("-", "subtract", type, element, left,
                          left ? spread_evaluate<subtract_bits, true> : spread_evaluate<subtract_bits, false>, infix("-"));
-            r.functions.back().unrepresentable_when_constant = left ? spread_check<difference_unrepresentable, true>
-                                                                    : spread_check<difference_unrepresentable, false>;
+            constant_rule(type, left ? spread_check<difference_unrepresentable, true>
+                                     : spread_check<difference_unrepresentable, false>);
             spread_infix("*", "multiply", type, element, left,
                          left ? spread_evaluate<multiply_bits, true> : spread_evaluate<multiply_bits, false>, infix("*"));
-            r.functions.back().unrepresentable_when_constant
-                = left ? spread_check<product_unrepresentable, true> : spread_check<product_unrepresentable, false>;
+            constant_rule(type, left ? spread_check<product_unrepresentable, true>
+                                     : spread_check<product_unrepresentable, false>);
             spread_infix("/", "divide", type, element, left,
                          left ? spread_evaluate<divide_integers, true> : spread_evaluate<divide_integers, false>,
                          infix("/"));
@@ -448,34 +477,36 @@ void sgl::builtins::register_vector_math(registry& r)
     }
 
     r.add_comment("// what the integers share with the floats, componentwise (CHK-359); `sign` of an int is an int");
-    add_function(r, "sign", {"x", "int"}, "int", sign_ints,
-                 {.kind = spelling_kind::custom,
-                  .custom = write_sign_ints<1>,
-                  .hlsl_names = k_sign,
-                  .wgsl_names = k_sign,
-                  .msl_names = k_clamp});
-    custom_writer const signs[] = {nullptr, nullptr, write_sign_ints<2>, write_sign_ints<3>, write_sign_ints<4>};
+    auto const add_sign = [&](cc::string_view type)
+    {
+        add_function(r, "sign", {"x", type}, type, sign_ints,
+                     {.kind = spelling_kind::custom,
+                      .custom = write_sign_ints,
+                      .data = u32(index_of(registered_type(r, type))),
+                      .hlsl_names = k_sign,
+                      .wgsl_names = k_sign,
+                      .msl_names = k_clamp});
+    };
+    add_sign("int");
+    add_sign("short");
     for (auto const type : integer_vectors)
     {
         add_function(r, "min", {"a", type, "b", type}, type, min_ints);
         add_function(r, "max", {"a", type, "b", type}, type, max_ints);
         add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp_ints, {}, {}, clamp_undefined);
-        if (!type.starts_with("int"))
+        if (!type.starts_with("int") && !type.starts_with("short"))
             continue;
         add_function(r, "abs", {"x", type}, type, abs_ints);
-        r.functions.back().unrepresentable_when_constant = negation_unrepresentable;
-        add_function(r, "sign", {"x", type}, type, sign_ints,
-                     {.kind = spelling_kind::custom,
-                      .custom = signs[type.back() - '0'],
-                      .hlsl_names = k_sign,
-                      .wgsl_names = k_sign,
-                      .msl_names = k_clamp});
+        constant_rule(type, negation_unrepresentable);
+        add_sign(type);
     }
 
     r.add_comment("// two vectors compared: an ordering per component (CHK-362), and `==` and `!=` of the whole "
                   "value,\n"
                   "// which `equal` and `not_equal` are per component (CHK-363)");
-    cc::string_view const ordered[] = {"float2", "float3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"};
+    cc::string_view const ordered[]
+        = {"float2", "float3", "float4", "int2",   "int3",   "int4",   "uint2",   "uint3",   "uint4",
+           "half2",  "half3",  "half4",  "short2", "short3", "short4", "ushort2", "ushort3", "ushort4"};
     for (auto const type : ordered)
     {
         auto const bools = cc::format("bool{}", type.back());
@@ -484,8 +515,10 @@ void sgl::builtins::register_vector_math(registry& r)
         add_infix(r, ">", named("greater", type), type, type, bools, greater_each);
         add_infix(r, ">=", named("greater_equal", type), type, type, bools, greater_equal_each);
     }
-    cc::string_view const compared[] = {"float2", "float3", "float4", "int2",  "int3", "int4", "uint2", "uint3",
-                                        "uint4",  "bool2",  "bool3",  "bool4", "vec3", "pos3", "hpos4"};
+    cc::string_view const compared[]
+        = {"float2", "float3", "float4", "int2",   "int3",   "int4",    "uint2",   "uint3",
+           "uint4",  "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half2",
+           "half3",  "half4",  "short2", "short3", "short4", "ushort2", "ushort3", "ushort4"};
     for (auto const type : compared)
     {
         auto const bools = cc::format("bool{}", type.back());
@@ -513,8 +546,9 @@ void sgl::builtins::register_vector_math(registry& r)
         add_function(r, "all", {"m", type}, "bool", all_of, {}, "/// Whether every component of `m` is true.");
     }
     cc::string_view const selected[]
-        = {"float", "float2", "float3", "float4", "int",   "int2",  "int3", "int4", "uint", "uint2",
-           "uint3", "uint4",  "bool",   "bool2",  "bool3", "bool4", "vec3", "pos3", "hpos4"};
+        = {"float", "float2", "float3", "float4", "int",    "int2",   "int3",    "int4",    "uint",   "uint2", "uint3",
+           "uint4", "bool",   "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half",   "half2", "half3",
+           "half4", "short",  "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4"};
     for (auto const type : selected)
     {
         auto const width = type.back() >= '2' && type.back() <= '4' ? u32(type.back() - '0') : u32(0);
@@ -544,9 +578,10 @@ void sgl::builtins::register_vector_math(registry& r)
     r.add_comment("// scaling, from either side");
     for (auto const type : scaled)
     {
-        add_infix(r, "*", named("scale", type), type, "float", type, scale);
-        add_infix(r, "*", named("prescale", type), "float", type, type, prescale);
-        add_infix(r, "/", named("unscale", type), type, "float", type, unscale);
+        auto const element = element_of(type);
+        add_infix(r, "*", named("scale", type), type, element, type, scale);
+        add_infix(r, "*", named("prescale", type), element, type, type, prescale);
+        add_infix(r, "/", named("unscale", type), type, element, type, unscale);
         add_negate(r, named("negate", type), type, negate);
     }
 
@@ -558,8 +593,8 @@ void sgl::builtins::register_vector_math(registry& r)
     r.add_comment("// lengths and angles");
     for (auto const type : measured)
     {
-        add_function(r, "dot", {"a", type, "b", type}, "float", dot);
-        add_function(r, "length", {"v", type}, "float", length);
+        add_function(r, "dot", {"a", type, "b", type}, element_of(type), dot);
+        add_function(r, "length", {"v", type}, element_of(type), length);
         add_function(r, "normalize", {"v", type}, type, normalize);
     }
 }

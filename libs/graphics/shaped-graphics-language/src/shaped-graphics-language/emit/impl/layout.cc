@@ -47,6 +47,9 @@ placed_members place_from(checked_module const& m,
         if (auto const* const record = m.builtin_type_of(type))
         {
             auto const l = record->hlsl_layout;
+            auto const scalar = scalar_size_of(*record);
+            at = round_up(at, scalar);
+            result.alignment = scalar > result.alignment ? scalar : result.alignment;
             // HLSL packs by rows of 16: a value starts a fresh row when it is aligned to one, or when it would cross one.
             if (space == address_space::constants)
                 at = l.alignment >= 16 || at % 16 + l.size > 16 ? round_up(at, 16) : at;
@@ -58,19 +61,28 @@ placed_members place_from(checked_module const& m,
         }
 
         // A nested struct starts a fresh row in a constant block, and what follows it packs against its last member.
+        // In a buffer it starts at its own alignment, which a dry run over its members gives.
         if (space == address_space::constants)
             at = round_up(at, 16);
+        else
+            at = round_up(at, place_from(m, m.at(m.at(type).members), space, 0, path).alignment);
         auto inner = place_from(m, m.at(m.at(type).members), space, base + at, path);
+        result.alignment = inner.alignment > result.alignment ? inner.alignment : result.alignment;
         result.offsets.push_back(at);
         result.sizes.push_back(inner.size);
         for (auto& leaf : inner.leaves)
             result.leaves.push_back(cc::move(leaf));
         at += inner.size;
     }
-    result.size = at;
+    result.size = space == address_space::storage ? round_up(at, result.alignment) : at;
     return result;
 }
 } // namespace
+
+sgl::i32 sgl::emit::impl::scalar_size_of(builtins::type_record const& record)
+{
+    return check::is_16_bit(record.leaf_kind) ? 2 : 4;
+}
 
 cc::string_view sgl::emit::impl::space_name(address_space space)
 {

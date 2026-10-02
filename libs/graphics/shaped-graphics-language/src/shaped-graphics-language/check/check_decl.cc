@@ -501,7 +501,7 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
 cc::string checker::vector_name_of(type_id element, isize count) const
 {
     // CHK-349: the element types that have a vector family, each named after it and its width
-    cc::string_view const families[] = {"float", "int", "uint", "bool"};
+    cc::string_view const families[] = {"float", "int", "uint", "bool", "half", "short", "ushort"};
     if (element == checked_module::error_type || out.builtin_type_of(element) == nullptr)
         return {};
     for (auto const family : families)
@@ -758,6 +758,26 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 texels.is_atomic = true;
                 auto const atomic_image = resource_type(cc::move(texels));
                 type = innermost == type ? atomic_image : array_type(atomic_image, out.at(type).count);
+            }
+        }
+
+        // CHK-347: a binding member holding a 16-bit value is a form some device lacks, as CHK-201 judges one
+        if (!is_struct && type != checked_module::error_type)
+        {
+            auto const needs = features_of_type(type);
+            for (auto i = isize(0); i < k_feature_count; ++i)
+                if (needs.has(feature(i)))
+                    judge_feature(file, span_of(file, f.type), cc::format("a value of {}", out.name_of(type)),
+                                  feature(i));
+            // CHK-346: a buffer strides by whole 4-byte words, which an element of 16-bit values may not fill
+            auto const& buffer = out.at(innermost);
+            if (buffer.kind == type_kind::buffer && storage_size_of(buffer.element) % 4 != 0)
+            {
+                unsupported(file, span_of(file, f.type),
+                            cc::format("a buffer of {}, whose element takes {} bytes, which is no whole number of "
+                                       "4-byte words",
+                                       out.name_of(buffer.element), storage_size_of(buffer.element)));
+                type = checked_module::error_type;
             }
         }
 
@@ -1765,8 +1785,12 @@ void checker::judge_entry_point(symbol_id id)
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
     for (auto const& parameter : parameters)
         if (parameter.input == stage_input::none)
+        {
             judge_edge_arrays(file, where, parameter.type);
+            judge_edge_16_bit(file, where, parameter.type);
+        }
     judge_edge_arrays(file, where, info.result);
+    judge_edge_16_bit(file, where, info.result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
     if (info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control

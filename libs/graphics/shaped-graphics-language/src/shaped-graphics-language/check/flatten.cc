@@ -87,6 +87,7 @@ struct flattener
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
     cc::vector<origin> discards;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
+    /// A value of a type that needs one, such as a `half`, counts alike (CHK-347).
     struct feature_use
     {
         i32 file = 0;
@@ -94,8 +95,26 @@ struct flattener
         feature_set features;
         /// The functions whose bodies the call stands in, the tree's own first, each of which uses what it needs.
         cc::vector<symbol_id> within;
+        /// A value rather than a call, which the note says.
+        bool is_value = false;
     };
     cc::vector<feature_use> feature_uses;
+
+    /// CHK-347: a value of `type` at `from` needs what the type needs, once per function it stands in.
+    void note_value_use(type_id type, ast::expr_id from)
+    {
+        auto const needs = c.features_of_type(type);
+        if (needs.is_empty() || frames.empty() || !ast::is_valid(from))
+            return;
+        for (auto const& u : feature_uses)
+            if (u.is_value && u.features == needs && !u.within.empty() && u.within.back() == frames.back().function)
+                return;
+        auto within = cc::vector<symbol_id>();
+        for (auto const& fr : frames)
+            within.push_back(fr.function);
+        feature_uses.push_back(
+            {.file = file(), .call = from, .features = needs, .within = cc::move(within), .is_value = true});
+    }
     /// CHK-345: an intersection entry point fused with the any hit of one record, which its own `return` runs.
     struct fusion
     {
@@ -316,6 +335,7 @@ struct flattener
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
         type = concrete(type);
+        note_value_use(type, from);
         // A builtin with an effect may give nothing, `store`, and its call is only ever an `eval`'s value.
         auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::void_type;
         is_failed = is_failed || (!c.is_sound(type) && !is_effect_call);
@@ -825,23 +845,28 @@ struct flattener
         // CHK-357: a suffix named the type already, and the value is the number before it
         if (auto const suffixed = split_suffix(text); suffixed.has_value())
             text = suffixed.value().body;
-        auto const is_float = type == c.prelude_type(builtins::k_float);
+        auto const is_half = type == c.prelude_type(builtins::k_half);
+        auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+        // CHK-253: a half literal is the half nearest its value, which every target's text then spells exactly
+        auto const literal = [&](f64 v)
+        { return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v}); };
         if (classify_number(text) == number_class::plain_integer)
         {
             auto const value = parse_literal_integer(text);
             if (!value.has_value())
                 return fail();
             if (is_float)
-                return add_expr(type, id, flat_literal{.value = f64(value.value())});
+                return literal(f64(value.value()));
             // an unsigned literal keeps its bits in `value`
-            auto const is_unsigned = type == c.prelude_type(builtins::k_uint);
+            auto const is_unsigned
+                = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);
             auto const v = value.value();
             if (is_unsigned ? v < 0 || v > 4294967295ll : v < -2147483647 - 1 || v > 2147483647)
                 return fail();
             return add_expr(type, id, flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned});
         }
         auto const value = parse_plain_float(text);
-        return value.has_value() ? add_expr(type, id, flat_literal{.value = value.value()}) : fail();
+        return value.has_value() ? literal(value.value()) : fail();
     }
 
     /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
@@ -2999,8 +3024,9 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             for (auto const& u : f.feature_uses)
                 if (u.features.has(needed))
                 {
-                    d.notes.push_back(
-                        {.file = u.file, .where = span_of(u.file, u.call), .message = "the call that needs it"});
+                    d.notes.push_back({.file = u.file,
+                                       .where = span_of(u.file, u.call),
+                                       .message = u.is_value ? "a value that needs it" : "the call that needs it"});
                     break;
                 }
         }

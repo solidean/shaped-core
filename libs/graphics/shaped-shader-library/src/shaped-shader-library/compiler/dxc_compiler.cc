@@ -22,7 +22,8 @@ ssc::dxc::compiler* thread_local_compiler()
 class dxc_shader_compiler final : public slib::shader_compiler
 {
 public:
-    explicit dxc_shader_compiler(ssc::dxc::compile_target target) : _target(target)
+    dxc_shader_compiler(ssc::dxc::compile_target target, slib::dxc_compiler_options options)
+      : _target(target), _options(cc::move(options))
     {
         _cache.add_default_in_memory_provider();
     }
@@ -52,7 +53,7 @@ public:
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
         // The cache keys on the flattened source and options: a reload that touched a file without changing what it expands to returns the node that already exists.
-        return _cache.compile(to_dxc(desc), {.target = _target});
+        return _cache.compile(to_dxc(desc), {.target = _target, .extra_args = _options.extra_args});
     }
 
     /// SPIR-V states its layout in decorations; DXIL's would need the reflection container, which the bytecode does
@@ -82,6 +83,7 @@ private:
     }
 
     ssc::dxc::compile_target _target;
+    slib::dxc_compiler_options _options;
 
     // Mutable: compile() is const on the seam (it must be callable from several threads), and the cache is itself thread-safe.
     // One cache serves both targets safely: compute_key folds the compile options in, so a dxil and a spirv build of
@@ -92,25 +94,31 @@ private:
 
 namespace
 {
-cc::result<std::unique_ptr<slib::shader_compiler>> create_for(ssc::dxc::compile_target target)
+cc::result<std::unique_ptr<slib::shader_compiler>> create_for(ssc::dxc::compile_target target,
+                                                              slib::dxc_compiler_options options)
 {
     // Fail here rather than on first use, so a broken DXC install surfaces at startup.
     if (thread_local_compiler() == nullptr)
         return cc::error("failed to create the DXC compiler");
 
-    auto compiler = std::make_unique<dxc_shader_compiler>(target);
+    auto compiler = std::make_unique<dxc_shader_compiler>(target, cc::move(options));
     return cc::result<std::unique_ptr<slib::shader_compiler>>(cc::move(compiler));
 }
 } // namespace
 
-cc::result<std::unique_ptr<slib::shader_compiler>> slib::create_dxc_compiler()
+slib::dxc_compiler_options slib::sgl_dxc_options()
 {
-    return create_for(ssc::dxc::compile_target::dxil);
+    return {.extra_args = {cc::string("-enable-16bit-types")}};
 }
 
-cc::result<std::unique_ptr<slib::shader_compiler>> slib::create_dxc_spirv_compiler()
+cc::result<std::unique_ptr<slib::shader_compiler>> slib::create_dxc_compiler(dxc_compiler_options options)
 {
-    return create_for(ssc::dxc::compile_target::spirv);
+    return create_for(ssc::dxc::compile_target::dxil, cc::move(options));
+}
+
+cc::result<std::unique_ptr<slib::shader_compiler>> slib::create_dxc_spirv_compiler(dxc_compiler_options options)
+{
+    return create_for(ssc::dxc::compile_target::spirv, cc::move(options));
 }
 
 #endif

@@ -49,7 +49,7 @@ native_placement place_natively(checked_module const& m,
                                 cc::vector<i32>& offsets)
 {
     auto at = 0;
-    auto alignment = 4;
+    auto alignment = 1;
     for (auto const& member : members)
     {
         if (member.type == checked_module::void_type)
@@ -84,6 +84,7 @@ cc::string_view component_name(i32 i)
 }
 
 /// The scalar of a builtin as `t` spells it.
+/// WGSL has no 16-bit integer, so a short never reaches a WGSL form (EMIT-109).
 cc::string_view scalar_spelling(builtins::type_record const& record, emit::target t)
 {
     auto const is_wgsl = t == emit::target::wgsl;
@@ -93,6 +94,12 @@ cc::string_view scalar_spelling(builtins::type_record const& record, emit::targe
         return is_wgsl ? "i32" : "int";
     case value_kind::scalar_uint:
         return is_wgsl ? "u32" : "uint";
+    case value_kind::scalar_half:
+        return is_wgsl ? "f16" : "half";
+    case value_kind::scalar_short:
+        return "short";
+    case value_kind::scalar_ushort:
+        return "ushort";
     default:
         return is_wgsl ? "f32" : "float";
     }
@@ -131,10 +138,14 @@ struct form_builder
         return i32(form.fields.size() - 1);
     }
 
+    /// Pads in 4-byte words, and with one 2-byte scalar where a 16-bit value leaves room of 2: a WGSL text that has
+    /// one holds a half, so `f16` is enabled there.
     void pad_to(i32 offset)
     {
-        while (at < offset)
+        while (at + 4 <= offset)
             add_field(cc::format("_pad{}", padding++), cc::string(t == emit::target::wgsl ? "u32" : "uint"), 4);
+        if (at < offset)
+            add_field(cc::format("_pad{}", padding++), cc::string(t == emit::target::wgsl ? "f16" : "ushort"), 2);
     }
 
     /// The source names of the members along `path`, joined by `_`: `light_dir`.
@@ -161,17 +172,18 @@ struct form_builder
         auto result = memory_leaf{.path = leaf.path, .type = leaf.type};
         auto const l = native_layout(record, t);
         auto const scalar = scalar_spelling(record, t);
+        auto const scalar_size = scalar_size_of(record);
 
         if (record.leaf_count == 1)
-            result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), 4));
+            result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), scalar_size));
         else if (!is_forced && leaf.offset % l.alignment == 0 && !(t == emit::target::msl && record.leaf_count == 3))
             result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), l.size));
         else if (t == emit::target::msl && !is_matrix(record))
         {
-            // MSL's packed vector sits at any 4-byte offset and takes exactly its scalars' bytes.
+            // MSL's packed vector sits at any offset of its scalar's size and takes exactly its scalars' bytes.
             result.is_packed = true;
-            result.fields.push_back(
-                add_field(stem, cc::format("packed_{}", record.spelled_in(language_of(t))), record.leaf_count * 4));
+            result.fields.push_back(add_field(stem, cc::format("packed_{}", record.spelled_in(language_of(t))),
+                                              record.leaf_count * scalar_size));
         }
         else
         {
@@ -180,7 +192,7 @@ struct form_builder
             {
                 auto const name
                     = is_matrix(record) ? cc::format("{}_{}", stem, i) : cc::format("{}_{}", stem, component_name(i));
-                result.fields.push_back(add_field(name, cc::string(scalar), 4));
+                result.fields.push_back(add_field(name, cc::string(scalar), scalar_size));
             }
         }
         form.leaves.push_back(cc::move(result));
@@ -188,12 +200,19 @@ struct form_builder
 };
 
 /// The largest alignment a field of `form` has under `t`'s rule, which is what an array of it strides by.
+/// A split or packed value aligns to its scalar, and a padding field to its own size.
 i32 alignment_of(checked_module const& m, memory_form const& form, emit::target t)
 {
-    auto result = 4;
+    auto result = 1;
     for (auto const& leaf : form.leaves)
-        if (!leaf.is_split && !leaf.is_packed)
-            result = max_of(result, native_layout(*m.builtin_type_of(leaf.type), t).alignment);
+    {
+        auto const& record = *m.builtin_type_of(leaf.type);
+        result = max_of(result,
+                        leaf.is_split || leaf.is_packed ? scalar_size_of(record) : native_layout(record, t).alignment);
+    }
+    for (auto const& field : form.fields)
+        if (field.name.starts_with("_pad"))
+            result = max_of(result, field.type == "u32" || field.type == "uint" ? 4 : 2);
     return result;
 }
 
@@ -227,10 +246,11 @@ bool is_natively_placed(checked_module const& m,
     for (auto i = isize(0); i < leaves.size(); ++i)
         if (offsets[i] != leaves[i].offset)
             return false;
-    // MSL's float3 takes 16 bytes, so the one value after it has to start past them as well.
+    // MSL's float3 takes 16 bytes and its half3 8, so the one value after it has to start past them as well.
     if (t == emit::target::msl)
         for (auto i = isize(0); i + 1 < leaves.size(); ++i)
-            if (m.builtin_type_of(leaves[i].type)->leaf_count == 3 && leaves[i + 1].offset < leaves[i].offset + 16)
+            if (auto const& record = *m.builtin_type_of(leaves[i].type);
+                record.leaf_count == 3 && leaves[i + 1].offset < leaves[i].offset + record.msl_layout.size)
                 return false;
     return stride == 0 || native.size == stride;
 }

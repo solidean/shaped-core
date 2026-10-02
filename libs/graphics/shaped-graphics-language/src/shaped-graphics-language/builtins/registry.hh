@@ -172,6 +172,9 @@ struct sgl::builtins::type_record
     /// A bool crosses none in WGSL; an int crosses only flat, which the check pass holds it to (CHK-273).
     bool crosses_edges = false;
 
+    /// What a device needs for a value of it, which an entry point holding one needs too (CHK-347).
+    check::feature_set features;
+
     /// Read back from the declaration by `finalize`.
     cc::string name;
 
@@ -326,6 +329,9 @@ constexpr cc::string_view k_float = "float";
 constexpr cc::string_view k_int = "int";
 constexpr cc::string_view k_uint = "uint";
 constexpr cc::string_view k_bool = "bool";
+constexpr cc::string_view k_half = "half";
+constexpr cc::string_view k_short = "short";
+constexpr cc::string_view k_ushort = "ushort";
 constexpr cc::string_view k_hpos4 = "hpos4";
 
 /// Every builtin SGL has, registered in a fixed order and finalized.

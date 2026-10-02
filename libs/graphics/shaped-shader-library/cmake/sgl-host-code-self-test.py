@@ -397,6 +397,21 @@ def a_binding_whose_layout_names_an_option_has_no_generated_type():
 # ---- the runner -----------------------------------------------------------------------------------------------------
 
 
+@test
+def a_16_bit_value_is_its_host_type_and_a_2_byte_gap_a_u16():
+    members = [
+        {"name": "weight", "type": "float", "offset": 0, "size": 4},
+        {"name": "tint", "type": "half3", "offset": 4, "size": 6},
+        {"name": "count", "type": "ushort", "offset": 12, "size": 2},
+        {"name": "dir", "type": "float", "offset": 16, "size": 4},
+    ]
+    fields = sgl_host_code.padded_fields("p", {}, "here", members, "")
+    expect_in("tg::vec<3, tg::f16> tint; ///< `half3`, at byte 4\n", fields, "a half3 is typed-geometry's")
+    expect_in("cc::u16 _pad0 = {}; ///< 2 bytes SGL's layout leaves free\n", fields, "a 2-byte gap")
+    expect_in("cc::u16 count;", fields, "a ushort is clean-core's")
+    expect_in("cc::u16 _pad1 = {}; ///< 2 bytes", fields, "a gap of 2 after a ushort")
+
+
 def main() -> int:
     failed = 0
     for fn in TESTS:

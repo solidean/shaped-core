@@ -15,7 +15,7 @@ enum class address_space : u8
 {
     /// A group's constant block or the `@inline` block: HLSL's constant-buffer packing.
     constants,
-    /// The elements of a `buffer[T]`: dx12's structured-buffer packing, member after member at 4-byte steps.
+    /// The elements of a `buffer[T]`: dx12's structured-buffer packing, each value aligned to its scalar's size.
     storage,
 };
 
@@ -39,11 +39,17 @@ struct placed_members
     /// Parallel to the members; a void member has offset and size 0 and takes no room.
     cc::vector<i32> offsets;
     cc::vector<i32> sizes;
-    /// Where the last member ends, which is the size of a struct in either space.
+    /// Where the last member ends, which is the size of a struct in a constant block.
+    /// In a buffer it is rounded up to `alignment`, as dx12 sizes a struct.
     i32 size = 0;
+    /// The largest scalar size among the members: 4, or 2 where every value is 16 bits.
+    i32 alignment = 2;
     /// Every builtin value inside, in memory order.
     cc::vector<placed_leaf> leaves;
 };
+
+/// The bytes of one scalar of a builtin: 2 for a 16-bit family, and 4 for every other.
+[[nodiscard]] i32 scalar_size_of(builtins::type_record const& record);
 
 /// Whether a value of `type` can stand in GPU memory: a builtin with a size there, or a struct of such values.
 [[nodiscard]] bool is_placeable(check::checked_module const& m, check::type_id type);

@@ -465,6 +465,9 @@ AMD's fast FSR build is its 16-bit path, and a port without 16-bit types runs ev
 One feature for 16-bit floats, storage and arithmetic together, is the shape WebGPU's `shader-f16` has.
 16-bit ints are a second feature because WGSL has none, and one feature for both would cost WebGPU its 16-bit floats.
 A device with 16-bit storage and no 16-bit arithmetic grants neither, which sg's coarse features accept for a difference of degree on old hardware.
+A buffer of lone halves would stride by 2 bytes, which sg refuses for every element type: a GPU loads a buffer in whole words.
+Padding each half to 4 bytes would make `buffer[half]` a buffer the host cannot fill with a plain array of `tg::f16`, which is the one thing it would be for.
+So the element is `half2`, or a struct that fills its words, until a packed buffer of halves is asked for.
 
 ## CHK-349
 

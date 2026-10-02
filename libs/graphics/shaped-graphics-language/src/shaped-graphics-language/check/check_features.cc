@@ -119,6 +119,60 @@ void checker::judge_entry_features(symbol_id id)
     }
 }
 
+feature_set checker::features_of_type(type_id type) const
+{
+    if (!is_valid(type) || type == checked_module::error_type || type == checked_module::void_type)
+        return {};
+    if (auto const* const record = out.builtin_type_of(type))
+        return record->features;
+    auto const& t = out.at(type);
+    switch (t.kind)
+    {
+    case type_kind::array:
+    case type_kind::atomic:
+    case type_kind::buffer:
+        return features_of_type(t.element);
+    case type_kind::structure:
+    {
+        auto result = feature_set();
+        for (auto const& m : out.at(t.members))
+            result |= features_of_type(m.type);
+        return result;
+    }
+    default:
+        return {};
+    }
+}
+
+void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
+{
+    // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
+    while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
+           && (out.at(type).kind == type_kind::array || out.at(type).kind == type_kind::stream))
+        type = out.at(type).element;
+    if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
+        || out.at(type).kind != type_kind::structure)
+        return;
+    auto const path = [&](auto const& self, type_id t) -> cc::string
+    {
+        for (auto const& m : out.at(out.at(t).members))
+        {
+            if (auto const* const record = out.builtin_type_of(m.type))
+            {
+                if (is_16_bit(record->leaf_kind))
+                    return cc::format(".{}: {}", m.name, out.name_of(m.type));
+                continue;
+            }
+            if (m.type != checked_module::error_type && out.at(m.type).kind == type_kind::structure)
+                if (auto inner = self(self, m.type); !inner.empty())
+                    return cc::format(".{}{}", m.name, inner);
+        }
+        return {};
+    };
+    if (auto const found = path(path, type); !found.empty())
+        unsupported(file, where, cc::format("a 16-bit value crossing a stage edge, in {}{}", out.name_of(type), found));
+}
+
 void checker::mark_requires_used(cc::span<symbol_id const> functions, feature_set features)
 {
     for (auto const function : functions)

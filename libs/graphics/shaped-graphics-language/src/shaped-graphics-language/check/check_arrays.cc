@@ -323,6 +323,36 @@ i32 checker::workgroup_size_of(type_id type) const
     return measure(measure, type).size;
 }
 
+i32 checker::storage_size_of(type_id type) const
+{
+    struct measured
+    {
+        i32 size = 0;
+        i32 alignment = 1;
+    };
+    auto const round_up = [](i32 n, i32 to) { return (n + to - 1) / to * to; };
+    auto const measure = [&](auto const& self, type_id t) -> measured
+    {
+        if (auto const* const record = out.builtin_type_of(t))
+            return {.size = record->hlsl_layout.size, .alignment = is_16_bit(record->leaf_kind) ? 2 : 4};
+        auto const& info = out.at(t);
+        if (info.kind != type_kind::structure)
+            return {.size = 4, .alignment = 4};
+        auto result = measured();
+        for (auto const& m : out.at(info.members))
+        {
+            if (m.type == checked_module::void_type || m.type == checked_module::error_type)
+                continue;
+            auto const member = self(self, m.type);
+            result.size = round_up(result.size, member.alignment) + member.size;
+            result.alignment = member.alignment > result.alignment ? member.alignment : result.alignment;
+        }
+        result.size = round_up(result.size, result.alignment);
+        return result;
+    };
+    return measure(measure, type).size;
+}
+
 bool checker::holds_atomic(type_id type) const
 {
     auto const& t = out.at(type);

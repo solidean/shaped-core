@@ -664,6 +664,9 @@ ops[i](mut v)                                            // raygen, miss, closes
   A constant block packs as an HLSL constant buffer does, and a buffer's element as a dx12 structured buffer: tight, like a `tg` struct.
   WGSL and MSL are made to follow by a memory form, where a vector their own rule would place elsewhere is split or packed.
   A struct in both a block and a buffer is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
+- **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-346): `require shader_f16` or `shader_int16`, and WGSL has no short.
+  HLSL spells a half `float16_t`, never `half`, so slib's DXC edges pass `-enable-16bit-types`; a 16-bit literal is a construction, `half(0.5)`.
+  A 16-bit value packs at 2 bytes and crosses no stage edge, and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
 - **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.

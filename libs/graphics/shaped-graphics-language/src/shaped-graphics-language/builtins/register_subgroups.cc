@@ -263,9 +263,14 @@ void sgl::builtins::register_subgroups(registry& r)
     r.add_comment("// Subgroup operations, which exchange values between the invocations the hardware runs together.\n"
                   "// Each needs `subgroups`, stands only in uniform control flow, and gives a value that differs\n"
                   "// within a workgroup (CHK-376, CHK-377).");
+    // a number is any numeric scalar of the prelude or a vector of them, the 16-bit ones too
     cc::string_view const numbers[]
-        = {"float", "float2", "float3", "float4", "int", "int2", "int3", "int4", "uint", "uint2", "uint3", "uint4"};
-    cc::string_view const integers[] = {"int", "int2", "int3", "int4", "uint", "uint2", "uint3", "uint4"};
+        = {"float", "float2", "float3", "float4", "int",    "int2",    "int3",    "int4",
+           "uint",  "uint2",  "uint3",  "uint4",  "half",   "half2",   "half3",   "half4",
+           "short", "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4"};
+    cc::string_view const integers[]
+        = {"int",   "int2",   "int3",   "int4",   "uint",   "uint2",   "uint3",   "uint4",
+           "short", "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4"};
     cc::string_view const votes[] = {"bool"};
     for (auto i = u32(0); i < u32(sizeof(k_operations) / sizeof(k_operations[0])); ++i)
     {

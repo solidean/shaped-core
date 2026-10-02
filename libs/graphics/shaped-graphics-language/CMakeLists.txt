@@ -406,6 +406,7 @@ if(SC_BUILD_TESTS)
         tests/emit/layout-emit-test.cc
         tests/emit/swizzle-emit-test.cc
         tests/emit/vector-emit-test.cc
+        tests/emit/sixteen-bit-emit-test.cc
 
         tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc

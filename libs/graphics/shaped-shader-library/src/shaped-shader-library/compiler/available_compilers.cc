@@ -30,14 +30,15 @@ void slib::add_available_compilers(shader_library& lib)
     if (dxil.has_value())
     {
         lib.add_compiler(cc::move(dxil.value()));
-        if (auto sgl_dxil = create_dxc_compiler(); sgl_dxil.has_value())
+        // EMIT-4: SGL writes a half as `float16_t`, which DXC compiles only with 16-bit types enabled
+        if (auto sgl_dxil = create_dxc_compiler(sgl_dxc_options()); sgl_dxil.has_value())
             lib.add_compiler(create_sgl_compiler(cc::move(sgl_dxil.value())));
     }
 
     if (spirv.has_value())
     {
         lib.add_compiler(cc::move(spirv.value()));
-        if (auto sgl_spirv = create_dxc_spirv_compiler(); sgl_spirv.has_value())
+        if (auto sgl_spirv = create_dxc_spirv_compiler(sgl_dxc_options()); sgl_spirv.has_value())
             lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value())));
     }
 #endif

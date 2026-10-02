@@ -494,16 +494,12 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
 {
     // CHK-357: the suffix names the type, and the literal converts to no other
     auto const s = split_suffix(text).value();
-    if (s.width == 16)
-    {
-        unsupported(file, where, "a 16-bit literal, since half, short and ushort are not in the prelude yet");
-        return error_type;
-    }
-    if (s.width != 32)
+    if (s.width != 32 && s.width != 16)
     {
         unsupported(file, where, cc::format("a literal of {} bits, which no type of the prelude is", s.width));
         return error_type;
     }
+    auto const is_narrow = s.width == 16;
     auto const is_float_body = classify_number(s.body) == number_class::plain_float;
     if (is_float_body && s.letter != 'f')
     {
@@ -512,7 +508,9 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         return error_type;
     }
 
-    auto const name = s.letter == 'f' ? builtins::k_float : s.letter == 'u' ? builtins::k_uint : builtins::k_int;
+    auto const name = s.letter == 'f' ? (is_narrow ? builtins::k_half : builtins::k_float)
+                    : s.letter == 'u' ? (is_narrow ? builtins::k_ushort : builtins::k_uint)
+                                      : (is_narrow ? builtins::k_short : builtins::k_int);
     auto const type = type_of_builtin(name, file, where);
     if (type == error_type)
         return error_type;
@@ -528,7 +526,8 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         auto const real = value.has_value() ? value.value() : f64(integer.value());
         if (!holds({.is_number = true, .real = real}, type))
         {
-            report(diagnostic_kind::literal_not_representable, file, where, cc::format("float does not hold {}", text));
+            report(diagnostic_kind::literal_not_representable, file, where,
+                   cc::format("{} does not hold {}", name, text));
             return error_type;
         }
         return type;
@@ -539,12 +538,9 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         unsupported(file, where, "an integer literal beyond 64 bits");
         return error_type;
     }
-    auto const v = value.value();
-    auto const is_held = s.letter == 'u' ? v >= 0 && v <= 4294967295ll : v >= -2147483647ll - 1 && v <= 2147483647ll;
-    if (!is_held)
+    if (!holds({.is_number = true, .is_integer = true, .integer = value.value()}, type))
     {
-        report(diagnostic_kind::literal_not_representable, file, where,
-               cc::format("{} does not hold {}", s.letter == 'u' ? "uint" : "int", text));
+        report(diagnostic_kind::literal_not_representable, file, where, cc::format("{} does not hold {}", name, text));
         return error_type;
     }
     return type;
@@ -1957,6 +1953,18 @@ type_id checker::prelude_type(cc::string_view name) const
     return out.at(found->front()).type;
 }
 
+namespace
+{
+/// Whether a half holds `n` exactly: 11 significant bits at most.
+bool is_exact_half(i64 n)
+{
+    auto magnitude = u64(n < 0 ? -n : n);
+    while (magnitude > 2048 && magnitude % 2 == 0)
+        magnitude /= 2;
+    return magnitude <= 2048;
+}
+} // namespace
+
 bool checker::holds(number_literal const& n, type_id to) const
 {
     if (!is_valid(to))
@@ -1973,6 +1981,18 @@ bool checker::holds(number_literal const& n, type_id to) const
             return f64(f32(n.integer)) == f64(n.integer);
         auto const magnitude = n.real < 0 ? -n.real : n.real;
         return magnitude < 3.4028235677973366e38;
+    }
+    if (to == prelude_type(builtins::k_short))
+        return n.is_integer && n.integer >= -32768 && n.integer <= 32767;
+    if (to == prelude_type(builtins::k_ushort))
+        return n.is_integer && n.integer >= 0 && n.integer <= 65535;
+    if (to == prelude_type(builtins::k_half))
+    {
+        // as for float: an integer exactly, and a float below the largest half plus half an ulp, 65504 + 16
+        if (n.is_integer)
+            return n.integer >= -65504 && n.integer <= 65504 && is_exact_half(n.integer);
+        auto const magnitude = n.real < 0 ? -n.real : n.real;
+        return magnitude < 65520.0;
     }
     return false;
 }

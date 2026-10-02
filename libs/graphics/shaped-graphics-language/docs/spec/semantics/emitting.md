@@ -470,7 +470,8 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
   A 16-bit value is aligned to 2 bytes within its row, and every other value to 4.
 * **EMIT-111** A buffer's element is placed by dx12's structured-buffer packing: each value right behind the one before, aligned to its scalar's size.
   That is 4 bytes, and 2 for a 16-bit value.
-  A buffer strides by its element's size, which is where its last value ends, rounded up to 4 bytes.
+  A struct is aligned to its largest scalar's size, and its size is where its last value ends, rounded up to that.
+  A buffer strides by its element's size, which CHK-346 holds to whole 4-byte words.
 * **EMIT-112** Each target is made to follow the two rules ([why](why/emitting.md#emit-112)).
   `hlsl-dx12` writes nothing, since they are its own rules.
   `hlsl-vulkan` states every offset, which sg's vulkan backend admits by requiring `scalarBlockLayout`.

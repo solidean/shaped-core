@@ -145,6 +145,7 @@ slib::create_dxc_compiler()        // -> cc::result<std::unique_ptr<shader_compi
 slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere DXC does
                                    //   register BOTH: a shader_asset picks by what the context accepts
                                    //   content-keyed cache inside: an identical recompile is free
+slib::create_dxc_compiler(slib::sgl_dxc_options())  // the one behind an SGL edge: -enable-16bit-types, for float16_t
 
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>  // every platform, WebAssembly included
 slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl -> wgsl, the source IS the bytecode
@@ -333,6 +334,7 @@ pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
 auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::particle>{...}, sg::buffer_usage::readwrite_buffer);
 //   a constant block packs as an HLSL cbuffer, a buffer element tight like a tg struct (the SGL spec's layout rules).
 // SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
+// SGL `half` -> tg::f16, `short`/`ushort` -> cc::i16/cc::u16, their vectors tg::vec<N, T>; a 2-byte gap is `cc::u16 _padN`.
 // every name lives in the package namespace, so two files declaring one name is a generator error.
 // sg sees an SGL binding by its path, `work.values`, and a group's constant block by the binding's name:
 //   the identifier the target text spells it with stays on each binding as `reflected_name`, for diagnostics.

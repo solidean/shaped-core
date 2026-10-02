@@ -57,11 +57,11 @@ void add_sgl_compilers(slib::shader_library& lib)
 #if SLIB_HAS_DXC
     // DXIL reflection needs the Windows SDK, so that edge is Windows' alone.
 #ifdef CC_OS_WINDOWS
-    auto dxil = slib::create_dxc_compiler();
+    auto dxil = slib::create_dxc_compiler(slib::sgl_dxc_options());
     REQUIRE(dxil.has_value());
     lib.add_compiler(slib::create_sgl_compiler(cc::move(dxil.value())));
 #endif
-    auto spirv = slib::create_dxc_spirv_compiler();
+    auto spirv = slib::create_dxc_spirv_compiler(slib::sgl_dxc_options());
     REQUIRE(spirv.has_value());
     lib.add_compiler(slib::create_sgl_compiler(cc::move(spirv.value())));
 #endif
@@ -406,6 +406,75 @@ ASYNC_TEST("slib sgl compiler - the vector vocabulary SGL writes is accepted by 
 
 namespace
 {
+/// Halves in a constant block, in a buffer's element, in workgroup memory and in arithmetic, with literals of their
+/// own type.
+constexpr auto k_half_source
+    = cc::string_view("require shader_f16\n"
+                      "\n"
+                      "struct sample:\n"
+                      "    weight: float\n"
+                      "    tint: half3\n"
+                      "    scale: half\n"
+                      "\n"
+                      "binding work:\n"
+                      "    gain: half\n"
+                      "    offset: float\n"
+                      "    bias: half3\n"
+                      "    input: buffer[sample]\n"
+                      "    halves: mut buffer[half2]\n"
+                      "\n"
+                      "@workgroup binding scratch:\n"
+                      "    partial: half2\n"
+                      "\n"
+                      "@compute(64) fun main(@thread_id id: int3){work, scratch}:\n"
+                      "    let s = work.input[id.x]\n"
+                      "    let v = s.tint * 0.5 + half3(1.0, 2.0, 0.1) * work.gain + work.bias\n"
+                      "    let w = normalize(v).zyx * s.scale\n"
+                      "    scratch.partial = w.xy\n"
+                      "    workgroup_barrier()\n"
+                      "    work.halves[id.x] = half2(max(w.x, 0.0) + (s.weight as half) - 0.25f16, "
+                      "scratch.partial.y)\n");
+
+/// 16-bit integers, which WGSL has none of.
+constexpr auto k_short_source
+    = cc::string_view("require shader_int16\n"
+                      "\n"
+                      "binding work:\n"
+                      "    counts: mut buffer[ushort2]\n"
+                      "    deltas: buffer[short2]\n"
+                      "\n"
+                      "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                      "    let d = work.deltas[id.x]\n"
+                      "    let sum = d.x * 3i16 + abs(d.y) - (-d.x) / 2i16\n"
+                      "    work.counts[id.x] = work.counts[id.x] * 2u16 + ushort2(sum as ushort, 1u16)\n");
+} // namespace
+
+ASYNC_TEST("slib sgl compiler - the 16-bit types SGL writes are accepted by every compiler behind an edge",
+           exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+
+    for (auto const format : lib.supported_formats(slib::shader_language::sgl))
+    {
+        auto const node = lib.compile_source(k_half_source, sg::shader_stage::compute, "main", format,
+                                             {.language = slib::shader_language::sgl, .label = "halves.sgl"});
+        co_await cc::async_settled(node);
+        CHECK(value_of(node).bytecode.size() > 0);
+        CHECK(value_of(node).required_features == cc::optional<sg::feature_set>(sg::feature::shader_f16));
+        // EMIT-109: WGSL has no 16-bit integer
+        if (format == sg::shader_format::wgsl)
+            continue;
+        auto const shorts = lib.compile_source(k_short_source, sg::shader_stage::compute, "main", format,
+                                               {.language = slib::shader_language::sgl, .label = "shorts.sgl"});
+        co_await cc::async_settled(shorts);
+        CHECK(value_of(shorts).bytecode.size() > 0);
+        CHECK(value_of(shorts).required_features == cc::optional<sg::feature_set>(sg::feature::shader_int16));
+    }
+}
+
+namespace
+{
 /// Two groups, and in the second one resource of every kind, so a register class, a slot or a space off by one shows.
 constexpr auto k_two_groups_source
     = cc::string_view("binding frame:\n"
@@ -722,7 +791,7 @@ ASYNC_TEST("slib sgl compiler - every compiler that reads a layout finds each fi
     auto edges = cc::vector<std::unique_ptr<slib::shader_compiler>>();
     edges.push_back(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
 #if SLIB_HAS_DXC
-    auto spirv = slib::create_dxc_spirv_compiler();
+    auto spirv = slib::create_dxc_spirv_compiler(slib::sgl_dxc_options());
     REQUIRE(spirv.has_value());
     edges.push_back(slib::create_sgl_compiler(cc::move(spirv.value())));
 #endif

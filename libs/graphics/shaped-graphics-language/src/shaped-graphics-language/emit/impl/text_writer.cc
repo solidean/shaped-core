@@ -542,14 +542,23 @@ struct writer
                     return {.text = cc::format("{}.{}", field_text(object.value(), leaf, 0), component)};
                 }
         auto result = rendered();
+        // EMIT-140: a literal of a 16-bit type is a construction of its type, since a bare one is 32 bits in MSL
+        auto const* const literal_type = p.m.builtin_type_of(x.type);
+        auto const narrow = [&](rendered r)
+        {
+            if (literal_type == nullptr || !is_16_bit(literal_type->leaf_kind))
+                return r;
+            return rendered{.text = cc::format("{}({})", literal_type->spelled_in(d.language()), r.text)};
+        };
         x.node.visit(
             [&](flat_invalid const&) {}, [&](flat_literal const& l)
-            { result = {.text = literal_text(l.value), .binds = l.value < 0 ? level::unary : level::primary}; },
+            { result = narrow({.text = literal_text(l.value), .binds = l.value < 0 ? level::unary : level::primary}); },
             [&](flat_int_literal const& l)
             {
                 auto const is_wrapped = l.value == -2147483647 - 1;
                 auto text = l.is_unsigned ? cc::to_string(u32(l.value)) + "u" : int_literal_text(l.value);
-                result = {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary};
+                result = narrow(
+                    {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary});
             },
             [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
             [&](flat_enum_value const& v)

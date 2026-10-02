@@ -69,6 +69,9 @@ struct b:
 * **CHK-346** `half`, `short` and `ushort` are the prelude's 16-bit float, `int` and `uint` ([why](why/checking.md#chk-346)).
   Their vectors are `half2` to `half4`, `short2` to `short4` and `ushort2` to `ushort4`.
   A literal converts to one by CHK-253, so `h * 0.5` with `h` a `half` is a `half` product, and `as` converts by CHK-197.
+  The bit operators and the bit functions take no 16-bit integer yet, and the derivatives take no half, which WGSL's do not.
+  A buffer whose element, placed by EMIT-111, is no whole number of 4-byte words is `unsupported-yet` ([why](why/checking.md#chk-346)).
+  sg binds a buffer by whole words, so `buffer[half2]` is one and `buffer[half]` is not.
 * **CHK-347** A builtin type's record may name the feature a value of it needs, as a builtin function's record may (CHK-322).
   `half` and its vectors name `shader_f16`, and `short`, `ushort` and their vectors name `shader_int16`.
   An entry point whose flat tree holds a value of such a type needs its feature, and a binding member that holds one is a form CHK-201 judges.
@@ -1255,7 +1258,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-348, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-348, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |

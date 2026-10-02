@@ -540,6 +540,9 @@ struct checker
                                                              bool is_workgroup = false);
     /// The bytes a value of `type` takes in workgroup memory, laid out as WGSL lays out its workgroup variables.
     [[nodiscard]] i32 workgroup_size_of(type_id type) const;
+    /// The bytes one element of a `buffer[type]` takes by EMIT-111, before any stride rounding: each value aligned to
+    /// its scalar's size, and a struct sized to its largest scalar.
+    [[nodiscard]] i32 storage_size_of(type_id type) const;
     /// A `@workgroup` binding, whose members a shader writes and a test holds without listing it (CHK-292).
     [[nodiscard]] bool is_workgroup_binding(symbol_id id) const
     {
@@ -662,6 +665,11 @@ struct checker
     feature_set read_require(i32 file, ast::require_decl const& r, require_scope scope, symbol_id owner);
     /// Records which features entry point `id` needs and reports every one it does not declare (CHK-263, CHK-264).
     void judge_entry_features(symbol_id id);
+    /// What a value of `type` needs of a device: its builtin's, or what any member or element holds (CHK-347).
+    /// A resource holds its element, so `buffer[half]` needs what `half` needs; a texture holds nothing.
+    [[nodiscard]] feature_set features_of_type(type_id type) const;
+    /// CHK-348: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
+    void judge_edge_16_bit(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).
