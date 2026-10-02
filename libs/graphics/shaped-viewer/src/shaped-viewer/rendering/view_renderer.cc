@@ -647,6 +647,16 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_split = has_split ? 1 : 0;
     }
 
+    // The depth a layer's 3D drawings are occluded by, on every frame that traces it — after the hash, so a drawing
+    // coming or going never restarts the image.
+    // Keyed on the same condition `temporal_inputs_of` declares it on, so the slot was sized by this frame's resolve.
+    auto* const depth_slot = l.drawings.empty() ? nullptr : rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer));
+    if (depth_slot != nullptr)
+    {
+        fc.write_primary_depth = 1;
+        fc.near_plane = f32(v.camera.projection.near_plane);
+    }
+
     auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
         1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(frame, fc);
@@ -683,6 +693,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
               .frame_diffuse = has_split ? ds.frame_diffuse->texture : sg::texture_2d(),
               .frame_specular = has_split ? ds.frame_specular->texture : sg::texture_2d(),
               .guide_hit_distance = has_split ? ds.hit_distance->texture : sg::texture_2d(),
+              .primary_depth = depth_slot != nullptr ? depth_slot->texture : sg::texture_2d(),
               .instance_table = instance_table,
               .lights = light_buffer,
               .hit_groups = resolved.hit_groups,

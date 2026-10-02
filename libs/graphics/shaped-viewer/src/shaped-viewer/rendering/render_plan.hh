@@ -115,6 +115,10 @@ struct sv::plan_drawing_job
 
     /// 2D: the view's size in logical pixels, which a placement's `from` corner measures against.
     tg::vec2f logical_size = tg::vec2f(0, 0);
+
+    /// 3D: the trace of the same layer, into `render_plan::traces`, whose primary-hit depth the drawings are tested
+    /// against; `u32(-1)` for a layer with no geometry to trace, whose drawings then draw untested.
+    u32 trace = u32(-1);
 };
 
 /// One texture the frame writes: a view's composite target, or the frame's output.

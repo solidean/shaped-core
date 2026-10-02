@@ -4,11 +4,14 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/slug_routine.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
+#include <shaped-viewer/impl/view_state.hh>
+#include <shaped-viewer/rendering/depth_fill_routine.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/view/view_data.hh>
+#include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 
 namespace sv
@@ -50,38 +53,104 @@ namespace
     return sr::slug_routine::prepare_job(cmd, drawings.atlas(), frames, quads);
 }
 
-/// Records a target's draws into its open pass: each run of layout draws through the layout routine, and each drawings
-/// draw as its layer's Slug job, in the order the plan lists them.
+/// One layer's drawings as this frame records them: the uploaded job, and for a 3D one the trace's depth it is tested
+/// against, or null for a job drawn untested.
+struct recorded_job
+{
+    sr::slug_routine::prepared_job job;
+    sg::texture_2d depth;
+};
+
+/// The primary-hit depth the trace of `job`'s layer writes this frame, or null when it has none to be tested against.
+[[nodiscard]] sg::texture_2d depth_of(plan_drawing_job const& job, viewer_definition const& def, view_store& store)
+{
+    if (!job.is_3d || job.trace == u32(-1))
+        return {};
+    auto const* const state = store.get_ptr(def[job.view].id);
+    auto const* const slot
+        = state != nullptr ? state->temporal.get_ptr(temporal_id::primary_depth(u8(job.layer))) : nullptr;
+    return slot != nullptr ? slot->texture : sg::texture_2d();
+}
+
+/// Records a target's draws, in the order the plan lists them, into as many passes as its 3D drawings need.
+///
+/// Every run of layout draws and every untested drawings job shares one colour pass.
+/// A 3D job tested against its trace's depth gets two passes of its own: one filling a depth target from that depth,
+/// then one drawing over the target's colour against it, since nothing else in the target's pass is built for depth.
+/// `color` is how the first pass treats the target; every later one preserves what the earlier ones drew.
 /// Returns whether anything declined.
-[[nodiscard]] bool record_target(sg::rendering_scope& scope,
+[[nodiscard]] bool record_target(sg::command_list& cmd,
+                                 sg::color_target color,
                                  cc::span<layout_draw const> draws,
                                  plan_textures const& textures,
                                  render_plan const& plan,
-                                 cc::span<sr::slug_routine::prepared_job const> jobs,
+                                 cc::span<recorded_job const> jobs,
                                  sr::slug_atlas const& atlas)
 {
+    auto const is_tested
+        = [&](layout_draw const& d) { return d.kind == draw_kind::drawings && jobs[d.job].depth.raw() != nullptr; };
+
     auto declined = false;
-    auto run_start = isize(0);
-    auto const flush = [&](isize end)
+    auto opened = false;
+    auto i = isize(0);
+    while (i < draws.size() || !opened)
     {
-        if (end > run_start
-            && layout_routine::execute(scope, window_id(0),
-                                       draws.subspan({.offset = run_start, .size = end - run_start}), textures)
-                   == sg::routine_outcome::declined)
-            declined = true;
-    };
-    for (auto i = isize(0); i < draws.size(); ++i)
-    {
-        if (draws[i].kind != draw_kind::drawings)
-            continue;
-        flush(i);
-        run_start = i + 1;
-        auto const& job = plan.drawing_jobs[draws[i].job];
-        if (sr::slug_routine::execute(scope, atlas, jobs[draws[i].job], {.object_to_clip = job.object_to_clip})
-            == sg::routine_outcome::declined)
-            declined = true;
+        // Everything up to the next tested job, in one colour pass; the first pass opens even with nothing in it, so a
+        // target with no draws is still cleared.
+        auto end = i;
+        while (end < draws.size() && !is_tested(draws[end]))
+            ++end;
+        if (end > i || !opened)
+        {
+            auto scope = cmd.raster.render_to({.color_targets = {color}});
+            auto run_start = i;
+            auto const flush = [&](isize run_end)
+            {
+                if (run_end > run_start
+                    && layout_routine::execute(scope, window_id(0),
+                                               draws.subspan({.offset = run_start, .size = run_end - run_start}), textures)
+                           == sg::routine_outcome::declined)
+                    declined = true;
+            };
+            for (auto k = i; k < end; ++k)
+            {
+                if (draws[k].kind != draw_kind::drawings)
+                    continue;
+                flush(k);
+                run_start = k + 1;
+                if (sr::slug_routine::execute(scope, atlas, jobs[draws[k].job].job,
+                                              {.object_to_clip = plan.drawing_jobs[draws[k].job].object_to_clip})
+                    == sg::routine_outcome::declined)
+                    declined = true;
+            }
+            flush(end);
+            opened = true;
+            color.op = sg::target_op::preserve;
+        }
+        if (end == draws.size())
+            break;
+
+        // A tested job: its trace's depth into a depth target, then the drawings against it over the colour so far.
+        auto const& recorded = jobs[draws[end].job];
+        auto const depth = cmd.context().transient.create_texture_2d({.format = sg::pixel_format::depth32_float,
+                                                                      .width = recorded.depth.width(),
+                                                                      .height = recorded.depth.height(),
+                                                                      .usage = sg::texture_usage::depth_stencil});
+        {
+            auto fill = cmd.raster.render_to({.depth_stencil_target = depth.as_depth_stencil_view().cleared(1.0f)});
+            if (depth_fill_routine::execute(fill, recorded.depth) == sg::routine_outcome::declined)
+                declined = true;
+        }
+        {
+            auto scope = cmd.raster.render_to(
+                {.color_targets = {color}, .depth_stencil_target = depth.as_depth_stencil_view().preserved()});
+            if (sr::slug_routine::execute(scope, atlas, recorded.job,
+                                          {.object_to_clip = plan.drawing_jobs[draws[end].job].object_to_clip})
+                == sg::routine_outcome::declined)
+                declined = true;
+        }
+        i = end + 1;
     }
-    flush(draws.size());
     return declined;
 }
 } // namespace
@@ -126,10 +195,12 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
     auto const textures = res.textures();
 
     // Every drawing job's uploads, since a copy recorded inside a pass would split it.
-    auto jobs = cc::vector<sr::slug_routine::prepared_job>();
+    // A 3D job's depth is looked up now, though the trace writes it below: the slot is the same texture either way.
+    auto jobs = cc::vector<recorded_job>();
     jobs.reserve(plan.drawing_jobs.size());
     for (auto const& job : plan.drawing_jobs)
-        jobs.push_back(prepare_drawing_job(cmd, def, job, resources.drawings));
+        jobs.push_back(
+            {.job = prepare_drawing_job(cmd, def, job, resources.drawings), .depth = depth_of(job, def, store)});
 
     // Every trace first.
     //
@@ -158,10 +229,9 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
 
         if (target.is_output)
         {
-            auto scope = cmd.raster.render_to({.color_targets = {output}});
             // The layout routine is acquired per format, so it can still be building for THIS one even though the
             // chain above was ready — the one place in the frame where that is possible.
-            if (record_target(scope, draws, textures, plan, jobs, resources.drawings.atlas()))
+            if (record_target(cmd, output, draws, textures, plan, jobs, resources.drawings.atlas()))
                 declined = true;
             continue;
         }
@@ -172,9 +242,8 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
         // Cleared rather than preserved: a layout layer only covers its leaves, so the gaps between them (spacing,
         // empty grid cells, a collapsed rect) must be defined rather than holding whatever the texture held before.
         // Transparent black, since every view target carries premultiplied alpha.
-        auto scope = cmd.raster.render_to(
-            {.color_targets = {textures.targets[ti].as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
-        if (record_target(scope, draws, textures, plan, jobs, resources.drawings.atlas()))
+        if (record_target(cmd, textures.targets[ti].as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0)), draws,
+                          textures, plan, jobs, resources.drawings.atlas()))
             declined = true;
     }
     return declined ? sg::routine_outcome::declined : sg::routine_outcome::executed;

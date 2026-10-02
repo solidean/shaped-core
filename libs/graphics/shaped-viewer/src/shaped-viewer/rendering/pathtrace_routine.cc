@@ -89,6 +89,7 @@ cc::shared_async<cc::unit> pathtrace_routine::init_once(sg::routine_init_scope s
     _frame_specular_stand_in = stand_in(sg::pixel_format::rgba16_float);
     _guide_hit_distance_stand_in = stand_in(sg::pixel_format::rg32_float);
     _guide_motion_stand_in = stand_in(sg::pixel_format::rg32_float);
+    _primary_depth_stand_in = stand_in(sg::pixel_format::r32_float);
     co_return;
 }
 
@@ -277,7 +278,8 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
                   && matches_extent(d.guide_albedo, d.output) && matches_extent(d.guide_specular_albedo, d.output)
                   && matches_extent(d.guide_roughness, d.output) && matches_extent(d.frame_output, d.output)
                   && matches_extent(d.guide_motion, d.output) && matches_extent(d.frame_diffuse, d.output)
-                  && matches_extent(d.frame_specular, d.output) && matches_extent(d.guide_hit_distance, d.output),
+                  && matches_extent(d.frame_specular, d.output) && matches_extent(d.guide_hit_distance, d.output)
+                  && matches_extent(d.primary_depth, d.output),
               "pathtrace_routine: every target the trace writes beside the accumulator matches its extent");
     CC_ASSERT(!d.hit_groups.empty(), "pathtrace_routine: a trace needs at least one hit group to shade with");
 
@@ -327,6 +329,7 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
             .guide_hit_distance
             = image_or<sg::pixel_format::rg32_float>(d.guide_hit_distance, self->_guide_hit_distance_stand_in),
             .lights = lights.as_readonly_buffer(),
+            .primary_depth = image_or<sg::pixel_format::r32_float>(d.primary_depth, self->_primary_depth_stand_in),
         });
 
     cmd.raytracing.bind_pipeline(*variant->pipeline);

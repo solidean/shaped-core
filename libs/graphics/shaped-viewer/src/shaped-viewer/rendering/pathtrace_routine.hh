@@ -110,6 +110,8 @@ struct sv::pt_trace_desc
     sg::texture_2d guide_hit_distance;
 
     /// The first sample's primary-hit clip depth per pixel (r32_float), at `output`'s extent, or null.
+    /// Set exactly when the frame block's `write_primary_depth` is; what a raster pass after the trace is occluded by.
+    sg::texture_2d primary_depth;
 
     /// One `sv::shaders::tracer::instance_record` per entry of `instances`, in that same order — `traced.instances`, read by a hit's instance id.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
@@ -210,6 +212,7 @@ private:
     sg::texture_2d _frame_specular_stand_in;
     sg::texture_2d _guide_hit_distance_stand_in;
     sg::texture_2d _guide_motion_stand_in;
+    sg::texture_2d _primary_depth_stand_in;
 
     /// One pipeline, built over one ordered set of hit groups, in two steps polled rather than waited on.
     struct pipeline_variant

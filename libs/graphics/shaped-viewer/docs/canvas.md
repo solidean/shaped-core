@@ -26,6 +26,8 @@ They differ in where they are added and in what depth means.
   A logical pixel is the window's content scale in texture pixels, so text keeps its physical size on a high-DPI display.
 - **3D instances go on a scene**, `scene_ref::add_drawing`, in world units, seen through the view's camera.
   They are drawn after the trace, so traced geometry in front of them hides them, and they hide nothing traced: no shadow, not in a reflection.
+  The trace writes its primary-hit depth for a layer that holds drawings, a fill pass turns it into a depth target, and the layer's drawings draw tested against it in a pass of their own.
+  That depth is the first sample's, reprojected to the pixel centre on the plane it hit, so a drawing lying on a face tests equal to the face rather than flickering with the jitter.
   A drawing that has to belong to the surface it lies on — lit, shadowed, curved with it — is a decal, which is traced.
 
 ## Residency
@@ -46,10 +48,9 @@ A job's draw sits in its view target's pass at the layer's place, so a canvas dr
 | piece | status |
 |---|---|
 | sr job draw: records in the atlas, frames and quads per job | [done] |
-| `drawing`, `drawing_set`, `drawing_manager` | [in progress] |
-| canvas layer and 2D instances | [in progress] |
-| 3D instances, drawn over the trace | [in progress] |
-| 3D instances occluded by the trace's primary-hit depth | [planned] |
+| `drawing`, `drawing_set`, `drawing_manager` | [done] |
+| canvas layer and 2D instances | [done] |
+| 3D instances, drawn over the trace and occluded by its primary-hit depth | [done] |
 | atlas pages when one fills, and freeing on eviction | [planned] |
 | text: fonts, a vendored default font, kerned multi-line layout, one-line `add_text` | [planned] |
 | strokes, with dashes, as filled outlines | [planned] |

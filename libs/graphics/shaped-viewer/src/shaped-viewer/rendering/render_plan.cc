@@ -27,7 +27,7 @@ namespace
 [[nodiscard]] tg::mat4f world_to_clip(camera cam, tg::vec2i resolution)
 {
     cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1] > 0 ? resolution[1] : 1);
-    auto const m = matrices_of(camera_gpu::from(cam), f32(cam.projection.near_plane));
+    auto const m = matrices_of(camera_record_of(cam), f32(cam.projection.near_plane));
     return m.view_to_clip * m.world_to_view;
 }
 
@@ -274,9 +274,10 @@ struct builder
                 // Emitting them anyway hands the renderer a dispatch with nothing to bind, which it asserts on —
                 // and `add_scene().add_light(...)` before any mesh exists is ordinary authoring, not an error.
                 // Its drawings still draw: they need the camera, not the trace.
+                auto trace = u32(-1);
                 if (is_traceable(l))
                 {
-                    auto const trace = u32(plan.traces.size());
+                    trace = u32(plan.traces.size());
                     plan.traces.push_back(
                         {.id = v.id, .view = view, .layer = u8(layer_index), .resolution = res, .refresh = refreshes});
                     local.push_back({.kind = draw_kind::view,
@@ -285,14 +286,14 @@ struct builder
                                      .blend = l.blend,
                                      .opacity = l.opacity});
                 }
-                emit_drawings(view, layer_index, l, res, local);
+                emit_drawings(view, layer_index, l, res, trace, local);
                 break;
             }
             case layer_kind::layout:
                 emit_layout(view, l, res, map, depth, local);
                 break;
             case layer_kind::canvas:
-                emit_drawings(view, layer_index, l, res, local);
+                emit_drawings(view, layer_index, l, res, u32(-1), local);
                 break;
             case layer_kind::ui:
                 // Not drawn yet; see libs/graphics/shaped-viewer/docs/TODO.md for what it still needs.
@@ -316,7 +317,12 @@ struct builder
 
     /// Appends one job for `l`'s drawings, if it has any, and the draw that places it in the target's pass.
     /// A scene's are 3D, through the view's camera; a canvas's are 2D, in the view's logical pixels.
-    void emit_drawings(view_index view, u32 layer_index, layer const& l, tg::vec2i res, cc::vector<layout_draw>& local)
+    void emit_drawings(view_index view,
+                       u32 layer_index,
+                       layer const& l,
+                       tg::vec2i res,
+                       u32 trace,
+                       cc::vector<layout_draw>& local)
     {
         if (l.drawings.empty() || res[0] <= 0 || res[1] <= 0)
             return;
@@ -329,7 +335,8 @@ struct builder
              .layer = layer_index,
              .is_3d = is_3d,
              .object_to_clip = is_3d ? world_to_clip(def[view].camera, res) : logical_pixels_to_clip(res, scale),
-             .logical_size = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale)});
+             .logical_size = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale),
+             .trace = trace});
         local.push_back({.kind = draw_kind::drawings,
                          .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
                          .blend = layer_blend::over,

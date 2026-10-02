@@ -224,6 +224,7 @@ struct render_plan;
 enum class window_id : u32;
 struct plan_textures;
 class layout_routine;
+class depth_fill_routine; // a depth target filled from the trace's primary-hit depth
 
 struct plan_resources;
 

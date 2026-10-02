@@ -80,7 +80,10 @@ struct frame_constants:
 
     /// whether to write `frame_diffuse`, `frame_specular` and `guide_hit_distance`, for a split-signal denoiser
     write_split: uint
-    split_pad: uint3
+    /// whether to write `primary_depth`, at the camera's `near_plane`
+    write_primary_depth: uint
+    near_plane: float
+    split_pad: uint
 
     /// the camera the previous frame of this layer was traced from, which motion vectors reproject into
     previous_camera: camera_record
@@ -130,6 +133,9 @@ binding traced:
 
     /// Every light the trace samples, grouped by path — what `sv::pt_light_table` builds.
     lights: buffer[light_record]
+
+    /// The clip-space depth of the first primary hit per pixel, 1 where it escaped, written while `frame.write_primary_depth` is set.
+    primary_depth: out image_2d[.r32_float]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //

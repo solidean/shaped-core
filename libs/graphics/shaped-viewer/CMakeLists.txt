@@ -43,6 +43,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/pathtrace_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
+    src/shaped-viewer/rendering/depth_fill_routine.cc
     src/shaped-viewer/rendering/view_renderer.cc
     src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
@@ -118,6 +119,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/rendering/pathtrace_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
+    src/shaped-viewer/rendering/depth_fill_routine.hh
     src/shaped-viewer/rendering/view_renderer.hh
     src/shaped-viewer/rendering/viewer_renderer.hh
     src/shaped-viewer/rendering/shaders.hh
@@ -172,6 +174,7 @@ sc_add_shader_package(
         module:tracer
         tracer_pipeline.sgl:*
         layout.sgl:*
+        depth_fill.sgl:*
 )
 
 # The examples corpus: the viewer as a caller actually reaches for it.
