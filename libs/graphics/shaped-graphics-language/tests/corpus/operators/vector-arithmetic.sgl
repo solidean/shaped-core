@@ -17,6 +17,8 @@ test:
     10 - id == int3(5, 17, 4)
     id * 3 + 1 == int3(16, -20, 19)
     12 / int2(5, -4) == int2(2, -3)
+    -id == int3(-5, 7, -6)
+    -id.xy == 0 - id.xy
 
 test:
     let u = uint2(6u, 9u)
@@ -41,6 +43,19 @@ test (vec3(1.0, 2.0, 3.0) + 1.0).x == 2.0
 // a constant division by a zero component has no value, from either side
 @expect(error = "constant-without-value")
 test (int2(4, 4) / 0).x == 0
+
+// a signed vector negates per component, wrapping the most negative int at run time as its scalar does
+test:
+    let low = int2(-2147483647 - 1, 1)
+    -low == int2(-2147483647 - 1, -1)
+
+// and a constant one is refused there, as WGSL refuses it
+@expect(error = "constant-not-representable")
+test (-int2(-2147483647 - 1, 1)).y == -1
+
+// a uint vector has no minus
+@expect(error = "no-matching-overload")
+test (-uint2(1u, 2u)).x == 0u
 
 // min, max and clamp take the integer vectors, and abs and sign the signed ones (CHK-359)
 test:

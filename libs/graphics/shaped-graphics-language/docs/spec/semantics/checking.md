@@ -625,7 +625,7 @@ The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2
 `vec3`, `pos3` and `hpos4` keep their own arithmetic, since `pos3 + 0.5` means nothing.
 
 * **CHK-358** Every arithmetic operator, `+`, `-`, `*`, `/` and `%`, takes a plain vector and its element type on either side, and is componentwise ([why](why/checking.md#chk-358)).
-  So do `&`, `|`, `^`, `<<` and `>>` for the integer families, so `id.xy % 2` and `mask >> 4` need no construction.
+  So do `&`, `|`, `^`, `<<` and `>>` for the integer families, so `id.xy % 2` and `mask >> 4` need no construction, and unary `-` for the signed families.
 * **CHK-359** `min`, `max` and `clamp` take every integer vector family as they take the float ones, and `abs` and `sign` take the signed ones.
 * **CHK-360** Every vector of the prelude has a one-value constructor, `float3(x)`, whose every component is `x`; it is a function of the vector's name beside its synthesized constructor (CHK-240).
 * **CHK-361** `fwidth(x)` is `abs(ddx(x)) + abs(ddy(x))`, and like `ddx` it is `@stages(.pixel)` and takes derivatives (CHK-282).

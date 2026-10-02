@@ -390,8 +390,7 @@ void sgl::builtins::register_sync(registry& r)
     r.add_comment("// The uniform load, a barrier that then reads workgroup memory and gives every thread the same "
                   "value "
                   "(CHK-374).");
-    for (auto const type : {"float", "float2", "float3", "float4", "int", "int2", "int3", "int4", "uint", "uint2",
-                            "uint3", "uint4", "bool", "bool2", "bool3", "bool4", "vec3", "pos3", "hpos4"})
+    for (auto const type : impl::k_selectable)
         r.add(function_record{
             .signature = cc::format("@stages(.compute) fun workgroup_uniform_load(m: {0}) -> {0}", type),
             .doc = "/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.",

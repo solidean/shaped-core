@@ -38,6 +38,12 @@ void register_raytracing(registry& r);
 /// What the topic files share.
 namespace sgl::builtins::impl
 {
+/// Every builtin type a value of passes through `select` whole, and through `workgroup_uniform_load` (CHK-365, CHK-374).
+inline constexpr cc::string_view k_selectable[]
+    = {"float", "float2", "float3", "float4", "int",    "int2",   "int3",    "int4",    "uint",   "uint2", "uint3",
+       "uint4", "bool",   "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half",   "half2", "half3",
+       "half4", "short",  "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4"};
+
 /// `@pure @operator("op") fun name(a: lhs, b: rhs) -> result`, written `a op b` by every target.
 void add_infix(registry& r,
                cc::string_view op,

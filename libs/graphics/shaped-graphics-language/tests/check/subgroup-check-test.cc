@@ -114,6 +114,27 @@ TEST("sgl check - workgroup_uniform_load makes a branch on workgroup memory unif
               .contains("workgroup_uniform_load waits for every thread of the workgroup"));
 }
 
+TEST("sgl check - workgroup_uniform_load takes every type select takes, a 16-bit one with its feature")
+{
+    // CHK-374 and CHK-382
+    constexpr auto source = "{}"
+                            "binding work:\n"
+                            "    output: mut buffer[float]\n"
+                            "\n"
+                            "@workgroup binding spd:\n"
+                            "    scale: half2\n"
+                            "    count: ushort\n"
+                            "\n"
+                            "@compute(64) fun cs(@local_thread_index li: int){{work, spd}}:\n"
+                            "    let s = workgroup_uniform_load(spd.scale)\n"
+                            "    let n = workgroup_uniform_load(spd.count)\n"
+                            "    work.output[li] = (s.x as float) + ((n as uint) as float)\n";
+    CHECK(reports_for(cc::format(source, "require shader_f16\nrequire shader_int16\n\n")) == "");
+    auto const lacking = reports_for(cc::format(source, ""));
+    CHECK(lacking.contains("feature-not-declared"));
+    CHECK(!lacking.contains("no-matching-overload"));
+}
+
 TEST("sgl check - workgroup_uniform_load reads a member of workgroup memory, and nothing else")
 {
     auto const loaded = [](cc::string_view argument)

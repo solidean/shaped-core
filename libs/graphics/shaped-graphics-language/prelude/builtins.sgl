@@ -671,7 +671,8 @@
 @builtin @pure @operator("/") fun divide_scalar_ushort4(a: ushort, b: ushort4) -> ushort4
 @builtin @pure @operator("%") fun remainder_scalar_ushort4(a: ushort, b: ushort4) -> ushort4
 
-// what the integers share with the floats, componentwise (CHK-359); `sign` of an int is an int
+// what the integers share with the floats, componentwise (CHK-359); `sign` of an int is an int,
+// and the signed families negate, wrapping as their scalars do (CHK-358)
 @builtin @pure fun sign(x: int) -> int
 @builtin @pure fun sign(x: short) -> short
 @builtin @pure fun min(a: int2, b: int2) -> int2
@@ -679,16 +680,19 @@
 @builtin @pure fun clamp(x: int2, low: int2, high: int2) -> int2
 @builtin @pure fun abs(x: int2) -> int2
 @builtin @pure fun sign(x: int2) -> int2
+@builtin @pure @operator("-") fun negate_int2(x: int2) -> int2
 @builtin @pure fun min(a: int3, b: int3) -> int3
 @builtin @pure fun max(a: int3, b: int3) -> int3
 @builtin @pure fun clamp(x: int3, low: int3, high: int3) -> int3
 @builtin @pure fun abs(x: int3) -> int3
 @builtin @pure fun sign(x: int3) -> int3
+@builtin @pure @operator("-") fun negate_int3(x: int3) -> int3
 @builtin @pure fun min(a: int4, b: int4) -> int4
 @builtin @pure fun max(a: int4, b: int4) -> int4
 @builtin @pure fun clamp(x: int4, low: int4, high: int4) -> int4
 @builtin @pure fun abs(x: int4) -> int4
 @builtin @pure fun sign(x: int4) -> int4
+@builtin @pure @operator("-") fun negate_int4(x: int4) -> int4
 @builtin @pure fun min(a: uint2, b: uint2) -> uint2
 @builtin @pure fun max(a: uint2, b: uint2) -> uint2
 @builtin @pure fun clamp(x: uint2, low: uint2, high: uint2) -> uint2
@@ -703,16 +707,19 @@
 @builtin @pure fun clamp(x: short2, low: short2, high: short2) -> short2
 @builtin @pure fun abs(x: short2) -> short2
 @builtin @pure fun sign(x: short2) -> short2
+@builtin @pure @operator("-") fun negate_short2(x: short2) -> short2
 @builtin @pure fun min(a: short3, b: short3) -> short3
 @builtin @pure fun max(a: short3, b: short3) -> short3
 @builtin @pure fun clamp(x: short3, low: short3, high: short3) -> short3
 @builtin @pure fun abs(x: short3) -> short3
 @builtin @pure fun sign(x: short3) -> short3
+@builtin @pure @operator("-") fun negate_short3(x: short3) -> short3
 @builtin @pure fun min(a: short4, b: short4) -> short4
 @builtin @pure fun max(a: short4, b: short4) -> short4
 @builtin @pure fun clamp(x: short4, low: short4, high: short4) -> short4
 @builtin @pure fun abs(x: short4) -> short4
 @builtin @pure fun sign(x: short4) -> short4
+@builtin @pure @operator("-") fun negate_short4(x: short4) -> short4
 @builtin @pure fun min(a: ushort2, b: ushort2) -> ushort2
 @builtin @pure fun max(a: ushort2, b: ushort2) -> ushort2
 @builtin @pure fun clamp(x: ushort2, low: ushort2, high: ushort2) -> ushort2
@@ -2254,6 +2261,30 @@
 @builtin @stages(.compute) fun workgroup_uniform_load(m: pos3) -> pos3
 /// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
 @builtin @stages(.compute) fun workgroup_uniform_load(m: hpos4) -> hpos4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: half) -> half
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: half2) -> half2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: half3) -> half3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: half4) -> half4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: short) -> short
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: short2) -> short2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: short3) -> short3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: short4) -> short4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ushort) -> ushort
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ushort2) -> ushort2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ushort3) -> ushort3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ushort4) -> ushort4
 
 // Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.
 // Each is relaxed, and each but a store gives the value before; a vertex stage has none (CHK-296).

@@ -184,6 +184,12 @@ void abs_ints(leaves in, result& out)
     for (auto const& x : in)
         out.push_back(scalar::of(x.as_int() < 0 ? i32(0u - x.bits) : x.as_int()));
 }
+/// Wraps where it negates the most negative int, as every target does.
+void negate_ints(leaves in, result& out)
+{
+    for (auto const& x : in)
+        out.push_back(scalar::of(i32(0u - x.bits)));
+}
 void sign_ints(leaves in, result& out)
 {
     for (auto const& x : in)
@@ -476,7 +482,8 @@ void sgl::builtins::register_vector_math(registry& r)
         }
     }
 
-    r.add_comment("// what the integers share with the floats, componentwise (CHK-359); `sign` of an int is an int");
+    r.add_comment("// what the integers share with the floats, componentwise (CHK-359); `sign` of an int is an int,\n"
+                  "// and the signed families negate, wrapping as their scalars do (CHK-358)");
     auto const add_sign = [&](cc::string_view type)
     {
         add_function(r, "sign", {"x", type}, type, sign_ints,
@@ -499,6 +506,8 @@ void sgl::builtins::register_vector_math(registry& r)
         add_function(r, "abs", {"x", type}, type, abs_ints);
         constant_rule(type, negation_unrepresentable);
         add_sign(type);
+        add_negate(r, named("negate", type), type, negate_ints);
+        constant_rule(type, negation_unrepresentable);
     }
 
     r.add_comment("// two vectors compared: an ordering per component (CHK-362), and `==` and `!=` of the whole "
@@ -545,11 +554,7 @@ void sgl::builtins::register_vector_math(registry& r)
         add_function(r, "any", {"m", type}, "bool", any_of, {}, "/// Whether some component of `m` is true.");
         add_function(r, "all", {"m", type}, "bool", all_of, {}, "/// Whether every component of `m` is true.");
     }
-    cc::string_view const selected[]
-        = {"float", "float2", "float3", "float4", "int",    "int2",   "int3",    "int4",    "uint",   "uint2", "uint3",
-           "uint4", "bool",   "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half",   "half2", "half3",
-           "half4", "short",  "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4"};
-    for (auto const type : selected)
+    for (auto const type : k_selectable)
     {
         auto const width = type.back() >= '2' && type.back() <= '4' ? u32(type.back() - '0') : u32(0);
         add_function(r, "select", {"cond", "bool", "if_true", type, "if_false", type}, type, select_whole,
