@@ -89,7 +89,7 @@ fun srgb_to_linear(c: float) -> float:
         color = linear
         em = em
         banding = v.banding
-        glyph = int4((v.glyph.x & 0xffff) as int, (v.glyph.x >> 16) as int, (v.glyph.y & 0xffff) as int, (v.glyph.y >> 16) as int)
+        glyph = slug.glyph_of(v.glyph)
     }
 
 @pixel fun main_ps(p: slug_varyings){slug.tables, slug_draw} -> slug_target:

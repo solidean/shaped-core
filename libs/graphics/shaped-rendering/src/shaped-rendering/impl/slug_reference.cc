@@ -188,4 +188,38 @@ f32 slug_reference_coverage(slug_atlas const& atlas,
         filled = saturate(raw);
     return weight_boost ? tg::sqrt(filled) : filled;
 }
+
+bool slug_reference_contains(slug_atlas const& atlas, slug_instance const& instance, tg::pos2f em)
+{
+    auto const glyph_x = int(instance.glyph_location & 0xffff);
+    auto const glyph_y = int(instance.glyph_location >> 16);
+    auto const glyph_w = int(instance.band_info >> 16);
+    auto const band_y = cc::clamp(int(em[1] * instance.banding[1] + instance.banding[3]), 0, glyph_w & 0xff);
+
+    auto const hband = band_at(atlas, glyph_x + band_y, glyph_y);
+    auto const x = glyph_x + int(hband.y);
+    auto const hloc = tg::pos2i(x & 4095, glyph_y + (x >> 12));
+
+    auto winding = 0;
+    for (auto i = 0; i < int(hband.x); ++i)
+    {
+        auto const entry = band_at(atlas, hloc[0] + i, hloc[1]);
+        auto const a = curve_at(atlas, int(entry.x), int(entry.y));
+        auto const b = curve_at(atlas, int(entry.x) + 1, int(entry.y));
+        auto const p12 = texel4{a.x - em[0], a.y - em[1], a.z - em[0], a.w - em[1]};
+        auto const p3x = b.x - em[0];
+        auto const p3y = b.y - em[1];
+        if (cc::max(cc::max(p12.x, p12.z), p3x) < 0.0f)
+            break;
+        auto const code = root_code(p12.y, p12.w, p3y);
+        if (code == 0)
+            continue;
+        auto const r = solve(p12, p3x, p3y, false);
+        if ((code & 1) != 0 && r[0] > 0.0f)
+            ++winding;
+        if (code > 1 && r[1] > 0.0f)
+            --winding;
+    }
+    return (glyph_w & 0x1000) != 0 ? (winding & 1) != 0 : winding != 0;
+}
 } // namespace sr::impl

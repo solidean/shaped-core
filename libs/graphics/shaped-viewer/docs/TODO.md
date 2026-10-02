@@ -69,7 +69,7 @@ What is left is the interaction on top of it, in dependency order:
   The composited image carries no depth, so a label meant to lie on a face would show through when the face turns away.
   Occlusion needs the trace to write a primary-hit depth target, which `sr::slug_routine` already tests against when a scope has one.
 - **Shapes on traced geometry wait for the tracer's SGL port.**
-  SGL module `slug`'s `coverage` takes the pixel footprint as an argument, so a hit can pass one from its ray cone; the tracer is HLSL today.
+  Module `slug` traces them already, as quads `slug.decide` cuts and as decals at a hit (libs/graphics/shaped-rendering/docs/slug.md); the tracer is HLSL today.
 - **A traced layer has no alpha.** `pathtrace.hlsl`'s raygen writes none, so a `scene_3d` layer is forced to
   `layer_blend::replace`. Writing coverage into `.a` is what would let a traced layer composite `over` another.
   Until then `view_ref::add_scene` can express two scene layers on one view but only the last is visible.

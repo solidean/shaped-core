@@ -7,6 +7,7 @@
 //
 // A module, so any shader can cover a shape: sr::slug_routine's quads `use slug`, and so can a mesh's pixel shader that
 // carries an em coordinate like a UV, drawing the shape as part of its surface.
+// A trace reaches it too: `decide` is the any-hit that cuts the quads sr::build_slug_blas builds down to their shapes.
 // The host binds `slug.tables` from the atlas as one group, `sgl_modules::slug::tables`, shared by every pipeline.
 //
 // `glyph` is the reference's packed per-shape data:
@@ -18,6 +19,24 @@ module slug
 binding tables:
     curves: texture_2d[float4]
     bands: texture_2d[uint4]
+
+/// One shape instance as a buffer element: sr::slug_instance byte for byte, so a trace reads the array the routine draws.
+/// `glyph` is the packed form, `x | y << 16` and `z | w << 16`, which `glyph_of` unpacks.
+struct shape_instance:
+    em_to_object: float4
+    origin: float2
+    em_bounds: float4
+    banding: float4
+    glyph: uint2
+    color: uint
+
+// The records a trace's quads were built from, as sr::upload_slug_records uploads them.
+binding shapes:
+    instances: buffer[shape_instance]
+
+/// The per-shape data `coverage` takes, from an instance's two packed words.
+fun glyph_of(packed: uint2) -> int4:
+    return int4((packed.x & 0xffff) as int, (packed.x >> 16) as int, (packed.y & 0xffff) as int, (packed.y >> 16) as int)
 
 /// Which of a curve's two roots contribute, from the signs of its three control points' heights above the ray.
 /// Bit 0 is the first root and bit 8 the second.
@@ -148,6 +167,68 @@ fun coverage(em: float2, banding: float4, glyph: int4, weight_boost: bool){table
     let em_per_pixel = abs(ddx(em)) + abs(ddy(em))
     return coverage(em, em_per_pixel, banding, glyph, weight_boost)
 
+/// Whether `em` lies inside the shape `glyph` names: a point test, so its edge is hard.
+/// It is `coverage`'s horizontal ray with no footprint, each crossing right of the sample counting whole.
+/// A tracer antialiases it with the rays a pixel casts, and needs no footprint for it.
+fun contains(em: float2, banding: float4, glyph: int4){tables} -> bool:
+    let band_y = clamp((em.y * banding.y + banding.w) as int, 0, glyph.w & 0xff)
+    let glyph_location = int2(glyph.x, glyph.y)
+    let origin = float4(em.x, em.y, em.x, em.y)
+
+    let mut winding = 0
+    let hband = tables.bands.load(int2(glyph_location.x + band_y, glyph_location.y))
+    let hband_location = band_location(glyph_location, hband.y)
+    for i in 0 ..< (hband.x as int):
+        let entry = tables.bands.load(int2(hband_location.x + i, hband_location.y))
+        let curve_location = int2(entry.x as int, entry.y as int)
+        let p12 = tables.curves.load(curve_location) - origin
+        let next = tables.curves.load(int2(curve_location.x + 1, curve_location.y))
+        let p3 = float2(next.x - em.x, next.y - em.y)
+        if max(max(p12.x, p12.z), p3.x) < 0.0 => break
+        let code = root_code(p12.y, p12.w, p3.y)
+        if code != 0:
+            let r = solve_horizontal(p12, p3)
+            if (code & 1) != 0 and r.x > 0.0 => winding += 1
+            if code > 1 and r.y > 0.0 => winding -= 1
+
+    return case (glyph.w & 0x1000) != 0:
+        true => (winding & 1) != 0
+        false => winding != 0
+
+/// Where in em space a trace met `shape`'s quad, from the triangle it met and the barycentrics there.
+/// The quad is sr::build_slug_blas': triangle 2i is (min, (max.x, min.y), max), triangle 2i + 1 (min, max, (min.x, max.y)).
+fun quad_em(shape: shape_instance, primitive_index: int, barycentrics: float3) -> float2:
+    let lo = float2(shape.em_bounds.x, shape.em_bounds.y)
+    let hi = float2(shape.em_bounds.z, shape.em_bounds.w)
+    let is_first = (primitive_index & 1) == 0
+    let second = case is_first:
+        true => float2(hi.x, lo.y)
+        false => hi
+    let third = case is_first:
+        true => hi
+        false => float2(lo.x, hi.y)
+    return lo * barycentrics.x + second * barycentrics.y + third * barycentrics.z
+
+/// The record triangle `primitive_index` of a quad run of sr::build_slug_blas was built from, its run's records starting
+/// at `first` in `slug.shapes`.
+/// `first` is the scene's to know, typically a field of its own instance table read at the instance's id.
+fun shape_of(first: int, primitive_index: int){shapes} -> shape_instance:
+    return shapes.instances[first + primitive_index / 2]
+
+/// The any-hit for a quad of sr::build_slug_blas whose record is `shape`: accept where the ray met the shape itself.
+/// One function for both forms of a trace: an inline trace's decision calls it, and a pipeline's `@any_hit` wraps it,
+/// once per payload type, since a pipeline stage carries its ray type's payload.
+/// Deciding that a candidate is a slug quad at all is the caller's, which is what lets other non-opaque geometry share the
+/// structure.
+fun decide(c: triangle_candidate, shape: shape_instance){tables} -> hit_decision:
+    let em = quad_em(shape, c.primitive_index, c.barycentrics)
+    if contains(em, shape.banding, glyph_of(shape.glyph)) => return hit_decision.accept
+    return hit_decision.ignore
+
+/// The same, with the record read from `slug.shapes`, its run's records starting at `first`.
+fun decide(c: triangle_candidate, first: int){tables, shapes} -> hit_decision:
+    return decide(c, shape_of(first, c.primitive_index))
+
 // ---- tests: run when this file is compiled on its own, as sr's slug-module test does ----
 
 // The root code reads the signs of a curve's three heights: bit 0 when the first root counts, bit 8 the second.
@@ -187,3 +268,17 @@ test combine(1.0, 1.0, 1.0, 1.0, false, false) == 1.0
 test combine(2.0, 2.0, 1.0, 1.0, false, false) == 1.0
 test combine(2.0, 2.0, 1.0, 1.0, true, false) == 0.0
 test combine(0.25, 0.25, 1.0, 1.0, false, true) == 0.5
+
+// The packed words unpack to the band header's x and y, the last vertical band, and the last horizontal one with its flags.
+test:
+    let g = glyph_of(uint2(0x0007'0005, 0x1003'0002))
+    g.x == 5 and g.y == 7 and g.z == 2 and g.w == 0x1003
+
+// A quad over the em box (1, 2) to (5, 10): each triangle's corners where the barycentrics put all weight on one of them.
+test:
+    let s = shape_instance(float4(1.0, 0.0, 0.0, 1.0), float2(0.0, 0.0), float4(1.0, 2.0, 5.0, 10.0), float4(0.0, 0.0, 0.0, 0.0), uint2(0, 0), 0)
+    let a = quad_em(s, 0, float3(1.0, 0.0, 0.0))
+    let b = quad_em(s, 0, float3(0.0, 1.0, 0.0))
+    let c = quad_em(s, 3, float3(0.0, 0.0, 1.0))
+    let d = quad_em(s, 3, float3(0.0, 1.0, 0.0))
+    a.x == 1.0 and a.y == 2.0 and b.x == 5.0 and b.y == 2.0 and c.x == 1.0 and c.y == 10.0 and d.x == 5.0 and d.y == 10.0
