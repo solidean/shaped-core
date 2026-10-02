@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
@@ -30,6 +31,7 @@ public:
                    bool owns_image = true)
       : sg::raw_texture(desc),
         _ctx(ctx),
+        _live(ctx_base_of(ctx)),
         _creation_epoch(created_in),
         _image(image),
         _memory(memory),
@@ -191,8 +193,9 @@ public:
         _access.lock([&](vulkan_texture_access& a) { a.discard(slot); });
     }
 
-    vulkan_context& _ctx;      // creating context — outlives this texture
-    sg::epoch _creation_epoch; // epoch this texture was created in (immutable identity / diagnostics)
+    vulkan_context& _ctx;             // creating context — outlives this texture
+    sg::context::live_resource _live; // counts this resource alive against _ctx, construction to destruction
+    sg::epoch _creation_epoch;        // epoch this texture was created in (immutable identity / diagnostics)
 
     /// Process-unique for the life of the context, and the key the image view cache is built on.
     /// The address is NOT a usable identity there: it is reusable the moment this object dies, while the cache

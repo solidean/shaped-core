@@ -5,6 +5,7 @@
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_resource_access.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
@@ -26,7 +27,7 @@ public:
                   sg::texture_description const& desc,
                   MTL::Texture* texture,
                   sg::memory_heap_handle heap = nullptr)
-      : sg::raw_texture(desc), _ctx(ctx), _texture(texture), _heap(cc::move(heap))
+      : sg::raw_texture(desc), _ctx(ctx), _live(ctx_base_of(ctx)), _texture(texture), _heap(cc::move(heap))
     {
     }
 
@@ -57,6 +58,7 @@ private:
     void release_storage() const;
 
     metal_context& _ctx;
+    sg::context::live_resource _live; // counts this resource alive against _ctx, construction to destruction
     mutable MTL::Texture* _texture = nullptr;
     sg::memory_heap_handle _heap;
     mutable cc::mutex<metal_resource_access> _access;

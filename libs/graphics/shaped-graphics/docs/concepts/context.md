@@ -76,6 +76,8 @@ Everything about what it closes, what becomes reclaimable, and how `allowed_in_f
 
 **A context must outlive every command list and resource it created.**
 That is not refcounted for you: a `raw_buffer_handle` does not keep its context alive, so holding one past the context's destruction is a use-after-free.
+It is checked rather than trusted: every backend texture and buffer counts itself alive against its context, and the context's destructor asserts the count is zero.
+Without that check, the late release pushes onto a deletion list under a mutex in freed memory, which hangs or corrupts depending on what reused the memory.
 
 `shutdown()` releases all backend state and leaves the context unusable.
 It is idempotent, and a backend's destructor runs it for you — call it yourself only to release the device earlier than the handle goes away.

@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/stamp.hh>
@@ -613,6 +614,11 @@ context::~context()
     // The backend destructor calls shutdown() before this base destructor runs.
     // Reaching here not shut down means a lifetime/order bug — e.g. a context torn down through a path that skipped it.
     CC_ASSERT(_is_shut_down, "context must be shut down before destruction");
+
+    // A resource still alive here releases into this context after it is freed, which hangs or corrupts rather than fails.
+    CC_ASSERTF(_live_resources.load() == 0,
+               "{} textures and buffers outlive their context; release them before it is destroyed",
+               _live_resources.load());
 }
 
 void context::shutdown()

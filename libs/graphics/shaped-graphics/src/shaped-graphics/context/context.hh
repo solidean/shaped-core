@@ -333,6 +333,24 @@ public:
 
     [[nodiscard]] bool is_shut_down() const { return _is_shut_down; }
 
+    /// One backend texture or buffer, counted alive against its context from construction to destruction.
+    /// A backend resource holds one as a member, so every release path counts exactly once.
+    /// The context must outlive every resource created from it: its destructor asserts the count is zero.
+    class live_resource
+    {
+    public:
+        explicit live_resource(context& ctx) : _ctx(&ctx) { _ctx->_live_resources.fetch_add(1); }
+        ~live_resource() { _ctx->_live_resources.fetch_sub(1); }
+        live_resource(live_resource const&) = delete;
+        live_resource& operator=(live_resource const&) = delete;
+
+    private:
+        context* _ctx = nullptr;
+    };
+
+    /// How many backend textures and buffers created from this context are alive.
+    [[nodiscard]] isize live_resource_count() const { return _live_resources.load(); }
+
 protected:
     /// Takes the device lifecycle lock until this context is fully destroyed, members included.
     /// A backend's destructor calls it first; see impl/device_lifecycle.hh for the driver deadlock it exists for.
@@ -774,6 +792,9 @@ protected:
     bool _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
     cc::atomic<bool> _render_pass_split_warnings = true;
+
+    // What live_resource counts; a texture or buffer outliving the context would release into freed memory.
+    cc::atomic<isize> _live_resources = 0;
 
     // The split causes already warned about; command lists record on any thread.
     cc::mutex<cc::vector<cc::string>> _warned_split_causes;

@@ -6,6 +6,7 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 
@@ -34,6 +35,7 @@ public:
                 sg::memory_heap_handle heap = nullptr)
       : sg::raw_buffer(size_in_bytes, usage),
         _ctx(ctx),
+        _live(ctx_base_of(ctx)),
         _creation_epoch(created_in),
         _resource(cc::move(resource)),
         _heap(cc::move(heap))
@@ -65,6 +67,7 @@ public:
     dx12_completion_group_handle _download_group;
 
     dx12_context& _ctx;                       // creating context — outlives this buffer
+    sg::context::live_resource _live;         // counts this resource alive against _ctx, construction to destruction
     sg::epoch _creation_epoch;                // epoch this buffer was created in (identity / diagnostics)
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
     sg::memory_heap_handle _heap;             // backing heap for a placed buffer; null when dedicated

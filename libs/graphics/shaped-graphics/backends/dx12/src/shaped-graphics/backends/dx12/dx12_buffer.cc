@@ -7,6 +7,11 @@
 
 namespace sg::backend::dx12
 {
+sg::context& ctx_base_of(dx12_context& ctx)
+{
+    return ctx;
+}
+
 D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usages usage)
 {
     CC_ASSERT(size_in_bytes > 0, "buffer resource desc requires a positive size");

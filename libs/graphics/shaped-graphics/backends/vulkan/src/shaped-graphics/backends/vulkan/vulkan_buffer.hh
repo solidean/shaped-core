@@ -6,6 +6,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_buffer_access.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 
@@ -17,6 +18,9 @@ namespace sg::backend::vulkan
 
 /// A completion group from the context's pool, for the same reason.
 [[nodiscard]] vulkan_completion_group_handle ctx_acquire_completion_group(vulkan_context& ctx);
+
+/// The context as sg sees it, for the same reason.
+[[nodiscard]] sg::context& ctx_base_of(vulkan_context& ctx);
 } // namespace sg::backend::vulkan
 
 /// Vulkan implementation of sg::raw_buffer.
@@ -34,6 +38,7 @@ public:
                   sg::memory_heap_handle heap = nullptr)
       : sg::raw_buffer(size_in_bytes, usage),
         _ctx(ctx),
+        _live(ctx_base_of(ctx)),
         _creation_epoch(created_in),
         _buffer(buffer),
         _memory(memory),
@@ -118,8 +123,9 @@ public:
     /// Both expiry and destruction run it, and whichever comes first owns the release.
     void release_storage() const;
 
-    vulkan_context& _ctx;      // creating context — outlives this buffer
-    sg::epoch _creation_epoch; // epoch this buffer was created in (immutable identity / diagnostics)
+    vulkan_context& _ctx;             // creating context — outlives this buffer
+    sg::context::live_resource _live; // counts this resource alive against _ctx, construction to destruction
+    sg::epoch _creation_epoch;        // epoch this buffer was created in (immutable identity / diagnostics)
     // Mutable because release_storage() is const: expiry is a lifetime event on a const handle, the same reason
     // sg::raw_buffer::expire() is const.
     mutable VkBuffer _buffer = VK_NULL_HANDLE;

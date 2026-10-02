@@ -1,3 +1,5 @@
+#include "dx12-test-common.hh"
+
 #include <clean-core/platform/environment.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
@@ -115,4 +117,21 @@ TEST("sg dx12 - SC_DX12_ADAPTER=hardware hides WARP from every request", exclusi
     }
     else
         CHECK(fallback.has_error());
+}
+
+TEST("sg dx12 - a context counts the textures and buffers alive against it")
+{
+    // A context of its own: no other test's resources move the count.
+    // The count is what the context's destructor asserts is zero, since a resource outliving it releases into freed memory.
+    auto const ctx = dx12::make_fresh_context();
+    if (ctx == nullptr)
+        SKIP("no dx12 adapter");
+    auto const before = ctx->live_resource_count();
+    {
+        auto const buffer = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::copy_dst);
+        auto const texture = ctx->persistent.create_texture_2d(
+            {.format = sg::pixel_format::rgba8_unorm, .width = 4, .height = 4, .usage = sg::texture_usage::copy_dst});
+        CHECK(ctx->live_resource_count() == before + 2);
+    }
+    CHECK(ctx->live_resource_count() == before);
 }

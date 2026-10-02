@@ -2,6 +2,7 @@
 
 #include <shaped-graphics/backends/webgpu/fwd.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_common.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 
 /// WebGPU implementation of sg::raw_buffer.
@@ -32,5 +33,6 @@ private:
     void release_storage() const;
 
     webgpu_context& _ctx;
-    mutable wgpu_buffer _buffer; // mutable: expiry is a const lifetime hook
+    sg::context::live_resource _live; // counts this resource alive against _ctx, construction to destruction
+    mutable wgpu_buffer _buffer;      // mutable: expiry is a const lifetime hook
 };

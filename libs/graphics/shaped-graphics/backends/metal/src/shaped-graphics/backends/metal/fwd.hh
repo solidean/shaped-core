@@ -63,3 +63,10 @@ using metal_raytracing_pipeline_handle = std::shared_ptr<metal_raytracing_pipeli
 /// It shadows sg's, so a backend message is never mistaken for a portable one.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace sg::backend::metal
+
+namespace sg::backend::metal
+{
+/// The context as sg sees it, for a header that cannot see metal_context's definition.
+/// Defined in metal_buffer.cc, where the context is complete.
+[[nodiscard]] sg::context& ctx_base_of(metal_context& ctx);
+} // namespace sg::backend::metal
