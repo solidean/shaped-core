@@ -932,10 +932,11 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
 
 * **CHK-376** The **subgroup operations** are the builtins of the table below; each needs `subgroups` (CHK-322) and is `@stages(.pixel, .compute)` ([why](why/checking.md#chk-376)).
   A number is a numeric scalar of the prelude, and every operation that takes a number takes a vector of numbers too, componentwise.
+  A lane that names no invocation of the subgroup, at run time, gives a value the language does not specify, whichever operation names it.
 * **CHK-377** A subgroup operation stands only in uniform control flow, judged as CHK-282 judges a barrier, and its result is non-uniform ([why](why/checking.md#chk-377)).
 * **CHK-378** The lane of `subgroup_broadcast` is a constant `int` from 0 to 127, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.
+  So are the mask of `subgroup_shuffle_xor` and the delta of `subgroup_shuffle_up` and `subgroup_shuffle_down`, from 0 to 127, which WGSL and MSL require every invocation to share.
   A constant is an `int` literal or the name of an `int` `const`; 128 is the most invocations a subgroup holds on any target, and WGSL refuses a lane past it.
-  A lane that names no invocation of the subgroup, at run time, gives a value the language does not specify.
 * **CHK-379** A test whose run reaches a subgroup operation is `unsupported-yet` at the call: a run is one invocation, and has no subgroup.
 * **CHK-380** A compute entry point whose inlined body reaches a quad operation has a workgroup of one row, `(x, 1, 1)` with `x` a multiple of 4 ([why](why/checking.md#chk-380)).
   Any other workgroup makes each such call `invalid-entry-point`.

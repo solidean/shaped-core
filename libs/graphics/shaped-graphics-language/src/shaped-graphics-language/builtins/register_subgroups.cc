@@ -302,7 +302,9 @@ void sgl::builtins::register_subgroups(registry& r)
                           .msl_names = k_msl_names},
                 .is_subgroup_operation = true,
                 .is_quad_operation = info.name.starts_with("quad_"),
-                .constant_lane_below = info.op == subgroup_op::broadcast      ? 128
+                .constant_lane_below = info.op == subgroup_op::broadcast || info.op == subgroup_op::shuffle_xor
+                                            || info.op == subgroup_op::shuffle_up || info.op == subgroup_op::shuffle_down
+                                         ? 128
                                      : info.op == subgroup_op::quad_broadcast ? 4
                                                                               : 0,
                 .features = check::feature_set(check::feature::subgroups),

@@ -601,15 +601,18 @@ void checker::judge_constant_arguments(i32 file, ast::expr_id id)
         return;
     auto const written = out.at(r.written);
     auto const slots = out.at(r.slots);
-    // CHK-378: a lane WGSL takes as a constant, within the subgroup or the quad
+    // CHK-378: a lane, mask or delta that every invocation shares, which WGSL and MSL require
     if (callee->constant_lane_below > 0 && slots.size() >= 2 && slots[1] >= 0)
     {
         auto const expr = written[slots[1]].expr;
         auto const lane = constant_index(file, expr);
+        auto const& s = out.at(r.callee);
+        auto const parameters = out.at(out.functions[s.info].parameters);
         if (!lane.has_value() || lane.value() < 0 || lane.value() >= callee->constant_lane_below)
             report(diagnostic_kind::invalid_constant_argument, file, span_of(file, expr),
-                   cc::format("the lane of {} is a constant from 0 to {}: an int literal, or the name of an int const",
-                              callee->name, callee->constant_lane_below - 1));
+                   cc::format("the {} of {} is a constant from 0 to {}: an int literal, or the name of an int const",
+                              parameters.size() >= 2 ? cc::string_view(parameters[1].name) : "lane", callee->name,
+                              callee->constant_lane_below - 1));
     }
     auto is_compare = false;
     for (auto const& n : callee->named_only)

@@ -20,10 +20,12 @@ const wave = 64
     let v = work.input[li]
     let quad_max = max(max(v, quad_swap_x(v)), max(quad_swap_y(v), quad_swap_diagonal(v)))
     let total = subgroup_add(quad_max)
+    // a butterfly step: every invocation shuffles by the same constant mask
+    let pair = total + subgroup_shuffle_xor(total, 1)
     let leader = subgroup_broadcast(total, first_lane)
     let mine = quad_broadcast(v, 3) + subgroup_shuffle(v, lane ^ 1) + subgroup_inclusive_add(v)
     if subgroup_all(v > 0.0) and lane == 0:
-        spd.total = leader + mine
+        spd.total = leader + mine + pair
     // the last workgroup alone goes on, which a uniform load lets every thread of it agree on
     if li == 0:
         spd.finished = work.counter[0].add(1u)
@@ -57,6 +59,15 @@ test:
 
 @expect(error = "invalid-constant-argument")
 test quad_broadcast(1.0, 4) == 1.0
+
+// so is a shuffle's mask or delta, which every invocation shares
+@expect(error = "invalid-constant-argument")
+test:
+    let mask = 1
+    subgroup_shuffle_xor(1.0, mask) == 1.0
+
+@expect(error = "invalid-constant-argument")
+test subgroup_shuffle_down(1.0, 128) == 1.0
 
 // the uniform load reads workgroup memory, and nothing else
 @expect(error = "wrong-kind-of-name")

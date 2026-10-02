@@ -87,6 +87,13 @@ TEST("sgl check - a lane a target takes as a constant is a constant within the s
     CHECK(lane("quad_broadcast(work.input[li], 4)").contains("the lane of quad_broadcast is a constant from 0 to 3"));
     // a shuffle computes its lane at run time
     CHECK(lane("subgroup_shuffle(work.input[li], li + 1)") == "");
+    // a shuffle by a mask or a delta takes it as the broadcast takes its lane
+    CHECK(lane("subgroup_shuffle_xor(work.input[li], 16)") == "");
+    CHECK(lane("subgroup_shuffle_xor(work.input[li], li)")
+              .contains("the mask of subgroup_shuffle_xor is a constant from 0 to 127"));
+    CHECK(lane("subgroup_shuffle_up(work.input[li], li)")
+              .contains("the delta of subgroup_shuffle_up is a constant from 0 to 127"));
+    CHECK(lane("subgroup_shuffle_down(work.input[li], -1)").contains("invalid-constant-argument"));
 }
 
 TEST("sgl check - workgroup_uniform_load makes a branch on workgroup memory uniform")

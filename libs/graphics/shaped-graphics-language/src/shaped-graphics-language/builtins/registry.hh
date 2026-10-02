@@ -239,7 +239,8 @@ struct sgl::builtins::function_record
     bool is_quad_operation = false;
     /// `workgroup_uniform_load`: a barrier whose argument is workgroup memory and whose result is uniform (CHK-374).
     bool is_uniform_load = false;
-    /// The last argument is a lane, a constant `int` from 0 to below this (CHK-378); 0 for a call without one.
+    /// The second argument is a lane, a mask or a delta, a constant `int` from 0 to below this (CHK-378); 0 for a call
+    /// without one.
     i32 constant_lane_below = 0;
     /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
     bool is_nonuniform_mark = false;
