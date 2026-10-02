@@ -290,7 +290,15 @@ public:
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
-        return _inner->compile(desc);
+        // EMIT-4: what the emitted text needs of the compiler that builds it, whoever wired that compiler
+        auto inner = desc;
+        if (_target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan)
+            // a half is `float16_t`, which DXC compiles only with 16-bit types on, and SGL writes no spelling the flag changes
+            inner.dxc_args.push_back(cc::string("-enable-16bit-types"));
+        if (_target == sgl::emit::target::msl)
+            // `coherent(device)` and texture atomics, which a metallib compiles from MSL 3.2 on
+            inner.metal_language_version = "metal3.2";
+        return _inner->compile(inner);
     }
 
     [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override

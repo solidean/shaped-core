@@ -681,7 +681,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   Only the generated struct is promised, unless `@layout(.hlsl)` (today's packing, never reordered) or `@layout(.cpp)` on the binding promises one (CHK-369).
   `.cpp` places a block as C++ places a struct of `tg` types, so a host's own struct fills it; every target then reads it through a memory form.
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
-  HLSL spells a half `float16_t`, never `half`, so slib's DXC edges pass `-enable-16bit-types`; a 16-bit literal is a construction, `half(0.5)`.
+  HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
   A 16-bit value packs at 2 bytes, crosses no stage edge and sits in no `@inline` binding (CHK-387), and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.

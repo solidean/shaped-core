@@ -16,9 +16,9 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-3** Every target's text carries its final addresses: no later pass numbers a binding, a location or an offset.
 * **EMIT-4** No target depends on a flag of the compiler that reads its text for its meaning ([why](why/emitting.md#emit-4)).
   A text means what it says under every flag, or it fails to compile without the one it needs, and never means something else.
-  HLSL that names a 16-bit type needs DXC's `-enable-16bit-types`, which SGL's DXC instances always pass.
+  HLSL that names a 16-bit type needs DXC's `-enable-16bit-types`, which slib's SGL edge passes on every compile.
   MSL that holds a coherent member or an image atomic needs the language version that has it (EMIT-150, EMIT-151).
-  SGL's metal instance compiles a metallib against MSL 3.2, and the driver compiles source at the newest version the device has.
+  slib's SGL edge has a metallib compiled against MSL 3.2, and the driver compiles source at the newest version the device has.
 * **EMIT-5** One emission writes one entry point: that entry point, and exactly the structs and the binding it needs.
 * **EMIT-6** Nothing in the text of one entry point depends on the text of another ([why](why/emitting.md#emit-6)).
 * **EMIT-7** An emitter reads the flat tree, the module's types and the module's bindings, and never an AST.

@@ -124,6 +124,8 @@ The shape the seam is built for, and what is still `[planned]`:
   A group's textures and images are typed views, a bound sampler an `sg::sampler` field, and a `sampler name:` block of the binding one of its `declared_samplers()`.
   Its table carries every fact sg's layouts take from a binding, from `sgl describe`, so the WebGPU layout agrees with the WGSL the group becomes.
   **The MSL arm runs too**: `create_metal_compiler()` is the `metal_lib` inner compiler that `create_sgl_compiler` maps to the `msl` target.
+  **The SGL edge states what its text needs per compile**: `shader_source_description` carries `dxc_args` and `metal_language_version`, and it sets them.
+  So `-enable-16bit-types` reaches DXC and MSL 3.2 a metallib whoever built the inner compiler, and both caches key on them.
   `sgl-cube` draws on metal from the same `cube.sgl` every other backend reads, and `sg metal - a draw from an SGL shader writes what the shader computed` pins the path with a pixel readback.
 - **chains** — a shader is authored in one language but consumed as several backend formats, and the path may need an intermediate hop (`slang -> hlsl -> dxil`).
   That needs a language→language transpile edge and a graph search to replace the direct lookup.

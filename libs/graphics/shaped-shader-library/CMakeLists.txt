@@ -121,6 +121,7 @@ endif()
 # Its target exists on Apple alone, and it needs no toolchain of its own to build — shaped-shader-compiler-msl
 # resolves `xcrun metal` at run time and falls back to MSL source where there is none.
 # This is also what carries an SGL package to metal: create_sgl_compiler(create_metal_compiler()).
+# The SGL edge asks each compile for the MSL version its text needs, so the inner compiler takes no setting.
 if(TARGET shaped-shader-compiler-msl)
     target_sources(shaped-shader-library PRIVATE src/shaped-shader-library/compiler/metal_compiler.cc)
     target_sources(shaped-shader-library

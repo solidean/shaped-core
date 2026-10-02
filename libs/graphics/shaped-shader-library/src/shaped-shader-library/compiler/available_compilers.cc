@@ -30,22 +30,20 @@ void slib::add_available_compilers(shader_library& lib)
     if (dxil.has_value())
     {
         lib.add_compiler(cc::move(dxil.value()));
-        // EMIT-4: SGL writes a half as `float16_t`, which DXC compiles only with 16-bit types enabled
-        if (auto sgl_dxil = create_dxc_compiler(sgl_dxc_options()); sgl_dxil.has_value())
+        if (auto sgl_dxil = create_dxc_compiler(); sgl_dxil.has_value())
             lib.add_compiler(create_sgl_compiler(cc::move(sgl_dxil.value())));
     }
 
     if (spirv.has_value())
     {
         lib.add_compiler(cc::move(spirv.value()));
-        if (auto sgl_spirv = create_dxc_spirv_compiler(sgl_dxc_options()); sgl_spirv.has_value())
+        if (auto sgl_spirv = create_dxc_spirv_compiler(); sgl_spirv.has_value())
             lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value())));
     }
 #endif
 
 #if SLIB_HAS_METAL
     lib.add_compiler(create_metal_compiler());
-    // EMIT-4: SGL writes `coherent(device)` and texture atomics, which a metallib compiles from MSL 3.2 on
-    lib.add_compiler(create_sgl_compiler(create_metal_compiler("metal3.2")));
+    lib.add_compiler(create_sgl_compiler(create_metal_compiler()));
 #endif
 }

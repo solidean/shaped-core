@@ -109,6 +109,12 @@ struct slib::shader_source_description
     /// The module library an SGL source may `use`, which every other language ignores.
     /// A file of it whose path is `label` is the source itself, and is left out.
     cc::span<module_source const> modules;
+    /// Raw DXC flags this compile needs, which a DXC compiler appends and its cache keys on; every other compiler ignores them.
+    /// SGL's edge sets what its text needs, so a caller wiring a DXC compiler behind it passes nothing.
+    cc::vector<cc::string> dxc_args;
+    /// The oldest MSL version the text compiles at, as `-std=` spells it: "metal3.2"; empty takes the toolchain's default.
+    /// Only a metal compiler building a metallib reads it, since the source arm's driver compiles at the device's newest.
+    cc::string metal_language_version;
 };
 
 /// One compilation edge: `source_language` -> `target_format`.

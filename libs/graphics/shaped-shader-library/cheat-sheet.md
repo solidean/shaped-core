@@ -178,17 +178,15 @@ slib::create_dxc_compiler()        // -> cc::result<std::unique_ptr<shader_compi
 slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere DXC does
                                    //   register BOTH: a shader_asset picks by what the context accepts
                                    //   content-keyed cache inside: an identical recompile is free
-slib::create_dxc_compiler(slib::sgl_dxc_options())  // the one behind an SGL edge: -enable-16bit-types, for float16_t
+                                   //   desc.dxc_args are appended to the compile and keyed on; the SGL edge sets its own
 
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>  // every platform, WebAssembly included
 slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl -> wgsl, the source IS the bytecode
                                    //   reflection only: a stage or entry point other than the package's is an async error
 
 #include <shaped-shader-library/compiler/metal_compiler.hh>  // Apple only: SLIB_HAS_METAL says whether it is there
-slib::create_metal_compiler(language_version = {})
-                                   // -> std::unique_ptr<shader_compiler>; metal -> metal_lib
-                                   //   language_version ("metal3.2") reaches a metallib's -std=; source ignores it
-                                   //   add_available_compilers gives the SGL edge "metal3.2", for coherent(device) and texture atomics
+slib::create_metal_compiler()      // -> std::unique_ptr<shader_compiler>; metal -> metal_lib
+                                   //   desc.metal_language_version ("metal3.2") reaches a metallib's -std=; source ignores it
                                    //   the artifact is a metallib, or MSL source where Apple's Metal toolchain is not
                                    //   installed — target_format() is metal_lib either way, and the shader says which
                                    //   compiles through an ssc::msl::shader_cache: async, in memory and in the blob cache
@@ -201,6 +199,8 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
                                    //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL, metal_lib -> MSL
                                    //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
                                    //   compile and reflection are the inner compiler's
+                                   //   each compile hands it what the text needs, so ANY inner compiler will do:
+                                   //   -enable-16bit-types for DXC (float16_t), metal3.2 for a metallib (coherent(device))
                                    //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
                                    //   the binding pass runs behind it: the HLSL names each group, the pass writes registers
 lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build

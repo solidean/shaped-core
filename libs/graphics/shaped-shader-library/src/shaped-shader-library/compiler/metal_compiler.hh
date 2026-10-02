@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/string/string_view.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
 
 #include <memory>
@@ -19,7 +18,6 @@ namespace slib
 /// in memory and in the blob cache like DXC's.
 /// Exists only on Apple targets, which is what `SLIB_HAS_METAL` says.
 ///
-/// `language_version` is the MSL version a metallib is compiled against, as `-std=` spells it: "metal3.2".
-/// Empty takes the toolchain's default; the source arm ignores it, since the driver compiles at the device's newest.
-[[nodiscard]] std::unique_ptr<shader_compiler> create_metal_compiler(cc::string_view language_version = {});
+/// A metallib is compiled at its description's `metal_language_version`, which SGL's edge sets to what its text needs.
+[[nodiscard]] std::unique_ptr<shader_compiler> create_metal_compiler();
 } // namespace slib

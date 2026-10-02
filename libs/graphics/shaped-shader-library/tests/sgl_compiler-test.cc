@@ -57,11 +57,11 @@ void add_sgl_compilers(slib::shader_library& lib)
 #if SLIB_HAS_DXC
     // DXIL reflection needs the Windows SDK, so that edge is Windows' alone.
 #ifdef CC_OS_WINDOWS
-    auto dxil = slib::create_dxc_compiler(slib::sgl_dxc_options());
+    auto dxil = slib::create_dxc_compiler();
     REQUIRE(dxil.has_value());
     lib.add_compiler(slib::create_sgl_compiler(cc::move(dxil.value())));
 #endif
-    auto spirv = slib::create_dxc_spirv_compiler(slib::sgl_dxc_options());
+    auto spirv = slib::create_dxc_spirv_compiler();
     REQUIRE(spirv.has_value());
     lib.add_compiler(slib::create_sgl_compiler(cc::move(spirv.value())));
 #endif
@@ -115,6 +115,41 @@ TEST("slib sgl compiler - over a metal_lib compiler the flattened source is MSL"
     REQUIRE(text.has_value());
     CHECK(text.value().source.contains("using namespace metal;"));
     CHECK(text.value().source.contains("fragment frame main_ps(pixel_input p [[stage_in]])"));
+}
+
+TEST("slib sgl compiler - each compile hands the inner compiler what SGL's text needs, however it was built")
+{
+    auto const settings_through = [](sg::shader_format format, cc::vector<cc::string> caller_args)
+    {
+        auto inner = std::make_unique<slib_test::fake_compiler>(slib::shader_language::hlsl, format);
+        auto const* const seen = inner.get();
+        auto const sgl = slib::create_sgl_compiler(cc::move(inner));
+        (void)sgl->compile({.source = "text", .entry_point = "main", .dxc_args = cc::move(caller_args)});
+        return seen->last_settings();
+    };
+
+    // a half is `float16_t` in HLSL, which DXC compiles only with 16-bit types on
+    for (auto const format : {sg::shader_format::dxil, sg::shader_format::spirv})
+    {
+        auto const s = settings_through(format, {});
+        REQUIRE(s.dxc_args.size() == 1);
+        CHECK(s.dxc_args[0] == "-enable-16bit-types");
+        CHECK(s.metal_language_version.empty());
+    }
+    // a caller's own flags stay, and the edge's come after them
+    auto const kept = settings_through(sg::shader_format::spirv, {cc::string("-Zi")});
+    REQUIRE(kept.dxc_args.size() == 2);
+    CHECK(kept.dxc_args[0] == "-Zi");
+    CHECK(kept.dxc_args[1] == "-enable-16bit-types");
+
+    // `coherent(device)` and texture atomics compile into a metallib from MSL 3.2 on
+    auto const metal = settings_through(sg::shader_format::metal_lib, {});
+    CHECK(metal.dxc_args.empty());
+    CHECK(metal.metal_language_version == "metal3.2");
+
+    auto const wgsl = settings_through(sg::shader_format::wgsl, {});
+    CHECK(wgsl.dxc_args.empty());
+    CHECK(wgsl.metal_language_version.empty());
 }
 
 TEST("slib sgl compiler - the edge is sgl to whatever the inner compiler builds")
@@ -791,7 +826,7 @@ ASYNC_TEST("slib sgl compiler - every compiler that reads a layout finds each fi
     auto edges = cc::vector<std::unique_ptr<slib::shader_compiler>>();
     edges.push_back(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
 #if SLIB_HAS_DXC
-    auto spirv = slib::create_dxc_spirv_compiler(slib::sgl_dxc_options());
+    auto spirv = slib::create_dxc_spirv_compiler();
     REQUIRE(spirv.has_value());
     edges.push_back(slib::create_sgl_compiler(cc::move(spirv.value())));
 #endif
