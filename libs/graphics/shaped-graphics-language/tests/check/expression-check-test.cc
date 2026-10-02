@@ -202,6 +202,10 @@ TEST("sgl check - a number literal with a dot or an exponent is a float, and not
     CHECK(body_reports("let i: int = 1.0\nreturn k\n")
           == "literal-not-representable user:[1.0] int does not hold 1.0 exactly\n");
     CHECK(body_reports("let i = 1'000 + -3\nreturn k\n") == "");
+    // only a number type converts a literal: a vector expected of one is no question of precision
+    CHECK(body_reports("let w: float2 = 1.0\nreturn k\n") == "type-mismatch user:[1.0] expected float2, got float\n");
+    CHECK(body_reports("let mut v = float3(0.0)\nv.xy = 1.0\nreturn k\n")
+          == "type-mismatch user:[1.0] expected float2, got float\n");
     // CHK-61: held in 64 bits, and refused where it keeps a type that does not hold it
     CHECK(body_reports("let i = 3'000'000'000\nreturn k\n")
           == "literal-not-representable user:[3'000'000'000] int does not hold 3'000'000'000\n");

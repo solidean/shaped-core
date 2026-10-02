@@ -2155,9 +2155,15 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
     expected_result = outer_expected;
     if (type == error_type || to == error_type)
         return type;
-    // CHK-253: a number literal where one type is expected converts to it where it holds exactly
+    // CHK-253: a number literal where a number type is expected converts to it where it holds exactly; anything else,
+    // a vector included, is no number and the literal is simply of another type
     auto const number = number_of(file, expr);
-    if (number.is_number && type != to && prelude_type(out.name_of(to)) == to)
+    cc::string_view const number_types[] = {builtins::k_int,   builtins::k_uint,   builtins::k_float,
+                                            builtins::k_short, builtins::k_ushort, builtins::k_half};
+    auto is_number_type = false;
+    for (auto const name : number_types)
+        is_number_type = is_number_type || to == prelude_type(name);
+    if (number.is_number && type != to && is_number_type)
     {
         if (!holds(number, to))
         {
