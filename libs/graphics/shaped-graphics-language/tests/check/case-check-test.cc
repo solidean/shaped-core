@@ -76,9 +76,20 @@ TEST("sgl check - an arm behind _ never runs")
 
 TEST("sgl check - every arm of a case that is a value gives one of its type, or leaves")
 {
+    // with no type expected of it, the first arm decides (CHK-166)
+    CHECK(reports_for(over_light_kind("    let w = case k:\n"
+                                      "        .point => 1.0\n"
+                                      "        _ => 3\n"
+                                      "    return w\n"))
+              .contains("type-mismatch"));
+    // and where one is expected, a literal arm converts to it as a literal does anywhere
     CHECK(reports_for(over_light_kind("    return case k:\n"
                                       "        .point => 1.0\n"
                                       "        _ => 3\n"))
+          == "");
+    CHECK(reports_for(over_light_kind("    return case k:\n"
+                                      "        .point => 1.0\n"
+                                      "        _ => true\n"))
               .contains("type-mismatch"));
 
     // A jump is no value, and an arm may carry one instead: that is what CHK-120 no longer refuses.
@@ -97,11 +108,12 @@ TEST("sgl check - a case arm may be a value block that yields")
                                       "        _ => 0.0\n"))
           == "");
 
-    // The yielded type is the arm's, so a second yield of another type is a mismatch.
-    CHECK(reports_for(over_light_kind("    return case k:\n"
+    // The yielded type is the arm's, so another arm of another type is a mismatch where no type is expected.
+    CHECK(reports_for(over_light_kind("    let w = case k:\n"
                                       "        .point =>:\n"
                                       "            yield 1\n"
-                                      "        _ => 0.0\n"))
+                                      "        _ => 0.0\n"
+                                      "    return w\n"))
               .contains("type-mismatch"));
 }
 

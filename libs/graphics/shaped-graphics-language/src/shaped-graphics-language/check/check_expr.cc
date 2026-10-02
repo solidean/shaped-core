@@ -373,6 +373,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
     auto const file = scope.file;
     auto const& e = ast_of(file).at(expr);
     auto const where = span_of(file, expr);
+    auto const expected = expected_value;
+    expected_value = type_id::none;
     judge_attributes(file, e.attributes, {}, "an expression");
 
     auto const not_yet = [&](cc::string_view construct)
@@ -417,8 +419,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         { return check_cast(scope, expr, node); }, [&](ast::membership const&) { return not_yet("in"); },
         [&](ast::ascription const&) { return not_yet("a type ascription"); },
         [&](ast::range const&) { return not_yet("a range"); }, [&](ast::lambda const&) { return not_yet("a lambda"); },
-        [&](ast::case_expr const& c) { return check_case(scope, expr, c, true); },
-        [&](ast::if_expr const& i) { return check_if_value(scope, i, true); },
+        [&](ast::case_expr const& c) { return check_case(scope, expr, c, true, nullptr, expected); },
+        [&](ast::if_expr const& i) { return check_if_value(scope, i, true, nullptr, expected); },
         [&](ast::loop_expr const& loop)
         {
             auto has_break = false;
@@ -2146,6 +2148,9 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
         return check_array_literal(scope, expr, to);
     auto const outer_expected = expected_result;
     expected_result = to;
+    // CHK-166: an `if` or a `case` value is the type expected of it, which each branch's value converts to
+    if ((node.is<ast::if_expr>() || node.is<ast::case_expr>()) && to != error_type)
+        expected_value = to;
     auto const type = check_expr(scope, expr);
     expected_result = outer_expected;
     if (type == error_type || to == error_type)

@@ -150,6 +150,7 @@ void checker::check_yield(function_scope& scope, source_span where, ast::expr_id
 void checker::check_arm_body(function_scope& scope,
                              ast::body const& body,
                              bool yields_value,
+                             type_id expected,
                              type_id& arm_type,
                              bool& arm_exits,
                              bool& is_failed)
@@ -160,8 +161,9 @@ void checker::check_arm_body(function_scope& scope,
     // A value block of its own, so a `yield` inside it names this arm (AST-107).
     auto const visible = scope.locals.size();
     ++scope.depth;
+    auto const is_expected = yields_value && is_valid(expected);
     if (yields_value)
-        scope.value_blocks.push_back({});
+        scope.value_blocks.push_back({.value = expected, .is_expected = is_expected});
 
     if (body.kind == ast::body_kind::arrow && ast::is_valid(body.value))
     {
@@ -175,6 +177,13 @@ void checker::check_arm_body(function_scope& scope,
             else if (auto const* const b = jump.node.try_as<ast::break_expr>())
                 check_break(scope, jump_where, b->value);
             set_type(file, body.value, void_type);
+        }
+        else if (is_expected)
+        {
+            // a value that does not convert was reported here, and the `if` or the `case` says nothing more of it
+            arm_type = check_expected(scope, body.value, expected);
+            if (arm_type != expected)
+                arm_type = error_type;
         }
         else
             arm_type = check_expr(scope, body.value);
@@ -203,14 +212,18 @@ void checker::check_arm_body(function_scope& scope,
     scope.locals.resize_down_to(visible);
 }
 
-type_id checker::check_if_value(function_scope& scope, ast::if_expr const& node, bool yields_value, flow* ending)
+type_id checker::check_if_value(function_scope& scope,
+                                ast::if_expr const& node,
+                                bool yields_value,
+                                flow* ending,
+                                type_id expected)
 {
     // CHK-375: each condition is judged as an `if` judges one, and each branch as an arm of a `case` value
     if (ending != nullptr)
         *ending = flow::falls_through;
     auto const file = scope.file;
     auto const& ast = ast_of(file);
-    auto result = yields_value ? type_id::none : void_type;
+    auto result = yields_value ? expected : void_type;
     auto is_failed = false;
     auto every_branch_exits = true;
 
@@ -221,7 +234,7 @@ type_id checker::check_if_value(function_scope& scope, ast::if_expr const& node,
 
         auto branch_type = type_id::none;
         auto branch_exits = false;
-        check_arm_body(scope, branch.then, yields_value, branch_type, branch_exits, is_failed);
+        check_arm_body(scope, branch.then, yields_value, expected, branch_type, branch_exits, is_failed);
         every_branch_exits = every_branch_exits && branch_exits;
 
         if (!yields_value || branch_exits)
@@ -255,7 +268,12 @@ type_id checker::check_if_value(function_scope& scope, ast::if_expr const& node,
     return is_valid(result) ? result : error_type;
 }
 
-type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_expr const& node, bool yields_value, flow* ending)
+type_id checker::check_case(function_scope& scope,
+                            ast::expr_id id,
+                            ast::case_expr const& node,
+                            bool yields_value,
+                            flow* ending,
+                            type_id expected)
 {
     if (ending != nullptr)
         *ending = flow::falls_through;
@@ -280,7 +298,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
     auto named_cases = cc::vector<i32>();
     auto is_all_constant = true;
     auto has_wildcard = false;
-    auto result = yields_value ? type_id::none : void_type;
+    auto result = yields_value ? expected : void_type;
     auto is_failed = false;
     auto reported_unreachable = false;
     // CHK-123: whether every arm leaves the list the `case` stands in
@@ -315,7 +333,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
 
         auto arm_type = type_id::none;
         auto arm_exits = false;
-        check_arm_body(scope, arm.result, yields_value, arm_type, arm_exits, is_failed);
+        check_arm_body(scope, arm.result, yields_value, expected, arm_type, arm_exits, is_failed);
         every_arm_exits = every_arm_exits && arm_exits;
 
         if (!yields_value || arm_exits)

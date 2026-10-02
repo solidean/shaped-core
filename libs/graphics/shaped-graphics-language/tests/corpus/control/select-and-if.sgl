@@ -36,6 +36,28 @@ test first_positive(-1.0, 3.0) == 6.0 and first_positive(-1.0, -2.0) == 0.0
 @expect(error = "type-mismatch")
 test (if true => 1.0 else 2) == 1.0
 
+// where a type is expected the `if` is that type, and each branch's value converts to it as a literal does (CHK-166)
+test:
+    let c = true
+    let y: float = if c => 1 else 2
+    y == 1.0
+
+fun stepped_down(c: bool) -> float => if c => 1 else 2
+
+test stepped_down(true) == 1.0 and stepped_down(false) == 2.0
+
+@expect(error = "type-mismatch")
+test:
+    let y: float = if true => 1 else false
+    y == 1.0
+
+// where none is, the first branch decides, and another branch's literal does not convert to it
+@expect(error = "type-mismatch")
+test:
+    let c = true
+    let y = if c => 1 else 2u
+    y == 1u
+
 // the condition is a bool
 @expect(error = "type-mismatch")
 test (if 1 => 1.0 else 2.0) == 1.0

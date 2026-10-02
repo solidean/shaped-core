@@ -790,6 +790,9 @@ struct checker
     /// What a call stands where a type is expected, which a generic callee's result is deduced from where its
     /// arguments leave a parameter unbound (CHK-340); `none` elsewhere.
     type_id expected_result = type_id::none;
+    /// What `check_expected` expects of the `if` or `case` value it is about to check (CHK-166); `none` elsewhere.
+    /// The `check_expr` of that value takes it and clears it, so no expression inside sees it.
+    type_id expected_value = type_id::none;
 
     /// CHK-330: a `hit_group`, one row of a ray-tracing pipeline's table.
     void compile_hit_group(symbol_id id);
@@ -889,24 +892,30 @@ struct checker
                                      bool yields_value,
                                      bool& has_break);
     /// The body of a `case` arm or of a branch of an `if` value: what it gives in `arm_type`, or that it leaves.
+    /// A value is checked against `expected` where that is valid, and one that does not convert gives the error type.
     void check_arm_body(function_scope& scope,
                         ast::body const& body,
                         bool yields_value,
+                        type_id expected,
                         type_id& arm_type,
                         bool& arm_exits,
                         bool& is_failed);
     /// `if c => a else b`, read as a value where `yields_value`, and as an `if` statement otherwise (CHK-375).
+    /// `expected` is the type the context expects of the value, `none` where it expects none (CHK-166).
     [[nodiscard]] type_id check_if_value(function_scope& scope,
                                          ast::if_expr const& node,
                                          bool yields_value,
-                                         flow* ending = nullptr);
+                                         flow* ending = nullptr,
+                                         type_id expected = type_id::none);
     /// A `case`; the result is the type of its arms, and `nothing` for one that is a statement.
     /// `ending`, where given, is how the `case` ends as a statement: it exits when it is exhaustive and every arm exits.
+    /// `expected` is the type the context expects of the value, `none` where it expects none (CHK-166).
     [[nodiscard]] type_id check_case(function_scope& scope,
                                      ast::expr_id id,
                                      ast::case_expr const& node,
                                      bool yields_value,
-                                     flow* ending = nullptr);
+                                     flow* ending = nullptr,
+                                     type_id expected = type_id::none);
     /// One arm's pattern, against the scrutinee's type; appends the enum cases it names, and says whether all were cases.
     void check_pattern(function_scope& scope,
                        ast::expr_id pattern,
