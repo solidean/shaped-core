@@ -252,6 +252,9 @@ cc::result<face> read(cc::pinned_data<byte const> bytes, i32 face_index)
         f._metrics.glyph_count = m.read<u16>();
         if (!m.ok)
             return cc::error("'maxp' is too short");
+        // Glyph 0 is `.notdef`, which every face must have: it is what a face draws for a character it has none for.
+        if (f._metrics.glyph_count == 0)
+            return cc::error("'maxp' states no glyphs, not even .notdef");
     }
     {
         auto h = be_reader{.bytes = hhea.value(), .pos = 4};
@@ -262,7 +265,7 @@ cc::result<face> read(cc::pinned_data<byte const> bytes, i32 face_index)
         f._long_metrics = h.read<u16>();
         if (!h.ok)
             return cc::error("'hhea' is too short");
-        if (f._long_metrics == 0 && f._metrics.glyph_count > 0)
+        if (f._long_metrics == 0)
             return cc::error("'hhea' states no horizontal metrics");
         auto const needed = isize(f._long_metrics) * 4 + isize(cc::max(0, f._metrics.glyph_count - f._long_metrics)) * 2;
         if (hmtx.value().size() < needed)

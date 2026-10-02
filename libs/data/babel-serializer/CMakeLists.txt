@@ -126,6 +126,9 @@ if(SC_BUILD_TESTS)
 
     sc_target_pch(babel-serializer-test CC_ALL NEXUS) # inherits the library's measured tier
 
+    # tests/font/font_builder.hh crafts fonts byte by byte; another library's tests include it from this root.
+    set(BABEL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests" CACHE INTERNAL "babel-serializer's test-helper include root")
+
     # Browser test runner (Emscripten only); no-op natively.
     sc_add_nexus_web_runner(babel-serializer-test)
 endif()

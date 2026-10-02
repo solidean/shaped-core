@@ -162,7 +162,8 @@ namespace babel::font
 {
 /// Parses the table directory of face `face_index` of a font file: a `.ttf` / `.otf` has one face, a `.ttc` several.
 /// The returned face shares `bytes`, which nothing copies.
-/// Fails on a missing required table (`head`, `maxp`, `hhea`, `hmtx`, `cmap`), or one that runs past the file.
+/// Fails on a missing required table (`head`, `maxp`, `hhea`, `hmtx`, `cmap`), one that runs past the file, or a face
+/// with no glyphs, which has no `.notdef` to fall back on.
 [[nodiscard]] cc::result<face> read(cc::pinned_data<byte const> bytes, i32 face_index = 0);
 
 /// Convenience: COPIES the bytes into an owned pin, since the face keeps them.
