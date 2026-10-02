@@ -31,7 +31,7 @@ namespace sgl::builtins::impl
 /// TEMPORARY: clean-core has no half type yet, and typed-geometry's `tg::f16` is out of reach, since SGL depends on
 /// clean-core alone; libs/graphics/shaped-graphics-language/docs/lower-library-gaps.md records the gap.
 [[nodiscard]] u32 half_bits_of(f32 x);
-/// The same from an f64, rounded once: a literal's exact value, which an f32 in between would round twice.
+/// The same from an f64, rounded once from the f64 the literal parses to, which an f32 in between would round twice.
 [[nodiscard]] u32 half_bits_of(f64 x);
 /// Exact, since every half is an f32.
 [[nodiscard]] f32 float_of_half_bits(u32 h);
