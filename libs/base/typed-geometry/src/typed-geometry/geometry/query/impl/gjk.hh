@@ -361,7 +361,8 @@ template <class A, class B>
     for (auto step = 0; step < max_steps; ++step)
     {
         auto const v2 = v.length_sqr();
-        if (v2 <= tol * scale2)
+        // |v| within the tolerance relative to the largest support point seen
+        if (v2 <= tol * tol * scale2)
         {
             r.overlapping = true;
             break;

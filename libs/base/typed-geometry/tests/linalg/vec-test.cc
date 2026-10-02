@@ -129,7 +129,8 @@ TEST("tg vec - orthogonal vectors and bases")
     for (auto const v :
          {tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1), tg::vec3f(0, 0, -1), tg::vec3f(1, 2, 3), tg::vec3f(-5, 0.1f, 0)})
     {
-        CHECK(tg::dot(tg::any_orthogonal(v), v) == 0.0f);
+        // exact in exact arithmetic; a fused multiply-add may leave a rounding residue
+        CHECK(tg::abs(tg::dot(tg::any_orthogonal(v), v)) <= 1e-6f * v.length_sqr());
         CHECK(tg::any_orthogonal(v).length_sqr() > 0.0f);
 
         auto const n = v.normalized();
@@ -142,5 +143,5 @@ TEST("tg vec - orthogonal vectors and bases")
         auto const handed = tg::dual(tg::cross(u, w));
         CHECK(tg::abs(tg::dot(handed, n) - 1.0f) < 1e-5f);
     }
-    CHECK(tg::dot(tg::any_orthogonal(tg::vec2f(3, 4)), tg::vec2f(3, 4)) == 0.0f);
+    CHECK(tg::abs(tg::dot(tg::any_orthogonal(tg::vec2f(3, 4)), tg::vec2f(3, 4))) <= 1e-6f);
 }
