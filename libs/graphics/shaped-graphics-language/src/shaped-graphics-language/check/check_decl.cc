@@ -1893,7 +1893,17 @@ void checker::judge_entry_point(symbol_id id)
         }
         auto const& input = info_of(parameter.input);
         if (input.in_stage != info.entry_stage && (input.also_in & stage_bit(info.entry_stage)) == 0)
-            invalid(cc::format("@{} is an input of the {} stage", input.name, stage_name(input.in_stage)));
+        {
+            auto stages = cc::vector<stage>();
+            stages.push_back(input.in_stage);
+            for (auto k = u8(stage::vertex); k <= u8(stage::callable); ++k)
+                if (stage(k) != input.in_stage && (input.also_in & stage_bit(stage(k))) != 0)
+                    stages.push_back(stage(k));
+            auto listed = cc::string(stage_name(stages[0]));
+            for (auto i = isize(1); i < stages.size(); ++i)
+                listed.appendf("{}{}", i + 1 == stages.size() ? " and " : ", ", stage_name(stages[i]));
+            invalid(cc::format("@{} is an input of the {} stage{}", input.name, listed, stages.size() > 1 ? "s" : ""));
+        }
         else if (out.name_of(parameter.type) != input.type)
             invalid(cc::format("a @{} parameter is an {}", input.name, input.type));
         for (auto const other : seen)

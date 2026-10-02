@@ -54,7 +54,7 @@ TEST("sgl check - a subgroup operation needs subgroups of a device, and so does 
     CHECK(reports_for(cc::string("require subgroups\n\n") + edges
                       + "@vertex fun vs(@subgroup_size n: int) -> vout:\n"
                         "    return { p = hpos4(n as float, 0.0, 0.0, 1.0) }\n")
-              .contains("invalid-entry-point"));
+              .contains("@subgroup_size is an input of the pixel and compute stages"));
 }
 
 TEST("sgl check - a subgroup operation stands in uniform control flow, and what it gives differs within a workgroup")
