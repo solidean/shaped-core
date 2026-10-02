@@ -439,3 +439,63 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pipeline carries the sampler of the file its p
                 mismatches += pixels[(y * extent + x) * 4 + c] != texels[(y * extent + column_of[x]) * 4 + c] ? 1 : 0;
     CHECK(mismatches == 0);
 }
+
+namespace
+{
+/// Fills an image of `Format` through option_formats.sgl compiled for that format, and hands back its bytes.
+/// `ctx` is by value, since a reference would dangle across a suspend.
+template <sg::pixel_format Format>
+cc::shared_async<cc::vector<byte>> fill_image(sg::context_handle ctx)
+{
+    auto const values = shaders::option_formats_fill_t::options{.output_format = Format};
+    auto const pipeline = co_await shaders::option_formats.fill.acquire_pipeline(*ctx, values);
+    // the group's layout follows the format its option has, as the shader's does
+    auto const layout = ctx->cached.acquire_binding_group_layout(
+        shaders::paint::declared_bindings({.output_format = Format}), shaders::paint::declared_samplers());
+    auto const image = make_texture(ctx, Format, sg::texture_usage::image);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::paint{.color = tg::vec4f(0.0f, 1.0f, 0.25f, 1.0f), .target = image.as_image_view<Format>()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(k_extent, k_extent);
+    auto const written = cmd->download.bytes_from_texture(image.raw());
+    ctx->submit_command_list(cc::move(cmd));
+    auto const& bytes = co_await written.bytes();
+    co_return cc::vector<byte>::create_copy_of(bytes);
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - an image whose format is an option is written in whichever format the host picks",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // 0, 1 and 0.25 as unorm bytes: 0.25 * 255 is 63.75, which rounds to 64
+    auto const unorm = co_await fill_image<sg::pixel_format::rgba8_unorm>(ctx);
+    REQUIRE(unorm.size() == isize(k_extent * k_extent * 4));
+    auto wrong = 0;
+    for (auto i = 0; i < k_extent * k_extent; ++i)
+        wrong += unorm[i * 4] != byte(0) || unorm[i * 4 + 1] != byte(255) || unorm[i * 4 + 2] != byte(64)
+                      || unorm[i * 4 + 3] != byte(255)
+                   ? 1
+                   : 0;
+    CHECK(wrong == 0);
+
+    // the same values as halves, each exact: 0x0000, 0x3c00, 0x3400 and 0x3c00
+    auto const halves = co_await fill_image<sg::pixel_format::rgba16_float>(ctx);
+    REQUIRE(halves.size() == isize(k_extent * k_extent * 8));
+    constexpr u16 expected[] = {0x0000, 0x3c00, 0x3400, 0x3c00};
+    wrong = 0;
+    for (auto i = 0; i < k_extent * k_extent * 4; ++i)
+    {
+        auto bits = u16(0);
+        cc::memcpy(&bits, halves.data() + i * 2, 2);
+        wrong += bits != expected[i % 4] ? 1 : 0;
+    }
+    CHECK(wrong == 0);
+}

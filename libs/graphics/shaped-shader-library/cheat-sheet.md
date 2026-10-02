@@ -348,7 +348,12 @@ auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx)
 auto const tuned = co_await shaders::taa.reproject.acquire_pipeline(ctx, {.tile = 16, .lowres = true}); // a compile per set
 shaders::taa.reproject.acquire(ctx, {.tile = 16})  // the shader alone; .values() is the struct as an acquire's span takes it
 //   an option of a type the generator has no C++ for (a program's own enum) is a generator error;
-//   a binding whose image format or array length names an option has no generated type yet: list its entry points alone
+// an image whose format names an option is an sg::any_texture_view field, and the group's layout is per set of values:
+auto const values = shaders::upscale_main_t::options{.output_format = sg::pixel_format::rgba16_float};
+auto const upscale = co_await shaders::upscale.main.acquire_pipeline(ctx, values);   // its layout follows the values
+auto const group_layout = ctx.cached.acquire_binding_group_layout(shaders::outputs::declared_bindings({.output_format = f}),
+                                                                  shaders::outputs::declared_samplers());
+//   a binding array whose length names an option, and a `pipeline` over such a group, have no generated type yet
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
 // a wrapper's layout holds only the samplers ITS entry point reaches, so a file used as a library never fills the sampler slots:
 //   a raster pipeline whose stages reach file samplers is built from the file's `pipeline`, whose layout holds every stage's.

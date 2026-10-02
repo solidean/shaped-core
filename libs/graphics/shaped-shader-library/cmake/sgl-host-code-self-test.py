@@ -383,15 +383,78 @@ def a_pipelines_options_ride_in_its_open_parts():
     expect_in("cc::move(customize), false, parts.options.values());", source, "the description takes them")
 
 
+FORMATTED = {
+    "name": "upscaled",
+    "inline": False,
+    "options": ["output_format"],
+    "members": [
+        {"kind": "buffer", "name": "weights", "type": "float", "host_name": "upscaled_weights", "slot": 0,
+         "access": "read"},
+        {"kind": "image", "name": "output", "type": "out image_2d[output_format]", "host_name": "upscaled_output",
+         "slot": 1, "texture_dimension": "tex_2d", "image_format": "rgba16_float", "format_option": "output_format",
+         "access": "write"},
+    ],
+}
+FORMATTED_FILE = SglFile(path="upscale.sgl", options=OPTIONS)
+
+
 @test
-def a_binding_whose_layout_names_an_option_has_no_generated_type():
-    binding = {**GROUP, "options": ["output_format"]}
+def an_image_whose_format_is_an_option_is_taken_format_erased_and_its_layout_per_value():
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FORMATTED_FILE, FORMATTED)
+    expect_in("struct upscaled_options\n{\n    sg::pixel_format output_format = sg::pixel_format::rgba16_float;", header,
+              "the group's options, at the source's default")
+    expect_in("    using options = upscaled_options;", header, "the group names its struct")
+    expect_in("    sg::any_texture_view<sg::tv_2d> output; ///< `out image_2d[output_format]`, an image of the format "
+              "`output_format` names", header, "the image's field, its format taken at run time")
+    expect_in("[[nodiscard]] static cc::vector<sg::binding> declared_bindings(options const& values);", header,
+              "the bindings per set of values")
+    expect_in("[[nodiscard]] static cc::span<sg::binding const> declared_bindings();", header,
+              "the defaults' bindings, which keep it a declared_binding_set")
+    source = sgl_host_code.emit_group_impl("pkg", {}, "ns", FORMATTED_FILE, FORMATTED)
+    expect_in("cc::vector<sg::binding> ns::upscaled::declared_bindings(options const& values)\n{\n"
+              "    auto bindings = cc::vector<sg::binding>::create_copy_of(k_sgl_bindings_upscaled);\n"
+              "    bindings[1].image_format = values.output_format;\n"
+              "    return bindings;\n}\n", source, "the image's entry takes the value's format")
+    expect_in(".image_format = sg::pixel_format::rgba16_float}", source, "the defaults' table")
+
+
+@test
+def an_entry_point_reaching_a_groups_format_option_builds_its_layout_from_the_values():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["upscaled", "shadow"],
+             "options": ["tile", "output_format"]}
+    entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED), (FILE, GROUP)],
+                                         described_entry_points={(FORMATTED_FILE.path, "cs"): entry},
+                                         file_options={FORMATTED_FILE.path: OPTIONS})
+    header = sgl_host_code.emit_entry_wrappers(entries, {FORMATTED_FILE.path: "upscale"}, "pkg")
+    expect_in("acquire_layout(sg::context& ctx, options const& values = {}) const", header, "the layout takes values")
+    expect_in("        desc.groups.push_back(ctx.cached.acquire_binding_group_layout(\n"
+              "            upscaled::declared_bindings(upscaled::options{.output_format = values.output_format}), "
+              "upscaled::declared_samplers()));\n", header, "the optioned group's layout, from the values")
+    expect_in("        desc.groups.push_back(ctx.cached.acquire_binding_group_layout<shadow>());\n", header,
+              "a plain group's layout, as declared")
+    expect_in("acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx, values), values.values());", header,
+              "the pipeline's layout follows its values")
+    expect_in("<shaped-graphics/binding/pipeline_layout.hh>", " ".join(sgl_host_code.includes(entries)),
+              "sg::pipeline_layout_description's header")
+
+
+@test
+def a_binding_array_sized_by_an_option_and_a_pipeline_over_an_optioned_group_are_refused():
+    counted = {**ARRAYS, "options": ["layers"],
+               "members": [{**ARRAYS["members"][0], "count_option": "layers"}, ARRAYS["members"][1]]}
     try:
-        sgl_host_code.emit_group("pkg", {}, "ns", FILE, binding)
+        sgl_host_code.emit_group("pkg", {}, "ns", FILE, counted)
+        raise AssertionError("a binding array sized by an option generated a type")
     except sgl_host_code.HostCodeError as e:
-        expect_in("output_format", str(e), "the refusal names the option")
-        return
-    raise AssertionError("a binding naming an option generated a type")
+        expect_in("layers", str(e), "the refusal names the option")
+    pipeline = {**TESSELLATED, "layout": ["upscaled"]}
+    entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED)],
+                                         pipelines=[(FORMATTED_FILE, pipeline)])
+    try:
+        sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {FORMATTED_FILE.path: "upscale"}, {})
+        raise AssertionError("a pipeline over a group with an option format generated a layout")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("upscaled", str(e), "the refusal names the group")
 
 
 # ---- the runner -----------------------------------------------------------------------------------------------------

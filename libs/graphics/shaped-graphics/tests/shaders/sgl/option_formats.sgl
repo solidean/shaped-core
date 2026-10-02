@@ -1,0 +1,10 @@
+// An image whose format the host picks: one source, a shader per format, and a group whose layout follows the value.
+
+@option const output_format: pixel_format = .rgba8_unorm
+
+binding paint:
+    color: float4
+    target: out image_2d[output_format]
+
+@compute(8, 8) fun fill(@thread_id id: int3){paint}:
+    paint.target.store(id.xy, paint.color)

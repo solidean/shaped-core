@@ -437,6 +437,7 @@ if(SC_BUILD_TESTS)
                 subgroups.sgl:*
                 coherence.sgl:*
                 sixteen_bit.sgl:*
+                option_formats.sgl:*
         )
     endif()
 

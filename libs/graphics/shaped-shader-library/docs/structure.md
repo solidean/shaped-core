@@ -118,7 +118,9 @@ The shape the seam is built for, and what is still `[planned]`:
   A ray-tracing pipeline's type is [raytracing-pipelines](raytracing-pipelines.md); the SGL compiler maps all six ray-tracing stages.
   **An SGL option is set per acquire**: a generated options struct per entry point and pipeline that reaches one, at the source's defaults.
   A `shader_asset` keys its compiles by format and by the values of the options its entry point reaches, and a reload recompiles each set.
-  A binding whose image format or array length names an option generates no type yet, since its type fixes both.
+  An image whose format names an option is a format-erased `sg::any_texture_view`, and its group states `declared_bindings(values)` beside the defaults' table.
+  An entry point's layout is then built from the values it is acquired with.
+  A binding array whose length names an option generates no type yet, since its field fixes the length (the TODO).
   A group's textures and images are typed views, a bound sampler an `sg::sampler` field, and a `sampler name:` block of the binding one of its `declared_samplers()`.
   Its table carries every fact sg's layouts take from a binding, from `sgl describe`, so the WebGPU layout agrees with the WGSL the group becomes.
   **The MSL arm runs too**: `create_metal_compiler()` is the `metal_lib` inner compiler that `create_sgl_compiler` maps to the `msl` target.

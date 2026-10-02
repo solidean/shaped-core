@@ -684,20 +684,45 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         return cc::error(front.errors);
 
     auto const& m = front.module;
-    // the options a binding's declaration names, which its layout and its formats then follow
-    auto const binding_options = [&](check::symbol const& s)
+    // the options named within `span` of `file`, each once
+    auto const options_within = [&](i32 file, source_span span)
     {
-        auto const decl = front.files[s.file]->at(front.asts[s.file]->at(s.declaration).form).where;
         auto options = cc::vector<check::symbol_id>();
         for (auto const& use : m.option_uses)
         {
             auto is_known = false;
             for (auto const known : options)
                 is_known = is_known || known == use.option;
-            if (use.file == s.file && use.where.offset >= decl.offset && use.where.end() <= decl.end() && !is_known)
+            if (use.file == file && use.where.offset >= span.offset && use.where.end() <= span.end() && !is_known)
                 options.push_back(use.option);
         }
-        return option_names(m, cc::move(options));
+        return options;
+    };
+    // The options a binding's declaration names, which its layout and its formats then follow.
+    // A member says which of them its own type names, so a host can take that format or that length at run time.
+    auto const describe_options = [&](check::symbol const& s, described_binding& b)
+    {
+        auto const& ast = *front.asts[s.file];
+        auto const& file = *front.files[s.file];
+        auto const& decl = ast.at(s.declaration);
+        b.options = option_names(m, options_within(s.file, file.at(decl.form).where));
+        for (auto const member : ast.at(decl.node.as<ast::binding_decl>().members))
+        {
+            auto const* const f = ast.at(member).node.try_as<ast::field_decl>();
+            if (f == nullptr)
+                continue;
+            auto const& field = ast.at(f->field);
+            for (auto& described : b.members)
+            {
+                if (described.name != file.text_of(field.name))
+                    continue;
+                for (auto const option : options_within(s.file, file.at(field.form).where))
+                {
+                    auto const is_format = m.name_of(m.constants[m.at(option).info].type) == "pixel_format";
+                    (is_format ? described.format_option : described.count_option) = m.at(option).name;
+                }
+            }
+        }
     };
     auto errors = cc::vector<emit::error>();
     auto result = module_description();
@@ -721,7 +746,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             if (errors.size() == before)
             {
                 result.bindings.push_back(driver::impl::describe_binding(m, s));
-                result.bindings.back().options = binding_options(s);
+                describe_options(s, result.bindings.back());
                 described.push_back(id);
             }
         }

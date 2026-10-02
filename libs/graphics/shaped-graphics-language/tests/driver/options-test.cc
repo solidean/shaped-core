@@ -152,6 +152,37 @@ TEST("sgl options - a workgroup size and an image's format may name an option, a
     REQUIRE(d.bindings.size() == 1);
     REQUIRE(d.bindings[0].options.size() == 1);
     CHECK(d.bindings[0].options[0] == "output_format");
+    // the member says which option its format is, so a host takes that format at run time
+    CHECK(d.bindings[0].members[0].format_option == "output_format");
+    CHECK(d.bindings[0].members[0].count_option == "");
+}
+
+TEST("sgl options - a binding array's length that names an option is the member's count option")
+{
+    constexpr auto source = "require binding_arrays\n"
+                            "\n"
+                            "@option const layers = 3\n"
+                            "\n"
+                            "binding inputs:\n"
+                            "    plain: texture_2d[float4]\n"
+                            "    layered: texture_2d[float4][layers]\n"
+                            "\n"
+                            "@pixel struct target:\n"
+                            "    color: float4\n"
+                            "\n"
+                            "struct pixel_input:\n"
+                            "    @position position: hpos4\n"
+                            "\n"
+                            "@pixel fun main_ps(p: pixel_input){inputs} -> target:\n"
+                            "    return {color = inputs.layered[1].load(int2(0, 0)) + inputs.plain.load(int2(0, 0))}\n";
+    auto const described = sgl::describe({.source = source});
+    REQUIRE(described.has_value());
+    auto const& d = described.value();
+    REQUIRE(d.bindings.size() == 1);
+    CHECK(d.bindings[0].members[0].count_option == "");
+    CHECK(d.bindings[0].members[1].count_option == "layers");
+    CHECK(d.bindings[0].members[1].count == 3);
+    CHECK(d.bindings[0].members[1].format_option == "");
 }
 
 TEST("sgl options - an option of a pipeline's stage is the pipeline's, and one only a dead branch names still counts")

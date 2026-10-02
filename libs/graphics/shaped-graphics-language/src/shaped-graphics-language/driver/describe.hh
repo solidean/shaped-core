@@ -90,6 +90,10 @@ struct sgl::described_binding_member
     cc::string sample_type;
     /// An image's `sg::pixel_format`: `rgba8_unorm`.
     cc::string image_format;
+    /// The option an image's format names, whose value `image_format` is described with; empty for a literal format.
+    cc::string format_option;
+    /// The option a binding array's length names, whose value `count` is described with; empty for a literal length.
+    cc::string count_option;
     /// Every resource's `sg::access_mode`: `read`, `write` or `read_write`.
     cc::string access;
     /// A sampler's `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.

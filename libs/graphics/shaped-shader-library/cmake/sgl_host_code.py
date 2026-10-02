@@ -143,9 +143,13 @@ def includes(entries: SglEntries) -> list[str]:
                 "<shaped-shader-library/binding/binding_groups.hh>"]
     # An options struct: its values as an acquire takes them, and a format's enumerators for a default.
     if (any(e.get("options") for e in entries.described_entry_points.values())
-            or any(p.get("options") for _, p in entries.pipelines + entries.raytracing_pipelines)):
+            or any(p.get("options") for _, p in entries.pipelines + entries.raytracing_pipelines)
+            or any(format_options(b) for _, b in entries.bindings)):
         out += ["<clean-core/container/vector.hh>", "<shaped-shader-library/compiler/shader_compiler.hh>",
                 "<shaped-graphics/resource/pixel_format.hh>"]
+    # A layout built per set of values, from a group whose formats name options.
+    if any(format_options(b) for _, b in entries.bindings):
+        out += ["<shaped-graphics/binding/pipeline_layout.hh>"]
     if not entries.bindings and not entries.vertex_inputs and not entries.render_targets:
         return out
     out += ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
@@ -189,26 +193,51 @@ def includes(entries: SglEntries) -> list[str]:
 
 
 def refuse_options(package: str, file: SglFile, binding: dict) -> None:
-    """A binding's generated type bakes its layout and its image formats, so one that names an option has none yet."""
-    if binding.get("options"):
+    """A binding array's length fixes the group's fields, so a binding whose length names an option has no type yet.
+
+    An image's format may name one: the group takes that view format-erased, and its layout per set of values.
+    An `@inline` block holds constants alone, whose layout no option may change.
+    """
+    counted = [m["count_option"] for m in binding["members"] if m.get("count_option")]
+    if counted or (binding["inline"] and binding.get("options")):
+        named = counted or binding["options"]
         raise HostCodeError(
-            f"shader package '{package}': '{file.path}' `binding {binding['name']}` names the option(s) "
-            f"{', '.join(binding['options'])}, and a generated binding type fixes its formats and its layout; "
+            f"shader package '{package}': '{file.path}' `binding {binding['name']}` sizes a binding array by the "
+            f"option(s) {', '.join(named)}, and a generated binding type fixes its fields; "
             f"list the file's entry points alone, without '{file.path}:*'")
+
+
+def format_options(binding: dict) -> list[str]:
+    """The options the binding's image formats name, in the binding's own order: the values its layout follows."""
+    named = {m["format_option"] for m in binding["members"] if m.get("format_option")}
+    return [o for o in binding.get("options", []) if o in named]
 
 
 def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFile, binding: dict) -> str:
     name = binding["name"]
     refuse_options(package, file, binding)
+    options = format_options(binding)
     out = [f"\nnamespace {namespace}\n{{\n"]
+    if options:
+        # Outside the group: a nested struct with member initializers cannot be a default argument within it.
+        out.append(options_struct(package, f"`binding {name}` of {file.path}", f"{name}_options", options, file.options))
+        out.append("\n")
     out.append(f"/// `binding {name}` of {file.path}, as the host fills it. Generated; do not edit.\n")
     out.append("///\n")
     out.append("/// It fixes no group index: SGL numbers a group by its position in each entry point's list, so bind it\n")
     out.append("/// with `bind_group(index, group)` at the index the pipeline has it at.\n")
     out.append("///\n")
-    out.append(f"///     auto const layout = ctx.cached.acquire_binding_group_layout<{namespace}::{name}>();\n")
+    if options:
+        out.append("/// Its layout follows the formats its options name, so it is acquired for the values the shader was compiled with:\n")
+        out.append("///\n")
+        out.append(f"///     auto const layout = ctx.cached.acquire_binding_group_layout({namespace}::{name}::declared_bindings(values),\n")
+        out.append(f"///                                                                 {namespace}::{name}::declared_samplers());\n")
+    else:
+        out.append(f"///     auto const layout = ctx.cached.acquire_binding_group_layout<{namespace}::{name}>();\n")
     out.append(f"///     auto const g = ctx.transient.create_binding_group(cmd, layout, {namespace}::{name}{{...}});\n")
     out.append(f"struct {name}\n{{\n")
+    if options:
+        out.append(f"    using options = {name}_options;\n\n")
     # One field per member, in the shader's order.
     # A buffer's field is the view its access takes, of the element the shader reads, so a read-only view of a `mut`
     # buffer, or a view of another element type, does not compile.
@@ -224,6 +253,12 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
             continue
         if member["kind"] == "texture":
             out.append(f"    {array(f'sg::texture_view_{view_shape(member)}')} {member['name']}; ///< `{member['type']}`\n")
+            continue
+        if member["kind"] == "image" and member.get("format_option"):
+            # sg's view of an image whose format is chosen at run time; the layout states the format the group needs
+            view = f"sg::any_texture_view<sg::tv_{view_shape(member)}>"
+            out.append(f"    {array(view)} {member['name']}; ///< `{member['type']}`, an image of the format "
+                       f"`{member['format_option']}` names\n")
             continue
         if member["kind"] == "image":
             view = f"sg::image_view_{view_shape(member)}<sg::pixel_format::{member['image_format']}>"
@@ -251,7 +286,13 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         out.append("    void write_constants(cc::span<cc::byte> block) const;\n")
         out.append("\n")
     out.append("    /// The group's bindings in slot order, as the compiled shader reflects them.\n")
+    if options:
+        out.append("    /// Its images are of the formats the options' defaults name; a shader compiled with other values needs the\n")
+        out.append("    /// overload below.\n")
     out.append("    [[nodiscard]] static cc::span<sg::binding const> declared_bindings();\n")
+    if options:
+        out.append("    /// The bindings of a shader compiled with `values`: each image of the format its option has there.\n")
+        out.append("    [[nodiscard]] static cc::vector<sg::binding> declared_bindings(options const& values);\n")
     out.append("\n")
     out.append("    /// The group's static samplers, the `sampler name:` blocks of the binding, which the layout carries.\n")
     out.append("    [[nodiscard]] static cc::span<sg::named_sampler const> declared_samplers();\n")
@@ -372,6 +413,14 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
 
     out.append(f"\ncc::span<sg::binding const> {qualified}::declared_bindings()\n{{\n")
     out.append(f"    return k_sgl_bindings_{name};\n}}\n")
+    if format_options(binding):
+        out.append(f"\ncc::vector<sg::binding> {qualified}::declared_bindings(options const& values)\n{{\n")
+        out.append(f"    auto bindings = cc::vector<sg::binding>::create_copy_of(k_sgl_bindings_{name});\n")
+        first = 1 if has_block(binding) else 0
+        for i, member in enumerate(resources):
+            if member.get("format_option"):
+                out.append(f"    bindings[{first + i}].image_format = values.{member['format_option']};\n")
+        out.append("    return bindings;\n}\n")
     out.append(f"\ncc::span<sg::named_sampler const> {qualified}::declared_samplers()\n{{\n")
     out.append(f"    return k_sgl_samplers_{name};\n}}\n" if statics else "    return {};\n}\n")
 
@@ -582,9 +631,32 @@ def entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> dict[tuple[str
     return out
 
 
+def per_values_layout(listed: list[str], by_name: dict[str, dict], per_values: dict[str, list[str]],
+                      has_samplers: bool) -> str:
+    """The body that builds an entry point's pipeline layout group by group, each with the formats `values` names.
+
+    It is what `acquire_pipeline_layout<...>` does, spelled out, since a group's layout there takes no values.
+    """
+    out = ["        auto desc = sg::pipeline_layout_description();\n"]
+    for b in listed:
+        if by_name[b]["inline"]:
+            out.append(f"        desc.inline_constants = {b}::inline_binding();\n")
+        elif per_values[b]:
+            stated = ", ".join(f".{o} = values.{o}" for o in per_values[b])
+            out.append(f"        desc.groups.push_back(ctx.cached.acquire_binding_group_layout(\n")
+            out.append(f"            {b}::declared_bindings({b}::options{{{stated}}}), {b}::declared_samplers()));\n")
+        else:
+            out.append(f"        desc.groups.push_back(ctx.cached.acquire_binding_group_layout<{b}>());\n")
+    if has_samplers:
+        out.append("        desc.static_samplers.push_back_range(samplers);\n")
+    out.append("        return ctx.cached.acquire_pipeline_layout(desc);\n    }\n")
+    return "".join(out)
+
+
 def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str], package: str = "") -> str:
     """One struct per wrapped entry point: its asset, the pipeline layout its binding list states, and its options."""
     wrappers = entry_wrappers(entries, stems)
+    by_name = {b["name"]: b for _, b in entries.bindings}
     out = []
     for (path, name), type_name in wrappers.items():
         described = entries.described_entry_points[(path, name)]
@@ -613,21 +685,32 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str], package: str
         out.append("    /// It carries only the file samplers this entry point reaches, so a file used as a library never fills the sampler slots.\n")
         out.append("    /// A raster pipeline whose stages list different groups needs their union, spelled `ctx.cached.acquire_pipeline_layout<...>()`.\n")
         out.append("    /// One whose stages reach file samplers is built from the file's SGL `pipeline`, whose layout carries every stage's samplers.\n")
-        out.append("    [[nodiscard]] sg::pipeline_layout_handle acquire_layout(sg::context& ctx) const\n    {\n")
+        # A group whose formats name options this entry point reaches has a layout per set of values.
+        per_values = {b: [o for o in format_options(by_name[b]) if o in options] for b in listed}
+        is_per_values = any(per_values.values())
+        if is_per_values:
+            out.append("    /// Its groups' image formats are those `values` names.\n")
+            out.append("    [[nodiscard]] sg::pipeline_layout_handle acquire_layout(sg::context& ctx, options const& values = {}) const\n    {\n")
+        else:
+            out.append("    [[nodiscard]] sg::pipeline_layout_handle acquire_layout(sg::context& ctx) const\n    {\n")
         samplers = described.get("samplers", [])
         if samplers:
             # The file-scope samplers its code reaches, which no group holds.
             rows = bound_samplers(f"'{path}' entry point '{name}'", entries.file_samplers.get(path, []), samplers,
                                   "            ")
             out.append(f"        static sg::bound_sampler const samplers[] = {{\n{rows}        }};\n")
+        if is_per_values:
+            out.append(per_values_layout(listed, by_name, per_values, bool(samplers)))
+        elif samplers:
             out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>(samplers);\n    }}\n")
         else:
             out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>();\n    }}\n")
+        layout_call = "acquire_layout(ctx, values)" if is_per_values else "acquire_layout(ctx)"
         if described["stage"] == "compute" and options:
             out.append("\n")
             out.append("    /// The compute pipeline of this entry point over that layout, with `values` for its options.\n")
             out.append("    [[nodiscard]] sg::async_compute_pipeline acquire_pipeline(sg::context& ctx, options const& values = {}) const\n    {\n")
-            out.append("        return slib::acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx), values.values());\n    }\n")
+            out.append(f"        return slib::acquire_compute_pipeline(&ctx, asset, {layout_call}, values.values());\n    }}\n")
         elif described["stage"] == "compute":
             out.append("\n")
             out.append("    /// The compute pipeline of this entry point over that layout, which is all a compute pipeline needs.\n")
@@ -917,6 +1000,16 @@ def open_call(path: str, index: int, targets: list[str]) -> str:
     return f"f::color_targets_format(d, {target}, sg::pixel_format(open[{index}].value));"
 
 
+def refuse_option_layouts(package: str, where: str, groups: list[str], entries: SglEntries) -> None:
+    """A pipeline's layout is acquired from the context alone, so a group whose formats name options cannot be in it yet."""
+    by_name = {b["name"]: b for _, b in entries.bindings}
+    optioned = [g for g in groups if g in by_name and format_options(by_name[g])]
+    if optioned:
+        raise HostCodeError(
+            f"shader package '{package}': {where} lists {', '.join(optioned)}, whose image formats name options, and a "
+            f"pipeline's layout takes no option values yet; acquire its entry points one by one")
+
+
 def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems: dict[str, str],
                         wrappers: dict[tuple[str, str], str]) -> str:
     out = []
@@ -936,6 +1029,7 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
             raise HostCodeError(
                 f"shader package '{package}': `pipeline {p['name']}` of '{file.path}' is built from generated types, and "
                 f"{', '.join(missing)} has none; declare the file as '{file.path}:*'")
+        refuse_option_layouts(package, f"`pipeline {p['name']}` of '{file.path}'", groups, entries)
 
         def handle(entry: str) -> str:
             return f"&{namespace}::{stem}.{entry}" + (".asset" if (file.path, entry) in wrappers else "")
@@ -1064,6 +1158,7 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
         if missing:
             raise HostCodeError(f"{where} is built from generated types, and {', '.join(missing)} has none; "
                                 f"declare the file as '{file.path}:*'")
+        refuse_option_layouts(package, f"`@raytracing pipeline {p['name']}` of '{file.path}'", groups, entries)
         if any(not m for m in p["misses"]):
             # TODO: a ray type without a miss wants an empty miss record, which sg's table has no spelling for yet
             raise HostCodeError(f"{where} leaves a ray type without a miss, which slib cannot table yet")

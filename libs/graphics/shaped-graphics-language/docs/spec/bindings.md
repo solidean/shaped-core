@@ -144,6 +144,9 @@ Every other image format needs a feature.
 
 **An image whose format the host picks names an option** ([CHK-353](semantics/checking.md#consts)).
 Each format the host asks for is one compile, and the text names that format exactly as it names a written one, on every target and with no feature.
+The binding's layout names that format too, so a host binds the image through a view of the format it picked and a layout acquired for the same value.
+slib's generated group does so: the image is a format-erased view, and the group states its bindings per set of values.
+A binding array whose length names an option is a compile per length as well, and slib generates no group for it yet: the group's field is an array of that length.
 
 ```sgl sketch
 @option const output_format: pixel_format = .rgba16_float

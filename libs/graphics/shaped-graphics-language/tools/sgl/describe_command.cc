@@ -104,6 +104,8 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         optional("texture_dimension", m.texture_dimension);
         optional("sample_type", m.sample_type);
         optional("image_format", m.image_format);
+        optional("format_option", m.format_option);
+        optional("count_option", m.count_option);
         optional("sampler_type", m.sampler_type);
         if (m.static_sampler.has_value())
         {

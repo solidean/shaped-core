@@ -3,6 +3,11 @@
 Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
+- **A binding array whose length names an SGL option has no generated group.**
+  The group's field is a `cc::fixed_array` of that length, so the type would change with the value; `sgl_host_code.py` refuses it, and the file's entry points are listed alone.
+  A field of a run-time length, `cc::vector` or a span, with `declared_bindings(values)` setting the binding's count, would close it.
+  A raster or ray-tracing pipeline over a group whose image format names an option is refused for a kindred reason: `pipeline_definition::acquire_layout` takes the context alone, not the values.
+
 - **A package has one `SOURCE_DIR`, so a shader cannot include a header from outside it.**
   `sc_add_shader_package` takes a single `SOURCE_DIR`, and the generator's `include_closure` resolves and embeds every `#include` under that one directory.
   A shipped binary reads its shaders from the embedded copy and `ssc::dxc` has no filesystem fallback.
