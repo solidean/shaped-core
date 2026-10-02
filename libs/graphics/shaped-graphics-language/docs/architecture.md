@@ -212,7 +212,7 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 ## What does not exist yet
 
 Generic structs of the program, lambdas beyond an arrow body, and `mut self`.
-GLSL, and in MSL a compute entry point and a group.
+GLSL.
 Iterative walks: `interpret`'s `eval` and the legalizer's expression walks recurse, so the smallest stack a walk runs on bounds `k_max_depth`.
 That makes a 40-term sum `nesting-too-deep` (CHK-268).
 Over an explicit work stack, with a cycle caught by an on-path bit rather than by depth, the limit could be far higher.
