@@ -1333,6 +1333,8 @@ cc::rec::report_thread_scopes("why");                         // the stderr rend
 #include <clean-core/string/conversion.hh>
 cc::vector<char16_t> u16 = cc::utf8_to_utf16(sv); // BMP -> 1 unit, astral -> surrogate pair; bad -> U+FFFD
                                                   // NOT NUL-terminated (push_back(u'\0') if you need it)
+cc::vector<char32_t> cps = cc::utf8_to_utf32(sv); // one code point per element; bad -> U+FFFD, as above
+                                                  // a cut-short sequence is one U+FFFD; the byte that cut it decodes on its own
 cc::string u8 = cc::utf16_to_utf8(u16);           // pair -> astral code point; an unpaired surrogate -> U+FFFD
                                                   // takes a span, since a wide OS string is rarely NUL-terminated
 ```

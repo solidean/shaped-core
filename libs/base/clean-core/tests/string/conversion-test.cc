@@ -51,6 +51,51 @@ TEST("conversion - utf8_to_utf16")
     }
 }
 
+TEST("conversion - utf8_to_utf32")
+{
+    SECTION("one code point per element, whatever its length")
+    {
+        auto const r = cc::utf8_to_utf32("a\xC3\xA4\xE2\x82\xAC\xF0\x9F\x98\x80");
+        REQUIRE(r.size() == 4);
+        CHECK(r[0] == U'a');
+        CHECK(r[1] == 0x00E4);
+        CHECK(r[2] == 0x20AC);
+        CHECK(r[3] == 0x1F600);
+    }
+
+    SECTION("a truncated sequence is one U+FFFD per byte left")
+    {
+        auto const r = cc::utf8_to_utf32("\xE2\x82");
+        REQUIRE(r.size() == 2);
+        CHECK(r[0] == 0xFFFD);
+        CHECK(r[1] == 0xFFFD);
+    }
+
+    SECTION("a bad continuation byte ends the sequence and is decoded on its own")
+    {
+        // 0xC3 announces two bytes, but 'A' is no continuation: the 'A' must survive rather than be folded into an Á
+        auto const r = cc::utf8_to_utf32("\xC3"
+                                         "A");
+        REQUIRE(r.size() == 2);
+        CHECK(r[0] == 0xFFFD);
+        CHECK(r[1] == U'A');
+    }
+
+    SECTION("an overlong encoding is U+FFFD")
+    {
+        auto const r = cc::utf8_to_utf32("\xC0\xAF"); // '/' in two bytes
+        REQUIRE(r.size() == 1);
+        CHECK(r[0] == 0xFFFD);
+    }
+
+    SECTION("an encoded surrogate is U+FFFD")
+    {
+        auto const r = cc::utf8_to_utf32("\xED\xA0\x80"); // U+D800
+        REQUIRE(r.size() == 1);
+        CHECK(r[0] == 0xFFFD);
+    }
+}
+
 TEST("conversion - utf16_to_utf8")
 {
     SECTION("empty")
