@@ -7,7 +7,7 @@ The case that brought it here is shaped-rendering's OIDN member: a U-Net of sixt
 Its route to speed is [reconstruction.md's "Getting faster"](../../../../shaped-rendering/docs/reconstruction.md#getting-faster).
 The first step, implicit-GEMM tiling, needs only the [`@workgroup` bindings and barriers](../bindings.md#workgroup-memory) SGL already has.
 The steps after it asked two things of SGL.
-The first is decided: **a 16-bit float**, `half` and its vectors under the feature `shader_f16` ([CHK-346](../semantics/checking.md#types)).
+The first is decided: **a 16-bit float**, `half` and its vectors under the feature `shader_f16` ([CHK-381](../semantics/checking.md#types)).
 It halves bandwidth and workgroup-memory footprint, which buys larger tiles, and packed arithmetic doubles the ALU rate on some GPUs.
 The second is still this file's idea:
 

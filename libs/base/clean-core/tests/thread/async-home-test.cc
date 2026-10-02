@@ -1,6 +1,7 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
@@ -763,6 +764,23 @@ TEST("async home - a yielding main-homed body does not pin pump_main_thread",
         CHECK(root->is_ready());
     }
     CHECK(polls.load() == 50);
+}
+
+// On threaded wasm a worker's file access is proxied to the main thread, which only a pump that runs that queue serves.
+TEST("async home - a worker's file access completes while the main thread pumps",
+     nx::config::main_thread,
+     nx::config::exclusive())
+{
+    // a missing file still makes the syscall, so nothing on disk is needed
+    auto const node
+        = cc::make_async_scheduled([] { return cc::file_read_stream_adapter::open("cc-no-such-file").has_value(); });
+
+    auto const deadline = cc::current_time_steady_secs() + 10.0;
+    while (!node->is_ready() && cc::current_time_steady_secs() < deadline)
+        (void)cc::pump_main_thread(1.0);
+
+    REQUIRE(node->is_ready());
+    CHECK(!node->value());
 }
 
 TEST("async home - pump_main_thread checks its budget between items, not between cycles", nx::config::main_thread)

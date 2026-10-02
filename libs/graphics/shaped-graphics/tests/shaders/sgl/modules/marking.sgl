@@ -1,0 +1,21 @@
+// A module two shader files share, the way a renderer's raster route shares its bindings: the group is declared once,
+// and every pipeline listing it first binds the one group the host created from it at slot 0.
+module marking
+
+binding marks:
+    tint: float4
+    hits: mut buffer[float]
+
+@vertex struct corner:
+    position: float3
+
+struct varyings:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+fun to_clip(c: corner) -> hpos4 => hpos4(c.position.x, c.position.y, 0.0, 1.0)
+
+// every pixel of a 4x4 target owns the element its position maps to
+fun pixel_index(p: varyings) -> int => (p.position.y as int) * 4 + (p.position.x as int)

@@ -8,12 +8,15 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/check/symbols.hh>
+#include <shaped-graphics-language/driver/library_file.hh>
 
 /// What the host side of one SGL source is generated from: its binding groups, its pipeline-edge structs and its entry points.
 ///
 /// This is the seam between the compiler and a build that writes C++, and it knows nothing about that C++.
 /// A type is named as SGL spells it, `float3` or `mat4`, and mapping it to a host type is the reader's job.
 /// It holds only what the file itself declares: a module it `use`s describes its own declarations.
+/// A name of such a module the file writes is spelled as the file spells it, `view.frame`, and a struct of one carries
+/// the module's name, so the host refers to that module's type rather than generating a second one.
 
 /// What a binding member is to the host.
 enum class sgl::described_member_kind : sgl::u8
@@ -163,6 +166,9 @@ struct sgl::described_memory_member
 struct sgl::described_memory_struct
 {
     cc::string name;
+    /// The module it is declared in where that is not the described source's own, so the host names that module's
+    /// type rather than generating one; empty otherwise.
+    cc::string module;
     /// `constants` or `storage`.
     cc::string space;
     /// Where the last member ends; a buffer of it strides by this.
@@ -181,6 +187,7 @@ struct sgl::described_entry_point
     i32 preferred_subgroup_size = 0;
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
     /// A `@workgroup` binding is left out, since the host binds nothing for it.
+    /// A binding of another module is `m.name`, whatever name the file's `use` gave the module.
     cc::vector<cc::string> bindings;
     /// The `sg::feature`s a device needs to run it, by name, in the enum's order.
     cc::vector<cc::string> features;
@@ -361,6 +368,12 @@ struct sgl::describe_request
     cc::string_view source_name = "<sgl>";
     /// The values the source's options are described with, as `text_request::options` gives them; empty for the defaults.
     cc::span<check::option_value const> options;
+    /// The files whose modules the source may `use`.
+    cc::span<library_file const> library;
+    /// Where not empty, the module of `library` to describe instead of `source`, which is then not read: every
+    /// binding and edge struct of the module's files, and the structs those bindings place.
+    /// Its entry points, pipelines and ray sets are left out, since an entry point is built from the file it stands in.
+    cc::string_view module;
 };
 
 namespace sgl

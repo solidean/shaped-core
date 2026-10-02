@@ -3,9 +3,11 @@
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/test/run_tests.hh>
 
-sgl::tested_source sgl::test_source(cc::string_view source, cc::string_view source_name)
+sgl::tested_source sgl::test_source(cc::string_view source,
+                                    cc::string_view source_name,
+                                    cc::span<library_file const> library)
 {
-    auto const front = driver::impl::run_front_end(source, source_name);
+    auto const front = driver::impl::run_front_end(source, source_name, library);
     auto result = tested_source{.errors = front.errors, .warnings = front.warnings};
 
     for (auto const& t : front.module.tests)

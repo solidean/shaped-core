@@ -35,6 +35,10 @@ struct imgui_fixture
     template <class F>
     cc::shared_async<cc::unit> frame(F build_ui, tg::pos2f display_pos = tg::pos2f(0.0f, 0.0f))
     {
+        // a helper is an unhomed async: it moves to where the device lives before its first bound call
+        if (auto* const home = ctx->device_home())
+            co_await cc::async_resume_on(*home);
+
         imgui.begin_frame({.display_size = tg::vec2i(target_width, target_height), .delta_time = 1.0f / 60.0f});
         build_ui();
         imgui.end_frame();
@@ -77,6 +81,10 @@ struct imgui_fixture
 
     [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> read_back()
     {
+        // a helper is an unhomed async: it moves to where the device lives before its first bound call
+        if (auto* const home = ctx->device_home())
+            co_await cc::async_resume_on(*home);
+
         auto cmd = ctx->create_command_list();
         auto const future = cmd->download.bytes_from_texture(target.raw());
         ctx->submit_command_list(cc::move(cmd));

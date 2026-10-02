@@ -125,6 +125,10 @@ cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
                                       .options = driver::impl::option_names_of(m, e),
                                       .footprint = check::footprint_of(m, legal),
                                       .layouts = cc::move(emitted.layouts)};
+    // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
+    if (!result.target_struct.empty() && check::is_valid(e.result) && check::is_valid(m.at(e.result).symbol))
+        if (auto const module = m.foreign_module_of(m.at(e.result).symbol); !module.empty())
+            result.target_struct = cc::format("{}.{}", module, result.target_struct);
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
     result.preferred_subgroup_size = e.preferred_subgroup_size;
@@ -134,7 +138,8 @@ cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
 {
-    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.options);
+    auto const front
+        = driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
     if (!front.errors.empty())
         return cc::error(front.errors);
     auto const& m = front.module;
@@ -145,7 +150,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
         auto const defaults
             = request.options.empty()
                 ? cc::optional<driver::impl::front_end>()
-                : cc::optional<driver::impl::front_end>(driver::impl::run_front_end(request.source, request.source_name));
+                : cc::optional<driver::impl::front_end>(driver::impl::run_front_end(request.source, request.source_name, request.library));
         auto const& tested = defaults.has_value() ? defaults.value() : front;
         auto failed = cc::string();
         for (auto const& r :
@@ -175,18 +180,27 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
         return cc::error(cc::format("{}: error: entry point '{}' is a {} entry point, and a {} one was asked for\n",
                                     request.source_name, e.name, check::stage_name(e.entry_stage),
                                     check::stage_name(request.stage)));
-    return emit_text(m, e, request.target, request.source_name);
+    auto result = emit_text(m, e, request.target, request.source_name);
+    if (result.has_value())
+        for (auto const name : front.library_names)
+            result.value().library_files.push_back(cc::string(name));
+    return result;
 }
 
 cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all_text_request const& request)
 {
-    auto const front = driver::impl::run_front_end(request.source, request.source_name);
+    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library);
     if (!front.errors.empty())
         return cc::error(front.errors);
     auto result = cc::vector<entry_text>();
     for (auto const& e : front.module.entry_points)
         for (auto const t : request.targets)
-            result.push_back(
-                {.entry_point = e.name, .target = t, .text = emit_text(front.module, e, t, request.source_name)});
+        {
+            auto text = emit_text(front.module, e, t, request.source_name);
+            if (text.has_value())
+                for (auto const name : front.library_names)
+                    text.value().library_files.push_back(cc::string(name));
+            result.push_back({.entry_point = e.name, .target = t, .text = cc::move(text)});
+        }
     return result;
 }

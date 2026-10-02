@@ -159,5 +159,7 @@ namespace cc
 /// Repeats until nothing progresses or `max_ms` elapses; max_ms <= 0 runs one cycle.
 /// The budget is checked between the main home's items, so one long body overruns it.
 /// Returns false only when nothing progressed and the main home has nothing queued, so a loop seeing false may wait.
+/// On threaded wasm it also runs what Emscripten proxies to the main thread, a worker's file access among them.
+/// A loop that pumps without returning to the browser therefore never deadlocks a worker waiting on one.
 bool pump_main_thread(double max_ms = 0);
 } // namespace cc

@@ -25,9 +25,9 @@ enum class sgl::check::feature : sgl::u8
     sample_rate_shading,
     geometry_shader,
     tessellation_shader,
-    /// `half` and its vectors (CHK-347).
+    /// `half` and its vectors (CHK-382).
     shader_f16,
-    /// `short`, `ushort` and their vectors (CHK-347), which WebGPU has on no device.
+    /// `short`, `ushort` and their vectors (CHK-382), which WebGPU has on no device.
     shader_int16,
     /// The `subgroup_*` and `quad_*` operations (CHK-376).
     subgroups,

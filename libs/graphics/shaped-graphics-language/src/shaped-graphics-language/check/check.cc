@@ -11,19 +11,76 @@ using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::check::impl;
 
+namespace
+{
+/// The files of one check in its order, and how they fall into modules.
+struct planned_files
+{
+    cc::vector<module_file> files;
+    module_plan plan;
+};
+
+planned_files plan_files(cc::span<module_file const> prelude, cc::span<module_file const> library, module_file program)
+{
+    auto result = planned_files{.plan = plan_modules(library, program)};
+    result.files.push_back_range(prelude);
+    for (auto const i : result.plan.library_order)
+        result.files.push_back(library[i]);
+    result.files.push_back(program);
+    return result;
+}
+
+/// Hands `c` the modules of `plan`, with `prelude_count` files of the prelude in front of the plan's, and reports what
+/// the plan found wrong.
+void apply_plan(checker& c, module_plan& plan, i32 prelude_count)
+{
+    c.prelude_count = prelude_count;
+    c.out.prelude_files = prelude_count;
+    c.out.library_files = plan.library_order;
+    c.out.file_modules = {};
+    for (auto i = i32(0); i < prelude_count; ++i)
+        c.out.file_modules.push_back({});
+    for (auto const module : plan.file_module)
+        c.out.file_modules.push_back(plan.modules[module]);
+    c.modules = cc::move(plan.modules);
+    c.file_module = cc::vector<i32>::create_filled(prelude_count, -1);
+    c.file_module.push_back_range(plan.file_module);
+    c.uses = {};
+    for (auto i = i32(0); i < prelude_count; ++i)
+        c.uses.push_back({});
+    for (auto& u : plan.uses)
+        c.uses.push_back(cc::move(u));
+    for (auto& d : plan.diagnostics)
+    {
+        d.file += prelude_count;
+        for (auto& n : d.notes)
+            n.file += prelude_count;
+        c.out.diagnostics.push_back(cc::move(d));
+    }
+}
+} // namespace
+
+checked_module sgl::check::check(cc::span<module_file const> prelude,
+                                 cc::span<module_file const> library,
+                                 module_file program,
+                                 builtins::registry const& builtins,
+                                 cc::span<option_value const> options)
+{
+    auto planned = plan_files(prelude, library, program);
+    auto c = checker{.files = planned.files, .builtins = builtins};
+    c.out.builtins = &builtins;
+    apply_plan(c, planned.plan, i32(prelude.size()));
+    c.options = options;
+    c.run();
+    return cc::move(c.out);
+}
+
 checked_module sgl::check::check(cc::span<module_file const> prelude,
                                  module_file user,
                                  builtins::registry const& builtins,
                                  cc::span<option_value const> options)
 {
-    auto files = cc::vector<module_file>();
-    files.push_back_range(prelude);
-    files.push_back(user);
-    auto c = checker{.files = files, .builtins = builtins};
-    c.out.builtins = &builtins;
-    c.options = options;
-    c.run();
-    return cc::move(c.out);
+    return check(prelude, {}, user, builtins, options);
 }
 
 checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user, cc::span<option_value const> options)
@@ -51,6 +108,8 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     result._state = cc::make_unique<checker>(checker{.files = files, .builtins = builtins});
     auto& c = *result._state;
     c.out.builtins = &builtins;
+    auto plan = plan_modules({}, files.back());
+    apply_plan(c, plan, i32(prelude.size()));
     c.run();
     if (!c.out.diagnostics.empty())
         return {};
@@ -58,6 +117,9 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     c.files = {};
     c.out.files.remove_back();
     c.file_features.remove_back();
+    c.file_module.remove_back();
+    c.uses.remove_back();
+    c.out.file_modules.remove_back();
     result._resume = {
         .files = i32(prelude.size()),
         .symbols = c.out.symbols.size(),
@@ -68,16 +130,23 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     return result;
 }
 
-checked_module sgl::check::check(checked_prelude const& prelude, module_file user, cc::span<option_value const> options)
+checked_module sgl::check::check(checked_prelude const& prelude,
+                                 cc::span<module_file const> library,
+                                 module_file program,
+                                 cc::span<option_value const> options)
 {
-    auto files = cc::vector<module_file>();
-    files.push_back_range(prelude._files);
-    files.push_back(user);
+    auto planned = plan_files(prelude._files, library, program);
     auto c = *prelude._state;
-    c.files = files;
+    c.files = planned.files;
+    apply_plan(c, planned.plan, i32(prelude._files.size()));
     c.options = options;
     c.run(prelude._resume);
     return cc::move(c.out);
+}
+
+checked_module sgl::check::check(checked_prelude const& prelude, module_file user, cc::span<option_value const> options)
+{
+    return check(prelude, {}, user, options);
 }
 
 // ---- number literals ------------------------------------------------------------------------------------------------
@@ -396,6 +465,10 @@ void checker::run(resume_point from)
         out.types.push_back({.kind = type_kind::error});
         out.types.push_back({.kind = type_kind::void_});
     }
+    // A checked prelude leaves the scope of its empty program behind, which this check's modules replace.
+    module_scopes = {};
+    for (auto i = isize(0); i < modules.size(); ++i)
+        module_scopes.push_back({});
     for (auto file = from.files; file < i32(files.size()); ++file)
     {
         auto const count = ast_of(file).exprs.size();
@@ -451,8 +524,10 @@ void checker::run(resume_point from)
 
     index_builtin_symbols();
     instantiate_generics();
+    // CHK-350: the entry points are the program's; a module the program uses is a library, whose own are not built
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
-        if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
+        if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked
+            && (is_prelude_file(out.symbols[i].file) || out.symbols[i].file == program_file()))
             flatten_entry_point(symbol_id(i));
     flatten_metal_traversals();
     for (auto i = from.tests; i < out.tests.size(); ++i)
@@ -489,9 +564,9 @@ void checker::add_symbol(symbol s, source_span name_where)
         return;
     }
 
-    // CHK-12 holds within one scope; the user file's may shadow the prelude's.
+    // CHK-12 holds within one scope; a module's may shadow the prelude's.
     // A struct shares its name with functions, its constructors among them, and stands in front of them (CHK-240).
-    auto& declared = is_prelude_file(file) ? prelude_names[name] : file_names[name];
+    auto& declared = is_prelude_file(file) ? prelude_names[name] : module_scopes[file_module[file]][name];
     auto const is_struct = out.at(id).kind == symbol_kind::structure;
     auto const is_allowed
         = declared.empty() || (is_function && is_overload_set(declared)) || (is_struct && is_all_functions(declared));
@@ -559,7 +634,7 @@ cc::string_view checker::member_kind_of(symbol_id owner, cc::string_view name) c
         if (auto const* const c = d.try_as<ast::enum_case_decl>(); c != nullptr && text_of(o.file, c->name) == name)
             return "case";
     }
-    // CHK-351: every swizzle is a member as a field is, and a function of its name would never be reached
+    // CHK-386: every swizzle is a member as a field is, and a function of its name would never be reached
     if (s != nullptr && find_attribute(o.file, ast.at(o.declaration).attributes, "swizzle") != nullptr
         && name.size() >= 2 && name.size() <= 4)
     {
@@ -650,8 +725,8 @@ void checker::attach_extensions(isize first)
 cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, type_id first) const
 {
     auto result = cc::vector<symbol_id>();
-    if (auto const* const found = names_seen_from(file).get_ptr(name))
-        for (auto const id : *found)
+    if (auto const* const named = names_seen_from(file).get_ptr(name))
+        for (auto const id : *named)
             if (out.at(id).kind == symbol_kind::function)
                 result.push_back(id);
 
@@ -676,14 +751,71 @@ cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, typ
         for (auto const id : *members)
             if (is_visible_from(file, id))
                 add(id);
-    // The program's file sees its own declarations already, so only a prelude type has a declaring scope to add, and
-    // it matters where the program shadows the name with something that is no function (CHK-188).
-    if (is_prelude_file(out.at(type.symbol).file))
-        if (auto const* const declared = prelude_names.get_ptr(name))
-            for (auto const id : *declared)
-                if (out.at(id).kind == symbol_kind::function && is_visible_from(file, id))
-                    add(id);
+    // A file sees its own module's declarations already, so only a prelude type or another module's has a declaring
+    // scope to add; for a prelude type it matters where the module shadows the name with something that is no function
+    // (CHK-188).
+    auto const declaring_file = out.at(type.symbol).file;
+    auto const* const declared = is_prelude_file(declaring_file) ? prelude_names.get_ptr(name)
+                               : is_prelude_file(file) || file_module[declaring_file] != file_module[file]
+                                   ? module_scopes[file_module[declaring_file]].get_ptr(name)
+                                   : nullptr;
+    if (declared != nullptr)
+        for (auto const id : *declared)
+            if (out.at(id).kind == symbol_kind::function && is_visible_from(file, id))
+                add(id);
     return result;
+}
+
+cc::string checker::name_seen_from(i32 file, symbol_id id) const
+{
+    auto const& s = out.at(id);
+    if (s.file < 0 || is_prelude_file(s.file) || is_prelude_file(file) || file_module[s.file] == file_module[file])
+        return cc::string(s.name);
+    return cc::format("{}.{}", modules[file_module[s.file]], s.name);
+}
+
+i32 checker::module_named(i32 file, ast::expr_id expr, function_scope const* scope) const
+{
+    if (!ast::is_valid(expr) || is_prelude_file(file))
+        return -1;
+    auto const* const n = ast_of(file).at(expr).node.try_as<ast::name>();
+    if (n == nullptr)
+        return -1;
+    auto const text = text_of(file, n->where);
+    if ((scope != nullptr && scope->find_local(text) != nullptr) || is_type_parameter_name(text))
+        return -1;
+    return used_module(file, text);
+}
+
+cc::vector<symbol_id> const* checker::symbols_named(i32 file,
+                                                    ast::expr_id expr,
+                                                    function_scope const* scope,
+                                                    bool* is_qualified) const
+{
+    if (is_qualified != nullptr)
+        *is_qualified = false;
+    if (!ast::is_valid(expr))
+        return nullptr;
+    auto const& node = ast_of(file).at(expr).node;
+    cc::vector<symbol_id> const* found = nullptr;
+    if (auto const* const n = node.try_as<ast::name>())
+    {
+        auto const text = text_of(file, n->where);
+        if ((scope != nullptr && scope->find_local(text) != nullptr) || is_type_parameter_name(text))
+            return nullptr;
+        found = names_seen_from(file).get_ptr(text);
+    }
+    else if (auto const* const m = node.try_as<ast::member>())
+    {
+        // CHK-348: what a module declares, and none of the prelude it sees
+        auto const module = module_named(file, m->object, scope);
+        if (module < 0 || m->name.empty())
+            return nullptr;
+        if (is_qualified != nullptr)
+            *is_qualified = true;
+        found = module_scopes[module].get_ptr(text_of(file, m->name));
+    }
+    return found != nullptr && !found->empty() ? found : nullptr;
 }
 
 void checker::judge_redeclarations(isize first)
@@ -742,8 +874,9 @@ void checker::judge_redeclarations(isize first)
     };
     for (auto const& [name, ids] : prelude_names)
         judge(ids);
-    for (auto const& [name, ids] : file_names)
-        judge(ids);
+    for (auto const& scope : module_scopes)
+        for (auto const& [name, ids] : scope)
+            judge(ids);
     for (auto const& [owner, scope] : type_scopes)
         for (auto const& [name, ids] : scope)
             judge(ids);
@@ -773,7 +906,7 @@ void checker::declare_constructors(isize first)
         if (decl.is_opaque || decl.name.empty())
             continue;
         // Only a struct a lookup finds has a constructor there: a duplicate is found by nothing.
-        auto const& scope = is_prelude_file(s.file) ? prelude_names : file_names;
+        auto const& scope = is_prelude_file(s.file) ? prelude_names : module_scopes[file_module[s.file]];
         auto const* const found = scope.get_ptr(s.name);
         if (found == nullptr || found->empty() || found->front() != symbol_id(i))
             continue;
@@ -804,13 +937,48 @@ bool checker::is_internal(symbol_id id) const
 
 void checker::merge_scopes()
 {
-    // CHK-323: an `@internal` symbol of the prelude is the prelude's alone, and no lookup from the program finds it
-    names = {};
-    for (auto const& [name, ids] : prelude_names)
-        for (auto const id : ids)
-            if (!is_internal(id))
-                names[name].push_back(id);
-    for (auto const& [name, ids] : file_names)
+    merged_scopes = {};
+    for (auto const& scope : module_scopes)
+    {
+        auto& names = merged_scopes.emplace_back();
+        // CHK-323: an `@internal` symbol of the prelude is the prelude's alone, and no lookup from a module finds it
+        for (auto const& [name, ids] : prelude_names)
+            for (auto const id : ids)
+                if (!is_internal(id))
+                    names[name].push_back(id);
+        merge_scope(names, scope);
+    }
+
+    // CHK-347: a `use` line's name and a declaration of the file's module, or of the prelude, would be one name for two
+    // things
+    // A refused `use` binds nothing, so the name keeps meaning the declaration.
+    for (auto file = prelude_count; file < i32(files.size()); ++file)
+    {
+        auto kept = cc::vector<module_use>();
+        for (auto& u : uses[file])
+        {
+            auto const* const found = module_scopes[file_module[file]].get_ptr(u.name);
+            auto is_prelude_name = false;
+            if (auto const* const prelude = prelude_names.get_ptr(u.name))
+                for (auto const id : *prelude)
+                    is_prelude_name = is_prelude_name || !is_internal(id);
+            if (found != nullptr && !found->empty())
+                report(diagnostic_kind::duplicate_declaration, file, u.where,
+                       cc::format("{} names a module here, and a declaration of this module", u.name));
+            else if (is_prelude_name)
+                report(diagnostic_kind::duplicate_declaration, file, u.where,
+                       cc::format("{} names a module here, and a declaration of the prelude", u.name));
+            else
+                kept.push_back(cc::move(u));
+        }
+        uses[file] = cc::move(kept);
+    }
+}
+
+void checker::merge_scope(cc::map<cc::string, cc::vector<symbol_id>>& names,
+                          cc::map<cc::string, cc::vector<symbol_id>> const& scope)
+{
+    for (auto const& [name, ids] : scope)
     {
         auto& seen = names[name];
         // Two overload sets are one, a struct's constructors among them (CHK-189).
@@ -888,10 +1056,15 @@ void checker::declare(i32 file, ast::decl_id decl)
                 else
                     spelling = {};
 
-                if (spelling.empty())
+                // CHK-350: an operator is never qualified, so one of a module the program uses has no spelling to reach it
+                auto const is_foreign = !is_prelude_file(file) && file_module[file] != 0;
+                if (spelling.empty() || is_foreign)
                 {
-                    report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-                           "@operator takes one quoted operator, as in @operator(\"*\")");
+                    if (is_foreign)
+                        unsupported(file, a->name, "an @operator function in a module the program uses");
+                    else
+                        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+                               "@operator takes one quoted operator, as in @operator(\"*\")");
                     // Neither its name nor an operator finds it: the attribute says its name is hidden.
                     s.state = symbol_state::failed;
                     out.symbols.push_back(cc::move(s));
@@ -916,9 +1089,9 @@ void checker::declare(i32 file, ast::decl_id decl)
             if (!b.name.empty())
                 add_symbol(named(symbol_kind::binding, b.name), b.name);
         },
-        // one unnamed module: the line is accepted and names nothing
+        // what the two lines name was read before any file was declared (`plan_modules`)
         [&](ast::module_decl const&) {}, //
-        [&](ast::use_decl const&) { unsupported(file, span_of(file, decl), "use"); },
+        [&](ast::use_decl const&) {},
         [&](ast::require_decl const& r)
         {
             judge_attributes(file, d.attributes, {}, "a require");
@@ -942,7 +1115,10 @@ void checker::declare(i32 file, ast::decl_id decl)
         },
         [&](ast::sampler_decl const& s)
         {
-            if (!s.name.empty())
+            // CHK-350: a file-scope sampler takes a position among its module's, which no other module numbers
+            if (!is_prelude_file(file) && file_module[file] != 0)
+                unsupported_symbol(s.name, "a file-scope sampler in a module the program uses");
+            else if (!s.name.empty())
                 add_symbol(named(symbol_kind::sampler, s.name), s.name);
         },
         [&](ast::pipeline_decl const& p)

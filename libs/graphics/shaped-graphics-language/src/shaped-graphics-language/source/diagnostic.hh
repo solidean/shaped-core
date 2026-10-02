@@ -122,6 +122,12 @@ enum class sgl::diagnostic_kind : sgl::u8
     type_mismatch,
     /// A symbol that needs itself to be compiled.
     dependency_cycle,
+    /// A `use` that names a module no file of the library declares.
+    unknown_module,
+    /// Modules that `use` each other in a loop, which a module compiled on its own could not resolve.
+    module_cycle,
+    /// A `use` of the module its own file belongs to, whose names that file sees already.
+    use_of_own_module,
     /// A `@builtin` declaration whose name the compiler does not know, or knows as the other kind of declaration.
     unknown_builtin,
     opaque_struct_needs_builtin,

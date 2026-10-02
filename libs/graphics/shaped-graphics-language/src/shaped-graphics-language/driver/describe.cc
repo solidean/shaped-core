@@ -144,6 +144,28 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
     return result;
 }
 
+/// The name the host knows `id` by: bare for the prelude's and the source's own module's, `m.name` for another
+/// module's (CHK-348).
+cc::string host_name_of(check::checked_module const& m, check::symbol_id id)
+{
+    auto const module = m.foreign_module_of(id);
+    return module.empty() ? cc::string(m.at(id).name) : cc::format("{}.{}", module, m.at(id).name);
+}
+
+/// `host_name_of` the type's declaration, for a type a module declares; its spelling for any other.
+cc::string host_type_name_of(check::checked_module const& m, check::type_id type)
+{
+    auto const symbol = m.at(type).symbol;
+    return check::is_valid(symbol) ? host_name_of(m, symbol) : cc::string(m.name_of(type));
+}
+
+/// The module of `type`'s declaration where it is not the source's own; empty otherwise.
+cc::string foreign_module_of_type(check::checked_module const& m, check::type_id type)
+{
+    auto const symbol = m.at(type).symbol;
+    return check::is_valid(symbol) ? cc::string(m.foreign_module_of(symbol)) : cc::string();
+}
+
 described_memory_struct describe_memory_struct(check::checked_module const& m,
                                                check::type_id type,
                                                emit_impl::address_space space)
@@ -151,6 +173,7 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
     auto const placed = emit_impl::place_struct(m, type, space);
     auto result = described_memory_struct{
         .name = cc::string(m.name_of(type)),
+        .module = foreign_module_of_type(m, type),
         .space = cc::string(space == emit_impl::address_space::constants ? "constants" : "storage"),
         .size = placed.size};
     auto const members = m.at(m.at(type).members);
@@ -218,7 +241,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     result.preferred_subgroup_size = e.preferred_subgroup_size;
     for (auto const id : e.bindings)
         if (!m.bindings[m.at(id).info].is_workgroup)
-            result.bindings.push_back(m.at(id).name);
+            result.bindings.push_back(host_name_of(m, id));
     result.features = feature_names(e.features);
     result.options = option_names(m, e.options);
     result.footprint = check::footprint_of(m, legal);
@@ -363,7 +386,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
     if (p.has_host_hit_groups)
         result.max_attribute_size = check::checked_module::max_attribute_bytes;
     for (auto const b : m.at(p.layout))
-        result.layout.push_back(m.at(b).name);
+        result.layout.push_back(host_name_of(m, b));
     // CHK-343: every table of the module, packed in declaration order
     auto tables = cc::vector<check::pipeline_info const*>();
     for (auto const& t : m.pipelines)
@@ -497,15 +520,15 @@ described_pipeline describe_pipeline(check::checked_module const& m,
         if (is_reached[i] != 0)
             result.samplers.push_back(m.symbols[i].name);
     for (auto const b : m.at(p.layout))
-        result.layout.push_back(m.at(b).name);
+        result.layout.push_back(host_name_of(m, b));
     if (check::is_valid(p.inline_constants))
-        result.inline_constants = m.at(p.inline_constants).name;
+        result.inline_constants = host_name_of(m, p.inline_constants);
     // empty for a vertex stage that draws from no vertex buffer
     if (check::is_valid(p.vertex_input))
-        result.vertex_input = m.name_of(p.vertex_input);
+        result.vertex_input = host_type_name_of(m, p.vertex_input);
     if (check::is_valid(p.target_set))
     {
-        result.target_set = m.name_of(p.target_set);
+        result.target_set = host_type_name_of(m, p.target_set);
         for (auto const& member : m.at(m.at(p.target_set).members))
             if (member.output == check::pixel_output::color)
                 result.targets.push_back(member.name);
@@ -679,7 +702,13 @@ cc::vector<sgl::check::symbol_id> sgl::driver::impl::file_samplers_of(check::fla
 
 cc::result<sgl::module_description, cc::string> sgl::describe(describe_request const& request)
 {
-    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.options);
+    // A module is described through a program that joins it, which is its every file and nothing else.
+    auto const is_module = !request.module.empty();
+    auto const joining = cc::format("module {}\n", request.module);
+    auto const program_name = cc::format("<module {}>", request.module);
+    auto const front = is_module
+                         ? driver::impl::run_front_end(joining, program_name, request.library, request.options)
+                         : driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
     if (!front.errors.empty())
         return cc::error(front.errors);
 
@@ -724,16 +753,25 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             }
         }
     };
+    if (is_module && m.library_files.empty())
+        return cc::error(
+            cc::format("{}: error: no file of the library declares module {}\n", program_name, request.module));
     auto errors = cc::vector<emit::error>();
     auto result = module_description();
     auto described = cc::vector<check::symbol_id>();
+    // the source's own declarations, or every file's of the module described, and none of a module either uses
+    auto const is_own = [&](i32 file)
+    {
+        return is_module ? file >= m.prelude_file_count() && m.file_modules[file] == m.file_modules.back()
+                         : file == front.program_file();
+    };
 
     // Only the program's own declarations: the prelude describes nothing, and an imported module describes itself.
     for (auto i = isize(0); i < m.symbols.size(); ++i)
     {
         auto const id = check::symbol_id(i);
         auto const& s = m.at(id);
-        if (s.file != front.program_file() || s.state != check::symbol_state::checked)
+        if (!is_own(s.file) || s.state != check::symbol_state::checked)
             continue;
 
         // workgroup memory has no host side, so the host is told nothing of it
@@ -769,6 +807,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     }
 
     // The structs the described bindings place in memory, each once and after what it holds.
+    // Once by type: two modules may each declare a struct of one name.
+    auto placed = cc::vector<check::type_id>();
     for (auto const id : described)
     {
         for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage})
@@ -777,12 +817,14 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             emit_impl::collect_placed_structs(m, id, space, structs);
             for (auto const type : structs)
             {
-                auto const name = m.name_of(type);
                 auto is_known = false;
-                for (auto const& known : result.memory_structs)
-                    is_known = is_known || known.name == name;
+                for (auto const known : placed)
+                    is_known = is_known || known == type;
                 if (!is_known)
+                {
+                    placed.push_back(type);
                     result.memory_structs.push_back(describe_memory_struct(m, type, space));
+                }
             }
         }
     }
@@ -800,7 +842,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
 
     for (auto const& p : m.pipelines)
     {
-        if (m.at(p.symbol).file != front.program_file())
+        if (is_module || m.at(p.symbol).file != front.program_file())
             continue;
         if (p.kind == check::pipeline_kind::hit_group)
             result.hit_groups.push_back(describe_hit_group(m, p));
@@ -813,7 +855,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     }
     // every ray set of the program, a pipeline naming it or not
     for (auto const& s : m.symbols)
-        if (s.kind == check::symbol_kind::structure && s.file == front.program_file()
+        if (s.kind == check::symbol_kind::structure && !is_module && s.file == front.program_file()
             && s.state == check::symbol_state::checked && ast::is_valid(s.declaration))
         {
             auto const* const d = front.asts[s.file]->at(s.declaration).node.try_as<ast::struct_decl>();
@@ -841,7 +883,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             for (auto j = isize(0); j < i; ++j)
                 is_repeat = is_repeat || errors[j] == error;
             if (!is_repeat)
-                text.appendf("{}: error: {}: {}\n", request.source_name, emit::to_string(error.kind), error.detail);
+                text.appendf("{}: error: {}: {}\n", is_module ? cc::string_view(program_name) : request.source_name,
+                             emit::to_string(error.kind), error.detail);
         }
         return cc::error(cc::move(text));
     }

@@ -16,6 +16,8 @@ struct sgl::text_request
     cc::string_view source;
     /// What a diagnostic calls the source; it is never opened.
     cc::string_view source_name = "<sgl>";
+    /// The files whose modules the source may `use`.
+    cc::span<library_file const> library;
     /// The entry point's name as the source writes it.
     cc::string_view entry_point;
     /// The stage the caller expects the entry point to be; `none` takes whichever it is.
@@ -35,6 +37,8 @@ struct sgl::all_text_request
     cc::string_view source;
     /// What a diagnostic calls the source; it is never opened.
     cc::string_view source_name = "<sgl>";
+    /// The files whose modules the source may `use`.
+    cc::span<library_file const> library;
     cc::span<emit::target const> targets;
 };
 
@@ -95,6 +99,8 @@ struct sgl::emitted_source
     cc::vector<check::slot_footprint> footprint;
     /// Every constant block and buffer element as the text declares it, which a compiler reflecting the text reports.
     cc::vector<emit::emitted_layout> layouts;
+    /// The names of the library files the source reached through `use`, which an edit of any of them changes the text of.
+    cc::vector<cc::string> library_files;
 };
 
 /// One entry point on one target, as `compile_all_to_text` wrote it or said why it could not.

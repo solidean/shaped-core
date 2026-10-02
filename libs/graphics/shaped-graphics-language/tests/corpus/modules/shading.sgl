@@ -1,0 +1,22 @@
+// A module of the corpus library: every corpus file may `use shading`, and only through `shading.name`.
+// Its second file is shading-tones.sgl; the two see each other's names unqualified.
+module shading
+
+binding frame:
+    exposure: float
+
+struct light:
+    power: float
+
+fun light.halved(self) -> light => light(self.power * 0.5)
+
+// declared where `light` is, so a call on a light finds it from any module (CHK-247)
+fun strength(l: light) -> float => l.power
+
+fun exposed(x: float){frame} -> float => x * frame.exposure
+
+const steps = 4
+
+// a name of the other file of the module, unqualified
+test toned(2.0, tone.linear) == 2.0
+test light(4.0).halved().power == 2.0

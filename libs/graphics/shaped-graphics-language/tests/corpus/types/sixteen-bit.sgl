@@ -1,4 +1,4 @@
-// half, short and ushort: the 16-bit float, int and uint, and their vectors (CHK-346)
+// half, short and ushort: the 16-bit float, int and uint, and their vectors (CHK-381)
 
 require shader_f16
 
@@ -72,7 +72,7 @@ test:
     s.yx + 1i16 == short2(-3i16, 4i16) and abs(s) == short2(3i16, 4i16) and sign(s) == short2(1i16, -1i16)
     (s as ushort2).y == 65532u16
 
-// a value of half needs shader_f16 of every entry point that holds one (CHK-347); a test needs no feature
+// a value of half needs shader_f16 of every entry point that holds one (CHK-382); a test needs no feature
 binding scales:
     factor: half
     values: mut buffer[half2]

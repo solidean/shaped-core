@@ -12,7 +12,7 @@ enum class sgl::check::value_kind : sgl::u8
     scalar_int,
     scalar_uint,
     boolean,
-    /// The 16-bit families (CHK-346), whose bits are the low 16 of `scalar::bits` and whose upper 16 are zero.
+    /// The 16-bit families (CHK-381), whose bits are the low 16 of `scalar::bits` and whose upper 16 are zero.
     scalar_half,
     scalar_short,
     scalar_ushort,

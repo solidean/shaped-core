@@ -199,7 +199,7 @@ TEST("sgl check - a stage input some device lacks needs its feature, as a bindin
 
 TEST("sgl check - a 16-bit value needs its feature wherever an entry point or a binding holds one")
 {
-    // CHK-347: a value in the body, which the entry point declares like a call's feature
+    // CHK-382: a value in the body, which the entry point declares like a call's feature
     auto const body = cc::string("@compute(64) fun cs(@thread_id id: int3):\n"
                                  "    let h = (id.x as float) as half\n"
                                  "    let s = h * 2.0\n");
@@ -222,7 +222,7 @@ TEST("sgl check - a 16-bit value needs its feature wherever an entry point or a 
 
 TEST("sgl check - no 16-bit value crosses a stage edge, and no buffer strides by part of a word")
 {
-    // CHK-348: at any depth of the struct an entry point takes or returns
+    // CHK-383: at any depth of the struct an entry point takes or returns
     CHECK(reports_for("require shader_f16\n\n"
                       "struct shade:\n"
                       "    tint: half3\n"
@@ -235,7 +235,7 @@ TEST("sgl check - no 16-bit value crosses a stage edge, and no buffer strides by
                       "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), s = {tint = half3(1.0)}}\n")
               .contains("unsupported-yet user:[vs] a 16-bit value crossing a stage edge, in varyings.s.tint: half3"));
 
-    // CHK-346: a buffer strides by whole 4-byte words, which a lone half or a half3 does not fill
+    // CHK-381: a buffer strides by whole 4-byte words, which a lone half or a half3 does not fill
     CHECK(reports_for(listing("require shader_f16\n\n", "    values: buffer[half]\n"))
           == "unsupported-yet user:[buffer[half]] a buffer of half, whose element takes 2 bytes, which is no whole "
              "number of 4-byte words\n");

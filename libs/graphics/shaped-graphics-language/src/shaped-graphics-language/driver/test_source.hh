@@ -1,9 +1,11 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/symbols.hh>
+#include <shaped-graphics-language/driver/library_file.hh>
 
 /// One SGL source checked against the prelude with its tests run: what `sgl test` and the corpus read.
 struct sgl::tested_source
@@ -33,8 +35,11 @@ struct sgl::tested_source
 
 namespace sgl
 {
-/// Parses and checks `source` behind the prelude and runs its tests, which only the source's own are.
+/// Parses and checks `source` behind the prelude and the modules of `library` it uses, and runs its tests, which only
+/// the source's own are.
 /// Total and deterministic, like `compile_to_text`: a source that does not check still has its errors reported, and
 /// its tests that have a flat tree still run.
-[[nodiscard]] tested_source test_source(cc::string_view source, cc::string_view source_name = "<sgl>");
+[[nodiscard]] tested_source test_source(cc::string_view source,
+                                        cc::string_view source_name = "<sgl>",
+                                        cc::span<library_file const> library = {});
 } // namespace sgl

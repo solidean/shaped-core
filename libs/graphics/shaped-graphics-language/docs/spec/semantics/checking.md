@@ -2,16 +2,18 @@
 
 *Tracer: deliberately thin.*
 
-The check pass reads the ASTs of one module and resolves names, checks types and builds the flat tree of every entry point.
+The check pass reads the ASTs of one program and the modules it uses, resolves names, checks types and builds the flat tree of every entry point.
 It is one pass, not three, and it carries what three samples need.
 They are [cube.sgl](../../../tests/samples/cube.sgl), [helpers.sgl](../../../tests/samples/helpers.sgl) and [matrices.sgl](../../../tests/samples/matrices.sgl).
 Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/checking.md).
 
 ## The pass
 
-* **CHK-1** The check pass reads the [ASTs](../syntax/ast.md) of the files of one module, and it changes none of them.
-* **CHK-2** The module is unnamed: the files of the prelude stand in front, then the program's file, and a file is named by its position in that order ([why](why/checking.md#chk-2)).
-* **CHK-3** A `module` line is accepted and names nothing.
+* **CHK-1** The check pass reads the [ASTs](../syntax/ast.md) of the prelude, of the program's file and of the modules the program reaches, and it changes none of them.
+* **CHK-2** The files of the prelude stand in front, then the library files of the modules the program reaches (CHK-346), then the program's file.
+  A file is named by its position in that order ([why](why/checking.md#chk-2)).
+* **CHK-3** A `module` line names the module its file belongs to (CHK-346).
+  A program file without one is a module of its own, which no `use` can name.
 * **CHK-4** The files stay separate, so a span points into the source of its own file, and a diagnostic names its file.
 * **CHK-5** The check pass is total: any ASTs give a checked module and a list of diagnostics, `invalid` nodes and earlier diagnostics included.
 * **CHK-6** What did not check has the **error type**.
@@ -26,19 +28,19 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-12** A name is declared once in one scope, unless every declaration of it is a function, or one is a `struct` and every other a function (CHK-240).
   A later declaration is the normal error `duplicate-declaration`.
 * **CHK-13** Several functions of one name are an **overload set**.
-* **CHK-188** The module scope is two: the files of the prelude share the outer one, and the program's file has the inner one ([why](why/checking.md#chk-188)).
-  A declaration of the program's file **shadows** what the prelude declares of its name, so a `struct vec3` there is no duplicate, and it shadows that struct's constructors with it.
+* **CHK-188** The module scope has two levels: the files of the prelude share the outer one, and the files of each module share an inner one of that module's own ([why](why/checking.md#chk-188)).
+  A declaration of a module's file **shadows** what the prelude declares of its name, so a `struct vec3` there is no duplicate, and it shadows that struct's constructors with it.
 * **CHK-189** Where both scopes declare nothing but functions of one name, the functions of both are one overload set.
   So are they where the prelude declares a struct and the program nothing but functions of its name: a program's `fun float4(v: float)` joins `float4`'s constructors.
 * **CHK-192** Where a call matches functions of both scopes, those of the program's file are its only matching candidates ([why](why/checking.md#chk-192)).
   It is applied before CHK-254 ranks them, so two matches in one scope are still ranked.
-* **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
+* **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of a module.
   An operator is looked up the same way: `a - b` in a prelude file chooses among the prelude's `@operator` functions alone.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
 * **CHK-14** A `type` alias is `unsupported-yet`, and it still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
   An `enum` is a symbol of its own, by CHK-142.
-* **CHK-15** `use` and `notation` are `unsupported-yet`.
+* **CHK-15** `notation` is `unsupported-yet`; `use` is CHK-347.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
 * **CHK-17** Compilation is on demand: needing a symbol that is untouched compiles it first ([why](why/checking.md#chk-17)).
 * **CHK-18** Needing a symbol that is in compilation is the normal error `dependency-cycle`, its detail names the loop, and what needed it gets the error type.
@@ -55,6 +57,46 @@ struct b:
     y: a
 ```
 
+## Modules
+
+The program is checked with a **library**: the files of the module directories its caller was given, which the caller reads.
+
+* **CHK-346** A library file belongs to the module its `module` line names, and every library file naming one module is a file of it ([why](why/checking.md#chk-346)).
+  A library file without a `module` line belongs to no module and is not read.
+  A module's name is one identifier; a dotted one is `unsupported-yet`.
+  Only the modules the program reaches through `use`, directly or through another module, are checked.
+  A program file whose `module` line names a module of the library is checked as one more file of that module.
+* **CHK-347** `use m` binds the name `m`, and `use m as n` the name `n`, to module `m`, in the file that writes it alone ([why](why/checking.md#chk-347)).
+  It brings no name of `m` into the file: what `m` declares is reached as `m.name` (CHK-348).
+  A module is no value, so its name where a value or a type stands is `wrong-kind-of-name`.
+  A `use` of a module no library file declares is `unknown-module`, and one of the file's own module `use-of-own-module`.
+  A dotted path is `unsupported-yet`, and so is `use` in a function body.
+  Two `use` lines binding one name, or a `use` binding a name a declaration of its file's module or of the prelude has, is `duplicate-declaration`, and that `use` binds nothing.
+* **CHK-348** `m.name`, where `m` is a name a `use` of the file binds and no local hides, stands for the module-level name `name` of module `m` wherever a bare name could stand.
+  That is a value, a call, a type, an entry of a binding list, a binding member, an enum case and `m.T.f(…)`.
+  It finds what `m` declares and nothing of the prelude.
+  A call `m.f(…)` takes the functions `m` declares as `f` alone: CHK-247's type scope of the first argument does not widen it.
+  A literal converts to a struct of another module by the functions of its name visible where the struct is declared, its constructor among them, as a call finds them by CHK-247.
+* **CHK-349** Modules that `use` each other in a loop are the normal error `module-cycle`, reported at the `use` that closes it, and its detail names the loop ([why](why/checking.md#chk-349)).
+  A program file that joins a module (CHK-346) counts as that module.
+* **CHK-350** A module the program uses is a library, and the tracer refuses what it cannot carry of one yet as `unsupported-yet` ([why](why/checking.md#chk-350)).
+  Its entry points, pipelines and tests are not built when another file is compiled.
+  An `@operator` function and a file-scope `sampler` in it are `unsupported-yet`, and so is one binding list naming two bindings of one name from different modules.
+
+```sgl sketch
+// view.sgl, a file of a module directory
+module view
+
+binding frame:
+    exposure: float
+
+// a program
+use view
+
+@pixel fun shade(p: pixel_input){view.frame} -> target:
+    return { color = float4(view.frame.exposure, 0.0, 0.0, 1.0) }
+```
+
 ## Types
 
 * **CHK-21** A type is canonical: two expressions name the same type exactly when they resolve to the same type, and nothing converts implicitly but a literal, by CHK-81 and CHK-253.
@@ -66,16 +108,16 @@ struct b:
 * **CHK-26** A field, a binding member and a parameter have a type; one without is the normal error `missing-type`.
 * **CHK-27** A `mut` member is `unsupported-yet`; defaults, properties and methods are [members](#members-and-constructors).
 * **CHK-28** Two fields of one struct, two members of one binding and two parameters of one function differ in name, or the later one is `duplicate-declaration`.
-* **CHK-346** `half`, `short` and `ushort` are the prelude's 16-bit float, `int` and `uint` ([why](why/checking.md#chk-346)).
+* **CHK-381** `half`, `short` and `ushort` are the prelude's 16-bit float, `int` and `uint` ([why](why/checking.md#chk-381)).
   Their vectors are `half2` to `half4`, `short2` to `short4` and `ushort2` to `ushort4`.
   A literal converts to one by CHK-253, so `h * 0.5` with `h` a `half` is a `half` product, and `as` converts by CHK-197.
   The bit operators and the bit functions take no 16-bit integer yet, and the derivatives take no half, which WGSL's do not.
-  A buffer whose element, placed by EMIT-111, is no whole number of 4-byte words is `unsupported-yet` ([why](why/checking.md#chk-346)).
+  A buffer whose element, placed by EMIT-111, is no whole number of 4-byte words is `unsupported-yet` ([why](why/checking.md#chk-381)).
   sg binds a buffer by whole words, so `buffer[half2]` is one and `buffer[half]` is not.
-* **CHK-347** A builtin type's record may name the feature a value of it needs, as a builtin function's record may (CHK-322).
+* **CHK-382** A builtin type's record may name the feature a value of it needs, as a builtin function's record may (CHK-322).
   `half` and its vectors name `shader_f16`, and `short`, `ushort` and their vectors name `shader_int16`.
   An entry point whose flat tree holds a value of such a type needs its feature, and a binding member that holds one is a form CHK-201 judges.
-* **CHK-348** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
+* **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
 
 ## Members and constructors
 
@@ -105,15 +147,15 @@ struct b:
   It is checked once, where it is declared, and it is of its parameter's type or `type-mismatch`.
 * **CHK-244** A named-only parameter (AST-144) binds by name alone, and a named-only field makes its constructor's parameter named-only.
 * **CHK-245** `self` in the body of a method or a property is its receiver, and anywhere else it is `unknown-name`.
-* **CHK-349** `@swizzle` on a struct gives it swizzles ([why](why/checking.md#chk-349)).
+* **CHK-384** `@swizzle` on a struct gives it swizzles ([why](why/checking.md#chk-384)).
   Its fields are two to four, each named by one character, and all of one element type that has a vector family: `float`, `int`, `uint`, `bool`, `half`, `short` or `ushort`.
   A struct that breaks this is `invalid-attribute-arguments`, and the detail names the field.
-  The prelude's vectors carry it: `float2` to `float4`, `int2` to `int4`, `uint2` to `uint4`, `bool2` to `bool4`, the 16-bit vectors (CHK-346), `vec3`, `pos3` and `hpos4`.
-* **CHK-350** A **swizzle** `v.zyx` names two to four fields of a `@swizzle` struct by their letters, in any order and with repeats.
-  It is a value of the plain vector of the element type and the letter count: `float3` from a `vec3`, a `pos3` and a program's `rgb` alike ([why](why/checking.md#chk-350)).
+  The prelude's vectors carry it: `float2` to `float4`, `int2` to `int4`, `uint2` to `uint4`, `bool2` to `bool4`, the 16-bit vectors (CHK-381), `vec3`, `pos3` and `hpos4`.
+* **CHK-385** A **swizzle** `v.zyx` names two to four fields of a `@swizzle` struct by their letters, in any order and with repeats.
+  It is a value of the plain vector of the element type and the letter count: `float3` from a `vec3`, a `pos3` and a program's `rgb` alike ([why](why/checking.md#chk-385)).
   One letter is the field itself, by CHK-64.
   A letter that names no field, or a fifth letter, is `unknown-member`, and the detail names the letter.
-* **CHK-351** Every swizzle of a `@swizzle` struct is a member of its type scope, as a field is (CHK-233) ([why](why/checking.md#chk-351)).
+* **CHK-386** Every swizzle of a `@swizzle` struct is a member of its type scope, as a field is (CHK-233) ([why](why/checking.md#chk-386)).
   So `v.xy` is the swizzle before any function is consulted (CHK-249).
   A function named `xy` visible at the use changes nothing, and `v.xy(…)` is still a call of it.
   A property or a function of the type scope, an extension included, whose name is a swizzle of the type is `member-name-clash`, at that declaration.
@@ -351,7 +393,8 @@ fun shade(k: float) -> float:
 
 * **CHK-40** A `binding` with a block is a symbol whose members have a name and a type; the composition form is `unsupported-yet`.
 * **CHK-41** `@inline` on a binding is recorded on the checked binding, since an emitter needs it.
-* **CHK-42** Each entry of a function's binding list is the bare name of a binding; any other entry is `unsupported-yet`.
+* **CHK-42** Each entry of a function's binding list is the name of a binding, bare or of a module (CHK-348); any other entry is `unsupported-yet`.
+* **CHK-351** A binding listed twice in one list, by any two spellings of its name, is `duplicate-declaration` at the second.
 * **CHK-43** A binding list is checked and never passed ([why](why/checking.md#chk-43)).
 * **CHK-44** `binding.member` is an expression of the member's type, inside a function whose binding list names that binding.
 * **CHK-45** In any other function it is the normal error `binding-not-listed`.
@@ -561,7 +604,7 @@ fun shade(k: float) -> float:
   The result takes part in the match, since the overloads of `as` differ in it; no such function is `no-matching-overload`.
 * **CHK-196** `x as T` where `x` already has the type `T` is `x`.
 * **CHK-197** The prelude converts between `float`, `int` and `uint` of one width, and nothing else ([why](why/checking.md#chk-197)).
-  Each family also converts between its widths: `half` and `float`, `short` and `int`, `ushort` and `uint` (CHK-346).
+  Each family also converts between its widths: `half` and `float`, `short` and `int`, `ushort` and `uint` (CHK-381).
   A float whose truncation the integer holds becomes that integer, truncated toward zero.
   A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
   Between `int` and `uint` the bits stay.
@@ -700,7 +743,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 
 * **CHK-258** A `require` names features as `sg::feature` names them, and only those a shader can use:
   `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures`, `ray_query` and `raytracing_pipeline`.
-  The 16-bit types add `shader_f16` and `shader_int16` (CHK-347), and the subgroup operations `subgroups` (CHK-376).
+  The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), and the subgroup operations `subgroups` (CHK-376).
   Coherent memory adds `device_coherence` (CHK-368), and image atomics `image_atomics` (CHK-372).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
@@ -1258,18 +1301,20 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-348, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379 |
-| `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383 |
+| `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
+| `unknown-module`, `use-of-own-module` | CHK-347 |
+| `module-cycle` | CHK-349 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245, CHK-330 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-368, CHK-372, CHK-373, CHK-374 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300, CHK-315, CHK-317, CHK-320, CHK-338, CHK-339, CHK-347, CHK-368, CHK-372, CHK-373, CHK-374 |
 | `unexpected-keyword` | CHK-315 |
 | `default-not-allowed-here` | CHK-316 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304, CHK-349, CHK-369, CHK-370, CHK-371 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-329, CHK-344, CHK-362, CHK-375 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
@@ -1278,14 +1323,14 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `no-effect` | CHK-225 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
-| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-350 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
 | `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-366, CHK-367 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
-| `needs-feature` | CHK-201, CHK-320, CHK-347, CHK-368, CHK-372 |
+| `needs-feature` | CHK-201, CHK-320, CHK-382, CHK-368, CHK-372 |
 | `unknown-feature` | CHK-258 |
-| `feature-not-declared` | CHK-264, CHK-322, CHK-347 |
+| `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
 | `unused-require` | CHK-265 |
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-298, CHK-329, CHK-344 |
 | `ambiguous-overload` | CHK-72 |
@@ -1297,7 +1342,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
 | `unmet-expectation` | CHK-232, CHK-267 |
-| `member-name-clash` | CHK-238, CHK-351 |
+| `member-name-clash` | CHK-238, CHK-386 |
 | `literal-not-representable` | CHK-60, CHK-61, CHK-253, CHK-357 |
 | `call-spelling` | CHK-256 |
 | `literal-conversion-result` | CHK-85 |

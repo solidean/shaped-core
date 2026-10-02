@@ -63,6 +63,8 @@ struct sgl_test::checked_sources
     sgl::parsed_file user;
     sgl::ast::file_ast user_ast;
     sgl::check::checked_module module;
+    /// Parallel to the files between the prelude and the user file: each one's position in the library the test gave.
+    cc::vector<sgl::i32> library_files;
 
     /// The position of the user file, which a diagnostic and an origin name it by: 1 behind one prelude file, 3 behind the library's.
     [[nodiscard]] sgl::i32 user_file() const { return sgl::i32(files.size() - 1); }
@@ -129,10 +131,57 @@ inline checked_sources check_sources(library_prelude, cc::string_view user)
     return check_behind(sgl::parsed_prelude(), sources);
 }
 
+/// `program` behind the library's prelude and the modules of `library` it reaches through `use`.
+/// A reached library file is reported as `lib.<i>`, by its position in `library`.
+inline checked_sources check_with_library(cc::span<cc::string_view const> library, cc::string_view program)
+{
+    auto result = checked_sources();
+    auto const own = [&](cc::string_view source)
+    {
+        result.owned_files.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(source)));
+        result.owned_asts.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*result.owned_files.back())));
+        return sgl::check::module_file{.file = *result.owned_files.back(), .ast = *result.owned_asts.back()};
+    };
+    auto modules = cc::vector<sgl::check::module_file>();
+    for (auto const source : library)
+        modules.push_back(own(source));
+    auto const user = own(program);
+    REQUIRE(sgl::checked_prelude() != nullptr);
+    result.module = sgl::check::check(*sgl::checked_prelude(), modules, user);
+    result.library_files = result.module.library_files;
+
+    for (auto const& f : sgl::parsed_prelude())
+    {
+        result.files.push_back(&f.file);
+        result.asts.push_back(&f.ast);
+    }
+    for (auto const i : result.module.library_files)
+    {
+        result.files.push_back(&modules[i].file);
+        result.asts.push_back(&modules[i].ast);
+    }
+    result.files.push_back(&user.file);
+    result.asts.push_back(&user.ast);
+    result.user = user.file;
+    result.user_ast = user.ast;
+    return result;
+}
+
+/// What `reports_of` calls file `file` of `s`.
+inline cc::string role_of(checked_sources const& s, sgl::i32 file)
+{
+    auto const prelude_count = s.files.size() - 1 - s.library_files.size();
+    if (file == s.user_file())
+        return "user";
+    if (file < prelude_count)
+        return prelude_count == 1 ? cc::string("prelude") : cc::format("prelude.{}", file);
+    return cc::format("lib.{}", s.library_files[file - prelude_count]);
+}
+
 /// The diagnostics of the check pass, one per line, with the source they point at in place of an offset:
 /// `unknown-name user:[foo] foo` is kind, file, the first line of the span, and the detail.
 /// A file is named by its role, since its position moves whenever the prelude gains a file: the last one is `user`,
-/// and a prelude file is `prelude`, or `prelude.<i>` where there are several.
+/// a prelude file is `prelude`, or `prelude.<i>` where there are several, and a library file is `lib.<i>`.
 inline cc::string reports_of(checked_sources const& s)
 {
     auto out = cc::string();
@@ -141,10 +190,7 @@ inline cc::string reports_of(checked_sources const& s)
         auto text = s.files[d.file]->text_of(d.what.where);
         if (auto const end = text.find('\n'); end >= 0)
             text = text.subview({.offset = 0, .size = end});
-        auto const prelude_count = s.files.size() - 1;
-        auto role = cc::string("user");
-        if (d.file < prelude_count)
-            role = prelude_count == 1 ? cc::string("prelude") : cc::format("prelude.{}", d.file);
+        auto const role = role_of(s, d.file);
         out.appendf("{} {}:[{}]", sgl::to_string(d.what.kind), role, text);
         if (!d.detail.empty())
             out.appendf(" {}", d.detail);
@@ -159,6 +205,12 @@ inline cc::string reports_of(checked_sources const& s)
         }
     }
     return out;
+}
+
+/// `program` behind the library's prelude and `library`, as `reports_of` writes it.
+inline cc::string reports_with(cc::span<cc::string_view const> library, cc::string_view program)
+{
+    return reports_of(check_with_library(library, program));
 }
 
 /// The last symbol of `name` that a declaration wrote, which a synthesized constructor of that name is not.

@@ -26,7 +26,7 @@ constexpr scalar_family k_float_family = {"float", "float", "f32", "f", value_ki
 constexpr scalar_family k_int_family = {"int", "int", "i32", "i", value_kind::scalar_int, true, true};
 constexpr scalar_family k_uint_family = {"uint", "uint", "u32", "u", value_kind::scalar_uint, true, true};
 constexpr scalar_family k_bool_family = {"bool", "bool", "bool", "", value_kind::boolean, false, false};
-// CHK-346 and CHK-348: no 16-bit value crosses a stage edge.
+// CHK-381 and CHK-383: no 16-bit value crosses a stage edge.
 // WGSL has no 16-bit integer at all, so `i16` and `u16` are spellings no text ever holds (EMIT-109).
 constexpr scalar_family k_half_family
     = {"half", "float16_t", "f16", "h", value_kind::scalar_half, true, false, 2, check::feature::shader_f16};
@@ -188,8 +188,8 @@ void sgl::builtins::register_types(registry& r)
     r.add(cc::move(boolean));
     add_vectors(r, k_bool_family, vectors);
 
-    r.add_comment("// the 16-bit families (CHK-346), each needing a feature of the device (CHK-347); no value of one\n"
-                  "// crosses a stage edge (CHK-348)");
+    r.add_comment("// the 16-bit families (CHK-381), each needing a feature of the device (CHK-382); no value of one\n"
+                  "// crosses a stage edge (CHK-383)");
     r.add(scalar_of(k_half_family, "/// A 16-bit float; every operation rounds to it, to nearest and ties to even."));
     add_vectors(r, k_half_family, vectors);
     r.add(scalar_of(k_short_family, "/// 16 bits, signed; its arithmetic wraps."));

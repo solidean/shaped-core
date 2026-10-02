@@ -297,6 +297,35 @@ struct footprint_pin
     source_span where;
 };
 
+/// One `use` line of a file: the name it binds, and the module that name stands for.
+struct module_use
+{
+    cc::string name;
+    i32 module = -1;
+    /// The whole line, which a clash with the name is reported at.
+    source_span where;
+};
+
+/// How the files behind the prelude fall into modules, read from their `module` and `use` lines before anything is
+/// declared.
+struct module_plan
+{
+    /// The library files the program reaches, as positions in the library, in the order they are checked.
+    cc::vector<i32> library_order;
+    /// Each module's name; module 0 is the program's own, whose name is empty where its file declares none.
+    cc::vector<cc::string> modules;
+    /// Parallel to `library_order` and then the program: the module of each file.
+    cc::vector<i32> file_module;
+    /// Parallel to `file_module`: the `use` lines of each file that name a module.
+    cc::vector<cc::vector<module_use>> uses;
+    /// What the plan found wrong, each `file` a position in `library_order`, and the program's one past its end.
+    cc::vector<located_diagnostic> diagnostics;
+};
+
+/// The modules `program` reaches through `use`, from the files of `library` grouped by their `module` line (CHK-346).
+/// A library file without a `module` line is no module's, and is left out.
+[[nodiscard]] module_plan plan_modules(cc::span<module_file const> library, module_file program);
+
 /// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 struct checker
 {
@@ -306,14 +335,24 @@ struct checker
     /// The values this compile gives the user file's options, by name (CHK-354).
     cc::span<option_value const> options;
 
+    /// How many of `files` are the prelude's; every other file is a module's.
+    i32 prelude_count = 0;
+    /// The modules of the files behind the prelude: 0 is the program's, every other one a module it reaches by `use`.
+    cc::vector<cc::string> modules;
+    /// Parallel to `files`: the module of each, and -1 for a file of the prelude.
+    cc::vector<i32> file_module;
+    /// Parallel to `files`: the `use` lines of each, which name a module and nothing else (CHK-347).
+    cc::vector<cc::vector<module_use>> uses;
+
     /// The prelude's scope: every name its files declare but those of `@operator` functions.
-    /// More than one symbol under a name means all of them are functions; the same holds for `file_names`.
+    /// More than one symbol under a name means all of them are functions; the same holds for `module_scopes`.
     cc::map<cc::string, cc::vector<symbol_id>> prelude_names;
-    /// The user file's own scope, the inner one.
-    cc::map<cc::string, cc::vector<symbol_id>> file_names;
-    /// What the user file sees: `file_names` over `prelude_names`, where two overload sets of one name merge.
+    /// Parallel to `modules`: the scope every file of the module shares, the inner one.
+    cc::vector<cc::map<cc::string, cc::vector<symbol_id>>> module_scopes;
+    /// Parallel to `modules`: what a file of the module sees, its scope over `prelude_names`, where two overload sets
+    /// of one name merge.
     /// Built once every file is declared.
-    cc::map<cc::string, cc::vector<symbol_id>> names;
+    cc::vector<cc::map<cc::string, cc::vector<symbol_id>>> merged_scopes;
     /// `@operator` functions by operator spelling.
     cc::map<cc::string, cc::vector<symbol_id>> operators;
     /// The prelude's alone, which is all a prelude file sees (CHK-190).
@@ -373,13 +412,36 @@ struct checker
     [[nodiscard]] parsed_file const& file_of(i32 file) const { return files[file].file; }
     [[nodiscard]] ast::file_ast const& ast_of(i32 file) const { return files[file].ast; }
     [[nodiscard]] cc::string_view text_of(i32 file, source_span where) const { return file_of(file).text_of(where); }
-    /// The user file is the last one; every file before it is the prelude's.
-    [[nodiscard]] bool is_prelude_file(i32 file) const { return file < i32(files.size()) - 1; }
-    /// The module-level names a lookup from `file` finds: a prelude file never sees the user file's.
+    [[nodiscard]] bool is_prelude_file(i32 file) const { return file < prelude_count; }
+    /// The program is the last file, behind the prelude and the library files it reaches.
+    [[nodiscard]] i32 program_file() const { return i32(files.size()) - 1; }
+    /// The module-level names a lookup from `file` finds: a prelude file sees the prelude alone, and a module's file sees
+    /// its module's names over the prelude's, and no other module's.
     [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& names_seen_from(i32 file) const
     {
-        return is_prelude_file(file) ? prelude_names : names;
+        return is_prelude_file(file) ? prelude_names : merged_scopes[file_module[file]];
     }
+    /// The module a `use` line of `file` binds to `name`; -1 for none.
+    [[nodiscard]] i32 used_module(i32 file, cc::string_view name) const
+    {
+        for (auto const& u : uses[file])
+            if (u.name == name)
+                return u.module;
+        return -1;
+    }
+    /// How a diagnostic in `file` names `id`: `m.name` for a symbol of another module, by that module's own name.
+    [[nodiscard]] cc::string name_seen_from(i32 file, symbol_id id) const;
+    /// The module `expr` names: a bare name a `use` of `file` binds, which no local of `scope` and no type parameter
+    /// hides; -1 for anything else.
+    [[nodiscard]] i32 module_named(i32 file, ast::expr_id expr, function_scope const* scope) const;
+    /// The module-level symbols `expr` names from `file`: a bare name, or `m.name` where `m` is a module (CHK-348).
+    /// Null for any other expression, for a name a local of `scope` or a type parameter hides, and for a name that
+    /// finds nothing.
+    /// `is_qualified`, where given, says whether it was `m.name`.
+    [[nodiscard]] cc::vector<symbol_id> const* symbols_named(i32 file,
+                                                             ast::expr_id expr,
+                                                             function_scope const* scope,
+                                                             bool* is_qualified = nullptr) const;
     /// The `@operator` functions a use of an operator in `file` may choose from, by spelling.
     [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& operators_seen_from(i32 file) const
     {
@@ -423,8 +485,13 @@ struct checker
     void declare_file(i32 file);
     void declare(i32 file, ast::decl_id decl);
     void add_symbol(symbol s, source_span name_where);
-    /// Lays the user file's scope over the prelude's into `names`.
+    /// Lays each module's scope over the prelude's into `merged_scopes`, and reports a `use` whose name the file's module
+    /// declares too.
     void merge_scopes();
+    /// Lays `scope` over `names`: two overload sets of one name merge, and anything else of `scope` hides what `names`
+    /// has of its name, unless that is `@shadowable(false)` (CHK-188, CHK-220).
+    void merge_scope(cc::map<cc::string, cc::vector<symbol_id>>& names,
+                     cc::map<cc::string, cc::vector<symbol_id>> const& scope);
     /// True where every symbol of `ids` is a function, so the name is an overload set (CHK-12, CHK-189).
     [[nodiscard]] bool is_all_functions(cc::span<symbol_id const> ids) const;
     /// True where `ids` are functions, or a struct in front of functions of its name (CHK-240).
@@ -587,7 +654,7 @@ struct checker
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
     /// The name of the plain vector of `count` values of `element`, `float3`; empty for an element without vectors.
     [[nodiscard]] cc::string vector_name_of(type_id element, isize count) const;
-    /// The swizzle `name` is of a value of `object`, a count of zero where it is none (CHK-350).
+    /// The swizzle `name` is of a value of `object`, a count of zero where it is none (CHK-385).
     [[nodiscard]] swizzle swizzle_of(type_id object, cc::string_view name) const;
     /// What an unknown member of a `@swizzle` struct says about its letters; empty for any other type.
     [[nodiscard]] cc::string why_no_swizzle(type_id object, cc::string_view name) const;
@@ -667,10 +734,10 @@ struct checker
     feature_set read_require(i32 file, ast::require_decl const& r, require_scope scope, symbol_id owner);
     /// Records which features entry point `id` needs and reports every one it does not declare (CHK-263, CHK-264).
     void judge_entry_features(symbol_id id);
-    /// What a value of `type` needs of a device: its builtin's, or what any member or element holds (CHK-347).
+    /// What a value of `type` needs of a device: its builtin's, or what any member or element holds (CHK-382).
     /// A resource holds its element, so `buffer[half]` needs what `half` needs; a texture holds nothing.
     [[nodiscard]] feature_set features_of_type(type_id type) const;
-    /// CHK-348: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
+    /// CHK-383: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
     void judge_edge_16_bit(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
@@ -857,6 +924,11 @@ struct checker
     /// `text` must be a `suffixed` number.
     [[nodiscard]] type_id check_suffixed_literal(i32 file, source_span where, cc::string_view text);
     [[nodiscard]] type_id check_name(function_scope& scope, ast::expr_id id, ast::name const& name);
+    /// A module-level name as a value, where `found` is what the name, bare or qualified, resolved to.
+    [[nodiscard]] type_id check_symbol_value(function_scope& scope,
+                                             ast::expr_id id,
+                                             cc::string_view text,
+                                             cc::vector<symbol_id> const* found);
     [[nodiscard]] type_id check_member(function_scope& scope, ast::expr_id id, ast::member const& member);
     [[nodiscard]] type_id check_call(function_scope& scope, ast::expr_id id, ast::call const& call);
     [[nodiscard]] type_id check_logical(function_scope& scope, ast::expr_id id, ast::call const& call);
@@ -942,6 +1014,14 @@ struct checker
                                            call_spelling written_as = call_spelling::free);
     /// `a.foo(…)` or `T.foo(…)`, whose callee is the member `callee`.
     [[nodiscard]] type_id check_dot_call(function_scope& scope, ast::expr_id id, ast::call const& call);
+    /// A call of the module-level name `text`, bare or qualified, where `found` is what it resolved to (CHK-247).
+    /// A qualified call's functions are `found` alone, where a bare one's are all its file sees.
+    [[nodiscard]] type_id check_named_call(function_scope& scope,
+                                           ast::expr_id id,
+                                           ast::call const& call,
+                                           cc::string_view text,
+                                           cc::vector<symbol_id> const* found,
+                                           bool is_qualified);
     [[nodiscard]] cc::string signature_text(cc::string_view spelling, cc::span<type_id const> types) const;
     /// A call as it was written, each named argument with its name and a number literal as its text:
     /// `sub(int, b = 2.5)`; `file_of_call` is the file its arguments stand in.

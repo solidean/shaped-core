@@ -36,6 +36,10 @@ constexpr auto extent = 4;
 /// Blits the source into a fresh target of `format` and reads the target back.
 [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> blit_into(sg::context& ctx, sg::pixel_format format)
 {
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx.device_home())
+        co_await cc::async_resume_on(*home);
+
     auto const source
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
                                             .width = extent,

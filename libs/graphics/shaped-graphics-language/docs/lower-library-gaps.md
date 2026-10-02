@@ -17,7 +17,7 @@ So a capability typed-geometry already has is still a gap here, until clean-core
 **Wanted:** a 16-bit float in clean-core, converting from `f32` and from `f64` with one rounding to nearest, ties to even, and widening exactly.
 typed-geometry's `tg::f16` is that type, so the wish is for it, or its conversion core, one library lower.
 
-**Why:** the interpreter holds `half` values (CHK-346, EVAL-96), and every one of them is rounded from the 32-bit result its family computes.
+**Why:** the interpreter holds `half` values (CHK-381, EVAL-96), and every one of them is rounded from the 32-bit result its family computes.
 A literal rounds from its exact `f64` value, since a detour through `f32` would round twice.
 
 **Today:** `half_bits_of` and `float_of_half_bits` in `builtins/impl/soft_math.cc`, marked TEMPORARY.

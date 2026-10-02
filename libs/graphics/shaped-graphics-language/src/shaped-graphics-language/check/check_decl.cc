@@ -360,18 +360,23 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
         result = checked_module::void_type;
     else if (resource != type_id::none)
         result = resource;
-    else if (n != nullptr)
+    else if (n != nullptr
+             || (e.node.is<ast::member>() && module_named(file, e.node.as<ast::member>().object, scope) >= 0))
     {
-        auto const text = text_of(file, n->where);
-        auto const* const found = names_seen_from(file).get_ptr(text);
+        // CHK-348: `m.name` names a type of module `m` as `name` names one of the file's
+        auto const text = text_of(file, where);
+        auto const* const found = symbols_named(file, expr, nullptr);
         // CHK-54: types and values share one namespace, so a local hides a type of its name
-        if (auto const* const local = scope != nullptr ? scope->find_local(text) : nullptr)
+        if (auto const* const local = scope != nullptr && n != nullptr ? scope->find_local(text) : nullptr)
         {
             set_target(file, expr, local->where);
             report(diagnostic_kind::wrong_kind_of_name, file, where,
                    cc::format("{} is a local, and a type stands here", text));
         }
-        else if (found == nullptr || found->empty())
+        else if (found == nullptr && n != nullptr && used_module(file, text) >= 0)
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   cc::format("{} is a module, and only `{}.name` names a type of it", text, text));
+        else if (found == nullptr)
             report(diagnostic_kind::unknown_name, file, where, text);
         else
         {
@@ -447,8 +452,18 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     }
     else if (e.node.is<ast::tuple>())
         unsupported(file, where, "a tuple type");
-    else if (e.node.is<ast::member>())
-        unsupported(file, where, "a qualified type name");
+    else if (auto const* const qualified = e.node.try_as<ast::member>())
+    {
+        // `m.name` where `m` names nothing at all is an unknown name, since that is what makes it no module
+        auto const* const object
+            = ast::is_valid(qualified->object) ? ast_of(file).at(qualified->object).node.try_as<ast::name>() : nullptr;
+        if (object != nullptr && !is_type_parameter_name(text_of(file, object->where))
+            && symbols_named(file, qualified->object, scope) == nullptr
+            && (scope == nullptr || scope->find_local(text_of(file, object->where)) == nullptr))
+            report(diagnostic_kind::unknown_name, file, object->where, text_of(file, object->where));
+        else
+            unsupported(file, where, "a qualified type name");
+    }
     else if (auto const* const q = e.node.try_as<ast::qualified_type>())
     {
         auto const inner = resolve_type(file, q->type, scope);
@@ -526,7 +541,7 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
 
 cc::string checker::vector_name_of(type_id element, isize count) const
 {
-    // CHK-349: the element types that have a vector family, each named after it and its width
+    // CHK-384: the element types that have a vector family, each named after it and its width
     cc::string_view const families[] = {"float", "int", "uint", "bool", "half", "short", "ushort"};
     if (element == checked_module::error_type || out.builtin_type_of(element) == nullptr)
         return {};
@@ -787,7 +802,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             }
         }
 
-        // CHK-347: a binding member holding a 16-bit value is a form some device lacks, as CHK-201 judges one
+        // CHK-382: a binding member holding a 16-bit value is a form some device lacks, as CHK-201 judges one
         if (!is_struct && type != checked_module::error_type)
         {
             auto const needs = features_of_type(type);
@@ -795,7 +810,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 if (needs.has(feature(i)))
                     judge_feature(file, span_of(file, f.type), cc::format("a value of {}", out.name_of(type)),
                                   feature(i));
-            // CHK-346: a buffer strides by whole 4-byte words, which an element of 16-bit values may not fill
+            // CHK-381: a buffer strides by whole 4-byte words, which an element of 16-bit values may not fill
             auto const& buffer = out.at(innermost);
             if (buffer.kind == type_kind::buffer && storage_size_of(buffer.element) % 4 != 0)
             {
@@ -925,7 +940,7 @@ void checker::compile_struct(symbol_id id)
         if (!is_prelude_file(file) || parameters.size() != 1)
         {
             unsupported(file, s.name,
-                        !is_prelude_file(file) ? "a generic struct of the program"
+                        !is_prelude_file(file) ? "a generic struct outside the prelude"
                                                : "a generic struct of more than one type parameter");
             out.symbols[index_of(id)].state = symbol_state::failed;
             return;
@@ -945,7 +960,7 @@ void checker::compile_struct(symbol_id id)
                        cc::format("{} is a ray type, whose payload is a struct, and this is {}", m.name,
                                   out.name_of(m.type)));
 
-    // CHK-349: a swizzle names fields by their letters and is a vector of their one element type
+    // CHK-384: a swizzle names fields by their letters and is a vector of their one element type
     auto has_swizzles = false;
     if (auto const* const swizzled = find_attribute(file, d.attributes, "swizzle"))
     {
@@ -1345,18 +1360,21 @@ cc::vector<symbol_id> checker::binding_list_of(i32 file, ast::range_of<ast::argu
     {
         auto const where = span_of(file, entry.form);
         auto const* const n = ast::is_valid(entry.value) ? ast.at(entry.value).node.try_as<ast::name>() : nullptr;
-        if (n == nullptr || !entry.name.empty() || entry.is_splat || !entry.attributes.empty())
+        // CHK-42: a binding's name, bare or of a module (CHK-348)
+        auto const* const m = ast::is_valid(entry.value) ? ast.at(entry.value).node.try_as<ast::member>() : nullptr;
+        auto const is_named = n != nullptr || (m != nullptr && module_named(file, m->object, nullptr) >= 0);
+        if (!is_named || !entry.name.empty() || entry.is_splat || !entry.attributes.empty())
         {
             // an `invalid` entry was reported by the AST pass
             if (!ast::is_valid(entry.value) || !ast.at(entry.value).node.is<ast::invalid_expr>())
-                unsupported(file, where, "a binding entry that is not a bare name");
+                unsupported(file, where, "a binding entry that is not a binding's name");
             is_failed = true;
             continue;
         }
 
-        auto const text = text_of(file, n->where);
-        auto const* const found = names_seen_from(file).get_ptr(text);
-        if (found == nullptr || found->empty())
+        auto const text = text_of(file, span_of(file, entry.value));
+        auto const* const found = symbols_named(file, entry.value, nullptr);
+        if (found == nullptr)
         {
             report(diagnostic_kind::unknown_name, file, where, text);
             is_failed = true;
@@ -1366,7 +1384,29 @@ cc::vector<symbol_id> checker::binding_list_of(i32 file, ast::range_of<ast::argu
         set_target(file, entry.value, {.kind = target_kind::symbol, .symbol = binding});
         if (out.at(binding).kind == symbol_kind::binding)
         {
-            if (demand(binding, file, where) == symbol_state::checked)
+            // CHK-351: one binding listed twice, by any two spellings, is one group bound twice
+            // CHK-350: two bindings of one name in one list would be one name twice in the target text
+            auto is_listed = false;
+            auto is_clash = false;
+            for (auto const other : bindings)
+            {
+                is_listed = is_listed || other == binding;
+                is_clash = is_clash || (other != binding && out.at(other).name == out.at(binding).name);
+            }
+            if (is_listed)
+            {
+                report(diagnostic_kind::duplicate_declaration, file, where,
+                       cc::format("{} is listed already", out.at(binding).name));
+                is_failed = true;
+            }
+            else if (is_clash)
+            {
+                unsupported(
+                    file, where,
+                    cc::format("two bindings named {} in one list, from different modules", out.at(binding).name));
+                is_failed = true;
+            }
+            else if (demand(binding, file, where) == symbol_state::checked)
                 bindings.push_back(binding);
             else
                 is_failed = true;

@@ -37,16 +37,18 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     if (e.node.is<ast::index>())
         return true;
     auto const* const n = e.node.try_as<ast::name>();
-    if (n == nullptr)
-        return false;
-    auto const text = text_of(file, n->where);
-    if (text == "sampler" || text == "comparison_sampler")
-        return true;
-    for (auto const& shape : k_shapes)
-        if (shape.depth == text)
+    if (n != nullptr)
+    {
+        auto const text = text_of(file, n->where);
+        if (text == "sampler" || text == "comparison_sampler")
             return true;
-    auto const* const found = names_seen_from(file).get_ptr(text);
-    if (found == nullptr || found->empty())
+        for (auto const& shape : k_shapes)
+            if (shape.depth == text)
+                return true;
+    }
+    // CHK-348: a type of a module, `m.name`, as well as one of the file
+    auto const* const found = symbols_named(file, expr, nullptr);
+    if (found == nullptr)
         return false;
     auto const kind = out.at(found->front()).kind;
     return kind == symbol_kind::structure || kind == symbol_kind::enumeration;

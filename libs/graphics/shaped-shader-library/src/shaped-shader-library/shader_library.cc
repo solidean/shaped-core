@@ -315,6 +315,38 @@ void slib::shader_library::mount(cc::string_view virtual_dir, filesystem_handle 
     _mounts.mount(virtual_dir, cc::move(fs));
 }
 
+void slib::shader_library::add_module_dir(cc::string_view virtual_dir)
+{
+    CC_ASSERT(_watcher == nullptr, "add every module directory before start_hot_reload");
+    auto normalized = impl::normalize_path(virtual_dir);
+    CC_ASSERT(normalized.has_value(), "a module directory must not escape the root");
+    for (auto const& known : _module_dirs)
+        if (known == normalized.value())
+            return;
+    _module_dirs.push_back(cc::move(normalized.value()));
+    _module_sources.push_back({});
+}
+
+slib::module_library slib::shader_library::read_modules() const
+{
+    auto result = module_library();
+    for (auto const& dir : _module_dirs)
+        for (auto const& name : _mounts.list(dir))
+        {
+            if (!name.ends_with(".sgl"))
+                continue;
+            auto path = impl::join_path(dir, name);
+            if (!path.has_value())
+                continue;
+            auto text = _mounts.read_text(path.value());
+            if (!text.has_value())
+                continue;
+            result.paths.push_back(cc::move(path.value()));
+            result.texts.push_back(cc::move(text.value()));
+        }
+    return result;
+}
+
 void slib::shader_library::add_package(shader_package const& package)
 {
     // Embedded first, then the real source dir over it; a missing directory simply finds nothing.
@@ -345,6 +377,25 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
             _mounts.mount(package.name,
                           std::make_shared<real_filesystem>(cc::string::create_copy_of(package.source_dir)));
     }
+
+    // An SGL package's module directories join the library's, each directory on disk once whichever packages list it:
+    // added twice, its modules would declare everything twice.
+    if (package.language == shader_language::sgl)
+        for (auto const& dir : package.module_dirs)
+        {
+            auto is_known = false;
+            for (auto const& known : _module_sources)
+                is_known = is_known || (!dir.source_dir.empty() && known == dir.source_dir);
+            if (is_known)
+                continue;
+            auto virtual_dir = impl::join_path(package.name, dir.path);
+            CC_ASSERT(virtual_dir.has_value(), "a module directory must not escape its package");
+            if (fs == nullptr && !dir.path.empty() && !dir.source_dir.empty())
+                _mounts.mount(virtual_dir.value(),
+                              std::make_shared<real_filesystem>(cc::string::create_copy_of(dir.source_dir)));
+            _module_dirs.push_back(cc::move(virtual_dir.value()));
+            _module_sources.push_back(cc::string::create_copy_of(dir.source_dir));
+        }
 
     for (auto const& definition : package.definitions)
     {
@@ -489,19 +540,31 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         return text;
     };
 
+    // What an SGL source's `use` reaches, read as it is now: the modules are files like an include is.
+    auto const modules = language == shader_language::sgl ? read_modules() : module_library();
+    auto const module_files = modules.files();
     shader_source_description desc = {.source = cc::move(source),
                                       .entry_point = cc::string::create_copy_of(entry_point),
                                       .stage = stage,
-                                      .label = cc::string::create_copy_of(label)};
+                                      .label = cc::string::create_copy_of(label),
+                                      .modules = module_files};
     desc.options.push_back_range(options);
 
     auto preprocessed = compiler->preprocess(desc, resolve);
     if (preprocessed.has_error())
     {
+        // Which modules a broken source reaches is unknown, so it depends on all of them: an edit that fixes the
+        // module it broke on has to reach it.
+        for (auto const& path : modules.paths)
+            if (seen.insert(path))
+                outcome.dependencies.push_back(path);
         outcome.shader
             = make_failed_shader(cc::format("preprocessing '{}' failed: {}", label, preprocessed.error().to_string()));
         return;
     }
+    for (auto& path : preprocessed.value().used_modules)
+        if (seen.insert(path))
+            outcome.dependencies.push_back(cc::move(path));
 
     desc.source = cc::move(preprocessed.value().source);
     auto pending = cc::optional<sgl_interface>();
@@ -512,8 +575,15 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                 .layouts = cc::move(preprocessed.value().layouts),
                                 .compiler = compiler,
                                 .label = cc::string::create_copy_of(label)};
+        // A module's target set is named after its module, which needs no package to say where its type is: the
+        // generated `sgl_modules::m::s` names it wherever it was generated.
         auto& target_set = pending.value().shader.target_set;
-        if (!target_set.empty())
+        if (target_set.contains('.'))
+        {
+            target_set.replace_all(".", "::");
+            target_set = cc::format("sgl_modules::{}", target_set);
+        }
+        else if (!target_set.empty())
             target_set = host_namespace.empty() ? cc::string() : cc::format("{}::{}", host_namespace, target_set);
     }
     // A preprocessor that renamed the entry point says so, and the compile has to ask for the name the text declares.

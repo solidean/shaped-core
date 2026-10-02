@@ -172,7 +172,7 @@ struct sgl::builtins::type_record
     /// A bool crosses none in WGSL; an int crosses only flat, which the check pass holds it to (CHK-273).
     bool crosses_edges = false;
 
-    /// What a device needs for a value of it, which an entry point holding one needs too (CHK-347).
+    /// What a device needs for a value of it, which an entry point holding one needs too (CHK-382).
     check::feature_set features;
 
     /// Read back from the declaration by `finalize`.

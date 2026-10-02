@@ -63,9 +63,14 @@ Overloads resolve by type, operators among them.
 
 It yields side tables over the untouched AST, which is what an editor asks about, and one flat typed tree per entry point, which is all an emitter reads.
 
-**A file of a module is named by its position.**
-`check` takes the prelude's files and then the program's, so the program is the LAST file and never "file 1": behind the library's prelude it is file 2.
-A diagnostic, an origin and a side table all name a file that way, and `compile_to_text` is what turns a position back into `builtins.sgl`, `core.sgl` or the source's own name.
+**A file is named by its position.**
+`check` takes the prelude's files, then the library files of the modules the program reaches, then the program's, so the program is the LAST file and never "file 1".
+A diagnostic, an origin and a side table all name a file that way, and the front end is what turns a position back into `builtins.sgl`, a library file's name or the source's own.
+
+**Modules are planned before anything is declared** (`check/check_modules.cc`).
+The library's files are grouped by their `module` line, the program's `use` lines are followed to the modules it reaches, and a loop among them is reported.
+Each module then has a scope of its own over the prelude's, and `m.name` looks into it through the `use` that named `m`.
+Everything reached is checked in one pass with the program; there are no interfaces yet, which is [the compilation model](spec/incubator/compilation-model.md)'s next step.
 
 **The library's prelude is checked once per process.**
 `sgl::checked_prelude()` is `check::check_prelude` over `parsed_prelude()`: the checker's whole state after the prelude, behind an empty program file.

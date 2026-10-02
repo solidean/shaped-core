@@ -61,6 +61,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_stages.cc
     src/shaped-graphics-language/check/check_raytracing.cc
     src/shaped-graphics-language/check/check_generics.cc
+    src/shaped-graphics-language/check/check_modules.cc
     src/shaped-graphics-language/check/check_stmt.cc
     src/shaped-graphics-language/check/check_test.cc
     src/shaped-graphics-language/check/uniformity.cc
@@ -252,6 +253,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/driver/describe.hh
     src/shaped-graphics-language/driver/pipeline_fields.hh
     src/shaped-graphics-language/driver/impl/front_end.hh
+    src/shaped-graphics-language/driver/library_file.hh
     src/shaped-graphics-language/driver/prelude.hh
     src/shaped-graphics-language/driver/classify.hh
     src/shaped-graphics-language/driver/inferred_results.hh
@@ -300,6 +302,8 @@ if(SC_BUILD_TOOLS)
     add_executable(sgl
         tools/sgl/main.cc
         tools/sgl/files.hh
+        tools/sgl/module_dirs.hh
+        tools/sgl/module_dirs.cc
         tools/sgl/describe_command.cc
         tools/sgl/emit_command.cc
         tools/sgl/prelude_command.cc
@@ -325,7 +329,8 @@ if(SC_BUILD_TOOLS)
     sc_nexus_binary(sgl KINDS tool tests)
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
     target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
-    target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples")
+    target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
+        SGL_LSP_TEST_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/sgl/lsp/tests/modules")
 endif()
 
 # Test executable
@@ -352,6 +357,7 @@ if(SC_BUILD_TESTS)
         tests/check/check-test-support.hh
         tests/corpus/corpus-test.cc
         tests/check/array-check-test.cc
+        tests/check/module-check-test.cc
         tests/check/primitive-stage-check-test.cc
         tests/check/prelude-profile-test.cc
         tests/check/checked-prelude-test.cc

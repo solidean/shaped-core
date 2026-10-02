@@ -17,7 +17,7 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-4** Two trees **behave the same** when every input gives them the same result and the same trace.
 * **EVAL-5** An implementation may produce anything that behaves the same as the structured form: this is the **as-if rule** ([why](why/evaluation.md#eval-5)).
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
-* **EVAL-96** A `half` is a 16-bit IEEE number, and a `short` and a `ushort` are 16 bits whose arithmetic wraps (CHK-346).
+* **EVAL-96** A `half` is a 16-bit IEEE number, and a `short` and a `ushort` are 16 bits whose arithmetic wraps (CHK-381).
   An operation of them computes as its 32-bit family does and rounds its result once: a half to nearest, ties to even, and an integer to its low 16 bits.
   So `+`, `-`, `*`, `/` and `sqrt` of halves are exactly binary16's own, and a builtin of several steps, such as `mix` or `dot`, rounds once where a GPU may round each step.
 * **EVAL-83** An integer `/` truncates toward zero, and `%` is what it leaves, with the sign of its left operand: `-7 / 2` is `-3` and `-7 % 3` is `-1`.

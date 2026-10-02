@@ -135,8 +135,8 @@
     z: bool
     w: bool
 
-// the 16-bit families (CHK-346), each needing a feature of the device (CHK-347); no value of one
-// crosses a stage edge (CHK-348)
+// the 16-bit families (CHK-381), each needing a feature of the device (CHK-382); no value of one
+// crosses a stage edge (CHK-383)
 /// A 16-bit float; every operation rounds to it, to nearest and ties to even.
 @shadowable(false)
 @builtin struct half

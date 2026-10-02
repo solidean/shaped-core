@@ -33,22 +33,32 @@ sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = 
                                            // from ONE check; compile_to_text per entry point and target checks that many times
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
-sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target, options, run_tests
+sgl::text_request                          // source, source_name ("<sgl>"), library, entry_point, stage (none = any), target, options, run_tests
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
                                            // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:
                                            // `16`, `-3`, `true`, `.rgba16_float`; the rest keep their defaults, tests always run at them
                                            // a name the source has no option of, or a value of another type: `invalid-option`
 r.value().options                          // the options the entry point reaches, by name: each set of their values is one text
+r.value().library_files                    // the names of the library files the source reached: what an edit of it depends on
+
+#include <shaped-graphics-language/driver/library_file.hh>
+sgl::library_file{.name = "modules/view.sgl", .source = text}
+                                           // a file the source may `use` a module of; every request takes a span of them
+                                           // grouped by their `module` line; one without it, or named like the source, is left out
+sgl::is_same_path(a, b)                    // one path? a path or a file:// uri, either separator, `.`/`..` read lexically,
+                                           // any case on Windows; nothing is opened, so relative vs absolute differ
 
 #include <shaped-graphics-language/driver/test_source.hh>
-auto const t = sgl::test_source(text, "colors.sgl");
+auto const t = sgl::test_source(text, "colors.sgl", library);   // library optional
                                            // -> tested_source { errors, warnings, test_count, tests_run, tests_passed,
                                            // tests_expecting_diagnostics, entry_points }; t.is_clean(): nothing to report
 
 #include <shaped-graphics-language/driver/describe.hh>
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
+sgl::describe({.library = files, .module = "view"});   // module `view` instead of a source: its bindings and structs, no entry point
+                                           // a binding of another module is named `view.frame`; a memory struct of one carries `module`
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`; a binding array: `count` slots from `slot`), block_size
                                            // texture / image / sampler members also carry the sg enum values of their binding:
                                            // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
@@ -247,6 +257,8 @@ impl::add_function(r, "mix", {"a", t, "b", t, "t", "float"}, t, eval, {.hlsl = "
 #include <shaped-graphics-language/check/check.hh>
 auto const m = sgl::check::check(prelude_files, {.file = user, .ast = user_ast});   // + a registry; default_registry() without
                                            // -> sgl::check::checked_module; TOTAL; a module_file is two REFERENCES
+sgl::check::check(prelude_files, library, program, registry, options)   // library: the files `use` may reach;
+                                           // options: an option_value per `@option const` the program sets; both optional
                                            // prelude_files: cc::span<module_file const>, from sgl::parsed_prelude() or a test's own
                                            // file i is prelude file i, and the program is the LAST file; never concatenated
                                            // carried: let / let mut, assignment and `op=`, if chains, while, for over `a ..< b`, loop with
@@ -388,6 +400,8 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
+#   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
+uv run dev.py run sgl -- describe --module view --module-dir shaders     # a module of the directories, as its package entry reads it
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads;
                                                                          # each entry point and pipeline carries its sg `features`
@@ -666,7 +680,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   A struct in both a block and a buffer is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
   Only the generated struct is promised, unless `@layout(.hlsl)` (today's packing, never reordered) or `@layout(.cpp)` on the binding promises one (CHK-369).
   `.cpp` places a block as C++ places a struct of `tg` types, so a host's own struct fills it; every target then reads it through a memory form.
-- **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-346): `require shader_f16` or `shader_int16`, and WGSL has no short.
+- **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
   HLSL spells a half `float16_t`, never `half`, so slib's DXC edges pass `-enable-16bit-types`; a 16-bit literal is a construction, `half(0.5)`.
   A 16-bit value packs at 2 bytes and crosses no stage edge, and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.

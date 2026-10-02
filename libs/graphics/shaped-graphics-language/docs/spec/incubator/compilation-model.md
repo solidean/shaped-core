@@ -87,8 +87,8 @@ That needs no multi-file compilation.
 * Whether an interface is a file on disk, and whether it is SGL text.
 * Whether on-demand compilation is recursive or asynchronous.
 * How a dependency cycle is reported when its loop passes through a type expression.
-* Whether a file without a `module` line is a module of its own.
-* How the files of a module are found.
-  What is settled: the compiler takes a project as in-memory sources and never reads a file; finding the files of each module, and their text, happens outside its core.
+* How the files of a module are found beyond a list of directories.
+  What is settled: the compiler takes a library of in-memory sources and never reads a file, and groups them by their `module` line (CHK-346).
+  Finding them is the caller's: the `sgl` tool's `--module-dir`, slib's module directories, the language server's setting.
 * How an inlined early `return` is written in targets that have no `goto`.
 * How much of an inlined program's source structure the readable text can keep.

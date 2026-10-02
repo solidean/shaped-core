@@ -87,7 +87,7 @@ struct flattener
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
     cc::vector<origin> discards;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
-    /// A value of a type that needs one, such as a `half`, counts alike (CHK-347).
+    /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
     {
         i32 file = 0;
@@ -100,7 +100,7 @@ struct flattener
     };
     cc::vector<feature_use> feature_uses;
 
-    /// CHK-347: a value of `type` at `from` needs what the type needs, once per function it stands in.
+    /// CHK-382: a value of `type` at `from` needs what the type needs, once per function it stands in.
     void note_value_use(type_id type, ast::expr_id from)
     {
         auto const needs = c.features_of_type(type);
@@ -709,12 +709,10 @@ struct flattener
         {
             return where.kind == target_kind::enum_case ? enum_value(type, id, where.index) : fail();
         }
-        if (e.node.is<ast::name>() || e.node.is<ast::self_ref>())
+        // A module-level name: a const is its value, and a file-scope sampler is handed to a builtin.
+        // A const that did not check has no value, and its name already has the error type (CHK-19).
+        auto const module_level = [&]() -> flat_expr_id
         {
-            for (auto const& b : current()->bound)
-                if (b.where == where)
-                    return is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
-            // a const that did not check has no value, and its name already has the error type (CHK-19)
             if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
                 && c.out.at(where.symbol).state == symbol_state::checked)
                 return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
@@ -722,9 +720,19 @@ struct flattener
                 && c.out.at(where.symbol).state == symbol_state::checked)
                 return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
             return fail();
+        };
+        if (e.node.is<ast::name>() || e.node.is<ast::self_ref>())
+        {
+            for (auto const& b : current()->bound)
+                if (b.where == where)
+                    return is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
+            return module_level();
         }
         if (auto const* const m = e.node.try_as<ast::member>())
         {
+            // CHK-348: `m.name`, a module-level name of module `m`
+            if (where.kind == target_kind::symbol)
+                return module_level();
             // `a.foo` that is no field is a call of `foo` with `a` (CHK-249)
             if (tables().call_at(id) >= 0)
                 return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);

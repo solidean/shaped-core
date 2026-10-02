@@ -7,6 +7,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
+#include <shaped-graphics-language/driver/library_file.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
@@ -25,8 +26,11 @@ struct front_end
     cc::vector<cc::unique_ptr<ast::file_ast>> owned_asts;
     check::checked_module module;
     cc::string_view source_name;
-    /// The file the source is: behind the prelude, or the prelude's own file when it is one (`prelude_file_of`).
+    /// The file the source is: behind the prelude and the library files it reaches, or the prelude's own file when it
+    /// is one (`prelude_file_of`).
     i32 program = 0;
+    /// Parallel to the files between the prelude and the program: the name of each reached library file.
+    cc::vector<cc::string_view> library_names;
     /// Every error of every phase, one formatted diagnostic per line and its notes under it; empty when there is none.
     /// A diagnostic a test's `@expect` names is in neither this nor `warnings`.
     cc::string errors;
@@ -39,7 +43,12 @@ struct front_end
     /// What a diagnostic calls file `file`.
     [[nodiscard]] cc::string_view name_of(isize file) const
     {
-        return file == program || file >= prelude.size() ? source_name : prelude[file].name;
+        if (file == program)
+            return source_name;
+        if (file < prelude.size())
+            return prelude[file].name;
+        auto const library = file - prelude.size();
+        return library < library_names.size() ? library_names[library] : source_name;
     }
 };
 
@@ -52,11 +61,14 @@ struct front_end
 /// The names of the options `e` reaches, in declaration order (CHK-355).
 [[nodiscard]] cc::vector<cc::string> option_names_of(check::checked_module const& m, check::flat_entry_point const& e);
 
-/// Parses, builds and checks `source` behind the prelude, or as the prelude's file where `source_name` names one.
-/// In the second case the file behind the prelude is empty.
+/// Parses, builds and checks `source` behind the prelude and the modules of `library` it reaches, or as the prelude's
+/// file where `source_name` names one.
+/// In the second case the file behind the prelude is empty, and the library is not read.
 /// A source with errors still yields a module, whose `errors` say why nothing should be read from it.
+/// Only the reached library files' parse and AST diagnostics are reported, since only those were checked.
 /// `options` are the values the compile gives the source's options (CHK-354).
 [[nodiscard]] front_end run_front_end(cc::string_view source,
                                       cc::string_view source_name,
+                                      cc::span<library_file const> library = {},
                                       cc::span<check::option_value const> options = {});
 } // namespace sgl::driver::impl

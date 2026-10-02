@@ -1,4 +1,4 @@
-// a swizzle reads several fields of a `@swizzle` struct at once, as the plain vector of their type (CHK-349 to CHK-352)
+// a swizzle reads several fields of a `@swizzle` struct at once, as the plain vector of their type (CHK-384 to CHK-386, and CHK-352)
 
 // the letters in any order, and with repeats
 test float3(1.0, 2.0, 3.0).zyx.x == 3.0

@@ -169,6 +169,12 @@ cc::optional<cc::string> slib::shader_asset::read_source() const
     return library->filesystem().read_text(_virtual_path);
 }
 
+slib::module_library slib::shader_asset::read_modules() const
+{
+    auto const library = _library.lock();
+    return library == nullptr ? module_library() : library->read_modules();
+}
+
 cc::optional<cc::string> slib::shader_asset::last_error() const
 {
     return _state.lock([](state const& s) { return s.last_error; });

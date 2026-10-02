@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../module_dirs.hh"
 #include "fwd.hh"
 #include "protocol/documents.hh"
 
@@ -25,13 +26,17 @@ namespace sgl_lsp
 {
 /// Built on first use, safe from any thread.
 [[nodiscard]] prelude const& the_prelude();
+
+/// The module directories every document is checked against, absolute; the client states them once it initializes.
+/// Safe from any thread.
+void set_module_dirs(cc::vector<cc::string> dirs);
+[[nodiscard]] cc::vector<cc::string> module_dirs();
 } // namespace sgl_lsp
 
-/// What every feature reads: one document checked as one unnamed module behind the prelude.
-/// A document that is a file of the prelude is checked in that file's place instead.
+/// What every feature reads: one document checked behind the prelude and the modules it `use`s.
+/// A document that is a file of the prelude is checked in that file's place instead, with no modules.
 ///
-/// Today a unit is one file, since every file is its own unnamed module.
-/// Once modules exist, an analysis covers every file of one, and a feature finds its file with `file_of`.
+/// A feature reads the document's own file; the modules' files are there for what a diagnostic or a test names.
 struct sgl_lsp::analysis
 {
     cc::shared_ptr<lsp::document> document;
@@ -42,6 +47,13 @@ struct sgl_lsp::analysis
     sgl::ast::file_ast empty_ast;
     /// The document's position among the module's files: the last, or its place in the prelude (`sgl::prelude_file_of`).
     i32 own_file = 0;
+    /// Every file of the module directories as read for this analysis, and the ones the document reached parsed.
+    /// `module.library_files` says which of `library.files` each checked file between the prelude and the document is.
+    sgl_tool::module_library library;
+    cc::vector<cc::unique_ptr<sgl::parsed_file>> library_parsed;
+    cc::vector<cc::unique_ptr<sgl::ast::file_ast>> library_asts;
+    /// Parallel to `module.library_files`.
+    cc::vector<lsp::text_index> library_indices;
     sgl::check::checked_module module;
     /// Every phase's diagnostics, the ones a test's `@expect` declared taken out.
     cc::vector<sgl::check::located_diagnostic> diagnostics;

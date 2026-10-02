@@ -239,3 +239,51 @@ TEST("sgl options - an option is a bool, an int or an enum case, at file scope")
     // an image takes a const whose value is an image format, and no other
     CHECK(reports_for("const n = 3\n\nbinding b:\n    image: out image_2d[n]\n").contains("wrong-kind-of-name"));
 }
+
+TEST("sgl options - an option of the program reaches a function of a module it uses, at the value the compile gave")
+{
+    constexpr auto module_source = "module scaling\n"
+                                   "\n"
+                                   "fun shifted(x: int, by: int) -> int => x << by\n";
+    constexpr auto source = "use scaling\n"
+                            "\n"
+                            "@option const shift = 3\n"
+                            "\n"
+                            "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                            "    work.values[id.x] = scaling.shifted(id.x, shift)\n";
+    sgl::library_file const library[] = {{.name = "modules/scaling.sgl", .source = module_source}};
+    sgl::check::option_value const moved[] = {{.name = "shift", .value = "5"}};
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const compile = [&](cc::span<sgl::check::option_value const> options)
+        {
+            return sgl::compile_to_text(
+                {.source = source, .library = library, .entry_point = "main_cs", .target = t, .options = options});
+        };
+        auto const defaults = compile({});
+        auto const given = compile(moved);
+        REQUIRE(defaults.has_value());
+        REQUIRE(given.has_value());
+        CHECK(defaults.value().text != given.value().text);
+        REQUIRE(given.value().options.size() == 1);
+        CHECK(given.value().options[0] == "shift");
+        REQUIRE(given.value().library_files.size() == 1);
+        CHECK(given.value().library_files[0] == "modules/scaling.sgl");
+    }
+
+    // a name the program has no option of is refused with the library in place as without it
+    sgl::check::option_value const unknown[] = {{.name = "by", .value = "5"}};
+    auto const refused
+        = sgl::compile_to_text({.source = source, .library = library, .entry_point = "main_cs", .options = unknown});
+    REQUIRE(refused.has_error());
+    CHECK(refused.error().contains("invalid-option"));
+
+    auto const described = sgl::describe({.source = source, .options = moved, .library = library});
+    REQUIRE(described.has_value());
+    REQUIRE(described.value().entry_points.size() == 1);
+    REQUIRE(described.value().entry_points[0].options.size() == 1);
+    CHECK(described.value().entry_points[0].options[0] == "shift");
+}

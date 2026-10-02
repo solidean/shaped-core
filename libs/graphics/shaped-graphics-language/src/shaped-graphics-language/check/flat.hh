@@ -257,7 +257,7 @@ struct sgl::check::flat_file_sampler
 };
 
 /// `v.normal`, one field of a struct; or `v.zyx`, a swizzle of a prelude vector, whose value is the plain vector of
-/// its fields (CHK-350).
+/// its fields (CHK-385).
 /// A swizzle of a struct of the program never stands here: the check pass writes it as the construction it means.
 struct sgl::check::flat_member
 {

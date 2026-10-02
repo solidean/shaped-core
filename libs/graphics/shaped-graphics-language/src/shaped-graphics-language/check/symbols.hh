@@ -248,7 +248,7 @@ struct sgl::check::type_info
     stage edge = stage::none;
     /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.
     bool is_no_padding = false;
-    /// `@swizzle`: every two to four of its one-letter fields read at once, `v.zyx`, as a plain vector (CHK-349).
+    /// `@swizzle`: every two to four of its one-letter fields read at once, `v.zyx`, as a plain vector (CHK-384).
     bool has_swizzles = false;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
@@ -693,7 +693,7 @@ enum class sgl::check::target_kind : sgl::u8
     receiver,
     /// On a `member`: an array's `length`, a constant (CHK-288).
     array_length,
-    /// On a `member`: a swizzle of the struct `symbol`, whose fields `index` packs (`swizzle::unpacked`, CHK-350).
+    /// On a `member`: a swizzle of the struct `symbol`, whose fields `index` packs (`swizzle::unpacked`, CHK-385).
     swizzle,
     /// On a call: `T[N].filled(v)`, an array holding `v` in every element (CHK-289).
     array_filled,
@@ -712,7 +712,7 @@ struct sgl::check::target
     constexpr bool operator==(target const&) const = default;
 };
 
-/// The fields a swizzle reads, `v.zyx`: positions in its struct's `members`, in the order written (CHK-350).
+/// The fields a swizzle reads, `v.zyx`: positions in its struct's `members`, in the order written (CHK-385).
 /// A `count` of one is a field; zero is no swizzle at all.
 struct sgl::check::swizzle
 {

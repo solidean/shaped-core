@@ -11,10 +11,36 @@ So there is no resolver that runs first and no tree of resolved names: there is 
 
 ## CHK-2
 
-Placing the prelude in front needs no multi-file compilation.
-One unnamed module is the smallest thing that holds several files, and it is what a module will be once several files declare one.
-Concatenating the texts would have been less code, and every span of the program's file would then be off by the length of the prelude.
+Placing the prelude in front needs no multi-file compilation, and placing the modules behind it needs none either.
+Every file stays a file of its own: concatenating the texts would have been less code, and every span would then be off by what stood in front.
 A position is the whole name of a file, since nothing else about it is known to the pass: a caller keeps the names, and the program's file is always the last one.
+
+## CHK-346
+
+This is a tracer of the [compilation model](../../incubator/compilation-model.md), which compiles a module against the interfaces of the ones it uses.
+Here every reached module is checked together with the program, in one pass, and nothing is kept between compiles.
+That is what made modules cheap enough to arrive before interfaces; the input, a list of named files, is what the interface work grows from.
+A library file without a `module` line is a program of a module directory, which is how a package's own shader directory can be one.
+
+## CHK-347
+
+A `use` brings in the module's name only, so a foreign name is always written qualified and the reader never wonders where one came from.
+It is the file's own, as an import is in most languages: a file's dependencies read from its head, and deleting a `use` cannot break a sibling.
+Both are the strict end of their choice: a wildcard import, and a `use` shared across a module's files, would each add to what compiles and break nothing.
+
+## CHK-349
+
+Within one pass a loop of modules would check, since compilation is demand-driven per symbol.
+The compilation model compiles a module against the interfaces of the modules it uses, which only an acyclic graph allows.
+Refusing the loop now keeps every program written today compiling once modules compile apart.
+
+## CHK-350
+
+Each refusal is something the tracer has no model for yet, and each lifts without breaking a program.
+A file-scope sampler is numbered among its module's, and two modules' would claim one index.
+An operator cannot be written qualified, so a module's would need an import rule of its own.
+Two bindings of one name in one list would be one name twice in the target text and to the host.
+A library's entry points are built when a program file states them, so a compile builds only its own.
 
 ## CHK-7
 
@@ -457,7 +483,7 @@ A table belongs to the module rather than to a pipeline so that its place in the
 Were a table the pipeline's, a stage calling it would compile once per pipeline, with another offset each time, and a stage shared by two pipelines would be two shaders.
 The cost is that every pipeline of the module holds every callable, which costs table space and nothing else.
 
-## CHK-346
+## CHK-381
 
 AMD's fast FSR build is its 16-bit path, and a port without 16-bit types runs everything in fp32, losing the packed-math rate and doubling workgroup memory and registers.
 `half3` sits beside `float3` and `int3` as one family, which `f16x3` or `float16x3` would not; `half` is every shading language's word and MSL's spelling.
@@ -469,19 +495,19 @@ A buffer of lone halves would stride by 2 bytes, which sg refuses for every elem
 Padding each half to 4 bytes would make `buffer[half]` a buffer the host cannot fill with a plain array of `tg::f16`, which is the one thing it would be for.
 So the element is `half2`, or a struct that fills its words, until a packed buffer of halves is asked for.
 
-## CHK-349
+## CHK-384
 
 The rule is the same for any struct, since SGL's vectors are prelude structs of one-character fields and not a type the checker knows apart.
 The annotation keeps it opt-in: a struct of `a` and `b` fields does not grow `e.ba` and `e.aa` by accident.
 Adding swizzles to such a struct later breaks nothing, where removing them would.
 `rgba` is not a second alphabet: the letters are the field names, so a port writes `.xyz` for `.rgb`, one spelling per read.
 
-## CHK-350
+## CHK-385
 
 A permuted position is no position, and a swizzle is the everyday way out of the strong types into plain numbers, `clip.xyz`.
 So the result is the plain vector whatever the source, and `bool` vectors have swizzles too, since nothing in the rule is numeric.
 
-## CHK-351
+## CHK-386
 
 A swizzle found only after a failed lookup would mean whatever else is in scope, and in SGL that is not hypothetical: a dot call has the free function's candidates (CHK-247).
 A module that declared `fun xy(a: float4)` would then silently retarget every `v.xy` in every file that sees it.

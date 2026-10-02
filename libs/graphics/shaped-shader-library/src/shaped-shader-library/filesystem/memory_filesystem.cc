@@ -41,6 +41,22 @@ slib::file_revision slib::memory_filesystem::revision(cc::string_view path) cons
         });
 }
 
+cc::vector<cc::string> slib::memory_filesystem::list(cc::string_view dir) const
+{
+    auto result = cc::vector<cc::string>();
+    auto const normalized = impl::normalize_path(dir);
+    if (!normalized.has_value())
+        return result;
+    _state.lock(
+        [&](state const& s)
+        {
+            for (auto const& [path, f] : s.files)
+                if (auto const name = impl::name_in(path, normalized.value()); !name.empty())
+                    result.push_back(cc::string(name));
+        });
+    return result;
+}
+
 void slib::memory_filesystem::write(cc::string_view path, cc::string_view text)
 {
     auto const normalized = impl::normalize_path(path);

@@ -24,6 +24,7 @@ public:
 
     [[nodiscard]] cc::optional<cc::string> read_text(cc::string_view path) const override;
     [[nodiscard]] file_revision revision(cc::string_view path) const override;
+    [[nodiscard]] cc::vector<cc::string> list(cc::string_view dir) const override;
 
     /// A subscription that never fires — the honest answer for content that cannot change, and why a shipped build's watcher does nothing at all.
     /// Not nullopt; see watch_subscription for why those differ.

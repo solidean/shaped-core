@@ -42,6 +42,9 @@ TYPED_KINDS = (BINDING_KIND, VERTEX_INPUT_KIND, RENDER_TARGET_KIND, PIPELINE_KIN
 # `path:*` is every entry point and every typed declaration the file holds.
 EVERYTHING = "*"
 
+# `module:name` is every typed declaration of a module, which generates into a namespace and a header of its own.
+MODULE = "module"
+
 
 class DescriptionError(Exception):
     """The compiler refused a file, or a declaration names something the file does not hold."""
@@ -94,7 +97,13 @@ class SglFile:
 
 @dataclass
 class SglEntries:
-    """What an SGL package asked for, after `*` is expanded and every name is checked against its file."""
+    """What an SGL package asked for, after `*` is expanded and every name is checked against its file.
+
+    A module the package exports is an SglEntries of its own in `modules`, generated into its own namespace.
+    """
+
+    # The module this is, for one in `modules`; empty for the package's own entries.
+    module: str = ""
 
     # (path, stage, entry point) in the package's stage words; the stage is the one the source declares.
     entry_points: list[tuple[str, str, str]] = field(default_factory=list)
@@ -112,11 +121,25 @@ class SglEntries:
     raytracing_pipelines: list[tuple[SglFile, dict]] = field(default_factory=list)
     # (file, the described struct) for every struct a generated binding places in GPU memory, innermost first.
     memory_structs: list[tuple[SglFile, dict]] = field(default_factory=list)
+    # A struct a generated binding places that another module declares, by name: (that module, its size).
+    # The host names that module's type, which the module's own entry generates.
+    foreign_structs: dict[str, tuple[str, int]] = field(default_factory=dict)
+    # The modules the package exports, `module:name` each, by name.
+    modules: dict[str, SglEntries] = field(default_factory=dict)
 
 
-def describe(tool: Path, source: Path, shown_as: str) -> SglFile:
-    """Runs the compiler over one file; its diagnostics become the error, word for word."""
-    result = subprocess.run([str(tool), "describe", str(source)], capture_output=True, encoding="utf-8")
+def describe(tool: Path, source: Path | None, shown_as: str, module_dirs: list[Path],
+             module: str = "") -> SglFile:
+    """Runs the compiler over one file, or over module `module`; its diagnostics become the error, word for word.
+
+    Every path goes as `/`-separated text: a file of a module directory is named that way, and the source has to be
+    named the same to be told apart from its own copy in the library.
+    """
+    command = [str(tool), "describe"]
+    command += [source.as_posix()] if source is not None else ["--module", module]
+    for d in module_dirs:
+        command += ["--module-dir", d.as_posix()]
+    result = subprocess.run(command, capture_output=True, encoding="utf-8")
     if result.returncode != 0:
         said = (result.stderr or result.stdout).strip()
         raise DescriptionError(f"'{shown_as}' does not compile, so nothing is generated from it:\n{said}")
@@ -128,42 +151,79 @@ def describe(tool: Path, source: Path, shown_as: str) -> SglFile:
                    raytracing_pipelines=data.get("raytracing_pipelines", []), options=data.get("options", []))
 
 
-def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | None) -> SglEntries:
+def add_declared(into: SglEntries, seen: set[tuple], kind: str, key: tuple, item) -> None:
+    """Adds one declaration to `into`, once however many entries ask for it."""
+    if (kind, *key) in seen:
+        return
+    seen.add((kind, *key))
+    getattr(into, kind).append(item)
+    # A binding's C++ type names the structs it places in memory, so each of those is generated with it, unless another
+    # module declares it, whose own entry generates it.
+    if kind == "bindings":
+        described = item[0]
+        for s in described.memory_structs:
+            if s.get("module"):
+                into.foreign_structs[s["name"]] = (s["module"], s["size"])
+            else:
+                add_declared(into, seen, "memory_structs", (described.path, s["name"]), (described, s))
+
+
+def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | None,
+            module_dirs: list[Path] | None = None) -> SglEntries:
     """Every entry of an SGL package, with `*` expanded and every declared name found in its file.
 
+    `module_dirs` are where a `use` is looked for, the package's own source dir among them.
     An entry naming an entry point needs no compiler, so a package of those alone works where no `sgl` can run.
     """
     out = SglEntries()
     files: dict[str, SglFile] = {}
     seen: set[tuple] = set()
+    dirs = module_dirs if module_dirs is not None else [source_dir]
+
+    def need_tool(what: str) -> Path:
+        if tool is None:
+            raise DescriptionError(
+                f"shader package '{package}': '{what}' needs the SGL compiler to generate its C++, and this "
+                f"build has none; see SC_SGL_TOOL in ShaderPackage.cmake")
+        return tool
 
     def file_of(path: str) -> SglFile:
         if path not in files:
-            if tool is None:
-                raise DescriptionError(
-                    f"shader package '{package}': '{path}' needs the SGL compiler to generate its C++, and this "
-                    f"build has none; see SC_SGL_TOOL in ShaderPackage.cmake")
             try:
-                files[path] = describe(tool, source_dir / path, path)
+                files[path] = describe(need_tool(path), source_dir / path, path, dirs)
             except DescriptionError as e:
                 raise DescriptionError(f"shader package '{package}': {e}") from e
         return files[path]
 
     def add(kind: str, key: tuple, item) -> None:
         # `path:*` beside an explicit entry for the same thing asks for it once.
-        if (kind, *key) in seen:
-            return
-        seen.add((kind, *key))
-        getattr(out, kind).append(item)
-        # A binding's C++ type names the structs it places in memory, so each of those is generated with it.
-        if kind == "bindings":
-            described = item[0]
-            for s in described.memory_structs:
-                add("memory_structs", (described.path, s["name"]), (described, s))
+        add_declared(out, seen, kind, key, item)
 
     for entry in entries:
         parts = entry.split(":")
         path = parts[0]
+
+        # `module:name`: what the module declares, as one more package of types in a namespace of its own
+        if path == MODULE:
+            if len(parts) != 2 or not parts[1]:
+                raise DescriptionError(f"shader package '{package}': entry '{entry}' must be {MODULE}:name")
+            name = parts[1]
+            if name in out.modules:
+                continue
+            shown_as = f"{MODULE}:{name}"
+            try:
+                described = describe(need_tool(shown_as), None, shown_as, dirs, module=name)
+            except DescriptionError as e:
+                raise DescriptionError(f"shader package '{package}': {e}") from e
+            unit = SglEntries(module=name)
+            unit_seen: set[tuple] = set()
+            for b in described.bindings:
+                add_declared(unit, unit_seen, "bindings", (shown_as, b["name"]), (described, b))
+            for s in described.structs:
+                kind = "vertex_inputs" if s["edge"] == "vertex" else "render_targets"
+                add_declared(unit, unit_seen, kind, (shown_as, s["name"]), (described, s))
+            out.modules[name] = unit
+            continue
 
         if parts[1:] == [EVERYTHING]:
             described = file_of(path)
