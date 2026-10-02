@@ -226,9 +226,13 @@ Name it with `title` as usual, and hand it over the same way.
 
 7. **Hand it over and wait.**
    ```bash
-   uv run review.py serve pr-<n> --no-open &     # background: the shell caps below how long a review takes
+   uv run review.py restart pr-<n>               # detached server; returns once it answers
    uv run review.py round pr-<n> --wait          # blocks, then prints the round
    ```
+
+   **Start the server with `restart`, never with a backgrounded `serve`.**
+   An agent's background job has a time limit, and a `serve` inside one dies with it, mid-round.
+   `restart` starts the server as a detached process, so its lifetime is not the job's.
 
    **Prefer `AskUserQuestion` over `round --wait` for the handover itself.**
    A blocking `round --wait` holds the turn open with nothing on screen, which reads as a stall and carries no

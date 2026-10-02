@@ -7,6 +7,7 @@ add_library(babel-serializer
     src/babel-serializer/fwd.cc
 
     src/babel-serializer/data/sqlite.cc
+    src/babel-serializer/font/font.cc
     src/babel-serializer/geometry/gltf.cc
     src/babel-serializer/geometry/obj.cc
     src/babel-serializer/geometry/stl.cc
@@ -34,6 +35,8 @@ target_sources(babel-serializer
     src/babel-serializer/fwd.hh
 
     src/babel-serializer/data/sqlite.hh
+
+    src/babel-serializer/font/font.hh
 
     src/babel-serializer/geometry/gltf.hh
     src/babel-serializer/geometry/obj.hh
@@ -101,6 +104,8 @@ if(SC_BUILD_TESTS)
 
         tests/data/sqlite-test.cc
 
+        tests/font/font-test.cc
+
         tests/geometry/gltf-test.cc
         tests/geometry/obj-test.cc
         tests/geometry/stl-test.cc
@@ -120,6 +125,9 @@ if(SC_BUILD_TESTS)
     )
 
     sc_target_pch(babel-serializer-test CC_ALL NEXUS) # inherits the library's measured tier
+
+    # tests/font/font_builder.hh crafts fonts byte by byte; another library's tests include it from this root.
+    set(BABEL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests" CACHE INTERNAL "babel-serializer's test-helper include root")
 
     # Browser test runner (Emscripten only); no-op natively.
     sc_add_nexus_web_runner(babel-serializer-test)

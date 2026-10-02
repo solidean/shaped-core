@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/backends/webgpu/fwd.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_common.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/subresource.hh>
 #include <shaped-graphics/resource/views.hh>
@@ -35,7 +36,8 @@ private:
     void release_storage() const;
 
     webgpu_context& _ctx;
-    mutable wgpu_texture _texture; // mutable: expiry is a const lifetime hook
+    sg::context::live_resource _live; // counts this resource alive against _ctx, construction to destruction
+    mutable wgpu_texture _texture;    // mutable: expiry is a const lifetime hook
     bool _owned = true;
 };
 

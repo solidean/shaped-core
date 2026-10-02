@@ -1,24 +1,16 @@
 #include <clean-core/string/conversion.hh>
 
-cc::vector<char16_t> cc::utf8_to_utf16(cc::string_view utf8)
+namespace cc
 {
-    cc::vector<char16_t> out;
-    out.reserve_back(utf8.size());
-
+namespace
+{
+/// Calls `emit` with each code point of `utf8`, U+FFFD for each malformed, overlong or surrogate-encoding sequence.
+/// A sequence cut short by a non-continuation byte is one U+FFFD, and that byte starts the next code point.
+template <class Emit>
+void decode_utf8(cc::string_view utf8, Emit&& emit)
+{
     auto const* bytes = reinterpret_cast<unsigned char const*>(utf8.data());
     isize const count = utf8.size();
-
-    auto const emit = [&](u32 cp)
-    {
-        if (cp <= 0xFFFF)
-            out.push_back(char16_t(cp));
-        else // astral: encode as a surrogate pair
-        {
-            cp -= 0x10000;
-            out.push_back(char16_t(0xD800 + (cp >> 10)));
-            out.push_back(char16_t(0xDC00 + (cp & 0x3FF)));
-        }
-    };
     auto const is_continuation = [&](isize i) { return i < count && (bytes[i] & 0xC0) == 0x80; };
 
     isize i = 0;
@@ -53,11 +45,38 @@ cc::vector<char16_t> cc::utf8_to_utf16(cc::string_view utf8)
         }
         else // invalid lead byte or truncated sequence
         {
-            emit(0xFFFD);
+            emit(u32(0xFFFD));
             i += 1;
         }
     }
+}
+} // namespace
+} // namespace cc
 
+cc::vector<char16_t> cc::utf8_to_utf16(cc::string_view utf8)
+{
+    cc::vector<char16_t> out;
+    out.reserve_back(utf8.size());
+    decode_utf8(utf8,
+                [&](u32 cp)
+                {
+                    if (cp <= 0xFFFF)
+                        out.push_back(char16_t(cp));
+                    else // astral: encode as a surrogate pair
+                    {
+                        cp -= 0x10000;
+                        out.push_back(char16_t(0xD800 + (cp >> 10)));
+                        out.push_back(char16_t(0xDC00 + (cp & 0x3FF)));
+                    }
+                });
+    return out;
+}
+
+cc::vector<char32_t> cc::utf8_to_utf32(cc::string_view utf8)
+{
+    cc::vector<char32_t> out;
+    out.reserve_back(utf8.size());
+    decode_utf8(utf8, [&](u32 cp) { out.push_back(char32_t(cp)); });
     return out;
 }
 

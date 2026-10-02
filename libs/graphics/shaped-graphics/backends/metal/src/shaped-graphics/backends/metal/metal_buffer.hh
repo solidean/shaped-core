@@ -5,6 +5,7 @@
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_resource_access.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 
@@ -22,7 +23,7 @@ public:
                  sg::buffer_usages usage,
                  MTL::Buffer* buffer,
                  sg::memory_heap_handle heap = nullptr)
-      : sg::raw_buffer(size_in_bytes, usage), _ctx(ctx), _buffer(buffer), _heap(cc::move(heap))
+      : sg::raw_buffer(size_in_bytes, usage), _ctx(ctx), _live(ctx_base_of(ctx)), _buffer(buffer), _heap(cc::move(heap))
     {
     }
 
@@ -51,6 +52,7 @@ private:
     void release_storage() const;
 
     metal_context& _ctx;
+    sg::context::live_resource _live;       // counts this resource alive against _ctx, construction to destruction
     mutable MTL::Buffer* _buffer = nullptr; // mutable: release_storage runs from the const lifetime hooks
     sg::memory_heap_handle _heap;           // keeps a placed buffer's heap alive; null when dedicated
     mutable cc::mutex<metal_resource_access> _access;

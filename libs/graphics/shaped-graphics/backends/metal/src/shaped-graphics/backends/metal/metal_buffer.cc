@@ -4,6 +4,11 @@
 
 namespace sg::backend::metal
 {
+sg::context& ctx_base_of(metal_context& ctx)
+{
+    return ctx;
+}
+
 metal_buffer::~metal_buffer()
 {
     release_storage();

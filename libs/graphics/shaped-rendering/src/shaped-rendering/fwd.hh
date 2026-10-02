@@ -57,6 +57,19 @@ struct nrd_options;        // its own options
 
 class mix_routine; // one image faded into another, in place (mix_routine.hh)
 
+// Slug: shapes bounded by quadratic curves, covered on the GPU from their outlines (slug_shape.hh, libs/graphics/shaped-rendering/docs/slug.md).
+struct slug_curve;              // one quadratic piece of an outline
+enum class slug_fill_rule : u8; // nonzero or even-odd
+struct slug_outline;            // closed contours of curves, in the shape's own units
+struct slug_compiled_shape;     // an outline as Slug's curve and band tables, device-free
+struct slug_shape_ref;          // where an atlas placed a shape
+class slug_atlas;               // the caller-owned curve and band textures many shapes share
+struct slug_instance;           // one shape to draw: which, where, what colour
+struct slug_view;               // one draw's transform and knobs
+struct slug_pipeline_key;       // the routine's parameter: colour and depth format
+class slug_routine;             // draws shape instances from an atlas
+class slug_font;                // a font face's glyphs compiled on demand into an atlas, plus a one-line layout
+
 // Dear ImGui integration (see imgui_context.hh).
 struct imgui_context_description; // value type — input to imgui_context
 

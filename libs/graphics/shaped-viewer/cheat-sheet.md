@@ -28,9 +28,9 @@ sv::view_data                    // { view_id id; vec2i resolution; bool resolut
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
 sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; }
-sv::layer_kind                   // layout | scene_3d | scene_2d | ui — composited in order, each over the ones before it
+sv::layer_kind                   // layout | scene_3d | canvas | ui — composited in order, each over the ones before it
                                  //   a `layout` layer renders a whole tree INTO this view's texture; that is the recursion in the model
-                                 //   scene_2d draws nothing (shaped-core has no 2D renderer); ui is not wired yet
+                                 //   canvas (2D) draws nothing until its API is designed; ui is not wired yet
 sv::layer_blend                  // replace | over (premultiplied) — scene_3d is forced to replace until the raygen writes alpha
 sv::primary_scene_3d(v) / sv::ensure_scene_3d(v)  // -> layer const* / layer& — the view's first traced layer, appended on demand
 sv::refresh_policy               // { float rate; } — fraction of the loop's rate: 1 every frame, 0.5 every second, 0 only on invalidation

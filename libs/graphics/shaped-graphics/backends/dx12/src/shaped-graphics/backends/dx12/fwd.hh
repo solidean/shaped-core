@@ -110,3 +110,10 @@ struct dx12_download_sink;
 /// It shadows sg's, so a backend message is never mistaken for a portable one.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace sg::backend::dx12
+
+namespace sg::backend::dx12
+{
+/// The context as sg sees it, for a header that cannot see dx12_context's definition.
+/// Defined in dx12_buffer.cc, where the context is complete.
+[[nodiscard]] sg::context& ctx_base_of(dx12_context& ctx);
+} // namespace sg::backend::dx12

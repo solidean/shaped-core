@@ -78,6 +78,18 @@ common shader utilities   [planned]
 
 The exact module layout settles as more routines land; keep this roadmap updated as it does.
 
+## Slug **[in progress]**
+
+Shapes and text drawn from their outlines; [slug.md](slug.md) is the design and the plan.
+
+```text
+sr::slug_outline / compile_slug_shape  [done]     outlines of quadratic curves -> Slug's curve and band tables
+sr::slug_atlas                         [done]     caller-owned, append-only; eviction planned
+sr::slug_routine                       [done]     one quad per shape, dilated; depth-tested when the scope has depth
+sr::slug_font                          [done]     glyphs on demand, advance-only layout; shaping planned
+CFF outlines                           [planned]
+```
+
 ## Reconstruction **[in progress]**
 
 One front routine over denoise members and the upscaler behind them; [reconstruction.md](reconstruction.md) is the design.

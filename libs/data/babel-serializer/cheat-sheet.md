@@ -70,6 +70,28 @@ Gotchas:
   Without that check it would fall through to the ascii parse, whose header line reads as a `solid` and whose remaining bytes spell no `facet`.
 - **Nothing is welded, indexed or derived.** STL is a soup of independent triangles and this keeps it one; a zero normal stays zero.
 
+## Fonts (`babel::font`)
+
+```cpp
+#include <babel-serializer/font/font.hh>
+
+auto const f = babel::font::read(pinned_bytes, face_index = 0).value(); // face; + span (COPIES) / read_stream overloads
+                                                                        // keeps the bytes; decodes a glyph only when asked
+f.metrics();          // face_metrics { units_per_em, glyph_count, ascender, descender, line_gap, bounds } in font units
+f.outlines();         // outline_format::truetype | cff | none — only glyf is decoded today
+f.glyph_for(U'A');    // -> optional<glyph_id> via cmap 4 / 12; nullopt when the face has none (or maps it to .notdef)
+f.horizontal(g);      // horizontal_metric { advance, left_side_bearing } from hmtx
+f.outline(g);         // -> result<glyf_outline>: AS STORED — points + on_curve flags + contour_ends, or components
+o.is_composite();  o.is_empty();   // a space has no record at all and reads as empty, not as an error
+c.glyph  c.args_are_offset  c.arg1  c.arg2  c.xx c.xy c.yx c.yy   // a component's placement, F2Dot14 decoded
+```
+
+Gotchas:
+
+- **Nothing is transformed.** No implied midpoints, no composite flattening, no curves: sr's `slug_outline_of` builds those.
+- **A font file is untrusted input.** Every read is bounds-checked into an error; a truncated file never reads out of range.
+- **CFF / CFF2 outlines are not read yet**: `outlines()` says `cff` and `outline` fails.
+
 ## glTF 2.0 / GLB (`babel::gltf`)
 
 Takes **bytes, not a stream**: every embedded buffer comes back as a `cc::pinned_data` subview sharing the input's owner.

@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_completion_group.hh> // has_pending_transfer reads the fences
 #include <shaped-graphics/backends/dx12/dx12_texture_access.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
@@ -31,6 +32,7 @@ public:
                  bool borrowed = false)
       : sg::raw_texture(desc),
         _ctx(ctx),
+        _live(ctx_base_of(ctx)),
         _creation_epoch(created_in),
         _resource(cc::move(resource)),
         _heap(cc::move(heap)),
@@ -57,6 +59,7 @@ public:
     dx12_completion_group_handle _download_group;
 
     dx12_context& _ctx;                       // creating context — outlives this texture
+    sg::context::live_resource _live;         // counts this resource alive against _ctx, construction to destruction
     sg::epoch _creation_epoch;                // epoch this texture was created in (identity / diagnostics)
     mutable ComPtr<ID3D12Resource> _resource; // mutable: expiry releases it via a const hook
     sg::memory_heap_handle _heap;             // backing heap for a placed texture; null when dedicated

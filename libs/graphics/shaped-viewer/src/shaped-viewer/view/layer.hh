@@ -17,9 +17,9 @@ enum class sv::layer_kind : sv::u8
     /// The DXR trace; the only kind that accumulates temporally today.
     scene_3d,
 
-    /// Not drawn yet: shaped-core carries no 2D renderer.
-    /// See libs/graphics/shaped-viewer/docs/TODO.md for what one needs before this layer can mean anything.
-    scene_2d,
+    /// 2D drawing — shapes and text — at the same level as a 3D scene.
+    /// Not drawn yet: its API is still to be designed; libs/graphics/shaped-viewer/docs/TODO.md says what is missing.
+    canvas,
 
     /// Dear ImGui, drawn through sr::imgui_routine.
     ui,

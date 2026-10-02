@@ -1,0 +1,11 @@
+{
+    "graphics/slug-cube": {
+        "mechanism": "custom",
+        "size": "1280x720",
+        "format": "jpg",
+        "captures": [
+            {},
+            {"name": "back"}
+        ]
+    }
+}

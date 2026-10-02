@@ -1,0 +1,40 @@
+// min, max and clamp of integer vectors, componentwise: an int ordered by value, a uint by its bits; abs for int alone
+
+test:
+    let v = min(int2(1, 5), int2(3, 2))
+    v.x == 1 and v.y == 2
+
+test:
+    let v = max(int3(-4, 7, 0), int3(-9, 2, 0))
+    v.x == -4 and v.y == 7 and v.z == 0
+
+test:
+    let v = clamp(int4(-3, 4, 9, 2), int4(0, 0, 0, 0), int4(5, 3, 5, 5))
+    v.x == 0 and v.y == 3 and v.z == 5 and v.w == 2
+
+// a uint compares as unsigned, so its top bit makes it large rather than negative
+test:
+    let big: uint = 0x8000'0000
+    let v = min(uint2(big, 3), uint2(1, 7))
+    v.x == 1 and v.y == 3
+
+test:
+    let v = clamp(uint3(0, 10, 4), uint3(2, 2, 2), uint3(5, 5, 5))
+    v.x == 2 and v.y == 5 and v.z == 4
+
+test:
+    let v = abs(int2(-3, 4))
+    v.x == 3 and v.y == 4
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@pixel fun bands_ps(p: pixel_input) -> target:
+    let cell = int2(p.position.x as int, p.position.y as int)
+    let band = clamp(cell, int2(0, 0), int2(7, 7))
+    let spread = abs(cell - int2(4, 4))
+    let pair = max(uint2(band.x as uint, band.y as uint), uint2(1, 1))
+    return { color = float4(band.x as float, band.y as float, (spread.x + spread.y) as float, pair.x as float) }

@@ -119,7 +119,7 @@ quadric primitives                       [done]         a second scene_item_kind
                                                         Still open: a per-end frequency blended along the clip slab's axis, which would give an edge a gradient for no extra bytes. See quadrics.md
 lighting                                 [in progress]  one sv::light record tagged by the integrator's path, placed by a similarity transform, with explicit units and a stable light_id (docs/lights.md).
                                                         Every path is traced — points and spots, rects, parallel light, suns — and a layer with no lights falls back to a sun it can turn off
-scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
+canvas layer                             [planned]      typed and validated, draws nothing: its API is its own design, drawing through sr::slug_routine
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine
 multi-window                             [planned]      the plan and the layout routine are window-aware already; sv::viewer still owns exactly one window
 ```

@@ -7,7 +7,7 @@
 namespace sg::backend::webgpu
 {
 webgpu_buffer::webgpu_buffer(webgpu_context& ctx, isize size_in_bytes, sg::buffer_usages usage, wgpu_buffer buffer)
-  : sg::raw_buffer(size_in_bytes, usage), _ctx(ctx), _buffer(cc::move(buffer))
+  : sg::raw_buffer(size_in_bytes, usage), _ctx(ctx), _live(ctx), _buffer(cc::move(buffer))
 {
 }
 
@@ -77,7 +77,7 @@ cc::result<webgpu_buffer_handle> webgpu_context::create_webgpu_buffer(isize size
 }
 
 webgpu_texture::webgpu_texture(webgpu_context& ctx, sg::texture_description const& desc, wgpu_texture texture, bool owned)
-  : sg::raw_texture(desc), _ctx(ctx), _texture(cc::move(texture)), _owned(owned)
+  : sg::raw_texture(desc), _ctx(ctx), _live(ctx), _texture(cc::move(texture)), _owned(owned)
 {
 }
 

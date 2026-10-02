@@ -17,6 +17,11 @@ vulkan_completion_group_handle ctx_acquire_completion_group(vulkan_context& ctx)
     return ctx._group_pool.acquire();
 }
 
+sg::context& ctx_base_of(vulkan_context& ctx)
+{
+    return ctx;
+}
+
 std::shared_ptr<vulkan_buffer> vulkan_context::register_if_transient(std::shared_ptr<vulkan_buffer> buffer,
                                                                      sg::lifetime_scope scope)
 {

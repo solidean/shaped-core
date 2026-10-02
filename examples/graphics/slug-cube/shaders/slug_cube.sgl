@@ -1,0 +1,67 @@
+// The lit cube of sgl-cube, with one face carrying a Slug shape drawn by the cube's own pixel shader.
+//
+// That face's vertices carry an em coordinate like a UV, and the pixel shader asks module `slug` how much of the shape
+// covers the pixel: the shape is part of the surface, not a quad on top of it.
+// The labels on the other faces are sr::slug_routine's quads, drawn after the cube against its depth.
+
+use slug
+
+@inline binding constants:
+    view_projection: mat4
+
+// The shape the decal face shows, as the atlas placed it; its textures are the atlas's, bound as `slug.tables`.
+binding decal:
+    banding: float4
+    glyph: int4
+    color: float4
+
+@vertex struct cube_vertex:
+    position: pos3
+    normal: vec3
+    color: float3
+    em: float2
+    decal: float
+
+@pixel struct target:
+    color: float4
+
+struct pixel_input:
+    @position position: hpos4
+    normal: vec3
+    color: float3
+    em: float2
+    decal: float
+
+@vertex fun main_vs(v: cube_vertex){constants} -> pixel_input:
+    return {
+        position = constants.view_projection * v.position
+        normal = v.normal
+        color = v.color
+        em = v.em
+        decal = v.decal
+    }
+
+fun lambert(n: vec3, towards: vec3) => saturate dot(n, normalize towards)
+
+fun shade(color: float3, normal: vec3) -> float3:
+    let n = normalize normal
+    let light = 0.3 + 0.75 * lambert(n, vec3(0.45, 0.8, -0.4)) + 0.25 * lambert(n, vec3(-0.7, 0.15, 0.6))
+    return color * min(light, 1.0)
+
+@pixel fun main_ps(p: pixel_input){slug.tables, decal} -> target:
+    // Taken on every face, in uniform control flow, since its footprint comes from derivatives; only the decal face keeps it.
+    let coverage = slug.coverage(p.em, decal.banding, decal.glyph, false) * p.decal
+    let lit = shade(p.color, p.normal)
+    let shaded = float3(mix(lit.x, decal.color.x, coverage), mix(lit.y, decal.color.y, coverage), mix(lit.z, decal.color.z, coverage))
+    return {
+        color = float4(..shaded, 1.0)
+    }
+
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .back
+    depth_test = true
+    depth_write = true
+    depth_stencil_format = .depth32_float
+    format = .host
