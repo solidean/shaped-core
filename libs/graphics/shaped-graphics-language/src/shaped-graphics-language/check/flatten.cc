@@ -2134,14 +2134,47 @@ struct flattener
 
     /// `if c => a else b` somebody reads the value of: a block around an `if` whose branches leave it (CHK-375).
     /// Only the branch the condition takes runs.
+    /// A branch CHK-356 resolves is the taken side alone, and an arrow side that is a value is its expression.
     flat_expr_id flatten_value_if(ast::expr_id id, type_id type, ast::if_expr const& node)
     {
+        auto branches = ast().at(node.branches);
+        auto condition = flat_expr_id::none;
+        while (branches.size() >= 2 && ast::is_valid(branches.front().condition))
+        {
+            condition = flatten_expr(branches.front().condition);
+            auto const taken = constant_condition(condition);
+            if (!taken.has_value())
+                break;
+            condition = flat_expr_id::none;
+            if (taken.value())
+                return taken_value(id, type, branches.front().then);
+            branches = branches.subspan({.offset = 1, .size = branches.size() - 1});
+            if (branches.size() == 1)
+                return taken_value(id, type, branches.front().then);
+        }
         auto const value_block = add_label("if");
         auto const outer = cc::move(block);
         block = {};
-        flatten_if_branches({.file = file(), .expr = id}, ast().at(node.branches), value_block);
+        flatten_if_branches({.file = file(), .expr = id}, branches, value_block, condition);
         auto const body = add_list(block);
         block = cc::move(outer);
+        return add_expr(type, id, flat_block{.label = value_block, .body = body});
+    }
+
+    /// The value of the side of an `if` value that a constant takes: an arrow's expression, or a block it leaves.
+    flat_expr_id taken_value(ast::expr_id id, type_id type, ast::body const& then)
+    {
+        if (then.kind == ast::body_kind::arrow && ast::is_valid(then.value))
+        {
+            auto const& e = ast().at(then.value);
+            auto const is_jump = e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>()
+                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>()
+                              || e.node.is<ast::discard_expr>();
+            if (!is_jump)
+                return flatten_expr(then.value);
+        }
+        auto const value_block = add_label("if");
+        auto const body = flatten_arm_body(then, value_block);
         return add_expr(type, id, flat_block{.label = value_block, .body = body});
     }
 
@@ -2164,14 +2197,18 @@ struct flattener
     }
 
     /// The branches of an `if` value, each an `if` nested in the `else` of the one before; the last has no condition.
-    void flatten_if_branches(origin from, cc::span<ast::if_branch const> branches, label_id value_block)
+    /// `first`, where valid, is the first condition flattened already.
+    void flatten_if_branches(origin from,
+                             cc::span<ast::if_branch const> branches,
+                             label_id value_block,
+                             flat_expr_id first = flat_expr_id::none)
     {
         if (branches.size() < 2 || !ast::is_valid(branches.front().condition))
         {
             is_failed = true;
             return;
         }
-        auto const condition = flatten_expr(branches.front().condition);
+        auto const condition = is_valid(first) ? first : flatten_expr(branches.front().condition);
         auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
         // CHK-356: only the side a constant takes is flattened, so nothing judges what the other side would use
         if (auto const taken = constant_condition(condition); taken.has_value())

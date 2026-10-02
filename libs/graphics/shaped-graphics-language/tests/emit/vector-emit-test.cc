@@ -108,6 +108,34 @@ TEST("sgl emit - an if that is a value is a local each branch assigns, and only 
                         "    let tone: f32 = if_result;\n"));
 }
 
+TEST("sgl emit - an if value on a constant is the taken branch's expression, with no local")
+{
+    // CHK-356
+    constexpr auto source = "const sharpen = true\n"
+                            "\n"
+                            "struct pixel_input:\n"
+                            "    @position position: hpos4\n"
+                            "    uv: float2\n"
+                            "\n"
+                            "@pixel struct target:\n"
+                            "    color: float4\n"
+                            "\n"
+                            "@pixel fun main_ps(p: pixel_input) -> target:\n"
+                            "    let v = p.uv\n"
+                            "    let tone = if sharpen => sqrt(v.x) else v.y\n"
+                            "    let soft = if not sharpen => sqrt(v.y) else v.x * 0.5\n"
+                            "    return { color = float4(tone, soft, 0.0, 1.0) }\n";
+    for (auto const t : {target::hlsl_dx12, target::wgsl})
+    {
+        auto const text = text_of(source, t);
+        CHECK(!text.contains("if_result")).dump("text", text);
+        CHECK(text.contains(t == target::wgsl ? "let tone: f32 = sqrt(v.x);\n" : "const float tone = sqrt(v.x);\n"))
+            .dump("text", text);
+        CHECK(text.contains(t == target::wgsl ? "let soft: f32 = v.x * 0.5;\n" : "const float soft = v.x * 0.5;\n"))
+            .dump("text", text);
+    }
+}
+
 namespace
 {
 /// A function of the program that takes a texture, a sampler and an image, and one whose arrow body is a store.
