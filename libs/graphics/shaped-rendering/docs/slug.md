@@ -29,7 +29,8 @@ sr::compile_slug_shape   shaped-rendering  outline -> curve and band tables, dev
 sr::slug_atlas           shaped-rendering  caller-owned textures many shapes share, plus a CPU copy of them
 sr::slug_routine         shaped-rendering  draws shape instances from an atlas, one pipeline per (colour, depth) format
 module slug              shaped-rendering  the coverage itself, in SGL: any pixel shader that `use`s it may call it
-sr::slug_font            shaped-rendering  a face's glyphs compiled on demand, and a one-line advance-only layout
+sr::slug_font            shaped-rendering  a face's glyphs compiled on demand, and text set over them
+sr::layout_text          shaped-rendering  a string set in a face: kerned advances, line breaks, wrapping, alignment
 sr::build_slug_blas      shaped-rendering  instances as a BLAS of non-opaque quads, which `slug.decide` cuts to their shapes
 ```
 
@@ -191,7 +192,8 @@ babel::font: TrueType glyf, cmap 4 and 12, hmtx            [done]
 sr: outline, compilation, atlas, CPU reference             [done]
 SGL module slug: coverage, both overloads, exported by sr  [done]
 sr::slug_routine: quads, dilation, depth, both draw forms  [done]
-sr::slug_font: glyphs on demand, one-line layout           [done]
+sr::slug_font: glyphs on demand                            [done]
+sr::layout_text: kerning, lines, wrapping, alignment       [done]
 example: graphics/slug-cube                                [done]
 shapes as traced geometry: quads, `slug.decide` any-hit    [done]     inline and in a pipeline's hit group
 shapes on traced geometry: a decal by ray differentials    [done]     example: graphics/slug-traced
@@ -201,6 +203,6 @@ atlas eviction                                             [planned]  rewrite ba
 a decal past a bounce                                      [planned]  a ray-cone footprint, once a tracer carries cones
 shaped-viewer's tracer                                     [planned]  after it moves to SGL
 viewer depth for labels                                    [planned]  needs a primary-hit depth target from the trace
-shaping and layout                                         [planned]  its own design, with the canvas
+shaping: ligatures, marks, reordering scripts              [planned]  its own design
 the canvas                                                 [planned]  its own design: shaped-viewer's canvas layer, drawing through slug_routine
 ```

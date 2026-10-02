@@ -307,7 +307,12 @@ auto const job = sr::slug_routine::prepare_job(cmd, atlas, frames, quads);      
 sr::slug_routine::prewarm(ctx, {.color = f, .depth = sg::pixel_format::undefined});  // one pipeline per format pair
 
 auto font = sr::slug_font::load_system_ui_font().value();   // or slug_font::load(path); owns its own atlas
-font.append_line(out, "text", origin, size, color, right = {1, 0}, up = {0, 1});      // advance-only: no kerning
+font.append_line(out, "text", origin, size, color, right = {1, 0}, up = {0, 1});      // kerned; "
+" starts a line along -up
+#include <shaped-rendering/text_layout.hh>
+auto const l = sr::layout_text(face, "two
+lines", {.size = 14, .line_height = 1.2f, .max_width = 0, .align = sr::text_align::left});
+l.glyphs; l.box; l.scale;                     // laid_out_glyph {glyph, origin}: baseline origins, y DOWN from the box top; glyph outlines are y UP
 font.line_width("text", size);  font.atlas();  font.glyph(g);
 
 #include <shaped-rendering/slug_traced.hh>     // shapes as ray-traced geometry

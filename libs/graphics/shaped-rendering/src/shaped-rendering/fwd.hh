@@ -70,7 +70,11 @@ struct slug_quad;               // one quad of a job: an atlas record under a fr
 struct slug_view;               // one draw's transform and knobs
 struct slug_pipeline_key;       // the routine's parameter: colour and depth format
 class slug_routine;             // draws shape instances from an atlas
-class slug_font;                // a font face's glyphs compiled on demand into an atlas, plus a one-line layout
+class slug_font;                // a font face's glyphs compiled on demand into an atlas, and text set over them
+enum class text_align : u8;     // left, center or right within a laid-out box
+struct text_style;              // size, line height, wrap width, alignment
+struct laid_out_glyph;          // one glyph and its baseline origin
+struct text_layout;             // a string set in a face: positioned glyphs and their box
 
 // Dear ImGui integration (see imgui_context.hh).
 struct imgui_context_description; // value type — input to imgui_context

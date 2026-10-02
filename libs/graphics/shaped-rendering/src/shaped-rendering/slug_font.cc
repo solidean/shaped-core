@@ -2,23 +2,14 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
-#include <clean-core/string/conversion.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-rendering/slug_font.hh>
 #include <shaped-rendering/slug_routine.hh>
 #include <shaped-rendering/slug_shape.hh>
+#include <shaped-rendering/text_layout.hh>
 
 namespace sr
 {
-namespace
-{
-[[nodiscard]] babel::font::glyph_id glyph_of(babel::font::face const& face, char32_t c)
-{
-    auto const g = face.glyph_for(c);
-    return g.has_value() ? g.value() : babel::font::glyph_id::notdef;
-}
-} // namespace
-
 cc::result<slug_font> slug_font::load(cc::string_view path, i32 face_index)
 {
     auto adapter = cc::file_read_stream_adapter::open(path);
@@ -87,33 +78,33 @@ void slug_font::append_line(cc::vector<slug_instance>& out,
                             tg::vec2f right,
                             tg::vec2f up)
 {
-    auto const unit = size / f32(_face.units_per_em());
+    auto const laid = layout_text(_face, text, {.size = size});
+    auto const unit = laid.scale;
     auto const x_axis = right * unit;
     auto const y_axis = up * unit;
-    auto pen = origin;
-    for (auto const c : cc::utf8_to_utf32(text))
+
+    // The layout runs y down from its box's top, with the first baseline one ascender below it; this places that
+    // baseline at `origin`, and every later line further along -`up`.
+    auto const first_baseline = f32(_face.metrics().ascender) * unit;
+    for (auto const& g : laid.glyphs)
     {
-        auto const g = glyph_of(_face, c);
-        auto const failed_before = _failures.get_ptr(u16(g)) != nullptr;
-        auto const shape = glyph(g);
+        auto const failed_before = _failures.get_ptr(u16(g.glyph)) != nullptr;
+        auto const shape = glyph(g.glyph);
         if (shape.has_error())
         {
             if (!failed_before)
-                CC_LOG_WARNING("glyph {} of the font did not compile: {}", u16(g), shape.error().to_string());
+                CC_LOG_WARNING("glyph {} of the font did not compile: {}", u16(g.glyph), shape.error().to_string());
+            continue;
         }
-        else if (shape.value().is_drawable)
-        {
-            out.push_back(make_slug_instance(shape.value(), pen, x_axis, y_axis, srgb_color));
-        }
-        pen = pen + x_axis * f32(_face.horizontal(g).advance);
+        if (!shape.value().is_drawable)
+            continue;
+        auto const pen = origin + right * g.origin[0] - up * (g.origin[1] - first_baseline);
+        out.push_back(make_slug_instance(shape.value(), pen, x_axis, y_axis, srgb_color));
     }
 }
 
 f32 slug_font::line_width(cc::string_view text, f32 size) const
 {
-    auto advance = i64(0);
-    for (auto const c : cc::utf8_to_utf32(text))
-        advance += _face.horizontal(glyph_of(_face, c)).advance;
-    return f32(advance) * size / f32(_face.units_per_em());
+    return layout_text(_face, text, {.size = size}).box.max[0];
 }
 } // namespace sr
