@@ -96,6 +96,33 @@ struct slug_fixture
         co_return bytes;
     }
 
+    /// Draws a job over the atlas's records, cleared to black, and reads the target back.
+    [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> draw_job(cc::vector<sr::slug_frame> frames,
+                                                                         cc::vector<sr::slug_quad> quads)
+    {
+        sr::slug_routine::prewarm(*ctx, {.color = target_format, .depth = sg::pixel_format::undefined});
+        (void)co_await ctx->routines.idle_completion();
+        nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
+        auto cmd = ctx->create_command_list();
+        auto const job = sr::slug_routine::prepare_job(*cmd, atlas, frames, quads);
+        {
+            auto pass = cmd->raster.render_to(
+                {.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
+            CHECK(sr::slug_routine::execute(pass, atlas, job, {.object_to_clip = pixels_to_clip()})
+                  == sg::routine_outcome::executed);
+        }
+        ctx->submit_command_list(cc::move(cmd));
+        ctx->advance_epoch();
+        co_await ctx->idle_completion();
+
+        auto read = ctx->create_command_list();
+        auto const future = read->download.bytes_from_texture(target.raw());
+        ctx->submit_command_list(cc::move(read));
+        auto const bytes = co_await future.bytes();
+        co_return bytes;
+    }
+
     /// Draws every instance once, cleared to black, and reads the target back.
     [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> draw(cc::optional<f32> depth_clear = {})
     {
@@ -145,12 +172,18 @@ struct slug_fixture
     return f;
 }
 
+/// Channel `c` of the pixel at (x, y).
+[[nodiscard]] f32 channel_at(cc::span<byte const> pixels, int x, int y, int c)
+{
+    auto const at = (isize(y) * target_size + x) * 8 + c * 2;
+    auto const bits = u16(u16(pixels[at]) | (u16(pixels[at + 1]) << 8));
+    return f32(tg::half_float::make_from_bits(bits));
+}
+
 /// The red channel of the pixel at (x, y), which is its coverage.
 [[nodiscard]] f32 red_at(cc::span<byte const> pixels, int x, int y)
 {
-    auto const at = (isize(y) * target_size + x) * 8;
-    auto const bits = u16(u16(pixels[at]) | (u16(pixels[at + 1]) << 8));
-    return f32(tg::half_float::make_from_bits(bits));
+    return channel_at(pixels, x, y, 0);
 }
 
 /// Places `outline` with its outline origin at pixel `origin`, `scale` pixels per outline unit, y up.
@@ -223,6 +256,78 @@ ASYNC_INVOCABLE_TEST("sr::slug_routine - a scope with depth tests against it and
 
     auto const blocked = co_await f->draw(0.25f);
     CHECK(red_at(blocked, 60, 60) < 0.01f);
+}
+
+ASYNC_INVOCABLE_TEST("sr::slug_routine - a job draws what the same shapes drawn as instances draw",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    auto const f = make_fixture(ctx);
+
+    // the classic form: a rectangle and the ring, each placed in pixels by its own instance
+    auto const rect_origin = tg::pos2f(8.3f, 60.6f);
+    auto const ring_origin = tg::pos2f(90.0f, 64.0f);
+    auto const rect
+        = add(*f, sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(40, 30))), rect_origin, 1.0f);
+    auto const r = add(*f, ring(), ring_origin, 1.5f);
+    auto const classic = co_await f->draw();
+
+    // the job form: each shape kept once as a record in a y-up drawing plane, and placed by a frame that carries the
+    // pixel origin and the scale, so a frame's axes stretch the record exactly as the instance's axes did
+    auto const unit = [](sr::slug_shape_ref const& ref)
+    { return sr::make_slug_instance(ref, tg::pos2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, -1), tg::vec4f(1, 1, 1, 1)); };
+    sr::slug_instance const records[] = {unit(rect), unit(r)};
+    auto const first = f->atlas.add_records(records).value();
+    auto const frames = cc::vector<sr::slug_frame>{{.at = tg::pos3f(rect_origin[0], rect_origin[1], 0)},
+                                                   {.at = tg::pos3f(ring_origin[0], ring_origin[1], 0),
+                                                    .x_axis = tg::vec3f(1.5f, 0, 0),
+                                                    .y_axis = tg::vec3f(0, 1.5f, 0)}};
+    auto const quads = cc::vector<sr::slug_quad>{{.record = first, .frame = 0}, {.record = first + 1, .frame = 1}};
+    auto const job = co_await f->draw_job(frames, quads);
+
+    auto worst = 0.0f;
+    for (auto y = 0; y < target_size; ++y)
+        for (auto x = 0; x < target_size; ++x)
+            worst = cc::max(worst, tg::abs(red_at(job, x, y) - red_at(classic, x, y)));
+    CHECK(worst < 0.01f).dump("worst", worst);
+    CHECK(red_at(job, 28, 45) > 0.99f);
+    CHECK(red_at(job, 90, 64) < 0.01f);
+}
+
+ASYNC_INVOCABLE_TEST("sr::slug_routine - a job places one record under many frames, each tinting it",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    auto const f = make_fixture(ctx);
+    auto const ref
+        = f->atlas
+              .add(sr::compile_slug_shape(sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1)))))
+              .value();
+    auto const record
+        = sr::make_slug_instance(ref, tg::pos2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1), tg::vec4f(1, 1, 1, 1));
+    auto const first = f->atlas.add_records(cc::span<sr::slug_instance const>(&record, 1)).value();
+
+    // one unit square, stretched into a 20 x 20 red square on the left and a 40 x 10 green bar on the right
+    auto const frames = cc::vector<sr::slug_frame>{{.at = tg::pos3f(10, 10, 0),
+                                                    .x_axis = tg::vec3f(20, 0, 0),
+                                                    .y_axis = tg::vec3f(0, 20, 0),
+                                                    .tint = sr::pack_rgba8(tg::vec4f(1, 0, 0, 1))},
+                                                   {.at = tg::pos3f(70, 10, 0),
+                                                    .x_axis = tg::vec3f(40, 0, 0),
+                                                    .y_axis = tg::vec3f(0, 10, 0),
+                                                    .tint = sr::pack_rgba8(tg::vec4f(0, 1, 0, 1))}};
+    auto const quads = cc::vector<sr::slug_quad>{{.record = first, .frame = 0}, {.record = first, .frame = 1}};
+    auto const pixels = co_await f->draw_job(frames, quads);
+
+    CHECK(channel_at(pixels, 20, 20, 0) > 0.99f);
+    CHECK(channel_at(pixels, 20, 20, 1) < 0.01f);
+    CHECK(channel_at(pixels, 100, 15, 1) > 0.99f);
+    CHECK(channel_at(pixels, 100, 15, 0) < 0.01f);
+    // the bar is ten pixels tall, so its frame's y axis stretched the square as much as the x axis did
+    CHECK(channel_at(pixels, 100, 25, 1) < 0.01f);
+    CHECK(channel_at(pixels, 50, 15, 3) < 0.01f);
 }
 
 ASYNC_INVOCABLE_TEST("sr::slug_routine - a retained draw covers its sub-range of a persistent buffer and nothing else",

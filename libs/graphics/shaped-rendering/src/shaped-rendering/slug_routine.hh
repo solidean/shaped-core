@@ -31,6 +31,26 @@ struct sr::slug_instance
     u32 color = 0xffffffff;
 };
 
+/// Where a job places a plane of shapes: the plane's (x, y) lands at `at + x * x_axis + y * y_axis`, in whatever space
+/// the draw's `object_to_clip` starts from — pixels for a 2D overlay, the world for a scene.
+/// The axes are free: their lengths and angle stretch and shear the plane.
+struct sr::slug_frame
+{
+    tg::pos3f at;
+    tg::vec3f x_axis = tg::vec3f(1, 0, 0);
+    tg::vec3f y_axis = tg::vec3f(0, 1, 0);
+
+    /// rgba8, sRGB-encoded, straight alpha, red in the low byte; multiplies the colour of every shape under this frame.
+    u32 tint = 0xffffffff;
+};
+
+/// One quad of a job: the atlas record it draws, under which of the job's frames.
+struct sr::slug_quad
+{
+    u32 record = 0;
+    u32 frame = 0;
+};
+
 /// What one draw needs beyond its instances.
 struct sr::slug_view
 {
@@ -61,9 +81,16 @@ struct sr::slug_pipeline_key
 ///     auto pass = cmd->raster.render_to({.color_targets = {rt.preserved()}});
 ///     (void)sr::slug_routine::execute(pass, atlas, prepared, {.object_to_clip = mvp});
 ///
+/// A **job** is the instanced form: shapes kept once as the atlas's records, placed many times by frames.
+/// Each quad names a record and a frame, so one draw covers any mix of shapes under any number of frames:
+///
+///     auto const first = atlas.add_records(arrow_layers).value();                 // once
+///     auto const job = sr::slug_routine::prepare_job(*cmd, atlas, frames, quads); // before the scope
+///     (void)sr::slug_routine::execute(pass, atlas, job, {.object_to_clip = world_to_clip});
+///
 /// Output is linear and premultiplied, blended premultiplied over the target.
 /// A scope with a depth target draws depth-tested without writing depth, so shapes on a surface layer in draw order.
-/// One pipeline per (colour, depth) format pair, built in the background: execute declines until it is ready.
+/// One pipeline per (colour, depth) format pair and draw form, built in the background: execute declines until it is ready.
 class sr::slug_routine : public sg::render_routine<slug_routine, slug_pipeline_key>
 {
 public:
@@ -73,6 +100,32 @@ public:
         sg::command_list const* command_list = nullptr;
         sg::buffer<slug_instance> instances;
     };
+
+    /// A job's frames and quads uploaded for one recording, on the list `prepare_job` was given.
+    struct prepared_job
+    {
+        sg::command_list const* command_list = nullptr;
+        sg::texture_2d frames;
+        sg::buffer<slug_quad> quads;
+    };
+
+    /// Texels one frame takes in a job's frame texture, and how many frames a row of it holds.
+    static constexpr int texels_per_frame = 3;
+    static constexpr int frames_per_row = 4096 / texels_per_frame;
+
+    /// Uploads `atlas`'s pending shapes and records, and this job's frames and quads; call it before the scope opens.
+    /// Every quad must name a record of `atlas` and a frame of `frames`.
+    [[nodiscard]] static prepared_job prepare_job(sg::command_list& cmd,
+                                                  slug_atlas& atlas,
+                                                  cc::span<slug_frame const> frames,
+                                                  cc::span<slug_quad const> quads);
+
+    /// Draws what `prepare_job` uploaded into an open scope on the same list.
+    /// `view.object_to_clip` takes the frames' space to clip space.
+    [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope,
+                                                     slug_atlas const& atlas,
+                                                     prepared_job const& job,
+                                                     slug_view const& view);
 
     /// Uploads `atlas`'s pending shapes and this frame's instances; call it before the rendering scope opens.
     [[nodiscard]] static prepared_shapes prepare(sg::command_list& cmd,
@@ -99,7 +152,9 @@ protected:
 
 private:
     sg::binding_group_layout_handle _group_layout;
+    sg::binding_group_layout_handle _job_group_layout;
     sg::async_raster_pipeline _pipeline;
+    sg::async_raster_pipeline _job_pipeline;
 
     /// The six corners of the unit square every quad is drawn from, two triangles.
     sg::buffer<tg::vec2f> _corners;
@@ -108,7 +163,7 @@ private:
 namespace sr
 {
 /// An instance drawing `shape` with its outline's origin at `origin`, one outline unit along x on `x_axis` and along y on
-/// `y_axis` — all in object space.
+/// `y_axis` — all in object space, or in a drawing's plane for a record a job's frames place.
 /// `shape` must be drawable: an empty shape — a space — has no instance, so the caller skips it.
 /// `srgb_color` is straight-alpha, sRGB-encoded, in [0, 1].
 [[nodiscard]] slug_instance make_slug_instance(slug_shape_ref const& shape,

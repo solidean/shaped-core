@@ -49,15 +49,22 @@ struct sr::slug_shape_ref
 /// Shapes are added on the CPU, and `prepare` creates, grows and uploads the textures on a command list.
 /// Append-only: nothing is ever evicted, so an atlas holding a large font grows by every glyph it is asked for.
 ///
+/// A third texture holds **records**: shape instances kept beside the shapes they name, which a job draw
+/// (`slug_routine::prepare_job`) places many times through frames without uploading them again.
+///
 /// Holds no device until the first `prepare`, which is what lets a test add shapes and read back what it placed.
 class sr::slug_atlas
 {
 public:
-    /// Both textures are this many texels wide; the reference's shader wraps band lists at this width.
+    /// Every texture is this many texels wide; the reference's shader wraps band lists at this width.
     static constexpr int width = 4096;
 
-    /// The tallest either texture grows to, which is WebGPU's floor for a 2D texture's dimension.
+    /// The tallest a texture grows to, which is WebGPU's floor for a 2D texture's dimension.
     static constexpr int max_rows = 8192;
+
+    /// Texels one record takes in the record texture, and how many records a row holds.
+    static constexpr int texels_per_record = 5;
+    static constexpr int records_per_row = width / texels_per_record;
 
     slug_atlas() = default;
     slug_atlas(slug_atlas&&) noexcept = default;
@@ -70,27 +77,44 @@ public:
     /// Fails when the atlas is full, or a shape's band data does not fit one row.
     [[nodiscard]] cc::result<slug_shape_ref> add(slug_compiled_shape const& shape);
 
-    /// Creates the textures, regrows them, and uploads what `add` placed since the last call.
+    /// Keeps `records` as consecutive records, on the CPU only, and returns the index of the first.
+    /// Every record must name a shape of this atlas; a job's quad names a record by its index.
+    /// Fails when the record texture is full.
+    [[nodiscard]] cc::result<u32> add_records(cc::span<slug_instance const> records);
+
+    /// How many records `add_records` has kept.
+    [[nodiscard]] isize record_count() const { return _record_count; }
+
+    /// Creates the textures, regrows them, and uploads what `add` and `add_records` placed since the last call.
     /// Records copies, so it must be called before the rendering scope that draws from this atlas opens.
     void prepare(sg::command_list& cmd);
 
-    /// Whether `add` placed something `prepare` has not uploaded yet.
+    /// Whether `add` or `add_records` placed something `prepare` has not uploaded yet.
     [[nodiscard]] bool has_pending_upload() const
     {
-        return _curve_dirty_row < _curve_rows || _band_dirty_row < _band_rows;
+        return _curve_dirty_row < _curve_rows || _band_dirty_row < _band_rows || _record_dirty_row < _record_rows;
     }
 
-    /// The textures as of the last `prepare`; null before the first.
+    /// The textures as of the last `prepare`; null before the first, and the record texture null until a record exists.
     [[nodiscard]] sg::texture_2d const& curve_texture() const { return _curve_texture; }
     [[nodiscard]] sg::texture_2d const& band_texture() const { return _band_texture; }
+    [[nodiscard]] sg::texture_2d const& record_texture() const { return _record_texture; }
 
     /// The CPU copies, `width` texels a row: half-float bits for curves, two u16 for bands.
     [[nodiscard]] cc::span<cc::fixed_array<u16, 4> const> curve_texels() const { return _curve_texels; }
     [[nodiscard]] cc::span<cc::fixed_array<u16, 2> const> band_texels() const { return _band_texels; }
 
+    /// The record kept at `index`, read back from the CPU copy; `index` must be below `record_count`.
+    [[nodiscard]] slug_instance record(u32 index) const;
+
 private:
     cc::vector<cc::fixed_array<u16, 4>> _curve_texels;
     cc::vector<cc::fixed_array<u16, 2>> _band_texels;
+    cc::vector<cc::fixed_array<u32, 4>> _record_texels;
+    isize _record_count = 0;
+    int _record_rows = 0;
+    int _record_dirty_row = 0;
+    sg::texture_2d _record_texture;
 
     // The next free texel of each texture, and how many rows hold anything.
     tg::pos2i _curve_cursor = tg::pos2i(0, 0);

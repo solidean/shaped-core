@@ -300,6 +300,9 @@ auto const inst = sr::make_slug_instance(ref, origin, x_axis, y_axis, srgb_rgba)
 auto const prepared = sr::slug_routine::prepare(cmd, atlas, instances);           // atlas.prepare + instance upload
 (void)sr::slug_routine::execute(scope, atlas, prepared, {.object_to_clip = m, .depth_bias = 0, .weight_boost = false});
 (void)sr::slug_routine::execute(scope, atlas, retained_buffer, first, count, view);  // instances the caller keeps
+auto const first = atlas.add_records(records).value();                             // instances kept IN the atlas, for jobs
+auto const job = sr::slug_routine::prepare_job(cmd, atlas, frames, quads);         // slug_frame {at, x_axis, y_axis, tint}; slug_quad {record, frame}
+(void)sr::slug_routine::execute(scope, atlas, job, view);                          // every quad, one draw: record placed by its frame
 // execute ASSERTS the atlas has no pending upload: a glyph added after prepare would otherwise draw nothing
 sr::slug_routine::prewarm(ctx, {.color = f, .depth = sg::pixel_format::undefined});  // one pipeline per format pair
 
