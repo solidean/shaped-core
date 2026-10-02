@@ -1,0 +1,179 @@
+// A traced scene with Slug shapes in it, two ways: labels as geometry an any-hit cuts to their shapes, and a star as a
+// decal the cube's surface covers itself with.
+//
+// One compute thread per pixel casts a 4 × 4 grid of rays, so a label's hard-edged point test is antialiased by the rays
+// rather than by a footprint, and every ray and shadow ray meets the labels through the same decision.
+// The decal is the other case: the star's coverage at a hit, filtered over the em span between neighbouring rays.
+require ray_query
+use slug
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    // the cube's triangles in object space, three corners each, and the em coordinate every corner carries
+    cube_positions: buffer[float3]
+    cube_em: buffer[float2]
+    image: out image_2d[.rgba8_unorm]
+    // the camera: a pixel's ray runs along forward + right * x + up * y, x and y in [-1, 1] across the image
+    eye: float3
+    forward: float3
+    right: float3
+    up: float3
+    sun: float3
+    star_banding: float4
+    star_glyph: int4
+    star_color: float4
+
+// What the TLAS holds, by instance index: the ground, the cube, and then the label runs.
+fun is_ground(h: triangle_hit) -> bool => h.instance_index == 0
+fun is_cube(h: triangle_hit) -> bool => h.instance_index == 1
+
+/// The cube's top face, which carries the star.
+fun is_decal_face(face: int) -> bool => face == 5
+
+fun as_float3(p: pos3) -> float3 => float3(p.x, p.y, p.z)
+fun as_float3(v: vec3) -> float3 => float3(v.x, v.y, v.z)
+
+fun srgb_to_linear(c: float) -> float:
+    if c <= 0.04045 => return c / 12.92
+    return pow((c + 0.055) / 1.055, 2.4)
+
+fun linear_to_srgb(c: float) -> float:
+    if c <= 0.0031308 => return c * 12.92
+    return 1.055 * pow(c, 1.0 / 2.4) - 0.055
+
+/// An instance's rgba8 sRGB colour, red in the low byte, as linear rgb.
+fun unpack_color(c: uint) -> float3:
+    let r = ((c & 0xff) as float) / 255.0
+    let g = (((c >> 8) & 0xff) as float) / 255.0
+    let b = (((c >> 16) & 0xff) as float) / 255.0
+    return float3(srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b))
+
+fun lerp3(a: float3, b: float3, t: float) -> float3 => a + (b - a) * t
+
+/// The ray through `at`, a point of the image in pixels.
+fun camera_ray(at: float2){scene} -> ray:
+    let size = scene.image.size() as float2
+    let x = at.x / size.x * 2.0 - 1.0
+    let y = 1.0 - at.y / size.y * 2.0
+    let d = scene.forward + scene.right * x + scene.up * y
+    return ray(origin = pos3(scene.eye.x, scene.eye.y, scene.eye.z), direction = vec3(d.x, d.y, d.z))
+
+/// The nearest surface along `r`, the labels' quads cut to their shapes.
+fun nearest(r: ray){slug.tables, slug.shapes, scene} -> triangle_hit:
+    return scene.world.trace(r, c => slug.decide(c))
+
+/// Whether anything — a label's glyph included, and never the rest of its quad — stands between `p` and the sun.
+fun in_shadow(p: float3, n: float3){slug.tables, slug.shapes, scene} -> bool:
+    let o = p + n * 0.001
+    let s = normalize(scene.sun)
+    let r = ray(origin = pos3(o.x, o.y, o.z), direction = vec3(s.x, s.y, s.z), t_min = 0.0001)
+    return scene.world.trace(r, c => slug.decide(c), flags = ray_flags.accept_first_hit_and_end_search).is_hit
+
+/// `p`'s barycentrics in the triangle (a, b, c), which `p` must lie in the plane of.
+fun barycentrics_of(p: float3, a: float3, b: float3, c: float3) -> float3:
+    let e0 = b - a
+    let e1 = c - a
+    let e2 = p - a
+    let d00 = dot(e0, e0)
+    let d01 = dot(e0, e1)
+    let d11 = dot(e1, e1)
+    let d20 = dot(e2, e0)
+    let d21 = dot(e2, e1)
+    let denominator = d00 * d11 - d01 * d01
+    let v = (d11 * d20 - d01 * d21) / denominator
+    let w = (d00 * d21 - d01 * d20) / denominator
+    return float3(1.0 - v - w, v, w)
+
+/// Where `r` meets the plane through `p` with normal `n`.
+fun on_plane(r: ray, p: float3, n: float3) -> float3:
+    let o = as_float3(r.origin)
+    let d = as_float3(r.direction)
+    return o + d * (dot(p - o, n) / dot(d, n))
+
+/// The star's coverage where `h` met the decal face: its em point, and the em span to where the neighbouring rays `dx` and
+/// `dy` meet the face's plane — the ray-traced stand-in for a pixel shader's derivatives.
+fun decal_coverage(h: triangle_hit, dx: ray, dy: ray){slug.tables, scene} -> float:
+    let first = h.primitive_index * 3
+    let a = as_float3(h.to_world(pos3(..scene.cube_positions[first])))
+    let b = as_float3(h.to_world(pos3(..scene.cube_positions[first + 1])))
+    let c = as_float3(h.to_world(pos3(..scene.cube_positions[first + 2])))
+    let ea = scene.cube_em[first]
+    let eb = scene.cube_em[first + 1]
+    let ec = scene.cube_em[first + 2]
+
+    let p = as_float3(h.ray.origin) + as_float3(h.ray.direction) * h.t
+    let n = normalize(cross(b - a, c - a))
+    let em = ea * h.barycentrics.x + eb * h.barycentrics.y + ec * h.barycentrics.z
+    let wx = barycentrics_of(on_plane(dx, p, n), a, b, c)
+    let wy = barycentrics_of(on_plane(dy, p, n), a, b, c)
+    let em_x = ea * wx.x + eb * wx.y + ec * wx.z
+    let em_y = ea * wy.x + eb * wy.y + ec * wy.z
+    let em_per_pixel = abs(em_x - em) + abs(em_y - em)
+    return slug.coverage(em, em_per_pixel, scene.star_banding, scene.star_glyph, false)
+
+/// The six faces in the order the host builds them: -z, +z, -x, +x, -y, +y.
+fun face_normal(face: int) -> vec3:
+    if face == 0 => return vec3(0.0, 0.0, -1.0)
+    if face == 1 => return vec3(0.0, 0.0, 1.0)
+    if face == 2 => return vec3(-1.0, 0.0, 0.0)
+    if face == 3 => return vec3(1.0, 0.0, 0.0)
+    if face == 4 => return vec3(0.0, -1.0, 0.0)
+    return vec3(0.0, 1.0, 0.0)
+
+fun face_color(face: int) -> float3:
+    if face == 0 => return float3(0.62, 0.12, 0.10)
+    if face == 1 => return float3(0.10, 0.25, 0.62)
+    if face == 2 => return float3(0.12, 0.42, 0.14)
+    if face == 3 => return float3(0.68, 0.36, 0.06)
+    if face == 4 => return float3(0.24, 0.10, 0.50)
+    return float3(0.08, 0.09, 0.12)
+
+fun sky(d: float3) -> float3 => lerp3(float3(0.30, 0.32, 0.36), float3(0.22, 0.36, 0.62), saturate(d.y))
+
+/// What one ray through `at` sees, linear.
+fun radiance(at: float2){slug.tables, slug.shapes, scene} -> float3:
+    let r = camera_ray(at)
+    let h = nearest(r)
+    let d = normalize(as_float3(r.direction))
+    if not h.is_hit => return sky(d)
+
+    let p = as_float3(r.origin) + as_float3(r.direction) * h.t
+    let mut n = float3(0.0, 1.0, 0.0)
+    let mut albedo = float3(0.5, 0.5, 0.5)
+    if is_ground(h):
+        let checker = ((floor(p.x * 2.0) + floor(p.z * 2.0)) as int) & 1
+        albedo = case checker == 0:
+            true => float3(0.55, 0.55, 0.52)
+            false => float3(0.40, 0.40, 0.38)
+    else:
+        if is_cube(h):
+            let face = h.primitive_index / 2
+            n = as_float3(h.normal_to_world(face_normal(face)))
+            albedo = face_color(face)
+            if is_decal_face(face):
+                // the 4 × 4 rays a pixel casts sit a quarter pixel apart, which is the span each one's coverage filters over
+                let coverage = decal_coverage(h, camera_ray(at + float2(0.25, 0.0)), camera_ray(at + float2(0.0, 0.25)))
+                albedo = lerp3(albedo, float3(scene.star_color.x, scene.star_color.y, scene.star_color.z), coverage)
+        else:
+            let shape = slug.shapes.instances[h.instance_id + h.primitive_index / 2]
+            albedo = unpack_color(shape.color)
+            n = as_float3(h.normal_to_world(vec3(0.0, 0.0, 1.0)))
+
+    // a label is seen from either side, and lit from the side it is seen from
+    n = normalize(n)
+    if dot(n, d) > 0.0 => n = n * -1.0
+    let lambert = saturate(dot(n, normalize(scene.sun)))
+    let mut direct = 0.0
+    if lambert > 0.0 and not in_shadow(p, n) => direct = lambert
+    return albedo * (0.30 + 1.1 * direct)
+
+@compute(8, 8) fun trace_view(@thread_id id: int3){slug.tables, slug.shapes, scene}:
+    let size = scene.image.size()
+    if id.x >= size.x or id.y >= size.y => return
+    let mut sum = float3(0.0, 0.0, 0.0)
+    for sy in 0 ..< 4:
+        for sx in 0 ..< 4:
+            let at = float2((id.x as float) + ((sx as float) + 0.5) * 0.25, (id.y as float) + ((sy as float) + 0.5) * 0.25)
+            sum += radiance(at)
+    let c = sum * (1.0 / 16.0)
+    scene.image.store(int2(id.x, id.y), float4(linear_to_srgb(c.x), linear_to_srgb(c.y), linear_to_srgb(c.z), 1.0))

@@ -1,0 +1,7 @@
+{
+    "graphics/slug-traced": {
+        "mechanism": "custom",
+        "size": "1280x720",
+        "format": "jpg"
+    }
+}
