@@ -478,8 +478,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
                            .up = up * half_height,
                            .sun = tg::vec3f(0.35f, 1.0f, 0.45f),
                            .star_banding = star.banding,
-                           .star_glyph = tg::vec4i(i32(star.glyph_location & 0xffff), i32(star.glyph_location >> 16),
-                                                   i32(star.band_info & 0xffff), i32(star.band_info >> 16)),
+                           .star_glyph = star.glyph(),
                            .star_color = tg::vec4f(0.96f, 0.80f, 0.30f, 1.0f)});
         cmd->compute.bind_pipeline(**pipeline);
         cmd->compute.bind_group(0, *tables);

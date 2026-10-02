@@ -197,17 +197,14 @@ TEST("sr::slug - the point test agrees with the coverage wherever the coverage i
                 auto const c = coverage(*p, at, 0.01f);
                 if (c > 0.0f && c < 1.0f)
                     continue; // within a hundredth of an edge, where the two may round apart
-                auto const s = p->ref.em_scale;
-                auto const inside
-                    = sr::impl::slug_reference_contains(p->atlas, p->instance, tg::pos2f(at[0] * s, at[1] * s));
+                auto const inside = sr::impl::slug_reference_contains(p->atlas, p->instance, stored(p->ref, at));
                 CHECK(inside == (c == 1.0f)).dump("x", x).dump("y", y);
                 ++compared;
             }
     CHECK(compared > 19000);
 
-    auto const s = nonzero.ref.em_scale;
-    CHECK(!sr::impl::slug_reference_contains(nonzero.atlas, nonzero.instance, tg::pos2f(50 * s, 50 * s)));
-    CHECK(sr::impl::slug_reference_contains(nonzero.atlas, nonzero.instance, tg::pos2f(20 * s, 50 * s)));
+    CHECK(!sr::impl::slug_reference_contains(nonzero.atlas, nonzero.instance, stored(nonzero.ref, tg::pos2f(50, 50))));
+    CHECK(sr::impl::slug_reference_contains(nonzero.atlas, nonzero.instance, stored(nonzero.ref, tg::pos2f(20, 50))));
 }
 
 TEST("sr::slug - a traced quad's vertices lie where the instance places its em box")
@@ -219,11 +216,12 @@ TEST("sr::slug - a traced quad's vertices lie where the instance places its em b
     auto const v = sr::slug_quad_vertices(cc::span<sr::slug_instance const>(&instance, 1));
     REQUIRE(v.size() == 6);
 
-    // the box's corners in outline units, mapped through the placement: min, (max.x, min.y), max, min, max, (min.x, max.y)
+    // the box's corners back in outline units, mapped through the placement: min, (max.x, min.y), max, min, max, (min.x, max.y)
     auto const lo = p.ref.em_bounds.min;
     auto const hi = p.ref.em_bounds.max;
     auto const s = p.ref.em_scale;
-    auto const at = [&](f32 ex, f32 ey) { return tg::pos3f(10 + 2 * ex / s, 5 - ey / s, 0); };
+    auto const o = p.ref.stored_origin;
+    auto const at = [&](f32 ex, f32 ey) { return tg::pos3f(10 + 2 * (ex / s + o[0]), 5 - (ey / s + o[1]), 0); };
     tg::pos3f const expected[]
         = {at(lo[0], lo[1]), at(hi[0], lo[1]), at(hi[0], hi[1]), at(lo[0], lo[1]), at(hi[0], hi[1]), at(lo[0], hi[1])};
     for (auto i = 0; i < 6; ++i)
