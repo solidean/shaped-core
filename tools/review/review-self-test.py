@@ -947,6 +947,32 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     assert "pg-nf" in html, "an `sgl` fence must reach this lexer rather than fall through as plain text"
 
 
+def test_highlighted_subgroup_and_quad_names_are_the_prelude_s(root: Path) -> None:
+    """Both highlighters name the subgroup and quad operations one by one, so a renamed or added one drifts silently.
+
+    A prefix would need no list, and it coloured every `quad_count` and `quad_uv` in a mesh shader as a control keyword.
+    """
+    from tools.review.lib.render import sgl_lexer
+    sgl = REPO_ROOT / "libs/graphics/shaped-graphics-language"
+    prelude = (sgl / "prelude/builtins.sgl").read_text(encoding="utf-8")
+    declared = set(re.findall(r"\bfun ((?:subgroup|quad)_[0-9A-Za-z_]*)", prelude))
+    assert len(declared) > 20, f"the prelude no longer declares the subgroup operations as `fun subgroup_*`: {declared}"
+
+    lexed = {name for name in sgl_lexer._CONTROL_BUILTINS if name.startswith(("subgroup_", "quad_"))}
+    assert lexed == declared, f"the lexer lists {sorted(lexed - declared)} and misses {sorted(declared - lexed)}"
+
+    grammar = json.loads((sgl / "tools/vscode-extension/syntaxes/sgl.tmLanguage.json").read_text(encoding="utf-8"))
+    rule = grammar["repository"]["control-builtin"]["match"]
+    named = set(re.findall(r"(?:subgroup|quad)_[0-9A-Za-z_]*", rule))
+    # A prefix pattern reads here as the bare name `subgroup_`, which no builtin is.
+    assert named == declared, f"the grammar lists {sorted(named - declared)} and misses {sorted(declared - named)}"
+
+    source = "struct mesh_quad:\n    quad_count: int\nfun f(m: mesh_quad):\n    let quad_uv = m.quad_count + x.subgroup_add(1)\n"
+    drawn = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(source)]
+    control = {value for kind, value in drawn if kind == "Token.Keyword.Namespace"}
+    assert not control, f"ordinary names and members must not read as control builtins: {sorted(control)}"
+
+
 def test_sgl_type_positions_survive_qualifiers_and_arguments(root: Path) -> None:
     """`mut` and `out` qualify a type without ending the type position, and a type's `[...]` arguments are types.
 

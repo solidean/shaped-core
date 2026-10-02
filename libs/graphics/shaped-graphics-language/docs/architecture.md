@@ -52,8 +52,10 @@ The AST pass is per file and name-free: a name is a span, and nothing is looked 
 One is the VS Code grammar, [sgl.tmLanguage.json](../tools/vscode-extension/syntaxes/sgl.tmLanguage.json).
 The other is the review tool's Pygments lexer, [sgl_lexer.py](../../../../tools/review/lib/render/sgl_lexer.py).
 A new keyword, operator, literal form or line-tree rule is not done until both draw it.
-Both colour as control keywords the builtins whose names alone constrain control flow: `ddx`, `ddy`, `fwidth`, the barriers, `workgroup_uniform_load`, `subgroup_*` and `quad_*`.
-The review tool's self-test holds the lexer's keywords to the form parser's `sgl_keywords`; nothing else is checked yet ([TODO](TODO.md)).
+Both colour as control keywords the builtins whose names alone constrain control flow: `ddx`, `ddy`, `fwidth`, the barriers, `workgroup_uniform_load`, and the subgroup and quad operations.
+Those last two are listed by exact name, never by prefix, since `quad_count` is an ordinary name.
+The review tool's self-test holds the lexer's keywords to the form parser's `sgl_keywords`, and both highlighters' subgroup and quad names to the prelude's.
+Nothing else is checked yet ([TODO](TODO.md)).
 
 ## The check pass
 
