@@ -738,6 +738,10 @@ One draft said a fix counted "a callee's asserts" when it counted every assert o
 It also said a doc "no longer" described something that three of its lines still partly did.
 A comment grouped by area drifts a second way: a change lands under the commit its area came from rather than the one that made it.
 Another draft credited a call-stack fix to the metal commit beside it, and credited "88 ms to 2.9 ms" to the last of the two commits that made it.
+**A fix's before-state is claimed per input, from the before-code.**
+A fix that touched several sibling kernels is summarised as if each had shown the failure the probe found in one.
+A comment said a ray, line, segment, triangle or quad parallel to a plane "used to hit at infinity".
+Only the ray and line did; a segment's range and a triangle's barycentrics rejected the infinite parameter.
 **A number that spans commits names every commit it spans.**
 **Read the diff of each commit while writing its bullet, and name every hunk a reader will see.**
 A sort comparator, a `nan` spelling or a nested-test case left out of the comment is a hunk the author cannot account for.
