@@ -659,13 +659,13 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         for (auto const* name : k_raytracing_extensions)
             device_extensions.push_back(name);
 
-    // A point is one pixel in sg, as WebGPU has it, and SGL's vertex stages write no point size.
-    // Vulkan draws a point list only from a stage that writes one, unless maintenance5 makes an unwritten size 1.0.
-    // Optional, since it is above the 1.3 floor: without it a point list drawn with such a shader fails validation.
     auto const shader_features = query_optional_shader_features(best_device);
     if (shader_features.has_compute_derivatives)
         device_extensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
 
+    // A point is one pixel in sg, as WebGPU has it, and SGL's vertex stages write no point size.
+    // Vulkan draws a point list only from a stage that writes one, unless maintenance5 makes an unwritten size 1.0.
+    // Optional, since it is above the 1.3 floor: without it a point list drawn with such a shader fails validation.
     char const* const maintenance5_names[] = {VK_KHR_MAINTENANCE_5_EXTENSION_NAME};
     bool const maintenance5_supported = device_extensions_available(best_device, maintenance5_names);
     if (maintenance5_supported)
