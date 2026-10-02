@@ -629,6 +629,9 @@ The shapes this takes, each seen at least once:
   The push only enqueued each dependent on a scheduler.
   So the deadlock hazard, the "continuations must not block" rule and a per-context guard were all recommended against code that could not reach them.
   The maintainer's question — "is this something user code commonly needs to abide to" — is what sent the review to `route_after_schedule`, one grep the draft had skipped.
+- **A bug filed against the review tool is a mechanism claim too.** "A `changes` heading of 48 ids is refused, 47 pass" was filed as a length limit.
+  The cause was a stray `\r` that the reviewer's own shell pipeline left after the last id, and cutting to 47 ids had simply dropped it.
+  Bisect the input, not just its size, before naming a limit.
 - **Look for the configuration that makes the race deterministic before writing the item.** A `singlethreaded-*` preset removes exactly the concurrency a one-run finding depends on.
   Two minutes there convert "I saw it once" into a named mechanism.
 
