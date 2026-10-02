@@ -685,7 +685,14 @@ def per_values_layout(listed: list[str], by_name: dict[str, dict], per_values: d
     """
     out = ["        auto desc = sg::pipeline_layout_description();\n"]
     for b in listed:
-        if by_name[b]["inline"]:
+        if b not in by_name:
+            # another module's binding: whether it is inline is known only to its generated type, so C++ asks it
+            t = cpp_name(b)
+            out.append(f"        if constexpr (sg::declared_inline_constants<{t}>)\n")
+            out.append(f"            desc.inline_constants = {t}::inline_binding();\n")
+            out.append("        else\n")
+            out.append(f"            desc.groups.push_back(ctx.cached.acquire_binding_group_layout<{t}>());\n")
+        elif by_name[b]["inline"]:
             out.append(f"        desc.inline_constants = {b}::inline_binding();\n")
         elif per_values[b]:
             stated = ", ".join(f".{o} = values.{o}" for o in per_values[b])
@@ -734,12 +741,6 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str], package: str
         # A group whose formats name options this entry point reaches has a layout per set of values.
         per_values = {b: [o for o in format_options(by_name[b]) if o in options] if b in by_name else [] for b in listed}
         is_per_values = any(per_values.values())
-        foreign = [b for b in listed if b not in by_name]
-        if is_per_values and foreign:
-            raise HostCodeError(
-                f"shader package '{package}': `{name}` of {path} lists {', '.join(foreign)} of another module beside "
-                f"a group whose image formats name options, and a layout per option value is spelled from the "
-                f"package's own groups alone yet; acquire it from the shader")
         if is_per_values:
             out.append("    /// Its groups' image formats are those `values` names.\n")
             out.append("    [[nodiscard]] sg::pipeline_layout_handle acquire_layout(sg::context& ctx, options const& values = {}) const\n    {\n")

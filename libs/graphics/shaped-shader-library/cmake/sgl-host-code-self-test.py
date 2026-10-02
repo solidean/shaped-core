@@ -439,6 +439,23 @@ def an_entry_point_reaching_a_groups_format_option_builds_its_layout_from_the_va
 
 
 @test
+def another_modules_binding_in_a_layout_per_value_asks_its_type_whether_it_is_inline():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["upscaled", "common.lights"],
+             "options": ["output_format"]}
+    entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED)],
+                                         described_entry_points={(FORMATTED_FILE.path, "cs"): entry},
+                                         file_options={FORMATTED_FILE.path: OPTIONS})
+    header = sgl_host_code.emit_entry_wrappers(entries, {FORMATTED_FILE.path: "upscale"}, "pkg")
+    expect_in("        if constexpr (sg::declared_inline_constants<::sgl_modules::common::lights>)\n"
+              "            desc.inline_constants = ::sgl_modules::common::lights::inline_binding();\n"
+              "        else\n"
+              "            desc.groups.push_back(ctx.cached.acquire_binding_group_layout<::sgl_modules::common::lights>());\n",
+              header, "the module's binding, inline or a group by its own generated type")
+    expect_in("upscaled::declared_bindings(upscaled::options{.output_format = values.output_format})", header,
+              "the optioned group beside it, from the values")
+
+
+@test
 def a_binding_array_sized_by_an_option_and_a_pipeline_over_an_optioned_group_are_refused():
     counted = {**ARRAYS, "options": ["layers"],
                "members": [{**ARRAYS["members"][0], "count_option": "layers"}, ARRAYS["members"][1]]}
