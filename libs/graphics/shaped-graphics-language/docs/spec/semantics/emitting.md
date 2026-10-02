@@ -312,8 +312,8 @@ binding affine:
 * **EMIT-80** WGSL writes an arm's values as one comma list, and the C-like targets as one label per value.
 * **EMIT-142** A swizzle of a prelude vector is the target's own, `v.zyx` on every target, since every prelude vector is a vector of every target ([why](why/emitting.md#emit-142)).
   A swizzle of a struct of the program is a construction of its vector, one member access per letter, with an operand that is no local bound to a temporary first, as CHK-103 binds one.
-  A splat of a swizzle is one member access of its operand per letter, so `float4(..v.xyz, 1.0)` binds no temporary.
-* **EMIT-143** HLSL and MSL assign through a swizzle of a prelude vector as it stands, `v.xz += d;`.
+  A splat of a swizzle of a local is one member access of it per letter, so `float4(..v.xyz, 1.0)` binds no temporary.
+* **EMIT-143** HLSL and MSL assign through a swizzle of a prelude vector as it stands, `v.xz = v.xz + d;`.
   WGSL assigns one component at a time, and so does every target through a swizzle of a struct of the program.
   The new value goes into a temporary first, which reads the old value and the right side once, and each component is stored from it.
 * **EMIT-144** `==` and `!=` over two vectors are `all(a == b)` and `any(a != b)` on every target, and `equal` and `not_equal` are the targets' componentwise `==` and `!=`.
@@ -494,7 +494,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 * **EMIT-153** A binding marked `@layout(.hlsl)` has its constant block placed by EMIT-110, in declaration order, and that layout is promised: the compiler never reorders it.
   Every target writes it as EMIT-112 writes any block, so the promise is today's output kept.
 * **EMIT-154** A binding marked `@layout(.cpp)` has its constant block placed as a C++ compiler places a struct of the generated host types ([why](why/emitting.md#emit-154)).
-  Each value stands at the next multiple of its alignment: its scalar's size, or a nested struct's largest.
+  Each value stands at the next multiple of its alignment, which is its scalar's size.
   A struct's size is rounded up to its alignment, a `float3` takes 12 bytes, and no row rule applies.
   Every target writes the block as its memory form (EMIT-113), and in every target a vector the layout lets cross a 16-byte row is split into scalars.
   `hlsl-vulkan` states every field's offset.

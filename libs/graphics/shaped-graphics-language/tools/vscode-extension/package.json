@@ -98,7 +98,7 @@
             {
                 "id": "controlBuiltin",
                 "superType": "function",
-                "description": "A call of a builtin that constrains control flow: a derivative, a barrier, an atomic."
+                "description": "A call of a builtin whose record constrains control flow."
             }
         ],
         "semanticTokenScopes": [
