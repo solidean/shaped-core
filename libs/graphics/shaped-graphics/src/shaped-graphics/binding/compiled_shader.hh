@@ -74,6 +74,7 @@ struct sg::compiled_shader
     /// The subgroup size a compute shader runs best at, which a backend asks the device for where it can and ignores
     /// where it cannot: a preference, never a requirement, so no pipeline is refused for it.
     /// The shader itself must be correct at any size.
+    /// SGL states it, and a compiler's cache holds the compiler's own result, so a cached shader never carries it.
     cc::optional<i32> preferred_subgroup_size;
 
     compiler_info compiler;

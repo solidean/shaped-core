@@ -93,6 +93,33 @@ ASYNC_INVOCABLE_TEST("sg - one group binds at whichever slot the entry point lis
         CHECK(data[i] == float(i) * 3.0f);
 }
 
+ASYNC_INVOCABLE_TEST("sg - the pipeline cache keeps one pipeline per preferred subgroup size of one bytecode",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::subgroups))
+        SKIP("this context has no subgroup operations");
+
+    // On vulkan the size is in no text, so an `@option` naming it gives one SPIR-V that wants two sizes.
+    auto const& shader = co_await shaders::subgroups.reduce->acquire(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::wave_io>();
+    auto const layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+    auto const at_size = [&](i32 size)
+    {
+        auto sized = shader;
+        sized.preferred_subgroup_size = size;
+        return ctx->cached.acquire_compute_pipeline(sg::compute_pipeline_description{.shader = sized, .layout = layout});
+    };
+
+    auto const at_32 = co_await at_size(32);
+    auto const at_64 = co_await at_size(64);
+    auto const at_32_again = co_await at_size(32);
+    CHECK(at_32.get() != at_64.get());
+    CHECK(at_32.get() == at_32_again.get());
+}
+
 ASYNC_INVOCABLE_TEST("sg - a group's plain members reach the shader through the constant buffer it owns",
                      (sg::context_handle const& ctx))
 {

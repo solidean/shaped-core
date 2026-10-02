@@ -16,7 +16,6 @@ sg::compiled_shader make_shader()
     shader.format = sg::shader_format::dxil;
     shader.entry_point = "main";
     shader.workgroup_size = sg::compute_dimensions{.x = 64, .y = 2, .z = 1};
-    shader.preferred_subgroup_size = 32;
     shader.color_output_count = 3; // no stage carries both, and the codec does not care
 
     byte const code[] = {byte(0xDE), byte(0xAD), byte(0xBE), byte(0xEF), byte(0x00), byte(0x7F)};
@@ -98,7 +97,7 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
         if (x.visibility != y.visibility)
             return false;
     }
-    if (a.color_output_count != b.color_output_count || a.preferred_subgroup_size != b.preferred_subgroup_size)
+    if (a.color_output_count != b.color_output_count)
         return false;
     if (a.footprint != b.footprint)
         return false;
@@ -131,7 +130,6 @@ TEST("sg shader codec round-trips the absent optionals")
 {
     auto original = make_shader();
     original.workgroup_size = {};
-    original.preferred_subgroup_size = {};
     original.color_output_count = {};
     original.bindings.clear();
     original.compiler = {};
@@ -142,7 +140,6 @@ TEST("sg shader codec round-trips the absent optionals")
     CHECK(same(original, decoded.value()));
     CHECK(!decoded.value().workgroup_size.has_value());
     CHECK(!decoded.value().color_output_count.has_value());
-    CHECK(!decoded.value().preferred_subgroup_size.has_value());
 }
 
 TEST("sg shader codec refuses anything it did not write")
