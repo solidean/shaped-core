@@ -273,10 +273,13 @@ void append_circle(cc::vector<sr::slug_instance>& out, sr::slug_font& font, cc::
 
 ASYNC_EXAMPLE("graphics/slug-cube")
 {
+    // The default capture shows the sum, the hiragana and the star; `back` turns the camera round to the circle text,
+    // the heart and the sizes, which the default view cannot see.
     auto const capture = sr::capture_request::from_environment();
-    if (capture.active && !capture.name.empty())
+    auto const capture_back = capture.active && capture.name == "back";
+    if (capture.active && !capture.name.empty() && !capture_back)
     {
-        cc::eprintln("this example offers no named capture, so it cannot take {}", capture.name);
+        cc::eprintln("this example offers only the named capture `back`, so it cannot take {}", capture.name);
         co_return;
     }
 
@@ -399,7 +402,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         }
         begin_run(font, latin, 3);
         auto const reading = japanese.has_value() ? "konnichiwa" : "(no Japanese font found)";
-        font.append_line(latin, reading, tg::pos2f(-font.line_width(reading, 0.075f) * 0.5f, -0.2f), 0.075f, muted);
+        font.append_line(latin, reading, tg::pos2f(-font.line_width(reading, 0.1f) * 0.5f, -0.21f), 0.1f, muted);
         end_run(latin);
     }
 
@@ -434,6 +437,12 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         font.append_line(latin, "oblique by shear", tg::pos2f(-0.4f, -0.32f), 0.085f, muted, tg::vec2f(1, 0), tg::vec2f(0.25f, 1));
         end_run(latin);
     }
+
+    // The face labels never change, so they go up once, into buffers every frame draws ranges of.
+    // What does go up per frame is any glyph an atlas gained since the last one, which each atlas's prepare covers.
+    auto latin_buffer = ctx->persistent.create_buffer_from_data(latin, sg::buffer_usage::vertex_buffer);
+    auto kana_buffer = kana.empty() ? sg::buffer<sr::slug_instance>()
+                                    : ctx->persistent.create_buffer_from_data(kana, sg::buffer_usage::vertex_buffer);
 
     cc::unique_ptr<sr::window_system> wsys;
     cc::unique_ptr<sr::window> win;
@@ -474,6 +483,8 @@ ASYNC_EXAMPLE("graphics/slug-cube")
     (void)co_await ctx->routines.idle_completion();
 
     auto camera = orbit_camera();
+    if (capture_back)
+        camera.yaw = camera.yaw + tg::angle_f::make_from_degree(180.0f);
     auto dragging = false;
     auto spin = tg::angle_f::make_from_degree(0.0f);
     auto frames = u32(0);
@@ -522,11 +533,10 @@ ASYNC_EXAMPLE("graphics/slug-cube")
                          tg::pos2f(30, 86), 18.0f, tg::vec4f(0.75f, 0.78f, 0.85f, 1), tg::vec2f(1, 0), tg::vec2f(0, -1));
 
         auto cmd = ctx->create_command_list();
-        // Uploads first, on the list but outside the pass: the atlas's new glyphs and both instance arrays.
-        auto const latin_prepared = sr::slug_routine::prepare(*cmd, font.atlas(), latin);
-        auto const kana_prepared
-            = japanese.has_value() ? sr::slug_routine::prepare(*cmd, japanese.value().atlas(), kana) : sr::slug_routine::prepared_shapes{};
-        auto const overlay_prepared = sr::slug_routine::prepare(*cmd, font.atlas(), overlay);
+        // Uploads first, on the list but outside the pass: each atlas's new glyphs, and the caption's instances.
+        if (japanese.has_value())
+            japanese.value().atlas().prepare(*cmd);
+        auto const overlay_prepared = sr::slug_routine::prepare(*cmd, font.atlas(), overlay); // prepares font's atlas too
         auto const tables = ctx->transient.create_binding_group(
             *cmd, tables_layout,
             sgl_modules::slug::tables{.curves = font.atlas().curve_texture().as_texture_view(),
@@ -556,7 +566,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
             // Each face's runs with its face's frame; the bias keeps them in front of the face they lie on.
             for (auto const& d : draws)
             {
-                auto const& instances = d.font == &font ? latin_prepared.instances : kana_prepared.instances;
+                auto const& instances = d.font == &font ? latin_buffer : kana_buffer;
                 (void)sr::slug_routine::execute(pass, d.font->atlas(), instances, d.first, d.count,
                                                 {.object_to_clip = view_projection * face_frame(d.face), .depth_bias = 0.0005f});
             }
@@ -589,7 +599,9 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         }
     }
 
-    // The atlas's textures are the context's, so they go before it shuts down rather than with the font afterwards.
+    // The atlas's textures and the label buffers are the context's, so they go before it shuts down rather than after.
+    latin_buffer = sg::buffer<sr::slug_instance>();
+    kana_buffer = sg::buffer<sr::slug_instance>();
     font.atlas() = sr::slug_atlas();
     if (japanese.has_value())
         japanese.value().atlas() = sr::slug_atlas();
