@@ -1452,8 +1452,9 @@ struct flattener
         return add_expr(type, id, flat_block{.label = label, .body = body});
     }
 
-    /// True where evaluating `id` calls a builtin with an effect outside any block.
-    /// A block is the legalizer's to order: it moves in front of its statement and pins what stands left of it (LEGAL-16).
+    /// True where evaluating `id` has an effect, an inlined call's body included.
+    /// A block whose only leave is its last statement leaves its value where it stood (LEGAL-15).
+    /// So an inlined `fun f() => counter.add(1)` is an impure call in the text, written wherever the target puts it.
     [[nodiscard]] bool calls_impure(flat_expr_id id, int depth) const
     {
         if (!is_valid(id) || depth > k_max_inline_depth)
@@ -1461,8 +1462,8 @@ struct flattener
         auto const& x = entry.at(id);
         if (auto const* const call = x.node.try_as<flat_call>(); call != nullptr && !call->is_pure)
             return true;
-        if (x.node.is<flat_block>())
-            return false;
+        if (auto const* const block = x.node.try_as<flat_block>())
+            return writes_outside(entry, block->body, depth + 1);
         auto result = false;
         for_each_operand(entry, x, [&](flat_expr_id operand) { result = result || calls_impure(operand, depth + 1); });
         return result;

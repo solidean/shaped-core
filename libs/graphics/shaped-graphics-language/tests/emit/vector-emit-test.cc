@@ -31,9 +31,9 @@ constexpr cc::string_view k_vectors = "struct pixel_input:\n"
                                       "    return { color = float4(picked.x + mixed.y + mid.x + r.x + tone + flag, "
                                       "(masked.x + s.y) as float, 0.0, 1.0) }\n";
 
-cc::string text_of(cc::string_view source, target t)
+cc::string text_of(cc::string_view source, target t, isize entry = 0)
 {
-    auto const e = emit_source(source, 0, t);
+    auto const e = emit_source(source, entry, t);
     CHECK(sgl::emit::dump_errors(e) == "");
     return e.text;
 }
@@ -135,4 +135,40 @@ TEST("sgl emit - a resource parameter is the member it was handed, written where
     auto const wgsl = text_of(k_resources, target::wgsl);
     CHECK(wgsl.contains("textureSampleLevel(post_source, post_bilinear, "));
     CHECK(wgsl.contains("textureStore(post_level, xy, vec4f(textureLoad(post_level, xy).x + v, 0.0, 0.0, 0.0));\n"));
+}
+
+namespace
+{
+/// Each `claim()` is an atomic increment reached through an inlined call, so the order of any two is visible.
+constexpr cc::string_view k_claims = "binding work:\n"
+                                     "    counts: mut buffer[atomic[uint]]\n"
+                                     "    result: mut buffer[uint]\n"
+                                     "\n"
+                                     "fun claim(){work} -> uint => work.counts[0].add(1)\n"
+                                     "\n"
+                                     "@compute(64) fun picked(@thread_id id: int3){work}:\n"
+                                     "    work.result[id.x] = select(claim() > 3, claim(), claim())\n"
+                                     "\n"
+                                     "@compute(64) fun apart(@thread_id id: int3){work}:\n"
+                                     "    work.result[id.x] = claim() - claim()\n";
+} // namespace
+
+TEST("sgl emit - an effect inside an inlined call is bound in SGL's order where the target would reorder it")
+{
+    auto const wgsl = text_of(k_claims, target::wgsl);
+    CHECK(wgsl.contains("    let cond: bool = atomicAdd(&work_counts[0], 1u) > 3u;\n"
+                        "    let if_true: u32 = atomicAdd(&work_counts[0], 1u);\n"
+                        "    let if_false: u32 = atomicAdd(&work_counts[0], 1u);\n"
+                        "    work_result[id.x] = select(if_false, if_true, cond);\n"));
+    auto const msl = text_of(k_claims, target::msl);
+    CHECK(msl.contains(
+        "    const bool cond = atomic_fetch_add_explicit(&work_counts[0], 1u, memory_order_relaxed) > 3u;\n"
+        "    const uint if_true = atomic_fetch_add_explicit(&work_counts[0], 1u, memory_order_relaxed);\n"
+        "    const uint if_false = atomic_fetch_add_explicit(&work_counts[0], 1u, memory_order_relaxed);\n"
+        "    work_result[id.x] = select(if_false, if_true, cond);\n"));
+    // MSL leaves the order of an operator's operands unspecified
+    auto const apart = text_of(k_claims, target::msl, 1);
+    CHECK(apart.contains("    const uint a = atomic_fetch_add_explicit(&work_counts[0], 1u, memory_order_relaxed);\n"
+                         "    const uint b = atomic_fetch_add_explicit(&work_counts[0], 1u, memory_order_relaxed);\n"
+                         "    work_result[id.x] = a - b;\n"));
 }
