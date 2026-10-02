@@ -87,6 +87,7 @@ sr::slug_outline / compile_slug_shape  [done]     outlines of quadratic curves -
 sr::slug_atlas                         [done]     caller-owned, append-only; eviction planned
 sr::slug_routine                       [done]     one quad per shape, dilated; depth-tested when the scope has depth
 sr::slug_font                          [done]     glyphs on demand, advance-only layout; shaping planned
+sr::build_slug_blas                    [done]     shapes as traced quads, cut to their shapes by `slug.decide`
 CFF outlines                           [planned]
 ```
 

@@ -5,6 +5,8 @@
 #include <shaped-rendering/slug_atlas.hh>
 #include <shaped-rendering/slug_routine.hh>
 #include <shaped-rendering/slug_shape.hh>
+#include <shaped-rendering/slug_traced.hh>
+#include <typed-geometry/linalg/pos_ops.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 using namespace cc::primitive_defines;
@@ -171,6 +173,61 @@ TEST("sr::slug - a circle of quadratic arcs covers its area")
     // the curves bend: points just inside and outside the arc, away from the polygon's chords
     CHECK(coverage(p, tg::pos2f(50, 89)) == 1.0f);
     CHECK(coverage(p, tg::pos2f(50, 91.5f)) == 0.0f);
+}
+
+TEST("sr::slug - the point test agrees with the coverage wherever the coverage is not an edge's")
+{
+    // a circle with a hole wound against it, and the same pair under even-odd, which the point test must both follow
+    auto o = circle(tg::pos2f(50, 50), 40.0f, 16);
+    auto const hole = circle(tg::pos2f(50, 50), 15.0f, 8, true);
+    for (auto const& c : hole.curves)
+        o.curves.push_back(c);
+    o.contour_ends.push_back(i32(o.curves.size()));
+    auto const nonzero = place(o);
+    o.fill_rule = sr::slug_fill_rule::even_odd;
+    auto const even_odd = place(o);
+
+    auto compared = 0;
+    for (auto const* const p : {&nonzero, &even_odd})
+        for (auto y = 0; y < 100; ++y)
+            for (auto x = 0; x < 100; ++x)
+            {
+                // off the pixel grid, so no sample lands on a curve's end point or a band's edge by construction
+                auto const at = tg::pos2f(f32(x) + 0.37f, f32(y) + 0.61f);
+                auto const c = coverage(*p, at, 0.01f);
+                if (c > 0.0f && c < 1.0f)
+                    continue; // within a hundredth of an edge, where the two may round apart
+                auto const s = p->ref.em_scale;
+                auto const inside
+                    = sr::impl::slug_reference_contains(p->atlas, p->instance, tg::pos2f(at[0] * s, at[1] * s));
+                CHECK(inside == (c == 1.0f)).dump("x", x).dump("y", y);
+                ++compared;
+            }
+    CHECK(compared > 19000);
+
+    auto const s = nonzero.ref.em_scale;
+    CHECK(!sr::impl::slug_reference_contains(nonzero.atlas, nonzero.instance, tg::pos2f(50 * s, 50 * s)));
+    CHECK(sr::impl::slug_reference_contains(nonzero.atlas, nonzero.instance, tg::pos2f(20 * s, 50 * s)));
+}
+
+TEST("sr::slug - a traced quad's vertices lie where the instance places its em box")
+{
+    auto const p = place(sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(40, 20))));
+    // two outline units per object unit along x, and y flipped, from an origin of (10, 5)
+    auto const instance
+        = sr::make_slug_instance(p.ref, tg::pos2f(10, 5), tg::vec2f(2, 0), tg::vec2f(0, -1), tg::vec4f(1, 1, 1, 1));
+    auto const v = sr::slug_quad_vertices(cc::span<sr::slug_instance const>(&instance, 1));
+    REQUIRE(v.size() == 6);
+
+    // the box's corners in outline units, mapped through the placement: min, (max.x, min.y), max, min, max, (min.x, max.y)
+    auto const lo = p.ref.em_bounds.min;
+    auto const hi = p.ref.em_bounds.max;
+    auto const s = p.ref.em_scale;
+    auto const at = [&](f32 ex, f32 ey) { return tg::pos3f(10 + 2 * ex / s, 5 - ey / s, 0); };
+    tg::pos3f const expected[]
+        = {at(lo[0], lo[1]), at(hi[0], lo[1]), at(hi[0], hi[1]), at(lo[0], lo[1]), at(hi[0], hi[1]), at(lo[0], hi[1])};
+    for (auto i = 0; i < 6; ++i)
+        CHECK(tg::distance(v[i], expected[i]) < 1e-4f).dump("vertex", i);
 }
 
 TEST("sr::slug - a cubic is followed within its tolerance")

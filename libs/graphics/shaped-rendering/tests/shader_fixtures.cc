@@ -3,6 +3,7 @@
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <sr_test_sgl_shaders.hh>
 
 namespace
 {
@@ -16,6 +17,7 @@ slib::shader_library& create_library()
     // tests that need an HLSL shader fail on the missing edge.
     slib::add_available_compilers(lib);
     sr::add_shader_packages(lib);
+    lib.add_package(sr_test::sgl_shaders::package());
     return lib;
 }
 } // namespace
