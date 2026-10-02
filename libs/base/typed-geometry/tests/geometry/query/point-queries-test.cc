@@ -112,3 +112,37 @@ TEST("tg query - containment and intersection of a point")
     CHECK(tg::pos3f(1, 2, 3).contains(tg::pos3f(1, 2, 3)));
     CHECK(!tg::pos3f(1, 2, 3).intersects(tg::pos3f(1, 2, 4)));
 }
+
+TEST("tg query - a point no direction leads away from still projects")
+{
+    SECTION("a ball's center is its radius from its surface")
+    {
+        auto const ball = tg::sphere3d(tg::pos3d(0, 0, 0), 2.0);
+        CHECK(tgtest::approx(tg::pos3d(0, 0, 0).distance_to(ball.boundary()), 2.0));
+        CHECK(tgtest::approx(tg::pos2d(1, 1).distance_to(tg::sphere2d(tg::pos2d(1, 1), 3.0).boundary()), 3.0));
+    }
+
+    SECTION("a point on the axis goes out perpendicular to it")
+    {
+        auto const axis = tg::segment3d(tg::pos3d(0, 0, 0), tg::pos3d(0, 0, 4));
+        auto const on_axis = tg::pos3d(0, 0, 2);
+        auto const cyl = tg::cylinder3d(axis, 1.0);
+        CHECK(tgtest::approx(on_axis.distance_to(cyl.boundary()), 1.0));
+        CHECK(tgtest::approx(on_axis.distance_to(cyl.mantle()), 1.0));
+        CHECK(tgtest::approx(on_axis.project_to(cyl.mantle()).data[2], 2.0));
+        // beyond the tube's extent the axis point lands on the rim
+        CHECK(tgtest::approx(tg::pos3d(0, 0, 6).distance_to(cyl.mantle()), tg::sqrt(5.0)));
+
+        auto const cap = tg::capsule3d(axis, 1.0);
+        CHECK(tgtest::approx(on_axis.distance_to(cap.boundary()), 1.0));
+        CHECK(tgtest::approx(axis.pos1.distance_to(cap.boundary()), 1.0));
+        auto const flat = tg::capsule2d(tg::segment2d(tg::pos2d(0, 0), tg::pos2d(4, 0)), 1.0);
+        CHECK(tgtest::approx(tg::pos2d(2, 0).distance_to(flat.boundary()), 1.0));
+
+        auto const inf = tg::inf_cylinder3d(tg::line3d(tg::pos3d(1, 1, 0), tg::vec3d(0, 0, 1)), 2.0);
+        CHECK(tgtest::approx(tg::pos3d(1, 1, 7).distance_to(inf.boundary()), 2.0));
+        CHECK(tgtest::approx(tg::pos3d(1, 1, 7).project_to(inf.boundary()).data[2], 7.0));
+        auto const band = tg::inf_cylinder<2, double>(tg::line2d(tg::pos2d(0, 0), tg::vec2d(1, 0)), 1.0);
+        CHECK(tgtest::approx(tg::pos2d(3, 0).distance_to(band.boundary()), 1.0));
+    }
+}

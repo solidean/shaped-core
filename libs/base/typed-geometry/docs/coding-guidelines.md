@@ -147,9 +147,15 @@ This is a judgement call per operation, not a blanket waiver.
 Keep asserting on genuine programmer errors: an out-of-range `operator[]`, a wrong-size initializer list.
 
 **Geometric queries never assert on their data at all.**
-They assume special cases away — parallel lines, a zero-length segment, a ray in a triangle's plane — and return whatever the formula gives there, `inf` and `NaN` included.
+They assume special cases away — collinear lines, a zero-length segment, a ray in a triangle's plane — and return whatever the formula gives there, `inf` and `NaN` included.
 Ordinary arithmetic already produces non-finite values once inputs are large enough, so guarding against them is the caller's job at its own boundaries.
 Building with `SC_CHECK_GEOMETRY_SPECIAL_CASES` makes each such assumption log a warning, which a nexus test turns into a failure unless it declared it.
+
+**An exact zero after a division is not a special case to assume away.**
+Unit basis vectors make exact zeros common: an axis-aligned ray against an axis-aligned plane divides by exactly zero.
+The division already costs more than a well-predicted branch on `tg::traits::is_zero(denom)` right after it, so that branch is worth its cost when it gives the correct answer.
+`TG_SPECIAL_CASE` then marks only the sub-case with no single answer, such as a line lying in the plane, and its condition is narrowed to exactly that.
+A query that returns `NaN` where its answer is well-defined is a defect, not a special case — a ball's center is its radius from its surface.
 
 ## Semantic typing
 

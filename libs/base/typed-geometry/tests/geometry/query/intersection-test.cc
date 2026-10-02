@@ -129,6 +129,34 @@ TEST("tg intersection - linear objects against planes, boxes and triangles")
     }
 }
 
+TEST("tg intersection - a direction parallel to what it is tested against")
+{
+    SECTION("a plane off the line is never met")
+    {
+        auto const pl = tg::plane3d(tg::vec3d(0, 0, 1), 5.0);
+        CHECK(!tg::ray3d(tg::pos3d(0, 0, 0), tg::vec3d(1, 0, 0)).intersects(pl));
+        CHECK(!tg::line3d(tg::pos3d(0, 0, 0), tg::vec3d(1, 0, 0)).intersects(pl));
+        CHECK(!tg::segment3d(tg::pos3d(0, 0, 0), tg::pos3d(3, 0, 0)).intersects(pl));
+    }
+
+    SECTION("a triangle and a flat quad off the line's plane are never crossed")
+    {
+        auto const t = tg::triangle3d(tg::pos3d(0, 0, 0), tg::pos3d(2, 0, 0), tg::pos3d(0, 2, 0));
+        CHECK(!tg::line3d(tg::pos3d(-1, 0.5, 1), tg::vec3d(1, 0, 0)).intersects(t));
+        auto const q = tg::quad3d(tg::pos3d(0, 0, 0), tg::pos3d(2, 0, 0), tg::pos3d(2, 1, 0), tg::pos3d(0, 1, 0));
+        CHECK(!tg::line3d(tg::pos3d(-1, 0.5, 1), tg::vec3d(1, 0, 0)).intersects(q));
+    }
+
+    SECTION("two parallel rays in the plane do not cross, even at infinity")
+    {
+        auto const a = tg::ray2d(tg::pos2d(0, 1), tg::vec2d(1, 0));
+        auto const b = tg::ray2d(tg::pos2d(0, 0), tg::vec2d(1, 0));
+        CHECK(!a.intersects(b));
+        CHECK(!b.intersects(a));
+        CHECK(!tg::line2d(tg::pos2d(0, 1), tg::vec2d(1, 0)).intersects(tg::line2d(tg::pos2d(0, 0), tg::vec2d(-1, 0))));
+    }
+}
+
 TEST("tg intersection - overlaps that are primitives")
 {
     SECTION("two boxes overlap in a box")
@@ -146,6 +174,10 @@ TEST("tg intersection - overlaps that are primitives")
         auto const l = a.intersection_with(b).value();
         CHECK(tgtest::approx(l.origin, tg::pos3f(2, 3, 0)));
         CHECK(tgtest::approx(l.dir, tg::vec3f(0, 0, 1)));
+
+        // parallel planes share no line
+        CHECK(!a.intersection_with(tg::plane3f(tg::vec3f(1, 0, 0), 5.0f)).has_value());
+        CHECK(!a.intersection_with(tg::plane3f(tg::vec3f(-1, 0, 0), 5.0f)).has_value());
     }
 
     SECTION("a triangle crosses a plane in a segment")
@@ -171,5 +203,7 @@ TEST("tg intersection - overlaps that are primitives")
         CHECK(tgtest::approx(c.value().center, tg::pos3f(0.5f, 0, 0)));
         CHECK(tgtest::approx(c.value().radius, tg::sqrt(0.75f)));
         CHECK(!a.intersection_with(tg::sphere3f(tg::pos3f(3, 0, 0), 1.0f).boundary()).has_value());
+        // concentric surfaces of different radii never meet
+        CHECK(!a.intersection_with(tg::sphere3f(tg::pos3f(0, 0, 0), 2.0f).boundary()).has_value());
     }
 }

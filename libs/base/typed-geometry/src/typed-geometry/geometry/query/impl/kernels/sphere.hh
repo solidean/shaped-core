@@ -2,7 +2,6 @@
 
 #include <typed-geometry/geometry/primitives/sphere.hh>
 #include <typed-geometry/geometry/query/impl/ops.hh>
-#include <typed-geometry/geometry/query/impl/special_case.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 /// Kernels against a ball and its surface, spanning their ambient space.
@@ -22,7 +21,7 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::sphere<D, D, T>>
     }
 };
 
-/// Every point moves radially onto the surface; the center has no direction to move in.
+/// Every point moves radially onto the surface; the center, equally near all of it, moves along the first axis.
 template <int D, class T>
     requires(tg::traits::has_sqrt<T>)
 struct tg::impl::project_op<tg::pos<D, T>, tg::sphere_boundary<D, D, T>>
@@ -31,7 +30,8 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::sphere_boundary<D, D, T>>
     {
         auto const v = p - s.center;
         auto const l = v.length();
-        TG_SPECIAL_CASE(tg::traits::is_zero(l), "projecting a sphere's center onto its surface");
+        if (tg::traits::is_zero(l))
+            return s.center + vec<D, T>::make_unit(0) * s.radius;
         return s.center + v * (s.radius / l);
     }
 };

@@ -152,7 +152,8 @@ template <int D, class T>
 
 // --- plane and half-space
 
-/// One crossing; a direction parallel to the plane is the special case, and gives a non-finite parameter.
+/// One crossing; a direction parallel to the plane has none, unless the linear object lies in the plane.
+/// Lying in the plane is the special case, and gives one hit at its own origin, clamped into its range.
 template <class L, int D, class T>
     requires tg::impl::is_linear<L>
 struct tg::impl::intersection_parameter_op<L, tg::plane<D, T>>
@@ -160,10 +161,18 @@ struct tg::impl::intersection_parameter_op<L, tg::plane<D, T>>
     [[nodiscard]] static constexpr hits<1, T> apply(L const& l, plane<D, T> const& pl)
     {
         auto const v = impl::linear_of(l);
+        auto const off = pl.dist - tg::dot(pl.normal, v.origin - pos<D, T>());
         auto const denom = tg::dot(pl.normal, v.dir);
-        TG_SPECIAL_CASE(tg::traits::is_zero(denom), "a linear object parallel to a plane");
-        auto const t = (pl.dist - tg::dot(pl.normal, v.origin - pos<D, T>())) / denom;
         hits<1, T> r;
+        if (tg::traits::is_zero(denom))
+        {
+            auto const in_plane = tg::traits::is_zero(off);
+            TG_SPECIAL_CASE(in_plane, "a linear object in a plane");
+            if (in_plane)
+                r.add(T(0) < v.lo ? v.lo : (T(0) > v.hi ? v.hi : T(0)));
+            return r;
+        }
+        auto const t = off / denom;
         if (v.lo <= t && t <= v.hi)
             r.add(t);
         return r;
@@ -332,7 +341,8 @@ struct tg::impl::intersection_parameter_op<L, tg::ellipsoid_boundary<D, D, T>>
 // --- triangle
 
 /// In 3D a triangle is a patch: one crossing, from the barycentrics of where the line meets its plane.
-/// A line lying in the triangle's plane is the special case, and gives non-finite barycentrics, so no hit.
+/// A direction parallel to the plane has no crossing.
+/// A line lying in the triangle's plane is the special case, and gives no hit either.
 template <class L, class T>
     requires(tg::impl::is_linear<L> && !tg::traits::is_exact<T>)
 struct tg::impl::intersection_parameter_op<L, tg::triangle<3, T>>
@@ -344,13 +354,18 @@ struct tg::impl::intersection_parameter_op<L, tg::triangle<3, T>>
         auto const e2 = tri.pos2 - tri.pos0;
         auto const p = tg::dual(tg::cross(v.dir, e2));
         auto const det = tg::dot(e1, p);
-        TG_SPECIAL_CASE(tg::traits::is_zero(det), "a linear object in a triangle's plane");
-        auto const inv = T(1) / det;
         auto const s = v.origin - tri.pos0;
+        hits<1, T> r;
+        if (tg::traits::is_zero(det))
+        {
+            auto const in_plane = tg::traits::is_zero(tg::dot(tg::dual(tg::cross(e1, e2)), s));
+            TG_SPECIAL_CASE(in_plane, "a linear object in a triangle's plane");
+            return r;
+        }
+        auto const inv = T(1) / det;
         auto const u = tg::dot(s, p) * inv;
         auto const q = tg::dual(tg::cross(s, e1));
         auto const w = tg::dot(v.dir, q) * inv;
-        hits<1, T> r;
         if (!(u >= T(0) && w >= T(0) && u + w <= T(1)))
             return r;
         auto const t = tg::dot(e2, q) * inv;
@@ -403,7 +418,8 @@ struct tg::impl::intersection_parameter_op<L, tg::triangle<2, T>>
 // --- two linear objects in the plane
 
 /// The crossing of two lines in 2D, kept where it falls in both ranges; parameters along the first.
-/// Parallel lines are the special case, and give a non-finite parameter, so no hit.
+/// Parallel lines do not cross.
+/// Collinear lines are the special case, and give no hit either, overlapping or not.
 template <class L, class M>
     requires(tg::impl::is_linear<L> && tg::impl::is_linear<M>
              && decltype(tg::impl::linear_of(*static_cast<L const*>(nullptr)))::dim == 2)
@@ -416,11 +432,16 @@ struct tg::impl::intersection_parameter_op<L, M>
         using T = decltype(a.lo);
         auto const cross2 = [](auto const& x, auto const& y) { return x.data[0] * y.data[1] - x.data[1] * y.data[0]; };
         auto const denom = cross2(a.dir, b.dir);
-        TG_SPECIAL_CASE(tg::traits::is_zero(denom), "two parallel lines in the plane");
         auto const w = b.origin - a.origin;
-        auto const t = cross2(w, b.dir) / denom;
-        auto const s = cross2(w, a.dir) / denom;
+        auto const sn = cross2(w, a.dir);
         hits<1, T> r;
+        if (tg::traits::is_zero(denom))
+        {
+            TG_SPECIAL_CASE(tg::traits::is_zero(sn), "two collinear lines in the plane");
+            return r;
+        }
+        auto const t = cross2(w, b.dir) / denom;
+        auto const s = sn / denom;
         if (a.lo <= t && t <= a.hi && b.lo <= s && s <= b.hi)
             r.add(t);
         return r;

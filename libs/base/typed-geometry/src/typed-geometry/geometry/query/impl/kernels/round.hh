@@ -4,7 +4,6 @@
 #include <typed-geometry/geometry/primitives/cylinder.hh>
 #include <typed-geometry/geometry/query/impl/kernels/parameters.hh>
 #include <typed-geometry/geometry/query/impl/ops.hh>
-#include <typed-geometry/geometry/query/impl/special_case.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
@@ -12,6 +11,14 @@
 
 namespace tg::impl
 {
+/// a radial offset of length rho from an axis along u, rescaled to length r.
+/// A point on the axis has no offset of its own, and every direction perpendicular to the axis is as near, so it takes one.
+template <int D, class T>
+[[nodiscard]] constexpr vec<D, T> radial_offset(vec<D, T> const& radial, T rho, vec<D, T> const& u, T r)
+{
+    return tg::traits::is_zero(rho) ? tg::any_orthogonal(u).normalized() * r : radial * (r / rho);
+}
+
 /// the parameters of a linear object within distance r of the infinite line a + s u, unclipped.
 /// A direction along the axis is handled exactly: all of it or nothing.
 template <int D, class T>
@@ -135,7 +142,7 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::capsule<D, T>>
     }
 };
 
-/// Out to the radius from the axis; a point on the axis is the special case.
+/// Out to the radius from the axis; a point on the axis goes out perpendicular to it.
 template <int D, class T>
     requires(tg::traits::has_sqrt<T> && !tg::traits::is_exact<T>)
 struct tg::impl::project_op<tg::pos<D, T>, tg::capsule_boundary<D, T>>
@@ -144,9 +151,7 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::capsule_boundary<D, T>>
     {
         auto const q = c.axis.at(c.axis.parameter_of(p));
         auto const v = p - q;
-        auto const l = v.length();
-        TG_SPECIAL_CASE(tg::traits::is_zero(l), "projecting a point of a capsule's axis onto its surface");
-        return q + v * (c.radius / l);
+        return q + impl::radial_offset(v, v.length(), c.axis.pos1 - c.axis.pos0, c.radius);
     }
 };
 
@@ -260,15 +265,13 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::cylinder_boundary<D, T>>
         auto const to_cap1 = (T(1) - k.s) * h;
         auto const to_tube = c.radius - k.rho;
         if (to_tube <= to_cap0 && to_tube <= to_cap1)
-        {
-            TG_SPECIAL_CASE(tg::traits::is_zero(k.rho), "projecting a point of a cylinder's axis onto its tube");
-            return c.axis.at(k.s) + k.radial * (c.radius / k.rho);
-        }
+            return c.axis.at(k.s) + impl::radial_offset(k.radial, k.rho, c.axis.pos1 - c.axis.pos0, c.radius);
         return c.axis.at(to_cap0 <= to_cap1 ? T(0) : T(1)) + k.radial;
     }
 };
 
-/// The axis parameter clamped to the tube's extent, then out to the radius; a point on the axis is the special case.
+/// The axis parameter clamped to the tube's extent, then out to the radius.
+/// A point on the axis goes out perpendicular to it.
 template <int D, class T>
     requires(tg::traits::has_sqrt<T> && !tg::traits::is_exact<T>)
 struct tg::impl::project_op<tg::pos<D, T>, tg::cylinder_mantle<D, T>>
@@ -276,8 +279,7 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::cylinder_mantle<D, T>>
     [[nodiscard]] static constexpr pos<D, T> apply(pos<D, T> const& p, cylinder_mantle<D, T> const& c)
     {
         auto const k = impl::cylinder_coords_of(p, c.axis);
-        TG_SPECIAL_CASE(tg::traits::is_zero(k.rho), "projecting a point of a cylinder's axis onto its tube");
-        return c.axis.at(impl::clamp01(k.s)) + k.radial * (c.radius / k.rho);
+        return c.axis.at(impl::clamp01(k.s)) + impl::radial_offset(k.radial, k.rho, c.axis.pos1 - c.axis.pos0, c.radius);
     }
 };
 

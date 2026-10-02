@@ -71,6 +71,11 @@ TEST("tg hot pairs - separations along the obvious axis")
     CHECK(tgtest::approx(s.depth, 0.5));
     CHECK(tgtest::approx(s.normal, tg::vec3d(0, 1, 0)));
 
+    // concentric balls are as deep every way, so any unit normal is right, but it must be one
+    auto const c = a.separation_from(tg::sphere3d(tg::pos3d(0, 0, 0), 0.5)).value();
+    CHECK(tgtest::approx(c.depth, 1.5));
+    CHECK(tgtest::approx(c.normal.length(), 1.0));
+
     auto const x = tg::aabb3d(tg::pos3d(0, 0, 0), tg::pos3d(2, 2, 2));
     auto const y = tg::aabb3d(tg::pos3d(-0.5, 0.5, 0.5), tg::pos3d(0.25, 1.5, 1.5));
     auto const sep = x.separation_from(y).value();

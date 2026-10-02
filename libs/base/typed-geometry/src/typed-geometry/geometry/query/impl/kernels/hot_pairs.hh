@@ -86,7 +86,7 @@ struct tg::impl::intersects_op<tg::sphere<D, D, T>, tg::sphere<D, D, T>>
     }
 };
 
-/// Along the line of centers; concentric balls are the special case, and give a non-finite normal.
+/// Along the line of centers; concentric balls, equally deep every way, separate along the first axis.
 template <int D, class T>
     requires(tg::traits::has_sqrt<T>)
 struct tg::impl::separation_op<tg::sphere<D, D, T>, tg::sphere<D, D, T>>
@@ -98,7 +98,8 @@ struct tg::impl::separation_op<tg::sphere<D, D, T>, tg::sphere<D, D, T>>
         auto const depth = a.radius + b.radius - d;
         if (depth < T(0))
             return {};
-        TG_SPECIAL_CASE(tg::traits::is_zero(d), "two concentric balls");
+        if (tg::traits::is_zero(d))
+            return separation<D, T>{.normal = vec<D, T>::make_unit(0), .depth = depth};
         return separation<D, T>{.normal = between / d, .depth = depth};
     }
 };

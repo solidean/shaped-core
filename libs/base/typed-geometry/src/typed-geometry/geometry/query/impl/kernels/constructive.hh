@@ -14,8 +14,8 @@
 #include <typed-geometry/scalar/scalar.hh>
 
 /// `intersection_with` where the overlap of two objects is itself a representable primitive.
-/// Each returns the shape the overlap has when nothing is tangent, coincident or parallel; a special case lands in that
-/// shape as whatever the formula gives.
+/// Each returns the shape the overlap has when nothing is tangent, coincident or parallel.
+/// Parallel or concentric objects that never meet give no overlap; a coincident pair is the special case, and gives none.
 
 /// The overlap of two boxes is a box: the larger of the mins and the smaller of the maxes.
 template <int D, class T>
@@ -36,7 +36,7 @@ struct tg::impl::intersection_op<tg::aabb<D, T>, tg::aabb<D, T>>
 };
 
 /// Two planes in 3D meet in a line along the cross product of their normals.
-/// Parallel planes are the special case, and give a line with a zero direction and a non-finite origin.
+/// Parallel planes have no line in common, coincident ones included, which are the special case.
 template <class T>
     requires(!tg::traits::is_exact<T>)
 struct tg::impl::intersection_op<tg::plane<3, T>, tg::plane<3, T>>
@@ -45,7 +45,13 @@ struct tg::impl::intersection_op<tg::plane<3, T>, tg::plane<3, T>>
     {
         auto const dir = tg::dual(tg::cross(a.normal, b.normal));
         auto const d2 = tg::dot(dir, dir);
-        TG_SPECIAL_CASE(tg::traits::is_zero(d2), "two parallel planes");
+        if (tg::traits::is_zero(d2))
+        {
+            // opposite normals with negated distances describe the same plane too
+            TG_SPECIAL_CASE(tg::traits::is_zero(tg::dot(a.normal, b.normal) > T(0) ? a.dist - b.dist : a.dist + b.dist),
+                            "two coincident planes");
+            return {};
+        }
         // the point of the line nearest the origin: a combination of the normals meeting both plane equations
         auto const p = (tg::dual(tg::cross(dir, a.normal)) * b.dist + tg::dual(tg::cross(b.normal, dir)) * a.dist) / d2;
         return line<3, T>(pos<3, T>() + p, dir);
@@ -108,7 +114,7 @@ struct tg::impl::intersection_op<tg::sphere_boundary<3, 3, T>, tg::plane<3, T>>
 };
 
 /// Two sphere surfaces meet in a circle, in the plane where the powers of a point with respect to both are equal.
-/// Concentric spheres are the special case, and give a non-finite circle.
+/// Concentric spheres meet in no circle; equal ones are the special case, and give none either.
 template <class T>
     requires(tg::traits::has_sqrt<T>)
 struct tg::impl::intersection_op<tg::sphere_boundary<3, 3, T>, tg::sphere_boundary<3, 3, T>>
@@ -118,9 +124,13 @@ struct tg::impl::intersection_op<tg::sphere_boundary<3, 3, T>, tg::sphere_bounda
     {
         auto const between = b.center - a.center;
         auto const d = between.length();
-        TG_SPECIAL_CASE(tg::traits::is_zero(d), "two concentric spheres");
         auto const ra = a.radius;
         auto const rb = b.radius;
+        if (tg::traits::is_zero(d))
+        {
+            TG_SPECIAL_CASE(tg::traits::is_zero(ra - rb), "two coincident spheres");
+            return {};
+        }
         if (d > ra + rb || d < (ra > rb ? ra - rb : rb - ra))
             return {};
         auto const n = between / d;

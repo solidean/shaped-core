@@ -7,7 +7,6 @@
 #include <typed-geometry/geometry/query/impl/kernels/parameters.hh>
 #include <typed-geometry/geometry/query/impl/kernels/round.hh>
 #include <typed-geometry/geometry/query/impl/ops.hh>
-#include <typed-geometry/geometry/query/impl/special_case.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
@@ -160,9 +159,7 @@ struct tg::impl::project_op<tg::pos<D, T>, tg::inf_cylinder_boundary<D, T>>
     [[nodiscard]] static constexpr pos<D, T> apply(pos<D, T> const& p, inf_cylinder_boundary<D, T> const& c)
     {
         auto const [foot, off] = impl::foot_on(p, c.axis);
-        auto const l = off.length();
-        TG_SPECIAL_CASE(tg::traits::is_zero(l), "projecting a point of an infinite cylinder's axis onto its surface");
-        return foot + off * (c.radius / l);
+        return foot + impl::radial_offset(off, off.length(), c.axis.dir, c.radius);
     }
 };
 

@@ -186,8 +186,12 @@ struct tg::impl::intersection_parameter_op<L, tg::quad<3, T>>
         auto n = 0;
         if (tg::traits::is_zero(k2))
         {
-            TG_SPECIAL_CASE(tg::traits::is_zero(k1), "a line in the plane of a flat quad");
-            roots[n++] = -k0 / k1;
+            // k1 = 0 too is a line parallel to a flat quad's plane: no crossing, unless it lies in that plane
+            if (tg::traits::is_zero(k1))
+                TG_SPECIAL_CASE(tg::traits::is_zero(k0) && tg::traits::is_zero(tg::dot(tg::dual(tg::cross(a, b)), r)),
+                                "a line in the plane of a flat quad");
+            else
+                roots[n++] = -k0 / k1;
         }
         else
         {

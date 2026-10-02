@@ -388,6 +388,7 @@ a.intersects(b, eps);  p_obj.contains(p, eps);  // bool: true if they meet, fals
 // kernels: tg::impl::<verb>_op<A, B> specializations; each verb also tries (B, A), then derives
 //   (distance from closest points, closest points from a projection, contains/intersects for a pos from a projection)
 // special cases are assumed away: NaN/inf propagate, nothing asserts. SC_CHECK_GEOMETRY_SPECIAL_CASES logs each one.
+// an exact-zero denominator on common input (a ray parallel to a plane) is handled; only an answerless sub-case is special
 // exact scalars (tg::traits::is_exact: ints, bool, fixed_int) get only exact kernels: no projection onto a segment.
 ```
 

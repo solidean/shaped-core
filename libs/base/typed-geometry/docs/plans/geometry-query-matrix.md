@@ -152,6 +152,7 @@ An interval scalar whose `<` is not a total order cannot uphold the first, and s
 
 - **`cc::optional<X>`** for `intersection_with`, X the shape the overlap has when nothing is tangent, coincident or parallel.
   `sphere3_surface ∩ sphere3_surface → optional<circle3>`, `aabb ∩ aabb → optional<aabb>`, `segment ∩ plane → optional<pos>`.
+  Parallel or concentric objects that never meet give no X; a coincident pair is the special case, and gives none either.
   A special case lands inside X as whatever the formula gives; exact shapes are a later `_safe` verb's job.
 - **`tg::hits<N, T>`** for a ray or line against a surface: at most `N` parameters, sorted along the ray.
 - **`cc::optional<tg::hit_interval<T>>`** for a ray or line against a solid: `{start, end}`, the part of the ray inside.
@@ -164,6 +165,10 @@ The verbs are realtime first, and they **assume special cases away**: two 3D lin
 - **No assert** on a data-dependent special case, ever.
 - **`inf` and `NaN` propagate.** A verb returns whatever its straight-line formula gives.
   Plain arithmetic produces non-finite values once inputs are large enough (a `det` of a `mat4` with entries near 10^10), so guarding is the caller's job at its own boundaries.
+- **An exact-zero denominator on common input is handled, not assumed away.**
+  Basis vectors make exact zeros common, and a well-predicted branch costs less than the division it follows.
+  So a parallel ray misses a plane, and a point on a cylinder's axis projects perpendicular to it; only a ray lying in the plane stays a special case.
+  `NaN` where the answer is well-defined is a defect.
 - **No UB and bounded iteration**: no computed index out of range, no integer division by zero, an iteration cap on every iterative kernel.
 - **Exact comparisons**, through `tg::traits::is_zero` and plain `<`; GJK's tolerance is internal to it.
 
