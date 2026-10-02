@@ -251,6 +251,38 @@ TEST("sgl check - a dynamic index into a binding array is proven uniform, or mar
     CHECK(needless.contains("needless-nonuniform"));
 }
 
+TEST("sgl check - an index into a binding array that a parameter stands for is judged where the caller wrote it")
+{
+    auto const passed = [](cc::string_view line)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding post:\n"
+                                      "    arr: mut image_2d[.r32_float][4]\n"
+                                      "\n"
+                                      "fun read_it(a: mut image_2d[.r32_float], xy: int2) -> float => a.load(xy) + "
+                                      "a.load(xy)\n"
+                                      "\n"
+                                      "@compute(8, 8) fun cs(@thread_id id: int3){{post}}:\n"
+                                      "    let xy = id.xy\n"
+                                      "    let j = id.z\n"
+                                      "    post.arr[0].store(xy, read_it({}, xy))\n",
+                                      line));
+    };
+    CHECK(passed("post.arr[nonuniform j]") == "");
+    CHECK(passed("post.arr[nonuniform (j + 1)]") == "");
+
+    // the mark the hint asks for is written at the call, which is the one place it can be; a parameter named twice
+    // is still one index
+    CHECK(passed("post.arr[j]")
+          == "non-uniform-index user:[j] an index into a binding array that may differ between invocations: mark it "
+             "`nonuniform j`, or make it the same in all of them\n"
+             "  note user:[id] this value comes from the stage input id\n");
+    CHECK(passed("post.arr[j + 1]")
+          == "non-uniform-index user:[j + 1] an index into a binding array that may differ between invocations: mark "
+             "it `nonuniform (j + 1)`, or make it the same in all of them\n"
+             "  note user:[id] this value comes from the stage input id\n");
+}
+
 TEST("sgl check - an image the shader also stores to differs between threads, named alone or in a binding array")
 {
     auto const images = [](cc::string_view load)

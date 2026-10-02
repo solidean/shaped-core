@@ -537,6 +537,24 @@ TEST("sgl emit - a marked index keeps its mark when a later argument moves it in
     CHECK(dx12.contains("mats_texs[NonUniformResourceIndex(index)].Load("));
 }
 
+TEST("sgl emit - a marked index keeps its mark when its element is handed to a resource parameter")
+{
+    // binding arrays exist on no WebGPU, so this cannot be a corpus file, whose every entry point is written for all
+    constexpr auto handed = "require binding_arrays\n"
+                            "\n"
+                            "binding post:\n"
+                            "    arr: mut image_2d[.r32_float][4]\n"
+                            "\n"
+                            "fun read_it(a: mut image_2d[.r32_float], xy: int2) -> float => a.load(xy)\n"
+                            "\n"
+                            "@compute(8, 8) fun cs(@thread_id id: int3){post}:\n"
+                            "    let j = id.z\n"
+                            "    post.arr[0].store(id.xy, read_it(post.arr[nonuniform (j + 1)], id.xy))\n";
+    auto const dx12 = text_of(handed, target::hlsl_dx12);
+    CHECK(dx12.contains("const int at = j + 1;\n"));
+    CHECK(dx12.contains("post_arr[NonUniformResourceIndex(at)]"));
+}
+
 TEST("sgl emit - a depth texture's level is an int, which WGSL takes whole and the others convert")
 {
     constexpr auto depth = "binding set:\n"

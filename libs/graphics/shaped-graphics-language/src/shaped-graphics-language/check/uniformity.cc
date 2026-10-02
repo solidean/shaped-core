@@ -1,3 +1,4 @@
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -118,7 +119,13 @@ struct uniformity_pass
         auto const& x = e.at(id);
         auto result = divergence::none();
         x.node.visit(
-            [&](flat_local_ref const& l) { result = locals[index_of(l.local)]; },
+            [&](flat_local_ref const& l)
+            {
+                result = locals[index_of(l.local)];
+                // a stage input differs from the start, and is first seen where it is read
+                if (result.is && !ast::is_valid(result.where.expr) && !ast::is_valid(result.where.stmt))
+                    result.where = x.from;
+            },
             [&](flat_binding_member const& b)
             {
                 // WGSL takes workgroup memory as different in every thread, whatever was stored to it
@@ -437,16 +444,17 @@ void checker::judge_uniformity(flat_entry_point const& structured)
     pass.is_reporting = true;
     pass.walk();
 
-    auto reported = cc::vector<flat_expr_id>();
+    // an index a parameter names several times is one index where it was written
+    auto reported_indices = cc::vector<origin>();
     for (auto const& f : pass.index_findings)
     {
+        auto const& index = e.at(f.index);
         auto is_seen = false;
-        for (auto const r : reported)
-            is_seen = is_seen || r == f.index;
+        for (auto const& r : reported_indices)
+            is_seen = is_seen || r == index.from;
         if (is_seen)
             continue;
-        reported.push_back(f.index);
-        auto const& index = e.at(f.index);
+        reported_indices.push_back(index.from);
         auto const where = span_of(index.from.file, index.from.expr);
         if (f.is_marked)
         {
@@ -454,14 +462,19 @@ void checker::judge_uniformity(flat_entry_point const& structured)
                    "this index is the same in every invocation, so marking it `nonuniform` pays for nothing");
             continue;
         }
+        auto const text = text_of(index.from.file, where);
+        auto is_operand = true;
+        for (auto const ch : text)
+            is_operand = is_operand && (cc::is_alphanumeric(ch) || ch == '_' || ch == '.');
         auto& d = report(diagnostic_kind::non_uniform_index, index.from.file, where,
                          cc::format("an index into a binding array that may differ between invocations: mark it "
                                     "`nonuniform {}`, or make it the same in all of them",
-                                    text_of(index.from.file, where)));
+                                    is_operand ? cc::string(text) : cc::format("({})", text)));
         auto const& from = f.value.where;
         auto const span = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt);
         d.notes.push_back({.file = from.file, .where = span, .message = cc::format("this value {}", f.value.why)});
     }
+    auto reported = cc::vector<flat_expr_id>();
     for (auto const& v : pass.violations)
     {
         auto is_seen = false;

@@ -450,7 +450,7 @@ struct flattener
         if (auto const* const element = x.node.try_as<flat_element>())
         {
             auto const object = again(element->object, from);
-            auto const index = again(element->index, from);
+            auto const index = again_as_written(element->index, from);
             return add_expr(x.type, from, flat_element{.object = object, .index = index});
         }
         // a place a `mut` parameter stands for, whose indices were pinned when it was bound (`pin_place`)
@@ -464,7 +464,7 @@ struct flattener
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
             auto const buffer = again(element->buffer, from);
-            auto const index = again(element->index, from);
+            auto const index = again_as_written(element->index, from);
             return add_expr(x.type, from, flat_buffer_element{.buffer = buffer, .index = index});
         }
         // the mark stays where it was written, which is what a diagnostic about it points at
@@ -489,19 +489,50 @@ struct flattener
         return fail();
     }
 
+    /// `index` as it may stand in several places: itself where it is substitutable, and otherwise a local of `kind`
+    /// bound at `from`.
+    /// `nonuniform i` binds `i` and marks the bound local, since a mark is read only where it indexes (CHK-300).
+    flat_expr_id bound_index(flat_expr_id index, local_kind kind, cc::string_view name, origin from)
+    {
+        if (is_substitutable_index(index))
+            return index;
+        auto const marked = marked_by_nonuniform(index);
+        auto const value = is_valid(marked) ? marked : index;
+        auto const local = add_local(kind, name, entry.at(value).type);
+        add_stmt(from, flat_let{.local = local, .value = value});
+        if (!is_valid(marked))
+            return local_ref(local, from.expr);
+        flat_expr_id const arguments[] = {local_ref(local, from.expr)};
+        auto mark = entry.at(index);
+        mark.node.as<flat_call>().arguments = add_list(arguments);
+        entry.exprs.push_back(cc::move(mark));
+        return flat_expr_id(entry.exprs.size() - 1);
+    }
+
+    /// `again` for an index, which keeps the place it was written: a diagnostic about the index of an element a
+    /// parameter stands for belongs to the caller that wrote it, not to wherever the callee names the parameter.
+    flat_expr_id again_as_written(flat_expr_id index, ast::expr_id from)
+    {
+        if (!is_substitutable_index(index))
+            return again(index, from);
+        // by value: the copy of a mark's argument appends to the arrays
+        auto copy = entry.at(index);
+        if (auto const marked = marked_by_nonuniform(index); is_valid(marked))
+        {
+            flat_expr_id const arguments[] = {again_as_written(marked, from)};
+            copy.node.as<flat_call>().arguments = add_list(arguments);
+        }
+        entry.exprs.push_back(cc::move(copy));
+        return flat_expr_id(entry.exprs.size() - 1);
+    }
+
     /// `place` with every index it holds evaluated now, into a local where it is no substitutable value, so the place
     /// can stand wherever a `mut` parameter is named and mean the same element each time (CHK-316).
     flat_expr_id pin_place(flat_expr_id place)
     {
         auto const x = entry.at(place);
-        auto const pin_index = [&](flat_expr_id index)
-        {
-            if (is_substitutable_index(index))
-                return index;
-            auto const local = add_local(local_kind::let, "at", entry.at(index).type);
-            add_stmt(entry.at(index).from, flat_let{.local = local, .value = index});
-            return local_ref(local, entry.at(index).from.expr);
-        };
+        auto const pin_index
+            = [&](flat_expr_id index) { return bound_index(index, local_kind::let, "at", entry.at(index).from); };
         if (auto const* const member = x.node.try_as<flat_member>())
         {
             auto const index = member->member;
@@ -1207,22 +1238,7 @@ struct flattener
         // by value: binding adds nodes, and the arrays move
         auto const x = entry.at(place);
         auto bind = [&](flat_expr_id index)
-        {
-            if (is_substitutable_index(index))
-                return index;
-            // `nonuniform i` binds `i`, and marks the bound local, since a mark is read only where it indexes (CHK-300)
-            auto const marked = marked_by_nonuniform(index);
-            auto const value = is_valid(marked) ? marked : index;
-            auto const local = add_local(local_kind::temporary, "index", entry.at(value).type);
-            add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = value});
-            if (!is_valid(marked))
-                return local_ref(local, id);
-            flat_expr_id const arguments[] = {local_ref(local, id)};
-            auto mark = entry.at(index);
-            mark.node.as<flat_call>().arguments = add_list(arguments);
-            entry.exprs.push_back(cc::move(mark));
-            return flat_expr_id(entry.exprs.size() - 1);
-        };
+        { return bound_index(index, local_kind::temporary, "index", {.file = file(), .expr = id}); };
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
             auto const buffer = element->buffer;
