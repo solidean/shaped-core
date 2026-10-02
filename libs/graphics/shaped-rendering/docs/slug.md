@@ -101,7 +101,7 @@ auto pass = cmd->raster.render_to({.color_targets = {target.preserved()}});
 ```
 
 `graphics/slug-cube` draws labels on a cube's faces, a star from the cube's own shader, and a caption.
-`shaped-viewer/text` draws over a traced scene through `sv::frame::draw_overlay`, the stopgap until the canvas exists.
+shaped-viewer will reach Slug through its `canvas` layer, which is a design of its own.
 
 ## How it is held to the reference
 
@@ -129,12 +129,12 @@ sr: outline, compilation, atlas, CPU reference             [done]
 SGL module slug: coverage, both overloads, exported by sr  [done]
 sr::slug_routine: quads, dilation, depth, both draw forms  [done]
 sr::slug_font: glyphs on demand, one-line layout           [done]
-examples: graphics/slug-cube, shaped-viewer/text           [done]
+example: graphics/slug-cube                                [done]
 benchmark: runtime fill rule against nonzero-only          [planned]
 babel::font: CFF / CFF2 charstrings, cubics split in sr    [planned]
 atlas eviction                                             [planned]  rewrite band lists that point at moved curves
 shapes on traced geometry                                  [planned]  ray-cone footprint, after the tracer moves to SGL
 viewer depth for labels                                    [planned]  needs a primary-hit depth target from the trace
 shaping and layout                                         [planned]  its own design, with the canvas
-the canvas                                                 [planned]  its own design; replaces frame::draw_overlay
+the canvas                                                 [planned]  its own design: shaped-viewer's canvas layer, drawing through slug_routine
 ```

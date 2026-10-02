@@ -251,9 +251,6 @@ struct frame_sentinel;
 // capturing a run to an image (see capture.hh); the protocol itself is sr::capture_request
 struct capture_context;
 
-// what a frame overlay records with (see frame.hh): the stopgap for drawing over a frame until the canvas exists
-struct overlay_context;
-
 namespace impl
 {
 class capture_session;

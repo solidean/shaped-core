@@ -8,15 +8,6 @@
 // `captures` lists the images to take; an entry with no `name` is the view the example's own body leaves, and a named
 // one must match a `frame::register_capture` in the source or the run fails.
 {
-    "shaped-viewer/text": {
-        "mechanism": "sv",
-        "size": "1280x720",
-        "format": "jpg",
-        "accumulate": 64,
-        "captures": [
-            {}
-        ]
-    },
     "shaped-viewer/light-stage": {
         "mechanism": "sv",
         "size": "1280x720",

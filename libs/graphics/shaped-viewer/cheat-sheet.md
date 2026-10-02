@@ -28,9 +28,9 @@ sv::view_data                    // { view_id id; vec2i resolution; bool resolut
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
 sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; }
-sv::layer_kind                   // layout | scene_3d | scene_2d | ui — composited in order, each over the ones before it
+sv::layer_kind                   // layout | scene_3d | canvas | ui — composited in order, each over the ones before it
                                  //   a `layout` layer renders a whole tree INTO this view's texture; that is the recursion in the model
-                                 //   scene_2d draws nothing (shaped-core has no 2D renderer); ui is not wired yet
+                                 //   canvas (2D) draws nothing until its API is designed; ui is not wired yet
 sv::layer_blend                  // replace | over (premultiplied) — scene_3d is forced to replace until the raygen writes alpha
 sv::primary_scene_3d(v) / sv::ensure_scene_3d(v)  // -> layer const* / layer& — the view's first traced layer, appended on demand
 sv::refresh_policy               // { float rate; } — fraction of the loop's rate: 1 every frame, 0.5 every second, 0 only on invalidation
@@ -871,9 +871,6 @@ frame.seconds() / frame.delta_seconds() -> double              // since the loop
                                                                //   both sampled once per frame, so every view animates off the same instant
 auto id = frame.scoped_id(i);  frame.id_seed()                 // RAII id scope, so one name in a loop names N views
 frame.push_id(i) / frame.pop_id()                              // the same, explicit — every push needs its pop
-frame.draw_overlay([&](sv::overlay_context const& o) { ... })  // TEMPORARY until the canvas: drawn over the finished image
-                                                               //   o.cmd (copies before any scope), o.target (open it preserved()),
-                                                               //   o.size, o.world_to_clip (the window view's camera); NO depth
 frame.present()                                                // flatten + record + present; idempotent
                                                                //   a frame_scope's destructor is this call, and viewer::end_frame is too
 frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)

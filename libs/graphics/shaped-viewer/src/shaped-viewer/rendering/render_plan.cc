@@ -267,7 +267,7 @@ struct builder
             case layer_kind::layout:
                 emit_layout(view, l, res, map, depth, local);
                 break;
-            case layer_kind::scene_2d:
+            case layer_kind::canvas:
             case layer_kind::ui:
                 // Neither draws yet; see libs/graphics/shaped-viewer/docs/TODO.md for what each still needs.
                 break;

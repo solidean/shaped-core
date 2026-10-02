@@ -893,25 +893,6 @@ void viewer::finish_frame(frame& f)
         auto const recorded
             = viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
 
-        // TEMPORARY (frame::draw_overlay), until the canvas exists: what the caller draws over the finished image.
-        if (!f._overlays.empty())
-        {
-            auto world_to_clip = tg::mat4f::identity;
-            if (!f._windows.empty())
-            {
-                auto cam = def[f._windows.front()].camera;
-                cam.projection.aspect_ratio = f64(f._size[0]) / f64(f._size[1] > 0 ? f._size[1] : 1);
-                auto const m = matrices_of(camera_gpu::from(cam), f32(cam.projection.near_plane));
-                world_to_clip = m.view_to_clip * m.world_to_view;
-            }
-            auto const overlay = overlay_context{.cmd = *im.current_cmd,
-                                                 .target = output,
-                                                 .size = f._size,
-                                                 .world_to_clip = world_to_clip};
-            for (auto& draw : f._overlays)
-                draw(overlay);
-        }
-
         // The frame's own answer, rather than a flag the pathtracer left behind for someone to read.
         // It is WIDER than the old question -- it covers the layout passes too, not just the traces -- and that is
         // what a capture actually needs: a frame where any pass declined is one that would be saved incomplete.
