@@ -635,7 +635,7 @@ The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2
   `equal(a, b)` and `not_equal(a, b)` are the componentwise comparisons, which give the `bool` vector.
 * **CHK-364** `any(m)` and `all(m)` take a `bool` vector, and give whether any of its components is true, or every one.
 * **CHK-365** `select(cond, if_true, if_false)` evaluates all three in that order, and gives `if_true` where `cond` holds and `if_false` where it does not ([why](why/checking.md#chk-365)).
-  With a `bool` condition both values are of one scalar or vector type; with a `bool` vector both are vectors of its width, and it picks per component.
+  With a `bool` condition both values are of one scalar or vector type; with a `bool` vector both are plain vectors of its width, and it picks per component.
   It is a function like any other, so `cond.select(a, b)` is the same call (CHK-247).
 
 ```sgl sketch
