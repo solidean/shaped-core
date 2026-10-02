@@ -185,6 +185,9 @@ struct sgl::check::checked_module
             return {};
         return file_modules[file];
     }
+    /// The name the program names `id` by from outside any scope: bare for the prelude's and its own module's, and
+    /// `m.name` for another module's (CHK-348), which is also how a compile sets a module's option (CHK-354).
+    [[nodiscard]] cc::string qualified_name_of(symbol_id id) const;
 
     [[nodiscard]] symbol const& at(symbol_id id) const { return symbols[index_of(id)]; }
     [[nodiscard]] type_info const& at(type_id id) const { return types[index_of(id)]; }

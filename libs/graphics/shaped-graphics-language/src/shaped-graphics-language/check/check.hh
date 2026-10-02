@@ -38,7 +38,8 @@ namespace sgl::check
 /// A tracer: it carries exactly what `tests/samples/` needs, and everything else is `unsupported-yet`.
 ///
 /// `options` sets the program's options by name, each standing for its value wherever it is named (CHK-354).
-/// An option `options` leaves out keeps its default, and a name no option of the program has is `invalid-option`.
+/// A module's option the program uses is named `module.name`.
+/// An option `options` leaves out keeps its default, and a name no option has is `invalid-option`.
 [[nodiscard]] checked_module check(cc::span<module_file const> prelude,
                                    cc::span<module_file const> library,
                                    module_file program,

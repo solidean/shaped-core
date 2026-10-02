@@ -103,7 +103,8 @@ The text, the footprint, the uniformity pass and the features an entry point nee
 
 **An option is substituted where its `const` compiles**, so every reader of a const reads the compile's value unaware.
 `checker::options` holds the values, and `option_uses` records where the program names an option.
-An entry point's options are the uses inside its declaration, its callees' and its bindings', which no value changes.
+An entry point's options are the uses inside its declaration, its callees', its bindings' and the structs any of those name, which no value changes.
+A module's option is matched by its qualified name, `checked_module::qualified_name_of`, which `describe` reports too.
 
 **Compiling a function means its signature, with one exception.**
 A body is checked after every signature is known, which is what lets a function call one declared below it.

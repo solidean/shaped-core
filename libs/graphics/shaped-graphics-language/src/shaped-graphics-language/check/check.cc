@@ -149,6 +149,12 @@ checked_module sgl::check::check(checked_prelude const& prelude, module_file use
     return check(prelude, {}, user, options);
 }
 
+cc::string sgl::check::checked_module::qualified_name_of(symbol_id id) const
+{
+    auto const module = foreign_module_of(id);
+    return module.empty() ? cc::string(at(id).name) : cc::format("{}.{}", module, at(id).name);
+}
+
 // ---- number literals ------------------------------------------------------------------------------------------------
 
 namespace

@@ -38,7 +38,8 @@ sgl::text_request                          // source, source_name ("<sgl>"), lib
                                            // run_tests: the source's own tests run, and one that fails is an error
                                            // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:
                                            // `16`, `-3`, `true`, `.rgba16_float`; the rest keep their defaults, tests always run at them
-                                           // a name the source has no option of, or a value of another type: `invalid-option`
+                                           // a used module's option is named `common.taps`; a name no option has, a value of
+                                           // another type, or a name given twice: `invalid-option`
 r.value().options                          // the options the entry point reaches, by name: each set of their values is one text
 r.value().library_files                    // the names of the library files the source reached: what an edit of it depends on
 
@@ -461,6 +462,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 ```sgl sketch
 @option const tile = 8                   // the host sets it per compile, and this is its default (CHK-353)
 @compute(tile, tile) fun blur(...)       // an option stands where a const stands: a workgroup size, an array length, an image format
+                                         // a used module's option is set as `common.taps`, apart from the program's `taps` (CHK-354)
 if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
 fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
 

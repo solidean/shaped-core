@@ -483,7 +483,7 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
     case diagnostic_kind::nesting_too_deep:
         return "an entry point that nests deeper than the compiler walks, once every call is inlined";
     case diagnostic_kind::invalid_option:
-        return "a value for an option the module does not have, or of another type than the option's";
+        return "a value for a name no option has, of another type than the option's, or for a name given twice";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:

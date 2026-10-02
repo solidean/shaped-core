@@ -117,7 +117,8 @@ struct sgl::described_binding
     /// -1 and empty for an `@inline` binding and for a group without a plain member.
     i32 block_slot = -1;
     cc::string block_host_name;
-    /// The members' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
+    /// The binding's structural hash (`check::structural_hash`), its members and its layout rule, as 32 hex digits:
+    /// what a hot reload compares.
     cc::string shape;
     /// The options its members' types name, an image's format or an array's length, by name in declaration order.
     /// Its layout and its formats are then those of the values this describe was given.
@@ -331,9 +332,10 @@ struct sgl::described_raytracing_pipeline
     cc::vector<cc::string> frozen;
 };
 
-/// An `@option const` of the file: a value the host sets for each compile (CHK-353).
+/// An `@option const` the file can set: a value the host sets for each compile (CHK-353).
 struct sgl::described_option
 {
+    /// What a compile sets it by: its own name for the file's module, `module.name` for a module the file uses (CHK-354).
     cc::string name;
     /// `bool`, `int`, or the name of its enum, `pixel_format` for an image's format.
     cc::string type;
@@ -344,7 +346,7 @@ struct sgl::described_option
 
 struct sgl::module_description
 {
-    /// In declaration order.
+    /// The file's own and those of the modules it uses, in declaration order, a module's file ahead of the source.
     cc::vector<described_option> options;
     /// In source order.
     cc::vector<described_binding> bindings;

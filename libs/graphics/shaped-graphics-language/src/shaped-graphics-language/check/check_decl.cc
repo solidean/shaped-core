@@ -1263,6 +1263,12 @@ void checker::compile_const(symbol_id id)
             unsupported(file, c.name, "an option of float; an option is a bool, an int or an enum case");
             return fail();
         }
+        // the host would set the named option and not see this one follow it
+        if (is_valid(info.option))
+        {
+            unsupported(file, where, "an option whose value names another option");
+            return fail();
+        }
         info.option = id;
         apply_option_value(id, info);
     }

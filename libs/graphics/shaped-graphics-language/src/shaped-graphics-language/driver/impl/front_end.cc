@@ -30,7 +30,7 @@ cc::vector<cc::string> sgl::driver::impl::option_names_of(check::checked_module 
 {
     auto names = cc::vector<cc::string>();
     for (auto const id : e.options)
-        names.push_back(m.at(id).name);
+        names.push_back(m.qualified_name_of(id));
     return names;
 }
 

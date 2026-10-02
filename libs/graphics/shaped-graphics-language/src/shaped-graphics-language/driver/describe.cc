@@ -148,8 +148,7 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
 /// module's (CHK-348).
 cc::string host_name_of(check::checked_module const& m, check::symbol_id id)
 {
-    auto const module = m.foreign_module_of(id);
-    return module.empty() ? cc::string(m.at(id).name) : cc::format("{}.{}", module, m.at(id).name);
+    return m.qualified_name_of(id);
 }
 
 /// `host_name_of` the type's declaration, for a type a module declares; its spelling for any other.
@@ -195,13 +194,13 @@ cc::vector<cc::string> feature_names(check::feature_set features)
     return result;
 }
 
-/// The names of `options`, which holds each once, in declaration order.
+/// The names a compile sets `options` by, which holds each once, in declaration order (CHK-354).
 cc::vector<cc::string> option_names(check::checked_module const& m, cc::vector<check::symbol_id> options)
 {
     cc::sort(options);
     auto result = cc::vector<cc::string>();
     for (auto const id : options)
-        result.push_back(m.at(id).name);
+        result.push_back(host_name_of(m, id));
     return result;
 }
 
@@ -220,14 +219,15 @@ void add_options_of(check::checked_module const& m, check::symbol_id function, c
             }
 }
 
-/// A file's option, spelled with the value the module was checked with.
-described_option describe_option(check::checked_module const& m, check::symbol const& s)
+/// An option the file sets, by the name it sets it by, spelled with the value the module was checked with.
+described_option describe_option(check::checked_module const& m, check::symbol_id id)
 {
+    auto const& s = m.at(id);
     auto const& c = m.constants[s.info];
     auto value = c.kind == check::constant_kind::integer ? cc::format("{}", c.integer)
                : m.name_of(c.type) == "bool" ? cc::string(m.at(m.at(c.type).cases)[c.case_index].name)
                                              : cc::format(".{}", m.at(m.at(c.type).cases)[c.case_index].name);
-    return {.name = s.name, .type = cc::string(m.name_of(c.type)), .value = cc::move(value)};
+    return {.name = host_name_of(m, id), .type = cc::string(m.name_of(c.type)), .value = cc::move(value)};
 }
 
 /// `legal` is `e` legalized, which is the tree the footprint is read from.
@@ -258,8 +258,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
 /// A binding as a frozen line names it: by its name and its shape.
 cc::string bound_text(check::checked_module const& m, check::symbol_id b)
 {
-    return cc::format("{}@{}", m.at(b).name,
-                      check::hex_of(check::structural_hash(m, m.at(m.bindings[m.at(b).info].members))));
+    return cc::format("{}@{}", m.at(b).name, check::hex_of(check::structural_hash(m, m.bindings[m.at(b).info])));
 }
 
 /// A binding list as a frozen line names it.
@@ -604,7 +603,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
     auto const members = m.at(b.members);
     auto result = described_binding{.name = s.name,
                                     .is_inline = b.is_inline,
-                                    .shape = check::hex_of(check::structural_hash(m, members))};
+                                    .shape = check::hex_of(check::structural_hash(m, b))};
 
     if (b.is_inline)
     {
@@ -748,7 +747,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
                 for (auto const option : options_within(s.file, file.at(field.form).where))
                 {
                     auto const is_format = m.name_of(m.constants[m.at(option).info].type) == "pixel_format";
-                    (is_format ? described.format_option : described.count_option) = m.at(option).name;
+                    (is_format ? described.format_option : described.count_option) = host_name_of(m, option);
                 }
             }
         }
@@ -771,7 +770,13 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     {
         auto const id = check::symbol_id(i);
         auto const& s = m.at(id);
-        if (!is_own(s.file) || s.state != check::symbol_state::checked)
+        if (s.state != check::symbol_state::checked)
+            continue;
+        // an option of a module the source uses is the source's to set too, by its qualified name (CHK-354)
+        auto const is_option = s.kind == check::symbol_kind::constant && m.constants[s.info].option == id;
+        if (is_option && s.file >= m.prelude_file_count())
+            result.options.push_back(describe_option(m, id));
+        if (!is_own(s.file) || is_option)
             continue;
 
         // workgroup memory has no host side, so the host is told nothing of it
@@ -790,8 +795,6 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         }
         else if (s.kind == check::symbol_kind::sampler)
             result.samplers.push_back(driver::impl::describe_file_sampler(m, id));
-        else if (s.kind == check::symbol_kind::constant && m.constants[s.info].option == id)
-            result.options.push_back(describe_option(m, s));
         else if (s.kind == check::symbol_kind::structure && check::is_valid(s.type))
         {
             auto const& t = m.at(s.type);

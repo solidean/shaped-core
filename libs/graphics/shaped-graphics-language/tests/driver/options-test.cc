@@ -287,3 +287,173 @@ TEST("sgl options - an option of the program reaches a function of a module it u
     REQUIRE(described.value().entry_points[0].options.size() == 1);
     CHECK(described.value().entry_points[0].options[0] == "shift");
 }
+
+TEST("sgl options - a module's option is set by its qualified name, apart from a program option of its own name")
+{
+    constexpr auto module_source = "module common\n"
+                                   "\n"
+                                   "@option const taps = 4\n"
+                                   "\n"
+                                   "fun weight() -> float => 1.0 / (taps as float)\n";
+    constexpr auto source = "use common\n"
+                            "\n"
+                            "@option const taps = 2\n"
+                            "\n"
+                            "binding res:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){res}:\n"
+                            "    res.values[id.x] = common.weight() * (taps as float)\n";
+    sgl::library_file const library[] = {{.name = "modules/common.sgl", .source = module_source}};
+    auto const compile = [&](cc::span<sgl::check::option_value const> options)
+    {
+        return sgl::compile_to_text(
+            {.source = source, .library = library, .entry_point = "cs", .target = target::wgsl, .options = options});
+    };
+    sgl::check::option_value const own[] = {{.name = "taps", .value = "8"}};
+    sgl::check::option_value const module[] = {{.name = "common.taps", .value = "8"}};
+    auto const defaults = compile({});
+    auto const by_own = compile(own);
+    auto const by_module = compile(module);
+    REQUIRE(defaults.has_value());
+    REQUIRE(by_own.has_value());
+    REQUIRE(by_module.has_value());
+    CHECK(defaults.value().text != by_own.value().text);
+    CHECK(defaults.value().text != by_module.value().text);
+    CHECK(by_own.value().text != by_module.value().text);
+    // the module's file is checked ahead of the program, so its option comes first
+    REQUIRE(by_module.value().options.size() == 2);
+    CHECK(by_module.value().options[0] == "common.taps");
+    CHECK(by_module.value().options[1] == "taps");
+
+    auto const described = sgl::describe({.source = source, .options = module, .library = library});
+    REQUIRE(described.has_value());
+    auto const& d = described.value();
+    REQUIRE(d.options.size() == 2);
+    CHECK(d.options[0].name == "common.taps");
+    CHECK(d.options[0].value == "8");
+    CHECK(d.options[1].name == "taps");
+    CHECK(d.options[1].value == "2");
+    REQUIRE(d.entry_points.size() == 1);
+    REQUIRE(d.entry_points[0].options.size() == 2);
+    CHECK(d.entry_points[0].options[0] == "common.taps");
+}
+
+TEST("sgl options - a module's option given by its bare name is refused, naming the name that sets it")
+{
+    constexpr auto module_source = "module common\n"
+                                   "\n"
+                                   "@option const taps = 4\n"
+                                   "\n"
+                                   "fun weight() -> float => 1.0 / (taps as float)\n";
+    constexpr auto source = "use common\n"
+                            "\n"
+                            "binding res:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){res}:\n"
+                            "    res.values[id.x] = common.weight()\n";
+    sgl::library_file const library[] = {{.name = "modules/common.sgl", .source = module_source}};
+    sgl::check::option_value const bare[] = {{.name = "taps", .value = "8"}};
+    auto const refused
+        = sgl::compile_to_text({.source = source, .library = library, .entry_point = "cs", .options = bare});
+    REQUIRE(refused.has_error());
+    CHECK(refused.error().contains("invalid-option"));
+    CHECK(refused.error().contains("common.taps"));
+}
+
+TEST("sgl options - a name given twice is invalid-option, and the most negative int is a value")
+{
+    sgl::check::option_value const twice[] = {{.name = "wide", .value = "true"}, {.name = "wide", .value = "false"}};
+    auto const repeated = compiled(twice);
+    REQUIRE(repeated.has_error());
+    CHECK(repeated.error().contains("invalid-option"));
+    CHECK(repeated.error().contains("more than once"));
+
+    constexpr auto source = "@option const bias = 0\n";
+    sgl::check::option_value const lowest[] = {{.name = "bias", .value = "-2147483648"}};
+    auto const described = sgl::describe({.source = source, .options = lowest});
+    REQUIRE(described.has_value());
+    REQUIRE(described.value().options.size() == 1);
+    CHECK(described.value().options[0].value == "-2147483648");
+    for (auto const value : {cc::string_view("-2147483649"), cc::string_view("2147483648"), cc::string_view("--1")})
+    {
+        sgl::check::option_value const given[] = {{.name = "bias", .value = cc::string(value)}};
+        auto const r = sgl::describe({.source = source, .options = given});
+        REQUIRE(r.has_error());
+        CHECK(r.error().contains("invalid-option")).dump("value", value);
+    }
+}
+
+TEST("sgl options - a struct an entry point names reaches the options its fields name")
+{
+    // CHK-355: a struct sizes its array by an option, so the text follows that option wherever an entry point names
+    // the struct: through a binding's member, a local or a parameter alike
+    constexpr auto source = "@option const tile = 8\n"
+                            "@option const width = 2\n"
+                            "\n"
+                            "struct scratch_rows:\n"
+                            "    rows: float[tile]\n"
+                            "\n"
+                            "struct pair:\n"
+                            "    values: float[width]\n"
+                            "\n"
+                            "@workgroup binding scratch:\n"
+                            "    data: scratch_rows\n"
+                            "\n"
+                            "binding res:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "fun first(p: pair) -> float => p.values[0]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){res, scratch}:\n"
+                            "    scratch.data.rows[0] = res.values[id.x]\n"
+                            "    workgroup_barrier()\n"
+                            "    res.values[id.x] = scratch.data.rows[0]\n"
+                            "\n"
+                            "@compute(64) fun by_parameter(@thread_id id: int3){res}:\n"
+                            "    let p: pair = {values = [1.0, 2.0]}\n"
+                            "    res.values[id.x] = first(p)\n";
+    auto const described = sgl::describe({.source = source});
+    REQUIRE(described.has_value());
+    auto const& d = described.value();
+    REQUIRE(d.entry_points.size() == 2);
+    REQUIRE(d.entry_points[0].options.size() == 1);
+    CHECK(d.entry_points[0].options[0] == "tile");
+    REQUIRE(d.entry_points[1].options.size() == 1);
+    CHECK(d.entry_points[1].options[0] == "width");
+}
+
+TEST("sgl options - an option whose value names another option is unsupported-yet")
+{
+    CHECK(reports_for("@option const base = 8\n@option const tile = base\n").contains("unsupported-yet"));
+    // a plain const naming an option follows it, which is how a helper reads one
+    CHECK(reports_for("@option const base = 8\nconst tile = base\n") == "");
+}
+
+TEST("sgl options - a binding's shape follows its layout rule, which moves every offset the host writes")
+{
+    auto const shape_of = [](cc::string_view layout) -> cc::string
+    {
+        auto const source = cc::string(layout)
+                          + "binding params:\n"
+                            "    a: float\n"
+                            "    d: float4\n"
+                            "\n"
+                            "@compute(1) fun cs(){params}:\n"
+                            "    let x = params.a + params.d.x\n";
+        auto const described = sgl::describe({.source = source});
+        if (!described.has_value() || described.value().bindings.size() != 1)
+            return "";
+        return described.value().bindings[0].shape;
+    };
+    auto const cpp = shape_of("@layout(.cpp)\n");
+    auto const hlsl = shape_of("@layout(.hlsl)\n");
+    auto const none = shape_of("");
+    REQUIRE(!cpp.empty());
+    REQUIRE(!hlsl.empty());
+    REQUIRE(!none.empty());
+    CHECK(cpp != hlsl);
+    CHECK(cpp != none);
+    CHECK(hlsl != none);
+}

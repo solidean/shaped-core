@@ -332,7 +332,7 @@ struct checker
     cc::span<module_file const> files;
     builtins::registry const& builtins;
     checked_module out;
-    /// The values this compile gives the user file's options, by name (CHK-354).
+    /// The values this compile gives the options, by the name each is set by (CHK-354).
     cc::span<option_value const> options;
 
     /// How many of `files` are the prelude's; every other file is a module's.
@@ -536,11 +536,12 @@ struct checker
     /// CHK-354: `info` as the compile's value for option `id` sets it, or as written where it sets none.
     /// A value of another type than the option's is `invalid-option`, and leaves the default.
     void apply_option_value(symbol_id id, constant_info& info);
-    /// CHK-354: a value the compile gives a name no option of the user file has is `invalid-option`.
+    /// CHK-354: a value for a name no option is set by, or for a name given twice, is `invalid-option`.
     void judge_option_values();
     /// Records that `where` of `file` names the option `c` comes from, if it comes from one (CHK-355).
     void note_option(i32 file, source_span where, constant_info const& c);
-    /// CHK-355: the options named by `function`, every function it calls, and the bindings it lists, in declaration order.
+    /// CHK-355: the options named by `function`, every function it calls, the bindings it lists, and the structs any of
+    /// those name, in declaration order.
     /// `also` is a further function the tree inlines without a call of the source, such as a fused any hit; or `none`.
     [[nodiscard]] cc::vector<symbol_id> options_reached(symbol_id function, symbol_id also);
     /// A file-scope `sampler name:`: its settings, and the sampler type they make (CHK-314).

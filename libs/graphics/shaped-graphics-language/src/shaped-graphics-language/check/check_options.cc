@@ -12,35 +12,53 @@ using namespace sgl::check::impl;
 // An option is a const whose value the compile may set, so the value is substituted where the const is compiled and
 // every reader of a const reads the compile's value without knowing it is one.
 
+namespace
+{
+/// The struct declaration `type` holds its values in, through arrays, buffers, atomics and streams; `none` for any other.
+symbol_id struct_of(checked_module const& m, type_id type)
+{
+    while (is_valid(type))
+    {
+        auto const& t = m.at(type);
+        if (t.kind == type_kind::structure)
+            return t.symbol;
+        if (t.kind != type_kind::array && t.kind != type_kind::buffer && t.kind != type_kind::atomic
+            && t.kind != type_kind::stream)
+            return symbol_id::none;
+        type = t.element;
+    }
+    return symbol_id::none;
+}
+} // namespace
+
 void checker::apply_option_value(symbol_id id, constant_info& info)
 {
     auto const& s = out.at(id);
-    // only the program's options are the compile's to set
-    if (s.file != i32(files.size()) - 1)
-        return;
+    auto const name = out.qualified_name_of(id);
+    // a name given twice is judge_option_values' to report, and the first value stands meanwhile
     for (auto const& given : options)
     {
-        if (given.name != s.name)
+        if (given.name != name)
             continue;
         auto const where = ast_of(s.file).at(s.declaration).node.as<ast::const_decl>().name;
         auto const refuse = [&]
         {
             report(diagnostic_kind::invalid_option, s.file, where,
-                   cc::format("the value '{}' given for the option {} is no {}", given.value, s.name,
+                   cc::format("the value '{}' given for the option {} is no {}", given.value, name,
                               out.name_of(info.type)));
         };
         auto text = cc::string_view(given.value);
         if (info.kind == constant_kind::integer)
         {
-            auto const is_negative = text.starts_with('-');
-            auto const digits = is_negative ? text.subview(1) : text;
+            // the sign belongs to the value, so the most negative int is one too
+            auto const digits = text.starts_with('-') ? text.subview(1) : text;
             auto const value = !digits.starts_with('-') && !digits.starts_with('+')
                                     && classify_number(digits) == number_class::plain_integer
-                                 ? parse_plain_integer(digits)
+                                 ? parse_plain_integer(text)
                                  : cc::optional<i32>();
             if (!value.has_value())
                 return refuse();
-            info.integer = is_negative ? -value.value() : value.value();
+            info.integer = value.value();
             return;
         }
         // an enum case, `bool`'s two values among them, written with or without its leading dot
@@ -59,18 +77,43 @@ void checker::apply_option_value(symbol_id id, constant_info& info)
 
 void checker::judge_option_values()
 {
-    auto const program = i32(files.size()) - 1;
-    for (auto const& given : options)
+    for (auto i = isize(0); i < options.size(); ++i)
     {
+        auto const& given = options[i];
+        auto earlier = 0;
+        for (auto j = isize(0); j < i; ++j)
+            earlier += options[j].name == given.name ? 1 : 0;
+        // a name given twice is reported once, at its second value
+        if (earlier == 1)
+            report(diagnostic_kind::invalid_option, program_file(), source_span{},
+                   cc::format("a value is given for {} more than once", given.name));
+        if (earlier > 0)
+            continue;
+
+        // An option of the program's module is set by its own name, and one of a module it uses by `module.name`.
         auto is_option = false;
-        for (auto const& s : out.symbols)
-            if (s.file == program && s.kind == symbol_kind::constant && s.name == given.name
-                && ast::is_valid(s.declaration)
-                && find_attribute(s.file, ast_of(s.file).at(s.declaration).attributes, "option") != nullptr)
+        auto qualified = cc::string();
+        for (auto s = isize(0); s < out.symbols.size(); ++s)
+        {
+            auto const& symbol = out.symbols[s];
+            if (is_prelude_file(symbol.file) || symbol.kind != symbol_kind::constant || !ast::is_valid(symbol.declaration)
+                || find_attribute(symbol.file, ast_of(symbol.file).at(symbol.declaration).attributes, "option") == nullptr)
+                continue;
+            auto const name = out.qualified_name_of(symbol_id(s));
+            if (name == given.name)
                 is_option = true;
-        if (!is_option)
-            report(diagnostic_kind::invalid_option, program, source_span{},
-                   cc::format("a value is given for {}, and the source has no option of that name", given.name));
+            else if (symbol.name == given.name)
+                qualified = name;
+        }
+        if (is_option)
+            continue;
+        if (qualified.empty())
+            report(diagnostic_kind::invalid_option, program_file(), source_span{},
+                   cc::format("a value is given for {}, and no option is set by that name", given.name));
+        else
+            report(diagnostic_kind::invalid_option, program_file(), source_span{},
+                   cc::format("a value is given for {}, and the option of that name is a module's, set as {}",
+                              given.name, qualified));
     }
 }
 
@@ -105,11 +148,16 @@ cc::vector<symbol_id> checker::options_reached(symbol_id function, symbol_id als
         source_span span;
     };
     auto extents = cc::vector<extent>();
+    auto declarations = cc::vector<symbol_id>();
     auto const add = [&](symbol_id id)
     {
         auto const& s = out.at(id);
         if (!ast::is_valid(s.declaration))
             return;
+        for (auto const known : declarations)
+            if (known == id)
+                return;
+        declarations.push_back(id);
         // a declaration's attributes stand in front of its form, and a workgroup size among them may name an option
         auto span = span_of(s.file, s.declaration);
         auto first = span.offset;
@@ -121,6 +169,23 @@ cc::vector<symbol_id> checker::options_reached(symbol_id function, symbol_id als
         add(id);
     for (auto const binding : out.at(out.functions[out.at(function).info].bindings))
         add(binding);
+
+    // A struct a signature, a local or a member names shapes the text where its own fields name an option, such as an
+    // array's length, so every struct an extent names is reached too, and every struct its fields name in turn.
+    for (auto e = isize(0); e < extents.size(); ++e)
+    {
+        auto const file = extents[e].file;
+        auto const span = extents[e].span;
+        auto const& tables = out.files[file];
+        for (auto x = isize(0); x < tables.type_of.size(); ++x)
+        {
+            auto const where = span_of(file, ast::expr_id(x));
+            if (where.offset < span.offset || where.end() > span.end())
+                continue;
+            if (auto const s = struct_of(out, tables.type_of[x]); is_valid(s))
+                add(s);
+        }
+    }
 
     auto result = cc::vector<symbol_id>();
     for (auto const& use : out.option_uses)

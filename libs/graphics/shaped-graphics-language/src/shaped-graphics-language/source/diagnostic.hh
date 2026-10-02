@@ -215,7 +215,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     needless_nonuniform,
     /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.
     nesting_too_deep,
-    /// A compile's value for an option the module does not have, or of another type than the option's.
+    /// A compile's value for a name no option has, of another type than the option's, or for a name given twice.
     invalid_option,
 };
 

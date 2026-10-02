@@ -217,11 +217,16 @@ fun f(x: float) -> float:
 * **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
 * **CHK-353** `@option` on a file-scope `const` makes it an **option**: a value the host sets for each compile, whose written value is its default ([why](why/checking.md#chk-353)).
   An option is a `bool`, an `int` or an enum case, an image format among them; one of another type is `unsupported-yet`.
+  An option whose value names another option is `unsupported-yet` too; a plain `const` naming one follows it.
 * **CHK-354** A compile names a value for each option it sets, and the option stands for that value wherever it is named, as CHK-219 has a `const` stand for its own.
   So every rule that judges a constant judges each set of values on its own.
-  A value for a name no option of the module has, or of another type than the option's, is `invalid-option`, and the detail names it.
+  An option of the program's own module is named by its name, and one of a module the program uses by its qualified name, `common.taps` (CHK-348) ([why](why/checking.md#chk-354)).
+  So a program's `taps` and a module's `common.taps` are two options, each set on its own.
+  A value for a name no option is named by, a value of another type than the option's, and a second value for one name are each `invalid-option`, and the detail names it.
   A test runs with every option at its default.
 * **CHK-355** An entry point's options are those named by its own declaration, by every function it calls at any depth, and by the bindings it lists ([why](why/checking.md#chk-355)).
+  They are named by the structs any of those name too, a struct being named by a signature, a local or a member of its type.
+  The structs a reached struct's own fields name are reached in turn.
   That takes in its workgroup size, its subgroup-size preference, an array's length and an image's format, and a branch CHK-356 removes too.
   Each distinct set of their values is one compile, so an option the entry point does not reach multiplies nothing.
   `sgl describe` reports them per entry point, and a pipeline's options are those of its stages together.

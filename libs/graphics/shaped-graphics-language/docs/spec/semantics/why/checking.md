@@ -530,11 +530,23 @@ The footprint and the bound resources would then be the union of every variant, 
 A switch that changes an image's format specializes on no target at all.
 A preprocessor would break what the syntax is built on: local errors, lossless parsing, and one tree for the language server.
 
+An option naming another would make the named one a second way to set it, and a host that set only the first would not see the second follow.
+No use asks for that chain yet, so it is refused rather than given a meaning that would have to be kept.
+
+## CHK-354
+
+A shared helper is where a permutation flag naturally lives, so a module's option has to be settable or the helper cannot have one.
+Its qualified name is the one the program already names the module's declarations by, so nothing new is learned to spell it.
+A bare name would make a program's own option and a module's collide, and adding an option to a module would then change what an existing value sets.
+A name given twice is a mistake whichever value was meant, and taking either one silently would hide it.
+
 ## CHK-355
 
 The host is generated from the options an entry point reaches, before any value is chosen, so the set must be one for every value.
 A set read off the flat tree would lose an option named only inside a branch another option removes, and the host could then never set it.
 Counting what the declarations name is a little wider than what one compile reads, and an option too many costs only a key.
+A struct is emitted with the arrays its fields size, so an option its field names shapes the text of every entry point that names the struct.
+An option the text follows and the set lacks is one the host sets to no effect, which is the failure the set exists to prevent.
 
 ## CHK-356
 

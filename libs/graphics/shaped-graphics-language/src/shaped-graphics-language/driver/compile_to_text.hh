@@ -24,7 +24,8 @@ struct sgl::text_request
     check::stage stage = check::stage::none;
     emit::target target = emit::target::hlsl_dx12;
     /// The values this compile gives the source's options, by name (CHK-354); an option left out keeps its default.
-    /// A name the source has no option of, and a value of another type than the option's, is `invalid-option`.
+    /// A used module's option is named `module.name`.
+    /// A name no option has, a value of another type than the option's, and a name given twice are `invalid-option`.
     cc::span<check::option_value const> options;
     /// Runs the source's own tests after it checked, and makes a test that does not pass an error like any other.
     /// The tests run with every option at its default, whatever `options` says.
