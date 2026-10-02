@@ -340,6 +340,20 @@ The checking goes elsewhere: the interpreter reports the program error in a `tes
 A construct that is missing on some target is lowered or feature-gated, never left target-dependent; this rule covers only a value no program should produce.
 Price a defined-everywhere option by what every correct program pays for it, not by what it buys the rare incorrect one.
 
+### A robustness branch is priced against the operation it follows
+
+The shader rule above is about values no correct program produces; CPU geometry gets the opposite answer for input correct programs produce all the time.
+tg's kernels assume special cases away, and a review proposed drawing the line by whether an arbitrarily small perturbation can flip the answer.
+That rule was rejected, because a ray along x against the plane `z = 5` flips too, as soon as the direction or the normal moves:
+
+```raw
+whenever we do a division, we're already committed to 10+ cycles. so a well predicted branch afterwards to improve robustness is quite the good bang for buck
+```
+
+The input that decides it is the **exactly** zero denominator, which "happens more often than you might think simply because unit basis vectors are quite common".
+And a NaN from a distance whose answer is well-defined — a ball's center to its surface — is a defect under any rule, not a special case.
+Price a proposed guard by what it costs next to the arithmetic already on that path, and by how often real input is exactly degenerate, not by a stability argument.
+
 ### A check that costs every dispatch or draw is opt-in
 
 A validation that runs per operation on a hot path is never on by default, whatever it protects against.
