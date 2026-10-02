@@ -109,6 +109,17 @@ auto pass = cmd->raster.render_to({.color_targets = {target.preserved()}});
 - **A C++ reference** of the whole pixel shader (`impl/slug_reference.hh`) reads the atlas's CPU copy, so compilation is tested with no device.
 - **Readback** compares every pixel the routine draws against that reference, on every backend the tests run.
 
+## Why not something else
+
+- **A bitmap atlas** — glyphs rasterized once at a fixed size, as imgui does — is one image per size.
+  Text on a model's face changes size every frame and blurs or blocks up when magnified.
+- **A signed distance field atlas, or MSDF** stays sharp over a wide range of sizes from one small image per glyph.
+  It rounds corners (SDF) or needs an offline generator (MSDF), loses thin features at small sizes, and is still an image with a precomputation step, so it serves glyphs better than arbitrary shapes.
+  Slug is exact at every size and angle from the outline alone, at the price of the heaviest pixel shader of the three.
+- **FreeType, or the stb_truetype imgui vendors**, would read CFF today.
+  FreeType is a large C dependency with its own build; stb is what [TODO.md](TODO.md) means to get imgui off, being hobby-grade on exactly this path of user-supplied fonts.
+  So babel reads fonts itself and treats every file as untrusted, and CFF is a slot in the plan below rather than a reason to link either.
+
 ## Plan
 
 ```text
