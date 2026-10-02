@@ -67,7 +67,39 @@ TEST("sgl emit - a coherent member is globallycoherent in HLSL and coherent(devi
     CHECK(msl.contains("    texture2d<uint, access::read_write> set_depth [[id(2)]];\n"));
     // the barrier that publishes an image's writes is the texture barrier, device-scoped in both
     CHECK(dx12.contains("    DeviceMemoryBarrierWithGroupSync();\n"));
-    CHECK(msl.contains("    threadgroup_barrier(mem_flags::mem_texture);\n"));
+    // Metal's barrier orders the threadgroup alone, so a device-scoped fence follows it
+    CHECK(msl.contains("    threadgroup_barrier(mem_flags::mem_texture);\n"
+                       "    atomic_thread_fence(mem_flags::mem_texture, memory_order_seq_cst, "
+                       "thread_scope_device);\n"));
+}
+
+TEST("sgl emit - MSL fences a storage or texture barrier device-wide only where a member is coherent")
+{
+    constexpr auto barriers = "{}binding work:\n"
+                              "    {}values: mut buffer[uint]\n"
+                              "\n"
+                              "@workgroup binding shared:\n"
+                              "    n: uint\n"
+                              "\n"
+                              "@compute(64) fun cs(@thread_id id: int3){{work, shared}}:\n"
+                              "    work.values[id.x] = 1u\n"
+                              "    storage_barrier()\n"
+                              "    texture_barrier()\n"
+                              "    workgroup_barrier()\n";
+    auto const coherent = text_of(cc::format(barriers, "require device_coherence\n\n", "@coherent "), target::msl);
+    CHECK(coherent.contains(
+        "    threadgroup_barrier(mem_flags::mem_device);\n"
+        "    atomic_thread_fence(mem_flags::mem_device, memory_order_seq_cst, thread_scope_device);\n"
+        "    threadgroup_barrier(mem_flags::mem_texture);\n"
+        "    atomic_thread_fence(mem_flags::mem_texture, memory_order_seq_cst, thread_scope_device);\n"
+        "    threadgroup_barrier(mem_flags::mem_threadgroup);\n"));
+    // workgroup memory is the threadgroup's, which the barrier alone orders
+    CHECK(!coherent.contains("atomic_thread_fence(mem_flags::mem_threadgroup"));
+
+    auto const plain = text_of(cc::format(barriers, "", ""), target::msl);
+    CHECK(plain.contains("    threadgroup_barrier(mem_flags::mem_device);\n"
+                         "    threadgroup_barrier(mem_flags::mem_texture);\n"));
+    CHECK(!plain.contains("atomic_thread_fence"));
 }
 
 TEST("sgl emit - an atomic image's update is the target's own atomic on the texel")
@@ -112,4 +144,20 @@ TEST("sgl emit - an image's subscript is the load or the store it stands for")
     auto const msl = text_of(k_copy, target::msl);
     CHECK(msl.contains("    canvas_target.write(canvas_source.read(uint2(xy)), uint2(xy));\n"));
     CHECK(msl.contains("    canvas_layers.write(float4(value, 0.0, 0.0, 0.0), uint2(xy), uint(2));\n"));
+}
+
+TEST("sgl emit - MSL fences a store to an image the entry point also reads, so the thread's own read sees it")
+{
+    // EMIT-151: `weights` is read and written, and its store is fenced before the read that follows
+    auto const msl = text_of(k_copy, target::msl);
+    CHECK(msl.contains("    canvas_weights.write(float4(canvas_weights.read(uint2(xy)).x + 0.5, 0.0, 0.0, 0.0), "
+                       "uint2(xy));\n"
+                       "    canvas_weights.fence();\n"
+                       "    const float value = canvas_weights.read(uint2(xy)).x;\n"));
+    // `target` is only written and `layers` only stored to, so neither is fenced
+    CHECK(!msl.contains("canvas_target.fence()"));
+    CHECK(!msl.contains("canvas_layers.fence()"));
+    // HLSL and WGSL order one invocation's own accesses
+    CHECK(!text_of(k_copy, target::hlsl_dx12).contains("fence"));
+    CHECK(!text_of(k_copy, target::wgsl).contains("fence"));
 }

@@ -45,6 +45,10 @@ struct writer
     cc::string out;
     /// How many levels the next line is indented by; the body of the function is level 1.
     int depth = 1;
+    /// The entry point holds a `@coherent` member (EMIT-150).
+    bool is_device_coherent = false;
+    /// The images the entry point loads a texel of, where the target fences a store before a load (EMIT-151).
+    cc::vector<flat_binding_member> fenced_images;
 
     /// The name a target writes member `name` of struct `type` with, which the plan may have renamed.
     [[nodiscard]] cc::string_view member_of(type_id type, cc::string_view name) const
@@ -145,6 +149,44 @@ struct writer
         auto const* const c = p.e.at(id).node.try_as<flat_call>();
         auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
         return record != nullptr && record->is_atomic;
+    }
+
+    /// The image member whose texel `x` loads or, with `is_store`, stores; null for any other expression.
+    /// An element of a binding array of images is its array's member.
+    [[nodiscard]] flat_binding_member const* image_accessed_by(flat_expr const& x, bool is_store) const
+    {
+        auto const* const c = x.node.try_as<flat_call>();
+        auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
+        if (record == nullptr || p.e.at(c->arguments).empty())
+            return nullptr;
+        if (is_store ? !record->is_image_store : record->is_image_store || record->name != "load")
+            return nullptr;
+        auto const image = p.e.at(c->arguments)[0];
+        if (p.m.at(p.e.at(image).type).kind != check::type_kind::image)
+            return nullptr;
+        auto member = image;
+        if (auto const* const element = p.e.at(member).node.try_as<flat_element>())
+            member = element->object;
+        return p.e.at(member).node.try_as<flat_binding_member>();
+    }
+    [[nodiscard]] flat_binding_member const* image_loaded_by(flat_expr const& x) const
+    {
+        return image_accessed_by(x, false);
+    }
+
+    /// `img.fence();` behind a store to an image the entry point also loads, so this thread's later load sees it.
+    void fence_after(flat_expr_id id)
+    {
+        auto const* const b = image_accessed_by(p.e.at(id), true);
+        if (b == nullptr)
+            return;
+        for (auto const& loaded : fenced_images)
+            if (loaded.binding == b->binding && loaded.member == b->member)
+            {
+                auto const* const c = p.e.at(id).node.try_as<flat_call>();
+                line(cc::format("{}.fence();", wrapped(expr(p.e.at(c->arguments)[0]), level::primary)));
+                return;
+            }
     }
 
     bool needs_member_assignment(flat_expr const& x) const
@@ -511,7 +553,8 @@ struct writer
                  .builtins = *p.m.builtins,
                  .data = how.data,
                  .mint = mint,
-                 .result_type = p.m.builtin_type_of(type) != nullptr ? type_text(p, d, type) : cc::string_view()});
+                 .result_type = p.m.builtin_type_of(type) != nullptr ? type_text(p, d, type) : cc::string_view(),
+                 .is_device_coherent = is_device_coherent});
             // the statements its value needs, ahead of the one that holds it
             for (auto const& l : result.lines)
                 line(l);
@@ -797,6 +840,7 @@ struct writer
                 else
                     d.write_eval(text, expr(v.value).text);
                 line(text);
+                fence_after(v.value);
             },
             [&](flat_if const& i) { branch(i, false); },
             // none of the three is in a core tree
@@ -989,6 +1033,12 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
 cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
 {
     auto w = writer{.p = p, .d = d};
+    for (auto const& r : p.resources)
+        w.is_device_coherent = w.is_device_coherent || r.is_coherent;
+    if (d.fences_image_stores())
+        for (auto const& x : p.e.exprs)
+            if (auto const* const b = w.image_loaded_by(x))
+                w.fenced_images.push_back(*b);
     w.out.appendf("// SGL {} entry point '{}', written as {}.\n", check::stage_name(p.e.entry_stage), p.entry_name,
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";

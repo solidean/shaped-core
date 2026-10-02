@@ -435,8 +435,12 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-149** `workgroup_uniform_load(m)` is `workgroupUniformLoad(&m)` in WGSL.
   HLSL and MSL write the workgroup barrier of EMIT-131, read `m` into a local, and write the barrier again ([why](why/emitting.md#emit-149)).
 * **EMIT-150** A `@coherent` member is `globallycoherent` in HLSL, which DXC writes as SPIR-V's `Coherent` for vulkan, and its declaration carries `coherent(device)` in MSL, from MSL 3.2.
-  The barrier that publishes its writes is EMIT-131's, which is device-scoped in HLSL and MSL; WGSL lacks `device_coherence` (EMIT-109).
+  The barrier that publishes its writes is EMIT-131's, which is device-scoped in HLSL; WGSL lacks `device_coherence` (EMIT-109).
+  MSL's `threadgroup_barrier` orders memory within the threadgroup alone, so an entry point holding a `@coherent` member follows a `storage_barrier` or a `texture_barrier` with a device-scoped fence.
+  That fence is `atomic_thread_fence(mem_flags::mem_device, memory_order_seq_cst, thread_scope_device)`, or `mem_texture` for the texture barrier.
 * **EMIT-151** An image subscript is the `load` or the `store` it stands for (CHK-367), and a compound assignment through one evaluates its coordinates once and loads the texel once.
+  A thread sees its own store to a `read_write` texture in MSL only after `img.fence()`, where HLSL and WGSL order one invocation's own accesses.
+  So MSL writes `img.fence();` behind every store to an image the entry point also reads.
   An `@atomic` image is the plain integer image in HLSL, and its texel's update is `InterlockedMax(img[xy], v, before)`, read back as a buffer atomic's is (EMIT-120).
   MSL makes it a `read_write` texture and calls its own methods, `img.atomic_fetch_max(xy, v)`, `atomic_load` and `atomic_store`, from MSL 3.1.
   WGSL lacks `image_atomics` (EMIT-109).

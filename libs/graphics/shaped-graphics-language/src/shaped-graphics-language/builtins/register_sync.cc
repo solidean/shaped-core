@@ -41,8 +41,11 @@ constexpr barrier k_barriers[] = {
 
 constexpr cc::string_view k_barriers_hlsl[] = {"GroupMemoryBarrierWithGroupSync", "DeviceMemoryBarrierWithGroupSync"};
 constexpr cc::string_view k_barriers_wgsl[] = {"workgroupBarrier", "storageBarrier", "textureBarrier"};
-constexpr cc::string_view k_barriers_msl[] = {"threadgroup_barrier", "mem_flags"};
+constexpr cc::string_view k_barriers_msl[]
+    = {"threadgroup_barrier", "mem_flags", "atomic_thread_fence", "memory_order_seq_cst", "thread_scope_device"};
 
+/// EMIT-150: Metal's barrier orders memory within the threadgroup alone, so where a `@coherent` member's writes must
+/// reach the whole dispatch, a device-scoped fence follows it.
 written write_barrier(call_context const& ctx)
 {
     auto const& b = k_barriers[ctx.data];
@@ -53,7 +56,16 @@ written write_barrier(call_context const& ctx)
     case language::wgsl:
         return {.text = cc::format("{}()", b.wgsl)};
     case language::msl:
-        return {.text = cc::format("threadgroup_barrier(mem_flags::{})", b.msl_memory)};
+    {
+        auto const barrier = cc::format("threadgroup_barrier(mem_flags::{})", b.msl_memory);
+        if (!ctx.is_device_coherent || b.msl_memory == "mem_threadgroup")
+            return {.text = barrier};
+        auto result = written{.text = cc::format("atomic_thread_fence(mem_flags::{}, memory_order_seq_cst, "
+                                                 "thread_scope_device)",
+                                                 b.msl_memory)};
+        result.lines.push_back(cc::format("{};", barrier));
+        return result;
+    }
     }
     return {};
 }
@@ -367,6 +379,7 @@ void sgl::builtins::register_sync(registry& r)
             .evaluate = nothing,
             .write = {.kind = spelling_kind::custom,
                       .custom = write_barrier,
+                      .writes_lines = is_msl,
                       .data = i,
                       .hlsl_names = k_barriers_hlsl,
                       .wgsl_names = k_barriers_wgsl,

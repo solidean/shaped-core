@@ -26,6 +26,10 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   Folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in their place.
 - **Re-run [tools/msl-probe](../tools/msl-probe/readme.md) when the Metal toolchain is bumped.** MSL's generated reserved words are taken from one toolchain's headers, which grow every release.
   A name a newer one adds fails as `quad` did, naming a header the program's author never wrote, until the block is regenerated.
+- **Run MSL's two memory-ordering spellings on a Mac.** Both were read off the MSL spec, and no Metal device has run them.
+  One is the device-scoped `atomic_thread_fence` behind a barrier in an entry point holding a `@coherent` member (EMIT-150).
+  sg's `compute-coherence-test.cc`, spread over many workgroups, is what shows it publishes across threadgroups.
+  The other is `img.fence();` behind a store to an image the entry point also reads (EMIT-151), which wants a read-after-write test of one texel.
 - **What `discard` does to a quad's derivatives, per target.** SGL writes `discard;` and MSL `discard_fragment();`, which every target reads as "no effect after this".
   Whether the pixel keeps running as a helper is where they differ, and a sample after a discard in a neighbouring pixel depends on it.
   sg's tier-1 pixel-semantics test pins it on every backend, and dx12 and vulkan keep the pixel as a helper.

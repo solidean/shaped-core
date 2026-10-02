@@ -65,6 +65,8 @@ struct sgl::builtins::call_context
     /// The call's result type as the target spells it, for such a local; empty where no text is being written, and
     /// for a result of no builtin type.
     cc::string_view result_type;
+    /// The entry point holds a `@coherent` member, whose writes a barrier publishes to the whole dispatch (EMIT-150).
+    bool is_device_coherent = false;
 };
 
 /// What a helper writer is given: the target, and each argument's type as the target spells it.
@@ -88,6 +90,10 @@ using lines_predicate = bool (*)(language);
 [[nodiscard]] inline bool is_hlsl(language l)
 {
     return l == language::hlsl;
+}
+[[nodiscard]] inline bool is_msl(language l)
+{
+    return l == language::msl;
 }
 [[nodiscard]] inline bool is_not_wgsl(language l)
 {
@@ -224,6 +230,8 @@ struct sgl::builtins::function_record
     /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
     /// the other arguments, and gives what the atomic holds after; the call gives what it held before, or nothing.
     bool is_atomic = false;
+    /// Stores a texel of its first argument, an image, which MSL fences before the same thread reads it (EMIT-151).
+    bool is_image_store = false;
     /// Exchanges values between the invocations of a subgroup, so every one of them reaches the call or none does, and
     /// what it gives differs within a workgroup (CHK-377).
     bool is_subgroup_operation = false;
