@@ -1,8 +1,8 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/all.hh>
+#include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/linalg/cross.hh>   // tg::cross, tg::dual — the wedge and its Hodge dual
-#include <typed-geometry/linalg/pos_ops.hh> // tg::distance
 #include <typed-geometry/linalg/vec_ops.hh> // tg::dot, tg::normalize
 
 // Drawing a mesh's STRUCTURE rather than its surface: every vertex a sphere, every edge a tube, as analytic quadrics.
@@ -56,7 +56,7 @@ cc::vector<tg::pos3f> icosahedron_vertices()
 /// Whether two icosahedron vertices share an edge, which for this solid is exactly "they are the minimum distance apart".
 bool adjacent(tg::pos3f const& a, tg::pos3f const& b)
 {
-    return tg::distance(a, b) < 2.1f;
+    return a.distance_to(b) < 2.1f;
 }
 
 /// Every unordered pair of adjacent vertices — 30 of them.

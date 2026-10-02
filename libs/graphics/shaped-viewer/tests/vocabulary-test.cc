@@ -19,9 +19,9 @@
 #include <shaped-viewer/view/layer.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <typed-geometry/geometry/primitives/triangle.hh>
+#include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
 #include <typed-geometry/linalg/pos.hh>
-#include <typed-geometry/linalg/pos_ops.hh> // tg::distance
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 #include <typed-geometry/scalar/angle.hh>
@@ -604,7 +604,7 @@ TEST("sv - a scene item's placement is an affine tg transform")
 
     // +x turns onto -z under a quarter turn about +y, then the lift moves it up.
     auto const placed = item.transform.transform(tg::pos3f(1, 0, 0));
-    CHECK(tg::distance(placed, tg::pos3f(0, 2, -1)) < 1e-5f);
+    CHECK(placed.distance_to(tg::pos3f(0, 2, -1)) < 1e-5f);
 
     // The renderer packs these two halves, not a mat4 — the linear part carries no translation of its own.
     CHECK(item.transform.translation() == tg::vec3f(0, 2, 0));

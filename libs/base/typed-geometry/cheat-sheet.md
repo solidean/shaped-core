@@ -57,6 +57,8 @@ a == b  a != b                             // component-wise
 #include <typed-geometry/linalg/vec_ops.hh>
 tg::dot(a, b);                             // T   — dot product
 tg::normalize(v);                          // vec — free form of v.normalized() (requires has_sqrt<T>)
+tg::any_orthogonal(v);                     // vec — perpendicular to v, any length, never near zero for a nonzero v
+tg::orthonormal_basis(n);                  // pair<vec3, vec3> {u, w}: (u, w, n) right-handed orthonormal; n MUST be unit
 ```
 
 ## pos — point (affine arithmetic)
@@ -75,9 +77,9 @@ p == q;                                    // component-wise
 ```
 
 ```cpp
-#include <typed-geometry/linalg/pos_ops.hh>
-tg::distance_sqr(p, q);                    // T  — squared distance (any scalar)
-tg::distance(p, q);                        // T  — requires has_sqrt<T>
+#include <typed-geometry/geometry/query/distance.hh>   // a pos is a geometric object; see "geometric queries"
+p.distance_sqr_to(q);                      // T  — squared distance (any scalar)
+p.distance_to(q);                          // T  — requires has_sqrt<T>
 ```
 
 ## comp — neutral component container (raw component-wise arithmetic)
@@ -265,36 +267,141 @@ t(obj);               // the call spelling of t.transform(obj) — application, 
 ## geometry primitives (each denotes a set of points)
 
 ```cpp
-#include <typed-geometry/geometry/primitives/aabb.hh>      // and triangle/segment/ray/line/plane.hh
+#include <typed-geometry/geometry/primitives/aabb.hh>      // and box/triangle/segment/ray/line/plane/halfspace.hh
 tg::aabb<D,T>     {pos min, max}              // solid box {x : min <= x <= max}              — finite
+tg::aabb_boundary<D,T>                        // its faces; aabb3f_surface
+tg::box<D,DA,T>   {pos center; mat<D,DA> half_extents}  // {center + H*c : c in [-1,1]^D}; columns = half-axes,
+                                              //   NOT necessarily orthogonal (any affine image of a box is a box)
+tg::box_boundary<D,DA,T>                      // its faces; box3f_surface; box2in3f is a rectangle in 3D
+tg::halfspace<D,T> {vec normal; T dist}       // {x : dot(normal,x) <= dist}; h.boundary() is the plane
+tg::capsule<D,T>  {segment axis; T radius}    // within radius of the axis (2D: stadium); capsule_boundary
+tg::cylinder<3,T> {segment axis; T radius}    // flat caps; cylinder_boundary (all of it), cylinder_mantle = tube3
+                                              //   (open tube, NOT a boundary: .solid() but no round trip); .caps()
+tg::cone<3,T>     {pos apex; vec axis; T radius}  // axis: apex -> base center (|axis| = height); cone_boundary, cone_mantle
+tg::hemisphere<3,T> {pos center; T radius; vec normal}  // the half ball the normal points into; _boundary, _mantle (dome)
+tg::tetrahedron<3,T> {pos pos0..pos3}         // solid hull; tetrahedron_boundary; .faces()[i] opposite vertex i
+tg::quad<D,T>     {pos00, pos10, pos11, pos01}  // BILINEAR patch (need not be planar): at(comp2), bounds, edges,
+                                              //   ray crossings; no area / support / sampling (not convex, not flat)
+tg::inf_cylinder<D,T> {line axis; T radius}  // unbounded tube (2D: a slab); _boundary. cylinder.unbounded() gives one
+tg::inf_cone<D,T> {pos apex; vec dir; angle opening_angle}  // single nappe, dir unit, opening < 180deg; _boundary
+tg::frustum<3,T>  {plane planes[6]}           // left right bottom top near far, normals OUTWARD (inside: <= dist);
+                                              //   .vertices() 8 corners (bit0 right, bit1 top, bit2 far); _boundary
+tg::frustum3d::make_from_view_projection(vp); // REVERSE-Z [0,1] (near -> 1); infinite far -> absent far plane
+f.has_far_plane();                            // false: planes[5] is {0, 0}; plane-only queries still work
+                                              //   (contains, may_intersect vs a support object, ray intervals);
+                                              //   vertices / volume / bounds / sampling and every support-based
+                                              //   query (GJK, EPA, halfspace/plane vs it, may_intersect vs another
+                                              //   frustum) need a far plane, else they see the near rectangle
 tg::triangle<D,T> {pos pos0, pos1, pos2}      // filled triangle (hull of 3 verts), 2D patch  — finite
 tg::segment<D,T>  {pos pos0, pos1}            // {(1-t)*pos0 + t*pos1 : t in [0,1]}, 1D        — finite
 tg::ray<D,T>      {pos origin; vec dir}       // {origin + t*dir : t >= 0}, 1D                 — infinite
 tg::line<D,T>     {pos origin; vec dir}       // {origin + t*dir : t in R}, 1D                 — infinite
 tg::plane<D,T>    {vec normal; T dist}        // hyperplane {x : dot(normal,x) == dist}        — infinite
-tg::sphere<D,DA,T>    {pos center; T radius}          // SURFACE {x : distance(x,center) == radius}    — finite
-tg::ellipsoid<D,DA,T> {pos center; vec semi_axes[D]}  // SURFACE {center + sum_i u_i*semi_axes[i] : |u| == 1} — finite
+tg::sphere<D,DA,T>    {pos center; T radius}          // SOLID ball {x : distance(x,center) <= radius}  — finite
+tg::ellipsoid<D,DA,T> {pos center; vec semi_axes[D]}  // SOLID {center + sum_i u_i*semi_axes[i] : |u| <= 1} — finite
+tg::sphere_boundary<D,DA,T>, tg::ellipsoid_boundary<D,DA,T>  // the SURFACE: same storage, == instead of <=
+// an object type is MAXIMAL: the plain name is the solid. Its boundary is a separate type, never implicit:
+//   s.boundary() -> sphere3f_surface;  b.solid() -> sphere3f.   3D also spells it _surface (sphere3f_surface).
+//   a boundary transforms as its solid does: b.transformed(t) == b.solid().transformed(t).boundary()
 // sphere/ellipsoid take TWO dims: D = the flat the object curves in, DA = the space that flat sits in.
-//   equal for the everyday case (sphere3f == sphere<3,3,f32>); apart when EMBEDDED: sphere2in3f is a circle in 3D.
+//   equal for the everyday case (sphere3f == sphere<3,3,f32>); apart when EMBEDDED: disk3f (= sphere2in3f) is a
+//   disk in 3D, circle3f (= sphere2in3f_boundary) its rim.
 //   ellipsoid ctor takes D axis vectors (or a vec[D] array): tg::ellipsoid3f(center, axis0, axis1, axis2).
 //     the axes need not be orthogonal, and they span the flat — so the embedded case stores nothing extra.
 //   sphere's {center,radius} does NOT pin down the plane, so what it stores depends on the pair: the PRIMARY
 //     template is undefined and each pair is a specialization — sphere<D,D,T> is {center,radius},
-//     sphere<2,3,T> adds the plane's normal: tg::sphere2in3f(center, radius, normal).
-//     A pair with no specialization (a circle in 4D) is an incomplete type, not a silently wrong encoding.
+//     sphere<2,3,T> adds the plane's normal: tg::disk3f(center, radius, normal).
+//     A pair with no specialization (a disk in 4D) is an incomplete type, not a silently wrong encoding.
 // members are public + named (pos0/min/normal/…), not data[]; default-ctor zero-inits; explicit ctors;
-//   defaulted operator==. No queries/measures/factories yet (representations still settling).
+//   defaulted operator==. Queries are MEMBERS (a.intersects(b), p.distance_to(seg)) — being built,
+//   see docs/plans/geometry-query-matrix.md.
 // dimensional aliases: aabb2/3, triangle2/3, …   concrete: aabb3f triangle3f segment2i ray3f plane3d
 //   (aabb/triangle/segment get f/d/i; ray/line/plane/sphere/ellipsoid get f/d — they carry real values)
-//   the embedded pair spells both dims: sphere2in3/ellipsoid2in3 (+ …2in3f / …2in3d)
+//   the embedded pair spells both dims: sphere2in3/ellipsoid2in3 (+ …2in3f / …2in3d), and disk3/circle3
+//   boundaries: sphere3f_boundary == sphere3f_surface, sphere2f_boundary, ellipsoid3d_surface, circle3f, …
 
 obj.transformed(t);   // every primitive; which transforms it accepts is a geometric statement:
-//   sphere              similarity -> sphere      |  affine -> ELLIPSOID (unless embedded: needs a basis of the flat)
+//   sphere              similarity -> sphere      |  affine -> ELLIPSOID (embedded too: disk3 -> ellipsoid2in3)
+//   *_boundary          whatever its solid becomes, then .boundary()
 //   ellipsoid           affine     -> ellipsoid   (embedded or not — the map is one of the ambient space)
-//   aabb                scaling + translation ONLY (a rotated aabb needs obb, which does not exist)
+//   aabb                scaling + translation -> aabb  |  affine -> BOX (never a silently enlarged aabb)
+//   box                 affine
+//   halfspace           whatever its plane accepts
 //   triangle, segment   affine, projective
 //   plane               affine, projective        (normal picks up the cofactor, not the linear part)
 //   ray, line           affine ONLY               (a projected ray is a bounded segment)
+//   tetrahedron, quad   affine
+//   frustum             whatever its planes accept
+//   round objects       (signed) similarity ONLY  (capsule, cylinder, cone, hemisphere, inf_cylinder, inf_cone:
+//                                                 an affine image is elliptic, which no type here encodes)
+```
+
+## unary members (per type, inline)
+
+```cpp
+seg.length();  tri.area();  tri.perimeter();  box.volume();   // by intrinsic dim: 1 length, 2 area + perimeter, 3 volume
+                                        // tri.area() is refused for an exact scalar (triangle2i): halving would truncate
+aabb3.area();  sphere3.area();          // a 3D SOLID's area() is its surface; a boundary answers only its own measure
+                                        //   (sphere3f_surface has area(), no volume(); aabb2_boundary has length())
+o.centroid();  o.bounds();              // pos; aabb<D,T>
+o.vertices();  o.edges();               // cc::fixed_array — polytopes; vertices() also on segment and box, which have no edges()
+tri.normal();  tri.plane();             // 3D, unit, counter-clockwise; also box2in3.normal(), disk3.plane()
+o.any_point();                          // a point of the set (for a surface ON it, not the center)
+seg.unbounded();  ray.unbounded();      // the line through it
+seg.at(t);  ray.at(t);  line.at(t);     // t: [0,1] / >= 0 / any
+tri.at(comp3 bary);  aabb.at(comp [0,1]^D);  box.at(comp [-1,1]^D)
+o.parameter_of(p);                      // inverse of at; segment/ray/line: of p's projection (clamped),
+                                        //   triangle/aabb/box: unclamped (barycentrics go negative)
+```
+
+## sampling
+
+```cpp
+o.sample_uniform(rng);   // cc::random&; uniform over the object's point set — the TYPE says which set:
+                         //   sphere3f the ball, sphere3f_surface the surface, aabb3f_surface the faces
+// every bounded object whose point set is a linear image of a simple one or a union of such pieces, e.g. a capsule's surface
+// direct methods with a fixed draw count, except the ball/ellipsoid: rejection measured 2x faster
+// also disk3 / circle3 (through an orthonormal basis of their plane); not yet ellipsoid_boundary (not a linear image)
+```
+
+## geometric queries (members; definitions per verb)
+
+```cpp
+#include <typed-geometry/geometry/query/query.hh>     // or one verb: query/distance.hh, query/project.hh, …
+p.project_to(obj);          // obj's nearest point to p; for a solid, p itself when inside
+a.closest_points_to(b);     // cc::pair{point of a, point of b}
+a.closest_point_to(b);      // the point of a nearest b;  obj.closest_point_to(p) == p.project_to(obj)
+a.distance_sqr_to(b);  a.distance_to(b);   // distance_to needs has_sqrt
+p.signed_distance_to(obj);  // negative inside (plane: on the normal's far side)
+a.contains(b);              // every point of b is in a — not symmetric
+a.intersects(b);            // they share a point; for a pos it is exactly contains, a boundary included
+                            //   (box/ellipsoid/frustum surface vs pos: on it, compared exactly)
+l.intersection_parameter_with(b);          // l a line/ray/segment: tg::hits<N,T> against a SURFACE (sorted crossings,
+                                           //   .has_any() .first() .last()), cc::optional<tg::hit_interval<T>> {start,
+                                           //   end} against a SOLID (from inside, start is the ray's own 0)
+l.closest_intersection_parameter_with(b);  // cc::optional<T>: the first crossing, or where l enters the solid
+a.intersection_with(b);     // cc::optional<X>, X the generic-case shape: aabb∩aabb aabb, plane∩plane line,
+                            //   triangle∩plane segment, ball∩plane disk3, sphere surfaces circle3; a linear object
+                            //   gives its crossing pos (hits of pos) or the segment inside a BOUNDED solid
+a.separation_from(b);       // cc::optional<tg::separation<D,T>> {normal, depth}: move b by normal*depth to stop
+                            //   overlapping; empty when apart. Bounded convex SOLIDS only (EPA), 2D and 3D
+a.may_intersect(b);         // culling: false only when certainly apart; frustum vs anything with a support is
+                            //   plane by plane (cheap), every other pair falls back to the exact intersects
+a.intersects(b, eps);  p_obj.contains(p, eps);  // bool: true if they meet, false beyond eps, either between;
+                                                // default is the exact distance test (up to rounding)
+// closed forms for the hot pairs, e.g. box–box (SAT); GJK measured 7–103x slower than them (query-matrix plan §4)
+// bounded convex objects with a support (a box, a capsule, a cone, …) get distance / closest points /
+//   intersects against each other for free through GJK; closed forms take over where they exist
+// a member used without its verb's header: "function with deduced return type cannot be used before it is defined"
+// an unsupported pair: a static_assert naming the probe — tg::has_distance_sqr_to<A, B>, tg::has_intersects<A, B>, …
+//   one probe per verb: has_project_to, has_closest_points_to, has_closest_point_to, has_distance_sqr_to,
+//   has_signed_distance_to, has_contains, has_contains_eps (b a pos), has_intersects, has_intersects_eps (a distance),
+//   has_may_intersect, has_intersection_parameter_with, has_intersection_with, has_separation_from
+// kernels: tg::impl::<verb>_op<A, B> specializations; each verb also tries (B, A), then derives
+//   (distance from closest points, closest points from a projection, contains/intersects for a pos from a projection)
+// special cases are assumed away: NaN/inf propagate, nothing asserts. SC_CHECK_GEOMETRY_SPECIAL_CASES logs each one.
+// an exact-zero denominator on common input (a ray parallel to a plane) is handled; only an answerless sub-case is special
+// exact scalars (tg::traits::is_exact: ints, bool, fixed_int) get only exact kernels: no projection onto a segment.
 ```
 
 ## object_traits (point-set classification seam)
@@ -405,8 +512,8 @@ cc::format("{}", h);                               // shortest digits for f16: "
 
 - **No `.x/.y/.z`** — by design; use `data[i]` or `operator[]`.
 - **Constructors are `explicit`.** `tg::vec3f v = {1,2,3};` does not compile; use `tg::vec3f(1,2,3)` or `tg::vec3f({1,2,3})`.
-- **`length()`/`normalized()`/`distance()`/`tg::sqrt` need `has_sqrt<T>`** — they don't exist for `vec3i` etc.
-  Use `length_sqr()` / `distance_sqr()` for integers.
+- **`length()`/`normalized()`/`distance_to()`/`tg::sqrt` need `has_sqrt<T>`** — they don't exist for `vec3i` etc.
+  Use `length_sqr()` / `distance_sqr_to()` for integers.
 - **`normalized()` does NOT assert on zero** — it returns the zero vector or quaternion.
   Check `tg::traits::is_zero(v.length())` yourself if you need to tell the cases apart.
 - **Out-of-range `operator[]` and wrong-size initializer lists `CC_ASSERT`** (active in debug/relwithdebinfo, stripped in release).
@@ -422,7 +529,7 @@ cc::format("{}", h);                               // shortest digits for f16: "
   An implicit one would make two registrations at different classes an ambiguous overload set.
   Narrowing is not a constructor at all.
 - **A normal is a `bivec`, not a `vec`.** It transforms by the cofactor matrix, not the linear part — the difference only shows up under a non-uniform scaling, which is what makes it a silent bug.
-- **`obj.transformed(t)` on an unsupported pair is a compile error on purpose** (a rotated `aabb` is not an `aabb`).
+- **`obj.transformed(t)` on an unsupported pair is a compile error on purpose** (a projected `ray` is not a `ray`); a rotated `aabb` is a `box`.
   It is not probeable — the return type is `auto`, so asking trips the `static_assert`.
   Test the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
 - **Transform scale factors are POSITIVE** unless the class carries `negative_scaling` (`tg::signed_scaling_transform3f`, `signed_similarity_transform3f`, …); the factories assert it.

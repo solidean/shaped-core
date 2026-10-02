@@ -11,7 +11,7 @@
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
-#include <typed-geometry/linalg/pos_ops.hh> // tg::distance
+#include <typed-geometry/geometry/query/distance.hh>
 
 using namespace cc::primitive_defines;
 
@@ -946,7 +946,7 @@ ASYNC_INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and 
     // What a caller changes between frames without touching a payload is re-read, so the cache never goes stale on it.
     mesh.transform = tg::affine_transform3f::make_translation(tg::vec3f(1, 2, 3));
     auto const& moved = m.create_mesh(mesh);
-    CHECK(tg::distance(tg::pos3f(0, 0, 0).transformed(moved.transform), tg::pos3f(1, 2, 3)) < 1e-5f);
+    CHECK(tg::pos3f(0, 0, 0).transformed(moved.transform).distance_to(tg::pos3f(1, 2, 3)) < 1e-5f);
     CHECK(moved.geometry == first.geometry); // and the geometry was not re-acquired to do it
 
     // Readiness is a snapshot refreshed by placing, which is the cadence a frame loop already runs at.

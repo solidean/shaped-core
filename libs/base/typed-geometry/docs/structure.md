@@ -106,7 +106,6 @@ linalg/
   vec.hh           [done]     + zero, make_unit
   vec_ops.hh       [done]     dot, normalize
   pos.hh           [done]     + zero
-  pos_ops.hh       [done]     distance, distance_sqr
   comp.hh          [done]     storage + access + full component-wise arithmetic
   comp_ops.hh      [done]     component-wise min/max
   bivec.hh         [done]     + zero; C(D,2) components (3D order {yz, zx, xy})
@@ -256,7 +255,8 @@ Access checking is part of that `requires`, so a non-befriended object never see
 
 One branch covers many inputs: `aabb` asks only for `scaling_translation_transform<D, T>` and thereby handles the identity, a pure translation and both scalings.
 
-An unsupported pair is a **compile error**, deliberately — a rotated `aabb` is not an `aabb`, and returning an enlarged one silently would be worse.
+An unsupported pair is a **compile error**, deliberately — a projected `ray` is not a `ray`, and returning something else silently would be worse.
+A rotated `aabb` is answered with the type that holds it, an oriented `box`.
 Since the member's return type is `auto`, asking "is this supported?" would instantiate the body and trip the `static_assert`.
 Probe the branch condition (`requires { tg::affine_transform<D, T>(t); }`) instead.
 
@@ -269,18 +269,27 @@ The primitive *types* and the `object_traits` seam have landed; queries, measure
 geometry/
   traits.hh         [done]     object_traits<ObjT> seam + tg::traits::intrinsic_dim/ambient_dim/is_finite
   primitives/       [in progress]
-    aabb.hh         [done]     solid axis-aligned box {min..max}
+    aabb.hh         [done]     solid axis-aligned box {min..max}; aabb_boundary its faces
+    box.hh          [done]     oriented box {center + H*c : c in [-1,1]^D}, H's columns the half-axes; box_boundary
+    halfspace.hh    [done]     {x : dot(normal,x) <= dist}, plane's encoding
+    capsule.hh      [done]     {x : distance(x, axis) <= radius}; capsule_boundary
+    cylinder.hh     [done]     3D, flat caps; cylinder_boundary, cylinder_mantle (tube3)
+    cone.hh         [done]     {apex, axis, radius}; cone_boundary, cone_mantle
+    hemisphere.hh   [done]     {center, radius, normal}; hemisphere_boundary, hemisphere_mantle (the dome)
+    tetrahedron.hh  [done]     solid hull of 4 points; tetrahedron_boundary
+    quad.hh         [done]     bilinear patch over 4 corners
+    infinite.hh     [done]     inf_cylinder, inf_cone and their boundaries
+    frustum.hh      [done]     six outward planes; frustum_boundary
     triangle.hh     [done]     filled triangle (3 verts)
     segment.hh      [done]     closed segment between 2 endpoints
     ray.hh          [done]     {origin + t*dir : t >= 0}
     line.hh         [done]     {origin + t*dir : t in R}
     plane.hh        [done]     hyperplane {x : dot(normal,x) == dist}
-    sphere.hh       [done]     sphere surface {x : distance(x, center) == radius}
-    ellipsoid.hh    [done]     ellipsoid surface {center + sum_i u_i * semi_axes[i] : |u| == 1}
+    sphere.hh       [done]     ball {x : distance(x, center) <= radius}; sphere_boundary is the surface
+    ellipsoid.hh    [done]     solid ellipsoid {center + sum_i u_i * semi_axes[i] : |u| <= 1}; ellipsoid_boundary the surface
     primitives.hh   [done]
-    # planned: obb, ball, quadric, polygon, ...
-  query/            [planned]  # distance, projection, closest, intersection, intersects, containment, ...
-  measure/          [planned]  # area, volume, centroid, bounds, moments
+    # planned: polygon, polyline — see plans/old-tg-carryover.md
+  query/            [in progress]  # the member verbs' definitions, one header per verb; kernels and GJK / EPA in impl/
   construct/        [planned]  # hull, fitting, primitives_from_points
   geometry.hh       [done]
   all.hh            [done]
@@ -292,10 +301,9 @@ Every primitive denotes a **set of points**, classified by an `object_traits` sp
 Each primitive also registers what it becomes under a transform.
 [modules/transform.md](modules/transform.md) carries the registration table and why its gaps are missing types rather than skipped work.
 
-Queries are intentionally **not** implemented yet — the representations settle first.
-When they land, members stay intrinsic and cheap (`ray.at(t)`, `aabb.center()`, `triangle.area()`).
-Symmetric or cross-type queries are free functions: `distance(a, b)`, `intersection(a, b)`.
-[plans/geometry-query-matrix.md](plans/geometry-query-matrix.md) is the agreed shape for that layer.
+Every query is a member — `a.intersects(b)`, `p.distance_to(seg)`, `tri.area()` — declared per type and defined per verb under `query/`.
+Measures are per-type inline members rather than a `measure/` module.
+[plans/geometry-query-matrix.md](plans/geometry-query-matrix.md) is the query layer, and [plans/old-tg-carryover.md](plans/old-tg-carryover.md) the object roster and verb tables.
 
 ## curves/ [planned]
 
@@ -379,8 +387,8 @@ The top-level `<typed-geometry/all.hh>` pulls in everything.
 3.  linalg: bivec + cross/dual/undual  [done]
 4.  linalg: mat, quat                  [done]
 5.  transform: the flag lattice, homogeneous_transform, transformed(pos/vec/bivec), the object handshake   [done]
-6.  geometry primitives: aabb, triangle, segment, ray, line, plane, sphere, ellipsoid + object_traits   [in progress]  types done; queries planned
-7.  geometry measure/query basics      [planned]
+6.  geometry primitives + object_traits   [in progress]  waves 1–3 of plans/old-tg-carryover.md; polygon and polyline remain
+7.  geometry queries: member verbs, kernel seam, GJK / EPA   [in progress]
 8.  curves                             [planned]
 9.  symbolic scalars                   [planned]
 10. calculus                           [planned]

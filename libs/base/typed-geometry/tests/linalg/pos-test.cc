@@ -1,6 +1,6 @@
 #include <nexus/test.hh>
+#include <typed-geometry/geometry/query/distance.hh>
 #include <typed-geometry/linalg/pos.hh>
-#include <typed-geometry/linalg/pos_ops.hh>
 
 #include <type_traits>
 
@@ -66,9 +66,9 @@ TEST("tg pos - distance")
     auto const p = tg::pos3f(0, 0, 0);
     auto const q = tg::pos3f(0, 3, 4);
 
-    CHECK(distance_sqr(p, q) == 25);
-    CHECK(distance(p, q) == 5);
+    CHECK(p.distance_sqr_to(q) == 25);
+    CHECK(p.distance_to(q) == 5);
 
-    // distance_sqr is available for integer scalars (no sqrt needed)
-    CHECK(distance_sqr(tg::pos2i(0, 0), tg::pos2i(3, 4)) == 25);
+    // distance_sqr_to is available for integer scalars (no sqrt needed)
+    CHECK(tg::pos2i(0, 0).distance_sqr_to(tg::pos2i(3, 4)) == 25);
 }

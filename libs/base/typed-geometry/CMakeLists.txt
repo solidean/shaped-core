@@ -44,7 +44,6 @@ target_sources(typed-geometry
     src/typed-geometry/linalg/vec.hh
     src/typed-geometry/linalg/vec_ops.hh
     src/typed-geometry/linalg/pos.hh
-    src/typed-geometry/linalg/pos_ops.hh
     src/typed-geometry/linalg/bivec.hh
     src/typed-geometry/linalg/cross.hh
     src/typed-geometry/linalg/mat.hh
@@ -72,9 +71,51 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/primitives/ray.hh
     src/typed-geometry/geometry/primitives/line.hh
     src/typed-geometry/geometry/primitives/plane.hh
+    src/typed-geometry/geometry/primitives/halfspace.hh
+    src/typed-geometry/geometry/primitives/box.hh
     src/typed-geometry/geometry/primitives/sphere.hh
     src/typed-geometry/geometry/primitives/ellipsoid.hh
+    src/typed-geometry/geometry/primitives/capsule.hh
+    src/typed-geometry/geometry/primitives/cylinder.hh
+    src/typed-geometry/geometry/query/impl/kernels/round.hh
+    src/typed-geometry/geometry/primitives/cone.hh
+    src/typed-geometry/geometry/primitives/hemisphere.hh
+    src/typed-geometry/geometry/query/impl/kernels/capped.hh
+    src/typed-geometry/geometry/primitives/tetrahedron.hh
+    src/typed-geometry/geometry/primitives/quad.hh
+    src/typed-geometry/geometry/query/impl/kernels/polytope.hh
+    src/typed-geometry/geometry/primitives/infinite.hh
+    src/typed-geometry/geometry/primitives/frustum.hh
+    src/typed-geometry/geometry/query/impl/kernels/unbounded.hh
     src/typed-geometry/geometry/primitives/primitives.hh
+    src/typed-geometry/geometry/query/closest_points.hh
+    src/typed-geometry/geometry/query/contains.hh
+    src/typed-geometry/geometry/query/distance.hh
+    src/typed-geometry/geometry/query/impl/kernels.hh
+    src/typed-geometry/geometry/query/impl/kernels/aabb.hh
+    src/typed-geometry/geometry/query/impl/kernels/box.hh
+    src/typed-geometry/geometry/query/impl/kernels/constructive.hh
+    src/typed-geometry/geometry/query/impl/kernels/halfspace.hh
+    src/typed-geometry/geometry/query/impl/kernels/hot_pairs.hh
+    src/typed-geometry/geometry/query/impl/kernels/linear.hh
+    src/typed-geometry/geometry/query/impl/kernels/parameters.hh
+    src/typed-geometry/geometry/query/impl/kernels/plane.hh
+    src/typed-geometry/geometry/query/impl/kernels/pos.hh
+    src/typed-geometry/geometry/query/impl/kernels/sphere.hh
+    src/typed-geometry/geometry/query/impl/kernels/triangle.hh
+    src/typed-geometry/geometry/query/impl/epa.hh
+    src/typed-geometry/geometry/query/impl/gjk.hh
+    src/typed-geometry/geometry/query/impl/ops.hh
+    src/typed-geometry/geometry/query/impl/special_case.hh
+    src/typed-geometry/geometry/query/hits.hh
+    src/typed-geometry/geometry/query/intersection.hh
+    src/typed-geometry/geometry/query/intersects.hh
+    src/typed-geometry/geometry/query/parameter.hh
+    src/typed-geometry/geometry/query/project.hh
+    src/typed-geometry/geometry/query/separation.hh
+    src/typed-geometry/geometry/query/query.hh
+    src/typed-geometry/geometry/impl/bounds_of.hh
+    src/typed-geometry/geometry/impl/sampling.hh
     src/typed-geometry/geometry/geometry.hh
     src/typed-geometry/geometry/all.hh
 )
@@ -98,10 +139,19 @@ target_link_libraries(typed-geometry PUBLIC clean-core)
 if(NOT DEFINED SC_CHECK_WIDE_ARITH)
     set(SC_CHECK_WIDE_ARITH OFF)
 endif()
-# The input define; scalar/fixed_int/fwd.hh turns it into TG_CHECK_WIDE_ARITH (always 0 or 1).
+# The input define; scalar/fixed_int/impl/core.hh turns it into TG_CHECK_WIDE_ARITH (always 0 or 1).
 target_compile_definitions(typed-geometry
     PUBLIC
     $<$<BOOL:${SC_CHECK_WIDE_ARITH}>:TG_CHECK_WIDE_ARITH_REQUESTED>
+)
+
+# Same pattern for SC_CHECK_GEOMETRY_SPECIAL_CASES; geometry/query/impl/special_case.hh turns it into TG_CHECK_SPECIAL_CASES.
+if(NOT DEFINED SC_CHECK_GEOMETRY_SPECIAL_CASES)
+    set(SC_CHECK_GEOMETRY_SPECIAL_CASES OFF)
+endif()
+target_compile_definitions(typed-geometry
+    PUBLIC
+    $<$<BOOL:${SC_CHECK_GEOMETRY_SPECIAL_CASES}>:TG_CHECK_SPECIAL_CASES_REQUESTED>
 )
 
 # Enable conforming preprocessor for MSVC
@@ -127,6 +177,8 @@ if(SC_BUILD_TESTS)
 
         tests/benchmarks/fixed_int-benchmark.cc
         tests/benchmarks/half_float-benchmark.cc
+        tests/benchmarks/sampling-benchmark.cc
+        tests/benchmarks/query-benchmark.cc
 
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc
@@ -151,7 +203,22 @@ if(SC_BUILD_TESTS)
         tests/geometry/ray-test.cc
         tests/geometry/line-test.cc
         tests/geometry/plane-test.cc
+        tests/geometry/halfspace-test.cc
+        tests/geometry/box-test.cc
         tests/geometry/object-traits-test.cc
+        tests/geometry/wave3-test.cc
+        tests/geometry/polytope-test.cc
+        tests/geometry/capped-test.cc
+        tests/geometry/round-test.cc
+        tests/geometry/measures-test.cc
+        tests/geometry/sampling-test.cc
+        tests/geometry/query/ladder-test.cc
+        tests/geometry/query/point-queries-test.cc
+        tests/geometry/query/special-case-test.cc
+        tests/geometry/query/gjk-test.cc
+        tests/geometry/query/wave1-queries-test.cc
+        tests/geometry/query/intersection-test.cc
+        tests/geometry/query/hot-pairs-test.cc
     )
     sc_nexus_binary(typed-geometry-test KINDS tests)
 

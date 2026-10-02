@@ -37,7 +37,8 @@ tg::projective_transform3f  // + a non-trivial homogeneous row
 - **Any geometric type.** Each object writes its own `transformed` member in `geometry/`, which sits above this module.
   Nothing here names a geometric type, so the dependency runs one way only.
 - Camera / projection conventions.
-  `make_from_mat` takes a homogeneous matrix, but tg does not pick a handedness or a depth range — that is a rendering convention, not a geometric one.
+  `make_from_mat` takes a homogeneous matrix, but this module does not pick a handedness or a depth range — that is a rendering convention, not a geometric one.
+  The one place tg reads a convention is `frustum::make_from_view_projection`, which assumes reverse-Z [0, 1]; other depth ranges get their own named factories.
 
 ## Key decisions
 
@@ -229,7 +230,7 @@ The third is the one with content: `composed` must produce a transform whose act
 The equivalence extends to the **return type**, not just the value.
 Composing a similarity with a per-axis scaling gives an affine transform, under which a sphere is an ellipsoid.
 The chained spelling reaches an ellipsoid too, because the sphere becomes one at the scaling step and an ellipsoid stays an ellipsoid under the similarity.
-Where a pair is unsupported, both spellings fail: a rotation composed with a translation is rigid, which an `aabb` rejects, and so does the chain at its rotation step.
+Where a pair is unsupported, both spellings fail: a projected ray is a bounded segment, which a `ray` rejects at the projection step either way.
 
 ### Composition is opt-in, and `composed` is the opt-in
 
@@ -322,15 +323,20 @@ Which registrations exist is a statement about geometry, not about effort:
 
 | primitive | registered at | result |
 |---|---|---|
-| `sphere` | similarity / affine (unless embedded) | `sphere` / **`ellipsoid`** |
+| `sphere` | similarity / affine | `sphere` / **`ellipsoid`** (an embedded one too: a disk becomes an ellipse in space) |
 | `ellipsoid` | affine | `ellipsoid` |
-| `aabb` | scaling + translation **only** | `aabb` |
+| `aabb` | scaling + translation / affine | `aabb` / **`box`** |
+| `box` | affine | `box` |
+| `halfspace` | affine, projective (as its plane) | `halfspace` |
+| any `*_boundary` | whatever its solid is | the boundary of the solid's image |
 | `triangle`, `segment` | affine, projective | unchanged |
 | `plane` | affine, projective | `plane` |
 | `ray`, `line` | affine **only** | unchanged |
+| `tetrahedron`, `quad` | affine | unchanged |
+| `frustum` | affine, projective (as its planes) | `frustum` |
+| round objects: `capsule`, `cylinder`, `cone`, `hemisphere`, their unbounded forms | similarity **only**, signed included | unchanged; an affine image is elliptic, which no type encodes |
 
-The affine image of an *embedded* `sphere` is the one gap left in that table.
-It is an ellipse in the ambient space, but naming it needs an orthonormal basis of the circle's plane, which `linalg` has no routine for yet.
+An *embedded* `sphere` maps affinely to an ellipse in the ambient space, its semi-axes the images of two radius vectors from `tg::orthonormal_basis` of its plane.
 
 A finite convex primitive given by its vertices does survive a projection.
 `w` is affine over the primitive and the positive-`w` halfspace is convex, so asserting `w > 0` at the vertices settles the whole hull.
@@ -338,14 +344,15 @@ An unbounded primitive generally does not.
 
 ### An unsupported pair is a compile error on purpose
 
-A rotated `aabb` is not an `aabb`.
-Returning the enclosing box instead would be a silent, lossy answer to a question the caller did not ask, so the chain falls through to its `static_assert` and says so.
-The same holds for a projected `ray` (its point at infinity maps to a finite point, so the image is a bounded segment) and a projected `sphere` (a general quadric).
+A rotated `aabb` is not an `aabb`, so it becomes an oriented `box` rather than the enclosing aabb.
+Returning the enclosing box would be a silent, lossy answer to a question the caller did not ask.
+Where no type holds the answer the chain falls through to its `static_assert` and says so.
+That is a projected `ray` (its point at infinity maps to a finite point, so the image is a bounded segment) and a projected `sphere` (a general quadric).
 
-Each of those gaps names a type tg does not have yet — `obb`, a clipped segment, `quadric`.
+Each of those gaps names a type tg does not have yet — a clipped segment, `quadric`.
 
 The cost of that design is that "can X be transformed by Y" is not separately probeable: the member's return type is `auto`, so asking would instantiate the body and trip the `static_assert`.
-Probe the branch condition instead — `requires { tg::scaling_translation_transform<D, T>(t); }` is exactly why an `aabb` accepts or rejects a given transform.
+Probe the branch condition instead — `requires { tg::scaling_translation_transform<D, T>(t); }` is exactly why an `aabb` stays an `aabb` under a given transform.
 
 ### A normal is a `bivec`, not a `vec`
 

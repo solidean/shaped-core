@@ -5,6 +5,7 @@
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
 /// Line: an infinite straight line through a point along a direction.
@@ -52,6 +53,53 @@ public:
         else
             static_assert(false, "tg: a line only survives an affine map");
     }
+
+    // readings
+public:
+    [[nodiscard]] constexpr pos<D, T> any_point() const { return origin; }
+
+    // parameters
+public:
+    /// origin + t * dir.
+    [[nodiscard]] constexpr pos<D, T> at(T t) const { return origin + dir * t; }
+    /// the parameter of p's projection onto the line.
+    [[nodiscard]] constexpr T parameter_of(pos<D, T> const& p) const
+    {
+        return tg::dot(p - origin, dir) / tg::dot(dir, dir);
+    }
+
+    // queries: defined per verb in geometry/query/, see libs/base/typed-geometry/docs/plans/geometry-query-matrix.md
+public:
+    template <class Obj>
+    [[nodiscard]] constexpr auto project_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_points_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_point_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_sqr_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto signed_distance_to(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto contains(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersects(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool may_intersect(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool intersects(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr bool contains(Obj const& obj, T eps) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto separation_from(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersection_with(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto intersection_parameter_with(Obj const& obj) const;
+    template <class Obj>
+    [[nodiscard]] constexpr auto closest_intersection_parameter_with(Obj const& obj) const;
 
     // comparison
 public:

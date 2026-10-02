@@ -2,6 +2,7 @@
 
 #include <nexus/test.hh>
 #include <typed-geometry/geometry/primitives/ellipsoid.hh>
+#include <typed-geometry/geometry/query/query.hh>
 #include <typed-geometry/geometry/traits.hh>
 
 #include <type_traits>
@@ -10,15 +11,18 @@ static_assert(std::is_trivially_copyable_v<tg::ellipsoid3f>, "ellipsoid should b
 
 namespace
 {
-static_assert(tg::traits::intrinsic_dim<tg::ellipsoid3f> == 2);
+// an ellipsoid is the solid; its boundary is codimension 1
+static_assert(tg::traits::intrinsic_dim<tg::ellipsoid3f> == 3);
 static_assert(tg::traits::ambient_dim<tg::ellipsoid3f> == 3);
 static_assert(tg::traits::is_finite<tg::ellipsoid3f>);
+static_assert(tg::traits::intrinsic_dim<tg::ellipsoid3f_surface> == 2);
 
-// an ellipse is the 2D case, and it keeps its own dimension when it is embedded in 3D
-static_assert(tg::traits::intrinsic_dim<tg::ellipsoid2f> == 1);
+// the filled ellipse is the 2D case, and it keeps its own dimension when it is embedded in 3D
+static_assert(tg::traits::intrinsic_dim<tg::ellipsoid2f> == 2);
 static_assert(tg::traits::ambient_dim<tg::ellipsoid2f> == 2);
-static_assert(tg::traits::intrinsic_dim<tg::ellipsoid2in3f> == 1);
+static_assert(tg::traits::intrinsic_dim<tg::ellipsoid2in3f> == 2);
 static_assert(tg::traits::ambient_dim<tg::ellipsoid2in3f> == 3);
+static_assert(tg::traits::intrinsic_dim<tg::ellipsoid2in3f_boundary> == 1);
 
 static_assert(std::is_same_v<tg::ellipsoid3<float>, tg::ellipsoid3f>);
 static_assert(std::is_same_v<tg::ellipsoid2in3<float>, tg::ellipsoid2in3f>);
@@ -49,6 +53,20 @@ TEST("tg ellipsoid - construction")
         CHECK(tg::ellipsoid3f(tg::pos3f(0, 0, 0), x, y, z) != tg::ellipsoid3f(tg::pos3f(1, 0, 0), x, y, z));
         CHECK(tg::ellipsoid3f(tg::pos3f(0, 0, 0), x, y, z) != tg::ellipsoid3f(tg::pos3f(0, 0, 0), x * 2.0f, y, z));
     }
+}
+
+TEST("tg ellipsoid - the boundary is a type of its own")
+{
+    auto const e = tg::ellipsoid3f(tg::pos3f(1, 1, 1), tg::vec3f(2, 0, 0), tg::vec3f(0, 3, 0), tg::vec3f(0, 0, 4));
+    auto const b = e.boundary();
+    static_assert(std::is_same_v<decltype(b), tg::ellipsoid3f_surface const>);
+
+    CHECK(b.center == e.center);
+    CHECK(b.semi_axes[1] == e.semi_axes[1]);
+    CHECK(b.solid() == e);
+
+    auto const t = tg::scaling_transform3f::make_scaling(tg::vec3f(1, 3, 1));
+    CHECK(b.transformed(t) == e.transformed(t).boundary());
 }
 
 TEST("tg ellipsoid - transformation maps every semi-axis")
@@ -107,4 +125,20 @@ TEST("tg ellipsoid - an ellipse embedded in 3D stays 2D")
 
     CHECK(tgtest::approx(r.semi_axes[0], tg::vec3f(2, 0, 0), 1e-4f));
     CHECK(tgtest::approx(r.semi_axes[1], tg::vec3f(0, 0, 1), 1e-4f));
+}
+
+TEST("tg ellipsoid - a point meets the surface exactly when it lies on it")
+{
+    static_assert(tg::has_intersects<tg::pos3f, tg::ellipsoid3f_surface>);
+    static_assert(tg::has_intersects<tg::ellipsoid3f_surface, tg::pos3f>);
+
+    // power-of-two semi-axes, so the unit-ball frame is exact
+    auto const e = tg::ellipsoid3f(tg::pos3f(0, 0, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 2, 0), tg::vec3f(0, 0, 4));
+    auto const s = e.boundary();
+    CHECK(s.contains(tg::pos3f(1, 0, 0)));
+    CHECK(s.intersects(tg::pos3f(0, 2, 0)));
+    CHECK(tg::pos3f(0, 0, -4).intersects(s));
+    CHECK(!s.intersects(tg::pos3f(0, 1, 0)));
+    CHECK(!tg::pos3f(0, 1, 0).intersects(s));
+    CHECK(!s.intersects(tg::pos3f(0, 0, 5)));
 }
