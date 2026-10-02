@@ -306,6 +306,11 @@ sr::slug_routine::prewarm(ctx, {.color = f, .depth = sg::pixel_format::undefined
 auto font = sr::slug_font::load_system_ui_font().value();   // or slug_font::load(path); owns its own atlas
 font.append_line(out, "text", origin, size, color, right = {1, 0}, up = {0, 1});      // advance-only: no kerning
 font.line_width("text", size);  font.atlas();  font.glyph(g);
+
+#include <shaped-rendering/slug_traced.hh>     // shapes as ray-traced geometry
+auto const records = sr::upload_slug_records(cmd, atlas, instances);   // buffer<sgl_modules::slug::shape_instance>; prepares atlas
+auto const blas = sr::build_slug_blas(cmd, instances.subspan({.offset = first, .size = count}));   // two NON-OPAQUE triangles per instance
+sg::tlas_instance{.blas = blas, .instance_id = u32(first), .cull_mode = sg::instance_cull_mode::none};   // instance_id IS the first record
 ```
 
 - **Output is linear and premultiplied**, blended premultiplied; an instance's colour is 8-bit sRGB, straight alpha.
@@ -314,7 +319,12 @@ font.line_width("text", size);  font.atlas();  font.glyph(g);
 - **Any pixel shader can cover a shape**: `use slug`, list `{slug.tables}` and call `slug.coverage(em, banding, glyph, weight_boost)`.
   It takes its footprint from `ddx` / `ddy`, so call it in uniform control flow; the other overload takes `em_per_pixel`.
   The host binds `sgl_modules::slug::tables` (`<sgl_modules/slug.hh>`) from the atlas; another package lists `SR_SGL_MODULE_DIR` in its `MODULE_DIRS`.
+- **A trace meets shapes through one decision**: list `{slug.tables, slug.shapes}` and trace with `world.trace(r, c => slug.decide(c))`.
+  `slug.decide` is a point test with a hard edge, so the rays a pixel casts antialias it; every non-opaque triangle must be a slug quad.
+  A lambda, since a module's function cannot be handed over by name yet.
+- **A traced decal** passes `slug.coverage` its footprint: the em span to where neighbouring rays meet the surface's plane (`graphics/slug-traced`).
 - `impl::slug_reference_coverage(atlas, instance, em, em_per_pixel, weight_boost)` is the pixel shader on the CPU, for tests.
+  `impl::slug_reference_contains(atlas, instance, em)` is `slug.contains`, the point test.
 
 ## Box-filter mipmap routine
 

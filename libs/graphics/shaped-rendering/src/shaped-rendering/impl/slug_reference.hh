@@ -15,4 +15,7 @@ namespace sr::impl
                                           tg::pos2f em,
                                           tg::vec2f em_per_pixel,
                                           bool weight_boost);
+
+/// The point test module `slug`'s `contains` computes, on the CPU in the same order.
+[[nodiscard]] bool slug_reference_contains(slug_atlas const& atlas, slug_instance const& instance, tg::pos2f em);
 } // namespace sr::impl
