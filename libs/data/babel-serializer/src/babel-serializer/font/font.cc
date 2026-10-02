@@ -160,7 +160,11 @@ struct table_directory
         else if (c > end)
             lo = mid + 1;
         else
-            return u16(cc::load_bytes_be<u32>(sub, at + 8) + (c - start));
+        {
+            // u32 before the range check: a corrupt group past 0xFFFF must not wrap onto a real glyph.
+            auto const glyph = cc::load_bytes_be<u32>(sub, at + 8) + (c - start);
+            return glyph > 0xFFFF ? u16(0) : u16(glyph);
+        }
     }
     return 0;
 }
@@ -281,8 +285,11 @@ cc::result<face> read(cc::pinned_data<byte const> bytes, i32 face_index)
             auto const platform = c.read<u16>();
             auto const encoding = c.read<u16>();
             auto const offset = isize(c.read<u32>());
-            if (!c.ok || offset + 4 > cmap.value().size())
+            if (!c.ok)
                 break;
+            // a record pointing past the table is skipped, not the end of the scan: later records may be valid
+            if (offset + 4 > cmap.value().size())
+                continue;
             auto const format = cc::load_bytes_be<u16>(cmap.value(), offset);
             auto const preference = babel::impl::cmap_preference(platform, encoding, format);
             if (preference <= best)
