@@ -482,7 +482,8 @@ TEST("sgl emit layout - a @layout(.cpp) block places 16-bit values and matrices 
 {
     auto const source = cc::string_view("require shader_f16\n"
                                         "\n"
-                                        "@layout(.cpp) @inline binding look:\n"
+                                        "@layout(.cpp)\n"
+                                        "binding look:\n"
                                         "    a: half\n"
                                         "    b: float\n"
                                         "    to_world: mat4\n"

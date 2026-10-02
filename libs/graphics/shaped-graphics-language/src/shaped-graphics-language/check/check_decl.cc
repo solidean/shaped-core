@@ -1337,6 +1337,13 @@ void checker::compile_binding(symbol_id id)
             if (auto const* const smp = ast_of(file).at(member).node.try_as<ast::sampler_decl>())
                 report(diagnostic_kind::wrong_kind_of_name, file, smp->name,
                        "an @inline binding holds constants only, and a sampler is none");
+    // CHK-387: an `@inline` binding is a vulkan push constant, where a 16-bit member needs a bit of its own
+    if (is_inline)
+        for (auto const& m : out.at(members))
+            if (auto const path = sixteen_bit_path(m.type); !path.empty())
+                unsupported(
+                    file, span_of(file, ast_of(file).at(m.field).type),
+                    cc::format("a 16-bit value in an @inline binding, in {}.{}{}", out.at(id).name, m.name, path));
     out.symbols[index_of(id)].info = i32(out.bindings.size());
     out.bindings.push_back({
         .symbol = id,

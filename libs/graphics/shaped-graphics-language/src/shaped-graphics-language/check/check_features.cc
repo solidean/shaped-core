@@ -144,6 +144,23 @@ feature_set checker::features_of_type(type_id type) const
     }
 }
 
+cc::string checker::sixteen_bit_path(type_id type) const
+{
+    if (type == checked_module::error_type)
+        return {};
+    if (auto const* const record = out.builtin_type_of(type))
+        return is_16_bit(record->leaf_kind) ? cc::format(": {}", out.name_of(type)) : cc::string();
+    auto const& t = out.at(type);
+    if (t.kind == type_kind::array)
+        return sixteen_bit_path(t.element);
+    if (t.kind != type_kind::structure)
+        return {};
+    for (auto const& m : out.at(t.members))
+        if (auto inner = sixteen_bit_path(m.type); !inner.empty())
+            return cc::format(".{}{}", m.name, inner);
+    return {};
+}
+
 void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
@@ -153,23 +170,7 @@ void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
         return;
-    auto const path = [&](auto const& self, type_id t) -> cc::string
-    {
-        for (auto const& m : out.at(out.at(t).members))
-        {
-            if (auto const* const record = out.builtin_type_of(m.type))
-            {
-                if (is_16_bit(record->leaf_kind))
-                    return cc::format(".{}: {}", m.name, out.name_of(m.type));
-                continue;
-            }
-            if (m.type != checked_module::error_type && out.at(m.type).kind == type_kind::structure)
-                if (auto inner = self(self, m.type); !inner.empty())
-                    return cc::format(".{}{}", m.name, inner);
-        }
-        return {};
-    };
-    if (auto const found = path(path, type); !found.empty())
+    if (auto const found = sixteen_bit_path(type); !found.empty())
         unsupported(file, where, cc::format("a 16-bit value crossing a stage edge, in {}{}", out.name_of(type), found));
 }
 

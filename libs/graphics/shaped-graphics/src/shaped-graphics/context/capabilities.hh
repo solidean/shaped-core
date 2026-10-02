@@ -88,11 +88,15 @@ enum class sg::feature
 
     /// A shader may compute and store 16-bit floats (SGL's `half`), in registers and in buffers.
     /// D3D12 grants it with `Native16BitShaderOpsSupported`, Vulkan with `shaderFloat16` plus 16-bit buffer storage.
+    /// Where Vulkan grants `subgroups` too it also needs `shaderSubgroupExtendedTypes`, since a subgroup operation takes 16-bit values.
+    /// It promises no 16-bit push constant on Vulkan, and SGL refuses a 16-bit member in an `@inline` binding.
     /// WebGPU grants it with the optional `shader-f16` feature, and Metal always.
     shader_f16,
 
     /// A shader may compute and store 16-bit integers (SGL's `short` and `ushort`), in registers and in buffers.
     /// D3D12 grants it with `Native16BitShaderOpsSupported`, Vulkan with `shaderInt16` plus 16-bit buffer storage.
+    /// Where Vulkan grants `subgroups` too it also needs `shaderSubgroupExtendedTypes`, since a subgroup operation takes 16-bit values.
+    /// It promises no 16-bit push constant on Vulkan, and SGL refuses a 16-bit member in an `@inline` binding.
     /// WebGPU has no 16-bit integers at all, and Metal always has them.
     shader_int16,
 

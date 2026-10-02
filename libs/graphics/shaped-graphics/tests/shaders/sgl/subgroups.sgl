@@ -1,6 +1,7 @@
 // Subgroup and quad operations and the uniform load, as the GPU runs them: each holds whatever size the subgroup is.
 
 require subgroups
+require shader_f16
 
 binding wave_io:
     values: buffer[uint]
@@ -28,3 +29,13 @@ binding wave_io:
     if total > 0u:
         workgroup_barrier()
     wave_io.sums[id.x] = total
+
+// A subgroup sum over halves, which vulkan runs only where the device turns on its subgroup operations over 16-bit types.
+// A workgroup of 128 holds every subgroup a device has whole, so each sum covers exactly the subgroup's size.
+binding wave_halves:
+    values: buffer[half2]
+    sums: mut buffer[float4]
+
+@compute(128) fun reduce_halves(@thread_id id: int3, @subgroup_size size: int){wave_halves}:
+    let total = subgroup_add(wave_halves.values[id.x])
+    wave_halves.sums[id.x] = float4(total.x as float, total.y as float, size as float, 0.0)

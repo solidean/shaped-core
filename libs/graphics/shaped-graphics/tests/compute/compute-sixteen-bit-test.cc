@@ -110,3 +110,49 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's shorts and ushorts wrap at 16
         CHECK(data[i][1] == u16(u16(-2 * i) - 1u));
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL subgroup sum over halves agrees with the CPU at any subgroup size",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::subgroups) || !ctx->supports(sg::feature::shader_f16))
+        SKIP("this context has no subgroup operations over 16-bit floats");
+
+    auto const pipeline = co_await shaders::subgroups.reduce_halves.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::wave_halves>();
+
+    // every partial sum is a small integer, which a half holds exactly in whatever order a GPU adds
+    constexpr auto count = 4 * 128;
+    auto values = cc::vector<tg::vec<2, tg::f16>>();
+    for (auto i = 0; i < count; ++i)
+        values.push_back(tg::vec<2, tg::f16>(tg::f16(1.0f), tg::f16(float(i % 4))));
+    auto const value_buffer
+        = ctx->persistent.create_buffer_from_data(cc::move(values), sg::buffer_usage::readonly_buffer);
+    auto const sums
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec<4, f32>>::create_defaulted(count),
+                                                  sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::wave_halves{.values = value_buffer.as_readonly_buffer(), .sums = sums.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer(sums);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // a subgroup of n invocations sums n ones, and n / 4 runs of 0, 1, 2 and 3
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const size = data[i][2];
+        CHECK(size >= 4.0f);
+        CHECK(size <= 128.0f);
+        CHECK(data[i][0] == size);
+        CHECK(data[i][1] == 1.5f * size);
+    }
+}

@@ -404,6 +404,10 @@ struct optional_shader_features
     VkBool32 shader_int16 = VK_FALSE;
     VkBool32 storage_buffer_16bit = VK_FALSE;
     VkBool32 uniform_and_storage_buffer_16bit = VK_FALSE;
+    /// An HLSL push constant may hold a 16-bit member, which needs this bit; SGL refuses one in an `@inline` binding.
+    VkBool32 storage_push_constant_16bit = VK_FALSE;
+    /// A subgroup operation over a 16-bit value needs this bit, and SGL has every subgroup operation over 16-bit types.
+    VkBool32 subgroup_extended_types = VK_FALSE;
     VkBool32 subgroup_size_control = VK_FALSE;
     /// DXC writes a compute stage's quad operations in a derivative group, linear along one axis or of 2x2 threads.
     /// Both are VK_KHR_compute_shader_derivatives', which creation enables wherever the device has it.
@@ -414,12 +418,14 @@ struct optional_shader_features
     VkPhysicalDeviceVulkan13Properties vk13_properties = {};
 
     /// A 16-bit type is used in registers and in buffers alike, so each kind needs both storage bits too.
-    [[nodiscard]] bool has_16bit_storage() const
+    /// Beside `subgroups` it also needs the subgroup operations over 16-bit values, since a shader may use the two together.
+    [[nodiscard]] bool has_16bit_support() const
     {
-        return storage_buffer_16bit == VK_TRUE && uniform_and_storage_buffer_16bit == VK_TRUE;
+        return storage_buffer_16bit == VK_TRUE && uniform_and_storage_buffer_16bit == VK_TRUE
+            && (!subgroups || subgroup_extended_types == VK_TRUE);
     }
-    [[nodiscard]] bool has_f16() const { return shader_float16 == VK_TRUE && has_16bit_storage(); }
-    [[nodiscard]] bool has_int16() const { return shader_int16 == VK_TRUE && has_16bit_storage(); }
+    [[nodiscard]] bool has_f16() const { return shader_float16 == VK_TRUE && has_16bit_support(); }
+    [[nodiscard]] bool has_int16() const { return shader_int16 == VK_TRUE && has_16bit_support(); }
 };
 
 optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
@@ -458,6 +464,8 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         .shader_int16 = features.features.shaderInt16,
         .storage_buffer_16bit = vk11.storageBuffer16BitAccess,
         .uniform_and_storage_buffer_16bit = vk11.uniformAndStorageBuffer16BitAccess,
+        .storage_push_constant_16bit = vk11.storagePushConstant16,
+        .subgroup_extended_types = vk12.shaderSubgroupExtendedTypes,
         .subgroup_size_control = vk13.subgroupSizeControl,
         .has_compute_derivatives = has_compute_derivatives,
         .compute_derivative_group_linear = linear,
@@ -745,6 +753,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .runtimeDescriptorArray = VK_TRUE,
         .shaderFloat16 = shader_features.shader_float16,
         .scalarBlockLayout = VK_TRUE,
+        .shaderSubgroupExtendedTypes = shader_features.subgroup_extended_types,
         // How the query system resets a pool: vkCmdResetQueryPool cannot be recorded inside a render-pass instance,
         // and a timestamp legitimately can be.
         // See vulkan_query.hh.
@@ -784,6 +793,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .pNext = &vk12_features,
         .storageBuffer16BitAccess = shader_features.storage_buffer_16bit,
         .uniformAndStorageBuffer16BitAccess = shader_features.uniform_and_storage_buffer_16bit,
+        .storagePushConstant16 = shader_features.storage_push_constant_16bit,
         .shaderDrawParameters = VK_TRUE,
     };
 

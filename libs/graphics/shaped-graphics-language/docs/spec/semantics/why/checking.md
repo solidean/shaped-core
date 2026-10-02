@@ -514,6 +514,12 @@ A module that declared `fun xy(a: float4)` would then silently retarget every `v
 Found where a field is found, `v.xy` depends on the type of `v` alone.
 The price is that a prelude vector cannot later grow a method named like a swizzle.
 
+## CHK-387
+
+An `@inline` binding is a push constant on vulkan, and a 16-bit member of one needs `storagePushConstant16`, a device bit of its own.
+Folding that bit into `shader_f16` and `shader_int16` would cost 16-bit types to the mobile drivers that lack only it.
+So the member is refused instead, and a 16-bit constant travels as a 32-bit one converted in the shader, or in a group's constant block.
+
 ## CHK-353
 
 FSR's permutations are read deep in shared helpers, and an option is the one shape where a helper reads one without every caller learning of it.

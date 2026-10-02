@@ -242,3 +242,16 @@ TEST("sgl check - no 16-bit value crosses a stage edge, and no buffer strides by
     CHECK(reports_for(listing("require shader_f16\n\n", "    values: buffer[half3]\n")).contains("takes 6 bytes"));
     CHECK(reports_for(listing("require shader_f16\n\n", "    values: buffer[half2]\n")) == "");
 }
+
+TEST("sgl check - an @inline binding holds no 16-bit value, at any depth")
+{
+    // CHK-387: a push constant on vulkan, where a 16-bit member needs a device bit the 16-bit features leave out
+    CHECK(reports_for(listing("require shader_f16\n\n@inline ", "    gain: half\n"))
+          == "unsupported-yet user:[half] a 16-bit value in an @inline binding, in work.gain: half\n");
+    CHECK(reports_for(listing("require shader_int16\n\nstruct tint:\n    level: ushort2\n\n@inline ",
+                              "    scale: float\n    t: tint\n"))
+              .contains("a 16-bit value in an @inline binding, in work.t.level: ushort2"));
+    // a group's constant block holds one, and an @inline binding a 32-bit value
+    CHECK(reports_for(listing("require shader_f16\n\n", "    gain: half\n")) == "");
+    CHECK(reports_for(listing("@inline ", "    gain: float\n")) == "");
+}
