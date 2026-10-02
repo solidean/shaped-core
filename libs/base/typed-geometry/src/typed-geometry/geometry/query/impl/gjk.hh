@@ -233,6 +233,10 @@ constexpr void reduce_simplex_exhaustive(gjk_vertex<D, T>* s, int& n, T* bary)
         for (auto i = 0; i < n; ++i)
             if (mask & (1 << i))
                 idx[k++] = i;
+        // the whole simplex is never a candidate here: on a nearly flat one its system solves to noise that can pass
+        // the positivity test, and enclosing the origin is the closed-form tetrahedron's call, guarded by its volume
+        if (k == D + 1)
+            continue;
 
         // the point is w0 + sum_j l_j (w_j - w0), with the Gram system G l = -(e_j . w0)
         T lambda[D + 1] = {};

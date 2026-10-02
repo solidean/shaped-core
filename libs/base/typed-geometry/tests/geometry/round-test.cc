@@ -107,3 +107,19 @@ TEST("tg round - cylinder, its surface and its tube")
         CHECK(tgtest::approx(g.on_a.distance_to(g.on_b), p.distance_to(c), 1e-6));
     }
 }
+
+TEST("tg round - GJK does not call two apart capsules overlapping when its step stalls")
+{
+    // A pair whose GJK run stalls on a nearly flat simplex; the exhaustive fallback once took the whole tetrahedron,
+    // whose system solved to noise, as enclosing the origin.
+    auto const a = tg::capsule3d(tg::segment3d(tg::pos3d(-3.0177530693121737, 3.3944944414439338, 3.3690443848076121),
+                                               tg::pos3d(3.8767888962775379, -1.8856703351222084, 1.3179610189442945)),
+                                 0.96993036988210379);
+    auto const b = tg::capsule3d(tg::segment3d(tg::pos3d(2.3503781805677804, -0.86039287304437106, -0.44427452683903557),
+                                               tg::pos3d(2.7742660241401031, 1.2017286488272196, 1.1315760882470682)),
+                                 0.70281881490195208);
+    auto const expected = a.axis.distance_to(b.axis) - a.radius - b.radius;
+    CHECK(expected > 0.01);
+    CHECK(!a.intersects(b));
+    CHECK(tgtest::approx(a.distance_to(b), expected, 1e-6));
+}
