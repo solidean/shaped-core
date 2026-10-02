@@ -37,7 +37,7 @@ enum class sgl::check::feature : sgl::u8
     image_atomics,
 };
 
-CC_FLAG_ENUM_INDEXED(sgl::check, feature, u16);
+CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
 
 namespace sgl::check
 {
