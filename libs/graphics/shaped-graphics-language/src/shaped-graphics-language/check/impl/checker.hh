@@ -503,6 +503,8 @@ struct checker
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
     /// `@preferred_subgroup_size(n)`'s `n` (CHK-371); 0 without the attribute, and after a bad one, which it reports.
     [[nodiscard]] i32 preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute);
+    /// `@layout(.hlsl)` or `@layout(.cpp)` on a binding; anything else reports and promises nothing.
+    [[nodiscard]] block_layout layout_of(i32 file, ast::attribute const* a, bool is_workgroup);
     /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
     [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
     struct tessellation_mode

@@ -585,7 +585,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
 
     if (b.is_inline)
     {
-        auto const placed = sgl::emit::impl::place_block(m, members);
+        auto const placed = sgl::emit::impl::place_block(m, members, sgl::emit::impl::block_space(b));
         for (auto i = isize(0); i < members.size(); ++i)
             result.members.push_back({.name = members[i].name,
                                       .kind = described_member_kind::constant,
@@ -599,7 +599,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
     // Numbered as the emitter numbers them: the constant block first when there is one, then the resources in
     // declaration order, each the next slot of its group.
     auto const plain = sgl::emit::impl::plain_members_of(m, b);
-    auto const placed = sgl::emit::impl::place_block(m, plain);
+    auto const placed = sgl::emit::impl::place_block(m, plain, sgl::emit::impl::block_space(b));
     if (!plain.empty())
     {
         result.block_size = placed.size;

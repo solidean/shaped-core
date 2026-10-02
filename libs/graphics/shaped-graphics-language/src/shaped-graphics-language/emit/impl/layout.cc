@@ -74,7 +74,7 @@ placed_members place_from(checked_module const& m,
             result.leaves.push_back(cc::move(leaf));
         at += inner.size;
     }
-    result.size = space == address_space::storage ? round_up(at, result.alignment) : at;
+    result.size = space != address_space::constants ? round_up(at, result.alignment) : at;
     return result;
 }
 } // namespace
@@ -86,7 +86,12 @@ sgl::i32 sgl::emit::impl::scalar_size_of(builtins::type_record const& record)
 
 cc::string_view sgl::emit::impl::space_name(address_space space)
 {
-    return space == address_space::constants ? "constant block" : "storage buffer";
+    return space == address_space::storage ? "storage buffer" : "constant block";
+}
+
+sgl::emit::impl::address_space sgl::emit::impl::block_space(check::binding_info const& b)
+{
+    return b.layout == check::block_layout::cpp ? address_space::cpp_constants : address_space::constants;
 }
 
 bool sgl::emit::impl::is_placeable(check::checked_module const& m, check::type_id type)
@@ -188,7 +193,7 @@ void sgl::emit::impl::collect_placed_structs(check::checked_module const& m,
         auto const& t = m.takes_slots(member.type) && whole.kind == check::type_kind::array ? m.at(whole.element) : whole;
         if (space == address_space::storage && t.kind == check::type_kind::buffer)
             collect_structs(m, t.element, out);
-        else if (space == address_space::constants && !check::is_resource(t.kind))
+        else if (space == block_space(b) && !check::is_resource(t.kind))
             collect_structs(m, member.type, out);
     }
 }

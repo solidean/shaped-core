@@ -429,7 +429,7 @@ struct planner
                     .group = group,
                     .slot = 0,
                 };
-                auto const placed = place_block(p.m, plain);
+                auto const placed = place_block(p.m, plain, block_space(b));
                 for (auto i = isize(0); i < planned.members.size(); ++i)
                     planned.members[i].offset = placed.offsets[i];
                 auto next = 0;
@@ -512,7 +512,7 @@ struct planner
         auto const form_of_block = [&](planned_constants& block)
         {
             auto const& b = p.m.bindings[p.m.at(block.symbol).info];
-            block.form = memory_form_of(p.m, plain_members_of(p.m, b), address_space::constants, 0, p.which);
+            block.form = memory_form_of(p.m, plain_members_of(p.m, b), block_space(b), 0, p.which);
             if (block.form.has_value())
                 block.form.value().name = block.block_name;
         };
@@ -584,7 +584,7 @@ struct planner
                 .block_name = p.names.mint(cc::format("{}_data", s.name)),
                 .members = members_of(b.members, false),
             };
-            auto const placed = place_block(p.m, p.m.at(b.members));
+            auto const placed = place_block(p.m, p.m.at(b.members), block_space(b));
             for (auto i = isize(0); i < planned.members.size(); ++i)
             {
                 planned.members[i].offset = placed.offsets[i];
@@ -806,6 +806,14 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
     if (!is_placed)
         return;
 
+    // EMIT-154: every target reads a `.cpp` block from its memory form, and HLSL has no expression that builds a
+    // struct value out of the fields
+    if (b.layout == check::block_layout::cpp)
+        for (auto const& member : plain_members_of(m, b))
+            if (member.type != check::checked_module::void_type && m.builtin_type_of(member.type) == nullptr)
+                report(error_kind::unsupported,
+                       cc::format("a struct member in a @layout(.cpp) block: '{}.{}'", s.name, member.name));
+
     // A struct has one layout, so it stands in one address space; two rules would give it two.
     for (auto const space : {address_space::constants, address_space::storage})
     {
@@ -831,7 +839,7 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
 
     auto const plain = plain_members_of(m, b);
     if (b.is_no_padding)
-        for (auto& gap : padding_of(m, plain, address_space::constants))
+        for (auto& gap : padding_of(m, plain, block_space(b)))
             report(error_kind::padding_forbidden, cc::format("in the block of @no_padding '{}': {}", s.name, gap));
     for (auto const space : {address_space::constants, address_space::storage})
     {
@@ -872,9 +880,10 @@ sgl::emit::impl::planned_constants const* sgl::emit::impl::block_of(plan const& 
 }
 
 sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_module const& m,
-                                                              cc::span<check::member_info const> members)
+                                                              cc::span<check::member_info const> members,
+                                                              address_space space)
 {
-    auto placed = place(m, members, address_space::constants);
+    auto placed = place(m, members, space);
     return {.offsets = cc::move(placed.offsets), .sizes = cc::move(placed.sizes), .size = placed.size};
 }
 
@@ -1160,10 +1169,11 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
     auto result = cc::vector<emitted_layout>();
     auto const block = [&](planned_constants const& c)
     {
-        auto const plain = plain_members_of(p.m, p.m.bindings[p.m.at(c.symbol).info]);
+        auto const& b = p.m.bindings[p.m.at(c.symbol).info];
+        auto const plain = plain_members_of(p.m, b);
         result.push_back({.global = c.name,
                           .fields = c.form.has_value() ? fields_of(c.form.value())
-                                                       : fields_of(p, c.members, {}, plain, address_space::constants)});
+                                                       : fields_of(p, c.members, {}, plain, block_space(b))});
     };
     if (p.constants.has_value())
         block(p.constants.value());

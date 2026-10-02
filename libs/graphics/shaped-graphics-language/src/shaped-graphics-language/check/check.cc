@@ -369,7 +369,7 @@ void checker::judge_attributes(i32 file,
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "preferred_subgroup_size"
                  && name != "stream" && name != "stages" && name != "shadowable" && name != "expect"
                  && name != "interpolate" && name != "format" && name != "depth" && name != "sampler"
-                 && name != "geometry" && name != "tessellation_control")
+                 && name != "geometry" && name != "tessellation_control" && name != "layout")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }

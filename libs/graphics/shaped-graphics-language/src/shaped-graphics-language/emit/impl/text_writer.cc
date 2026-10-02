@@ -314,7 +314,14 @@ struct writer
                 return field_text(r, leaf, 0);
             auto const& record = *p.m.builtin_type_of(r.type);
             auto pieces = cc::vector<cc::string>();
-            if (record.leaf_count > 4 && !d.has_struct_constructor())
+            if (record.leaf_count > 4 && d.language() == builtins::language::hlsl)
+            {
+                // HLSL fills a matrix row by row from its scalars, and the fields hold it column by column.
+                for (auto row = 0; row < 4; ++row)
+                    for (auto column = 0; column < 4; ++column)
+                        pieces.push_back(field_text(r, leaf, column * 4 + row));
+            }
+            else if (record.leaf_count > 4 && !d.has_struct_constructor())
             {
                 // MSL builds a matrix from its columns, not from its scalars.
                 auto const column = cc::string(builtin_spelling(p, "float4"));

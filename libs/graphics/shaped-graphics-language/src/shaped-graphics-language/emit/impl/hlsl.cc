@@ -324,6 +324,27 @@ public:
         out.appendf("static const int {} = {};\n", name, value);
     }
 
+    /// A block's struct: its members, or its memory form where it has one (EMIT-154).
+    /// Every field states its offset on vulkan, as the push-constant block's do, so no compiler flag decides the layout.
+    /// dx12 states none: each field of a form fits its row and padding fills every gap, so its own packing lands each
+    /// at its offset.
+    void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
+    {
+        out.appendf("struct {}\n{{\n", block.block_name);
+        if (!block.form.has_value())
+            for (auto const& member : block.members)
+                write_member(out, nullptr, member, p);
+        else
+            for (auto const& f : block.form.value().fields)
+            {
+                out += k_indent;
+                if (_is_vulkan)
+                    out.appendf("[[vk::offset({})]] ", f.offset);
+                out.appendf("{}{} {};\n", f.type == "float4x4" ? "column_major " : "", f.type, f.name);
+            }
+        out += "};\n\n";
+    }
+
     /// Each resource of a group carries its final address: `space` is the group and the register is the slot on
     /// dx12, `[[vk::binding(slot, group)]]` on vulkan.
     /// A group's block is a `ConstantBuffer` of a struct declared ahead of it.
@@ -333,14 +354,7 @@ public:
                      cc::span<planned_resource const> buffers) const override
     {
         if (block != nullptr)
-        {
-            // Every member states its offset on vulkan, as the push-constant block's do, so no compiler flag decides
-            // the layout.
-            out.appendf("struct {}\n{{\n", block->block_name);
-            for (auto const& member : block->members)
-                write_member(out, nullptr, member, p);
-            out += "};\n\n";
-        }
+            write_block_struct(out, p, *block);
         if (block != nullptr)
             write_addressed(out, cc::format("ConstantBuffer<{}>", block->block_name), block->name, 'b', block->group,
                             block->slot, {});
@@ -449,10 +463,7 @@ public:
         if (!p.constants.has_value())
             return;
         auto const& c = p.constants.value();
-        out.appendf("struct {}\n{{\n", c.block_name);
-        for (auto const& member : c.members)
-            write_member(out, nullptr, member, p);
-        out += "};\n\n";
+        write_block_struct(out, p, c);
         if (_is_vulkan)
             out.appendf("[[vk::push_constant]] ConstantBuffer<{}> {};\n\n", c.block_name, c.name);
         else

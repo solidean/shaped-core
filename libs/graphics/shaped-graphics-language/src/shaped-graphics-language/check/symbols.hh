@@ -538,6 +538,17 @@ struct sgl::check::function_info
     constexpr bool operator==(function_info const&) const = default;
 };
 
+/// What a binding's `@layout` promises its constant block (CHK-369).
+enum class sgl::check::block_layout : sgl::u8
+{
+    /// No annotation: the compiler places the block, and promises nothing but the generated struct (EMIT-116).
+    unpromised,
+    /// `@layout(.hlsl)`: HLSL's constant-buffer packing in declaration order, never reordered (EMIT-153).
+    hlsl,
+    /// `@layout(.cpp)`: as a C++ compiler places a struct of the generated host types (EMIT-154).
+    cpp,
+};
+
 struct sgl::check::binding_info
 {
     symbol_id symbol = symbol_id::none;
@@ -547,6 +558,7 @@ struct sgl::check::binding_info
     bool is_workgroup = false;
     /// `@no_padding`: a gap before any member of its constant block is an error.
     bool is_no_padding = false;
+    block_layout layout = block_layout::unpromised;
     ast::range_of<member_info> members;
     /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
     feature_set declared;

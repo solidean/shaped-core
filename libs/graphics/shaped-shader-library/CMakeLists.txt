@@ -153,6 +153,7 @@ if(SC_BUILD_TESTS)
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc
         tests/sgl_options-test.cc
+        tests/sgl_layout-test.cc
         tests/metal_compiler-test.cc
         tests/pipeline-test.cc
         tests/raytracing_pipeline-test.cc
@@ -258,6 +259,7 @@ if(SC_BUILD_TESTS)
             cube.sgl:pixel:main_ps
             double_values.sgl:compute:main
             scaled.sgl:*
+            host_layout.sgl:*
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

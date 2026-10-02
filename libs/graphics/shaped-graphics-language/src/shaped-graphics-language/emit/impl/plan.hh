@@ -283,7 +283,7 @@ void validate_edge_struct(check::checked_module const& m, check::type_id type, s
 /// What only a list can get wrong, an `@inline` binding that does not stand last, is `validate`'s.
 void validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors);
 
-/// Where the members of a constant block land, by HLSL's constant-buffer packing on every target (layout.hh).
+/// Where the members of a constant block land, by the rule its binding's `@layout` names (layout.hh).
 struct block_placement
 {
     /// Parallel to the members.
@@ -295,7 +295,9 @@ struct block_placement
 };
 
 /// `members` must belong to a binding that passed `validate_binding`.
-[[nodiscard]] block_placement place_block(check::checked_module const& m, cc::span<check::member_info const> members);
+[[nodiscard]] block_placement place_block(check::checked_module const& m,
+                                          cc::span<check::member_info const> members,
+                                          address_space space);
 
 /// Every constant block and buffer element of `p`, as its target's text declares it.
 [[nodiscard]] cc::vector<emitted_layout> layouts_of(plan const& p);

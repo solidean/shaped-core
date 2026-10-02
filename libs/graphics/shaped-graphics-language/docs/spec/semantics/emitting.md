@@ -491,8 +491,10 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 * **EMIT-154** A binding marked `@layout(.cpp)` has its constant block placed as a C++ compiler places a struct of the generated host types ([why](why/emitting.md#emit-154)).
   Each value stands at the next multiple of its alignment: its scalar's size, or a nested struct's largest.
   A struct's size is rounded up to its alignment, a `float3` takes 12 bytes, and no row rule applies.
-  Every target is told so: `hlsl-dx12` writes the block as its memory form (EMIT-113) with a `packoffset` on every field, and `hlsl-vulkan` states every offset.
-  WGSL and MSL write its memory form, and in every target a vector the layout lets cross a 16-byte row is split into scalars.
+  Every target writes the block as its memory form (EMIT-113), and in every target a vector the layout lets cross a 16-byte row is split into scalars.
+  `hlsl-vulkan` states every field's offset.
+  `hlsl-dx12` states none: each field fits its row and padding fills each gap, so its own packing lands every field there ([why](why/emitting.md#emit-154)).
+  A struct member of such a block is `unsupported` for now.
 
 ## Error kinds
 
@@ -500,7 +502,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107, EMIT-154 |
 | `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | none: retired by EMIT-41 |
@@ -521,6 +523,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 * Arrays in GPU memory, which the checker refuses today (CHK-291).
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
 * Whether `@layout` also promises a buffer element's layout, which EMIT-111 places today without a promise.
+* A struct member of a `@layout(.cpp)` block, which HLSL would read back by building the struct in a local field by field.
 * `mat3`, which SGL has no type for yet: its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
   The host holds a block's as `slib::gpu_mat3` and a buffer's as `tg::mat3f`, which is those 36 bytes.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.

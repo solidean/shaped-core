@@ -222,3 +222,10 @@ Tint writes WGSL's own load for HLSL the same way.
 A host struct written with no knowledge of HLSL places a `float3` in 12 bytes and starts the next value right behind it.
 HLSL's constant buffers read in rows of 16 bytes, so a block laid out that way needs every member placed by hand there, and split where a vector crosses a row.
 That is the cost the `.cpp` layout asks for, and it is why `.hlsl` exists beside it.
+Every rule places the same, ordinary C++ struct, since every generated host type aligns to its scalar: `tg::vec3f` is 12 bytes at 4, `tg::mat4f` 64 at 4.
+So the rule is EMIT-111's, and a struct a `.cpp` block holds would have the layout it has in a buffer.
+`packoffset` was the first plan for dx12, and it cannot carry the rule.
+It counts in 4-byte components, so a `half` at byte 2 has no spelling.
+It stands only in a `cbuffer`, whose members are globals rather than fields of the `ConstantBuffer` every other block is read through.
+Neither is needed: once no field crosses a row and a padding field fills each gap, dx12's own packing puts every field right behind the one before, which is where the form placed it.
+A memory form on every target, rather than only where a target's own rule disagrees, keeps one shape of text for a promised layout.

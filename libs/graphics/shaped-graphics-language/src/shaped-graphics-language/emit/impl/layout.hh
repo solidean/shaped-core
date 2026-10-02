@@ -17,10 +17,16 @@ enum class address_space : u8
     constants,
     /// The elements of a `buffer[T]`: dx12's structured-buffer packing, each value aligned to its scalar's size.
     storage,
+    /// A constant block marked `@layout(.cpp)`: as a C++ compiler places a struct of the generated host types (EMIT-154).
+    /// Every host type aligns to its scalar, `tg::vec3f` is 12 bytes at 4, so this places as `storage` does.
+    cpp_constants,
 };
 
 /// "constant block" or "storage buffer", for a diagnostic.
 [[nodiscard]] cc::string_view space_name(address_space space);
+
+/// The rule the constant block of `b` is placed by: `cpp_constants` under `@layout(.cpp)`, and `constants` otherwise.
+[[nodiscard]] address_space block_space(check::binding_info const& b);
 
 /// One builtin value inside a placed value: where it lands, from the start of the outermost one.
 struct placed_leaf
