@@ -105,8 +105,9 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     for (auto i = isize(0); i < result.prelude.size(); ++i)
         modules.push_back({.file = *result.files[i], .ast = *result.asts[i]});
     auto const* const checked = own >= 0 ? nullptr : checked_prelude();
-    result.module = checked != nullptr ? check::check(*checked, library_files, user, options)
-                                       : check::check(modules, library_files, user, builtins::default_registry(), options);
+    result.module = checked != nullptr
+                      ? check::check(*checked, library_files, user, options)
+                      : check::check(modules, library_files, user, builtins::default_registry(), options);
 
     // The files as the check placed them: the prelude, the library files the source reached, then the source.
     for (auto const i : result.module.library_files)

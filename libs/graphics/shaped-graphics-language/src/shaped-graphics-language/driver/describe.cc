@@ -706,9 +706,9 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto const is_module = !request.module.empty();
     auto const joining = cc::format("module {}\n", request.module);
     auto const program_name = cc::format("<module {}>", request.module);
-    auto const front = is_module
-                         ? driver::impl::run_front_end(joining, program_name, request.library, request.options)
-                         : driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
+    auto const front
+        = is_module ? driver::impl::run_front_end(joining, program_name, request.library, request.options)
+                    : driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
     if (!front.errors.empty())
         return cc::error(front.errors);
 

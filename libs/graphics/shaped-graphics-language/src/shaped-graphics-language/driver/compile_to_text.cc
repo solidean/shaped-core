@@ -138,8 +138,7 @@ cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
 {
-    auto const front
-        = driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
+    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
     if (!front.errors.empty())
         return cc::error(front.errors);
     auto const& m = front.module;
@@ -147,10 +146,10 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     if (request.run_tests)
     {
         // CHK-354: a test runs with every option at its default, so the compile's values need a check of their own
-        auto const defaults
-            = request.options.empty()
-                ? cc::optional<driver::impl::front_end>()
-                : cc::optional<driver::impl::front_end>(driver::impl::run_front_end(request.source, request.source_name, request.library));
+        auto const defaults = request.options.empty()
+                                ? cc::optional<driver::impl::front_end>()
+                                : cc::optional<driver::impl::front_end>(driver::impl::run_front_end(
+                                      request.source, request.source_name, request.library));
         auto const& tested = defaults.has_value() ? defaults.value() : front;
         auto failed = cc::string();
         for (auto const& r :
