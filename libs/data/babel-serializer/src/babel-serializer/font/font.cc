@@ -88,6 +88,306 @@ struct table_directory
     }
 };
 
+/// The size of a `GPOS` value record of `format`: two bytes per field the format's bits name.
+[[nodiscard]] isize value_record_size(u16 format)
+{
+    auto n = isize(0);
+    for (auto bit = 0; bit < 8; ++bit)
+        if ((format >> bit) & 1)
+            ++n;
+    return n * 2;
+}
+
+/// The X advance a value record of `format` at `at` carries, or 0 when the format has none.
+[[nodiscard]] i32 x_advance_of(cc::span<byte const> table, isize at, u16 format)
+{
+    if ((format & 0x0004) == 0)
+        return 0;
+    auto r = be_reader{.bytes = table, .pos = at + value_record_size(u16(format & 0x0003))};
+    auto const v = r.read<i16>();
+    return r.ok ? i32(v) : 0;
+}
+
+/// The coverage index of `g` in the coverage table at `at`, or -1 when it is not covered.
+[[nodiscard]] i32 coverage_index(cc::span<byte const> table, isize at, u16 g)
+{
+    auto r = be_reader{.bytes = table, .pos = at};
+    auto const format = r.read<u16>();
+    auto const count = isize(r.read<u16>());
+    if (!r.ok)
+        return -1;
+
+    // Both forms are sorted by glyph, so the search is binary.
+    auto lo = isize(0);
+    auto hi = count - 1;
+    while (lo <= hi)
+    {
+        auto const mid = (lo + hi) / 2;
+        if (format == 1)
+        {
+            auto e = be_reader{.bytes = table, .pos = at + 4 + mid * 2};
+            auto const glyph = e.read<u16>();
+            if (!e.ok)
+                return -1;
+            if (glyph == g)
+                return i32(mid);
+            if (glyph < g)
+                lo = mid + 1;
+            else
+                hi = mid - 1;
+        }
+        else if (format == 2)
+        {
+            auto e = be_reader{.bytes = table, .pos = at + 4 + mid * 6};
+            auto const start = e.read<u16>();
+            auto const end = e.read<u16>();
+            auto const start_index = e.read<u16>();
+            if (!e.ok)
+                return -1;
+            if (g < start)
+                hi = mid - 1;
+            else if (g > end)
+                lo = mid + 1;
+            else
+                return i32(start_index) + i32(g - start);
+        }
+        else
+            return -1;
+    }
+    return -1;
+}
+
+/// The class the class definition at `at` assigns `g`; 0, the default class, for a glyph it does not list.
+[[nodiscard]] i32 class_of(cc::span<byte const> table, isize at, u16 g)
+{
+    auto r = be_reader{.bytes = table, .pos = at};
+    auto const format = r.read<u16>();
+    if (format == 1)
+    {
+        auto const start = r.read<u16>();
+        auto const count = r.read<u16>();
+        if (!r.ok || g < start || g >= u32(start) + count)
+            return 0;
+        r.pos = at + 6 + isize(g - start) * 2;
+        auto const c = r.read<u16>();
+        return r.ok ? i32(c) : 0;
+    }
+    if (format == 2)
+    {
+        auto const count = isize(r.read<u16>());
+        if (!r.ok)
+            return 0;
+        auto lo = isize(0);
+        auto hi = count - 1;
+        while (lo <= hi)
+        {
+            auto const mid = (lo + hi) / 2;
+            auto e = be_reader{.bytes = table, .pos = at + 4 + mid * 6};
+            auto const start = e.read<u16>();
+            auto const end = e.read<u16>();
+            auto const c = e.read<u16>();
+            if (!e.ok)
+                return 0;
+            if (g < start)
+                hi = mid - 1;
+            else if (g > end)
+                lo = mid + 1;
+            else
+                return i32(c);
+        }
+    }
+    return 0;
+}
+
+/// The X-advance adjustment pair-positioning subtable `sub` makes to `left` before `right`, or nullopt when it does not
+/// cover the pair — which is what tells the caller to try the lookup's next subtable.
+[[nodiscard]] cc::optional<i32> pair_adjustment(cc::span<byte const> sub, u16 left, u16 right)
+{
+    auto r = be_reader{.bytes = sub};
+    auto const format = r.read<u16>();
+    auto const coverage = isize(r.read<u16>());
+    auto const format1 = r.read<u16>();
+    auto const format2 = r.read<u16>();
+    if (!r.ok)
+        return {};
+    auto const index = coverage_index(sub, coverage, left);
+    if (index < 0)
+        return {};
+    auto const size1 = value_record_size(format1);
+    auto const size2 = value_record_size(format2);
+
+    if (format == 1)
+    {
+        auto const set_count = r.read<u16>();
+        if (!r.ok || index >= set_count)
+            return {};
+        r.pos = 10 + isize(index) * 2;
+        auto const set = isize(r.read<u16>());
+        auto p = be_reader{.bytes = sub, .pos = set};
+        auto const count = isize(p.read<u16>());
+        if (!p.ok)
+            return {};
+        auto const record = 2 + size1 + size2;
+
+        // Sorted by the second glyph.
+        auto lo = isize(0);
+        auto hi = count - 1;
+        while (lo <= hi)
+        {
+            auto const mid = (lo + hi) / 2;
+            auto const at = set + 2 + mid * record;
+            auto e = be_reader{.bytes = sub, .pos = at};
+            auto const second = e.read<u16>();
+            if (!e.ok)
+                return {};
+            if (second == right)
+                return x_advance_of(sub, at + 2, format1);
+            if (second < right)
+                lo = mid + 1;
+            else
+                hi = mid - 1;
+        }
+        return {};
+    }
+    if (format == 2)
+    {
+        auto const class_def1 = isize(r.read<u16>());
+        auto const class_def2 = isize(r.read<u16>());
+        auto const class1_count = r.read<u16>();
+        auto const class2_count = r.read<u16>();
+        if (!r.ok)
+            return {};
+        auto const c1 = class_of(sub, class_def1, left);
+        auto const c2 = class_of(sub, class_def2, right);
+        if (c1 >= class1_count || c2 >= class2_count)
+            return {};
+        auto const at = 16 + (isize(c1) * class2_count + c2) * (size1 + size2);
+        return x_advance_of(sub, at, format1);
+    }
+    return {};
+}
+
+/// The pair-adjustment subtables of every lookup a `kern` feature of `gpos` names, in lookup order, extensions resolved.
+/// Anything malformed is skipped rather than reported: kerning refines spacing, and a face without it still reads.
+[[nodiscard]] cc::vector<cc::span<byte const>> kern_pair_subtables(cc::span<byte const> gpos, cc::vector<i32>& lookup_of)
+{
+    auto out = cc::vector<cc::span<byte const>>();
+    auto r = be_reader{.bytes = gpos, .pos = 6};
+    auto const features = isize(r.read<u16>());
+    auto const lookups = isize(r.read<u16>());
+    if (!r.ok)
+        return out;
+
+    // Every lookup a `kern` feature lists, once each and in lookup order, which is the order they apply in.
+    auto r_features = be_reader{.bytes = gpos, .pos = features};
+    auto const feature_count = r_features.read<u16>();
+    auto r_lookups = be_reader{.bytes = gpos, .pos = lookups};
+    auto const lookup_count = r_lookups.read<u16>();
+    if (!r_features.ok || !r_lookups.ok)
+        return out;
+    auto wanted = cc::vector<bool>::create_defaulted(isize(lookup_count));
+    for (auto i = 0; i < feature_count; ++i)
+    {
+        auto f = be_reader{.bytes = gpos, .pos = features + 2 + isize(i) * 6};
+        auto const tag = f.read<u32>();
+        auto const offset = isize(f.read<u16>());
+        if (!f.ok || tag != tag_of("kern"))
+            continue;
+        auto l = be_reader{.bytes = gpos, .pos = features + offset + 2};
+        auto const count = l.read<u16>();
+        for (auto k = 0; k < count && l.ok; ++k)
+        {
+            auto const index = l.read<u16>();
+            if (l.ok && index < lookup_count)
+                wanted[index] = true;
+        }
+    }
+
+    for (auto i = isize(0); i < lookup_count; ++i)
+    {
+        if (!wanted[i])
+            continue;
+        auto e = be_reader{.bytes = gpos, .pos = lookups + 2 + i * 2};
+        auto const lookup = lookups + isize(e.read<u16>());
+        auto h = be_reader{.bytes = gpos, .pos = lookup};
+        auto const type = h.read<u16>();
+        h.skip(2); // lookupFlag
+        auto const sub_count = h.read<u16>();
+        if (!e.ok || !h.ok || (type != 2 && type != 9))
+            continue;
+        for (auto k = 0; k < sub_count; ++k)
+        {
+            auto o = be_reader{.bytes = gpos, .pos = lookup + 6 + isize(k) * 2};
+            auto sub = lookup + isize(o.read<u16>());
+            if (!o.ok)
+                break;
+            if (type == 9)
+            {
+                // An extension: format 1, the lookup type it wraps, and a 32-bit offset from itself to the real subtable.
+                auto x = be_reader{.bytes = gpos, .pos = sub};
+                x.skip(2);
+                auto const wrapped = x.read<u16>();
+                auto const offset = isize(x.read<u32>());
+                if (!x.ok || wrapped != 2)
+                    continue;
+                sub += offset;
+            }
+            if (sub >= 0 && sub < gpos.size())
+            {
+                out.push_back(gpos.subspan(sub));
+                lookup_of.push_back(i32(i));
+            }
+        }
+    }
+    return out;
+}
+
+/// The legacy `kern` table's adjustment for the pair: its first horizontal format-0 subtable, sorted by the pair.
+[[nodiscard]] i32 legacy_kerning(cc::span<byte const> kern, u16 left, u16 right)
+{
+    auto r = be_reader{.bytes = kern};
+    auto const version = r.read<u16>();
+    auto const tables = r.read<u16>();
+    if (!r.ok || version != 0)
+        return 0;
+    auto at = isize(4);
+    for (auto t = 0; t < tables; ++t)
+    {
+        auto h = be_reader{.bytes = kern, .pos = at};
+        h.skip(2); // version
+        auto const length = isize(h.read<u16>());
+        auto const coverage = h.read<u16>();
+        auto const pairs = isize(h.read<u16>());
+        if (!h.ok)
+            return 0;
+        // Horizontal (bit 0), format 0 (high byte), neither minimum nor cross-stream.
+        if ((coverage & 0x0007) == 0x0001 && (coverage >> 8) == 0)
+        {
+            auto const key = (u32(left) << 16) | right;
+            auto lo = isize(0);
+            auto hi = pairs - 1;
+            while (lo <= hi)
+            {
+                auto const mid = (lo + hi) / 2;
+                auto e = be_reader{.bytes = kern, .pos = at + 14 + mid * 6};
+                auto const pair = e.read<u32>();
+                auto const value = e.read<i16>();
+                if (!e.ok)
+                    return 0;
+                if (pair == key)
+                    return value;
+                if (pair < key)
+                    lo = mid + 1;
+                else
+                    hi = mid - 1;
+            }
+            return 0;
+        }
+        at += length;
+    }
+    return 0;
+}
+
 /// The subtable `cmap` should be read through, best first: full Unicode before the BMP, Windows before Unicode-platform.
 [[nodiscard]] int cmap_preference(u16 platform, u16 encoding, u16 format)
 {
@@ -300,6 +600,12 @@ cc::result<face> read(cc::pinned_data<byte const> bytes, i32 face_index)
         }
     }
 
+    // Kerning is optional, and a malformed table of it costs the face its kerning rather than the face itself.
+    if (auto gpos = dir.find(tag_of("GPOS")); gpos.has_value() && !gpos.value().empty())
+        f._pair_subtables = babel::impl::kern_pair_subtables(gpos.value(), f._pair_lookups);
+    if (auto kern = dir.find(tag_of("kern")); kern.has_value())
+        f._kern = kern.value();
+
     auto glyf = dir.find(tag_of("glyf"));
     CC_RETURN_IF_ERROR(glyf);
     auto loca = dir.find(tag_of("loca"));
@@ -335,6 +641,27 @@ cc::result<face> read(cc::read_stream& in, i32 face_index)
     auto slurped = in.read_all();
     CC_RETURN_IF_ERROR(slurped);
     return read(cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(slurped).value())), face_index);
+}
+
+i32 face::pair_kerning(glyph_id left, glyph_id right) const
+{
+    if (_pair_subtables.empty())
+        return _kern.empty() ? 0 : babel::impl::legacy_kerning(_kern, u16(left), u16(right));
+
+    // Within a lookup the first subtable covering the pair applies; separate lookups each apply, so they sum.
+    auto total = 0;
+    auto applied = -1;
+    for (auto i = isize(0); i < _pair_subtables.size(); ++i)
+    {
+        if (_pair_lookups[i] == applied)
+            continue;
+        if (auto const v = babel::impl::pair_adjustment(_pair_subtables[i], u16(left), u16(right)); v.has_value())
+        {
+            total += v.value();
+            applied = _pair_lookups[i];
+        }
+    }
+    return total;
 }
 
 cc::optional<glyph_id> face::glyph_for(char32_t codepoint) const

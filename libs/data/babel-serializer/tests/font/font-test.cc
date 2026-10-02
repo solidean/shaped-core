@@ -186,3 +186,84 @@ TEST("babel::font - a face with no glyphs is refused, since every face has a .no
     REQUIRE(r.has_error());
     CHECK(r.error().to_string().contains("no glyphs"));
 }
+
+TEST("babel::font - a face with no kerning tables kerns nothing")
+{
+    auto const f = babel::font::read(build_font(letters_font())).value();
+    CHECK(f.pair_kerning(babel::font::glyph_id(1), babel::font::glyph_id(1)) == 0);
+}
+
+namespace
+{
+/// The letters font with `kerning` applied: four glyphs, so 'A' to 'C' map to glyphs 1 to 3.
+[[nodiscard]] babel::font::face kerned(babel_test::test_font f)
+{
+    while (f.glyphs.size() < 4)
+        f.glyphs.push_back(letter());
+    return babel::font::read(babel_test::build_font(f)).value();
+}
+
+[[nodiscard]] i32 kerning(babel::font::face const& f, u16 a, u16 b)
+{
+    return f.pair_kerning(babel::font::glyph_id(a), babel::font::glyph_id(b));
+}
+} // namespace
+
+TEST("babel::font - per-pair GPOS kerning applies to its pairs alone")
+{
+    auto f = letters_font();
+    f.gpos_pairs = {{.left = 1, .right = 2, .value = -80},
+                    {.left = 2, .right = 1, .value = 30},
+                    {.left = 1, .right = 3, .value = -5}};
+    auto const face = kerned(f);
+    CHECK(kerning(face, 1, 2) == -80);
+    CHECK(kerning(face, 2, 1) == 30);
+    CHECK(kerning(face, 1, 3) == -5);
+    CHECK(kerning(face, 2, 3) == 0);
+    CHECK(kerning(face, 3, 1) == 0);
+}
+
+TEST("babel::font - per-class GPOS kerning covers every glyph of its classes")
+{
+    auto f = letters_font();
+    f.gpos_classes.push_back({.left = {1, 2}, .right = {3}, .value = -60});
+    auto const face = kerned(f);
+    CHECK(kerning(face, 1, 3) == -60);
+    CHECK(kerning(face, 2, 3) == -60);
+    CHECK(kerning(face, 1, 2) == 0); // the right glyph is in class 0
+    CHECK(kerning(face, 3, 3) == 0); // the left glyph is not covered
+}
+
+TEST("babel::font - within a lookup the first covering subtable wins, and lookups sum")
+{
+    auto f = letters_font();
+    // the per-pair subtable covers glyph 1 but not the pair (1, 3), so the class subtable after it answers;
+    // for (1, 2) the per-pair subtable answers and the class one is never reached
+    f.gpos_pairs = {{.left = 1, .right = 2, .value = -80}};
+    f.gpos_classes.push_back({.left = {1}, .right = {2, 3}, .value = -20});
+    f.gpos_second_lookup = {{.left = 1, .right = 2, .value = -7}};
+    auto const face = kerned(f);
+    CHECK(kerning(face, 1, 2) == -80 - 7);
+    CHECK(kerning(face, 1, 3) == -20);
+}
+
+TEST("babel::font - an extension lookup kerns as the lookup it wraps")
+{
+    auto f = letters_font();
+    f.gpos_pairs = {{.left = 1, .right = 2, .value = -80}};
+    f.gpos_classes.push_back({.left = {2}, .right = {3}, .value = -25});
+    f.gpos_as_extension = true;
+    auto const face = kerned(f);
+    CHECK(kerning(face, 1, 2) == -80);
+    CHECK(kerning(face, 2, 3) == -25);
+}
+
+TEST("babel::font - a face with no GPOS kerning reads the legacy kern table")
+{
+    auto f = letters_font();
+    f.legacy_kern = {{.left = 2, .right = 1, .value = -40}, {.left = 1, .right = 2, .value = -15}};
+    auto const face = kerned(f);
+    CHECK(kerning(face, 1, 2) == -15);
+    CHECK(kerning(face, 2, 1) == -40);
+    CHECK(kerning(face, 1, 1) == 0);
+}

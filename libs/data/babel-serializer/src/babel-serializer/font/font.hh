@@ -141,6 +141,15 @@ public:
     /// `g` must be below `glyph_count()`.
     [[nodiscard]] cc::result<glyf_outline> outline(glyph_id g) const;
 
+    /// How much the advance after `left` changes when `right` follows it, in font units; 0 for an unkerned pair.
+    ///
+    /// A query over the tables as stored, as `glyph_for` is over `cmap`: the pair adjustments of the `GPOS` lookups a
+    /// `kern` feature names, both the per-pair and the per-class form, summed over lookups and through extension lookups.
+    /// A face with no such lookups answers from the legacy `kern` table instead.
+    /// The script and language a feature is registered under are not consulted: every `kern` feature's lookups apply.
+    /// A malformed table answers 0 rather than failing, since kerning only refines spacing.
+    [[nodiscard]] i32 pair_kerning(glyph_id left, glyph_id right) const;
+
 private:
     friend cc::result<face> read(cc::pinned_data<byte const> bytes, i32 face_index);
 
@@ -153,6 +162,12 @@ private:
     cc::span<byte const> _loca;
     cc::span<byte const> _hmtx;
     cc::span<byte const> _cmap_subtable;
+
+    // `GPOS` pair-adjustment subtables of the `kern` feature's lookups, extensions resolved, in lookup order; and the
+    // legacy `kern` table, read only when there are none.
+    cc::vector<cc::span<byte const>> _pair_subtables;
+    cc::vector<i32> _pair_lookups; ///< the lookup each of `_pair_subtables` belongs to
+    cc::span<byte const> _kern;
     i32 _cmap_format = 0;
     i32 _long_metrics = 0;
     bool _long_loca = false;

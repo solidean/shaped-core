@@ -81,6 +81,7 @@ f.metrics();          // face_metrics { units_per_em, glyph_count, ascender, des
 f.outlines();         // outline_format::truetype | cff | none — only glyf is decoded today
 f.glyph_for(U'A');    // -> optional<glyph_id> via cmap 4 / 12; nullopt when the face has none (or maps it to .notdef)
 f.horizontal(g);      // horizontal_metric { advance, left_side_bearing } from hmtx
+f.pair_kerning(a, b); // i32 advance change after a when b follows, font units: GPOS `kern` pair lookups, else legacy `kern`
 f.outline(g);         // -> result<glyf_outline>: AS STORED — points + on_curve flags + contour_ends, or components
 o.is_composite();  o.is_empty();   // a space has no record at all and reads as empty, not as an error
 c.glyph  c.args_are_offset  c.arg1  c.arg2  c.xx c.xy c.yx c.yy   // a component's placement, F2Dot14 decoded
