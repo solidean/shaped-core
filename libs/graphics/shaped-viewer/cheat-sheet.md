@@ -31,7 +31,7 @@ sv::view_data                    // { view_id id; vec2i resolution; bool resolut
 sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; }
 sv::layer_kind                   // layout | scene_3d | canvas | ui — composited in order, each over the ones before it
                                  //   a `layout` layer renders a whole tree INTO this view's texture; that is the recursion in the model
-                                 //   canvas (2D) draws nothing until its API is designed; ui is not wired yet
+                                 //   canvas holds 2D drawings (view_ref::add_canvas); ui is not wired yet
 sv::layer_blend                  // replace | over (premultiplied) — scene_3d is forced to replace until the raygen writes alpha
 sv::primary_scene_3d(v) / sv::ensure_scene_3d(v)  // -> layer const* / layer& — the view's first traced layer, appended on demand
 sv::refresh_policy               // { float rate; } — fraction of the loop's rate: 1 every frame, 0.5 every second, 0 only on invalidation
@@ -523,6 +523,22 @@ See [docs/quadrics.md](docs/quadrics.md) for the design.
 `examples/quadric-gallery.cc` shows what the representation reaches — cones, ellipsoids and hyperboloids as well as spheres and tubes.
 `examples/quadric-arrows.cc` is the arrow API, and the difference the sizing overload makes across a row of them.
 `examples/mesh-structure.cc` is it in practice; `examples/mesh-structure-dense.cc` is the same code at 40,962 primitives in one batch.
+
+## Drawings — 2D vector content, built once and instanced ([docs/canvas.md](docs/canvas.md))
+```cpp
+#include <shaped-viewer/drawing/drawing.hh>     // + drawing/instance.hh
+auto d = sv::drawing();                          // ordered filled layers, its own units, y DOWN, no device
+d.add_fill(path, {.color = srgb_rgba, .rule = sr::slug_fill_rule::nonzero});   // sv::path = sr::slug_outline; must be CLOSED
+auto set = sv::drawing_set();                    // the value you keep, like sv::mesh; hashed whole, acquired whole
+auto const arrow = set.add(d);                   // sv::drawing_id, its index in the set
+scene.add_drawing(set, arrow, {.at = p, .x_axis = e, .y_axis = n, .scale = 1, .tint = c});   // 3D, world units; drawn AFTER the trace
+auto canvas = f.add_canvas();                    // appends a 2D layer each call — keep the handle
+canvas.add_drawing(set, arrow, {.at = tg::pos2f(16, 16), .scale = 48, .from = sv::corner::bottom_right});   // logical pixels
+canvas.add_drawing(d, {...});                    // a lone drawing: an implicit one-element set
+// point (x, y) lands at at + scale * (x * x_axis + y * y_axis); the axes are FREE (stretch, shear)
+// from a right/bottom corner, `at` is where the drawing's FAR edge sits in from that edge
+// resources.drawings: sv::drawing_manager, an lru_pool over one sr::slug_atlas; one Slug job (one draw) per layer
+```
 
 ## Asset loading — a file into `sv::mesh`
 

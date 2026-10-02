@@ -8,6 +8,7 @@
 #include <sgl_modules/tracer.hh> // sv::shaders::tracer::instance_record
 #include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-viewer/drawing/drawing_manager.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
 #include <shaped-viewer/resources/instance_data.hh>
@@ -342,6 +343,9 @@ public:
     quadric_manager quadrics;
     texture_manager textures;
     attribute_manager attributes;
+
+    /// Every acquired drawing set and the atlas they live in; needs no device until a job uploads it.
+    drawing_manager drawings;
 
     /// One generated hit group per material permutation, compiled for the manager's context.
     ///

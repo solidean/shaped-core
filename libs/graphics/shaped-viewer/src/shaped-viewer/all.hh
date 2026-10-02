@@ -25,6 +25,10 @@
 #include <shaped-viewer/scene/scene_item.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 
+// drawings
+#include <shaped-viewer/drawing/drawing.hh>
+#include <shaped-viewer/drawing/instance.hh>
+
 // loading an asset from a file
 #include <shaped-viewer/asset/asset.hh>
 #include <shaped-viewer/asset/asset_data.hh>

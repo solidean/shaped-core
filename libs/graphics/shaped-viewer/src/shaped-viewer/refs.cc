@@ -1,5 +1,7 @@
 #include <clean-core/common/asserts.hh>
-#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/common/utility.hh>     // cc::move
+#include <shaped-rendering/slug_routine.hh> // sr::pack_rgba8
+#include <shaped-viewer/drawing/drawing.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/refs.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -8,6 +10,53 @@
 
 namespace sv
 {
+namespace
+{
+/// A placement of drawing `index` of the acquired set `set`, with the scale folded into the axes.
+[[nodiscard]] drawing_placement place_drawing(drawing_manager& drawings,
+                                              drawing_set_id set,
+                                              u32 index,
+                                              tg::pos3f at,
+                                              tg::vec3f x_axis,
+                                              tg::vec3f y_axis,
+                                              f32 scale,
+                                              tg::vec4f tint,
+                                              sv::corner from)
+{
+    return {.set = set,
+            .first_record = drawings.first_record(set, index),
+            .record_count = drawings.record_count(set, index),
+            .at = at,
+            .x_axis = x_axis * scale,
+            .y_axis = y_axis * scale,
+            .tint = sr::pack_rgba8(tint),
+            .from = from};
+}
+
+[[nodiscard]] drawing_placement place_2d(drawing_manager& drawings, drawing_set_id set, u32 index, instance_2d const& i)
+{
+    auto p = place_drawing(drawings, set, index, tg::pos3f(i.at[0], i.at[1], 0), tg::vec3f(i.x_axis[0], i.x_axis[1], 0),
+                           tg::vec3f(i.y_axis[0], i.y_axis[1], 0), i.scale, i.tint, i.from);
+
+    // How far the placed drawing reaches right of and below `at`: the largest offset any corner of its bounds lands at.
+    auto const b = drawings.bounds(set, index);
+    auto reach = tg::vec2f(0, 0);
+    for (auto const x : {b.min[0], b.max[0]})
+        for (auto const y : {b.min[1], b.max[1]})
+        {
+            auto const o = p.x_axis * x + p.y_axis * y;
+            reach = tg::vec2f(cc::max(reach[0], o[0]), cc::max(reach[1], o[1]));
+        }
+    p.reach = reach;
+    return p;
+}
+
+[[nodiscard]] drawing_placement place_3d(drawing_manager& drawings, drawing_set_id set, u32 index, instance_3d const& i)
+{
+    return place_drawing(drawings, set, index, i.at, i.x_axis, i.y_axis, i.scale, i.tint, sv::corner::top_left);
+}
+} // namespace
+
 // ---- mesh_ref / light_ref --------------------------------------------------------------------------------
 
 scene_item& mesh_ref::target() const
@@ -198,6 +247,39 @@ void scene_ref::add_arrow(tg::segment3f const& segment, arrow_style const& style
     _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, style);
 }
 
+void scene_ref::add_drawing(drawing_set const& set, drawing_id id, instance_3d const& instance)
+{
+    CC_ASSERT(u32(id) < u32(set.size()), "a drawing_id names a drawing of the set that minted it");
+    auto& drawings = _frame->resources().drawings;
+    target().drawings.push_back(place_3d(drawings, drawings.acquire(set), u32(id), instance));
+}
+
+void scene_ref::add_drawing(drawing const& d, instance_3d const& instance)
+{
+    auto& drawings = _frame->resources().drawings;
+    target().drawings.push_back(place_3d(drawings, drawings.acquire(d), 0, instance));
+}
+
+// ---- canvas_ref ------------------------------------------------------------------------------------------
+
+layer& canvas_ref::target() const
+{
+    return _frame->_views[u32(_view)].layers[_layer];
+}
+
+void canvas_ref::add_drawing(drawing_set const& set, drawing_id id, instance_2d const& instance)
+{
+    CC_ASSERT(u32(id) < u32(set.size()), "a drawing_id names a drawing of the set that minted it");
+    auto& drawings = _frame->resources().drawings;
+    target().drawings.push_back(place_2d(drawings, drawings.acquire(set), u32(id), instance));
+}
+
+void canvas_ref::add_drawing(drawing const& d, instance_2d const& instance)
+{
+    auto& drawings = _frame->resources().drawings;
+    target().drawings.push_back(place_2d(drawings, drawings.acquire(d), 0, instance));
+}
+
 light_ref scene_ref::add_light(cc::string_view id, sv::light const& light)
 {
     CC_ASSERT(_frame->_open, "cannot author a closed frame");
@@ -367,6 +449,13 @@ scene_ref view_ref::add_scene()
     auto& v = target();
     v.layers.push_back({.kind = layer_kind::scene_3d, .blend = layer_blend::replace});
     return scene_ref(_frame, _view, u32(v.layers.size() - 1));
+}
+
+canvas_ref view_ref::add_canvas()
+{
+    auto& v = target();
+    v.layers.push_back({.kind = layer_kind::canvas, .blend = layer_blend::over});
+    return canvas_ref(_frame, _view, u32(v.layers.size() - 1));
 }
 
 layout_ref view_ref::open_layout(box_style style, grid_params params)

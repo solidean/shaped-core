@@ -61,13 +61,11 @@ What is left is the interaction on top of it, in dependency order:
   caller who wants it re-parented into a specific container has no way to ask.
 - **The UI layer** through `sr::imgui_context` / `sr::imgui_routine`, into the view's own target.
 - **A second window**, which is only an sv-side step: `sr::window_system` already drives N windows from one poll.
-- **The `canvas` layer draws nothing**, and is typed and documented that way on purpose.
-  It is where 2D drawing lives, a layer at the same level as a 3D scene.
-  sr can now draw what it needs: shapes and text from their outlines (`sr::slug_routine`, libs/graphics/shaped-rendering/docs/slug.md).
-  What is missing is the canvas's own API, which is its own design: its coordinate space, who owns fonts and atlases, and how it is retained across frames.
-- **A canvas over a traced scene cannot be occluded by it.**
-  The composited image carries no depth, so a label meant to lie on a face would show through when the face turns away.
-  Occlusion needs the trace to write a primary-hit depth target, which `sr::slug_routine` already tests against when a scope has one.
+- **A 3D drawing is not yet occluded by the trace.**
+  The composited image carries no depth, so an arrow on a face shows through when the face turns away.
+  Occlusion needs the trace to write a primary-hit depth target, which `sr::slug_routine` already tests against when a scope has one (docs/canvas.md).
+- **The drawing atlas never shrinks.** `sr::slug_atlas` is append-only, so `drawing_manager` runs without eviction limits, and one atlas is all it has.
+  Freeing blocks on eviction and a second page when one fills are the two halves (docs/canvas.md).
 - **Shapes on traced geometry are not wired into the tracer yet.**
   Module `slug` traces them already, as quads `slug.decide` cuts and as decals at a hit (libs/graphics/shaped-rendering/docs/slug.md).
   The tracer is SGL now, so its hit groups can `use slug`; what is missing is the scene side that places shapes and the rows that trace them.
@@ -496,7 +494,7 @@ What follows is everything else the importer left behind.
   scene layer above expensive to find.
   The viewer's destructor should be able to tear down a viewer whose frame did not complete.
 - **A view's display name is stored and never drawn.** `impl::view_state` keeps it (defaulting to the id up to its `##`) for the title bar a view has no way to draw yet —
-  sr can draw the text now, so this waits on the `canvas` layer the entry above names.
+  The canvas draws now; what it waits on is text, the first of the drawing utilities (docs/canvas.md).
 - **`per_edge` attributes need an edge table on `triangle_geometry`.**
   The enumerator exists and `mesh_attribute::create` rejects it; what is missing is the numbering — the edges themselves (each naming its two vertices) plus each triangle's three edge indices.
   That table also decides whether opposite half-edges share one entry, which is the real design question.

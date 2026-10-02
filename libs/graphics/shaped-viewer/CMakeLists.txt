@@ -17,6 +17,8 @@ add_library(shaped-viewer
     src/shaped-viewer/scene/background.cc
     src/shaped-viewer/scene/quadric.cc
     src/shaped-viewer/scene/quadric_set.cc
+    src/shaped-viewer/drawing/drawing.cc
+    src/shaped-viewer/drawing/drawing_manager.cc
     src/shaped-viewer/material/material_type.cc
     src/shaped-viewer/material/material.cc
     src/shaped-viewer/material/material_library.cc
@@ -76,6 +78,9 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/triangle_geometry.hh
     src/shaped-viewer/scene/resident_mesh.hh
     src/shaped-viewer/scene/mesh.hh
+    src/shaped-viewer/drawing/drawing.hh
+    src/shaped-viewer/drawing/drawing_manager.hh
+    src/shaped-viewer/drawing/instance.hh
     src/shaped-viewer/asset/uri_resolver.hh
     src/shaped-viewer/asset/asset_data.hh
     src/shaped-viewer/asset/asset.hh
@@ -191,6 +196,7 @@ if(SC_BUILD_TESTS)
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc
+        tests/drawing-test.cc
         tests/view-convergence-test.cc
         tests/bindless-tables-test.cc
         tests/material-resolution-test.cc
@@ -228,6 +234,7 @@ if(SC_BUILD_TESTS)
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
+            tests/drawing-render-test.cc
             tests/layout-routine-test.cc
             tests/gpu-resource-manager-test.cc
             tests/quadric-manager-test.cc

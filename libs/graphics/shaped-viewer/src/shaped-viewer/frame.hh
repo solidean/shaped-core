@@ -189,6 +189,7 @@ private:
     friend class layout_ref;
     friend class leaf_ref;
     friend class scene_ref;
+    friend class canvas_ref;
     friend class mesh_ref;
     friend class quadric_ref;
     friend class light_ref;

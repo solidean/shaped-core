@@ -57,6 +57,7 @@ public:
     /// The scope's first color target is what the pipelines are built for, and each draw sets its own viewport and
     /// scissor from its rect.
     /// A draw whose source is missing is skipped rather than drawn black.
+    /// `draws` must hold no `draw_kind::drawings` draw: those are Slug jobs, which the caller records between calls.
     /// Declines, recording nothing, while the shaders are still building and after a build that failed — never by
     /// throwing, which would unwind out of the caller's open scope and leave their command list unsubmitted.
     [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope,
@@ -69,6 +70,7 @@ protected:
 
 private:
     /// How many pipelines one instance holds: every draw_kind, blended and not.
+    /// The kinds this routine draws: every `draw_kind` before `drawings`.
     static constexpr int k_draw_kinds = 4;
 
     sg::binding_group_layout_handle _group_layout;

@@ -185,6 +185,9 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
         if (w <= 0 || h <= 0)
             continue; // a collapsed cell draws nothing rather than a degenerate viewport
 
+        CC_ASSERT(d.kind != draw_kind::drawings, "a drawings draw is a Slug job, which the caller records between "
+                                                 "layout calls");
+
         // An index rather than a lookup: every pipeline this format needs was built during init, so there is nothing
         // here that could still be building.
         auto const& pipeline = self->_pipelines[int(d.kind)][is_blended(d) ? 1 : 0];

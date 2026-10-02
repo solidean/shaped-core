@@ -721,6 +721,17 @@ void viewer::finish_frame(frame& f)
     def.views = f._views;
     def.nodes = f._nodes;
 
+    // A canvas places its drawings in logical pixels, so it takes the content scale of the display the window is on —
+    // the one whose rectangle holds the window's top-left corner, which is also where a new window opens.
+    if (im.window != nullptr && im.window_system != nullptr)
+        for (auto const& d : im.window_system->displays())
+        {
+            auto const p = im.window->position();
+            if (p[0] >= d.position[0] && p[1] >= d.position[1] && p[0] < d.position[0] + d.size[0]
+                && p[1] < d.position[1] + d.size[1] && d.content_scale > 0.0f)
+                def.content_scale = d.content_scale;
+        }
+
     im.last_frame_views.clear();
     for (auto& v : def.views)
     {

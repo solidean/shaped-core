@@ -142,6 +142,23 @@ struct generated_material_shader; // that permutation as an SGL hit group, plus 
 struct material_shader_options;
 class material_library;
 
+// 2D vector content, built once and instanced (drawing/, docs/canvas.md)
+struct fill_style;
+class drawing;
+class drawing_set;
+enum class drawing_id : u32;     // a drawing's index in its set
+enum class drawing_set_id : u32; // an acquired set, minted by the drawing manager
+struct drawing_set_record;
+class drawing_manager;
+enum class corner : u8;
+struct instance_2d;
+struct instance_3d;
+struct drawing_placement;
+namespace impl
+{
+struct drawing_set_gpu_slot;
+}
+
 // the per-frame description
 enum class layer_kind : u8;
 enum class layer_blend : u8;
@@ -192,6 +209,7 @@ struct draw_source;
 struct layout_draw;
 struct plan_target;
 struct plan_trace;
+struct plan_drawing_job;
 struct plan_temporal;
 struct hit_region;
 struct plan_diagnostic;
@@ -246,6 +264,7 @@ class mesh_ref;
 class quadric_ref; // one quadric batch placed in a scene (refs.hh)
 class light_ref;
 class scene_ref;
+class canvas_ref; // a 2D layer of a view, where drawings are instanced in pixels (refs.hh)
 class leaf_ref;
 class layout_ref;
 class view_ref;
@@ -305,6 +324,19 @@ enum class sv::mesh_id : sv::u32
 
 /// Names one uploaded quadric batch — the primitives, their AABBs, and the procedural BLAS over them.
 /// Minted by the quadric manager, keyed on the set's own content hash.
+/// A drawing's index in the `drawing_set` that minted it.
+enum class sv::drawing_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+/// Names one acquired drawing set — where its drawings' records sit in the drawing manager's atlas.
+/// Minted by the drawing manager, keyed on the set's own content hash.
+enum class sv::drawing_set_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
 enum class sv::quadric_set_id : sv::u32
 {
     invalid = u32(-1)

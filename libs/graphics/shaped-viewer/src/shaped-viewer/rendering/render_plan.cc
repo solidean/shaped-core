@@ -1,6 +1,7 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/utility.hh> // cc::clamp, cc::max, cc::min, cc::move
 #include <shaped-viewer/rendering/render_plan.hh>
+#include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/view_data.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::round
@@ -9,6 +10,27 @@ namespace sv
 {
 namespace
 {
+/// Logical pixels, y down from the top-left, to clip space, for a target `resolution` texels wide and tall.
+[[nodiscard]] tg::mat4f logical_pixels_to_clip(tg::vec2i resolution, f32 content_scale)
+{
+    auto m = tg::mat4f::identity;
+    m[0, 0] = 2.0f * content_scale / f32(resolution[0]);
+    m[3, 0] = -1.0f;
+    m[1, 1] = -2.0f * content_scale / f32(resolution[1]);
+    m[3, 1] = 1.0f;
+    m[2, 2] = 0.0f;
+    return m;
+}
+
+/// World to clip space through `cam`, at the aspect the trace of a `resolution` view uses — so a drawing lands on the
+/// pixels its scene does.
+[[nodiscard]] tg::mat4f world_to_clip(camera cam, tg::vec2i resolution)
+{
+    cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1] > 0 ? resolution[1] : 1);
+    auto const m = matrices_of(camera_gpu::from(cam), f32(cam.projection.near_plane));
+    return m.view_to_clip * m.world_to_view;
+}
+
 constexpr tg::aabb2f full_uv = tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1));
 
 /// What `emit` returns for a subtree it refused: an index into `render_plan::targets` that names none.
@@ -251,25 +273,29 @@ struct builder
                 // A layer with no geometry renders nothing, so it gets no trace and no draw sampling one.
                 // Emitting them anyway hands the renderer a dispatch with nothing to bind, which it asserts on —
                 // and `add_scene().add_light(...)` before any mesh exists is ordinary authoring, not an error.
-                if (!is_traceable(l))
-                    break;
-
-                auto const trace = u32(plan.traces.size());
-                plan.traces.push_back(
-                    {.id = v.id, .view = view, .layer = u8(layer_index), .resolution = res, .refresh = refreshes});
-                local.push_back({.kind = draw_kind::view,
-                                 .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
-                                 .primary = {.kind = draw_source_kind::trace, .index = trace, .uv = full_uv},
-                                 .blend = l.blend,
-                                 .opacity = l.opacity});
+                // Its drawings still draw: they need the camera, not the trace.
+                if (is_traceable(l))
+                {
+                    auto const trace = u32(plan.traces.size());
+                    plan.traces.push_back(
+                        {.id = v.id, .view = view, .layer = u8(layer_index), .resolution = res, .refresh = refreshes});
+                    local.push_back({.kind = draw_kind::view,
+                                     .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
+                                     .primary = {.kind = draw_source_kind::trace, .index = trace, .uv = full_uv},
+                                     .blend = l.blend,
+                                     .opacity = l.opacity});
+                }
+                emit_drawings(view, layer_index, l, res, local);
                 break;
             }
             case layer_kind::layout:
                 emit_layout(view, l, res, map, depth, local);
                 break;
             case layer_kind::canvas:
+                emit_drawings(view, layer_index, l, res, local);
+                break;
             case layer_kind::ui:
-                // Neither draws yet; see libs/graphics/shaped-viewer/docs/TODO.md for what each still needs.
+                // Not drawn yet; see libs/graphics/shaped-viewer/docs/TODO.md for what it still needs.
                 break;
             }
         }
@@ -286,6 +312,29 @@ struct builder
 
         plan.targets.push_back({.id = v.id, .view = view, .resolution = res, .refresh = refreshes});
         return target;
+    }
+
+    /// Appends one job for `l`'s drawings, if it has any, and the draw that places it in the target's pass.
+    /// A scene's are 3D, through the view's camera; a canvas's are 2D, in the view's logical pixels.
+    void emit_drawings(view_index view, u32 layer_index, layer const& l, tg::vec2i res, cc::vector<layout_draw>& local)
+    {
+        if (l.drawings.empty() || res[0] <= 0 || res[1] <= 0)
+            return;
+
+        auto const is_3d = l.kind == layer_kind::scene_3d;
+        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto const job = u32(plan.drawing_jobs.size());
+        plan.drawing_jobs.push_back(
+            {.view = view,
+             .layer = layer_index,
+             .is_3d = is_3d,
+             .object_to_clip = is_3d ? world_to_clip(def[view].camera, res) : logical_pixels_to_clip(res, scale),
+             .logical_size = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale)});
+        local.push_back({.kind = draw_kind::drawings,
+                         .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
+                         .blend = layer_blend::over,
+                         .opacity = l.opacity,
+                         .job = job});
     }
 
     void emit_layout(view_index view,
@@ -472,6 +521,14 @@ bool render_plan::validate() const
 
         for (auto const& d : draws_of(t))
         {
+            // A drawings draw samples no target; what it must name is a job.
+            if (d.kind == draw_kind::drawings)
+            {
+                if (isize(d.job) >= drawing_jobs.size())
+                    return false;
+                continue;
+            }
+
             // The whole point of the post-order append: a source is finished before anything samples it.
             if (d.primary.kind == draw_source_kind::target && d.primary.index >= t)
                 return false;

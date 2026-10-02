@@ -206,6 +206,41 @@ public:
     /// Sample counts and bounce limits for this layer's trace.
     void settings(render_settings const& s);
 
+    /// Instances drawing `id` of `set` in this scene, in world units — see `sv::instance_3d`.
+    ///
+    /// The set is acquired whole on first use, keyed by its content hash, so placing an unchanged set every frame uploads
+    /// nothing.
+    /// A drawing is drawn after the trace: geometry in front of it hides it, and it casts no shadow and shows in no
+    /// reflection.
+    void add_drawing(drawing_set const& set, drawing_id id, instance_3d const& instance);
+
+    /// The same for a lone drawing, acquired as a one-element set of its own.
+    void add_drawing(drawing const& d, instance_3d const& instance);
+
+private:
+    [[nodiscard]] layer& target() const;
+
+    frame* _frame = nullptr;
+    view_index _view = view_index(0);
+    u32 _layer = 0;
+};
+
+/// A 2D layer of a view — where drawings are instanced in the view's logical pixels, y down.
+///
+/// Nothing occludes what a canvas draws, and later instances draw over earlier ones.
+/// A logical pixel is the window's content scale in texture pixels, so a drawing keeps its physical size on any display.
+class sv::canvas_ref
+{
+public:
+    canvas_ref(frame* f, view_index view, u32 layer) : _frame(f), _view(view), _layer(layer) {}
+
+    /// Instances drawing `id` of `set` — see `sv::instance_2d`.
+    /// The set is acquired whole on first use, keyed by its content hash, so an unchanged set every frame uploads nothing.
+    void add_drawing(drawing_set const& set, drawing_id id, instance_2d const& instance);
+
+    /// The same for a lone drawing, acquired as a one-element set of its own.
+    void add_drawing(drawing const& d, instance_2d const& instance);
+
 private:
     [[nodiscard]] layer& target() const;
 
@@ -232,6 +267,10 @@ public:
     /// first rather than compositing over it (see libs/graphics/shaped-viewer/docs/TODO.md).
     /// Until that lands, calling this twice in a frame is legal but only the last layer is visible.
     [[nodiscard]] scene_ref add_scene();
+
+    /// Appends a 2D canvas layer to this view, drawn over the layers before it.
+    /// Like `add_scene`, every call appends one, so call it once and keep the handle.
+    [[nodiscard]] canvas_ref add_canvas();
 
     /// Fills this view with a layout tree, created on first use.
     /// `rows` stacks its children top to bottom, `columns` side by side; the params overload pins one dimension and
@@ -442,6 +481,7 @@ template <class Derived>
 struct sv::view_api
 {
     [[nodiscard]] scene_ref add_scene() { return self().default_view().add_scene(); }
+    [[nodiscard]] canvas_ref add_canvas() { return self().default_view().add_canvas(); }
 
     [[nodiscard]] layout_ref layout_rows(box_style style = {}) { return self().default_view().layout_rows(style); }
     [[nodiscard]] layout_ref layout_columns(box_style style = {})
