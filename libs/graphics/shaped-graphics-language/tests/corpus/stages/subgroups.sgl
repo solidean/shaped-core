@@ -63,3 +63,15 @@ test quad_broadcast(1.0, 4) == 1.0
 test:
     let x = 1u
     workgroup_uniform_load(x) == 1u
+
+// a run is one invocation, which has no subgroup to exchange values in (CHK-379)
+@expect(error = "unsupported-yet")
+test subgroup_add(1.0) == 1.0
+
+fun widest(b: bool) -> float:
+    if b => return subgroup_max(2.0)
+    return 1.0
+
+// reached through a helper, it is the test's own call that is refused
+@expect(error = "unsupported-yet")
+test widest(true) == 2.0

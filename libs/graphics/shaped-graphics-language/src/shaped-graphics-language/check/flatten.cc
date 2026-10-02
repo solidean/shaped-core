@@ -61,6 +61,8 @@ struct stage_violation
     i32 file = 0;
     ast::expr_id call = ast::expr_id::none;
     symbol_id callee = symbol_id::none;
+    /// The call written in the tree's own body that reaches it, the call itself where it stands there.
+    call_site written = {};
 };
 
 /// Reads the checked ASTs through the side tables and writes the STRUCTURED form of one entry point's flat tree.
@@ -143,13 +145,15 @@ struct flattener
             auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
             if (record != nullptr && record->uses_derivatives)
                 stage_violations.push_back({.file = file(), .call = call, .callee = callee});
+            auto const chain = entry.at(current()->chain);
+            auto const written = chain.empty() ? call_site{.file = file(), .call = call} : chain[0];
             if (record != nullptr && record->is_subgroup_operation)
-                subgroup_calls.push_back({.file = file(), .call = call, .callee = callee});
+                subgroup_calls.push_back({.file = file(), .call = call, .callee = callee, .written = written});
             auto const ray_stages = stage_bit(stage::raygen) | stage_bit(stage::miss) | stage_bit(stage::closest_hit)
                                   | stage_bit(stage::any_hit) | stage_bit(stage::intersection)
                                   | stage_bit(stage::callable);
             if (auto const& s = c.out.at(callee); s.info >= 0 && (c.out.functions[s.info].stages & ~ray_stages) == 0)
-                ray_stage_calls.push_back({.file = file(), .call = call, .callee = callee});
+                ray_stage_calls.push_back({.file = file(), .call = call, .callee = callee, .written = written});
             return;
         }
         if (entry.entry_stage == stage::none)
@@ -2838,6 +2842,21 @@ void checker::flatten_test(i32 index)
     for (auto const& u : f.feature_uses)
         mark_requires_used(u.within, u.features);
 
+    // Reported for a test that expects it too, which is how a corpus file pins the rule.
+    // There it stands at the test's own call, so a helper the test reaches it through carries no error of the test's.
+    auto const report_reached = [&](stage_violation const& v, cc::string_view why)
+    {
+        auto const site = test.expects_diagnostics() ? v.written : call_site{.file = v.file, .call = v.call};
+        unsupported(site.file, span_of(site.file, site.call),
+                    cc::format("a test that reaches {}{}", out.at(v.callee).name, why));
+    };
+    // a pipeline's trace or callable runs against tables a test has none of
+    for (auto const& v : f.ray_stage_calls)
+        report_reached(v, ", which only the ray-tracing stages run");
+    // CHK-379
+    for (auto const& v : f.subgroup_calls)
+        report_reached(v, ": a run is one invocation, and has no subgroup");
+
     // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
     // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
     if (test.expects_diagnostics())
@@ -2858,14 +2877,6 @@ void checker::flatten_test(i32 index)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
                           out.at(v.callee).name));
-    // a pipeline's trace or callable runs against tables a test has none of
-    for (auto const& v : f.ray_stage_calls)
-        unsupported(v.file, span_of(v.file, v.call),
-                    cc::format("a test that reaches {}, which only the ray-tracing stages run", out.at(v.callee).name));
-    for (auto const& v : f.subgroup_calls)
-        unsupported(
-            v.file, span_of(v.file, v.call),
-            cc::format("a test that reaches {}: a run is one invocation, and has no subgroup", out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
     if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty() || !f.subgroup_calls.empty())
