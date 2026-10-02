@@ -33,6 +33,7 @@ struct placement
     tg::pos2f origin;
     f32 scale = 1.0f;
     f32 em_scale = 1.0f;
+    tg::pos2f stored_origin = tg::pos2f(0, 0);
 };
 
 struct traced_fixture
@@ -46,15 +47,16 @@ struct traced_fixture
         auto const ref = atlas.add(sr::compile_slug_shape(outline)).value();
         instances.push_back(
             sr::make_slug_instance(ref, origin, tg::vec2f(scale, 0), tg::vec2f(0, -scale), tg::vec4f(1, 1, 1, 1)));
-        placements.push_back({.origin = origin, .scale = scale, .em_scale = ref.em_scale});
+        placements.push_back(
+            {.origin = origin, .scale = scale, .em_scale = ref.em_scale, .stored_origin = ref.stored_origin});
     }
 
     /// Where pixel (x, y)'s centre lands in instance `i`'s em space.
     [[nodiscard]] tg::pos2f em_at(isize i, int x, int y) const
     {
         auto const& p = placements[i];
-        auto const ox = (f32(x) + 0.5f - p.origin[0]) / p.scale;
-        auto const oy = (p.origin[1] - (f32(y) + 0.5f)) / p.scale;
+        auto const ox = (f32(x) + 0.5f - p.origin[0]) / p.scale - p.stored_origin[0];
+        auto const oy = (p.origin[1] - (f32(y) + 0.5f)) / p.scale - p.stored_origin[1];
         return tg::pos2f(ox * p.em_scale, oy * p.em_scale);
     }
 
