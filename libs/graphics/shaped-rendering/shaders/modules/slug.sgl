@@ -7,7 +7,7 @@
 //
 // A module, so any shader can cover a shape: sr::slug_routine's quads `use slug`, and so can a mesh's pixel shader that
 // carries an em coordinate like a UV, drawing the shape as part of its surface.
-// A trace reaches it too: `decide` cuts the quads sr::build_slug_blas builds down to their shapes, which takes `slug.shapes`.
+// A trace reaches it too: `decide` is the any-hit that cuts the quads sr::build_slug_blas builds down to their shapes.
 // The host binds `slug.tables` from the atlas as one group, `sgl_modules::slug::tables`, shared by every pipeline.
 //
 // `glyph` is the reference's packed per-shape data:
@@ -31,7 +31,6 @@ struct shape_instance:
     color: uint
 
 // The records a trace's quads were built from, as sr::upload_slug_records uploads them.
-// A TLAS instance of sr::build_slug_blas carries the index of its quads' first record as its instance_id.
 binding shapes:
     instances: buffer[shape_instance]
 
@@ -210,17 +209,25 @@ fun quad_em(shape: shape_instance, primitive_index: int, barycentrics: float3) -
         false => float2(lo.x, hi.y)
     return lo * barycentrics.x + second * barycentrics.y + third * barycentrics.z
 
-/// The record a candidate on a quad of sr::build_slug_blas was built from.
-fun shape_of(c: triangle_candidate){shapes} -> shape_instance:
-    return shapes.instances[c.instance_id + c.primitive_index / 2]
+/// The record triangle `primitive_index` of a quad run of sr::build_slug_blas was built from, its run's records starting
+/// at `first` in `slug.shapes`.
+/// `first` is the scene's to know, typically a field of its own instance table read at the instance's id.
+fun shape_of(first: int, primitive_index: int){shapes} -> shape_instance:
+    return shapes.instances[first + primitive_index / 2]
 
-/// The any-hit decision for the quads of sr::build_slug_blas: accept where the trace met the shape itself.
-/// Every non-opaque triangle the trace meets must be such a quad's, since the decision reads its record unasked.
-fun decide(c: triangle_candidate){tables, shapes} -> hit_decision:
-    let shape = shape_of(c)
+/// The any-hit for a quad of sr::build_slug_blas whose record is `shape`: accept where the ray met the shape itself.
+/// One function for both forms of a trace: an inline trace's decision calls it, and a pipeline's `@any_hit` wraps it,
+/// once per payload type, since a pipeline stage carries its ray type's payload.
+/// Deciding that a candidate is a slug quad at all is the caller's, which is what lets other non-opaque geometry share the
+/// structure.
+fun decide(c: triangle_candidate, shape: shape_instance){tables} -> hit_decision:
     let em = quad_em(shape, c.primitive_index, c.barycentrics)
     if contains(em, shape.banding, glyph_of(shape.glyph)) => return hit_decision.accept
     return hit_decision.ignore
+
+/// The same, with the record read from `slug.shapes`, its run's records starting at `first`.
+fun decide(c: triangle_candidate, first: int){tables, shapes} -> hit_decision:
+    return decide(c, shape_of(first, c.primitive_index))
 
 // ---- tests: run when this file is compiled on its own, as sr's slug-module test does ----
 

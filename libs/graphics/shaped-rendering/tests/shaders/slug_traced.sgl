@@ -1,11 +1,13 @@
 // Inline traces against sr::build_slug_blas' quads, one ray per pixel of a grid, read back by slug-traced-test.cc.
 // The quads lie at z = 0 in pixel space; each ray runs along +z through its pixel's centre.
+// `firsts` is the scene's instance table in miniature: an instance's id reads the index of its run's first record.
 require ray_query
 use slug
 
 binding probe:
     world: acceleration_structure[.triangles]
     width: int
+    firsts: buffer[int]
     hits: mut buffer[float4]
 
 fun pixel_ray(id: int3) -> ray => ray(
@@ -13,9 +15,9 @@ fun pixel_ray(id: int3) -> ray => ray(
     direction = vec3(0.0, 0.0, 1.0)
 )
 
-// The shapes as geometry: whether the ray met one, and which quad, with the em point the decision tested
+// The shapes as geometry: whether the ray met one, which quad, and where
 @compute(8, 8) fun trace_shapes(@thread_id id: int3){slug.tables, slug.shapes, probe}:
-    let h = probe.world.trace(pixel_ray(id), c => slug.decide(c))
+    let h = probe.world.trace(pixel_ray(id), c => slug.decide(c, probe.firsts[c.instance_id]))
     let mut is_hit = 0.0
     if h.is_hit => is_hit = 1.0
     probe.hits[id.x + id.y * probe.width] = float4(is_hit, h.primitive_index as float, h.t, 0.0)
@@ -25,7 +27,7 @@ fun pixel_ray(id: int3) -> ray => ray(
     let h = probe.world.trace(pixel_ray(id), flags = ray_flags.force_opaque)
     let mut value = float4(0.0, 0.0, 0.0, 0.0)
     if h.is_hit:
-        let shape = slug.shapes.instances[h.instance_id + h.primitive_index / 2]
+        let shape = slug.shape_of(probe.firsts[h.instance_id], h.primitive_index)
         let em = slug.quad_em(shape, h.primitive_index, h.barycentrics)
         let x_axis = float2(shape.em_to_object.x, shape.em_to_object.y)
         let y_axis = float2(shape.em_to_object.z, shape.em_to_object.w)

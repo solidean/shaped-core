@@ -12,6 +12,8 @@ binding scene:
     // the cube's triangles in object space, three corners each, and the em coordinate every corner carries
     cube_positions: buffer[float3]
     cube_em: buffer[float2]
+    // the scene's instance table: for each instance id, its label run's first record in `slug.shapes`, or -1 for none
+    first_shapes: buffer[int]
     image: out image_2d[.rgba8_unorm]
     // the camera: a pixel's ray runs along forward + right * x + up * y, x and y in [-1, 1] across the image
     eye: float3
@@ -23,7 +25,7 @@ binding scene:
     star_glyph: int4
     star_color: float4
 
-// What the TLAS holds, by instance index: the ground, the cube, and then the label runs.
+// What the TLAS holds, by instance id: the ground, the cube, and then the label runs.
 fun is_ground(h: triangle_hit) -> bool => h.instance_index == 0
 fun is_cube(h: triangle_hit) -> bool => h.instance_index == 1
 
@@ -58,16 +60,23 @@ fun camera_ray(at: float2){scene} -> ray:
     let d = scene.forward + scene.right * x + scene.up * y
     return ray(origin = pos3(scene.eye.x, scene.eye.y, scene.eye.z), direction = vec3(d.x, d.y, d.z))
 
+/// The scene's any-hit, and so its dispatch: a label run's quads take Slug's decision, and any other non-opaque geometry
+/// would join here with its own.
+fun any_hit(c: triangle_candidate){slug.tables, slug.shapes, scene} -> hit_decision:
+    let first = scene.first_shapes[c.instance_id]
+    if first >= 0 => return slug.decide(c, first)
+    return hit_decision.accept
+
 /// The nearest surface along `r`, the labels' quads cut to their shapes.
 fun nearest(r: ray){slug.tables, slug.shapes, scene} -> triangle_hit:
-    return scene.world.trace(r, c => slug.decide(c))
+    return scene.world.trace(r, c => any_hit(c))
 
 /// Whether anything — a label's glyph included, and never the rest of its quad — stands between `p` and the sun.
 fun in_shadow(p: float3, n: float3){slug.tables, slug.shapes, scene} -> bool:
     let o = p + n * 0.001
     let s = normalize(scene.sun)
     let r = ray(origin = pos3(o.x, o.y, o.z), direction = vec3(s.x, s.y, s.z), t_min = 0.0001)
-    return scene.world.trace(r, c => slug.decide(c), flags = ray_flags.accept_first_hit_and_end_search).is_hit
+    return scene.world.trace(r, c => any_hit(c), flags = ray_flags.accept_first_hit_and_end_search).is_hit
 
 /// `p`'s barycentrics in the triangle (a, b, c), which `p` must lie in the plane of.
 fun barycentrics_of(p: float3, a: float3, b: float3, c: float3) -> float3:
@@ -155,7 +164,7 @@ fun radiance(at: float2){slug.tables, slug.shapes, scene} -> float3:
                 let coverage = decal_coverage(h, camera_ray(at + float2(0.25, 0.0)), camera_ray(at + float2(0.0, 0.25)))
                 albedo = lerp3(albedo, float3(scene.star_color.x, scene.star_color.y, scene.star_color.z), coverage)
         else:
-            let shape = slug.shapes.instances[h.instance_id + h.primitive_index / 2]
+            let shape = slug.shape_of(scene.first_shapes[h.instance_id], h.primitive_index)
             albedo = unpack_color(shape.color)
             n = as_float3(h.normal_to_world(vec3(0.0, 0.0, 1.0)))
 

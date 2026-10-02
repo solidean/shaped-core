@@ -3,7 +3,7 @@
 //
 // Two ways a shape reaches a traced image, from one atlas:
 //   - every label is geometry: sr::build_slug_blas makes each glyph a quad of two non-opaque triangles, and module
-//     `slug`'s `decide` is the inline trace's any-hit, keeping a ray exactly where it meets the glyph itself;
+//     `slug`'s `decide` is what the scene's any-hit calls for a label, keeping a ray exactly where it meets the glyph;
 //     so the camera's rays and the shadow rays see the same letters, and the text throws letter-shaped shadows;
 //   - the star is a decal: where a ray meets the cube's top face, the shader asks module `slug` for its coverage at the
 //     hit's em coordinate, filtered over the em span between neighbouring rays.
@@ -296,7 +296,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
     auto const love = font.atlas().add(sr::compile_slug_shape(heart())).value();
 
     // Every label is laid out once in its plane, x right and y up, and every run of them becomes a BLAS of its own.
-    // A run's TLAS instance carries the index of its first record, which is how `slug.decide` finds a glyph's record.
+    // The scene's instance table keeps each run's first record, which is how its any-hit hands `slug.decide` a glyph's.
     struct run
     {
         isize first = 0;
@@ -341,6 +341,12 @@ ASYNC_EXAMPLE("graphics/slug-traced")
     auto const cube_positions = ctx->persistent.create_buffer_from_data(
         cube.positions, sg::buffer_usage::readonly_buffer | sg::buffer_usage::accel_structure_build_input);
     auto const cube_em = ctx->persistent.create_buffer_from_data(cube.em, sg::buffer_usage::readonly_buffer);
+
+    // The scene's instance table, by instance id: the ground and the cube have no labels, and run i is instance 2 + i.
+    auto first_records = cc::vector<i32>{-1, -1};
+    for (auto const& r : runs)
+        first_records.push_back(i32(r.first));
+    auto const first_shapes = ctx->persistent.create_buffer_from_data(first_records, sg::buffer_usage::readonly_buffer);
     tg::vec3f const ground_positions[] = {tg::vec3f(-8, -0.5f, -8), tg::vec3f(8, -0.5f, -8), tg::vec3f(8, -0.5f, 8),
                                           tg::vec3f(-8, -0.5f, -8), tg::vec3f(8, -0.5f, 8), tg::vec3f(-8, -0.5f, 8)};
     auto const ground_vertices = ctx->persistent.create_buffer_from_data(ground_positions, sg::buffer_usage::accel_structure_build_input);
@@ -439,14 +445,14 @@ ASYNC_EXAMPLE("graphics/slug-traced")
         // The cube and its labels turn together, and the ring the other way.
         auto const turn = spin_y(spin);
         auto instances = cc::vector<sg::tlas_instance>();
-        instances.push_back({.blas = ground_blas});
-        instances.push_back({.blas = cube_blas, .cull_mode = sg::instance_cull_mode::none});
+        instances.push_back({.blas = ground_blas, .instance_id = 0});
+        instances.push_back({.blas = cube_blas, .instance_id = 1, .cull_mode = sg::instance_cull_mode::none});
         turn.write_to(instances.back().transform);
         for (auto i = isize(0); i < runs.size(); ++i)
         {
             auto const& r = runs[i];
             auto const frame = r.face < 0 ? spin_y(-spin * 0.5f).after(ring_frame()) : turn.after(face_frame(r.face));
-            instances.push_back({.blas = run_blases[i], .instance_id = u32(r.first), .cull_mode = sg::instance_cull_mode::none});
+            instances.push_back({.blas = run_blases[i], .instance_id = u32(2 + i), .cull_mode = sg::instance_cull_mode::none});
             frame.write_to(instances.back().transform);
         }
 
@@ -471,6 +477,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
             shaders::scene{.world = tlas->as_view(),
                            .cube_positions = cube_positions.as_readonly_buffer(),
                            .cube_em = cube_em.as_readonly_buffer(),
+                           .first_shapes = first_shapes.as_readonly_buffer(),
                            .image = image.as_image_view<sg::pixel_format::rgba8_unorm>(),
                            .eye = eye,
                            .forward = forward,

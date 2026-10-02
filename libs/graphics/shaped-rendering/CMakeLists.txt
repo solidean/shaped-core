@@ -412,6 +412,7 @@ if(SC_BUILD_TESTS)
             MODULE_DIRS ${SR_SGL_MODULE_DIR}
             SHADERS
                 slug_traced.sgl:*
+                slug_traced_pipeline.sgl:*
         )
     endif()
 

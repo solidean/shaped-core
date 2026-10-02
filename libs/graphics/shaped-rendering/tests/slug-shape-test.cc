@@ -6,7 +6,6 @@
 #include <shaped-rendering/slug_routine.hh>
 #include <shaped-rendering/slug_shape.hh>
 #include <shaped-rendering/slug_traced.hh>
-#include <typed-geometry/linalg/pos_ops.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 using namespace cc::primitive_defines;
@@ -225,7 +224,7 @@ TEST("sr::slug - a traced quad's vertices lie where the instance places its em b
     tg::pos3f const expected[]
         = {at(lo[0], lo[1]), at(hi[0], lo[1]), at(hi[0], hi[1]), at(lo[0], lo[1]), at(hi[0], hi[1]), at(lo[0], hi[1])};
     for (auto i = 0; i < 6; ++i)
-        CHECK(tg::distance(v[i], expected[i]) < 1e-4f).dump("vertex", i);
+        CHECK((v[i] - expected[i]).length() < 1e-4f).dump("vertex", i);
 }
 
 TEST("sr::slug - a cubic is followed within its tolerance")
