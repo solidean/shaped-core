@@ -9,22 +9,22 @@
 use openpbr
 
 // Which estimator a case runs — mirrors sv_test::probe_mode.
-const probe_albedo = 0
-const probe_pdf_norm = 1
-const probe_reciprocity = 2
-const probe_echo = 3
-const probe_medium = 4
-const probe_transmitted = 5
+const probe_albedo = 0u
+const probe_pdf_norm = 1u
+const probe_reciprocity = 2u
+const probe_echo = 3u
+const probe_medium = 4u
+const probe_transmitted = 5u
 
 /// The denoiser guides for the case's surface, which are pure functions of it rather than estimators.
 /// One mode per guide, each returning its value in `xyz` and a sample count of 1 in `w`.
-const probe_guides_diffuse = 6
-const probe_guides_specular = 7
-const probe_guides_roughness = 8
+const probe_guides_diffuse = 6u
+const probe_guides_specular = 7u
+const probe_guides_roughness = 8u
 
 /// The directional albedo of ONE half of the split, integrated against the whole closure's sampler.
-const probe_albedo_diffuse = 9
-const probe_albedo_specular = 10
+const probe_albedo_diffuse = 9u
+const probe_albedo_specular = 10u
 
 /// `openpbr.surface` as a case carries it, field for field, which `probe_run` converts with `openpbr.surface(..c.s)`.
 /// A struct of its own because a buffer element naming a module's struct has no C++ mirror yet: the module's package mirrors only what its own bindings place in memory.
@@ -78,7 +78,7 @@ struct probe_surface:
 /// The pads keep the HLSL probe's layout, which is the same 320 bytes; `probe_echo` pins the agreement.
 struct probe_case:
     wo: float3
-    mode: int
+    mode: uint
 
     /// samples this work item draws, before the CPU sums the blocks of one case
     samples: uint

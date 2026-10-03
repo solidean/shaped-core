@@ -126,6 +126,27 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
   A clean `snapshot()` is the cached handle, so it is nearly free.
   The lock refuses instead.
 
+## What the SGL tracer still needs
+
+`sv::sgl_pathtrace_routine` traces `shaders/tracer_pipeline.sgl` over module `tracer`, and `sgl-tracer-parity-test.cc` holds it to the HLSL tracer on dx12 and vulkan.
+Every instance shades with sv's fallback material, through one hit group the routine compiles at run time.
+
+- **The material generator writes no SGL yet.**
+  A permutation's hit group is what replaces the fallback: its material function, `tracer.triangle_context` and `tracer.shade_triangle`, one group per permutation.
+  The cutout any-hits, the quadric group with its intersection, and the material samplers come with it, and so does `supplied_tangent_frame`.
+- **A ray set a module declares is named by no other file.**
+  `rays = tracer.path_rays` is `invalid-pipeline`, a trace of `tracer.path_rays.surface` is refused, and `sgl describe` lists no module's set for a file joining the module.
+  So the pipeline file and the host's hit group each restate `path_rays` over the module's payloads, which slib holds to the same names, sizes and shapes.
+- **Module `scene`'s structs are restated as `tracer.*_record`.**
+  A module exports only the structs its own bindings place, and `scene` declares no binding, so `tracer`'s buffers of them would have no C++ type.
+- **sv's bindless tables carry HLSL's names, so the SGL pipeline has no footprint.**
+  A group fits only the layout it was created against, so the pipeline's group 1 is the manager's layout, `gBindlessBuffers` and all.
+  sg resolves a footprint by name, and SGL's are `bindless.*`, so every view the trace binds is barriered by its class.
+  Naming the tables as SGL does, once the HLSL tracer retires, lets the footprint through.
+- **The two tracers agree to rounding rather than to the bit.**
+  DXC compiles without `-Gis`, and the SGL text reaches it in another shape, so fast-math reassociates the environment's MIS weight differently.
+  With `-Gis` the images are bit-identical; the parity test's tolerance is eight units in the last place.
+
 ## What the material system still needs
 
 The chain is joined end to end.

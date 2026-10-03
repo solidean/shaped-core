@@ -15,18 +15,17 @@ module openpbr
 /// Everything else is specular, glass included, for the reason that function gives.
 /// `bsdf_lobe_subsurface` is a refraction into a subsurface interior, and only one that crossed.
 /// The transmission slice reports `bsdf_lobe_transmission` for glass and for a total internal reflection.
-/// The lobes are `int`s where the HLSL closure's are `uint`s, since a `const` holds an `int` or a `float`.
-const bsdf_lobe_fuzz = 0
-const bsdf_lobe_coat = 1
-const bsdf_lobe_metal = 2
-const bsdf_lobe_spec = 3
-const bsdf_lobe_diffuse = 4
-const bsdf_lobe_transmission = 5
-const bsdf_lobe_subsurface = 6
+const bsdf_lobe_fuzz = 0u
+const bsdf_lobe_coat = 1u
+const bsdf_lobe_metal = 2u
+const bsdf_lobe_spec = 3u
+const bsdf_lobe_diffuse = 4u
+const bsdf_lobe_transmission = 5u
+const bsdf_lobe_subsurface = 6u
 
 /// Whether a drawn lobe belongs to the specular half, which is every lobe but the diffuse substrate and the subsurface.
 /// The one rule, in one place, so the sampler and the evaluator cannot disagree about what a path is.
-fun bsdf_lobe_is_specular(lobe: int) -> bool => lobe != bsdf_lobe_diffuse and lobe != bsdf_lobe_subsurface
+fun bsdf_lobe_is_specular(lobe: uint) -> bool => lobe != bsdf_lobe_diffuse and lobe != bsdf_lobe_subsurface
 
 // ---- The prepared closure -------------------------------------------------------------------------------------------
 
@@ -108,9 +107,9 @@ struct lobe_probs:
     transmission: float
 
 /// The continuation entered no interior, so the caller keeps whatever the incoming segment was already traveling through.
-const medium_none = 0
-const medium_transmission = 1
-const medium_subsurface = 2
+const medium_none = 0u
+const medium_transmission = 1u
+const medium_subsurface = 2u
 
 /// What one sampled direction carries back: the direction itself, the BSDF value there, and the pdf that produced it.
 /// `pdf` is the FULL closure pdf rather than the chosen lobe's, so a caller can weight it against a light sampler directly.
@@ -126,7 +125,7 @@ struct bsdf_sample:
 
     /// Which lobe drew it — one of the `bsdf_lobe_*` constants above.
     /// Meaningful only when `valid`: a branch names its lobe before it can fail, so an invalid sample reports whichever lobe was being drawn from.
-    lobe: int = bsdf_lobe_diffuse
+    lobe: uint = bsdf_lobe_diffuse
 
     /// Which interior the direction crossed into: `medium_none`, `medium_transmission` or `medium_subsurface`.
     ///
@@ -136,7 +135,7 @@ struct bsdf_sample:
     /// On a solid, `medium_none` requires `direction.z > 0`, because a direction crossing the interface always enters one of the two interiors.
     /// A thin wall is the exception and the only one: it encloses nothing, so it transmits and still reports `medium_none`, with a direction below the surface.
     /// `probe_medium` asserts both halves, which is what catches a reflective lobe leaking a below-horizon direction.
-    medium: int = medium_none
+    medium: uint = medium_none
 
 /// The perceptual-to-microfacet roughness mapping OpenPBR specifies, floored so no lobe becomes a delta.
 ///

@@ -40,6 +40,7 @@ add_library(shaped-viewer
     src/shaped-viewer/resources/gpu_resource_manager.cc
     src/shaped-viewer/rendering/raytrace_routine.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
+    src/shaped-viewer/rendering/sgl_pathtrace_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/view_renderer.cc
@@ -115,6 +116,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/rendering/frame_constants.hh
     src/shaped-viewer/rendering/raytrace_routine.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
+    src/shaped-viewer/rendering/sgl_pathtrace_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
     src/shaped-viewer/rendering/view_renderer.hh
@@ -181,6 +183,21 @@ sc_add_shader_package(
         common.hlsli:binding:flat_bindings
 )
 
+# The path tracer's SGL port, side by side with the HLSL one until an image-parity test has proven it.
+# Module `tracer` is exported because a hit group the host compiles at run time lists its bindings and traces its rays.
+# Nothing a viewer runs reaches it yet: `sv::sgl_pathtrace_routine` is the one caller, and a test the one caller of that.
+sc_add_shader_package(
+    TARGET      shaped-viewer
+    NAME        sv_sgl_shaders
+    NAMESPACE   sv::sgl_shaders
+    SOURCE_DIR  shaders
+    LANGUAGE    sgl
+    MODULE_DIRS shaders/sgl
+    SHADERS
+        module:tracer
+        tracer_pipeline.sgl:*
+)
+
 # The examples corpus: the viewer as a caller actually reaches for it.
 # The subdirectory gates itself on the window + dx12 + DXC combination an example needs, and
 # sc_add_single_file_examples is a no-op when SC_BUILD_EXAMPLES is off.
@@ -237,6 +254,7 @@ if(SC_BUILD_TESTS)
             tests/motion-vector-test.cc
             tests/runtime-probe-test.cc
             tests/pt-support-probe-test.cc
+            tests/sgl-tracer-parity-test.cc
             tests/volumetric-furnace-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
@@ -251,6 +269,12 @@ if(SC_BUILD_TESTS)
             tests/interactive-showcase-manual-test.cc
         )
         target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-dx12)
+
+        # The SGL tracer's parity test brings up a vulkan context of its own, which sv's other GPU tests do not run on.
+        if(TARGET shaped-graphics-vulkan)
+            target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-vulkan)
+            target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_VULKAN=1)
+        endif()
 
         # The probes: compute shaders over shaders/openpbr.hlsli, shaders/camera.hlsli and the material and quadric runtimes.
         # A test can then measure what the closure returns, where the camera projects and where a ray meets a quadric.

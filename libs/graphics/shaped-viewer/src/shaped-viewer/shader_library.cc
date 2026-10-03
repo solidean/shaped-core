@@ -39,6 +39,7 @@ cc::result<slib::shader_library*> impl::acquire_default_shader_library()
 
     // Every package, always: sv's routines trace with theirs, and the compositor places every view with sr's blit.
     lib->add_package(sv::shader_package());
+    lib->add_package(sv::sgl_shader_package());
     sr::add_shader_packages(*lib);
     return lib;
 }

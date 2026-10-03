@@ -235,6 +235,7 @@ struct pt_frame_constants_gpu;
 struct pt_light_table; // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
 class pathtrace_routine;
+class sgl_pathtrace_routine; // the SGL port of pathtrace_routine, which a parity test drives (rendering/sgl_pathtrace_routine.hh)
 class view_renderer;
 class viewer_renderer;
 

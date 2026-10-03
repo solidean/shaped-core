@@ -7,17 +7,16 @@ module scene
 // ---- Lights ---------------------------------------------------------------------------------------------------------
 
 // The path a light takes through the integrator — mirrors `sv::light_path` (scene/light.hh), whose values these are.
-// `int`s where the HLSL's are `uint`s, since a `const` holds an `int` or a `float`: compare `l.path == (light_path_area as uint)`.
-const light_path_point = 0
-const light_path_area = 1
-const light_path_distant_point = 2
-const light_path_distant_disc = 3
+const light_path_point = 0u
+const light_path_area = 1u
+const light_path_distant_point = 2u
+const light_path_distant_disc = 3u
 
 // Bits of `light.flags` — mirrors `sv::light_gpu::flag_*`; 0 is the default for each.
 // Written as their values, `1 << 0` to `1 << 2`, since a `const` holds a literal.
-const light_flag_two_sided = 1
-const light_flag_visible_to_camera = 2
-const light_flag_casts_no_shadow = 4
+const light_flag_two_sided = 1u
+const light_flag_visible_to_camera = 2u
+const light_flag_casts_no_shadow = 4u
 
 /// One light, tagged by `path` — mirrors `sv::light_gpu` (scene/light.hh), 96 bytes.
 ///
@@ -51,11 +50,11 @@ struct light:
 
 /// Whether geometry between `l` and a surface blocks it.
 fun light_casts_shadows(l: light) -> bool:
-    return (l.flags & (light_flag_casts_no_shadow as uint)) == 0
+    return (l.flags & light_flag_casts_no_shadow) == 0
 
 /// Whether a camera ray reaching `l` sees it.
 fun light_visible_to_camera(l: light) -> bool:
-    return (l.flags & (light_flag_visible_to_camera as uint)) != 0
+    return (l.flags & light_flag_visible_to_camera) != 0
 
 /// How much of a light survives its cone along a direction making cosine `cos_axis` with the light's axis.
 ///

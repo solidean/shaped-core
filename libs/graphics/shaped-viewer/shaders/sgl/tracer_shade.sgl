@@ -1,0 +1,332 @@
+// The path tracer's SHADING, once a hit has been located: what every closest hit runs after it has described its surface.
+//
+// The SGL port of shaders/pt_shade.hlsli and of the triangle half of shaders/pt_material_hit.hlsli, with the same numerics.
+// SGL hands no function to another, so a closest hit evaluates its material itself and hands `shade` the surface it got.
+// Everything from there on is the same for every geometry kind: prepare the closure, estimate direct light through it, sample the continuation.
+module tracer
+
+use material
+use openpbr
+use pt
+use scene
+
+/// Whether anything blocks the segment from `origin` along `dir` for `dist`.
+///
+/// Callers offset the origin along the GEOMETRIC normal rather than the shading one, so a normal map cannot start the ray below the surface.
+/// It skips the closest hit, since only visibility matters, and the shadow miss is what sets `visible` on a clear path.
+fun occluded(origin: float3, dir: float3, dist: float){traced} -> bool:
+    // assume occluded; only the shadow miss flips this
+    let mut sp = shadow_payload(0.0)
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = dist)
+    trace(traced.world, r, path_rays.occlusion, mut sp, flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit)
+    return sp.visible < 0.5
+
+/// Direct light from one of the trace's lights, with the BSDF folded in and weighted against the BSDF sampler.
+///
+/// One light is picked uniformly and its choice is part of the density, which keeps one shadow ray per hit an unbiased estimate of every light at once.
+/// A point or a parallel light is a delta no sampled ray can reach, so it takes no weighting and is divided by the probability of picking it alone.
+/// A rect and a disc are reachable by the raygen's continuation ray too, and weight against it.
+fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced}:
+    out_diffuse = float3(0.0)
+    out_specular = float3(0.0)
+
+    let count = traced.frame[0].light_count
+    if count == 0u => return
+
+    // No draw when there is nothing to choose between, so a one-light scene keeps the sample sequence it always had.
+    let mut index = 0u
+    if count != 1u:
+        let u = pt.rand(mut rng)
+        index = min((u * (count as float)) as uint, count - 1u)
+    let l = scene.light(..traced.lights[index as int])
+
+    // Filled per path: where the shadow ray goes and how far, what arrives along it before the BSDF, and the density of that direction.
+    let mut wi = float3(0.0)
+    let mut shadow_dist = 0.0
+    let mut incoming = float3(0.0)
+    let mut pdf = 0.0
+    let mut delta = false
+
+    if l.path == scene.light_path_area:
+        // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
+        let s = pt.rand(mut rng) * 2.0 - 1.0
+        let t = pt.rand(mut rng) * 2.0 - 1.0
+        let to_light = l.position + s * l.u + t * l.v - p
+        let dist2 = dot(to_light, to_light)
+        let dist = sqrt(dist2)
+        wi = to_light / dist
+
+        let cos_face = dot(l.normal, -wi)
+        let cos_light = if (l.flags & scene.light_flag_two_sided) != 0u => abs(cos_face) else cos_face
+        // the light's emitting face is turned away
+        if cos_light <= 0.0 => return
+
+        // Stop just short of the light surface, so the light's own geometry does not count as an occluder.
+        shadow_dist = dist - 2e-3
+        incoming = l.emission * scene.light_cone(l, cos_light)
+        pdf = pt.light_pdf(l, count, dist2, cos_light)
+    else if l.path == scene.light_path_point:
+        let to_light = l.position - p
+        let dist2 = max(dot(to_light, to_light), 1e-12)
+        let dist = sqrt(dist2)
+        wi = to_light / dist
+
+        shadow_dist = dist - 2e-3
+        incoming = l.emission * (scene.light_cone(l, dot(l.normal, -wi)) / dist2)
+        pdf = pt.light_select_pdf(count)
+        delta = true
+    else if l.path == scene.light_path_distant_point:
+        wi = -l.normal
+        shadow_dist = 1e20
+        incoming = l.emission
+        pdf = pt.light_select_pdf(count)
+        delta = true
+    else:
+        // scene.light_path_distant_disc
+        let u1 = pt.rand(mut rng)
+        let u2 = pt.rand(mut rng)
+        wi = pt.sample_cone(-l.normal, l.one_minus_cos_angular_radius, u1, u2)
+        shadow_dist = 1e20
+        incoming = l.emission
+        pdf = pt.disc_pdf(l, count)
+
+    if all(incoming <= float3(0.0)) => return
+
+    let wi_local = openpbr.to_local(f, wi)
+    // below the surface, so the BSDF is zero there anyway
+    if wi_local.z <= 0.0 => return
+
+    // Split at the evaluation rather than after it, since the two halves reach different denoiser signals.
+    let mut f_diffuse = float3(0.0)
+    let mut f_specular = float3(0.0)
+    openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
+    let f_sum = f_diffuse + f_specular
+    if all(f_sum <= float3(0.0)) => return
+
+    if scene.light_casts_shadows(l):
+        if occluded(p + n_geom * 1e-3, wi, shadow_dist) => return
+
+    // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
+    // A delta light is the exception, which that sample can never reach, and so is the last bounce, where the raygen takes none.
+    let w = if delta or last_bounce => 1.0 else pt.mis_weight(pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
+
+    let scale = incoming * (wi_local.z / pdf) * w
+    out_diffuse = f_diffuse * scale
+    out_specular = f_specular * scale
+
+/// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.
+///
+/// One uniform-hemisphere sample: the probe has no sharp features, so a radiance-proportional sampler is not worth its cost.
+fun estimate_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced}:
+    out_diffuse = float3(0.0)
+    out_specular = float3(0.0)
+
+    // cos(theta) = u1 uniform in [0, 1] gives a uniform solid-angle pick about the normal.
+    let u1 = pt.rand(mut rng)
+    let u2 = pt.rand(mut rng)
+    let r = sqrt(max(0.0, 1.0 - u1 * u1))
+    let phi = 2.0 * pt.pi * u2
+
+    let wi_local = float3(r * cos(phi), r * sin(phi), u1)
+    let wi = openpbr.to_world(f, wi_local)
+
+    let mut f_diffuse = float3(0.0)
+    let mut f_specular = float3(0.0)
+    openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
+    if all(f_diffuse + f_specular <= float3(0.0)) => return
+
+    if occluded(p + n_geom * 1e-3, wi, 1e4) => return
+
+    // No bounce ray follows the last hit, so there is nothing to balance against there.
+    let w = if last_bounce => 1.0 else pt.mis_weight(pt.env_pdf(), openpbr.bsdf_pdf(b, wo_local, wi_local))
+
+    let scale = scene.background_radiance(background_sh(), wi) * (wi_local.z / pt.env_pdf()) * w
+    out_diffuse = f_diffuse * scale
+    out_specular = f_specular * scale
+
+/// Shades a located hit and writes the whole payload.
+///
+/// `surface` is what the hit's material evaluated to, `n` the GEOMETRIC normal already turned to face the ray, and `v` the direction back toward the viewer.
+/// `exiting` says the ray arrived from inside the surface, which a refraction needs, since the index ratio inverts between going in and coming back out.
+/// `ray_origin`, `ray_dir` and `hit_t` are the ray as the hit received it.
+/// `authored` is the material's tangent frame in world space, and means something only where `has_authored` holds.
+fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool){traced}:
+    payload.normal = n
+    payload.hit_t = hit_t
+
+    // The random state round-trips through every path out of here, so a stream is never left half-advanced.
+    let mut rng = payload.rng
+
+    let mut surface = surface_in
+    // Before any early return below: every path out must have written all three.
+    payload.albedo = openpbr.pt_diffuse_albedo(surface)
+    payload.specular_albedo = openpbr.pt_specular_albedo(surface)
+    payload.roughness = openpbr.pt_roughness(surface)
+
+    // A dispersive interface collapses the path onto ONE wavelength, drawn before the closure is prepared, since the index it refracts at is what the choice decides.
+    // A path that already collapsed keeps its wavelength.
+    let mut channel = payload.channel
+    let collapsing = channel >= 3u and surface.transmission_dispersion_scale > 0.0 and surface.transmission_weight > 0.0
+    if collapsing:
+        let u = pt.rand(mut rng)
+        channel = min((u * 3.0) as uint, 2u)
+
+    let b = openpbr.bsdf_prepare(surface, exiting, channel)
+
+    // The shading frame, in three steps: the authored one if there is one, faced toward the ray, then the normal map on top.
+    let mut f = openpbr.make_frame(n)
+    if has_authored:
+        f = authored
+        // Two-sided, against the same test the geometric normal took: a ray arriving from behind needs the whole basis turned.
+        if dot(f.n, v) < 0.0 => f = openpbr.flip_frame(f)
+
+    // The frame as authored, which the coat's normal is written in the tangent space of.
+    let authored_frame = f
+
+    // A normal map is a rotation of the frame, not a replacement for it.
+    if surface.geometry_normal != float3(0.0, 0.0, 1.0) => f = openpbr.perturb_frame(f, surface.geometry_normal)
+
+    // The anisotropy direction, applied AFTER the normal map, because it is a rotation about the shading normal the normal map decided.
+    if surface.geometry_tangent != float3(1.0, 0.0, 0.0) => f = openpbr.rotate_frame_to_tangent(f, surface.geometry_tangent)
+
+    // The coat's normal, re-expressed in the frame the closure works in.
+    // It lands AFTER `bsdf_prepare` read the surface, exactly as shaders/pt_shade.hlsli has it, so the closure still sees the authored one.
+    if surface.geometry_coat_normal != float3(0.0, 0.0, 1.0):
+        let coat_world = normalize(openpbr.to_world(authored_frame, normalize(surface.geometry_coat_normal)))
+        surface.geometry_coat_normal = normalize(openpbr.to_local(f, coat_world))
+
+    let wo_local = openpbr.to_local(f, v)
+    let p = ray_origin + ray_dir * hit_t
+
+    payload.emission = b.emission
+
+    // What the medium was on the way in, so a continuation that stays on this side keeps traveling through it.
+    let in_sigma_t = payload.medium_sigma_t
+    let in_albedo = payload.medium_albedo
+    let in_g = payload.medium_g
+
+    // A grazing hit whose shading frame turned away has no hemisphere to integrate over.
+    if wo_local.z <= 0.0:
+        payload.direct_diffuse = float3(0.0)
+        payload.direct_specular = float3(0.0)
+        payload.throughput = float3(0.0)
+        payload.direction = float3(0.0)
+        payload.lobe = openpbr.bsdf_lobe_diffuse
+        payload.bsdf_pdf = 0.0
+        payload.rng = rng
+        payload.medium_sigma_t = in_sigma_t
+        payload.medium_albedo = in_albedo
+        payload.medium_g = in_g
+        return
+
+    let last_bounce = payload.last_bounce != 0u
+
+    let mut light_diffuse = float3(0.0)
+    let mut light_specular = float3(0.0)
+    estimate_light(b, f, wo_local, p, n, last_bounce, mut rng, mut light_diffuse, mut light_specular)
+
+    let mut env_diffuse = float3(0.0)
+    let mut env_specular = float3(0.0)
+    estimate_environment(b, f, wo_local, p, n, last_bounce, mut rng, mut env_diffuse, mut env_specular)
+
+    payload.direct_diffuse = light_diffuse + env_diffuse
+    payload.direct_specular = light_specular + env_specular
+
+    // The continuation, importance-sampled from the closure the material just described.
+    let u1 = pt.rand(mut rng)
+    let u2 = pt.rand(mut rng)
+    let u3 = pt.rand(mut rng)
+    let s = openpbr.bsdf_sample_direction(b, wo_local, float3(u1, u2, u3))
+
+    if s.valid:
+        // The cosine is the one at the SURFACE, so a refracted direction contributes its own magnitude rather than a negative weight.
+        let mut weight = s.value * (abs(s.direction.z) / s.pdf)
+
+        // Collapsing onto one wavelength keeps one channel of three, so what survives is scaled back up by three.
+        if collapsing:
+            let mask = float3(if channel == 0u => 1.0 else 0.0, if channel == 1u => 1.0 else 0.0, if channel == 2u => 1.0 else 0.0)
+            weight *= mask * 3.0
+
+        payload.throughput = weight
+        payload.direction = openpbr.to_world(f, s.direction)
+        payload.bsdf_pdf = s.pdf
+        payload.lobe = s.lobe
+        payload.channel = channel
+
+        // A continuation that crossed the surface changes which medium it travels in: into the interior the closure entered, or back out to vacuum.
+        // `medium_none` covers a reflection and a thin wall alike.
+        if s.medium == openpbr.medium_none:
+            payload.medium_sigma_t = in_sigma_t
+            payload.medium_albedo = in_albedo
+            payload.medium_g = in_g
+        else if exiting:
+            payload.medium_sigma_t = float3(0.0)
+            payload.medium_albedo = float3(0.0)
+            payload.medium_g = 0.0
+        else if s.medium == openpbr.medium_subsurface:
+            payload.medium_sigma_t = b.sss_sigma_t
+            payload.medium_albedo = b.sss_albedo
+            payload.medium_g = b.sss_g
+        else:
+            payload.medium_sigma_t = b.medium_sigma_t
+            payload.medium_albedo = b.medium_albedo
+            payload.medium_g = b.medium_g
+    else:
+        payload.throughput = float3(0.0)
+        payload.direction = float3(0.0)
+        // nothing continues, so the classification is never read
+        payload.lobe = openpbr.bsdf_lobe_diffuse
+        payload.bsdf_pdf = 0.0
+        payload.medium_sigma_t = in_sigma_t
+        payload.medium_albedo = in_albedo
+        payload.medium_g = in_g
+
+    payload.rng = rng
+
+// ---- Triangles ------------------------------------------------------------------------------------------------------
+
+/// One object-space position out of the instance's own vertex buffer: `float3`s, tightly packed, as `sv::mesh_manager` uploads them.
+fun instance_position(inst: scene.instance, vertex: uint){bindless} -> float3:
+    let buffer = inst.vertices as int
+    return reinterpret_as_float(bindless.buffers[nonuniform buffer].load3(vertex * 12u))
+
+/// The shading context of a triangle hit, which is all a material needs to know about where it is.
+fun triangle_context(h: triangle_hit){traced, bindless} -> material.shading_context:
+    let inst = scene.instance(..traced.instances[h.instance_id])
+    let indices = inst.indices as int
+    return material.make_context(inst, bindless.buffers[nonuniform indices], h.primitive_index as uint, float2(h.barycentrics.y, h.barycentrics.z))
+
+/// Shades a triangle hit whose material evaluated to `surface`, through `ctx` as `triangle_context` made it.
+///
+/// The flat face normal comes from the triangle's own corners, read through the instance, which is what lets one view hold many meshes.
+/// `supplied_tangent_frame` is whether the material's `geometry_tangent_frame` was authored rather than defaulted, which the generated material knows.
+fun shade_triangle(h: triangle_hit, payload: mut surface_payload, ctx: material.shading_context, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless}:
+    let inst = scene.instance(..traced.instances[h.instance_id])
+    let v0 = instance_position(inst, ctx.corner.x)
+    let v1 = instance_position(inst, ctx.corner.y)
+    let v2 = instance_position(inst, ctx.corner.z)
+    let n_obj = normalize(cross(v1 - v0, v2 - v0))
+
+    // By the inverse transpose, not by the object-to-world transform: a normal is a covector, so a non-uniform placement tilts it differently.
+    let n_world = h.normal_to_world(vec3(n_obj.x, n_obj.y, n_obj.z))
+    let mut n = normalize(float3(n_world.x, n_world.y, n_world.z))
+
+    let ray_dir = float3(h.ray.direction.x, h.ray.direction.y, h.ray.direction.z)
+    let v = -normalize(ray_dir)
+
+    // Which side the ray arrived on, read off the geometry BEFORE the normal is turned to face it.
+    let exiting = dot(n, v) < 0.0
+    // two-sided: face the incoming ray so arbitrary winding still shades
+    if exiting => n = -n
+
+    // The authored frame is in object space, so it moves with the instance the geometry does.
+    let mut authored = openpbr.frame(float3(0.0), float3(0.0), float3(0.0))
+    if supplied_tangent_frame:
+        let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
+        let t = h.to_world(vec3(local.t.x, local.t.y, local.t.z))
+        let bt = h.to_world(vec3(local.b.x, local.b.y, local.b.z))
+        let nt = h.to_world(vec3(local.n.x, local.n.y, local.n.z))
+        authored = openpbr.frame(normalize(float3(t.x, t.y, t.z)), normalize(float3(bt.x, bt.y, bt.z)), normalize(float3(nt.x, nt.y, nt.z)))
+
+    let ray_origin = float3(h.ray.origin.x, h.ray.origin.y, h.ray.origin.z)
+    shade(mut payload, surface, n, v, exiting, ray_origin, ray_dir, h.t, authored, supplied_tangent_frame)

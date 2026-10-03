@@ -19,4 +19,8 @@ namespace sv
 ///
 /// Re-exposes the generated package, whose own header is private to shaped-viewer's build.
 [[nodiscard]] slib::shader_package const& shader_package();
+
+/// The path tracer's SGL port, with module `tracer`: what `sv::sgl_pathtrace_routine` compiles through.
+/// Registered beside `shader_package()`, and reached by nothing a viewer runs yet.
+[[nodiscard]] slib::shader_package const& sgl_shader_package();
 } // namespace sv

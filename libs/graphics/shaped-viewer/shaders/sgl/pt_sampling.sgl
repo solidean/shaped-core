@@ -71,7 +71,7 @@ fun rect_intersect(l: scene.light, origin: float3, dir: float3, t_hit: mut float
     cos_light = 0.0
 
     let denom = dot(dir, l.normal)
-    let two_sided = (l.flags & (scene.light_flag_two_sided as uint)) != 0
+    let two_sided = (l.flags & scene.light_flag_two_sided) != 0
     // parallel to the plane, or arriving at a face the light does not emit from
     let faces_away = if two_sided => abs(denom) <= 1e-9 else denom >= -1e-9
     if faces_away => return false

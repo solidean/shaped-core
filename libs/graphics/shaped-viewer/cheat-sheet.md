@@ -752,7 +752,15 @@ table.describe_in(fc)                                // writes light_count + the
 // Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
 sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + one image-based-lit sample per pixel (SH diffuse irradiance + Fresnel env reflection) into the UAV target (no-op if the shaders did not compile)
 
+// The tracer's SGL port (shaders/tracer_pipeline.sgl + module `tracer`), side by side until it is proven; no viewer reaches it yet.
+sv::sgl_pathtrace_routine::execute(cmd, pt_trace_desc) // the same desc, the same estimate; declines until its hit group and pipeline land
+                                                     //   EVERY instance shades with sv's fallback material: hit_groups / fallback are not read
+                                                     //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
+                                                     //   triangle instances only, until the quadric hit group is ported
+sv::sgl_pathtrace_routine::fallback_hit_group_source() // the SGL hit group it compiles at run time, through slib::compile_hit_group
+
 sv::shader_package()                                 // register once on an slib::shader_library before rendering
+sv::sgl_shader_package()                             // the SGL tracer's package, beside it; sv's default library adds both
 ```
 
 [`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward one light, picked uniformly, and the SH environment.

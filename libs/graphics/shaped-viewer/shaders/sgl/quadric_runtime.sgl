@@ -32,11 +32,11 @@ struct primitive:
     flags: uint
 
 /// The stride of one primitive record in bytes: 12 + 40 + 40 + 4.
-const stride = 96
+const stride = 96u
 
 /// Set in `flags` when the clipper's own surface is drawn too — a cylinder's end caps, a hemisphere's floor.
 /// Mirrors `sv::quadric_primitive::flag_emit_clip_surface`.
-const flag_emit_clip_surface = 1
+const flag_emit_clip_surface = 1u
 
 fun load_quadric3(b: bytes, offset: uint) -> quadric3:
     let diag = reinterpret_as_float(b.load3(offset))
@@ -47,7 +47,7 @@ fun load_quadric3(b: bytes, offset: uint) -> quadric3:
 
 /// The primitive at `index` out of the batch's own primitive buffer, which is a run of `sv::quadric_gpu` records.
 fun load_primitive(b: bytes, index: uint) -> primitive:
-    let base = index * (stride as uint)
+    let base = index * stride
     let origin = reinterpret_as_float(b.load3(base))
     let surface = load_quadric3(b, base + 12)
     let clip = load_quadric3(b, base + 52)
@@ -148,7 +148,7 @@ fun intersect(prim: primitive, origin: float3, dir: float3, t_min: float, t_max:
     let o = origin - prim.origin
 
     let surface_roots = roots_of(prim.surface, o, dir)
-    let emit_clip = (prim.flags & (flag_emit_clip_surface as uint)) != 0
+    let emit_clip = (prim.flags & flag_emit_clip_surface) != 0
     let mut clip_roots = roots(0, 0.0, 0.0, o, 0.0)
     if emit_clip:
         clip_roots = roots_of(prim.clip, o, dir)
