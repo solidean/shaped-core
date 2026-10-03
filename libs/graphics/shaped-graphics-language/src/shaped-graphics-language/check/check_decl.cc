@@ -1174,9 +1174,27 @@ void checker::compile_const(symbol_id id)
             info.real = is_negated ? -parse_plain_float(text).value() : parse_plain_float(text).value();
             info.type = type_of_builtin(builtins::k_float, file, where);
         }
+        else if (auto const suffixed = number == number_class::suffixed ? split_suffix(text) : cc::nullopt;
+                 suffixed.has_value() && suffixed.value().letter == 'u' && suffixed.value().width == 32)
+        {
+            // a uint is no negative number, and its value must fit 32 bits
+            auto const value = classify_number(suffixed.value().body) == number_class::plain_integer
+                                 ? parse_literal_integer(suffixed.value().body)
+                                 : cc::optional<i64>();
+            if (is_negated || !value.has_value() || value.value() < 0 || value.value() > 4294967295ll)
+            {
+                report(diagnostic_kind::type_mismatch, file, where,
+                       cc::format("{}{} is no uint", is_negated ? "-" : "", text));
+                return fail();
+            }
+            info.kind = constant_kind::integer;
+            info.is_unsigned = true;
+            info.integer = i32(u32(value.value()));
+            info.type = type_of_builtin(builtins::k_uint, file, where);
+        }
         else
         {
-            unsupported(file, where, "a const whose literal is no plain int or float");
+            unsupported(file, where, "a const whose literal is no plain int or float, and no uint");
             return fail();
         }
     }
@@ -1258,9 +1276,9 @@ void checker::compile_const(symbol_id id)
     // CHK-353: an option is a bool, an int or an enum case, and the compile may give it another value of its type
     if (find_attribute(file, d.attributes, "option") != nullptr)
     {
-        if (info.kind == constant_kind::real)
+        if (info.kind == constant_kind::real || info.is_unsigned)
         {
-            unsupported(file, c.name, "an option of float; an option is a bool, an int or an enum case");
+            unsupported(file, c.name, "an option of float or uint; an option is a bool, an int or an enum case");
             return fail();
         }
         // the host would set the named option and not see this one follow it

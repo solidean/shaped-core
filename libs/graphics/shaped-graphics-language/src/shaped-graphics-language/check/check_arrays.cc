@@ -71,7 +71,7 @@ cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
     if (demand(id, file, span_of(file, expr)) != symbol_state::checked)
         return {};
     auto const& c = out.constants[out.at(id).info];
-    if (c.kind != constant_kind::integer)
+    if (c.kind != constant_kind::integer || c.is_unsigned)
         return {};
     note_option(file, span_of(file, expr), c);
     return c.integer;
@@ -93,7 +93,7 @@ cc::optional<i32> checker::constant_index(i32 file, ast::expr_id expr) const
         || out.at(where.symbol).state != symbol_state::checked)
         return {};
     auto const& c = out.constants[out.at(where.symbol).info];
-    return c.kind == constant_kind::integer ? cc::optional<i32>(c.integer) : cc::optional<i32>();
+    return c.kind == constant_kind::integer && !c.is_unsigned ? cc::optional<i32>(c.integer) : cc::optional<i32>();
 }
 
 type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)

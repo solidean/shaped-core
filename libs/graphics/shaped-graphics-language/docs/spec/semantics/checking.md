@@ -213,6 +213,7 @@ fun f(x: float) -> float:
 ## Consts
 
 * **CHK-219** A `const` at file scope stands for its value wherever it is named: an `int` or `float` literal, `-` in front of one, an enum case, or another `const`.
+  A `uint` literal with its `u` suffix is one too, which is never negative and fits 32 bits.
   Any other value is `unsupported-yet`, and a written type the value does not have is `type-mismatch`.
   A leading dot names a case of the written type, `const f: pixel_format = .rgba8_unorm`, by CHK-152.
 * **CHK-221** A `const` whose value is an enum case names that case as a `case` pattern, so it counts for exhaustiveness as `e.case` does (CHK-159).

@@ -3,6 +3,8 @@
 const steps = 4
 const scale = -0.5
 const also_steps = steps
+const mask = 0xff00u
+const all_bits = 4294967295u
 
 enum mode:
     low
@@ -12,6 +14,10 @@ const default_mode = mode.high
 
 test steps == 4 and also_steps == steps
 test scale < 0.0
+
+// a uint const takes its suffix, and every 32-bit value
+test mask == 65280u and (mask >> 8u) == 255u
+test all_bits == 0xffffffffu and all_bits + 1u == 0u
 
 fun weight(m: mode) -> float:
     return case m:
@@ -36,7 +42,7 @@ struct frag:
     color: float4
 
 @pixel fun main_ps(p: frag) -> target:
-    let w = weight(default_mode) * scale + (steps as float)
+    let w = weight(default_mode) * scale + (steps as float) + ((mask >> 15u) as float)
     return target(float4(w * p.a, 0.0, 0.0, 1.0))
 
 // a workgroup size may name an int const, which the attribute reads as its value (CHK-370)

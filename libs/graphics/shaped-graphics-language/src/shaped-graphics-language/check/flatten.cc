@@ -872,7 +872,7 @@ struct flattener
         switch (info.kind)
         {
         case constant_kind::integer:
-            return add_expr(type, from, flat_int_literal{.value = info.integer});
+            return add_expr(type, from, flat_int_literal{.value = info.integer, .is_unsigned = info.is_unsigned});
         case constant_kind::real:
             return add_expr(type, from, flat_literal{.value = info.real});
         case constant_kind::enum_case:
