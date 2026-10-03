@@ -415,6 +415,12 @@ struct optional_shader_features
     VkBool32 compute_derivative_group_linear = VK_FALSE;
     VkBool32 compute_derivative_group_quads = VK_FALSE;
     bool subgroups = false;
+    /// A binding array indexed `nonuniform` (HLSL's `NonUniformResourceIndex`, SGL's `t[nonuniform i]`) declares the capability
+    /// of its descriptor kind, which is invalid unless the matching bit is enabled.
+    VkBool32 sampled_image_array_non_uniform_indexing = VK_FALSE;
+    VkBool32 storage_buffer_array_non_uniform_indexing = VK_FALSE;
+    VkBool32 storage_image_array_non_uniform_indexing = VK_FALSE;
+    VkBool32 uniform_buffer_array_non_uniform_indexing = VK_FALSE;
     VkPhysicalDeviceVulkan13Properties vk13_properties = {};
 
     /// A 16-bit type is used in registers and in buffers alike, so each kind needs both storage bits too.
@@ -473,6 +479,10 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         // a quad operation of a compute stage is the one DXC writes in a linear derivative group
         .subgroups = (subgroup.supportedStages & stages) == stages
                   && (subgroup.supportedOperations & operations) == operations && linear == VK_TRUE,
+        .sampled_image_array_non_uniform_indexing = vk12.shaderSampledImageArrayNonUniformIndexing,
+        .storage_buffer_array_non_uniform_indexing = vk12.shaderStorageBufferArrayNonUniformIndexing,
+        .storage_image_array_non_uniform_indexing = vk12.shaderStorageImageArrayNonUniformIndexing,
+        .uniform_buffer_array_non_uniform_indexing = vk12.shaderUniformBufferArrayNonUniformIndexing,
         .vk13_properties = vk13_properties,
     };
 }
@@ -748,6 +758,10 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto vk12_features = VkPhysicalDeviceVulkan12Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .pNext = &vk13_features,
+        .shaderUniformBufferArrayNonUniformIndexing = shader_features.uniform_buffer_array_non_uniform_indexing,
+        .shaderSampledImageArrayNonUniformIndexing = shader_features.sampled_image_array_non_uniform_indexing,
+        .shaderStorageBufferArrayNonUniformIndexing = shader_features.storage_buffer_array_non_uniform_indexing,
+        .shaderStorageImageArrayNonUniformIndexing = shader_features.storage_image_array_non_uniform_indexing,
         .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
         .descriptorBindingPartiallyBound = VK_TRUE,
         .runtimeDescriptorArray = VK_TRUE,

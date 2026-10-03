@@ -7,6 +7,7 @@
 //
 // Each `shader` is an HLSL FRAGMENT, not a compilable shader: the generated prologue has already declared and initialized one
 // local per signature attribute, and one `sv::surface surface` for it to write.
+// Each `sgl_shader` is the same fragment in SGL, for the SGL tracer's generated hit groups.
 // So a fragment reads the attributes by their declared names and assigns `surface`, and knows nothing about where any of it came
 // from — which is what lets one fragment serve a constant, a per-corner attribute and a texture alike.
 //
@@ -86,6 +87,61 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
     surface.geometry_handedness = tangent_handedness;
 )hlsl";
 
+// The same fragment in SGL, statement for statement; the HLSL one says why `occlusion` is not read.
+constexpr cc::string_view openpbr_sgl = R"sgl(
+surface.base_weight = saturate(base_weight)
+surface.base_color = saturate(base_color)
+surface.base_metalness = saturate(base_metalness)
+surface.base_diffuse_roughness = saturate(base_diffuse_roughness)
+
+surface.specular_weight = max(0.0, specular_weight)
+surface.specular_color = saturate(specular_color)
+surface.specular_roughness = saturate(specular_roughness)
+surface.specular_roughness_anisotropy = saturate(specular_roughness_anisotropy)
+surface.specular_ior = max(1.0, specular_ior)
+
+surface.transmission_weight = saturate(transmission_weight)
+surface.transmission_color = saturate(transmission_color)
+surface.transmission_depth = max(0.0, transmission_depth)
+surface.transmission_scatter = max(float3(0.0), transmission_scatter)
+surface.transmission_scatter_anisotropy = clamp(transmission_scatter_anisotropy, -1.0, 1.0)
+surface.transmission_dispersion_scale = max(0.0, transmission_dispersion_scale)
+surface.transmission_dispersion_abbe_number = max(0.0, transmission_dispersion_abbe_number)
+
+surface.subsurface_weight = saturate(subsurface_weight)
+surface.subsurface_color = saturate(subsurface_color)
+surface.subsurface_radius = saturate(subsurface_radius)
+surface.subsurface_radius_scale = max(0.0, subsurface_radius_scale)
+surface.subsurface_scatter_anisotropy = clamp(subsurface_scatter_anisotropy, -1.0, 1.0)
+
+surface.coat_weight = saturate(coat_weight)
+surface.coat_color = saturate(coat_color)
+surface.coat_roughness = saturate(coat_roughness)
+surface.coat_roughness_anisotropy = saturate(coat_roughness_anisotropy)
+surface.coat_ior = max(1.0, coat_ior)
+surface.coat_darkening = saturate(coat_darkening)
+
+surface.fuzz_weight = saturate(fuzz_weight)
+surface.fuzz_color = saturate(fuzz_color)
+surface.fuzz_roughness = saturate(fuzz_roughness)
+
+surface.thin_film_weight = saturate(thin_film_weight)
+surface.thin_film_thickness = max(0.0, thin_film_thickness)
+surface.thin_film_ior = max(1.0, thin_film_ior)
+
+surface.emission_luminance = max(0.0, emission_luminance)
+surface.emission_color = max(float3(0.0), emission_color)
+
+surface.geometry_thin_walled = thin_walled
+surface.geometry_normal = normalize(normal)
+surface.geometry_coat_normal = normalize(coat_normal)
+surface.geometry_opacity = if alpha_cutoff > 0.0 => step(alpha_cutoff, opacity) else saturate(opacity)
+
+surface.geometry_tangent_frame = tangent_frame
+surface.geometry_tangent = tangent
+surface.geometry_handedness = tangent_handedness
+)sgl";
+
 // glTF metallic-roughness, projected onto the OpenPBR surface.
 //
 // The projection is the one glTF's own OpenPBR mapping uses: `metallic` is `base_metalness`, `roughness` is
@@ -106,6 +162,20 @@ constexpr cc::string_view pbr_shader = R"hlsl(
     surface.geometry_handedness = tangent_handedness;
 )hlsl";
 
+constexpr cc::string_view pbr_sgl = R"sgl(
+surface.base_weight = saturate(occlusion)
+surface.base_color = base_color
+surface.base_metalness = saturate(metallic)
+surface.specular_roughness = saturate(roughness)
+
+surface.emission_luminance = 1.0
+surface.emission_color = emissive
+
+surface.geometry_normal = normalize(normal)
+surface.geometry_tangent_frame = tangent_frame
+surface.geometry_handedness = tangent_handedness
+)sgl";
+
 // Unlit is emission and nothing else: no base and no specular means no bounce reaches it, so the integrator returns `color`.
 constexpr cc::string_view unlit_shader = R"hlsl(
     surface.base_weight = 0.0;
@@ -116,6 +186,16 @@ constexpr cc::string_view unlit_shader = R"hlsl(
 
     surface.geometry_opacity = saturate(opacity);
 )hlsl";
+
+constexpr cc::string_view unlit_sgl = R"sgl(
+surface.base_weight = 0.0
+surface.specular_weight = 0.0
+
+surface.emission_luminance = 1.0
+surface.emission_color = color
+
+surface.geometry_opacity = saturate(opacity)
+)sgl";
 
 [[nodiscard]] material_type make_openpbr()
 {
@@ -204,7 +284,7 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
 
     return material_type::create(cc::string(builtin_material::openpbr), cc::move(signature), cc::string(openpbr_shader),
-                                 "opacity");
+                                 "opacity", cc::string(openpbr_sgl));
 }
 
 [[nodiscard]] material_type make_pbr()
@@ -224,7 +304,8 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of_rotation("tangent_frame", tg::quat_f::make_identity()));
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
 
-    return material_type::create(cc::string(builtin_material::pbr), cc::move(signature), cc::string(pbr_shader));
+    return material_type::create(cc::string(builtin_material::pbr), cc::move(signature), cc::string(pbr_shader), {},
+                                 cc::string(pbr_sgl));
 }
 
 [[nodiscard]] material_type make_unlit()
@@ -233,7 +314,7 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     signature.push_back(material_signature_entry::of("opacity", 1.0f));
     return material_type::create(cc::string(builtin_material::unlit), cc::move(signature), cc::string(unlit_shader),
-                                 "opacity");
+                                 "opacity", cc::string(unlit_sgl));
 }
 } // namespace
 

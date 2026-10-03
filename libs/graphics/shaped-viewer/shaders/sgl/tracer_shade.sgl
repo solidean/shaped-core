@@ -1,13 +1,15 @@
 // The path tracer's SHADING, once a hit has been located: what every closest hit runs after it has described its surface.
 //
-// The SGL port of shaders/pt_shade.hlsli and of the triangle half of shaders/pt_material_hit.hlsli, with the same numerics.
+// The SGL port of shaders/pt_shade.hlsli, shaders/pt_material_hit.hlsli and shaders/pt_quadric_hit.hlsli, with the same numerics.
 // SGL hands no function to another, so a closest hit evaluates its material itself and hands `shade` the surface it got.
 // Everything from there on is the same for every geometry kind: prepare the closure, estimate direct light through it, sample the continuation.
+// What a generated hit group adds around this is `sv::generate_material_shader`'s, which material/shader_generator.hh describes.
 module tracer
 
 use material
 use openpbr
 use pt
+use quadric
 use scene
 
 /// Whether anything blocks the segment from `origin` along `dir` for `dist`.
@@ -320,6 +322,81 @@ fun shade_triangle(h: triangle_hit, payload: mut surface_payload, ctx: material.
     if exiting => n = -n
 
     // The authored frame is in object space, so it moves with the instance the geometry does.
+    let mut authored = openpbr.frame(float3(0.0), float3(0.0), float3(0.0))
+    if supplied_tangent_frame:
+        let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
+        let t = h.to_world(vec3(local.t.x, local.t.y, local.t.z))
+        let bt = h.to_world(vec3(local.b.x, local.b.y, local.b.z))
+        let nt = h.to_world(vec3(local.n.x, local.n.y, local.n.z))
+        authored = openpbr.frame(normalize(float3(t.x, t.y, t.z)), normalize(float3(bt.x, bt.y, bt.z)), normalize(float3(nt.x, nt.y, nt.z)))
+
+    let ray_origin = float3(h.ray.origin.x, h.ray.origin.y, h.ray.origin.z)
+    shade(mut payload, surface, n, v, exiting, ray_origin, ray_dir, h.t, authored, supplied_tangent_frame)
+
+/// The shading context of a triangle the traversal could not decide alone, as `triangle_context` makes one for a hit.
+fun candidate_context(c: triangle_candidate){traced, bindless} -> material.shading_context:
+    let inst = scene.instance(..traced.instances[c.instance_id])
+    let indices = inst.indices as int
+    return material.make_context(inst, bindless.buffers[nonuniform indices], c.primitive_index as uint, float2(c.barycentrics.y, c.barycentrics.z))
+
+/// The cutout test, run at every intersection a non-opaque instance reports, for a surface whose material evaluated to `opacity`.
+///
+/// STOCHASTIC rather than a fixed threshold: `geometry_opacity` is a coverage fraction, so accepting the hit that fraction of the time converges to a partly covered surface.
+/// The draw comes from the pixel, the frame's seed, the primitive and the instance rather than from the payload, which an any hit may not advance.
+/// The instance is in the hash so two instances sharing one geometry cut out independently.
+fun cutout(c: triangle_candidate, launch: int3, opacity: float){traced} -> hit_decision:
+    // fully covered: the common case, and it accepts without drawing anything
+    if opacity >= 1.0 => return hit_decision.accept
+    let x = launch.x as uint
+    let y = launch.y as uint
+    let primitive = c.primitive_index as uint
+    let instance = c.instance_id as uint
+    let h = pt.hash(x + y * 65536u + traced.frame[0].rng_seed * 9781u + primitive * 2654435761u + instance * 2246822519u)
+    let u = (h as float) * (1.0 / 4294967296.0)
+    if opacity < u => return hit_decision.ignore
+    return hit_decision.accept
+
+// ---- Quadrics -------------------------------------------------------------------------------------------------------
+
+/// What a quadric's intersection hands its closest hit: the object-space normal the solve already computed, 12 bytes.
+struct quadric_attributes:
+    normal: float3
+
+/// A quadric batch's intersection: the ray solved against the box's primitive, in the batch's object space.
+///
+/// `inst.vertices` names the batch's primitive records, the geometry buffer the instance reads.
+/// The box's `t_current` is the traversal's best so far, so a primitive behind an accepted hit rejects on the range test.
+fun intersect_quadric(b: procedural_box){traced, bindless} -> report[quadric_attributes]:
+    let inst = scene.instance(..traced.instances[b.instance_id])
+    let records = inst.vertices as int
+    let prim = quadric.load_primitive(bindless.buffers[nonuniform records], b.primitive_index as uint)
+    let origin = float3(b.object_ray.origin.x, b.object_ray.origin.y, b.object_ray.origin.z)
+    let direction = float3(b.object_ray.direction.x, b.object_ray.direction.y, b.object_ray.direction.z)
+    let found = quadric.intersect(prim, origin, direction, b.ray.t_min, b.t_current)
+    if not found.valid => return report.none()
+    return report(t = found.t, attributes = quadric_attributes(found.normal))
+
+/// The shading context of a quadric hit: the primitive alone, since a quadric numbers nothing else.
+fun quadric_context(h: procedural_hit[quadric_attributes]){traced} -> material.shading_context:
+    let inst = scene.instance(..traced.instances[h.instance_id])
+    return quadric.make_context(inst, h.primitive_index as uint)
+
+/// Shades a quadric hit whose material evaluated to `surface`, from the normal its intersection reported.
+///
+/// A quadric is two-sided in earnest: an open cylinder's inside wall is a hit, whose outward gradient points away from the viewer.
+/// `supplied_tangent_frame` is what `shade_triangle` takes it as.
+fun shade_quadric(h: procedural_hit[quadric_attributes], payload: mut surface_payload, surface: openpbr.surface, supplied_tangent_frame: bool){traced}:
+    let n_obj = h.attributes.normal
+    // By the inverse transpose: a batch under a non-uniform scale is a documented capability, a sphere becoming an ellipsoid.
+    let n_world = h.normal_to_world(vec3(n_obj.x, n_obj.y, n_obj.z))
+    let mut n = normalize(float3(n_world.x, n_world.y, n_world.z))
+
+    let ray_dir = float3(h.ray.direction.x, h.ray.direction.y, h.ray.direction.z)
+    let v = -normalize(ray_dir)
+
+    let exiting = dot(n, v) < 0.0
+    if exiting => n = -n
+
     let mut authored = openpbr.frame(float3(0.0), float3(0.0), float3(0.0))
     if supplied_tangent_frame:
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)

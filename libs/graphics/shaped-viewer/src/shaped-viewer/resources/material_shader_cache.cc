@@ -4,12 +4,14 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <shaped-shader-library/raytracing_pipeline.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_type.hh>
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 #include <shaped-viewer/shader_library.hh>
+#include <sv_sgl_shaders.hh>
 
 namespace sv
 {
@@ -24,6 +26,12 @@ constexpr cc::string_view include_dir = "sv_shaders";
     return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::move(message))));
 }
 
+[[nodiscard]] cc::shared_async<cc::vector<sg::hit_shader>> failed_hit_group(cc::string message)
+{
+    return cc::make_async_from_error<cc::vector<sg::hit_shader>>(
+        cc::async_error::make_error(cc::any_error(cc::move(message))));
+}
+
 /// The neutral material both fallbacks are built from: an EMPTY signature, which is the whole trick.
 ///
 /// With no attributes there is no parameter block to read, so one hit group is valid for an instance whose block was laid out
@@ -34,7 +42,10 @@ resolved_material fallback_resolution(geometry_kind kind)
 {
     static auto const type = material_type::create("sv_fallback", {},
                                                    "    surface.base_color = float3(0.5, 0.5, 0.5);\n"
-                                                   "    surface.specular_roughness = 1.0;");
+                                                   "    surface.specular_roughness = 1.0;",
+                                                   {},
+                                                   "surface.base_color = float3(0.5, 0.5, 0.5)\n"
+                                                   "surface.specular_roughness = 1.0\n");
     static auto const material = sv::material::create("sv_fallback", material_type_id::invalid, {});
 
     // Resolved against the kind it will be generated for, even though an empty signature asks the geometry for nothing:
@@ -45,10 +56,13 @@ resolved_material fallback_resolution(geometry_kind kind)
 } // namespace
 
 
-material_shader_cache material_shader_cache::create(sg::shader_format format, material_shader_options const& opts)
+material_shader_cache material_shader_cache::create(sg::shader_format format,
+                                                    material_shader_options const& opts,
+                                                    sg::context* ctx)
 {
     auto cache = material_shader_cache();
     cache._format = format;
+    cache._context = ctx;
     cache._entry_point = cc::string(opts.entry_point);
     cache._runtime_include = cc::string(opts.runtime_include);
     cache._epilogue_include = cc::string(opts.epilogue_include);
@@ -67,7 +81,8 @@ material_shader_options material_shader_cache::generation_options(geometry_kind 
     auto opts = material_shader_options{.entry_point = _entry_point,
                                         .runtime_include = _runtime_include,
                                         .epilogue_include = _epilogue_include,
-                                        .bindless = &_bindless};
+                                        .bindless = &_bindless,
+                                        .kind = kind};
 
     // `entry_point` names the generated MATERIAL function and is the same either way; what the kind picks is the pair
     // of includes, which is exactly what `material_shader_key` folds in to keep the two spellings apart in one cache.
@@ -167,6 +182,18 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
             {.include_dir = include_dir, .label = cc::format("<material '{}' shadow any-hit>", r.type->name)});
     }
 
+    // The SGL spelling of the same permutation, left cold: only the SGL tracer starts it.
+    auto sgl_hit_group = cc::shared_async<cc::vector<sg::hit_shader>>();
+    if (generated.sgl_source.empty())
+        sgl_hit_group = failed_hit_group(cc::format("material type '{}' has no SGL fragment", r.type->name));
+    else if (_context == nullptr || lib.has_error())
+        sgl_hit_group = failed_hit_group(cc::format(
+            "shaped-viewer: no context and shader library to compile material '{}' as SGL through", r.type->name));
+    else
+        sgl_hit_group = slib::compile_hit_group(
+            _context, lib.value(), &sv::sgl_shaders::tracer_pipeline_path_t::definition(), generated.sgl_source,
+            "sv_material", cc::format("<material '{}'{} SGL>", r.type->name, procedural ? " quadric" : ""));
+
     auto entry = _by_key.entry(key);
     return entry.get_or_emplace(material_permutation{.key = generated.key,
                                                      .layout = cc::move(generated.layout),
@@ -176,6 +203,8 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                                                      .shadow_any_hit = cc::move(shadow_any_hit),
                                                      .intersection = cc::move(intersection),
                                                      .can_cut_out = !procedural && generated.can_cut_out,
-                                                     .source = cc::move(generated.source)});
+                                                     .source = cc::move(generated.source),
+                                                     .sgl_hit_group = cc::move(sgl_hit_group),
+                                                     .sgl_source = cc::move(generated.sgl_source)});
 }
 } // namespace sv

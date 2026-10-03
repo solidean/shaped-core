@@ -5,6 +5,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/raytracing/raytracing_pipeline.hh> // sg::hit_shader
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/shader_generator.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
@@ -55,6 +56,17 @@ struct sv::material_permutation
 
     /// kept for diagnostics: a compile error names an offset in this text, and nothing else can reproduce it
     cc::string source;
+
+    /// The SGL tracer's hit group for this permutation, a hit shader per ray type, as a cold async node.
+    ///
+    /// Compiled through `slib::compile_hit_group` against `shaders/tracer_pipeline.sgl`'s pipeline, once something starts it.
+    /// Nothing does but `sgl_pathtrace_routine`, so a view traced by the HLSL tracer alone never pays for it.
+    /// An error where the type has no `sgl_shader`, or the cache was created without a context.
+    /// TEMPORARY: beside `shader` and its siblings until the SGL tracer replaces the HLSL one, which takes them with it.
+    cc::shared_async<cc::vector<sg::hit_shader>> sgl_hit_group;
+
+    /// The SGL source `sgl_hit_group` compiles, kept for the same diagnostics as `source`.
+    cc::string sgl_source;
 };
 
 /// Generates and compiles one closest-hit per material permutation, deduplicated on `material_shader_key`.
@@ -103,7 +115,11 @@ public:
     /// would collide on it.
     /// `opts` IS part of the key, and is copied — a `material_shader_options` borrows its strings and its budgets, and nothing
     /// says the caller's outlive the cache.
-    [[nodiscard]] static material_shader_cache create(sg::shader_format format, material_shader_options const& opts = {});
+    /// `ctx` is what each permutation's SGL hit group is compiled for, and must outlive the cache; null gives every permutation
+    /// an SGL hit group that fails.
+    [[nodiscard]] static material_shader_cache create(sg::shader_format format,
+                                                      material_shader_options const& opts = {},
+                                                      sg::context* ctx = nullptr);
 
     /// The options every generation here runs under, as `material_shader_key` and `generate_material_shader` take them.
     /// They borrow from the cache, so they are only valid while it is.
@@ -157,6 +173,7 @@ private:
     // those valid across every later insert.
     cc::map<cc::hash128, material_permutation> _by_key;
     sg::shader_format _format = sg::shader_format::dxil;
+    sg::context* _context = nullptr;
 
     // Owned copies of what `create` was handed, since `generation_options` hands out views onto them.
     cc::string _entry_point;

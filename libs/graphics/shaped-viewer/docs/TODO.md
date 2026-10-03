@@ -129,11 +129,20 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
 ## What the SGL tracer still needs
 
 `sv::sgl_pathtrace_routine` traces `shaders/tracer_pipeline.sgl` over module `tracer`, and `sgl-tracer-parity-test.cc` holds it to the HLSL tracer on dx12 and vulkan.
-Every instance shades with sv's fallback material, through one hit group the routine compiles at run time.
+Each permutation shades through its own generated SGL hit group: constants, mesh attributes, textures, cutouts, all three builtin types, and quadrics.
+`SV_TEST_SGL_TRACER=1` runs the path-tracing tests through it instead of the HLSL tracer.
 
-- **The material generator writes no SGL yet.**
-  A permutation's hit group is what replaces the fallback: its material function, `tracer.triangle_context` and `tracer.shade_triangle`, one group per permutation.
-  The cutout any-hits, the quadric group with its intersection, and the material samplers come with it, and so does `supplied_tangent_frame`.
+- **A custom material type needs its fragment twice.**
+  `material_type::sgl_shader` beside `shader`, and a type without one shades with the SGL tracer's fallback.
+  At cutover `shader` goes, and so do the HLSL halves of `material_permutation`.
+- **The split-signal targets are typed in SGL.**
+  `frame_output`, `frame_diffuse` and `frame_specular` are `rgba16_float` images, as sv allocates them, where the HLSL tracer writes any `float4` image.
+  `pathtraced-view-test`'s split test binds `rgba32_float` to compare at full precision, which the SGL tracer cannot bind, and is the one test the switch above fails.
+- **A permutation's SGL group does not reload with a module it uses.**
+  It is compiled once per permutation key, which hashes the fragment and the resolution, so an edit to module `tracer` reaches the raygen and not the hit groups.
+- **The SGL front end runs once per entry point of a group.**
+  `slib::compile_hit_group` compiles each stage from the source, and a cutout group has three, so the parse and the check run three times.
+  A compile that DXC answers from its cache still costs the SGL front end, about 70 ms a stage.
 - **A ray set a module declares is named by no other file.**
   `rays = tracer.path_rays` is `invalid-pipeline`, a trace of `tracer.path_rays.surface` is refused, and `sgl describe` lists no module's set for a file joining the module.
   So the pipeline file and the host's hit group each restate `path_rays` over the module's payloads, which slib holds to the same names, sizes and shapes.
@@ -172,6 +181,7 @@ What is left is narrower than it was:
   The DXR-native answer is a per-hit-group *local* root signature, which sg's shader table does not carry yet.
   Until it does, `collect_samplers` asserts when two materials claim one register with different states — loudly on the dev box, rather than an image nobody can explain.
   Two materials sampling the same way still share it silently, which is the case that is actually fine.
+  The SGL tracer has neither this collision nor the vulkan binding gap above: it samples through a fixed palette of static samplers in its own group.
 
 - **A generated permutation does not hot-reload when an `.hlsli` it includes is edited.**
   The generated source carries a literal `#include` line whose bytes never change when the file does.

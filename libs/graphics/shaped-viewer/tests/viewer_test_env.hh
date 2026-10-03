@@ -5,6 +5,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -16,6 +17,7 @@
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh> // pt_light_table
+#include <shaped-viewer/rendering/sgl_pathtrace_routine.hh>
 #include <shaped-viewer/rendering/shaders.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
@@ -97,6 +99,25 @@ inline void drive_ambient_work()
         return;
     cc::this_thread_yield();
 }
+
+/// Whether the path-tracing tests trace with the SGL port rather than the HLSL tracer: `SV_TEST_SGL_TRACER=1` in the environment.
+///
+/// TEMPORARY: a switch while the two tracers stand side by side, so a whole run can be held to its expectations through either.
+/// It goes with the HLSL tracer.
+[[nodiscard]] inline bool traces_with_sgl()
+{
+    static auto const sgl = cc::is_environment_flag_set("SV_TEST_SGL_TRACER");
+    return sgl;
+}
+
+/// One path trace, through whichever tracer `traces_with_sgl` picks.
+[[nodiscard]] inline sg::routine_outcome trace_path(sg::command_list& cmd, sv::pt_trace_desc const& d)
+{
+    return traces_with_sgl() ? sv::sgl_pathtrace_routine::execute(cmd, d) : sv::pathtrace_routine::execute(cmd, d);
+}
+
+/// What a path trace's frame block and environment are created with: the HLSL tracer reads them as constants, the SGL one as storage.
+inline constexpr auto pt_block_usage = sg::buffer_usage::constants_buffer | sg::buffer_usage::readonly_buffer;
 
 /// Drives `ctx.routines.tick()` until `ready()` holds, or until `timeout_secs` elapses; true when it came up.
 ///

@@ -50,11 +50,16 @@ struct sv::material_parameter_layout
     i32 size_bytes = 0;
 };
 
-/// A material permutation, as HLSL plus the parameter layout that source reads.
+/// A material permutation, as HLSL and as an SGL hit group, plus the parameter layout both sources read.
 struct sv::generated_material_shader
 {
     cc::string source;
     material_parameter_layout layout;
+
+    /// The SGL tracer's hit group for this permutation, `hit_group sv_material for path_rays`, or empty where the type has no
+    /// `sgl_shader`.
+    /// `generate_material_shader` says what it holds.
+    cc::string sgl_source;
 
     /// The sampler states this source declares, in declaration order — `samplers[i]` is what `sv_sampler_i` must be.
     /// The generated text names a register, never a state, so nothing else can recover which state belongs to which register.
@@ -93,6 +98,10 @@ struct sv::material_shader_options
 
     /// how many elements each bindless table is declared with; must match the `gpu_resource_manager`'s budgets
     bindless_config const* bindless = nullptr;
+
+    /// Which geometry the SGL hit group traces: a triangle group, or a procedural one with the quadric intersection.
+    /// The resolution must be against geometry of the same kind.
+    geometry_kind kind = geometry_kind::triangles;
 };
 
 namespace sv
@@ -117,8 +126,29 @@ namespace sv
 ///
 /// Every attribute must be a scalar or vector of `f32`, `i32` or `u32`; a matrix or a 64-bit / narrow scalar asserts, since
 /// neither has a settled `ByteAddressBuffer` layout here yet.
+///
+/// **The SGL hit group** reads the same layout, and is one file the host compiles through `slib::compile_hit_group`.
+/// It joins modules `material`, `openpbr`, `tracer` and, for quadrics, `quadric`, and restates `tracer`'s ray set as `path_rays`.
+/// Then, in order:
+/// - a `const sv_supplied_<attribute>` per attribute, whether anything but the declaration's default supplied it;
+/// - a `fun sv_attribute_<attribute>(ctx)` per attribute, the load the HLSL source does inline, through the bindless tables;
+/// - `sv_evaluate_material(ctx)`, which binds each attribute to a local of its own name and runs the type's `sgl_shader`;
+/// - the stages, which `tracer` shades through, and `hit_group sv_material for path_rays` over them.
+///
+/// A triangle group is `tracer.shade_triangle`'s closest hit, and the cutout any-hits on both records where `can_cut_out`.
+/// A procedural group is `tracer.intersect_quadric`'s intersection, shared by both records, and `tracer.shade_quadric`'s closest hit.
+/// A texture is sampled through the palette sampler `sgl_palette_sampler` names for its state, at level 0.
 [[nodiscard]] generated_material_shader generate_material_shader(resolved_material const& r,
                                                                  material_shader_options const& opts = {});
+
+/// The sampler of module `tracer`'s palette (shaders/sgl/tracer_bindings.sgl) that the SGL tracer samples `s`'s texture through.
+///
+/// The palette has one sampler per magnification filter and address mode of `u` and of `v`, which is everything a hit's sample can tell apart.
+/// A hit samples level 0 explicitly, and at level 0 only the magnification filter applies, so `min_filter` and `mip_filter` are dropped.
+/// `address_w` is a third axis no 2D texture has.
+/// What does approximate is a state that moves the level off 0: a `mip_lod_bias`, a `min_lod` above 0 or a `max_lod` below it.
+/// Anisotropy and a comparison are dropped too, and sv's importers produce none of the four.
+[[nodiscard]] cc::string sgl_palette_sampler(sg::sampler const& s);
 
 /// The HLSL type `format` maps to — `float`, `float3`, `uint2`, ...
 /// Empty for a format the generator does not support, which is what `generate_material_shader` asserts on.

@@ -199,8 +199,9 @@ Gotchas:
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
 
 ```cpp
-sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; hash128 hash; }
-sv::material_type::create(name, signature, shader, opacity_attribute = {})  // -> hashes all four; asserts a name declared twice, and a default that is not its format's size
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute; string sgl_shader; hash128 hash; }
+sv::material_type::create(name, signature, shader, opacity_attribute = {}, sgl_shader = {})  // -> hashes all five; asserts a name declared twice, and a default that is not its format's size
+                                 //   sgl_shader: the same fragment in SGL, unindented; a type without one shades with the SGL tracer's fallback
 t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
 sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
 sv::material_signature_entry::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
@@ -260,6 +261,8 @@ Gotchas:
 - **`material::create` validates nothing** against the type, because it cannot see one.
   `material_library::acquire` is where a binding naming an undeclared attribute asserts.
 - **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+- **A type carries its fragment twice while both tracers stand**: `shader` in HLSL, `sgl_shader` in SGL, statements unindented and attributes immutable.
+  `shader` goes with the HLSL tracer.
 - **An acquire creates the buffer and hands the payload to `ctx.stream`; it does not upload.**
   `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.
   The buffer exists immediately, so a descriptor naming it is always valid; only its contents are in flight.
@@ -302,19 +305,24 @@ Gotchas:
 `material/shader_generator.hh`; `shaders/material_runtime.hlsli` is the hand-authored half it is written against.
 
 ```cpp
-sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; material_parameter_layout layout; vector<sg::sampler> samplers; hash128 key;}
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; layout; string sgl_source; vector<sg::sampler> samplers; bool can_cut_out; hash128 key;}
                                  //   samplers[i] is what `sv_sampler_i` must be bound to; the generated text names no register, and nothing else records the state
+                                 //   sgl_source: `hit_group sv_material for path_rays`, the SGL tracer's group for the permutation, empty without an sgl_shader
+sv::sgl_palette_sampler(sampler) // -> "palette_<mag filter>_<u>_<v>", module tracer's static sampler a texture of that state is sampled through
 sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
-sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; }
+sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; geometry_kind kind; }
+                                 //   kind picks the SGL group's geometry: a triangle group, or a procedural one with the quadric intersection
                                  //   epilogue_include is emitted AFTER the entry function, for code that CALLS it
 {.epilogue_include = "pt_material_hit.hlsli"}   // -> a full DXR closest-hit for this permutation, not just the material function
 sv::material_shader_key(permutation_key, opts)  // -> hash128 — what `g.key` is, without generating anything
 
 resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, in the context's preferred format, over cfg.bindless
-sv::material_shader_cache::create(format, opts = {})   // one compiled closest-hit per permutation; `opts` is COPIED and is part of the key
+sv::material_shader_cache::create(format, opts = {}, ctx = nullptr)   // one compiled closest-hit per permutation; `opts` is COPIED and is part of the key
+                                 //   ctx is what the SGL hit groups compile for; null makes every permutation's SGL group an error
 sv::material_shader_cache::hit_entry_point / hit_epilogue_include   // "PtClosestHit" / "pt_material_hit.hlsli"
 cache.generation_options()       // -> material_shader_options borrowing from the cache — what to pass material_shader_key
 cache.acquire(resolved)          // -> material_permutation const& {hash128 key; layout; vector<sg::sampler> samplers; async_compiled_shader shader; string source;}
+p.sgl_hit_group                  // -> shared_async<vector<sg::hit_shader>>, COLD: slib::compile_hit_group over p.sgl_source, which only the SGL tracer starts
 cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
 sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
 sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
@@ -346,6 +354,10 @@ Gotchas:
 - **An attribute name is pasted in as a local**, so `material_type::create` rejects one that is not a plain identifier, is an HLSL keyword or builtin type, starts with `sv_`, or is `surface` / `ctx`.
   Rejected rather than sanitized: the type's own fragment is written against the declared name.
 - **A generated permutation does not hot-reload on an include edit** — the key hashes the resolution and the options, not the include's contents.
+- **The SGL group samples through a fixed palette**, never through per-permutation samplers: module `tracer` declares one static sampler per magnification filter and address mode of each axis.
+  A hit samples level 0, where only the magnification filter applies, so the minification and mip filters are dropped; `sgl_palette_sampler` says what else is.
+- **The SGL group's loads are functions, `sv_attribute_<name>(ctx)`**, which is the nested block of the HLSL source: the fragment still shares its scope with the attributes, `surface` and `ctx` alone.
+  `const sv_supplied_<name>` is what `SV_ATTR_SUPPLIED_<name>` is in HLSL.
 
 ## Mesh authoring — geometry + what a material reads
 
@@ -753,11 +765,11 @@ table.describe_in(fc)                                // writes light_count + the
 sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + one image-based-lit sample per pixel (SH diffuse irradiance + Fresnel env reflection) into the UAV target (no-op if the shaders did not compile)
 
 // The tracer's SGL port (shaders/tracer_pipeline.sgl + module `tracer`), side by side until it is proven; no viewer reaches it yet.
-sv::sgl_pathtrace_routine::execute(cmd, pt_trace_desc) // the same desc, the same estimate; declines until its hit group and pipeline land
-                                                     //   EVERY instance shades with sv's fallback material: hit_groups / fallback are not read
+sv::sgl_pathtrace_routine::execute(cmd, pt_trace_desc) // the same desc, the same estimate; declines until its hit groups, description and pipeline land
+                                                     //   hit_groups shade through each permutation's sgl_hit_group, substituted by fallback / quadric_fallback by kind
+                                                     //   an instance's hit_group_offset is read as the HLSL tracer's, 2 * permutation, and rewritten to that row
                                                      //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
-                                                     //   triangle instances only, until the quadric hit group is ported
-sv::sgl_pathtrace_routine::fallback_hit_group_source() // the SGL hit group it compiles at run time, through slib::compile_hit_group
+                                                     //   the guide and split targets are typed: rgba16_float / r32_float / rg32_float as sv allocates them
 
 sv::shader_package()                                 // register once on an slib::shader_library before rendering
 sv::sgl_shader_package()                             // the SGL tracer's package, beside it; sv's default library adds both

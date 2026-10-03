@@ -286,7 +286,347 @@ enum class load_shape
             return s;
     CC_UNREACHABLE("the layout has a slot for every attribute it was built from");
 }
+
+// ---- The SGL hit group ---------------------------------------------------------------------------------------------
+
+/// The `xyzw` letter one selector names, or empty for a constant one: SGL's swizzle letters are the field names.
+[[nodiscard]] cc::string_view sgl_channel_letter(texture_channel c)
+{
+    switch (c)
+    {
+    case texture_channel::r:
+        return "x";
+    case texture_channel::g:
+        return "y";
+    case texture_channel::b:
+        return "z";
+    case texture_channel::a:
+        return "w";
+    case texture_channel::zero:
+    case texture_channel::one:
+        return {};
+    }
+    return {};
+}
+
+/// The float vector type of `components` lanes.
+[[nodiscard]] cc::string_view sgl_float_type(int components)
+{
+    switch (components)
+    {
+    case 1:
+        return "float";
+    case 2:
+        return "float2";
+    case 3:
+        return "float3";
+    default:
+        return "float4";
+    }
+}
+
+/// `value`, a float expression of `format`'s lane count, converted to `format` where that is an integer type.
+[[nodiscard]] cc::string sgl_as_format(cc::string value, attribute_format format)
+{
+    if (format.scalar == scalar_type::f32)
+        return value;
+    return cc::format("({}) as {}", value, hlsl_type_of(format));
+}
+
+/// The float expression filling an attribute of `format` from the `float4` named `texel`, as `texel_expression` spells it in HLSL.
+[[nodiscard]] cc::string sgl_texel_expression(channel_swizzle const& z, attribute_format format)
+{
+    auto const components = format.component_count();
+
+    auto letters = cc::string();
+    for (auto i = 0; i < components; ++i)
+    {
+        auto const letter = sgl_channel_letter(z.components[i]);
+        if (letter.empty())
+        {
+            letters.clear();
+            break;
+        }
+        letters += letter;
+    }
+
+    if (!letters.empty())
+        return components == 4 && z.is_identity(4) ? cc::string("texel") : cc::format("texel.{}", letters);
+
+    auto const component = [&](texture_channel c) -> cc::string
+    {
+        if (c == texture_channel::zero)
+            return "0.0";
+        if (c == texture_channel::one)
+            return "1.0";
+        return cc::format("texel.{}", sgl_channel_letter(c));
+    };
+    if (components == 1)
+        return component(z.components[0]);
+
+    auto args = cc::string();
+    for (auto i = 0; i < components; ++i)
+    {
+        if (i > 0)
+            args += ", ";
+        args += component(z.components[i]);
+    }
+    return cc::format("{}({})", sgl_float_type(components), args);
+}
+
+/// The element index (or indices) a frequency reads, as `element_expression` spells it in HLSL.
+[[nodiscard]] cc::string_view sgl_element_expression(attribute_frequency f)
+{
+    switch (f)
+    {
+    case attribute_frequency::per_vertex:
+        return "ctx.corner";
+    case attribute_frequency::per_corner:
+        return "material.corner_elements(ctx)";
+    case attribute_frequency::per_triangle:
+        return "ctx.primitive";
+    default:
+        CC_UNREACHABLE("a mesh attribute a material reads is per_vertex, per_corner or per_triangle");
+    }
+}
+
+/// The load of mesh attribute `binding` through the descriptor named `desc`, as a float expression of `components` lanes.
+/// It reads the buffer through a local `<desc>_buffer`, since only a name may stand as a non-uniform index.
+[[nodiscard]] cc::string sgl_mesh_load(mesh_attribute_binding const& binding,
+                                       cc::string_view desc,
+                                       int components,
+                                       bool rotates)
+{
+    auto const buffer = cc::format("tracer.bindless.buffers[nonuniform {}_buffer]", desc);
+    if (shape_of(binding.frequency) == load_shape::flat)
+        return cc::format("material.load_element_{}({}, {}, {})", load_suffix(components), buffer, desc,
+                          sgl_element_expression(binding.frequency));
+    // A rotation blends as one: the three corners are aligned into a common hemisphere before they are summed.
+    auto const blend = rotates ? cc::string("rotation") : cc::string(load_suffix(components));
+    return cc::format("material.interpolate_{}({}, {}, {}, ctx.barycentrics)", blend, buffer, desc,
+                      sgl_element_expression(binding.frequency));
+}
+
+/// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, which the HLSL source does inline in its nested block.
+[[nodiscard]] cc::string sgl_attribute_function(resolved_material const& r,
+                                                material_parameter_layout const& layout,
+                                                i32 index)
+{
+    auto const& a = r.attributes[index];
+    auto const components = a.format.component_count();
+    auto const samples = a.frequency == material_frequency::material_texture
+                      || a.frequency == material_frequency::mesh_texture_binding;
+
+    auto out = cc::string();
+    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{{}}} -> {}:\n", a.name,
+                      samples ? "tracer.traced, tracer.bindless" : "tracer.bindless", hlsl_type_of(a.format));
+    out += "    let block = ctx.param_buffer as int\n";
+
+    switch (a.frequency)
+    {
+    case material_frequency::material_type:
+    case material_frequency::material:
+    case material_frequency::mesh_instance:
+    {
+        // A constant is read out of the parameter block whatever it is worth, which is why gold and copper share this source.
+        auto const& s = slot_for(layout, index, material_slot_kind::constant);
+        auto const load = components == 1 ? cc::string("load") : cc::format("load{}", components);
+        auto const raw
+            = cc::format("tracer.bindless.buffers[nonuniform block].{}(ctx.param_offset + {}u)", load, s.offset);
+        auto value = raw;
+        if (a.format.scalar == scalar_type::f32)
+            value = cc::format("reinterpret_as_float({})", raw);
+        else if (a.format.scalar == scalar_type::i32)
+            value = cc::format("reinterpret_as_int({})", raw);
+        cc::format_append(out, "    return {}\n", value);
+        break;
+    }
+
+    case material_frequency::mesh_attribute:
+    {
+        auto const& s = slot_for(layout, index, material_slot_kind::attribute_descriptor);
+        cc::format_append(out,
+                          "    let desc = material.load_attribute_desc(tracer.bindless.buffers[nonuniform block], "
+                          "ctx.param_offset + {}u)\n",
+                          s.offset);
+        out += "    let desc_buffer = desc.buffer as int\n";
+        auto const rotates = a.interpolation == attribute_interpolation::rotation;
+        cc::format_append(out, "    return {}\n",
+                          sgl_as_format(sgl_mesh_load(*a.attribute, "desc", components, rotates), a.format));
+        break;
+    }
+
+    case material_frequency::material_texture:
+    case material_frequency::mesh_texture_binding:
+    {
+        auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
+        auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
+        cc::format_append(out,
+                          "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[nonuniform block], "
+                          "ctx.param_offset + {}u)\n",
+                          uv_slot.offset);
+        out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
+        // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
+        cc::format_append(out, "    let uv = {}\n", sgl_mesh_load(*a.uv, "uv_desc", 2, false));
+        cc::format_append(
+            out, "    let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + {}u) as int\n",
+            tex.offset);
+        // An explicit level, since a hit has no derivatives; the texel is named because a constant selector reads it twice.
+        cc::format_append(
+            out, "    let texel = tracer.bindless.{}[nonuniform image].sample(uv, tracer.traced.{}, level = 0.0)\n",
+            "textures_2d", sgl_palette_sampler(a.sample->sampler));
+
+        auto value = sgl_texel_expression(a.sample->swizzle, a.format);
+
+        // The scale and the bias are parameters rather than literals, so a material changing only its normal scale re-uses this source.
+        if (!a.sample->transform.is_identity(components))
+        {
+            auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
+            auto const lanes = component_swizzle(components);
+            cc::format_append(out,
+                              "    let scale = reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4("
+                              "ctx.param_offset + {}u))\n"
+                              "    let bias = reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4("
+                              "ctx.param_offset + {}u))\n",
+                              tf.offset, tf.offset + 16);
+            value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
+        }
+        cc::format_append(out, "    return {}\n", sgl_as_format(cc::move(value), a.format));
+        break;
+    }
+    }
+    return out;
+}
+
+/// The SGL hit group of one permutation; `generate_material_shader`'s header says what it holds.
+[[nodiscard]] cc::string generate_sgl_hit_group(resolved_material const& r,
+                                                material_parameter_layout const& layout,
+                                                geometry_kind kind,
+                                                bool can_cut_out)
+{
+    auto const procedural = kind == geometry_kind::quadrics;
+
+    auto src = cc::string();
+    cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
+    src += "require raytracing_pipeline\n\n";
+    src += "use material\nuse openpbr\n";
+    if (procedural)
+        src += "use quadric\n";
+    src += "use tracer\n\n";
+
+    // Restated rather than named as `tracer.path_rays`, since a hit group names a set of its own file.
+    src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
+
+    // Whether anything actually supplied each attribute, as a constant per permutation, which the `#if` of the HLSL source is.
+    for (auto const& a : r.attributes)
+        cc::format_append(src, "const sv_supplied_{} = {}\n", a.name,
+                          a.frequency == material_frequency::material_type ? "false" : "true");
+    if (!r.attributes.empty())
+        src += "\n";
+
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        src += sgl_attribute_function(r, layout, i32(i));
+        src += "\n";
+    }
+
+    auto const samples = samples_texture(r);
+    cc::format_append(src, "fun sv_evaluate_material(ctx: material.shading_context){{{}}} -> openpbr.surface:\n",
+                      samples ? "tracer.traced, tracer.bindless" : "tracer.bindless");
+    for (auto const& a : r.attributes)
+        cc::format_append(src, "    let {} = sv_attribute_{}(ctx)\n", a.name, a.name);
+    src += "    let mut surface = openpbr.default_surface()\n";
+    cc::format_append(src, "\n    // --- {} ---\n", r.type->name);
+    auto line_start = isize(0);
+    auto const& fragment = r.type->sgl_shader;
+    while (line_start < fragment.size())
+    {
+        auto line_end = line_start;
+        while (line_end < fragment.size() && fragment[line_end] != '\n')
+            ++line_end;
+        auto const line = cc::string_view(fragment).subview(cc::start_end{.start = line_start, .end = line_end});
+        if (!line.empty())
+            cc::format_append(src, "    {}", line);
+        src += "\n";
+        line_start = line_end + 1;
+    }
+    src += "    return surface\n\n";
+
+    // The tangent frame is the one supplied attribute the shading itself asks after, and a type that declares none supplies none.
+    auto supplied_frame = cc::string("false");
+    for (auto const& a : r.attributes)
+        if (a.name == "tangent_frame")
+            supplied_frame = "sv_supplied_tangent_frame";
+
+    if (procedural)
+    {
+        src += "@intersection fun sv_intersection(b: procedural_box){tracer.traced, tracer.bindless} -> "
+               "report[tracer.quadric_attributes]:\n"
+               "    return tracer.intersect_quadric(b)\n\n";
+        cc::format_append(src,
+                          "@closest_hit fun sv_closest_hit(h: procedural_hit[tracer.quadric_attributes], p: mut "
+                          "tracer.surface_payload){{tracer.traced, tracer.bindless}}:\n"
+                          "    let ctx = tracer.quadric_context(h)\n"
+                          "    tracer.shade_quadric(h, mut p, sv_evaluate_material(ctx), {})\n\n",
+                          supplied_frame);
+        // The intersection is the whole row's, so a shadow ray meets the batch it traverses.
+        src += "hit_group sv_material for path_rays:\n"
+               "    geometry = .procedural\n"
+               "    intersection = sv_intersection\n"
+               "    surface = (closest_hit = sv_closest_hit)\n"
+               "    occlusion = ()\n";
+        return src;
+    }
+
+    cc::format_append(src,
+                      "@closest_hit fun sv_closest_hit(h: triangle_hit, p: mut tracer.surface_payload){{tracer.traced, "
+                      "tracer.bindless}}:\n"
+                      "    let ctx = tracer.triangle_context(h)\n"
+                      "    tracer.shade_triangle(h, mut p, ctx, sv_evaluate_material(ctx), {})\n\n",
+                      supplied_frame);
+
+    if (!can_cut_out)
+    {
+        src += "hit_group sv_material for path_rays:\n"
+               "    surface = (closest_hit = sv_closest_hit)\n"
+               "    occlusion = ()\n";
+        return src;
+    }
+
+    // The cutout test twice, since an any hit takes the payload of the one ray type its record serves.
+    src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload, @launch_id id: "
+           "int3){tracer.traced, "
+           "tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, id, sv_evaluate_material(tracer.candidate_context(c)).geometry_opacity)\n\n";
+    src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload, @launch_id id: "
+           "int3){tracer.traced, "
+           "tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, id, sv_evaluate_material(tracer.candidate_context(c)).geometry_opacity)\n\n";
+    src += "hit_group sv_material for path_rays:\n"
+           "    surface = (closest_hit = sv_closest_hit, any_hit = sv_any_hit)\n"
+           "    occlusion = (any_hit = sv_shadow_any_hit)\n";
+    return src;
+}
 } // namespace
+
+cc::string sgl_palette_sampler(sg::sampler const& s)
+{
+    auto const address = [](sg::sampler_address_mode m) -> cc::string_view
+    {
+        switch (m)
+        {
+        case sg::sampler_address_mode::repeat:
+            return "repeat";
+        case sg::sampler_address_mode::mirror_repeat:
+            return "mirror";
+        case sg::sampler_address_mode::clamp_edge:
+            return "clamp";
+        }
+        return "repeat";
+    };
+    auto const filter = s.mag_filter == sg::sampler_filter::nearest ? cc::string_view("nearest") : "linear";
+    return cc::format("palette_{}_{}_{}", filter, address(s.address_u), address(s.address_v));
+}
 
 cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_options const& opts)
 {
@@ -298,6 +638,7 @@ cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_opt
     b.add_string(opts.entry_point);
     b.add_string(opts.runtime_include);
     b.add_string(opts.epilogue_include);
+    b.add_pod(opts.kind);
 
     // Each table's own enumerator alongside its count, so omitting a table and declaring it empty stay distinct.
     b.add_pod(i64(bindless.tables.size()));
@@ -551,8 +892,12 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
         return false;
     }();
 
+    auto sgl_source
+        = r.type->sgl_shader.empty() ? cc::string() : generate_sgl_hit_group(r, layout, opts.kind, can_cut_out);
+
     return {.source = cc::move(src),
             .layout = cc::move(layout),
+            .sgl_source = cc::move(sgl_source),
             .samplers = cc::move(samplers),
             .can_cut_out = can_cut_out,
             .key = material_shader_key(r.permutation_key, opts)};

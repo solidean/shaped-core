@@ -102,10 +102,10 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
             records.clear();
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::constants_buffer);
+            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sv_test::pt_block_usage);
 
-            auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(bg),
-                                                                         sg::buffer_usage::constants_buffer);
+            auto const background
+                = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(bg), sv_test::pt_block_usage);
 
             // rgba32_float, which the routine asserts on: the raygen reads the target back to blend into it.
             auto const target
@@ -122,14 +122,14 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
             // The tables the closest-hit reaches all of that through, locked for the recording.
             auto const bindless = resources.freeze();
 
-            return sv::pathtrace_routine::execute(cmd, {.frame = frame,
-                                                        .background = background,
-                                                        .instances = instances,
-                                                        .output = target,
-                                                        .instance_table = instance_table,
-                                                        .lights = light_buffer,
-                                                        .hit_groups = hit_groups,
-                                                        .bindless = &bindless});
+            return sv_test::trace_path(cmd, {.frame = frame,
+                                             .background = background,
+                                             .instances = instances,
+                                             .output = target,
+                                             .instance_table = instance_table,
+                                             .lights = light_buffer,
+                                             .hit_groups = hit_groups,
+                                             .bindless = &bindless});
         }));
 
     // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
@@ -194,11 +194,10 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
         records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
         auto const frame = ctx.transient.create_buffer_from_pod(
-            cmd, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1},
-            sg::buffer_usage::constants_buffer);
+            cmd, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1}, sv_test::pt_block_usage);
 
         auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(sv::background{}),
-                                                                     sg::buffer_usage::constants_buffer);
+                                                                     sv_test::pt_block_usage);
 
         auto const target
             = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
@@ -210,14 +209,14 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
-        return sv::pathtrace_routine::execute(cmd, {.frame = frame,
-                                                    .background = background,
-                                                    .instances = instances,
-                                                    .output = target,
-                                                    .instance_table = instance_table,
-                                                    .hit_groups = hit_groups,
-                                                    .fallback = fallback,
-                                                    .bindless = &bindless});
+        return sv_test::trace_path(cmd, {.frame = frame,
+                                         .background = background,
+                                         .instances = instances,
+                                         .output = target,
+                                         .instance_table = instance_table,
+                                         .hit_groups = hit_groups,
+                                         .fallback = fallback,
+                                         .bindless = &bindless});
     };
 
     // The permutation genuinely does not build, so it cannot be traced with.
@@ -325,10 +324,10 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
             auto records = cc::vector<sv::instance_gpu>();
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::constants_buffer);
+            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sv_test::pt_block_usage);
 
             auto const background = ctx.transient.create_buffer_from_pod(
-                cmd, sv::background_gpu::from(sv::background{}), sg::buffer_usage::constants_buffer);
+                cmd, sv::background_gpu::from(sv::background{}), sv_test::pt_block_usage);
 
             auto const instance_table
                 = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
@@ -336,14 +335,14 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
 
             auto const bindless = resources.freeze();
 
-            return sv::pathtrace_routine::execute(cmd, {.frame = frame,
-                                                        .background = background,
-                                                        .instances = instances,
-                                                        .output = target,
-                                                        .instance_table = instance_table,
-                                                        .lights = light_buffer,
-                                                        .hit_groups = hit_groups,
-                                                        .bindless = &bindless});
+            return sv_test::trace_path(cmd, {.frame = frame,
+                                             .background = background,
+                                             .instances = instances,
+                                             .output = target,
+                                             .instance_table = instance_table,
+                                             .lights = light_buffer,
+                                             .hit_groups = hit_groups,
+                                             .bindless = &bindless});
         }));
 
     co_await cc::async_settled(sv::background_work(ctx));
@@ -428,11 +427,11 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
             auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-                1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+                1, sv_test::pt_block_usage | sg::buffer_usage::copy_dst);
             cmd.upload.pod_to_buffer(frame, fc);
 
             auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-                1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+                1, sv_test::pt_block_usage | sg::buffer_usage::copy_dst);
             cmd.upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
 
             auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
@@ -441,19 +440,19 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
             auto const light_buffer = sv_test::upload_lights(cmd, lights);
 
             auto const bindless = resources.freeze();
-            return sv::pathtrace_routine::execute(cmd, {.frame = frame,
-                                                        .background = background,
-                                                        .instances = instances,
-                                                        .output = accumulator,
-                                                        .frame_output = total,
-                                                        .guide_motion = motion,
-                                                        .frame_diffuse = diffuse,
-                                                        .frame_specular = specular,
-                                                        .guide_hit_distance = hit_distance,
-                                                        .instance_table = instance_table,
-                                                        .lights = light_buffer,
-                                                        .hit_groups = hit_groups,
-                                                        .bindless = &bindless});
+            return sv_test::trace_path(cmd, {.frame = frame,
+                                             .background = background,
+                                             .instances = instances,
+                                             .output = accumulator,
+                                             .frame_output = total,
+                                             .guide_motion = motion,
+                                             .frame_diffuse = diffuse,
+                                             .frame_specular = specular,
+                                             .guide_hit_distance = hit_distance,
+                                             .instance_table = instance_table,
+                                             .lights = light_buffer,
+                                             .hit_groups = hit_groups,
+                                             .bindless = &bindless});
         }));
 
     auto cmd = ctx.create_command_list();
@@ -578,10 +577,10 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
             fc.max_bounces = scene.max_bounces;
             fc.seed = 1u;
 
-            auto const frame = ctx->transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::constants_buffer);
+            auto const frame = ctx->transient.create_buffer_from_pod(*cmd, fc, sv_test::pt_block_usage);
 
             auto const background = ctx->transient.create_buffer_from_pod(
-                *cmd, sv::background_gpu::from(scene.environment), sg::buffer_usage::constants_buffer);
+                *cmd, sv::background_gpu::from(scene.environment), sv_test::pt_block_usage);
 
             auto const target = ctx->transient.create_texture_2d(
                 {.format = sg::pixel_format::rgba32_float,
@@ -599,14 +598,14 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
                 = lights.records.empty() ? sg::buffer<sv::light_gpu>() : sv_test::upload_lights(*cmd, lights);
 
             auto const bindless = resources->freeze();
-            auto const outcome = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
-                                                                       .background = background,
-                                                                       .instances = scene.instances,
-                                                                       .output = target,
-                                                                       .instance_table = instance_table,
-                                                                       .lights = light_buffer,
-                                                                       .hit_groups = scene.hit_groups,
-                                                                       .bindless = &bindless});
+            auto const outcome = sv_test::trace_path(*cmd, {.frame = frame,
+                                                            .background = background,
+                                                            .instances = scene.instances,
+                                                            .output = target,
+                                                            .instance_table = instance_table,
+                                                            .lights = light_buffer,
+                                                            .hit_groups = scene.hit_groups,
+                                                            .bindless = &bindless});
             if (outcome != sg::routine_outcome::executed)
             {
                 all_executed = false;

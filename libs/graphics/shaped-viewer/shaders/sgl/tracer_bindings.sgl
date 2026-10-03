@@ -99,7 +99,8 @@ binding traced:
     require readwrite_image_formats
     require extended_image_formats
 
-    world: acceleration_structure[.triangles]
+    /// Triangle meshes and quadric batches both: a quadric batch is a BLAS of boxes, which its hit group's intersection decides.
+    world: acceleration_structure[.mixed]
 
     /// The view's accumulator: the running mean of every sample this estimate has drawn, read back and blended into at the dispatch's own pixel.
     output: mut image_2d[.rgba32_float]
@@ -136,6 +137,85 @@ binding traced:
 
     /// The clip-space depth of the first primary hit per pixel, 1 where it escaped, written while `frame.write_primary_depth` is set.
     primary_depth: out image_2d[.r32_float]
+
+    // ---- The material sampler palette ----------------------------------------------------------------------------------
+    //
+    // Every texture a material samples goes through one of these, picked per texture by `sv::sgl_palette_sampler` (material/shader_generator.hh).
+    // One per magnification filter and address mode of each axis: a hit samples level 0 explicitly, where only the magnification filter decides.
+    // So the minification and mip filters, the third axis and the level clamps of an `sg::sampler` do not reach the palette; the generator's header says so at length.
+
+    sampler palette_nearest_repeat_repeat:
+        filter = .nearest
+        address_u = .repeat
+        address_v = .repeat
+    sampler palette_nearest_repeat_mirror:
+        filter = .nearest
+        address_u = .repeat
+        address_v = .mirror_repeat
+    sampler palette_nearest_repeat_clamp:
+        filter = .nearest
+        address_u = .repeat
+        address_v = .clamp_edge
+    sampler palette_nearest_mirror_repeat:
+        filter = .nearest
+        address_u = .mirror_repeat
+        address_v = .repeat
+    sampler palette_nearest_mirror_mirror:
+        filter = .nearest
+        address_u = .mirror_repeat
+        address_v = .mirror_repeat
+    sampler palette_nearest_mirror_clamp:
+        filter = .nearest
+        address_u = .mirror_repeat
+        address_v = .clamp_edge
+    sampler palette_nearest_clamp_repeat:
+        filter = .nearest
+        address_u = .clamp_edge
+        address_v = .repeat
+    sampler palette_nearest_clamp_mirror:
+        filter = .nearest
+        address_u = .clamp_edge
+        address_v = .mirror_repeat
+    sampler palette_nearest_clamp_clamp:
+        filter = .nearest
+        address_u = .clamp_edge
+        address_v = .clamp_edge
+    sampler palette_linear_repeat_repeat:
+        filter = .linear
+        address_u = .repeat
+        address_v = .repeat
+    sampler palette_linear_repeat_mirror:
+        filter = .linear
+        address_u = .repeat
+        address_v = .mirror_repeat
+    sampler palette_linear_repeat_clamp:
+        filter = .linear
+        address_u = .repeat
+        address_v = .clamp_edge
+    sampler palette_linear_mirror_repeat:
+        filter = .linear
+        address_u = .mirror_repeat
+        address_v = .repeat
+    sampler palette_linear_mirror_mirror:
+        filter = .linear
+        address_u = .mirror_repeat
+        address_v = .mirror_repeat
+    sampler palette_linear_mirror_clamp:
+        filter = .linear
+        address_u = .mirror_repeat
+        address_v = .clamp_edge
+    sampler palette_linear_clamp_repeat:
+        filter = .linear
+        address_u = .clamp_edge
+        address_v = .repeat
+    sampler palette_linear_clamp_mirror:
+        filter = .linear
+        address_u = .clamp_edge
+        address_v = .mirror_repeat
+    sampler palette_linear_clamp_clamp:
+        filter = .linear
+        address_u = .clamp_edge
+        address_v = .clamp_edge
 
 /// The manager's bindless tables — group 1, which the host binds as the manager's own group (resources/bindless_tables.hh).
 ///

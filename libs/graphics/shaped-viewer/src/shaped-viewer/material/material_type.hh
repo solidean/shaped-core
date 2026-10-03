@@ -19,7 +19,13 @@
 /// Everything around it — the bindless declarations, the parameter block, one initializer per attribute — is generated per
 /// permutation, which is what lets every material that samples no texture share one compiled shader.
 ///
-/// `hash` is the content key over name, signature and shader together.
+/// `sgl_shader` is the same fragment in SGL, which the SGL path tracer's hit groups are generated around.
+/// Its statements are written unindented, and the generator indents them into the material function's body.
+/// The attributes are immutable locals there, and `surface` is the one `let mut` it assigns.
+/// TEMPORARY: the two fragments live side by side while both tracers do, and `shader` goes with the HLSL tracer.
+/// A type without an SGL fragment shades with the SGL tracer's neutral fallback.
+///
+/// `hash` is the content key over name, signature and both fragments together.
 /// Two types built from equal inputs hash equal, so a library registering the same type twice keeps one.
 struct sv::material_type
 {
@@ -41,15 +47,19 @@ struct sv::material_type
     /// Must name an attribute the signature declares.
     cc::string opacity_attribute;
 
+    /// The SGL fragment, or empty for a type that has none yet.
+    cc::string sgl_shader;
+
     cc::hash128 hash;
 
-    /// Hashes `name`, `signature`, `shader` and `opacity_attribute` into the content key.
+    /// Hashes `name`, `signature`, `shader`, `opacity_attribute` and `sgl_shader` into the content key.
     /// A signature declaring one name twice asserts: the resolver would have no way to say which declaration a binding meant.
     /// So does an `opacity_attribute` naming something the signature does not declare.
     [[nodiscard]] static material_type create(cc::string name,
                                               cc::vector<material_signature_entry> signature,
                                               cc::string shader,
-                                              cc::string opacity_attribute = {});
+                                              cc::string opacity_attribute = {},
+                                              cc::string sgl_shader = {});
 
     /// The declaration of `name`, or null if this type does not read it.
     [[nodiscard]] material_signature_entry const* find(cc::string_view name) const;

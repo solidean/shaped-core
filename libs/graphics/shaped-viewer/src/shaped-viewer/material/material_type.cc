@@ -157,17 +157,33 @@ namespace
             return true;
     return false;
 }
+
+/// What SGL will not let a local be called, beyond what HLSL refuses already.
+/// The modules a generated hit group uses are in here too, since a local of one's name would hide it from the lines after.
+[[nodiscard]] bool is_sgl_reserved(cc::string_view name)
+{
+    constexpr cc::string_view reserved[]
+        = {"and",  "as",  "assert",   "binding",  "callables", "fun",   "hit_group", "let",     "loop",  "module",
+           "mut",  "not", "notation", "or",       "pipeline",  "print", "rays",      "require", "self",  "test",
+           "type", "use", "yield",    "material", "openpbr",   "pt",    "quadric",   "scene",   "tracer"};
+    for (auto const r : reserved)
+        if (name == r)
+            return true;
+    return false;
+}
 } // namespace
 
 material_type material_type::create(cc::string name,
                                     cc::vector<material_signature_entry> signature,
                                     cc::string shader,
-                                    cc::string opacity_attribute)
+                                    cc::string opacity_attribute,
+                                    cc::string sgl_shader)
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_string(name);
     b.add_string(shader);
     b.add_string(opacity_attribute);
+    b.add_string(sgl_shader);
     b.add_pod(i64(signature.size()));
     for (auto const& d : signature)
     {
@@ -182,6 +198,7 @@ material_type material_type::create(cc::string name,
                               .signature = cc::move(signature),
                               .shader = cc::move(shader),
                               .opacity_attribute = cc::move(opacity_attribute),
+                              .sgl_shader = cc::move(sgl_shader),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
 
     for (auto i = 0; i < type.signature.size(); ++i)
@@ -207,6 +224,8 @@ material_type material_type::create(cc::string name,
         CC_ASSERT(!is_builtin_type(d.name) && !is_keyword(d.name),
                   "a material attribute may not be named after an HLSL "
                   "keyword or builtin type");
+        CC_ASSERT(!is_sgl_reserved(d.name), "a material attribute may not be named after an SGL keyword or a module "
+                                            "a generated hit group uses");
         CC_ASSERT(!cc::string_view(d.name).starts_with("sv_"),
                   "the sv_ prefix belongs to the generator (sv_sampler_*, and "
                   "the entry function itself); a declared attribute may not "

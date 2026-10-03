@@ -141,12 +141,12 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd,
             sv::pt_frame_constants_gpu{.camera = sv::camera_gpu::from(camera), .samples_per_pixel = 8, .max_bounces = 2},
-            sg::buffer_usage::constants_buffer);
+            sv_test::pt_block_usage);
 
         // A uniform environment, so the background is a known constant and anything darker than it was HIT.
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sg::buffer_usage::constants_buffer);
+            sv_test::pt_block_usage);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -159,13 +159,13 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
-        auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
-                                                                  .background = background,
-                                                                  .instances = instances,
-                                                                  .output = target,
-                                                                  .instance_table = instance_table,
-                                                                  .hit_groups = hit_groups,
-                                                                  .bindless = &bindless});
+        auto const outcome = sv_test::trace_path(cmd, {.frame = frame,
+                                                       .background = background,
+                                                       .instances = instances,
+                                                       .output = target,
+                                                       .instance_table = instance_table,
+                                                       .hit_groups = hit_groups,
+                                                       .bindless = &bindless});
 
         if (outcome == sg::routine_outcome::executed)
             readback = sg::data_future<tg::vec4f>(cmd.download.bytes_from_texture(target.raw()));
@@ -523,11 +523,11 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
 
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 4, .max_bounces = 1},
-            sg::buffer_usage::constants_buffer);
+            sv_test::pt_block_usage);
 
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sg::buffer_usage::constants_buffer);
+            sv_test::pt_block_usage);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -539,13 +539,13 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
-        auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
-                                                                  .background = background,
-                                                                  .instances = instances,
-                                                                  .output = target,
-                                                                  .instance_table = instance_table,
-                                                                  .hit_groups = hit_groups,
-                                                                  .bindless = &bindless});
+        auto const outcome = sv_test::trace_path(cmd, {.frame = frame,
+                                                       .background = background,
+                                                       .instances = instances,
+                                                       .output = target,
+                                                       .instance_table = instance_table,
+                                                       .hit_groups = hit_groups,
+                                                       .bindless = &bindless});
 
         if (outcome == sg::routine_outcome::executed)
             readback = sg::data_future<tg::vec4f>(cmd.download.bytes_from_texture(target.raw()));
@@ -773,11 +773,11 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
 
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 2, .max_bounces = 1},
-            sg::buffer_usage::constants_buffer);
+            sv_test::pt_block_usage);
 
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sg::buffer_usage::constants_buffer);
+            sv_test::pt_block_usage);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -789,15 +789,15 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
-        auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
-                                                                  .background = background,
-                                                                  .instances = instances,
-                                                                  .output = target,
-                                                                  .instance_table = instance_table,
-                                                                  .hit_groups = hit_groups,
-                                                                  .fallback = &resources.shaders.acquire_fallback(),
-                                                                  .quadric_fallback = &stand_in,
-                                                                  .bindless = &bindless});
+        auto const outcome = sv_test::trace_path(cmd, {.frame = frame,
+                                                       .background = background,
+                                                       .instances = instances,
+                                                       .output = target,
+                                                       .instance_table = instance_table,
+                                                       .hit_groups = hit_groups,
+                                                       .fallback = &resources.shaders.acquire_fallback(),
+                                                       .quadric_fallback = &stand_in,
+                                                       .bindless = &bindless});
 
         if (outcome == sg::routine_outcome::executed)
             readback = sg::data_future<tg::vec4f>(cmd.download.bytes_from_texture(target.raw()));

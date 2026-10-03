@@ -213,7 +213,7 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
         material_manager::create(ctx, cfg.materials), texture_manager::create(ctx, cfg.textures),
         attribute_manager::create(ctx, cfg.attributes),
         material_shader_cache::create(
-            format, {.epilogue_include = material_shader_cache::hit_epilogue_include, .bindless = &cfg.bindless}),
+            format, {.epilogue_include = material_shader_cache::hit_epilogue_include, .bindless = &cfg.bindless}, &ctx),
         cc::move(group), cc::move(tables), cfg.textures_policy, cfg.work);
 }
 

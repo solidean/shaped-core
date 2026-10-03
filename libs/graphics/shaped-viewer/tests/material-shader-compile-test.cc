@@ -350,4 +350,118 @@ TEST("sv - the openpbr closest-hit compiles with the full layered BSDF")
     check_hit_compiles(resolved, "<generated openpbr closest-hit>");
 }
 
+// ---- The SGL hit group ------------------------------------------------------------------------------------------------
+//
+// The same permutations as the SGL tracer's hit group, every entry point of it compiled through SGL and DXC.
+// The tracer itself compiles them through `slib::compile_hit_group`, which takes a context; this needs none.
+
+namespace
+{
+/// One entry point of `g`'s SGL hit group, compiled; fails the test with the compiler's message and the source.
+void check_sgl_entry_compiles(sv::generated_material_shader const& g, sg::shader_stage stage, cc::string_view entry)
+{
+    auto const& lib = *sv_test::shared_env().lib;
+    auto const shader
+        = lib.compile_source(g.sgl_source, stage, entry, sg::shader_format::dxil,
+                             {.language = slib::shader_language::sgl, .label = "<generated SGL hit group>"});
+    REQUIRE(shader != nullptr);
+    (void)cc::try_async_blocking_get(shader);
+    if (shader->has_error())
+        FAIL(cc::format("{}: {}\n--- source ---\n{}", entry, shader->try_error()->underlying().to_string(), g.sgl_source));
+    REQUIRE(shader->has_value());
+    CHECK(shader->try_value()->bytecode.size() > 0);
+}
+
+/// Every entry point the hit group of `r` declares, for geometry of `kind`.
+void check_sgl_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv::geometry_kind::triangles)
+{
+    auto const g = sv::generate_material_shader(r, {.kind = kind});
+    REQUIRE(!g.sgl_source.empty());
+    CHECK(g.sgl_source.contains("hit_group sv_material for path_rays"));
+    check_sgl_entry_compiles(g, sg::shader_stage::closest_hit, "sv_closest_hit");
+    if (kind == sv::geometry_kind::quadrics)
+        check_sgl_entry_compiles(g, sg::shader_stage::intersection, "sv_intersection");
+    else if (g.can_cut_out)
+    {
+        check_sgl_entry_compiles(g, sg::shader_stage::any_hit, "sv_any_hit");
+        check_sgl_entry_compiles(g, sg::shader_stage::any_hit, "sv_shadow_any_hit");
+    }
+}
+} // namespace
+
+TEST("sv - every builtin material type compiles as an SGL hit group")
+{
+    if (!sv_test::shared_env().has_compiler)
+        return;
+
+    auto materials = sv::material_library::create();
+    sv::register_builtin_material_types(materials);
+
+    for (auto const& name : {sv::builtin_material::openpbr, sv::builtin_material::pbr, sv::builtin_material::unlit})
+    {
+        auto const type = materials.acquire_type(name).value();
+        auto const id = materials.acquire(sv::material::create(cc::string(name), type, {}));
+        check_sgl_compiles(sv::resolve_material(materials, id, make_mesh()));
+        auto const on_quadrics = sv::resolve_material(materials.get_type(type), materials.get(id),
+                                                      sv::geometry_view{.kind = sv::geometry_kind::quadrics});
+        check_sgl_compiles(on_quadrics, sv::geometry_kind::quadrics);
+    }
+}
+
+TEST("sv - an SGL hit group compiles at every attribute frequency, sampled, swizzled and cut out")
+{
+    if (!sv_test::shared_env().has_compiler)
+        return;
+
+    auto materials = sv::material_library::create();
+    sv::register_builtin_material_types(materials);
+    auto const type = materials.acquire_type(sv::builtin_material::openpbr).value();
+    auto const id = materials.acquire(sv::material::create("everything", type, {}));
+
+    auto const scalars = cc::array<f32>{0.1f, 0.2f, 0.3f};
+    auto const colors = cc::array<tg::vec3f>{tg::vec3f(1, 0, 0), tg::vec3f(0, 1, 0), tg::vec3f(0, 0, 1)};
+    auto const frames = cc::array<tg::vec4f>{tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1)};
+
+    // Every load shape at once: interpolated, flat, per corner, per instance, a rotation, and samples a letter swizzle,
+    // a narrowing, a constant selector and a transform each spell differently.
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(make_uvs(sv::attribute_frequency::per_corner));
+    mesh.attributes.push_back(
+        bind(sv::mesh_attribute::create("subsurface_color", sv::attribute_frequency::per_vertex, colors)));
+    mesh.attributes.push_back(
+        bind(sv::mesh_attribute::create("coat_weight", sv::attribute_frequency::per_triangle, cc::array<f32>{0.4f})));
+    mesh.attributes.push_back(
+        bind(sv::mesh_attribute::create("fuzz_weight", sv::attribute_frequency::per_corner, scalars)));
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create_value("thin_film_weight", 0.5f)));
+    mesh.attributes.push_back(
+        bind(sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex, frames)));
+    mesh.textures.push_back({.name = "base_metalness",
+                             .source = {.texture = sv::texture_id(1),
+                                        .uv_attribute = "uv",
+                                        .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::b)}});
+    mesh.textures.push_back({.name = "base_color",
+                             .source = {.texture = sv::texture_id(2),
+                                        .uv_attribute = "uv",
+                                        .sampler = {.mag_filter = sg::sampler_filter::nearest,
+                                                    .address_u = sg::sampler_address_mode::clamp_edge},
+                                        .swizzle = sv::channel_swizzle::of(
+                                            sv::texture_channel::r, sv::texture_channel::g, sv::texture_channel::one)}});
+    mesh.textures.push_back({.name = "opacity",
+                             .source = {.texture = sv::texture_id(2),
+                                        .uv_attribute = "uv",
+                                        .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::a)}});
+    mesh.textures.push_back({.name = "normal",
+                             .source = {.texture = sv::texture_id(3),
+                                        .uv_attribute = "uv",
+                                        .transform = sv::sample_transform::of_signed_normal(0.8f)}});
+
+    auto const resolved = sv::resolve_material(materials, id, mesh);
+    auto const g = sv::generate_material_shader(resolved);
+    CHECK(g.can_cut_out);
+    CHECK(g.sgl_source.contains("const sv_supplied_tangent_frame = true"));
+    CHECK(g.sgl_source.contains("palette_nearest_clamp_repeat"));
+    CHECK(g.sgl_source.contains("palette_linear_repeat_repeat"));
+    check_sgl_compiles(resolved);
+}
+
 #endif // SLIB_HAS_DXC
