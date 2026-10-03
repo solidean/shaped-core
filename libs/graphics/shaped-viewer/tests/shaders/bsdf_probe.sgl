@@ -1,0 +1,252 @@
+// A Monte-Carlo probe over the OpenPBR closure, so a test can assert on NUMBERS rather than on an image.
+//
+// The SGL twin of shaders/bsdf_probe.hlsl, over module `openpbr` rather than shaders/openpbr.hlsli.
+// openpbr-bsdf-test.cc runs every case through both and holds both to the same tolerances, which is what proves the port.
+// That file says what each estimator measures and why its expected value is known in closed form.
+//
+// Work is split so a case gets many more samples than one thread would finish: item `i` is case `i / blocks_per_case`, drawing its own independent block of samples.
+// The CPU sums the blocks belonging to one case.
+use openpbr
+
+// Which estimator a case runs — mirrors sv_test::probe_mode.
+const probe_albedo = 0
+const probe_pdf_norm = 1
+const probe_reciprocity = 2
+const probe_echo = 3
+const probe_medium = 4
+const probe_transmitted = 5
+
+/// The denoiser guides for the case's surface, which are pure functions of it rather than estimators.
+/// One mode per guide, each returning its value in `xyz` and a sample count of 1 in `w`.
+const probe_guides_diffuse = 6
+const probe_guides_specular = 7
+const probe_guides_roughness = 8
+
+/// The directional albedo of ONE half of the split, integrated against the whole closure's sampler.
+const probe_albedo_diffuse = 9
+const probe_albedo_specular = 10
+
+/// `openpbr.surface` as a case carries it, field for field, which `probe_run` converts with `openpbr.surface(..c.s)`.
+/// A struct of its own because a buffer element naming a module's struct has no C++ mirror yet: the module's package mirrors only what its own bindings place in memory.
+struct probe_surface:
+    base_weight: float
+    base_color: float3
+    base_metalness: float
+    base_diffuse_roughness: float
+    specular_weight: float
+    specular_color: float3
+    specular_roughness: float
+    specular_roughness_anisotropy: float
+    specular_ior: float
+    transmission_weight: float
+    transmission_color: float3
+    transmission_depth: float
+    transmission_scatter: float3
+    transmission_scatter_anisotropy: float
+    transmission_dispersion_scale: float
+    transmission_dispersion_abbe_number: float
+    subsurface_weight: float
+    subsurface_color: float3
+    subsurface_radius: float3
+    subsurface_radius_scale: float
+    subsurface_scatter_anisotropy: float
+    coat_weight: float
+    coat_color: float3
+    coat_roughness: float
+    coat_roughness_anisotropy: float
+    coat_ior: float
+    coat_darkening: float
+    fuzz_weight: float
+    fuzz_color: float3
+    fuzz_roughness: float
+    thin_film_weight: float
+    thin_film_thickness: float
+    thin_film_ior: float
+    emission_luminance: float
+    emission_color: float3
+    geometry_thin_walled: float
+    geometry_normal: float3
+    geometry_coat_normal: float3
+    geometry_opacity: float
+    geometry_tangent_frame: float4
+    geometry_tangent: float3
+    geometry_handedness: float
+
+/// One measurement to make — mirrors `sv_test::probe_case` lane-for-lane, so keep the two in lockstep.
+///
+/// A buffer element is packed tightly, so `surface` lands at byte 32 as the C++ struct has it.
+/// The pads keep the HLSL probe's layout, which is the same 320 bytes; `probe_echo` pins the agreement.
+struct probe_case:
+    wo: float3
+    mode: int
+
+    /// samples this work item draws, before the CPU sums the blocks of one case
+    samples: uint
+    seed: uint
+
+    /// Whether the closure is prepared as if the ray were INSIDE the surface, which is where the index ratio inverts.
+    /// Total internal reflection exists only on that side, so a case that leaves this at 0 cannot measure it at all.
+    exiting: uint
+    pad1: uint
+
+    s: probe_surface
+
+    pad2: float
+    pad3: float
+    pad4: float
+
+binding probe:
+    /// The cases to run, one per block of work items.
+    cases: buffer[probe_case]
+
+    /// One accumulator per work item, summed across a case's blocks by the CPU.
+    /// What the lanes mean is per mode, as shaders/bsdf_probe.hlsl lists them.
+    results: mut buffer[float4]
+
+    /// How many elements `results` and `cases` hold, which the HLSL probe reads off the buffers themselves.
+    item_count: uint
+    case_count: uint
+
+/// A hashed per-lane RNG (PCG-style), seeded per work item so every block draws an independent stream.
+fun probe_rand(state: mut uint) -> float:
+    state = state * 747796405 + 2891336453
+    let w = ((state >> ((state >> 28) + 4)) ^ state) * 277803737
+    return (((w >> 22) ^ w) as float) * (1.0 / 4294967296.0)
+
+/// A uniform direction in the upper hemisphere, whose solid-angle pdf is the constant `1 / (2 pi)`.
+fun probe_uniform_hemisphere(u: float2) -> float3:
+    let z = u.x
+    let r = sqrt(max(0.0, 1.0 - z * z))
+    let phi = 2.0 * openpbr.pi * u.y
+    return float3(r * cos(phi), r * sin(phi), z)
+
+/// A cosine-weighted direction on EITHER side of the surface, whose density is `0.5 * |wi.z| / pi` over the whole sphere.
+/// The closure transmits, so a proposal covering only the upper hemisphere would leave the refracted lobe unmeasured.
+fun probe_sample_two_sided_cosine(u: float3) -> float3:
+    let wi = openpbr.sample_cosine_local(u.yz)
+    let sided = if u.x < 0.5 => wi else float3(wi.x, wi.y, -wi.z)
+    return sided
+
+/// The estimator `probe_pdf_norm` runs: is `bsdf_pdf` the density that `bsdf_sample_direction` actually draws from?
+///
+/// Directions come half from a cosine lobe and half from the closure's own sampler.
+/// Weighting by `0.5 * cosine + 0.5 * bsdf_pdf` gives a mean of exactly 1 when those two agree, and the ratio is bounded by 2 either way.
+fun probe_consistency_weight(wi: float3, claimed_pdf: float) -> float:
+    let cosine = 0.5 * abs(wi.z) / openpbr.pi
+    return claimed_pdf / max(0.5 * cosine + 0.5 * claimed_pdf, 1e-9)
+
+/// Three uniforms from the stream, drawn in order.
+fun probe_rand3(rng: mut uint) -> float3:
+    let x = probe_rand(mut rng)
+    let y = probe_rand(mut rng)
+    let z = probe_rand(mut rng)
+    return float3(x, y, z)
+
+/// The estimate one work item contributes, which the CPU sums with its siblings.
+fun probe_run(c: probe_case, item: uint) -> float4:
+    // carrying all three wavelengths
+    let surface = openpbr.surface(..c.s)
+    let b = openpbr.bsdf_prepare(surface, c.exiting != 0, 3)
+    let mut rng = item * 9781 + c.seed * 26699 + 1
+
+    if c.mode == probe_echo => return float4(c.s.base_color.x, c.s.specular_roughness, c.s.geometry_tangent_frame.w, c.samples as float)
+
+    // The guides are read straight off the surface rather than estimated, so each contributes one "sample".
+    // The CPU's divide by `w` hands back the value itself.
+    if c.mode == probe_guides_diffuse => return float4(..openpbr.pt_diffuse_albedo(surface), 1.0)
+    if c.mode == probe_guides_specular => return float4(..openpbr.pt_specular_albedo(surface), 1.0)
+    if c.mode == probe_guides_roughness => return float4(openpbr.pt_roughness(surface), 0.0, 0.0, 1.0)
+
+    let wo = normalize(c.wo)
+    let mut sum = float3(0.0)
+
+    for i in 0 ..< (c.samples as int):
+        if c.mode == probe_albedo_diffuse or c.mode == probe_albedo_specular:
+            // The same estimator `probe_albedo` runs — `f * cos / pdf` against the closure's own sampler.
+            // One half of `f` stands in place of the whole, which integrates that half's share of the directional albedo.
+            let u = probe_rand3(mut rng)
+            let s = openpbr.bsdf_sample_direction(b, wo, u)
+            if s.valid and s.pdf > 0.0:
+                let mut d = float3(0.0)
+                let mut sp = float3(0.0)
+                openpbr.bsdf_eval_split(b, wo, s.direction, mut d, mut sp)
+                let half_f = if c.mode == probe_albedo_diffuse => d else sp
+                sum += half_f * (abs(s.direction.z) / s.pdf)
+            continue
+
+        if c.mode == probe_albedo:
+            // The closure's own sampler, so the estimator is `f * cos / pdf` and its mean is the directional albedo.
+            // An invalid sample contributes zero rather than being discarded: dropping it would renormalize the estimate over the samples that survived.
+            let u = probe_rand3(mut rng)
+            let s = openpbr.bsdf_sample_direction(b, wo, u)
+            // `abs`: a refracted direction leaves on the far side
+            if s.valid => sum += s.value * abs(s.direction.z) / s.pdf
+            continue
+
+        if c.mode == probe_pdf_norm:
+            // Half the draws come from a cosine lobe and half from the closure itself, and both are weighted by what `bsdf_pdf` claims about them.
+            // So the mean is 1 exactly when the claim matches the sampler.
+            let pick = probe_rand(mut rng)
+            let ux = probe_rand(mut rng)
+            let uy = probe_rand(mut rng)
+
+            if pick < 0.5:
+                let uz = probe_rand(mut rng)
+                let wi = probe_sample_two_sided_cosine(float3(uz, ux, uy))
+                if abs(wi.z) > 1e-6 => sum.x += probe_consistency_weight(wi, openpbr.bsdf_pdf(b, wo, wi))
+            else:
+                let uz = probe_rand(mut rng)
+                let s = openpbr.bsdf_sample_direction(b, wo, float3(uz, ux, uy))
+                if s.valid => sum.x += probe_consistency_weight(s.direction, s.pdf)
+            continue
+
+        if c.mode == probe_medium:
+            // Which interior each drawn direction entered, and whether that agreed with the side the direction went to.
+            //
+            // `x` is the DISAGREEMENT count, which is exact rather than statistical.
+            // A sample reporting no interior while pointing through the surface came from a reflective lobe that produced a direction below the horizon.
+            // A thin wall encloses nothing, so it legitimately transmits into no interior and is the one exclusion.
+            let u = probe_rand3(mut rng)
+            let s = openpbr.bsdf_sample_direction(b, wo, u)
+            if s.valid:
+                let crossed = s.direction.z < 0.0
+                let entered = s.medium != openpbr.medium_none
+                let thin = c.s.geometry_thin_walled != 0.0
+
+                let disagrees = crossed != entered and not (crossed and thin)
+                sum.x += if disagrees => 1.0 else 0.0
+                sum.y += if s.medium == openpbr.medium_transmission => 1.0 else 0.0
+                sum.z += if s.medium == openpbr.medium_subsurface => 1.0 else 0.0
+            continue
+
+        if c.mode == probe_transmitted:
+            // The same estimator `probe_albedo` runs, restricted to the samples that crossed.
+            // Every factor on the transmission branch but the coat's tint is colorless, so the channel RATIOS are exact whatever the sample budget.
+            let u = probe_rand3(mut rng)
+            let s = openpbr.bsdf_sample_direction(b, wo, u)
+            if s.valid and s.direction.z < 0.0 => sum += s.value * abs(s.direction.z) / s.pdf
+            continue
+
+        // probe_reciprocity: both directions drawn, and both in the UPPER hemisphere, so only the reflective lobes are compared.
+        // A BTDF is deliberately not reciprocal, so a transmitted pair has nothing to assert here.
+        let ua = float2(probe_rand(mut rng), probe_rand(mut rng))
+        let wa = probe_uniform_hemisphere(ua)
+        let ub = float2(probe_rand(mut rng), probe_rand(mut rng))
+        let wb = probe_uniform_hemisphere(ub)
+
+        let fab = openpbr.bsdf_eval(b, wa, wb)
+        let fba = openpbr.bsdf_eval(b, wb, wa)
+
+        sum.x += abs(fab.x - fba.x) + abs(fab.y - fba.y) + abs(fab.z - fba.z)
+        sum.y += abs(fab.x) + abs(fab.y) + abs(fab.z) + abs(fba.x) + abs(fba.y) + abs(fba.z)
+
+    return float4(..sum, c.samples as float)
+
+@compute(64) fun measure(@thread_id id: int3){probe}:
+    let item = id.x as uint
+    if item >= probe.item_count => return
+
+    // One case per block of work items, so a case's sample budget is not capped by what one thread can finish.
+    let blocks_per_case = probe.item_count / max(probe.case_count, 1)
+    let index = min(item / max(blocks_per_case, 1), probe.case_count - 1)
+    probe.results[id.x] = probe_run(probe.cases[index as int], item)

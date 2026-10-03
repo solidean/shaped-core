@@ -1,0 +1,325 @@
+// The OpenPBR closure at work: evaluating it, its pdf, and drawing a direction from it.
+//
+// The SGL port of the second half of shaders/openpbr.hlsli; openpbr_microfacet.sgl says what the model is.
+module openpbr
+
+/// The BSDF at (`wo`, `wi`) split into the halves a denoiser filters apart, with the cosine NOT folded in.
+///
+/// `diffuse` is what the diffuse substrate returns plus the subsurface's share of the transmission.
+/// `specular` is everything else — the fuzz, the coat, the metal and the dielectric specular, plus the glass's share.
+/// Glass is sharp and view-dependent, so filtering it as diffuse would destroy exactly what makes it read as glass.
+/// Subsurface is the opposite: what leaves it has scattered inside, and the diffuse albedo guide counts its color.
+///
+/// **Their sum is `bsdf_eval`, exactly rather than nearly.**
+/// The base mixes as `mix(f_spec + f_diffuse, f_metal, metalness)`.
+/// That separates into `mix(f_spec, f_metal, metalness)` plus `(1 - metalness) * f_diffuse` with nothing left over.
+/// So this is the one implementation, and `bsdf_eval` adds the two back together rather than computing anything of its own.
+///
+/// Both directions must be unit and in the local frame; a direction below the surface evaluates to zero.
+fun bsdf_eval_split(b: bsdf, wo: float3, wi: float3, diffuse: mut float3, specular: mut float3):
+    diffuse = float3(0.0)
+    specular = float3(0.0)
+
+    if wo.z <= 0.0 => return
+
+    // A direction on the far side is a TRANSMISSION, and only the transparent base produces one.
+    // Everything layered above it — the coat, the fuzz — reflects, so what reaches here has already crossed both and pays for both again on the way out.
+    if wi.z < 0.0:
+        // What the two refracting bases weigh between them.
+        // The transparent one pays its tint at the crossing; the subsurface one pays nothing here, because everything it costs happens inside.
+        let tint = b.trans_weight * b.trans_tint + (1.0 - b.trans_weight) * b.sss_weight * float3(1.0)
+        if all(tint <= float3(0.0)) => return
+
+        let f_btdf = transmission_btdf(b, wo, wi)
+        let t_coat_x = coat_crossing(b, wo, wi)
+        let t_fuzz_x = fuzz_transmission(b, wo.z) * fuzz_transmission(b, abs(wi.z))
+
+        // The coat tints what passes through it once, on this branch as on the reflecting one.
+        let coat_absorption_x = mix(float3(1.0), b.coat_tint, b.coat_weight)
+
+        let crossing = f_btdf * t_coat_x * coat_absorption_x * t_fuzz_x * (1.0 - b.metalness)
+        specular = crossing * b.trans_weight * b.trans_tint
+        diffuse = crossing * (1.0 - b.trans_weight) * b.sss_weight
+        return
+
+    if wi.z <= 0.0 => return
+
+    let mu_o = wo.z
+    let mu_i = wi.z
+    let h = normalize(wo + wi)
+    let mu_h = max(dot(wo, h), 1e-6)
+    let denom = 4.0 * mu_o * mu_i
+
+    // The metal and the dielectric specular share a half-vector and a roughness, so they share D and G2 as well.
+    let d_spec = ggx_d(h, b.spec_alpha)
+    let g_spec = ggx_g2(wo, wi, b.spec_alpha)
+
+    // The film replaces the interface's Fresnel rather than tinting what it returned.
+    // The interference is what the reflectance IS at that thickness, and a multiply could only darken where the film should be shifting hue.
+    //
+    // The layer coupling below still reads the film-free `spec_f0`.
+    // Averaged over the spectrum a film redistributes reflectance rather than adding it, so what reaches the diffuse substrate is close.
+    // A film-aware transmission would need the same albedo table the energy compensation is waiting on.
+    let mut f_metal_fresnel = fresnel_f82(mu_h, b.metal_f0, b.metal_tint)
+    let mut f_spec_fresnel = fresnel_schlick(mu_h, b.spec_f0)
+
+    // Past the critical angle the interface reflects ALL of it, and no approximation of the Fresnel says so on its own.
+    // This is the reflection a refraction could not be: `bsdf_sample_direction` turns a failed refraction into it, and `bsdf_pdf` carries the density that produced it.
+    // The three have to agree, or the sample is scored by a lobe that did not draw it.
+    // A thin wall encloses nothing and light passes straight through it, so it has no critical angle to be past.
+    // That is the same reason `bsdf_pdf` excludes it and `bsdf_sample_direction` never refracts through one.
+    let tir = b.thin_walled == 0.0 and interface_is_tir(b, mu_h)
+    if tir => f_spec_fresnel = float3(1.0)
+
+    if b.thin_film_weight > 0.0 and not tir:
+        let film_metal = thin_film_reflectance(mu_h, b.metal_f0, b.thin_film_ior, b.thin_film_thickness)
+        f_metal_fresnel = mix(f_metal_fresnel, film_metal, b.thin_film_weight)
+        let film_spec = thin_film_reflectance(mu_h, b.spec_f0, b.thin_film_ior, b.thin_film_thickness)
+        f_spec_fresnel = mix(f_spec_fresnel, film_spec, b.thin_film_weight)
+
+    let f_metal = f_metal_fresnel * (d_spec * g_spec / denom) * ggx_energy_compensation(mu_o, b.metal_alpha, b.metal_f0)
+
+    let f_spec = b.spec_weight * f_spec_fresnel * (d_spec * g_spec / denom) * ggx_energy_compensation(mu_o, b.spec_alpha, b.spec_f0)
+
+    // The diffuse substrate takes what the specular layer let through, both on the way in and on the way out.
+    let t_spec = spec_transmission(b, mu_o) * spec_transmission(b, mu_i)
+    let f_diffuse = (1.0 - b.trans_weight) * (1.0 - b.sss_weight) * b.diffuse_albedo * (oren_nayar(wo, wi, b.diffuse_roughness) / pi) * t_spec
+
+    // Split rather than mixed: `mix(f_spec + f_diffuse, f_metal, m)` is `mix(f_spec, f_metal, m)` plus `(1 - m) * f_diffuse`.
+    // So the two below add back to exactly what one `mix` would have produced.
+    let f_base_specular = mix(f_spec, f_metal, b.metalness)
+    let f_base_diffuse = (1.0 - b.metalness) * f_diffuse
+
+    // The coat, in its OWN frame: it may carry a normal the base does not, and every cosine its lobe needs is measured against that normal rather than the base's.
+    //
+    // What comes back is still added as a BSDF about the BASE normal, which is the standard simplification.
+    // The two frames disagree by a cosine ratio that no closed form absorbs, and the alternative is a second integrator.
+    // A direction below the coat's horizon sees no coat at all: it neither reflects nor blocks, so the base is charged nothing for a crossing that did not happen.
+    let wo_c = to_coat(b, wo)
+    let wi_c = to_coat(b, wi)
+
+    let mut f_coat = float3(0.0)
+    let mut t_coat = 1.0
+    if wo_c.z > 0.0 and wi_c.z > 0.0:
+        let h_c = normalize(wo_c + wi_c)
+        let mu_hc = max(dot(wo_c, h_c), 1e-6)
+        let d_coat = ggx_d(h_c, b.coat_alpha)
+        let g_coat = ggx_g2(wo_c, wi_c, b.coat_alpha)
+
+        let coat_ior = (1.0 + sqrt(b.coat_f0)) / max(1e-3, 1.0 - sqrt(b.coat_f0))
+        f_coat = float3(b.coat_weight * fresnel_dielectric(mu_hc, coat_ior) * (d_coat * g_coat / (4.0 * wo_c.z * wi_c.z)))
+
+        t_coat = coat_transmission(b, wo_c.z) * coat_transmission(b, wi_c.z)
+
+    let coat_absorption = mix(float3(1.0), b.coat_tint, b.coat_weight)
+
+    // Everything above the base attenuates both halves by the same factor.
+    // That keeps the split a partition of the closure rather than two closures that happen to resemble it.
+    let through_coat = t_coat * coat_absorption * coat_darkening_factor(b)
+
+    // The fuzz sits above everything, and takes its share on both crossings.
+    let f_fuzz = b.fuzz_weight * b.fuzz_color * sheen_d(h, b.fuzz_alpha) * sheen_v(wo, wi)
+    let t_fuzz = fuzz_transmission(b, mu_o) * fuzz_transmission(b, mu_i)
+
+    // The fuzz and the coat are rough specular lobes of their own, so they go with the specular half rather than being folded into whatever sits under them.
+    diffuse = t_fuzz * f_base_diffuse * through_coat
+    specular = f_fuzz + t_fuzz * (f_coat + f_base_specular * through_coat)
+
+/// The full BSDF at (`wo`, `wi`), with the cosine NOT folded in.
+/// Both directions must be unit and in the local frame; a direction below the surface evaluates to zero.
+fun bsdf_eval(b: bsdf, wo: float3, wi: float3) -> float3:
+    let mut diffuse = float3(0.0)
+    let mut specular = float3(0.0)
+    bsdf_eval_split(b, wo, wi, mut diffuse, mut specular)
+    return diffuse + specular
+
+/// How the six lobes split one outgoing direction's sampling budget.
+/// Each weight is roughly what its lobe reflects, so a lobe that contributes nothing is never picked.
+fun bsdf_lobe_probs(b: bsdf, wo: float3) -> lobe_probs:
+    let mu = max(wo.z, 1e-4)
+
+    let fuzz = b.fuzz_weight * luminance(b.fuzz_color) * sheen_albedo(mu, b.fuzz_alpha)
+
+    let t_fuzz = fuzz_transmission(b, mu)
+
+    // The coat is ranked by what it reflects at ITS cosine, so a coat tilted away from the view is picked less often.
+    // A coat turned past the horizon is not picked at all, which is the same case `bsdf_eval` charges nothing for.
+    let mu_coat = to_coat(b, wo).z
+    let coat_ab = ggx_albedo_split(max(mu_coat, 1e-4), alpha_iso(b.coat_alpha))
+    let coat = if mu_coat > 0.0 => t_fuzz * b.coat_weight * (b.coat_f0 * coat_ab.x + coat_ab.y) else 0.0
+
+    let below = t_fuzz * (if mu_coat > 0.0 => coat_transmission(b, mu_coat) else 1.0)
+    let metal = below * b.metalness * luminance(ggx_albedo(mu, b.metal_alpha, b.metal_f0))
+    let spec = below * (1.0 - b.metalness) * b.spec_weight * luminance(ggx_albedo(mu, b.spec_alpha, b.spec_f0))
+
+    let t_spec = spec_transmission(b, mu)
+    let opaque = 1.0 - b.trans_weight
+    let diffuse = below * (1.0 - b.metalness) * opaque * (1.0 - b.sss_weight) * luminance(b.diffuse_albedo * t_spec)
+
+    // Both refracting bases share ONE sampling lobe: they cross the same interface at the same roughness and differ only in what lies beyond it.
+    // Giving them separate lobes would be two names for one distribution.
+    // Which interior a drawn direction entered is decided after the fact, in `bsdf_sample_direction`.
+    let through = t_spec * (b.trans_weight * b.trans_tint + opaque * b.sss_weight)
+    let transmission = below * (1.0 - b.metalness) * luminance(through)
+
+    let sum = fuzz + coat + metal + spec + diffuse + transmission
+    // Nothing reflects anything worth sampling; the diffuse lobe keeps the pdf well-defined rather than zero.
+    if sum <= 1e-6 => return lobe_probs(0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+    let inv = 1.0 / sum
+    return lobe_probs(fuzz * inv, coat * inv, metal * inv, spec * inv, diffuse * inv, transmission * inv)
+
+/// The solid-angle pdf `bsdf_sample_direction` would produce for `wi`, which is what the multiple-importance weight against a light sampler needs.
+fun bsdf_pdf(b: bsdf, wo: float3, wi: float3) -> float:
+    if wo.z <= 0.0 => return 0.0
+
+    let p = bsdf_lobe_probs(b, wo)
+
+    // Only the transparent base reaches the far side, so a transmitted direction is that lobe's density alone.
+    if wi.z < 0.0:
+        if p.transmission <= 0.0 => return 0.0
+
+        if b.thin_walled != 0.0 => return p.transmission * ggx_pdf(wo, float3(wi.x, wi.y, -wi.z), b.spec_alpha)
+
+        return p.transmission * ggx_refraction_pdf(wo, wi, b.spec_alpha, b.trans_eta)
+
+    if wi.z <= 0.0 => return 0.0
+
+    let cosine = wi.z / pi
+
+    let mut density = p.fuzz * cosine
+        + p.coat * ggx_pdf(to_coat(b, wo), to_coat(b, wi), b.coat_alpha)
+        + p.metal * ggx_pdf(wo, wi, b.metal_alpha)
+        + p.spec * ggx_pdf(wo, wi, b.spec_alpha)
+        + p.diffuse * cosine
+
+    // The transmission lobe reaches the UPPER hemisphere too, whenever the microfacet it drew is past the critical angle.
+    // There is no refracted direction there, so it reflects instead.
+    // That mass belongs in the density, or the reflection it produced is scored by the spec lobe alone.
+    // That claims less than what drew it, and inflates every weight formed from it.
+    if p.transmission > 0.0 and b.thin_walled == 0.0:
+        let h = normalize(wo + wi)
+        if interface_is_tir(b, dot(wo, h)) => density += p.transmission * ggx_pdf(wo, wi, b.spec_alpha)
+
+    return density
+
+/// `r` completed for the direction `wi`: the BSDF and the full closure pdf there, and whether the pdf held.
+fun finish_sample(r: mut bsdf_sample, b: bsdf, wo: float3, wi: float3):
+    r.direction = wi
+    r.value = bsdf_eval(b, wo, wi)
+    r.pdf = bsdf_pdf(b, wo, wi)
+    r.valid = r.pdf > 1e-9
+
+/// One direction drawn from the closure, with the BSDF and the full pdf there.
+///
+/// `u` is three uniforms in [0, 1): the first picks the lobe and the other two the direction within it.
+/// The lobe choice is a one-sample estimator over the six, so the returned pdf is the mixture's rather than the picked lobe's.
+/// That keeps a lobe that another lobe could also have produced from being counted twice.
+///
+/// The direction may leave the UPPER hemisphere: a transparent base refracts, and the caller has to follow it through the surface rather than treating the sample as invalid.
+fun bsdf_sample_direction(b: bsdf, wo: float3, u: float3) -> bsdf_sample:
+    let mut r = bsdf_sample()
+
+    if wo.z <= 0.0 => return r
+
+    let p = bsdf_lobe_probs(b, wo)
+
+    // Walk the six in the order the struct lists them, so the pick is a single pass over the cdf.
+    let pick = u.x
+    let mut wi = float3(0.0, 0.0, 1.0)
+
+    // A REFLECTIVE lobe that produced a direction below the horizon has failed, and each one ends the sample itself.
+    //
+    // Rejecting here rather than at the bottom is what keeps the two populations apart.
+    // `bsdf_eval` and `bsdf_pdf` both read a direction below the surface as a transmission.
+    // A below-horizon reflection surviving to them would be valued as a BTDF and scored against a refraction density that did not produce it.
+    // It would also report `medium_none` while pointing through the surface, which sends the path into an interior it never entered.
+    // On an opaque surface the pdf collapses to zero and the sample is dropped anyway; on a transmissive one nothing downstream can tell the two apart.
+    if pick < p.fuzz:
+        r.lobe = bsdf_lobe_fuzz
+        wi = sample_cosine_local(u.yz)
+        if wi.z <= 0.0 => return r
+    else if pick < p.fuzz + p.coat:
+        r.lobe = bsdf_lobe_coat
+        // Drawn in the coat's frame and brought back, so a tilted coat reflects where its own normal says rather than where the base's does.
+        let wo_c = to_coat(b, wo)
+        if wo_c.z <= 0.0 => return r
+
+        let h_c = ggx_sample_vndf(wo_c, b.coat_alpha, u.yz)
+        wi = from_coat(b, reflect_about(-wo_c, h_c))
+
+        // The coat's own horizon is not the base's, so this rejects against the frame the closure is evaluated in.
+        if wi.z <= 0.0 => return r
+    else if pick < p.fuzz + p.coat + p.metal:
+        r.lobe = bsdf_lobe_metal
+        let hm = ggx_sample_vndf(wo, b.metal_alpha, u.yz)
+        wi = reflect_about(-wo, hm)
+        if wi.z <= 0.0 => return r
+    else if pick < p.fuzz + p.coat + p.metal + p.spec:
+        r.lobe = bsdf_lobe_spec
+        let hs = ggx_sample_vndf(wo, b.spec_alpha, u.yz)
+        wi = reflect_about(-wo, hs)
+        if wi.z <= 0.0 => return r
+    else if pick < p.fuzz + p.coat + p.metal + p.spec + p.diffuse:
+        r.lobe = bsdf_lobe_diffuse
+        wi = sample_cosine_local(u.yz)
+        if wi.z <= 0.0 => return r
+    else:
+        r.lobe = bsdf_lobe_transmission
+
+        // A refracting base.
+        // Which of the two is decided here, in proportion to what each contributes.
+        // The direction is the same either way, so the pick costs no extra distribution and changes only the interior reported.
+        let w_trans = b.trans_weight * luminance(b.trans_tint)
+        let w_sss = (1.0 - b.trans_weight) * b.sss_weight
+        let w_sum = w_trans + w_sss
+
+        // The lobe pick already consumed `u.x`; reusing where it landed INSIDE the transmission slice keeps this free of a fourth uniform.
+        // The two choices are independent of the direction the slice goes on to draw.
+        let slice_lo = p.fuzz + p.coat + p.metal + p.spec + p.diffuse
+        let slice = max(p.transmission, 1e-9)
+        let within = saturate((pick - slice_lo) / slice)
+
+        // A thin wall encloses nothing, so passing through one enters no interior at all.
+        // Saying so here is what keeps that fact in the closure, which is the only thing that knows it.
+        let picked_subsurface = w_sum > 0.0 and within * w_sum >= w_trans
+        if b.thin_walled != 0.0:
+            r.medium = medium_none
+        else:
+            r.medium = if picked_subsurface => medium_subsurface else medium_transmission
+
+        // Refracted about a visible microfacet, or straight through when the wall is thin.
+        let h = ggx_sample_vndf(wo, b.spec_alpha, u.yz)
+        if b.thin_walled != 0.0:
+            let wi_mirror = reflect_about(-wo, h)
+            if wi_mirror.z <= 1e-6 => return r
+            wi = float3(wi_mirror.x, wi_mirror.y, -wi_mirror.z)
+        else:
+            wi = refract_through(-wo, h, 1.0 / b.trans_eta)
+
+            // Total internal reflection: `refract` has no solution about this microfacet, and what physically happens is that the interface reflects rather than that the path ends.
+            //
+            // Ending it would lose the light.
+            // A walk inside a solid reaches the boundary outside the escape cone far more often than inside it — for an index of 1.5 that is most of the hemisphere.
+            // So a subsurface or a thick-glass interior would go dark by attrition rather than by absorbing anything.
+            // `bsdf_eval` returns the full lobe at such a microfacet and `bsdf_pdf` carries this density, so the three agree about a direction the transmission lobe drew but did not transmit.
+            if dot(wi, wi) < 1e-6 or wi.z >= -1e-6:
+                let wi_reflected = reflect_about(-wo, h)
+                if wi_reflected.z <= 0.0 => return r
+
+                // it never crossed, so the caller keeps the medium it was already in
+                r.medium = medium_none
+                finish_sample(mut r, b, wo, wi_reflected)
+                return r
+            wi = normalize(wi)
+
+        // Named only once it crossed: the reflection above is scored as specular, and keeps the transmission's name.
+        if r.medium == medium_subsurface => r.lobe = bsdf_lobe_subsurface
+
+    if wi.z > -1e-6 and wi.z <= 1e-6 => return r
+
+    // a reflected direction crossed nothing, whichever lobe produced it
+    if wi.z > 0.0 => r.medium = medium_none
+
+    finish_sample(mut r, b, wo, wi)
+    return r

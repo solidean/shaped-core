@@ -268,6 +268,19 @@ if(SC_BUILD_TESTS)
         )
         target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
 
+        # The BSDF probe again, over the SGL port of the closure in shaders/sgl, module `openpbr`.
+        # openpbr-bsdf-test.cc runs every case through both probes, which is what holds the port to the HLSL closure.
+        sc_add_shader_package(
+            TARGET      shaped-viewer-test
+            NAME        sv_test_sgl_shaders
+            NAMESPACE   sv_test::sgl_shaders
+            SOURCE_DIR  tests/shaders
+            LANGUAGE    sgl
+            MODULE_DIRS shaders/sgl
+            SHADERS
+                bsdf_probe.sgl:*
+        )
+
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.
         sc_stage_runtime_dlls(shaped-viewer-test DLLS "$<TARGET_RUNTIME_DLLS:shaped-viewer-test>")

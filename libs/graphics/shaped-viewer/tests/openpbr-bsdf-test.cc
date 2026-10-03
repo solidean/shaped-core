@@ -9,6 +9,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/all.hh>
+#include <sv_test_sgl_shaders.hh>
 #include <sv_test_shaders.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
@@ -27,6 +28,9 @@
 //   - and a layout echo pinning `probe_surface` against the `sv::surface` the GPU decodes.
 //
 // A lobe added to the closure belongs in `surfaces_under_test` below, and is then held to all of them at once.
+//
+// Every case runs twice: through the HLSL closure, and through its SGL port in shaders/sgl, by tests/shaders/bsdf_probe.sgl.
+// The two draw the same samples with the same arithmetic, so a port that changed a number fails here like a broken closure.
 
 namespace
 {
@@ -151,22 +155,52 @@ struct probe_result
     float samples = 0.0f;
 };
 
-/// Dispatches `cases` and returns one mean per case.
+/// Which closure a case is measured through: shaders/bsdf_probe.hlsl over shaders/openpbr.hlsli, or
+/// tests/shaders/bsdf_probe.sgl over the SGL port in shaders/sgl, module `openpbr`.
+///
+/// Every test below runs each of its cases through both and holds both to the same tolerances.
+/// That is what proves the port: the SGL closure is held to physics exactly as the HLSL one is, not merely to resembling it.
+enum class probe_shader
+{
+    hlsl,
+    sgl,
+};
+
+constexpr probe_shader probe_shaders[] = {probe_shader::hlsl, probe_shader::sgl};
+
+cc::string_view name_of(probe_shader shader)
+{
+    return shader == probe_shader::hlsl ? "hlsl" : "sgl";
+}
+
+static_assert(sizeof(sv_test::sgl_shaders::probe_case) == sizeof(probe_case),
+              "probe_case must match probe_case in tests/shaders/bsdf_probe.sgl");
+
+/// Dispatches `cases` through `shader`'s probe and returns one mean per case.
 ///
 /// Everything is built inline rather than behind a routine: nothing a viewer runs dispatches this shader, so a routine
 /// would put test-only machinery in the library.
-cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc::span<probe_case const> cases)
+cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx,
+                                                           probe_shader shader,
+                                                           cc::span<probe_case const> cases)
 {
-    auto const shader = sv_test::shaders::bsdf_probe.compute.BsdfProbe->acquire(ctx);
-    co_await cc::async_settled(shader);
-    if (shader->has_error())
-        FAIL(cc::format("the BSDF probe shader did not compile:\n{}", shader->try_error()->underlying().to_string()));
+    auto const& sgl_entry = sv_test::sgl_shaders::bsdf_probe.measure;
+    auto const compiled_shader = shader == probe_shader::hlsl
+                                   ? sv_test::shaders::bsdf_probe.compute.BsdfProbe->acquire(ctx)
+                                   : sgl_entry->acquire(ctx);
+    co_await cc::async_settled(compiled_shader);
+    if (compiled_shader->has_error())
+        FAIL(cc::format("the {} BSDF probe shader did not compile:\n{}", name_of(shader),
+                        compiled_shader->try_error()->underlying().to_string()));
 
-    auto const* const compiled = shader->try_value();
+    auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // the probe shader must build; without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::probe_bindings>();
-    auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
+    auto const hlsl_group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::probe_bindings>();
+    auto const sgl_group_layout = ctx.cached.acquire_binding_group_layout<sv_test::sgl_shaders::probe>();
+    auto const pipeline_layout = shader == probe_shader::hlsl
+                                   ? ctx.cached.acquire_pipeline_layout({.groups = {hlsl_group_layout}})
+                                   : sgl_entry.acquire_layout(ctx);
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
@@ -180,13 +214,27 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
     auto const result_buffer = ctx.transient.create_buffer<tg::vec4f>(
         item_count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
-    auto const group = ctx.transient.create_binding_group(
-        *cmd, group_layout,
-        sv_test::shaders::probe_bindings{.Cases = case_buffer.as_readonly_buffer(),
-                                         .Results = result_buffer.as_readwrite_buffer()});
-
     cmd->compute.bind_pipeline(*built);
-    cmd->compute.bind<sv_test::shaders::probe_bindings>(*group);
+    if (shader == probe_shader::hlsl)
+    {
+        auto const group = ctx.transient.create_binding_group(
+            *cmd, hlsl_group_layout,
+            sv_test::shaders::probe_bindings{.Cases = case_buffer.as_readonly_buffer(),
+                                             .Results = result_buffer.as_readwrite_buffer()});
+        cmd->compute.bind<sv_test::shaders::probe_bindings>(*group);
+    }
+    else
+    {
+        // SGL reads no buffer's length, so the probe is told both counts the HLSL one reads off its buffers.
+        auto const group = ctx.transient.create_binding_group(
+            *cmd, sgl_group_layout,
+            sv_test::sgl_shaders::probe{
+                .cases = case_buffer.reinterpret_as<sv_test::sgl_shaders::probe_case>().as_readonly_buffer(),
+                .results = result_buffer.as_readwrite_buffer(),
+                .item_count = u32(item_count),
+                .case_count = u32(cases.size())});
+        cmd->compute.bind_group(0, *group);
+    }
     cmd->compute.dispatch_threads(item_count);
 
     auto readback = cmd->download.data_from_buffer(result_buffer);
@@ -212,7 +260,7 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
 }
 
 /// Dispatches every case, in chunks small enough that no single dispatch runs long enough to be killed.
-cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, cc::span<probe_case const> cases)
+cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, probe_shader shader, cc::span<probe_case const> cases)
 {
     auto out = cc::vector<probe_result>();
     out.reserve(cases.size());
@@ -220,7 +268,7 @@ cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, cc::span<
     for (auto begin = isize(0); begin < cases.size(); begin += cases_per_dispatch)
     {
         auto const count = cc::min(cases_per_dispatch, cases.size() - begin);
-        auto const chunk = co_await run_probe_chunk(ctx, cases.subspan({.offset = begin, .size = count}));
+        auto const chunk = co_await run_probe_chunk(ctx, shader, cases.subspan({.offset = begin, .size = count}));
         for (auto const& r : chunk)
             out.push_back(r);
     }
@@ -442,181 +490,187 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
 
     auto const surfaces = surfaces_under_test();
 
-    // The layout pin, first: every number below is decoded through `probe_case`, so a packing disagreement would
-    // show up as a wrong result with nothing pointing at the cause.
+    for (auto const shader : probe_shaders)
     {
-        auto echo = probe_case{.mode = probe_mode::echo, .samples = 1};
-        echo.s.base_color = tg::vec3f(0.125f, 0, 0);
-        echo.s.specular_roughness = 0.375f;
-        echo.s.geometry_tangent_frame = tg::vec4f(0, 0, 0, 0.625f);
-
-        auto const r = co_await run_probe(ctx, cc::span<probe_case const>(&echo, 1));
-        REQUIRE(r.size() == 1);
-        CHECK(r[0].mean[0] == 0.125f).context("base_color.x, the first float3 in the struct");
-        CHECK(r[0].mean[1] == 0.375f).context("specular_roughness, past two float3s");
-        CHECK(r[0].mean[2] == 0.625f).context("the tangent frame's w, the last float4");
-    }
-
-    // Build one case per (surface, direction, mode) and measure them all in one dispatch.
-    auto cases = cc::vector<probe_case>();
-    for (auto const& ns : surfaces)
-        for (auto const& wo : probe_directions)
-            for (auto const mode :
-                 {probe_mode::albedo, probe_mode::pdf_norm, probe_mode::reciprocity, probe_mode::medium})
-                cases.push_back({.wo = wo,
-                                 .mode = mode,
-                                 .samples = samples_per_block,
-                                 .seed = 7u,
-                                 .exiting = ns.exiting ? 1u : 0u,
-                                 .s = ns.s});
-
-    auto const results = co_await run_probe(ctx, cases);
-    REQUIRE(results.size() == cases.size());
-
-    auto const modes_per_direction = 4;
-    auto const directions = isize(sizeof(probe_directions) / sizeof(probe_directions[0]));
-
-    for (auto si = isize(0); si < surfaces.size(); ++si)
-    {
-        auto const& ns = surfaces[si];
-        auto const is_furnace = ns.name.starts_with("white ");
-
-        for (auto di = isize(0); di < directions; ++di)
+        // The layout pin, first: every number below is decoded through `probe_case`, so a packing disagreement would
+        // show up as a wrong result with nothing pointing at the cause.
         {
-            auto const base = (si * directions + di) * modes_per_direction;
-            auto const& albedo = results[base + 0];
-            auto const& pdf_norm = results[base + 1];
-            auto const& reciprocity = results[base + 2];
-            auto const& medium = results[base + 3];
+            auto echo = probe_case{.mode = probe_mode::echo, .samples = 1};
+            echo.s.base_color = tg::vec3f(0.125f, 0, 0);
+            echo.s.specular_roughness = 0.375f;
+            echo.s.geometry_tangent_frame = tg::vec4f(0, 0, 0, 0.625f);
 
-            // A message per case, because a bare failing CHECK in a triple loop says nothing about which surface broke.
-            auto const where = cc::format("{} @ wo.z = {}", ns.name, probe_directions[di][2]);
-
-            // Energy conservation: a closure may not return more light than it received.
-            //
-            // The margin is two named approximations rather than Monte-Carlo error, which at this sample budget is well
-            // under a percent.
-            // Turquin's analytic energy compensation overshoots a white metal by about 3%, and the Conty-Estevez sheen
-            // reflects about 6% more at grazing than `sheen_albedo` charges the layers below it for.
-            // Both are the fits the viewer TODO names tabulated albedos as the replacement for, so this bound is what
-            // will tighten when they land.
-            // Measured from INSIDE, the bound is in different units, and that is the closure's convention rather than a
-            // concession.
-            //
-            // `transmission_btdf` deliberately omits the radiance-compression factor because this tracer transports
-            // importance from the camera rather than radiance from the light, and the two differ by the square of the
-            // index ratio.
-            // Entering, that leaves the integral bounded by 1; leaving, by the square of the ratio the other way round —
-            // so an exiting case is divided by it and held to the same bound as every other case.
-            // Without this the internal cases read about 2.25 for an index of 1.5 and 4 for one of 2, which is that
-            // factor exactly and says nothing about the closure.
-            auto const importance_scale = ns.exiting ? 1.0f / (ns.s.specular_ior * ns.s.specular_ior) : 1.0f;
-
-            for (auto c = 0; c < 3; ++c)
-                CHECK(albedo.mean[c] * importance_scale <= 1.06f)
-                    .context(where)
-                    .dump("albedo", albedo.mean)
-                    .dump("importance scale", importance_scale);
-
-            // The white furnace: a surface that absorbs nothing reflects everything.
-            // This is the assertion energy compensation exists to satisfy — without it a rough metal loses the
-            // multiple-scattering energy and lands around 0.8.
-            //
-            // The binding case for this tolerance is the ANISOTROPIC metal at grazing, which lands about 7% low.
-            // Lazarov's directional-albedo fit is isotropic and `alpha_iso` reduces the stretched lobe to the round one of
-            // the same solid angle, which is the closest an isotropic fit can come: a lobe stretched across the view loses
-            // more multiple-scattering energy than that reduction knows about.
-            // Only a tabulated albedo over both axes closes it, which is the same entry the two overshoots above wait on.
-            if (is_furnace)
-                for (auto c = 0; c < 3; ++c)
-                    CHECK(tg::abs(albedo.mean[c] - 1.0f) <= 0.08f).context(where).dump("albedo", albedo.mean);
-
-            // What `bsdf_pdf` claims, measured against what `bsdf_sample_direction` draws.
-            //
-            // The upper bound is the real requirement: a pdf that claims more mass than exists makes every
-            // multiple-importance weight it feeds too small, and the image is biased in a way no amount of accumulation
-            // fixes.
-            // Below 1 is legitimate and expected — a GGX visible-normal sample can reflect BELOW the horizon, and that
-            // mass is lost rather than renormalized, which for a rough lobe is around a tenth of it.
-            // The floor is a sanity bound: a pdf that collapsed entirely would sit near zero.
-            CHECK(pdf_norm.mean[0] <= 1.02f).context(where).dump("pdf mass", pdf_norm.mean[0]);
-            CHECK(pdf_norm.mean[0] >= 0.85f).context(where).dump("pdf mass", pdf_norm.mean[0]);
-
-            // A lobe that returns nothing at all passes every bound above, so this is what separates "conserves energy"
-            // from "was never wired up".
-            auto const brightness = (albedo.mean[0] + albedo.mean[1] + albedo.mean[2]) * importance_scale;
-            CHECK(brightness > 0.02f).context(where).dump("albedo", albedo.mean);
-
-            // The interior a sample reported must agree with the side it actually went to.
-            //
-            // Exact rather than statistical, and it is the one assertion here that a reflective lobe leaking a
-            // below-horizon direction cannot hide from: such a sample says `medium_none` while pointing through the
-            // surface, and the integrator then carries it into an interior it never entered.
-            // A thin wall transmits into no interior by construction and the probe excludes it.
-            CHECK(medium.mean[0] == 0.0f).context(where).dump("interior/side disagreements", medium.mean[0]);
-
-            // Which interior the sampled directions crossed into, which is what the integrator switches its medium on.
-            // A surface that transmits must reach one, and must reach the one it actually described.
-            auto const& probe_s = ns.s;
-            if (probe_s.transmission_weight > 0.0f && probe_s.geometry_thin_walled == 0.0f)
-                CHECK(medium.mean[1] > 0.0f).context(where).dump("into transmission", medium.mean[1]);
-            else
-                CHECK(medium.mean[1] == 0.0f).context(where).dump("into transmission", medium.mean[1]);
-
-            if (probe_s.subsurface_weight > 0.0f && probe_s.transmission_weight < 1.0f)
-                CHECK(medium.mean[2] > 0.0f).context(where).dump("into subsurface", medium.mean[2]);
-            else
-                CHECK(medium.mean[2] == 0.0f).context(where).dump("into subsurface", medium.mean[2]);
-
-            // Helmholtz reciprocity, as a fraction of the magnitudes compared — an absolute difference would be
-            // dominated by whichever surface happens to be brightest.
-            auto const relative = reciprocity.mean[0] / cc::max(reciprocity.mean[1], 1e-9f);
-            CHECK(relative <= 1e-3f).context(where).dump("relative asymmetry", relative);
+            auto const r = co_await run_probe(ctx, shader, cc::span<probe_case const>(&echo, 1));
+            REQUIRE(r.size() == 1);
+            CHECK(r[0].mean[0] == 0.125f)
+                .context("base_color.x, the first float3 in the struct")
+                .dump("probe", name_of(shader));
+            CHECK(r[0].mean[1] == 0.375f).context("specular_roughness, past two float3s").dump("probe", name_of(shader));
+            CHECK(r[0].mean[2] == 0.625f).context("the tangent frame's w, the last float4").dump("probe", name_of(shader));
         }
-    }
 
-    // What the coat does to what passes THROUGH it, which every bound above is blind to.
-    //
-    // The estimators above bound magnitudes, so a factor at or below 1 missing from the transmission branch only loses
-    // light and passes all of them; the sampler's lobe probabilities omit the tint too, so there is no pdf mismatch to
-    // surface as noise either.
-    // A ratio is what remains: on this surface the coat's tint is the only coloured factor the transmitted lobe carries,
-    // so the ratios are exact rather than statistical and the tolerance is float arithmetic alone.
-    {
-        auto const* const tinted = [&]() -> named_surface const*
+        // Build one case per (surface, direction, mode) and measure them all in one dispatch.
+        auto cases = cc::vector<probe_case>();
+        for (auto const& ns : surfaces)
+            for (auto const& wo : probe_directions)
+                for (auto const mode :
+                     {probe_mode::albedo, probe_mode::pdf_norm, probe_mode::reciprocity, probe_mode::medium})
+                    cases.push_back({.wo = wo,
+                                     .mode = mode,
+                                     .samples = samples_per_block,
+                                     .seed = 7u,
+                                     .exiting = ns.exiting ? 1u : 0u,
+                                     .s = ns.s});
+
+        auto const results = co_await run_probe(ctx, shader, cases);
+        REQUIRE(results.size() == cases.size());
+
+        auto const modes_per_direction = 4;
+        auto const directions = isize(sizeof(probe_directions) / sizeof(probe_directions[0]));
+
+        for (auto si = isize(0); si < surfaces.size(); ++si)
         {
-            for (auto const& ns : surfaces)
-                if (ns.name == "glass under a tinted coat")
-                    return &ns;
-            return nullptr;
-        }();
-        REQUIRE(tinted != nullptr);
+            auto const& ns = surfaces[si];
+            auto const is_furnace = ns.name.starts_with("white ");
 
-        auto tint_cases = cc::vector<probe_case>();
-        for (auto const& wo : probe_directions)
-            tint_cases.push_back(
-                {.wo = wo, .mode = probe_mode::transmitted, .samples = samples_per_block, .seed = 11u, .s = tinted->s});
-
-        auto const tint_results = co_await run_probe(ctx, tint_cases);
-        REQUIRE(tint_results.size() == tint_cases.size());
-
-        for (auto di = isize(0); di < tint_results.size(); ++di)
-        {
-            auto const& m = tint_results[di].mean;
-            auto const where = cc::format("glass under a tinted coat @ wo.z = {}", probe_directions[di][2]);
-
-            // A lobe that transmitted nothing would make every ratio below 0/0, so the magnitude is checked first.
-            REQUIRE(m[1] > 1e-4f);
-
-            for (auto c = 0; c < 3; ++c)
+            for (auto di = isize(0); di < directions; ++di)
             {
-                auto const expected = tinted_coat_color[c] / tinted_coat_color[1];
-                auto const measured = m[c] / m[1];
-                CHECK(tg::abs(measured - expected) <= 1e-3f)
-                    .context(where)
-                    .dump("channel", c)
-                    .dump("measured ratio", measured)
-                    .dump("expected ratio", expected);
+                auto const base = (si * directions + di) * modes_per_direction;
+                auto const& albedo = results[base + 0];
+                auto const& pdf_norm = results[base + 1];
+                auto const& reciprocity = results[base + 2];
+                auto const& medium = results[base + 3];
+
+                // A message per case, because a bare failing CHECK in a triple loop says nothing about which surface broke.
+                auto const where = cc::format("{}: {} @ wo.z = {}", name_of(shader), ns.name, probe_directions[di][2]);
+
+                // Energy conservation: a closure may not return more light than it received.
+                //
+                // The margin is two named approximations rather than Monte-Carlo error, which at this sample budget is well
+                // under a percent.
+                // Turquin's analytic energy compensation overshoots a white metal by about 3%, and the Conty-Estevez sheen
+                // reflects about 6% more at grazing than `sheen_albedo` charges the layers below it for.
+                // Both are the fits the viewer TODO names tabulated albedos as the replacement for, so this bound is what
+                // will tighten when they land.
+                // Measured from INSIDE, the bound is in different units, and that is the closure's convention rather than a
+                // concession.
+                //
+                // `transmission_btdf` deliberately omits the radiance-compression factor because this tracer transports
+                // importance from the camera rather than radiance from the light, and the two differ by the square of the
+                // index ratio.
+                // Entering, that leaves the integral bounded by 1; leaving, by the square of the ratio the other way round —
+                // so an exiting case is divided by it and held to the same bound as every other case.
+                // Without this the internal cases read about 2.25 for an index of 1.5 and 4 for one of 2, which is that
+                // factor exactly and says nothing about the closure.
+                auto const importance_scale = ns.exiting ? 1.0f / (ns.s.specular_ior * ns.s.specular_ior) : 1.0f;
+
+                for (auto c = 0; c < 3; ++c)
+                    CHECK(albedo.mean[c] * importance_scale <= 1.06f)
+                        .context(where)
+                        .dump("albedo", albedo.mean)
+                        .dump("importance scale", importance_scale);
+
+                // The white furnace: a surface that absorbs nothing reflects everything.
+                // This is the assertion energy compensation exists to satisfy — without it a rough metal loses the
+                // multiple-scattering energy and lands around 0.8.
+                //
+                // The binding case for this tolerance is the ANISOTROPIC metal at grazing, which lands about 7% low.
+                // Lazarov's directional-albedo fit is isotropic and `alpha_iso` reduces the stretched lobe to the round one of
+                // the same solid angle, which is the closest an isotropic fit can come: a lobe stretched across the view loses
+                // more multiple-scattering energy than that reduction knows about.
+                // Only a tabulated albedo over both axes closes it, which is the same entry the two overshoots above wait on.
+                if (is_furnace)
+                    for (auto c = 0; c < 3; ++c)
+                        CHECK(tg::abs(albedo.mean[c] - 1.0f) <= 0.08f).context(where).dump("albedo", albedo.mean);
+
+                // What `bsdf_pdf` claims, measured against what `bsdf_sample_direction` draws.
+                //
+                // The upper bound is the real requirement: a pdf that claims more mass than exists makes every
+                // multiple-importance weight it feeds too small, and the image is biased in a way no amount of accumulation
+                // fixes.
+                // Below 1 is legitimate and expected — a GGX visible-normal sample can reflect BELOW the horizon, and that
+                // mass is lost rather than renormalized, which for a rough lobe is around a tenth of it.
+                // The floor is a sanity bound: a pdf that collapsed entirely would sit near zero.
+                CHECK(pdf_norm.mean[0] <= 1.02f).context(where).dump("pdf mass", pdf_norm.mean[0]);
+                CHECK(pdf_norm.mean[0] >= 0.85f).context(where).dump("pdf mass", pdf_norm.mean[0]);
+
+                // A lobe that returns nothing at all passes every bound above, so this is what separates "conserves energy"
+                // from "was never wired up".
+                auto const brightness = (albedo.mean[0] + albedo.mean[1] + albedo.mean[2]) * importance_scale;
+                CHECK(brightness > 0.02f).context(where).dump("albedo", albedo.mean);
+
+                // The interior a sample reported must agree with the side it actually went to.
+                //
+                // Exact rather than statistical, and it is the one assertion here that a reflective lobe leaking a
+                // below-horizon direction cannot hide from: such a sample says `medium_none` while pointing through the
+                // surface, and the integrator then carries it into an interior it never entered.
+                // A thin wall transmits into no interior by construction and the probe excludes it.
+                CHECK(medium.mean[0] == 0.0f).context(where).dump("interior/side disagreements", medium.mean[0]);
+
+                // Which interior the sampled directions crossed into, which is what the integrator switches its medium on.
+                // A surface that transmits must reach one, and must reach the one it actually described.
+                auto const& probe_s = ns.s;
+                if (probe_s.transmission_weight > 0.0f && probe_s.geometry_thin_walled == 0.0f)
+                    CHECK(medium.mean[1] > 0.0f).context(where).dump("into transmission", medium.mean[1]);
+                else
+                    CHECK(medium.mean[1] == 0.0f).context(where).dump("into transmission", medium.mean[1]);
+
+                if (probe_s.subsurface_weight > 0.0f && probe_s.transmission_weight < 1.0f)
+                    CHECK(medium.mean[2] > 0.0f).context(where).dump("into subsurface", medium.mean[2]);
+                else
+                    CHECK(medium.mean[2] == 0.0f).context(where).dump("into subsurface", medium.mean[2]);
+
+                // Helmholtz reciprocity, as a fraction of the magnitudes compared — an absolute difference would be
+                // dominated by whichever surface happens to be brightest.
+                auto const relative = reciprocity.mean[0] / cc::max(reciprocity.mean[1], 1e-9f);
+                CHECK(relative <= 1e-3f).context(where).dump("relative asymmetry", relative);
+            }
+        }
+
+        // What the coat does to what passes THROUGH it, which every bound above is blind to.
+        //
+        // The estimators above bound magnitudes, so a factor at or below 1 missing from the transmission branch only loses
+        // light and passes all of them; the sampler's lobe probabilities omit the tint too, so there is no pdf mismatch to
+        // surface as noise either.
+        // A ratio is what remains: on this surface the coat's tint is the only coloured factor the transmitted lobe carries,
+        // so the ratios are exact rather than statistical and the tolerance is float arithmetic alone.
+        {
+            auto const* const tinted = [&]() -> named_surface const*
+            {
+                for (auto const& ns : surfaces)
+                    if (ns.name == "glass under a tinted coat")
+                        return &ns;
+                return nullptr;
+            }();
+            REQUIRE(tinted != nullptr);
+
+            auto tint_cases = cc::vector<probe_case>();
+            for (auto const& wo : probe_directions)
+                tint_cases.push_back(
+                    {.wo = wo, .mode = probe_mode::transmitted, .samples = samples_per_block, .seed = 11u, .s = tinted->s});
+
+            auto const tint_results = co_await run_probe(ctx, shader, tint_cases);
+            REQUIRE(tint_results.size() == tint_cases.size());
+
+            for (auto di = isize(0); di < tint_results.size(); ++di)
+            {
+                auto const& m = tint_results[di].mean;
+                auto const where
+                    = cc::format("{}: glass under a tinted coat @ wo.z = {}", name_of(shader), probe_directions[di][2]);
+
+                // A lobe that transmitted nothing would make every ratio below 0/0, so the magnitude is checked first.
+                REQUIRE(m[1] > 1e-4f);
+
+                for (auto c = 0; c < 3; ++c)
+                {
+                    auto const expected = tinted_coat_color[c] / tinted_coat_color[1];
+                    auto const measured = m[c] / m[1];
+                    CHECK(tg::abs(measured - expected) <= 1e-3f)
+                        .context(where)
+                        .dump("channel", c)
+                        .dump("measured ratio", measured)
+                        .dump("expected ratio", expected);
+                }
             }
         }
     }
@@ -674,41 +728,52 @@ ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are rea
         for (auto const mode : {probe_mode::guides_diffuse, probe_mode::guides_specular, probe_mode::guides_roughness})
             cases.push_back(guide_of(*s, mode));
 
-    auto const r = co_await run_probe(ctx, cases);
-    REQUIRE(r.size() == cases.size());
-
-    auto const diffuse = [&](isize surface) { return r[surface * 3 + 0].mean; };
-    auto const specular = [&](isize surface) { return r[surface * 3 + 1].mean; };
-    auto const roughness = [&](isize surface) { return r[surface * 3 + 2].mean[0]; };
-
-    enum : isize
+    for (auto const shader : probe_shaders)
     {
-        s_plain = 0,
-        s_metal,
-        s_glass,
-        s_coated,
-    };
+        auto const r = co_await run_probe(ctx, shader, cases);
+        REQUIRE(r.size() == cases.size());
 
-    // A dielectric's diffuse albedo is its base colour, which is what a denoiser divides out and multiplies back.
-    CHECK(tg::abs(diffuse(s_plain)[0] - 0.8f) < 1e-3f);
-    CHECK(tg::abs(diffuse(s_plain)[1] - 0.2f) < 1e-3f);
+        auto const diffuse = [&](isize surface) { return r[surface * 3 + 0].mean; };
+        auto const specular = [&](isize surface) { return r[surface * 3 + 1].mean; };
+        auto const roughness = [&](isize surface) { return r[surface * 3 + 2].mean[0]; };
 
-    // A metal has no diffuse lobe at all, and neither has glass: dividing a denoised image by either surface's
-    // "albedo" would be dividing by something that reflects nothing.
-    CHECK(diffuse(s_metal)[0] < 1e-3f).context("a metal's diffuse albedo must be zero");
-    CHECK(diffuse(s_glass)[0] < 1e-3f).context("a transmissive surface's diffuse albedo must be zero");
+        enum : isize
+        {
+            s_plain = 0,
+            s_metal,
+            s_glass,
+            s_coated,
+        };
 
-    // The specular guide is the other way round: a metal reflects its base colour, and the dielectric reflects the
-    // few percent its IOR implies.
-    // At ior 1.5 that is ((1.5-1)/(1.5+1))^2 = 0.04.
-    CHECK(tg::abs(specular(s_metal)[0] - 0.8f) < 1e-3f).context("a metal's F0 is its base colour");
-    CHECK(tg::abs(specular(s_metal)[1] - 0.2f) < 1e-3f);
-    CHECK(tg::abs(specular(s_plain)[0] - 0.04f) < 2e-3f).context("a dielectric's F0 comes from its IOR");
+        // A dielectric's diffuse albedo is its base colour, which is what a denoiser divides out and multiplies back.
+        CHECK(tg::abs(diffuse(s_plain)[0] - 0.8f) < 1e-3f).dump("probe", name_of(shader));
+        CHECK(tg::abs(diffuse(s_plain)[1] - 0.2f) < 1e-3f).dump("probe", name_of(shader));
 
-    // Roughness is the surface's own, until a coat covers it — the coat is outermost, so its reflection is the sharp
-    // one, and filtering it at the base's roughness would smear the only feature the coat adds.
-    CHECK(tg::abs(roughness(s_plain) - 0.4f) < 1e-3f);
-    CHECK(tg::abs(roughness(s_coated) - 0.05f) < 1e-3f).context("a coat takes over the roughness guide");
+        // A metal has no diffuse lobe at all, and neither has glass: dividing a denoised image by either surface's
+        // "albedo" would be dividing by something that reflects nothing.
+        CHECK(diffuse(s_metal)[0] < 1e-3f).context("a metal's diffuse albedo must be zero").dump("probe", name_of(shader));
+        CHECK(diffuse(s_glass)[0] < 1e-3f)
+            .context("a transmissive surface's diffuse albedo must be zero")
+            .dump("probe", name_of(shader));
+
+        // The specular guide is the other way round: a metal reflects its base colour, and the dielectric reflects the
+        // few percent its IOR implies.
+        // At ior 1.5 that is ((1.5-1)/(1.5+1))^2 = 0.04.
+        CHECK(tg::abs(specular(s_metal)[0] - 0.8f) < 1e-3f)
+            .context("a metal's F0 is its base colour")
+            .dump("probe", name_of(shader));
+        CHECK(tg::abs(specular(s_metal)[1] - 0.2f) < 1e-3f).dump("probe", name_of(shader));
+        CHECK(tg::abs(specular(s_plain)[0] - 0.04f) < 2e-3f)
+            .context("a dielectric's F0 comes from its IOR")
+            .dump("probe", name_of(shader));
+
+        // Roughness is the surface's own, until a coat covers it — the coat is outermost, so its reflection is the sharp
+        // one, and filtering it at the base's roughness would smear the only feature the coat adds.
+        CHECK(tg::abs(roughness(s_plain) - 0.4f) < 1e-3f).dump("probe", name_of(shader));
+        CHECK(tg::abs(roughness(s_coated) - 0.05f) < 1e-3f)
+            .context("a coat takes over the roughness guide")
+            .dump("probe", name_of(shader));
+    }
 }
 
 // What the diffuse and specular halves of the split each reflect.
@@ -764,25 +829,38 @@ ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what the
         case_of(subsurface, probe_mode::albedo),
     };
 
-    auto const r = co_await run_probe(ctx, cases);
-    REQUIRE(r.size() == 7);
+    for (auto const shader : probe_shaders)
+    {
+        auto const r = co_await run_probe(ctx, shader, cases);
+        REQUIRE(r.size() == 7);
 
-    // A lossless white Lambertian reflects all of it, and every bit of that is the diffuse half.
-    CHECK(tg::abs(r[0].mean[0] - 1.0f) < 0.02f)
-        .context(cc::format("a white Lambertian's diffuse half reflected {}", r[0].mean[0]));
-    CHECK(r[1].mean[0] < 0.01f)
-        .context(cc::format("a Lambertian with no specular layer reflected {} specularly", r[1].mean[0]));
+        // A lossless white Lambertian reflects all of it, and every bit of that is the diffuse half.
+        CHECK(tg::abs(r[0].mean[0] - 1.0f) < 0.02f)
+            .context(cc::format("a white Lambertian's diffuse half reflected {}", r[0].mean[0]))
+            .dump("probe", name_of(shader));
+        CHECK(r[1].mean[0] < 0.01f)
+            .context(cc::format("a Lambertian with no specular layer reflected {} specularly", r[1].mean[0]))
+            .dump("probe", name_of(shader));
 
-    // And a metal is the mirror image: no diffuse substrate under it, so the diffuse half is empty.
-    CHECK(r[2].mean[0] < 0.01f).context(cc::format("a metal's diffuse half reflected {}", r[2].mean[0]));
-    CHECK(r[3].mean[0] > 0.8f).context(cc::format("a white metal's specular half reflected only {}", r[3].mean[0]));
+        // And a metal is the mirror image: no diffuse substrate under it, so the diffuse half is empty.
+        CHECK(r[2].mean[0] < 0.01f)
+            .context(cc::format("a metal's diffuse half reflected {}", r[2].mean[0]))
+            .dump("probe", name_of(shader));
+        CHECK(r[3].mean[0] > 0.8f)
+            .context(cc::format("a white metal's specular half reflected only {}", r[3].mean[0]))
+            .dump("probe", name_of(shader));
 
-    // The subsurface's crossing is all of it, and all of it is the diffuse half.
-    // Against the whole closure rather than 1: a crossing into ior 1.5 compresses radiance by 1/1.5^2, so the
-    // integral over the far side is 0.44 however lossless the interior is.
-    CHECK(r[6].mean[0] > 0.3f).context(cc::format("a white subsurface returned only {}", r[6].mean[0]));
-    CHECK(tg::abs(r[4].mean[0] - r[6].mean[0]) < 0.01f)
-        .context(cc::format("a subsurface's diffuse half carried {} of {}", r[4].mean[0], r[6].mean[0]));
-    CHECK(r[5].mean[0] < 0.01f)
-        .context(cc::format("a subsurface with no specular layer carried {} specularly", r[5].mean[0]));
+        // The subsurface's crossing is all of it, and all of it is the diffuse half.
+        // Against the whole closure rather than 1: a crossing into ior 1.5 compresses radiance by 1/1.5^2, so the
+        // integral over the far side is 0.44 however lossless the interior is.
+        CHECK(r[6].mean[0] > 0.3f)
+            .context(cc::format("a white subsurface returned only {}", r[6].mean[0]))
+            .dump("probe", name_of(shader));
+        CHECK(tg::abs(r[4].mean[0] - r[6].mean[0]) < 0.01f)
+            .context(cc::format("a subsurface's diffuse half carried {} of {}", r[4].mean[0], r[6].mean[0]))
+            .dump("probe", name_of(shader));
+        CHECK(r[5].mean[0] < 0.01f)
+            .context(cc::format("a subsurface with no specular layer carried {} specularly", r[5].mean[0]))
+            .dump("probe", name_of(shader));
+    }
 }
