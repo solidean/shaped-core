@@ -19,7 +19,7 @@ namespace
 /// A closed axis-aligned square from (0, 0) to (size, size).
 [[nodiscard]] sv::path square(f32 size)
 {
-    return sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(size, size)));
+    return sv::path::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(size, size)));
 }
 } // namespace
 

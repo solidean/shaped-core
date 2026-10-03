@@ -142,8 +142,10 @@ struct generated_material_shader; // that permutation as an SGL hit group, plus 
 struct material_shader_options;
 class material_library;
 
-// 2D vector content, built once and instanced (drawing/, docs/canvas.md)
+// 2D vector content, built once and instanced (drawing/, libs/graphics/shaped-viewer/docs/canvas.md)
 struct fill_style;
+struct stroke_style;
+struct frame_2d; // where one drawing lands inside another
 class drawing;
 class drawing_set;
 enum class drawing_id : u32;     // a drawing's index in its set

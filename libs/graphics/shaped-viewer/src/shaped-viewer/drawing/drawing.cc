@@ -5,11 +5,51 @@
 
 namespace sv
 {
-drawing& drawing::add_fill(sv::path outline, fill_style const& style)
+drawing& drawing::add_fill(sv::path const& p, fill_style const& style)
+{
+    return add_fill(p.to_outline(style.rule), style);
+}
+
+drawing& drawing::add_fill(sr::slug_outline outline, fill_style const& style)
 {
     CC_ASSERT(outline.is_closed(), "a drawing's outline must be closed: call close() after each contour");
     outline.fill_rule = style.rule;
     _layers.push_back({.outline = cc::move(outline), .color = style.color});
+    _hash_dirty = true;
+    return *this;
+}
+
+drawing& drawing::add_stroke(sv::path const& p, stroke_style const& style)
+{
+    auto const box = p.bounds();
+    auto const extent = cc::max(box.max[0] - box.min[0], box.max[1] - box.min[1]) + style.width;
+    auto outline = sr::stroke_outline(p,
+                                      {.width = style.width,
+                                       .join = style.join,
+                                       .cap = style.cap,
+                                       .miter_limit = style.miter_limit,
+                                       .dashes = style.dashes,
+                                       .dash_offset = style.dash_offset},
+                                      extent / 4096.0f);
+    if (outline.is_empty())
+        return *this;
+    return add_fill(cc::move(outline), {.color = style.color, .rule = sr::slug_fill_rule::nonzero});
+}
+
+drawing& drawing::add_drawing(drawing const& d, frame_2d const& frame)
+{
+    auto const x_axis = frame.x_axis * frame.scale;
+    auto const y_axis = frame.y_axis * frame.scale;
+    auto const place = [&](tg::pos2f p) { return frame.at + x_axis * p[0] + y_axis * p[1]; };
+    for (auto const& l : d.layers())
+    {
+        auto outline = l.outline;
+        for (auto& c : outline.curves)
+            c = {.p1 = place(c.p1), .p2 = place(c.p2), .p3 = place(c.p3)};
+        auto const color = tg::vec4f(l.color[0] * frame.tint[0], l.color[1] * frame.tint[1], l.color[2] * frame.tint[2],
+                                     l.color[3] * frame.tint[3]);
+        _layers.push_back({.outline = cc::move(outline), .color = color});
+    }
     _hash_dirty = true;
     return *this;
 }

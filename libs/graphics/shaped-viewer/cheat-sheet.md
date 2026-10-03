@@ -528,7 +528,9 @@ See [docs/quadrics.md](docs/quadrics.md) for the design.
 ```cpp
 #include <shaped-viewer/drawing/drawing.hh>     // + drawing/instance.hh
 auto d = sv::drawing();                          // ordered filled layers, its own units, y DOWN, no device
-d.add_fill(path, {.color = srgb_rgba, .rule = sr::slug_fill_rule::nonzero});   // sv::path = sr::slug_outline; must be CLOSED
+d.add_fill(path, {.color = srgb_rgba, .rule = sr::slug_fill_rule::nonzero});   // sv::path = sr::slug_path; a fill closes it
+d.add_stroke(sv::path::polyline(pts), {.color = c, .width = 2, .cap = sr::stroke_cap::round, .dashes = {6, 4}});
+d.add_drawing(badge, {.at = tg::pos2f(8, 8), .scale = 24, .tint = c});   // a COPY of badge's layers under a frame_2d
 auto set = sv::drawing_set();                    // the value you keep, like sv::mesh; hashed whole, acquired whole
 auto const arrow = set.add(d);                   // sv::drawing_id, its index in the set
 scene.add_drawing(set, arrow, {.at = p, .x_axis = e, .y_axis = n, .scale = 1, .tint = c});   // 3D, world units; drawn AFTER the trace

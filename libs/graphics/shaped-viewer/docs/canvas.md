@@ -16,6 +16,9 @@ sr's half — the routine, the atlas, the job draw — is [slug.md](../../shaped
   The vectors' lengths and angle are stretch and shear, which is what lets one arrow drawing, built for an edge of length 1, follow every edge of a mesh.
   An instance can tint, multiplying the drawing's own colours.
 - **A lone drawing** can be instanced directly; sv makes it a one-element set behind the scenes.
+- **A stroke is a layer too**: `drawing::add_stroke` expands it once, through `sr::stroke_outline`, into the outline of the area it covers.
+  Its width is in the drawing's units, which on a canvas are pixels; its curves stay within 1/4096 of its extent, so a stroke is exact placed up to 4096 px across.
+- **A drawing nests another** with `drawing::add_drawing`, copying its layers under a `frame_2d`: a symbol built once and stamped where it is needed.
 
 ## 2D and 3D
 
@@ -64,7 +67,7 @@ A job's draw sits in its view target's pass at the layer's place, so a canvas dr
 | 3D instances, drawn over the trace and occluded by its primary-hit depth | [done] |
 | atlas pages when one fills, and freeing on eviction | [planned] |
 | text: `sv::font`, the system UI font by default, kerned multi-line layout, `add_text` on canvas and scene | [done] |
-| strokes, with dashes, as filled outlines | [planned] |
+| strokes, with joins, caps and dashes, as filled outlines; shapes; nested drawings | [done] |
 | annotations: a 2D box placed near a 3D anchor, a marker, a leader, hidden-line occlusion | [planned] |
 | view titles, drawn by default and opted out per leaf | [planned] |
 | decals on traced surfaces, projector first | [planned] |

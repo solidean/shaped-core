@@ -30,6 +30,7 @@ add_library(shaped-rendering
     src/shaped-rendering/slug_font.cc
     src/shaped-rendering/text_layout.cc
     src/shaped-rendering/slug_routine.cc
+    src/shaped-rendering/slug_path.cc
     src/shaped-rendering/slug_shape.cc
     src/shaped-rendering/slug_traced.cc
     src/shaped-rendering/impl/slug_reference.cc
@@ -69,6 +70,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/slug_font.hh
     src/shaped-rendering/text_layout.hh
     src/shaped-rendering/slug_routine.hh
+    src/shaped-rendering/slug_path.hh
     src/shaped-rendering/slug_shape.hh
     src/shaped-rendering/slug_traced.hh
     src/shaped-rendering/impl/slug_reference.hh
@@ -332,6 +334,7 @@ if(SC_BUILD_TESTS)
         tests/shader-package-test.cc
         tests/slug-font-test.cc
         tests/slug-module-test.cc
+        tests/slug-path-test.cc
         tests/text-layout-test.cc
         tests/slug-shape-test.cc
         tests/tza-test.cc

@@ -25,6 +25,8 @@ A shape drawn on its own quad has the quad *dilated* by half a pixel after proje
 ```text
 babel::font              babel-serializer  reads a font file into each format's own outline, transforming nothing
 sr::slug_outline         shaped-rendering  closed contours of quadratic curves, in the shape's own units
+sr::slug_path            shaped-rendering  contours that may stay open, and the shapes; what a fill closes and a stroke follows
+sr::stroke_outline       shaped-rendering  a path and a stroke style -> the outline of the area the stroke covers
 sr::compile_slug_shape   shaped-rendering  outline -> curve and band tables, device-free
 sr::slug_atlas           shaped-rendering  caller-owned textures many shapes share, plus a CPU copy of them
 sr::slug_routine         shaped-rendering  draws shape instances from an atlas, one pipeline per (colour, depth) format
@@ -79,6 +81,30 @@ A per-draw bias pulls shapes toward the camera, which is what keeps a label on a
 
 **The fill rule is per shape, and the weight per draw, at runtime.**
 SGL has no preprocessor, and both are a branch after the curve loops, uniform within a shape.
+
+## Strokes
+
+Slug only fills, so a stroke reaches it as the outline of the area it covers, expanded on the CPU by `sr::stroke_outline`.
+The result is an ordinary shape: compiled, placed and drawn like a glyph, in one draw with the fills beside it.
+
+**The outline is a union of small pieces, wound one way.**
+Each segment's body, each join and each cap is its own simple contour, wound the same way as every other, so where pieces overlap their windings add.
+That is why a stroke's outline must be filled nonzero: even-odd would cut a hole wherever two pieces overlap.
+Neighbouring bodies share an edge traversed in opposite directions, so their coverage meets without a seam.
+
+**An offset is a quadratic within a tolerance.**
+The exact offset of a quadratic is not one, so each body's two edges are quadratics through the offset end points, controlled where their end tangents meet.
+A body is halved until both edges stay within the tolerance and it turns at most 30 degrees.
+
+**Where a curve bends tighter than the half-width, disks stand in for the inner edge.**
+There the inner offset folds back over itself and no quadratic follows it.
+The outer half is still a clean offset, and the inner half is covered by disks along the curve, spaced so they cover all but the tolerance between them.
+
+**Dashes cut the path first.**
+`sr::dash_path` splits each contour at arc lengths along it, so every dash is an open contour of exact pieces of the original curves, capped and joined like any other.
+Each contour restarts the pattern.
+
+A stroke's width is in the path's units and scales with the shape, so a hairline that stays one pixel under any zoom is not something it can be.
 
 ## A shape on any surface
 
@@ -163,7 +189,7 @@ auto pass = cmd->raster.render_to({.color_targets = {target.preserved()}});
 ```
 
 `graphics/slug-cube` draws labels on a cube's faces, a star from the cube's own shader, and a caption; `graphics/slug-traced` traces the same kinds of shapes.
-shaped-viewer will reach Slug through its `canvas` layer, which is a design of its own.
+shaped-viewer reaches Slug through its canvas layer: [canvas.md](../../shaped-viewer/docs/canvas.md).
 
 ## How it is held to the reference
 
@@ -194,6 +220,7 @@ SGL module slug: coverage, both overloads, exported by sr  [done]
 sr::slug_routine: quads, dilation, depth, both draw forms  [done]
 sr::slug_font: glyphs on demand                            [done]
 sr::layout_text: kerning, lines, wrapping, alignment       [done]
+sr::stroke_outline: joins, caps, dashes, open paths        [done]
 example: graphics/slug-cube                                [done]
 shapes as traced geometry: quads, `slug.decide` any-hit    [done]     inline and in a pipeline's hit group
 shapes on traced geometry: a decal by ray differentials    [done]     example: graphics/slug-traced
@@ -202,7 +229,7 @@ babel::font: CFF / CFF2 charstrings, cubics split in sr    [planned]
 atlas eviction                                             [planned]  rewrite band lists that point at moved curves
 a decal past a bounce                                      [planned]  a ray-cone footprint, once a tracer carries cones
 shaped-viewer's tracer                                     [planned]  after it moves to SGL
-viewer depth for labels                                    [planned]  needs a primary-hit depth target from the trace
+viewer depth for labels                                    [done]     the trace's primary-hit depth, in shaped-viewer
 shaping: ligatures, marks, reordering scripts              [planned]  its own design
-the canvas                                                 [planned]  its own design: shaped-viewer's canvas layer, drawing through slug_routine
+the canvas                                                 [done]     shaped-viewer's canvas layer, drawing through slug_routine
 ```

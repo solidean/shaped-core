@@ -287,6 +287,12 @@ auto o = sr::slug_outline();                   // closed contours of quadratics,
 o.move_to(p); o.line_to(p); o.quad_to(c, p); o.cubic_to(c0, c1, p, tolerance); o.close();
 o.fill_rule = sr::slug_fill_rule::even_odd;    // nonzero by default
 sr::slug_outline::rectangle(box);  sr::slug_outline_of(face, glyph);   // -> result: a TrueType glyph, composites resolved
+auto p = sr::slug_path();                       // contours that may stay OPEN; chainable move_to/line_to/quad_to/cubic_to
+p.move_to(a).line_to(b).arc_to(center, tg::angle_f::make_from_degree(90), tolerance).close();
+sr::slug_path::circle(c, r);  rounded_rectangle(box, r);  ellipse(c, radii);  polygon(pts);  polyline(pts);   // 1/4096 of size
+p.to_outline(sr::slug_fill_rule::nonzero);      // -> slug_outline: a FILL closes every contour with a line
+sr::stroke_outline(p, {.width = 2, .join = sr::stroke_join::round, .cap = sr::stroke_cap::round, .dashes = {6, 4}}, tolerance);
+// -> slug_outline of overlapping pieces wound one way: fill it NONZERO; width in path units, so it scales with the shape
 o.is_closed();                                 // every contour back at its start; compile_slug_shape ASSERTS it
 auto const shape = sr::compile_slug_shape(o);  // device-free curve + band tables, rounded to half floats before banding
 

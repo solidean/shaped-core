@@ -13,7 +13,7 @@ namespace
 /// A closed axis-aligned square from (0, 0) to (size, size).
 [[nodiscard]] sv::path square(f32 size)
 {
-    return sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(size, size)));
+    return sv::path::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(size, size)));
 }
 
 /// A view at `resolution` whose one layer is of `kind`, holding `placements`.
@@ -53,6 +53,62 @@ TEST("sv::drawing - the hash follows every layer's geometry, rule and colour, in
     auto ba = sv::drawing();
     ba.add_fill(square(2)).add_fill(square(1));
     CHECK(ab.hash() != ba.hash());
+}
+
+TEST("sv::drawing - a stroke is a nonzero layer of the area it covers, and a fill closes an open path")
+{
+    tg::pos2f const points[] = {tg::pos2f(0, 0), tg::pos2f(10, 0), tg::pos2f(10, 10)};
+    auto const open = sv::path::polyline(points);
+
+    auto d = sv::drawing();
+    d.add_stroke(open, {.color = tg::vec4f(0, 1, 0, 1), .width = 2, .dashes = {3, 1}});
+    REQUIRE(d.layers().size() == 1);
+    auto const& stroke = d.layers()[0];
+    CHECK(stroke.outline.is_closed());
+    CHECK(stroke.outline.fill_rule == sr::slug_fill_rule::nonzero);
+    CHECK(stroke.color == tg::vec4f(0, 1, 0, 1));
+
+    // a stroke that covers nothing adds no layer
+    d.add_stroke(open, {.width = 0});
+    CHECK(d.layers().size() == 1);
+
+    d.add_fill(open);
+    REQUIRE(d.layers().size() == 2);
+    CHECK(d.layers()[1].outline.is_closed());
+    CHECK(d.layers()[1].outline.curves.size() == 3);
+
+    // the dash pattern is part of the geometry, so of the hash
+    auto solid = sv::drawing();
+    solid.add_stroke(open, {.color = tg::vec4f(0, 1, 0, 1), .width = 2});
+    auto dashed = sv::drawing();
+    dashed.add_stroke(open, {.color = tg::vec4f(0, 1, 0, 1), .width = 2, .dashes = {3, 1}});
+    CHECK(solid.hash() != dashed.hash());
+}
+
+TEST("sv::drawing - a nested drawing is copied in under its frame, tinted")
+{
+    auto badge = sv::drawing();
+    badge.add_fill(square(1), {.color = tg::vec4f(1, 0.5f, 0, 1)});
+
+    auto d = sv::drawing();
+    d.add_drawing(badge, {.at = tg::pos2f(10, 20),
+                          .x_axis = tg::vec2f(0, 1),
+                          .y_axis = tg::vec2f(-1, 0),
+                          .scale = 4,
+                          .tint = tg::vec4f(1, 1, 1, 0.5f)});
+    REQUIRE(d.layers().size() == 1);
+    // the square's (1, 0) corner lands one scaled x axis from `at`, and its (0, 1) corner one scaled y axis
+    auto const& curves = d.layers()[0].outline.curves;
+    CHECK(curves[0].p1 == tg::pos2f(10, 20));
+    CHECK(curves[0].p3 == tg::pos2f(10, 24));
+    CHECK(curves[2].p3 == tg::pos2f(6, 20));
+    CHECK(d.layers()[0].color == tg::vec4f(1, 0.5f, 0, 0.5f));
+
+    // a copy: changing the source afterwards changes nothing here
+    auto const before = d.hash();
+    badge.add_fill(square(2));
+    CHECK(d.layers().size() == 1);
+    CHECK(d.hash() == before);
 }
 
 TEST("sv::drawing_manager - a set is placed once, and a lone drawing is its own set")

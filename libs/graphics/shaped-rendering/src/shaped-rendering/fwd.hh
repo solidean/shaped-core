@@ -61,6 +61,11 @@ class mix_routine; // one image faded into another, in place (mix_routine.hh)
 struct slug_curve;              // one quadratic piece of an outline
 enum class slug_fill_rule : u8; // nonzero or even-odd
 struct slug_outline;            // closed contours of curves, in the shape's own units
+struct slug_contour;            // one contour of a path: where it ends, whether it is closed
+struct slug_path;               // contours that may stay open, and shapes; what a stroke follows (slug_path.hh)
+enum class stroke_join : u8;    // miter, round or bevel
+enum class stroke_cap : u8;     // butt, round or square
+struct stroke_style;            // width, join, cap, miter limit, dashes
 struct slug_compiled_shape;     // an outline as Slug's curve and band tables, device-free
 struct slug_shape_ref;          // where an atlas placed a shape
 class slug_atlas;               // the caller-owned curve and band textures many shapes share

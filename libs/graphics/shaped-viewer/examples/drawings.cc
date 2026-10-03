@@ -5,9 +5,10 @@ using namespace cc::primitive_defines;
 
 // Drawings: 2D vector content built once and instanced, flat on screen and in the scene.
 //
-// One `sv::drawing_set` holds an arrow and a small logo, built before the loop like a mesh.
+// One `sv::drawing_set` holds an arrow, a small logo and a legend, built before the loop like a mesh.
 // Every frame then places them: the arrow along each halfedge of a cube's triangles, in 3D, and the logo on a canvas
 // layer over the scene, once from the top-left corner and once from the bottom-right.
+// The legend shows strokes: dashed, round-capped and mitred, and the logo nested inside it.
 // Nothing is uploaded after the first frame, since the set is keyed by its content.
 //
 // The arrow is built for an edge from (0, 0) to (1, 0) with its face toward +y; an instance's first vector is the edge
@@ -18,41 +19,58 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// A closed polygon through `points`.
-[[nodiscard]] sv::path polygon(std::initializer_list<tg::pos2f> points)
-{
-    auto p = sv::path();
-    auto first = true;
-    for (auto const q : points)
-    {
-        if (first)
-            p.move_to(q);
-        else
-            p.line_to(q);
-        first = false;
-    }
-    p.close();
-    return p;
-}
-
 /// An arrow along the unit edge, inset from both ends and set into the face.
 [[nodiscard]] sv::drawing arrow()
 {
+    tg::pos2f const outline[]
+        = {tg::pos2f(0.18f, 0.075f), tg::pos2f(0.66f, 0.075f), tg::pos2f(0.66f, 0.045f), tg::pos2f(0.82f, 0.1f),
+           tg::pos2f(0.66f, 0.155f), tg::pos2f(0.66f, 0.125f), tg::pos2f(0.18f, 0.125f)};
     auto d = sv::drawing();
-    d.add_fill(
-        polygon({tg::pos2f(0.18f, 0.075f), tg::pos2f(0.66f, 0.075f), tg::pos2f(0.66f, 0.045f), tg::pos2f(0.82f, 0.1f),
-                 tg::pos2f(0.66f, 0.155f), tg::pos2f(0.66f, 0.125f), tg::pos2f(0.18f, 0.125f)}));
+    d.add_fill(sv::path::polygon(outline));
     return d;
 }
 
-/// A two-colour badge, 1 unit square: a dark plate and a diamond on it.
+/// A two-colour badge, 1 unit square: a dark plate, a ring around its edge, and a diamond on it.
 [[nodiscard]] sv::drawing logo()
 {
+    tg::pos2f const diamond[]
+        = {tg::pos2f(0.5f, 0.12f), tg::pos2f(0.88f, 0.5f), tg::pos2f(0.5f, 0.88f), tg::pos2f(0.12f, 0.5f)};
+    auto const plate = tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1));
     auto d = sv::drawing();
-    d.add_fill(sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1))),
-               {.color = tg::vec4f(0.08f, 0.1f, 0.14f, 0.85f)});
-    d.add_fill(polygon({tg::pos2f(0.5f, 0.12f), tg::pos2f(0.88f, 0.5f), tg::pos2f(0.5f, 0.88f), tg::pos2f(0.12f, 0.5f)}),
-               {.color = tg::vec4f(1.0f, 0.62f, 0.1f, 1)});
+    d.add_fill(sv::path::rounded_rectangle(plate, 0.12f), {.color = tg::vec4f(0.08f, 0.1f, 0.14f, 0.85f)});
+    d.add_stroke(sv::path::rounded_rectangle(tg::aabb2f(tg::pos2f(0.04f, 0.04f), tg::pos2f(0.96f, 0.96f)), 0.09f),
+                 {.color = tg::vec4f(1.0f, 0.62f, 0.1f, 1), .width = 0.03f});
+    d.add_fill(sv::path::polygon(diamond), {.color = tg::vec4f(1.0f, 0.62f, 0.1f, 1)});
+    return d;
+}
+
+/// A legend in pixels, 220 by 96: a framed panel holding a dashed line, a round-capped curve, a mitred zigzag, and the
+/// badge nested twice, built once and stamped where the panel wants it.
+[[nodiscard]] sv::drawing legend(sv::drawing const& badge)
+{
+    auto const white = tg::vec4f(1, 1, 1, 1);
+    auto d = sv::drawing();
+    d.add_fill(sv::path::rounded_rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(220, 96)), 10),
+               {.color = tg::vec4f(0.08f, 0.1f, 0.14f, 0.8f)});
+    d.add_stroke(sv::path::rounded_rectangle(tg::aabb2f(tg::pos2f(0.5f, 0.5f), tg::pos2f(219.5f, 95.5f)), 9.5f),
+                 {.color = tg::vec4f(1, 1, 1, 0.35f), .width = 1});
+
+    tg::pos2f const dashed[] = {tg::pos2f(14, 20), tg::pos2f(150, 20)};
+    d.add_stroke(sv::path::polyline(dashed), {.color = tg::vec4f(0.15f, 0.9f, 1.0f, 1), .width = 2, .dashes = {8, 5}});
+
+    auto wave = sv::path();
+    wave.move_to(tg::pos2f(14, 52))
+        .quad_to(tg::pos2f(48, 20), tg::pos2f(82, 52))
+        .quad_to(tg::pos2f(116, 84), tg::pos2f(150, 52));
+    d.add_stroke(wave, {.color = white, .width = 5, .cap = sr::stroke_cap::round});
+
+    tg::pos2f const zigzag[] = {tg::pos2f(14, 84),  tg::pos2f(38, 68),  tg::pos2f(62, 84), tg::pos2f(86, 68),
+                                tg::pos2f(110, 84), tg::pos2f(134, 68), tg::pos2f(150, 78)};
+    d.add_stroke(sv::path::polyline(zigzag),
+                 {.color = tg::vec4f(1.0f, 0.62f, 0.1f, 1), .width = 4, .join = sr::stroke_join::miter});
+
+    d.add_drawing(badge, {.at = tg::pos2f(166, 12), .scale = 40});
+    d.add_drawing(badge, {.at = tg::pos2f(170, 58), .scale = 28, .tint = tg::vec4f(1, 1, 1, 0.5f)});
     return d;
 }
 
@@ -78,6 +96,7 @@ EXAMPLE("shaped-viewer/drawings")
     auto set = sv::drawing_set();
     auto const arrow_id = set.add(arrow());
     auto const logo_id = set.add(logo());
+    auto const legend_id = set.add(legend(logo()));
 
     for (auto f : sv::interactive("shaped-viewer/drawings"))
     {
@@ -131,8 +150,9 @@ EXAMPLE("shaped-viewer/drawings")
         auto canvas = view.add_canvas();
         canvas.add_drawing(set, logo_id, {.at = tg::pos2f(16, 16), .scale = 48});
         canvas.add_text("Drawings", tg::pos2f(76, 18), {.size = 22});
-        canvas.add_text("halfedge arrows, face labels, a badge", tg::pos2f(76, 46),
+        canvas.add_text("halfedge arrows, face labels, strokes", tg::pos2f(76, 46),
                         {.size = 13, .color = tg::vec4f(0.08f, 0.1f, 0.14f, 1)});
+        canvas.add_drawing(set, legend_id, {.at = tg::pos2f(16, 16), .from = sv::corner::bottom_left});
         canvas.add_drawing(set, logo_id, {.at = tg::pos2f(16, 16), .scale = 32, .from = sv::corner::bottom_right});
         canvas.add_text("bottom-right, 16 px in", {.at = tg::pos2f(56, 22), .from = sv::corner::bottom_right},
                         {.size = 13});
