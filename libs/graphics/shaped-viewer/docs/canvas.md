@@ -7,14 +7,14 @@ sr's half — the routine, the atlas, the job draw — is [slug.md](../../shaped
 ## The model
 
 - **`sv::drawing`** is one graphic: a letter, a logo, an arrow.
-  It is ordered filled layers, each a closed outline with a fill rule and a colour, in its own y-down units, and holds nothing GPU-side.
+  It is ordered filled layers, each a closed outline with a fill rule and a color, in its own y-down units, and holds nothing GPU-side.
 - **`sv::drawing_set`** is the value a caller builds and keeps, the 2D counterpart of `sv::mesh`.
   It is an ordered list of drawings, hashed as a whole, and immutable once placed: a changed set is a new hash and a new upload.
   `drawing_set::add` returns a **`sv::drawing_id`**, the drawing's index in its set.
 - **An instance** places one drawing of a set: a position, two free vectors spanning the plane it lands on, and a scale.
   A drawing point (x, y) lands at `at + scale * (x * x_axis + y * y_axis)`.
   The vectors' lengths and angle are stretch and shear, which is what lets one arrow drawing, built for an edge of length 1, follow every edge of a mesh.
-  An instance can tint, multiplying the drawing's own colours.
+  An instance can tint, multiplying the drawing's own colors.
 - **A lone drawing** can be instanced directly; sv makes it a one-element set behind the scenes.
 - **A stroke is a layer too**: `drawing::add_stroke` expands it once, through `sr::stroke_outline`, into the outline of the area it covers.
   Its width is in the drawing's units, which on a canvas are pixels; its curves stay within 1/4096 of its extent, so a stroke is exact placed up to 4096 px across.
@@ -30,7 +30,7 @@ They differ in where they are added and in what depth means.
 - **3D instances go on a scene**, `scene_ref::add_drawing`, in world units, seen through the view's camera.
   They are drawn after the trace, so traced geometry in front of them hides them, and they hide nothing traced: no shadow, not in a reflection.
   The trace writes its primary-hit depth for a layer that holds drawings, a fill pass turns it into a depth target, and the layer's drawings draw tested against it in a pass of their own.
-  That depth is the first sample's, reprojected to the pixel centre on the plane it hit, so a drawing lying on a face tests equal to the face rather than flickering with the jitter.
+  That depth is the first sample's, reprojected to the pixel center on the plane it hit, so a drawing lying on a face tests equal to the face rather than flickering with the jitter.
   A drawing that has to belong to the surface it lies on — lit, shadowed, curved with it — is a decal, which is traced.
 
 ## Annotations
@@ -40,14 +40,14 @@ It is text in a box, a marker on the anchor, and a leader from the marker to the
 
 - **The plan places it every frame.**
   The layer keeps the anchor and the box's content, already resolved to atlas records; the plan projects the anchor through the view's camera and puts the box on its side.
-  `automatic` puts it away from the view's centre, so labels fan outward, and a box that would cross an edge is pushed back inside the margin.
+  `automatic` puts it away from the view's center, so labels fan outward, and a box that would cross an edge is pushed back inside the margin.
   Nothing is compiled for a moving camera: the marker and the leader are a few fixed drawings, a disk, a ring, a unit segment and a dot, placed by their frames.
 - **The GPU decides whether the anchor is hidden**, by Slug's frame probes against the trace's primary-hit depth at the anchor's pixel.
   One test per label, so it is never cut in half where it crosses a silhouette.
 - **What a hidden anchor draws is a per-annotation policy.**
   `hidden_line` is the default: the box stays, the marker turns hollow and the leader dashed.
-  `hide` drops the whole label, and `show` draws it as if the anchor were in view, for a point inside a part such as its centre of mass.
-- **Leaders are straight or elbowed**, with a width, a colour and a dash pattern of their own, and another for the hidden look.
+  `hide` drops the whole label, and `show` draws it as if the anchor were in view, for a point inside a part such as its center of mass.
+- **Leaders are straight or elbowed**, with a width, a color and a dash pattern of their own, and another for the hidden look.
 
 An anchor behind the camera or outside the view draws nothing.
 Labels do not avoid each other yet; decluttering is its own feature, in [TODO.md](TODO.md).

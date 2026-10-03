@@ -32,7 +32,7 @@ namespace
     return d;
 }
 
-/// A two-colour badge, 1 unit square: a dark plate, a ring around its edge, and a diamond on it.
+/// A two-color badge, 1 unit square: a dark plate, a ring around its edge, and a diamond on it.
 [[nodiscard]] sv::drawing logo()
 {
     tg::pos2f const diamond[]
@@ -76,7 +76,7 @@ namespace
     return d;
 }
 
-/// The 12 triangles of an axis-aligned cube of side `size`, centred on the origin, wound outward.
+/// The 12 triangles of an axis-aligned cube of side `size`, centered on the origin, wound outward.
 [[nodiscard]] cc::vector<tg::pos3f> cube_triangles(f32 size)
 {
     auto const h = size * 0.5f;
@@ -149,11 +149,11 @@ EXAMPLE("shaped-viewer/drawings")
                             .y_axis = tg::vec3f(0, -1, 0)},
                            {.size = 0.4f, .color = tg::vec4f(1, 0.85f, 0.3f, 1)});
 
-        // Annotations on four corners and the centre: flat on screen, kept clear of the view's edges, and drawn as
-        // hidden lines while the corner behind the cube is out of sight; the centre is always inside it, so it shows.
+        // Annotations on four corners and the center: flat on screen, kept clear of the view's edges, and drawn as
+        // hidden lines while the corner behind the cube is out of sight; the center is always inside it, so it shows.
         for (auto const& c : {tg::pos3f(1, 1, 1), tg::pos3f(-1, 1, -1), tg::pos3f(1, -1, -1), tg::pos3f(-1, -1, 1)})
             scene.add_annotation(c, cc::format("corner ({}, {}, {})", c[0], c[1], c[2]), {.offset = tg::vec2f(64, 56)});
-        scene.add_annotation(tg::pos3f(0, 0, 0), "centre of mass",
+        scene.add_annotation(tg::pos3f(0, 0, 0), "center of mass",
                              {.side = sv::annotation_side::below_right,
                               .offset = tg::vec2f(220, 40),
                               .leader = {.shape = sv::leader_shape::straight, .color = tg::vec4f(1, 0.62f, 0.1f, 1)},

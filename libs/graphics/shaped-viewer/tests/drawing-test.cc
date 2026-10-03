@@ -32,7 +32,7 @@ namespace
 }
 } // namespace
 
-TEST("sv::drawing - the hash follows every layer's geometry, rule and colour, in order")
+TEST("sv::drawing - the hash follows every layer's geometry, rule and color, in order")
 {
     auto a = sv::drawing();
     a.add_fill(square(1), {.color = tg::vec4f(1, 0, 0, 1)});
@@ -40,9 +40,9 @@ TEST("sv::drawing - the hash follows every layer's geometry, rule and colour, in
     b.add_fill(square(1), {.color = tg::vec4f(1, 0, 0, 1)});
     CHECK(a.hash() == b.hash());
 
-    auto recoloured = sv::drawing();
-    recoloured.add_fill(square(1), {.color = tg::vec4f(0, 1, 0, 1)});
-    CHECK(recoloured.hash() != a.hash());
+    auto recolored = sv::drawing();
+    recolored.add_fill(square(1), {.color = tg::vec4f(0, 1, 0, 1)});
+    CHECK(recolored.hash() != a.hash());
 
     auto even_odd = sv::drawing();
     even_odd.add_fill(square(1), {.color = tg::vec4f(1, 0, 0, 1), .rule = sr::slug_fill_rule::even_odd});
@@ -192,7 +192,7 @@ namespace
 
 TEST("sv::annotation - the box sits on the anchor's side, offset away from it, with an elbow leader into it")
 {
-    // the anchor lands at (100, 225) of a 400 x 300 view: left of the centre and below it
+    // the anchor lands at (100, 225) of a 400 x 300 view: left of the center and below it
     auto placed = cc::vector<sv::drawing_placement>();
     sv::impl::place_annotation(test_annotation(tg::pos3f(-0.5f, -0.5f, 0), sv::annotation_occluded::show),
                                flat_camera(), tg::vec2f(400, 300), placed);
@@ -309,7 +309,7 @@ TEST("sv - a scene's annotations become a 2D job after its drawings, placed thro
     auto const& job = plan.drawing_jobs[0];
     CHECK(job.kind == sv::drawing_job_kind::annotations);
     CHECK(!job.is_3d);
-    // the anchor at the origin, straight ahead, lands at the view's centre
+    // the anchor at the origin, straight ahead, lands at the view's center
     auto const disk = parts_of(job.placements, 10);
     REQUIRE(disk.size() == 1);
     CHECK(tg::abs(disk[0].at[0] - 32.0f) < 1e-3f);

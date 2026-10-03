@@ -8,7 +8,7 @@
 #include <typed-geometry/linalg/pos.hh>
 
 // Text layout: a string set in one face, as positioned glyphs and the box they fill.
-// Advances, pair kerning, line breaks and wrapping at spaces, aligned left, centred or right.
+// Advances, pair kerning, line breaks and wrapping at spaces, aligned left, centered or right.
 // No ligatures, no mark positioning and no reordering, so scripts that need shaping — Arabic, Hebrew, Indic — come out
 // as their glyphs in logical order; libs/graphics/shaped-rendering/docs/slug.md names that as the next layer.
 

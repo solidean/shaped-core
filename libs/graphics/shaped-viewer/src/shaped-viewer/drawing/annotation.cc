@@ -69,8 +69,8 @@ struct part_visibility
     else
     {
         // a short shelf into the side of the box facing the anchor, at the box's middle height
-        auto const centre_x = (box.min[0] + box.max[0]) * 0.5f;
-        auto const toward = centre_x >= p[0] ? 1.0f : -1.0f;
+        auto const center_x = (box.min[0] + box.max[0]) * 0.5f;
+        auto const toward = center_x >= p[0] ? 1.0f : -1.0f;
         auto const attach = tg::pos2f(toward > 0.0f ? box.min[0] : box.max[0], (box.min[1] + box.max[1]) * 0.5f);
         auto const shelf = cc::min(10.0f, tg::abs(attach[0] - p[0]));
         auto const knee = tg::pos2f(attach[0] - toward * shelf, attach[1]);
@@ -79,7 +79,7 @@ struct part_visibility
         points.push_back(attach);
     }
 
-    // start at the marker's edge rather than its centre
+    // start at the marker's edge rather than its center
     auto const first = points[1] - points[0];
     auto const length = first.length();
     auto const radius = a.marker_radius;
@@ -138,7 +138,7 @@ void place_annotation(annotation_record const& a,
         out.push_back(q);
     }
 
-    // The marker's drawings are centred on their own origin, at one logical pixel per unit.
+    // The marker's drawings are centered on their own origin, at one logical pixel per unit.
     auto disk = probed(a.disk, visibility.marker);
     disk.at = at(p);
     out.push_back(disk);

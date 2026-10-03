@@ -544,7 +544,7 @@ scene.add_text("+X", {.at = p, .x_axis = r, .y_axis = down}, {.size = 0.1f});  /
 scene.add_annotation(p, "inlet", {.side = sv::annotation_side::automatic, .offset = {32, 28},
                                   .leader = {.shape = sv::leader_shape::elbow}, .occluded = sv::annotation_occluded::hidden_line});
 // a label flat on screen at world point p, logical px; placed every frame; hidden by the GPU at the anchor's pixel
-// occluded: hidden_line (box stays, marker hollow, leader dashed) | hide | show (e.g. a centre of mass inside the part)
+// occluded: hidden_line (box stays, marker hollow, leader dashed) | hide | show (e.g. a center of mass inside the part)
 auto const mono = sv::font::from_bytes(pinned).value();   // TrueType only; keyed by the file's hash
 sv::default_font();                              // the OS's UI font, loaded once; null where there is none
 // resources.drawings: sv::drawing_manager, an lru_pool over atlas pages (512 rows, 4 pages; the LRU page empties)

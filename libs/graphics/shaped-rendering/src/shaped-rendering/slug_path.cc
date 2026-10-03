@@ -329,7 +329,7 @@ private:
         if (tg::abs(turn) < 1e-4f)
             return;
 
-        // turning toward +y bends about a centre on the left, so the gap to fill opens on the right
+        // turning toward +y bends about a center on the left, so the gap to fill opens on the right
         auto const side = turn > 0.0f ? -1.0f : 1.0f;
         auto const a = p + left_of(in) * (_half * side);
         auto const b = p + left_of(out) * (_half * side);

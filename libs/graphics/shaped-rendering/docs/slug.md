@@ -69,7 +69,7 @@ A draw's matrix then takes that plane anywhere, so the same instance lies flat o
 The atlas keeps **records** — shape instances in a drawing's own plane — in a third texture, beside the shapes they name.
 A job is a list of **frames**, each a position and two free axes placing that plane in the draw's space, and a list of quads, each naming a record and a frame.
 So one draw covers any mix of shapes under any number of frames, and a shape placed eighty thousand times is uploaded once.
-The vertex stage folds a quad's frame into the draw's matrix rows, then dilates exactly as an instance does; a frame's tint multiplies the record's colour.
+The vertex stage folds a quad's frame into the draw's matrix rows, then dilates exactly as an instance does; a frame's tint multiplies the record's color.
 Records and frames are textures rather than buffers because a vertex stage may read no storage buffer on WebGPU.
 
 **A frame can be shown or hidden by a probe.**

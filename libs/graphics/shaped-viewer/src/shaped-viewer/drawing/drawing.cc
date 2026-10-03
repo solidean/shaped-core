@@ -60,7 +60,7 @@ cc::hash128 drawing::hash() const
         return _hash;
 
     // One digest per layer part, folded in order: the curves and contour ends are separate allocations, and the rule
-    // and colour decide the pixels as much as the geometry does.
+    // and color decide the pixels as much as the geometry does.
     auto h = cc::hash128::create(cc::span<byte const>(), impl::drawing_hash_seed);
     for (auto const& l : _layers)
     {

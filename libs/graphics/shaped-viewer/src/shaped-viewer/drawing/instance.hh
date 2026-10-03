@@ -26,7 +26,7 @@ struct sv::instance_2d
     tg::vec2f y_axis = tg::vec2f(0, 1);
     f32 scale = 1.0f;
 
-    /// Multiplies the drawing's own colours; straight alpha, sRGB-encoded, in [0, 1].
+    /// Multiplies the drawing's own colors; straight alpha, sRGB-encoded, in [0, 1].
     tg::vec4f tint = tg::vec4f(1, 1, 1, 1);
 
     sv::corner from = sv::corner::top_left;
@@ -44,7 +44,7 @@ struct sv::instance_3d
     tg::vec3f y_axis;
     f32 scale = 1.0f;
 
-    /// Multiplies the drawing's own colours; straight alpha, sRGB-encoded, in [0, 1].
+    /// Multiplies the drawing's own colors; straight alpha, sRGB-encoded, in [0, 1].
     tg::vec4f tint = tg::vec4f(1, 1, 1, 1);
 };
 

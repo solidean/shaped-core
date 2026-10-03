@@ -21,7 +21,7 @@ using path = sr::slug_path;
 /// How one layer of a drawing is filled.
 struct sv::fill_style
 {
-    /// Straight alpha, sRGB-encoded, in [0, 1]: the colour a picker shows.
+    /// Straight alpha, sRGB-encoded, in [0, 1]: the color a picker shows.
     tg::vec4f color = tg::vec4f(1, 1, 1, 1);
 
     sr::slug_fill_rule rule = sr::slug_fill_rule::nonzero;
@@ -53,13 +53,13 @@ struct sv::frame_2d
     tg::vec2f y_axis = tg::vec2f(0, 1);
     f32 scale = 1.0f;
 
-    /// Multiplies the nested drawing's colours.
+    /// Multiplies the nested drawing's colors.
     tg::vec4f tint = tg::vec4f(1, 1, 1, 1);
 };
 
 /// One 2D graphic: a letter, a logo, an arrow.
 ///
-/// Ordered filled layers, each a closed outline with a colour, in the drawing's own units with y pointing down.
+/// Ordered filled layers, each a closed outline with a color, in the drawing's own units with y pointing down.
 /// Later layers draw over earlier ones.
 /// A stroke is a layer too: its outline is the area the stroke covers, expanded once when it is added.
 /// Nothing here holds a device; a drawing reaches the GPU as part of a `drawing_set`, or alone when instanced directly.
@@ -73,7 +73,7 @@ public:
     };
 
     /// Appends a filled layer, every contour of `p` closed by a line back to its start.
-    /// The default colour is white, which an instance's tint then colours.
+    /// The default color is white, which an instance's tint then colors.
     drawing& add_fill(sv::path const& p, fill_style const& style = {});
 
     /// Appends a filled layer from an outline already built, such as a glyph's; it must be closed.
@@ -90,7 +90,7 @@ public:
     [[nodiscard]] cc::span<layer const> layers() const { return _layers; }
     [[nodiscard]] bool is_empty() const { return _layers.empty(); }
 
-    /// The content key: every layer's curves, contours, fill rule and colour, in order.
+    /// The content key: every layer's curves, contours, fill rule and color, in order.
     /// Computed on the first call after a change, then cached.
     [[nodiscard]] cc::hash128 hash() const;
 

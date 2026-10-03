@@ -58,7 +58,7 @@ struct sr::slug_frame
     tg::vec3f x_axis = tg::vec3f(1, 0, 0);
     tg::vec3f y_axis = tg::vec3f(0, 1, 0);
 
-    /// rgba8, sRGB-encoded, straight alpha, red in the low byte; multiplies the colour of every shape under this frame.
+    /// rgba8, sRGB-encoded, straight alpha, red in the low byte; multiplies the color of every shape under this frame.
     u32 tint = 0xffffffff;
 
     slug_visibility visibility = slug_visibility::always;
@@ -124,7 +124,7 @@ struct sr::slug_pipeline_key
 ///
 /// Output is linear and premultiplied, blended premultiplied over the target.
 /// A scope with a depth target draws depth-tested without writing depth, so shapes on a surface layer in draw order.
-/// One pipeline per (colour, depth) format pair and draw form, built in the background: execute declines until it is ready.
+/// One pipeline per (color, depth) format pair and draw form, built in the background: execute declines until it is ready.
 class sr::slug_routine : public sg::render_routine<slug_routine, slug_pipeline_key>
 {
 public:

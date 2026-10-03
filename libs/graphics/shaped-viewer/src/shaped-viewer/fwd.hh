@@ -164,7 +164,7 @@ struct leader_style;
 struct annotation_style;
 struct annotation_record; // an annotation as a layer keeps it, placed on screen by the plan
 class font;               // a TrueType face and its hash, the content text is drawn from
-struct text_style;        // a string's font, size, layout and colour
+struct text_style;        // a string's font, size, layout and color
 namespace impl
 {
 struct drawing_set_gpu_slot;

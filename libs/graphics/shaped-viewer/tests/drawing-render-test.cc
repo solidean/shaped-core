@@ -201,11 +201,11 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
-    // A grey quad at z = 0 across [-1, 1], facing a camera on -z.
+    // A gray quad at z = 0 across [-1, 1], facing a camera on -z.
     tg::pos3f const quad[] = {tg::pos3f(-1, -1, 0), tg::pos3f(1, -1, 0), tg::pos3f(1, 1, 0),
                               tg::pos3f(-1, -1, 0), tg::pos3f(1, 1, 0),  tg::pos3f(-1, 1, 0)};
-    sv_test::pbr_material const grey[] = {{}, {}};
-    auto const item = resources.acquire_scene_item(sv_test::as_mesh("quad", quad, grey));
+    sv_test::pbr_material const gray[] = {{}, {}};
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("quad", quad, gray));
     resources.wait_for_pending_uploads();
 
     auto red = sv::drawing();
@@ -221,7 +221,7 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
                                      .y_axis = tg::vec3f(0, 0.5f, 0)};
     };
 
-    // Right of centre and in front of the quad; left of centre and behind it.
+    // Right of center and in front of the quad; left of center and behind it.
     auto const size = tg::vec2i(96, 96);
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string("occluded");
@@ -264,10 +264,10 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
     REQUIRE(pixels.size() == isize(size[0]) * size[1] * 4);
     auto const channel = [&](int x, int y, int c) { return int(u8(pixels[(isize(y) * size[0] + x) * 4 + c])); };
 
-    // The front square's centre, (0.45, 0, -0.5) at depth 2.5, lands right of the image's centre: red, over the quad.
+    // The front square's center, (0.45, 0, -0.5) at depth 2.5, lands right of the image's center: red, over the quad.
     CHECK(channel(63, 48, 0) > 200);
     CHECK(channel(63, 48, 1) < 60);
-    // The back square's centre, (-0.45, 0, 0.5) at depth 3.5, is behind the quad: the quad's own grey shows.
+    // The back square's center, (-0.45, 0, 0.5) at depth 3.5, is behind the quad: the quad's own gray shows.
     CHECK(tg::abs(channel(37, 48, 0) - channel(37, 48, 1)) < 30);
 
     co_await cc::async_settled(sv::background_work(ctx));
@@ -292,8 +292,8 @@ ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor sho
     auto resources = sv::gpu_resource_manager::create(ctx);
     tg::pos3f const quad[] = {tg::pos3f(-1, -1, 0), tg::pos3f(1, -1, 0), tg::pos3f(1, 1, 0),
                               tg::pos3f(-1, -1, 0), tg::pos3f(1, 1, 0),  tg::pos3f(-1, 1, 0)};
-    sv_test::pbr_material const grey[] = {{}, {}};
-    auto const item = resources.acquire_scene_item(sv_test::as_mesh("quad", quad, grey));
+    sv_test::pbr_material const gray[] = {{}, {}};
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("quad", quad, gray));
     resources.wait_for_pending_uploads();
 
     // A marker 8 px across with a ring 2 px wide, in red; no box, and a leader pointed well away from the marker.
@@ -320,7 +320,7 @@ ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor sho
                                      .dot = part(3)};
     };
 
-    // Right of centre and in front of the quad; left of centre and behind it.
+    // Right of center and in front of the quad; left of center and behind it.
     auto const size = tg::vec2i(128, 128);
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string("annotated");
@@ -341,11 +341,11 @@ ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor sho
     CHECK(plan.drawing_jobs[0].trace == 0);
 
     // where each marker landed, from the plan's own placements
-    auto centres = cc::vector<tg::pos2f>();
+    auto centers = cc::vector<tg::pos2f>();
     for (auto const& p : plan.drawing_jobs[0].placements)
         if (p.first_record == resources.drawings.first_record(parts, 0))
-            centres.push_back(tg::pos2f(p.at[0], p.at[1]));
-    REQUIRE(centres.size() == 2);
+            centers.push_back(tg::pos2f(p.at[0], p.at[1]));
+    REQUIRE(centers.size() == 2);
 
     auto const output
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
@@ -376,12 +376,12 @@ ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor sho
         return int(u8(px[0])) > 200 && int(u8(px[1])) < 60;
     };
 
-    // in front: filled, so red at its centre and inside its edge
-    CHECK(is_red(centres[0], 0.0f));
-    CHECK(is_red(centres[0], 7.0f));
-    // behind: hollow, so the quad shows at its centre, and the ring is red 6 to 8 px out
-    CHECK(!is_red(centres[1], 0.0f));
-    CHECK(is_red(centres[1], 7.0f));
+    // in front: filled, so red at its center and inside its edge
+    CHECK(is_red(centers[0], 0.0f));
+    CHECK(is_red(centers[0], 7.0f));
+    // behind: hollow, so the quad shows at its center, and the ring is red 6 to 8 px out
+    CHECK(!is_red(centers[1], 0.0f));
+    CHECK(is_red(centers[1], 7.0f));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

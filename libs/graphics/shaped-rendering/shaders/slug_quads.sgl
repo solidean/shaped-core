@@ -88,7 +88,7 @@ fun place_corner(corner: float2, em_to_object: float4, origin: float2, em_bounds
         em = em
     }
 
-/// An rgba8 colour, sRGB-encoded and straight, as linear and premultiplied.
+/// An rgba8 color, sRGB-encoded and straight, as linear and premultiplied.
 fun premultiplied_linear(c: float4) -> float4:
     let a = c.w
     return float4(srgb_to_linear(c.x) * a, srgb_to_linear(c.y) * a, srgb_to_linear(c.z) * a, a)
@@ -175,7 +175,7 @@ fun framed_row(r: float4, at: float3, x_axis: float3, y_axis: float3) -> float4:
     let origin = float2(float.from_bits(packed.x), float.from_bits(packed.y))
     let c = place_corner(v.corner, em_to_object, origin, em_bounds, r0, r1, r2, r3)
 
-    // The frame's tint multiplies the shape's own colour, both linear and premultiplied.
+    // The frame's tint multiplies the shape's own color, both linear and premultiplied.
     let shape_color = premultiplied_linear(unpack_rgba8(color))
     let tint = premultiplied_linear(unpack_rgba8(f1.w))
 

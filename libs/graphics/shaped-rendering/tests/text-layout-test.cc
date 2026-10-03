@@ -80,8 +80,8 @@ TEST("sr::layout_text - a line break starts the next baseline one line spacing d
 
 TEST("sr::layout_text - lines align within the widest one")
 {
-    auto const centred = sr::layout_text(plain(), "AB\nA", {.size = 1000, .align = sr::text_align::center});
-    CHECK(origin_of(centred, 2)[0] == 300.0f);
+    auto const centered = sr::layout_text(plain(), "AB\nA", {.size = 1000, .align = sr::text_align::center});
+    CHECK(origin_of(centered, 2)[0] == 300.0f);
     auto const right = sr::layout_text(plain(), "AB\nA", {.size = 1000, .align = sr::text_align::right});
     CHECK(origin_of(right, 2)[0] == 600.0f);
     CHECK(origin_of(right, 0)[0] == 0.0f);

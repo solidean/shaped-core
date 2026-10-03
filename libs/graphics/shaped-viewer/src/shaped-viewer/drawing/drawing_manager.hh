@@ -54,7 +54,7 @@ public:
     /// Glyphs per glyph set: a font's glyphs reach the GPU in fixed sets of this many consecutive glyph ids.
     static constexpr u32 glyphs_per_set = 64;
 
-    /// The set holding glyph `g` of `f` and its neighbours, each glyph a drawing of its outline in font units, y up.
+    /// The set holding glyph `g` of `f` and its neighbors, each glyph a drawing of its outline in font units, y up.
     /// Compiled the first time any of its glyphs is asked for; keyed by the font's hash and the set's place, so the
     /// same glyphs are never compiled twice.
     /// The glyph is drawing `u32(g) % glyphs_per_set` of the set.

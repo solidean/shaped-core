@@ -96,9 +96,9 @@ struct recorded_job
 
 /// Records a target's draws, in the order the plan lists them, into as many passes as its 3D drawings need.
 ///
-/// Every run of layout draws and every untested drawings job shares one colour pass.
+/// Every run of layout draws and every untested drawings job shares one color pass.
 /// A 3D job tested against its trace's depth gets two passes of its own: one filling a depth target from that depth,
-/// then one drawing over the target's colour against it, since nothing else in the target's pass is built for depth.
+/// then one drawing over the target's color against it, since nothing else in the target's pass is built for depth.
 /// `color` is how the first pass treats the target; every later one preserves what the earlier ones drew.
 /// Returns whether anything declined.
 [[nodiscard]] bool record_target(sg::command_list& cmd,
@@ -117,7 +117,7 @@ struct recorded_job
     auto i = isize(0);
     while (i < draws.size() || !opened)
     {
-        // Everything up to the next tested job, in one colour pass; the first pass opens even with nothing in it, so a
+        // Everything up to the next tested job, in one color pass; the first pass opens even with nothing in it, so a
         // target with no draws is still cleared.
         auto end = i;
         while (end < draws.size() && !is_tested(draws[end]))
@@ -154,7 +154,7 @@ struct recorded_job
         if (end == draws.size())
             break;
 
-        // A tested job: its trace's depth into a depth target, then the drawings against it over the colour so far.
+        // A tested job: its trace's depth into a depth target, then the drawings against it over the color so far.
         auto const& recorded = jobs[draws[end].job];
         auto const depth = cmd.context().transient.create_texture_2d({.format = sg::pixel_format::depth32_float,
                                                                       .width = recorded.depth.width(),

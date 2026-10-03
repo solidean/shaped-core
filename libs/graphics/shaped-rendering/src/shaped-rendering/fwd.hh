@@ -69,12 +69,12 @@ struct stroke_style;             // width, join, cap, miter limit, dashes
 struct slug_compiled_shape;      // an outline as Slug's curve and band tables, device-free
 struct slug_shape_ref;           // where an atlas placed a shape
 class slug_atlas;                // the caller-owned curve and band textures many shapes share
-struct slug_instance;            // one shape to draw: which, where, what colour
+struct slug_instance;            // one shape to draw: which, where, what color
 enum class slug_visibility : u8; // always, or by a frame's probe into a depth texture
 struct slug_frame;               // where a job places a plane of shapes: a position, two axes, a tint, a probe
 struct slug_quad;                // one quad of a job: an atlas record under a frame
 struct slug_view;                // one draw's transform and knobs
-struct slug_pipeline_key;        // the routine's parameter: colour and depth format
+struct slug_pipeline_key;        // the routine's parameter: color and depth format
 class slug_routine;              // draws shape instances from an atlas
 class slug_font;                 // a font face's glyphs compiled on demand into an atlas, and text set over them
 enum class text_align : u8;      // left, center or right within a laid-out box

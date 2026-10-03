@@ -61,7 +61,7 @@ What is left is the interaction on top of it, in dependency order:
   caller who wants it re-parented into a specific container has no way to ask.
 - **The UI layer** through `sr::imgui_context` / `sr::imgui_routine`, into the view's own target.
 - **A second window**, which is only an sv-side step: `sr::window_system` already drives N windows from one poll.
-- **A 3D drawing is occluded by the depth of the trace's first sample, reprojected to the pixel centre.**
+- **A 3D drawing is occluded by the depth of the trace's first sample, reprojected to the pixel center.**
   Exact on flat faces; on a curved or normal-mapped one the plane taken is the shading normal's, a sub-pixel step off the surface.
   A silhouette pixel holds one surface's depth, so a drawing's edge along a silhouette is hard rather than antialiased.
 - **Annotations do not avoid each other.**

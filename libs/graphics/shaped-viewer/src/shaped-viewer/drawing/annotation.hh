@@ -15,7 +15,7 @@
 /// Where an annotation's box sits relative to its anchor.
 enum class sv::annotation_side : sv::u8
 {
-    /// Away from the view's centre, so labels fan outward; recomputed every frame as the anchor moves.
+    /// Away from the view's center, so labels fan outward; recomputed every frame as the anchor moves.
     automatic,
     above_right,
     above_left,
@@ -32,7 +32,7 @@ enum class sv::annotation_occluded : sv::u8
     /// Nothing at all.
     hide,
 
-    /// Everything, as if the anchor were in view: for a point inside a part, such as its centre of mass.
+    /// Everything, as if the anchor were in view: for a point inside a part, such as its center of mass.
     show,
 };
 

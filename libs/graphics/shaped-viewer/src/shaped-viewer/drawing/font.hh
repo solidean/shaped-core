@@ -28,7 +28,7 @@ private:
     cc::hash128 _hash;
 };
 
-/// How a string is drawn: the font, the size and layout, and the colour.
+/// How a string is drawn: the font, the size and layout, and the color.
 struct sv::text_style
 {
     /// The font, or null for `sv::default_font()`; it must outlive the call that draws with it.
