@@ -217,7 +217,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `sample_compare(…, reference = r, level = 0.0)` | the same, and every stage | a comparison at level 0, the one level every target compares at |
 | `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
 | `load(xy, level)` | every texture but a cube | one texel, with no sampler; a multisampled one takes `sample = s` instead |
-| `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write |
+| `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write; a store in a pixel, compute, raygen, closest-hit, miss or callable stage |
 | `img[xy]`, `img[xy] = value` | an image | the same `load` and `store`, as a subscript ([CHK-367](semantics/checking.md#bindings)) |
 | `size(level)`, `layer_count()`, `level_count()`, `sample_count()` | textures and images | what the shape has |
 
@@ -225,6 +225,10 @@ An array's layer is always named, `layer = 2`, since it is no coordinate on ever
 An offset, `offset = int2(1, -1)`, is a constant from -8 to 7 on a 2D, 2D array or 3D texture.
 A cube and a multisampled texture take none, and neither does a 1D one, which Metal samples with no offset.
 A gather's component, an offset and a comparison's level are constants, because some target takes each only as written (CHK-280).
+
+A store is refused in a vertex stage, where core WebGPU has no writable storage.
+It is refused in an any hit and an intersection too, which run any number of times per ray and in any order, so what they store has no defined result.
+Every target writes storage images from the other ray-tracing stages, dx12, vulkan and metal alike, and WebGPU has no ray-tracing pipeline to refuse.
 
 **A texture may name the sampler it is sampled with, and a call then leaves it out.**
 `@sampler(name)` on a texture member names a sampler of the same binding, static or dynamic, or a file-scope sampler:
@@ -505,7 +509,7 @@ A pin in a source states it, which [CHK-267](semantics/checking.md#entry-points)
 The syntax above is what the AST builds; the check pass is what limits it.
 Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
-* `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar or a vector.
+* `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out as dx12's structured buffers (EMIT-111).
 * A subscript on a buffer, as a value and as the place of an assignment.
 * A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)); a texture's is not built.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.

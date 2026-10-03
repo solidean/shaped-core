@@ -107,3 +107,30 @@ hit_group spheres for path_rays:
     miss.surface = sky
     miss.occlusion = open_sky
     hit_groups = (textured, spheres)
+
+// ---- the same rays, their results stored into images: the stages a ray runs once each store as compute does
+
+binding pictured:
+    picture: out image_2d[.rgba32_float]
+    marks: out image_2d[.rgba32_float]
+
+@raygen fun pictured_primary(@launch_id id: int3){traced, pictured}:
+    let mut p = radiance(0.0, 0.0, 0.0, 0, 0, 0, 0)
+    let r = ray(
+        origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+    )
+    trace(traced.world, r, path_rays.surface, mut p)
+    pictured.picture.store(int2(id.x, id.y), float4(p.t, p.u, p.v, p.is_hit as float))
+
+// every ray that leaves the scene marks the first texel, which is how the test sees a miss store
+@miss fun pictured_sky(p: mut radiance){traced, pictured}:
+    p.is_hit = 0
+    pictured.marks.store(int2(0, 0), float4(1.0, 0.0, 0.0, 1.0))
+
+@raytracing pipeline pictured_path:
+    rays = path_rays
+    raygen = pictured_primary
+    miss.surface = pictured_sky
+    miss.occlusion = open_sky
+    hit_groups = (textured)
