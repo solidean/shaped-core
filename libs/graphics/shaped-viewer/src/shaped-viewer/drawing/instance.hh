@@ -53,6 +53,9 @@ struct sv::instance_3d
 struct sv::drawing_placement
 {
     drawing_set_id set = drawing_set_id::invalid;
+
+    /// The atlas page `set` lives in, which is the atlas a job draws this placement's records from.
+    u32 page = 0;
     u32 first_record = 0;
     u32 record_count = 0;
 

@@ -66,8 +66,16 @@ Every leaf a caller adds has one unless `leaf_ref::title(false)` turns it off; t
 ## Residency
 
 A set is acquired whole, through the frame's resource manager, into `sv::drawing_manager` beside `mesh_manager`.
-On a miss its outlines are compiled on the CPU and its shapes and records land in the manager's atlas; a hit is a pointer compare against the set's cache slot.
-The atlas is the manager's private storage, as a texture's memory is the texture manager's.
+On a miss its outlines are compiled on the CPU and its shapes and records land in an atlas page; a hit is a pointer compare against the set's cache slot.
+The pages are the manager's private storage, as a texture's memory is the texture manager's.
+
+- **A page is an `sr::slug_atlas` capped at 512 rows**, and a set lives in exactly one: one that does not fit the newest page opens another.
+- **Space comes back a page at a time.**
+  Once there are four pages, the next opens by emptying the one drawn from longest ago; its sets leave the pool and are placed again the next time anything acquires them.
+  Slug's atlas has no free list, so a page is the smallest unit that can be reclaimed without rewriting every band list that points at a moved curve.
+- **A page drawn from this frame is never emptied**, since this frame's placements name its records.
+  When every page is in use the manager opens one past the limit, and says so once.
+- **A job draws once per page** its placements reach, each draw from that page's atlas.
 
 ## Text
 
@@ -95,7 +103,7 @@ A job's draw sits in its view target's pass at the layer's place, so a canvas dr
 | `drawing`, `drawing_set`, `drawing_manager` | [done] |
 | canvas layer and 2D instances | [done] |
 | 3D instances, drawn over the trace and occluded by its primary-hit depth | [done] |
-| atlas pages when one fills, and freeing on eviction | [planned] |
+| atlas pages when one fills, and freeing on eviction | [done] |
 | text: `sv::font`, the system UI font by default, kerned multi-line layout, `add_text` on canvas and scene | [done] |
 | strokes, with joins, caps and dashes, as filled outlines; shapes; nested drawings | [done] |
 | annotations: a 2D box placed near a 3D anchor, a marker, a leader, hidden-line occlusion | [done] |

@@ -106,6 +106,7 @@ tg::pos2f place_text(drawing_manager& drawings,
             continue; // a space, or a glyph with no outline
         auto const offset = x_axis * g.origin[0] + y_axis * g.origin[1];
         out.push_back({.set = set,
+                       .page = drawings.page_of(set),
                        .first_record = drawings.first_record(set, index),
                        .record_count = count,
                        .at = at + offset,

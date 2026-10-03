@@ -132,7 +132,7 @@ TEST("sv::drawing_manager - a set is placed once, and a lone drawing is its own 
     // one record per layer, consecutive within a drawing
     CHECK(manager.record_count(id, 0) == 1);
     CHECK(manager.record_count(id, 1) == 2);
-    CHECK(manager.atlas().record_count() == 3);
+    CHECK(manager.atlas(0).record_count() == 3);
 
     // an equal set built separately is the same content, so the same id
     auto copy = sv::drawing_set();
@@ -314,6 +314,69 @@ TEST("sv - a scene's annotations become a 2D job after its drawings, placed thro
     REQUIRE(disk.size() == 1);
     CHECK(tg::abs(disk[0].at[0] - 32.0f) < 1e-3f);
     CHECK(tg::abs(disk[0].at[1] - 32.0f) < 1e-3f);
+}
+
+namespace
+{
+/// A set of `count` squares, sized by `seed` so two sets of different seeds are different content.
+[[nodiscard]] sv::drawing_set squares(int count, f32 seed)
+{
+    auto set = sv::drawing_set();
+    for (auto i = 0; i < count; ++i)
+    {
+        auto d = sv::drawing();
+        d.add_fill(square(seed + f32(i)));
+        (void)set.add(d);
+    }
+    return set;
+}
+} // namespace
+
+TEST("sv::drawing_manager - a set that does not fit opens a page, and a full manager empties the one drawn longest ago")
+{
+    // pages one row tall, at most two of them; five hundred squares fit one, but two such sets pass its 819 records
+    auto manager = sv::drawing_manager(1, 2);
+    auto const a_set = squares(500, 1);
+    auto const b_set = squares(500, 1000);
+    auto const c_set = squares(500, 2000);
+
+    manager.begin_frame(sg::epoch(1));
+    auto const a = manager.acquire(a_set);
+    (void)manager.first_record(a, 0);
+    manager.begin_frame(sg::epoch(2));
+    auto const b = manager.acquire(b_set);
+    (void)manager.first_record(b, 0);
+    REQUIRE(manager.page_of(a) != manager.page_of(b));
+    CHECK(manager.page_count() == 2);
+
+    // a third set needs a page; the one A sits in was drawn from longest ago, so A leaves and C takes its page
+    manager.begin_frame(sg::epoch(3));
+    auto const a_page = manager.page_of(a);
+    auto const c = manager.acquire(c_set);
+    CHECK(manager.page_count() == 2);
+    CHECK(!manager.contains(a));
+    CHECK(manager.contains(b));
+    CHECK(manager.page_of(c) == a_page);
+    CHECK(manager.record_count(c, 499) == 1);
+
+    // acquiring A again places it anew: B's page is the one not drawn from this frame
+    auto const a_again = manager.acquire(a_set);
+    CHECK(a_again != a);
+    CHECK(!manager.contains(b));
+    CHECK(manager.page_of(a_again) != manager.page_of(c));
+
+    SECTION("a page drawn from this frame is never emptied; the manager grows past its limit instead")
+    {
+        manager.begin_frame(sg::epoch(4));
+        (void)manager.first_record(c, 0);
+        (void)manager.first_record(a_again, 0);
+        nx::expect_warning("every drawing atlas page is in use this frame*");
+        auto const b_again = manager.acquire(b_set);
+        CHECK(manager.page_count() == 3);
+        CHECK(manager.contains(c));
+        CHECK(manager.contains(a_again));
+        CHECK(manager.page_of(b_again) == 2);
+    }
 }
 
 TEST("sv - a canvas layer's drawings become one 2D job in its target, in logical pixels")

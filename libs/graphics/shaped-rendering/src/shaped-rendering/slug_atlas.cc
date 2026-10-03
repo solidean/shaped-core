@@ -86,6 +86,10 @@ void upload(sg::command_list& cmd,
 }
 } // namespace
 
+slug_atlas::slug_atlas(int row_limit) : _row_limit(cc::clamp(row_limit, 1, max_rows))
+{
+}
+
 cc::result<slug_shape_ref> slug_atlas::add(slug_compiled_shape const& shape)
 {
     auto ref = slug_shape_ref{.banding = shape.banding,
@@ -116,7 +120,7 @@ cc::result<slug_shape_ref> slug_atlas::add(slug_compiled_shape const& shape)
     auto band_cursor = _band_cursor;
     auto const block = reserve_run(band_cursor, int(shape.band_texel_count()));
 
-    if (curve_cursor[1] >= max_rows || band_cursor[1] >= max_rows)
+    if (curve_cursor[1] >= _row_limit || band_cursor[1] >= _row_limit)
         return cc::error("the slug atlas is full");
 
     grow_rows(_curve_texels, _curve_rows, curve_cursor[1] + 1);
@@ -168,7 +172,7 @@ cc::result<u32> slug_atlas::add_records(cc::span<slug_instance const> records)
 {
     auto const first = _record_count;
     auto const end = first + records.size();
-    if (end > isize(max_rows) * records_per_row)
+    if (end > isize(_row_limit) * records_per_row)
         return cc::error("the slug atlas's record texture is full");
 
     auto const rows = int((end + records_per_row - 1) / records_per_row);

@@ -67,8 +67,8 @@ What is left is the interaction on top of it, in dependency order:
 - **Annotations do not avoid each other.**
   Each is placed on its own, so labels whose anchors are close overlap.
   Decluttering is greedy in priority order against the previous frame's boxes, which wants the boxes to persist across frames and an identity per annotation.
-- **The drawing atlas never shrinks.** `sr::slug_atlas` is append-only, so `drawing_manager` runs without eviction limits, and one atlas is all it has.
-  Freeing blocks on eviction and a second page when one fills are the two halves (docs/canvas.md).
+- **The drawing atlas reclaims space a page at a time.** A page holding one long-lived set and much that is gone stays whole until it is the least recently drawn from.
+  Packing a page's survivors into a fresh one, or a free list in `sr::slug_atlas`, would reclaim the rest.
 - **Shapes on traced geometry are not wired into the tracer yet.**
   Module `slug` traces them already, as quads `slug.decide` cuts and as decals at a hit (libs/graphics/shaped-rendering/docs/slug.md).
   The tracer is SGL now, so its hit groups can `use slug`; what is missing is the scene side that places shapes and the rows that trace them.

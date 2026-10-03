@@ -18,54 +18,67 @@ namespace sv
 {
 namespace
 {
-/// Uploads one layer's drawings as a Slug job: a frame per placement, and a quad per record under it.
+/// One atlas page's share of a drawing job: its uploaded frames and quads, drawn from that page's atlas.
+struct page_job
+{
+    u32 page = 0;
+    sr::slug_routine::prepared_job job;
+};
+
+/// Uploads one layer's drawings as Slug jobs, one per atlas page they draw from: a frame per placement, and a quad per
+/// record under it.
 /// Records copies, so it runs before any pass opens.
-[[nodiscard]] sr::slug_routine::prepared_job prepare_drawing_job(sg::command_list& cmd,
-                                                                 viewer_definition const& def,
-                                                                 plan_drawing_job const& job,
-                                                                 drawing_manager& drawings)
+[[nodiscard]] cc::vector<page_job> prepare_drawing_job(sg::command_list& cmd,
+                                                       viewer_definition const& def,
+                                                       plan_drawing_job const& job,
+                                                       drawing_manager& drawings)
 {
     auto const& placements
         = job.kind == drawing_job_kind::layer ? def[job.view].layers[job.layer].drawings : job.placements;
-    auto frames = cc::vector<sr::slug_frame>();
-    auto quads = cc::vector<sr::slug_quad>();
-    frames.reserve(placements.size());
-    for (auto const& p : placements)
+    auto out = cc::vector<page_job>();
+    for (auto page = u32(0); page < u32(drawings.page_count()); ++page)
     {
-        if (p.record_count == 0)
-            continue;
-
-        // A 2D position measured from a right or bottom edge points into the view, and is where the block's far edge
-        // sits: the block's anchor counts back from that edge by the distance and by how far the block reaches, and
-        // the placement keeps its offset within the block.
-        auto at = p.at;
-        if (!job.is_3d)
+        auto frames = cc::vector<sr::slug_frame>();
+        auto quads = cc::vector<sr::slug_quad>();
+        for (auto const& p : placements)
         {
-            if (p.from == corner::top_right || p.from == corner::bottom_right)
-                at[0] = job.logical_size[0] - (at[0] - p.offset[0]) - p.reach[0] + p.offset[0];
-            if (p.from == corner::bottom_left || p.from == corner::bottom_right)
-                at[1] = job.logical_size[1] - (at[1] - p.offset[1]) - p.reach[1] + p.offset[1];
-        }
+            if (p.record_count == 0 || p.page != page)
+                continue;
 
-        auto const frame = u32(frames.size());
-        frames.push_back({.at = at,
-                          .x_axis = p.x_axis,
-                          .y_axis = p.y_axis,
-                          .tint = p.tint,
-                          .visibility = p.visibility,
-                          .probe = p.probe,
-                          .probe_depth = p.probe_depth});
-        for (auto r = p.first_record; r < p.first_record + p.record_count; ++r)
-            quads.push_back({.record = r, .frame = frame});
+            // A 2D position measured from a right or bottom edge points into the view, and is where the block's far edge
+            // sits: the block's anchor counts back from that edge by the distance and by how far the block reaches, and
+            // the placement keeps its offset within the block.
+            auto at = p.at;
+            if (!job.is_3d)
+            {
+                if (p.from == corner::top_right || p.from == corner::bottom_right)
+                    at[0] = job.logical_size[0] - (at[0] - p.offset[0]) - p.reach[0] + p.offset[0];
+                if (p.from == corner::bottom_left || p.from == corner::bottom_right)
+                    at[1] = job.logical_size[1] - (at[1] - p.offset[1]) - p.reach[1] + p.offset[1];
+            }
+
+            auto const frame = u32(frames.size());
+            frames.push_back({.at = at,
+                              .x_axis = p.x_axis,
+                              .y_axis = p.y_axis,
+                              .tint = p.tint,
+                              .visibility = p.visibility,
+                              .probe = p.probe,
+                              .probe_depth = p.probe_depth});
+            for (auto r = p.first_record; r < p.first_record + p.record_count; ++r)
+                quads.push_back({.record = r, .frame = frame});
+        }
+        if (!quads.empty())
+            out.push_back({.page = page, .job = sr::slug_routine::prepare_job(cmd, drawings.atlas(page), frames, quads)});
     }
-    return sr::slug_routine::prepare_job(cmd, drawings.atlas(), frames, quads);
+    return out;
 }
 
 /// One layer's drawings as this frame records them: the uploaded job, for a 3D one the trace's depth it is tested
 /// against, and for annotations the same depth their probes read; null where neither applies.
 struct recorded_job
 {
-    sr::slug_routine::prepared_job job;
+    cc::vector<page_job> pages;
     sg::texture_2d depth;
     sg::texture_2d probe;
 };
@@ -94,7 +107,7 @@ struct recorded_job
                                  plan_textures const& textures,
                                  render_plan const& plan,
                                  cc::span<recorded_job const> jobs,
-                                 sr::slug_atlas const& atlas)
+                                 drawing_manager& drawings)
 {
     auto const is_tested
         = [&](layout_draw const& d) { return d.kind == draw_kind::drawings && jobs[d.job].depth.raw() != nullptr; };
@@ -127,11 +140,12 @@ struct recorded_job
                     continue;
                 flush(k);
                 run_start = k + 1;
-                if (sr::slug_routine::execute(scope, atlas, jobs[draws[k].job].job,
-                                              {.object_to_clip = plan.drawing_jobs[draws[k].job].object_to_clip,
-                                               .probe_depth = jobs[draws[k].job].probe})
-                    == sg::routine_outcome::declined)
-                    declined = true;
+                for (auto const& p : jobs[draws[k].job].pages)
+                    if (sr::slug_routine::execute(scope, drawings.atlas(p.page), p.job,
+                                                  {.object_to_clip = plan.drawing_jobs[draws[k].job].object_to_clip,
+                                                   .probe_depth = jobs[draws[k].job].probe})
+                        == sg::routine_outcome::declined)
+                        declined = true;
             }
             flush(end);
             opened = true;
@@ -154,10 +168,11 @@ struct recorded_job
         {
             auto scope = cmd.raster.render_to(
                 {.color_targets = {color}, .depth_stencil_target = depth.as_depth_stencil_view().preserved()});
-            if (sr::slug_routine::execute(scope, atlas, recorded.job,
-                                          {.object_to_clip = plan.drawing_jobs[draws[end].job].object_to_clip})
-                == sg::routine_outcome::declined)
-                declined = true;
+            for (auto const& p : recorded.pages)
+                if (sr::slug_routine::execute(scope, drawings.atlas(p.page), p.job,
+                                              {.object_to_clip = plan.drawing_jobs[draws[end].job].object_to_clip})
+                    == sg::routine_outcome::declined)
+                    declined = true;
         }
         i = end + 1;
     }
@@ -211,7 +226,7 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
     for (auto const& job : plan.drawing_jobs)
     {
         auto const depth = primary_depth_of(job, def, store);
-        jobs.push_back({.job = prepare_drawing_job(cmd, def, job, resources.drawings),
+        jobs.push_back({.pages = prepare_drawing_job(cmd, def, job, resources.drawings),
                         .depth = job.is_3d ? depth : sg::texture_2d(),
                         .probe = job.kind == drawing_job_kind::annotations ? depth : sg::texture_2d()});
     }
@@ -245,7 +260,7 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
         {
             // The layout routine is acquired per format, so it can still be building for THIS one even though the
             // chain above was ready — the one place in the frame where that is possible.
-            if (record_target(cmd, output, draws, textures, plan, jobs, resources.drawings.atlas()))
+            if (record_target(cmd, output, draws, textures, plan, jobs, resources.drawings))
                 declined = true;
             continue;
         }
@@ -257,7 +272,7 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
         // empty grid cells, a collapsed rect) must be defined rather than holding whatever the texture held before.
         // Transparent black, since every view target carries premultiplied alpha.
         if (record_target(cmd, textures.targets[ti].as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0)), draws,
-                          textures, plan, jobs, resources.drawings.atlas()))
+                          textures, plan, jobs, resources.drawings))
             declined = true;
     }
     return declined ? sg::routine_outcome::declined : sg::routine_outcome::executed;

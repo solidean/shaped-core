@@ -547,7 +547,8 @@ scene.add_annotation(p, "inlet", {.side = sv::annotation_side::automatic, .offse
 // occluded: hidden_line (box stays, marker hollow, leader dashed) | hide | show (e.g. a centre of mass inside the part)
 auto const mono = sv::font::from_bytes(pinned).value();   // TrueType only; keyed by the file's hash
 sv::default_font();                              // the OS's UI font, loaded once; null where there is none
-// resources.drawings: sv::drawing_manager, an lru_pool over one sr::slug_atlas; one Slug job (one draw) per layer
+// resources.drawings: sv::drawing_manager, an lru_pool over atlas pages (512 rows, 4 pages; the LRU page empties)
+// a placement carries its page; a layer's job draws once per page it reaches
 // glyphs reach the GPU as glyph_set(font, g): 64 consecutive glyph ids per set, compiled on first use
 ```
 

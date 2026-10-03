@@ -100,6 +100,90 @@ ASYNC_INVOCABLE_TEST("sv - a canvas draws its drawings into the frame, from the 
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// One canvas job whose drawings live in two atlas pages draws both: one draw per page, each from its own atlas.
+ASYNC_INVOCABLE_TEST("sv - a canvas draws drawings from two atlas pages in one job", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the layout shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    resources.drawings = sv::drawing_manager(1, 4); // pages one row tall, so two sets of 500 squares need two
+
+    auto const squares = [](f32 seed)
+    {
+        auto set = sv::drawing_set();
+        for (auto i = 0; i < 500; ++i)
+        {
+            auto d = sv::drawing();
+            d.add_fill(square(seed + f32(i)), {.color = tg::vec4f(1, 0, 0, 1)});
+            (void)set.add(d);
+        }
+        return set;
+    };
+    auto const first = squares(1);
+    auto const second = squares(1000);
+    auto const a = resources.drawings.acquire(first);
+    auto const b = resources.drawings.acquire(second);
+    REQUIRE(resources.drawings.page_of(a) != resources.drawings.page_of(b));
+
+    // the first square of each, both stretched to 10 x 10 logical pixels
+    auto const place = [&](sv::drawing_set_id set, f32 side, tg::pos3f at)
+    {
+        return sv::drawing_placement{.set = set,
+                                     .page = resources.drawings.page_of(set),
+                                     .first_record = resources.drawings.first_record(set, 0),
+                                     .record_count = resources.drawings.record_count(set, 0),
+                                     .at = at,
+                                     .x_axis = tg::vec3f(10 / side, 0, 0),
+                                     .y_axis = tg::vec3f(0, 10 / side, 0)};
+    };
+
+    auto const size = tg::vec2i(48, 24);
+    auto v = sv::view_data{};
+    v.id = sv::view_id::from_string("pages");
+    v.resolution = size;
+    v.resolution_follows_layout = false;
+    v.layers.push_back({.kind = sv::layer_kind::canvas,
+                        .blend = sv::layer_blend::over,
+                        .drawings = {place(a, 1, tg::pos3f(4, 4, 0)), place(b, 1000, tg::pos3f(28, 4, 0))}});
+    auto def = sv::viewer_definition{};
+    def.views.push_back(cc::move(v));
+    def.root_view = sv::view_index(0);
+    auto const plan = sv::build_render_plan(def, size, 0, {});
+    REQUIRE(plan.validate());
+    REQUIRE(plan.drawing_jobs.size() == 1);
+
+    auto const output
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                            .width = size[0],
+                                            .height = size[1],
+                                            .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+    auto store = sv::view_store{};
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               resources.advance_to(ctx.current_epoch());
+                                               return sv::viewer_renderer::execute(
+                                                   cmd, def, plan, resources, store,
+                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+                                           }));
+    (void)co_await ctx.idle_completion();
+
+    auto read = ctx.create_command_list();
+    auto const future = read->download.bytes_from_texture(output.raw());
+    ctx.submit_command_list(cc::move(read));
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == isize(size[0]) * size[1] * 4);
+    auto const red_at = [&](int x, int y) { return u8(pixels[(isize(y) * size[0] + x) * 4]); };
+    CHECK(red_at(9, 9) > 250);
+    CHECK(red_at(33, 9) > 250);
+    CHECK(red_at(21, 9) < 5);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // A scene's drawings are tested against the trace's own depth: one in front of a traced quad shows, one behind it does not.
 ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of it", (sg::context_handle const& ctx_h))
 {

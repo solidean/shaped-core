@@ -7,10 +7,11 @@
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 
-/// One acquired drawing set: where each of its drawings' records sits in the manager's atlas.
+/// One acquired drawing set: the atlas page it lives in, and where each of its drawings' records sits there.
 /// A drawing whose records did not fit has a count of 0, and draws nothing.
 struct sv::drawing_set_record
 {
+    u32 page = 0;
     cc::vector<u32> first_record;
     cc::vector<u32> record_count;
 
@@ -18,17 +19,27 @@ struct sv::drawing_set_record
     cc::vector<tg::aabb2f> bounds;
 };
 
-/// Hands out `drawing_set_id`s and owns the Slug atlas every acquired set's shapes and records live in.
+/// Hands out `drawing_set_id`s and owns the Slug atlas pages every acquired set's shapes and records live in.
 ///
 /// The drawing counterpart of `mesh_manager`: an acquire is a content-hash lookup, and a miss compiles the set's outlines
-/// on the CPU and places them, to be uploaded by `prepare` before the frame's first pass.
+/// on the CPU and places them, to be uploaded by `prepare_job` before the frame's first pass.
 ///
-/// **Nothing is evicted yet.**
-/// The atlas is append-only, so an evicted set's space could not be reused; the pool runs without limits until the
-/// atlas frees blocks (libs/graphics/shaped-viewer/docs/canvas.md).
+/// **A set lives in one page, and space is reclaimed a page at a time.**
+/// A page is an atlas capped at `page_rows` rows; a set that does not fit the newest one opens another.
+/// Once there are `max_pages`, the next opens by emptying the page least recently drawn from, and its sets are placed
+/// again the next time anything acquires them.
+/// A page something drew from this frame is never emptied, since this frame's placements name its records; when every
+/// page is in use the manager grows past the limit rather than draw something wrong.
 class sv::drawing_manager : public impl::lru_pool<drawing_set_id, drawing_set_record>
 {
 public:
+    /// Rows each page's textures may grow to, and pages kept before the least recently used one is emptied.
+    /// At the defaults a page holds about 2 million curve texels, and four of them take about 64 MB of textures.
+    explicit drawing_manager(int page_rows = 512, isize max_pages = 4);
+
+    /// Starts frame `e`: pages drawn from before it become candidates to empty again.
+    void begin_frame(sg::epoch e);
+
     /// The id for `set`, resident from a prior acquire (O(1) through the set's cache slot), or freshly placed.
     [[nodiscard]] drawing_set_id acquire(drawing_set const& set);
 
@@ -36,6 +47,7 @@ public:
     [[nodiscard]] drawing_set_id acquire(drawing const& d);
 
     /// The record range of drawing `index` of the set `id` names, which must be resident.
+    /// Asking marks the set's page drawn from this frame, which is what keeps it from being emptied under the frame.
     [[nodiscard]] u32 first_record(drawing_set_id id, u32 index);
     [[nodiscard]] u32 record_count(drawing_set_id id, u32 index);
 
@@ -56,12 +68,34 @@ public:
     /// The extent of drawing `index` of the set `id` names, in the drawing's own units.
     [[nodiscard]] tg::aabb2f bounds(drawing_set_id id, u32 index);
 
-    /// The atlas every set lives in; `sr::slug_routine::prepare_job` uploads what acquires placed since the last frame.
-    [[nodiscard]] sr::slug_atlas& atlas() { return _atlas; }
+    /// The page the set `id` names lives in, which must be resident.
+    [[nodiscard]] u32 page_of(drawing_set_id id);
+
+    /// Page `page`'s atlas; `sr::slug_routine::prepare_job` uploads what acquires placed since the last frame.
+    [[nodiscard]] sr::slug_atlas& atlas(u32 page) { return _pages[isize(page)].atlas; }
+    [[nodiscard]] isize page_count() const { return _pages.size(); }
 
 private:
+    struct page
+    {
+        sr::slug_atlas atlas;
+        cc::vector<drawing_set_id> sets;
+        sg::epoch last_used = sg::epoch(0);
+    };
+
     [[nodiscard]] drawing_set_id _place(cc::hash128 hash, cc::span<drawing const> drawings);
 
-    sr::slug_atlas _atlas;
+    /// Places every drawing of a set in `p`, or reports that one did not fit.
+    [[nodiscard]] bool _try_place(page& p, cc::span<drawing const> drawings, drawing_set_record& out, isize& bytes);
+
+    /// A page with nothing in it: a new one while under the limit, else the least recently used one emptied.
+    [[nodiscard]] u32 _fresh_page();
+
+    cc::vector<page> _pages;
+    u32 _current = 0;
+    int _page_rows = 512;
+    isize _max_pages = 4;
+    sg::epoch _epoch = sg::epoch(0);
     bool _warned_full = false;
+    bool _warned_over = false;
 };

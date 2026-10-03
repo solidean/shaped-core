@@ -27,6 +27,7 @@ namespace
                                               sv::corner from)
 {
     return {.set = set,
+            .page = drawings.page_of(set),
             .first_record = drawings.first_record(set, index),
             .record_count = drawings.record_count(set, index),
             .at = at,

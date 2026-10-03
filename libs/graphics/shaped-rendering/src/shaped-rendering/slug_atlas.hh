@@ -48,6 +48,7 @@ struct sr::slug_shape_ref
 /// Caller-owned: an atlas lives as long as the draws that read it, and several can coexist — one per font, per document.
 /// Shapes are added on the CPU, and `prepare` creates, grows and uploads the textures on a command list.
 /// Append-only: nothing is ever evicted, so an atlas holding a large font grows by every glyph it is asked for.
+/// A caller that must reclaim space keeps several atlases capped at a few rows each, and replaces a whole one.
 ///
 /// A third texture holds **records**: shape instances kept beside the shapes they name, which a job draw
 /// (`slug_routine::prepare_job`) places many times through frames without uploading them again.
@@ -67,6 +68,9 @@ public:
     static constexpr int records_per_row = width / texels_per_record;
 
     slug_atlas() = default;
+
+    /// An atlas whose textures stop at `row_limit` rows, at most `max_rows`: `add` fails once a shape would need more.
+    explicit slug_atlas(int row_limit);
     slug_atlas(slug_atlas&&) noexcept = default;
     slug_atlas& operator=(slug_atlas&&) noexcept = default;
     slug_atlas(slug_atlas const&) = delete;
@@ -84,6 +88,9 @@ public:
 
     /// How many records `add_records` has kept.
     [[nodiscard]] isize record_count() const { return _record_count; }
+
+    /// The rows each texture may grow to.
+    [[nodiscard]] int row_limit() const { return _row_limit; }
 
     /// Creates the textures, regrows them, and uploads what `add` and `add_records` placed since the last call.
     /// Records copies, so it must be called before the rendering scope that draws from this atlas opens.
@@ -108,6 +115,7 @@ public:
     [[nodiscard]] slug_instance record(u32 index) const;
 
 private:
+    int _row_limit = max_rows;
     cc::vector<cc::fixed_array<u16, 4>> _curve_texels;
     cc::vector<cc::fixed_array<u16, 2>> _band_texels;
     cc::vector<cc::fixed_array<u32, 4>> _record_texels;
