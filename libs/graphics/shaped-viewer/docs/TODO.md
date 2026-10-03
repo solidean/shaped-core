@@ -132,12 +132,9 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
 Each permutation shades through its own generated SGL hit group: constants, mesh attributes, textures, cutouts, all three builtin types, and quadrics.
 `SV_TEST_SGL_TRACER=1` runs the path-tracing tests through it instead of the HLSL tracer.
 
-- **A custom material type needs its fragment twice.**
+- **A custom material type needs its fragment twice until cutover.**
   `material_type::sgl_shader` beside `shader`, and a type without one shades with the SGL tracer's fallback.
-  At cutover `shader` goes, and so do the HLSL halves of `material_permutation`.
-- **The split-signal targets are typed in SGL.**
-  `frame_output`, `frame_diffuse` and `frame_specular` are `rgba16_float` images, as sv allocates them, where the HLSL tracer writes any `float4` image.
-  `pathtraced-view-test`'s split test binds `rgba32_float` to compare at full precision, which the SGL tracer cannot bind, and is the one test the switch above fails.
+  SGL is where a material type is written from then on, since it is the one portable form: at cutover `shader` goes, and so do the HLSL halves of `material_permutation`.
 - **A permutation's SGL group does not reload with a module it uses.**
   It is compiled once per permutation key, which hashes the fragment and the resolution, so an edit to module `tracer` reaches the raygen and not the hit groups.
 - **The SGL front end runs once per entry point of a group.**

@@ -5,6 +5,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
+#include <typed-geometry/scalar/half_float.hh>
 
 using namespace cc::primitive_defines;
 
@@ -409,11 +410,10 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
              .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
     };
 
-    // rgba32_float throughout, so the sum is compared at the precision the raygen computed it in rather than at
-    // half-float's — the property is about the split, not about what a 16-bit target can hold.
-    auto const total = make(sg::pixel_format::rgba32_float);
-    auto const diffuse = make(sg::pixel_format::rgba32_float);
-    auto const specular = make(sg::pixel_format::rgba32_float);
+    // The formats the viewer allocates: each signal is rounded to a half on its own, so the sum is held to that.
+    auto const total = make(sg::pixel_format::rgba16_float);
+    auto const diffuse = make(sg::pixel_format::rgba16_float);
+    auto const specular = make(sg::pixel_format::rgba16_float);
     auto const motion = make(sg::pixel_format::rg32_float);
     auto const hit_distance = make(sg::pixel_format::rg32_float);
     auto const accumulator = make(sg::pixel_format::rgba32_float);
@@ -456,16 +456,24 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
         }));
 
     auto cmd = ctx.create_command_list();
-    auto total_back = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(total.raw()));
-    auto diffuse_back = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(diffuse.raw()));
-    auto specular_back = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(specular.raw()));
+    auto total_back = sg::data_future<cc::fixed_array<u16, 4>>(cmd->download.bytes_from_texture(total.raw()));
+    auto diffuse_back = sg::data_future<cc::fixed_array<u16, 4>>(cmd->download.bytes_from_texture(diffuse.raw()));
+    auto specular_back = sg::data_future<cc::fixed_array<u16, 4>>(cmd->download.bytes_from_texture(specular.raw()));
     auto hit_back = sg::data_future<tg::vec2f>(cmd->download.bytes_from_texture(hit_distance.raw()));
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
 
-    auto const t = co_await total_back.data();
-    auto const d = co_await diffuse_back.data();
-    auto const s = co_await specular_back.data();
+    auto const widened = [](cc::span<cc::fixed_array<u16, 4> const> halves)
+    {
+        auto out = cc::vector<tg::vec4f>();
+        for (auto const& p : halves)
+            out.push_back(tg::vec4f(f32(tg::half_float::make_from_bits(p[0])), f32(tg::half_float::make_from_bits(p[1])),
+                                    f32(tg::half_float::make_from_bits(p[2])), f32(tg::half_float::make_from_bits(p[3]))));
+        return out;
+    };
+    auto const t = widened(co_await total_back.data());
+    auto const d = widened(co_await diffuse_back.data());
+    auto const s = widened(co_await specular_back.data());
     auto const h = co_await hit_back.data();
     REQUIRE(t.size() == size[0] * size[1]);
     REQUIRE(h.size() == t.size());
@@ -477,7 +485,9 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
     for (auto i = isize(0); i < t.size(); ++i)
         for (auto c = 0; c < 3; ++c)
         {
-            worst = cc::max(worst, tg::abs((d[i][c] + s[i][c]) - t[i][c]));
+            // three halves, each within half a step of 2^-10 relative, so their sum within 3 * 2^-11 of the largest
+            auto const scale = cc::max(cc::max(tg::abs(t[i][c]), tg::abs(d[i][c]) + tg::abs(s[i][c])), 1e-3f);
+            worst = cc::max(worst, tg::abs((d[i][c] + s[i][c]) - t[i][c]) / scale);
             any_specular |= s[i][c] > 1e-4f;
             any_diffuse |= d[i][c] > 1e-4f;
 
@@ -485,7 +495,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
             negative |= d[i][c] < -1e-5f || s[i][c] < -1e-5f;
         }
 
-    CHECK(worst < 1e-5f).context(cc::format("worst |diffuse + specular - total| was {}", worst));
+    CHECK(worst <= 3.0f / 2048.0f).context(cc::format("worst |diffuse + specular - total|, relative, was {}", worst));
     CHECK(!negative);
 
     // And the split is doing something: a Cornell box lit through a specular-and-diffuse closure has both.
