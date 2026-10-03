@@ -33,6 +33,21 @@ They differ in where they are added and in what depth means.
   That depth is the first sample's, reprojected to the pixel center on the plane it hit, so a drawing lying on a face tests equal to the face rather than flickering with the jitter.
   A drawing that has to belong to the surface it lies on — lit, shadowed, curved with it — is a decal, which is traced.
 
+## Decals
+
+A decal is a drawing projected onto the traced surfaces of a scene, painted into their material: `scene_ref::add_decal(set, id, decal)`.
+It is lit and shadowed with the surface, curves with it and shows in reflections, which a 3D drawing drawn over the trace cannot.
+
+- **The projector is a box.** The drawing is placed on a plane as an instance is, and projected along `y_axis × x_axis` — away from a viewer reading it the right way round — to `depth` on either side.
+- **Only the side facing the projector is painted**, judged by the normal the hit turned toward the ray, so it does not depend on how a mesh is wound.
+  A surface met at a grazing angle fades out, rather than smearing the drawing along it.
+- **It is paint.** At every hit `tracer.shade` tests the layer's decals before the material is read, and where a shape covers, the base takes its color and loses its metalness.
+- **Its edges are antialiased by Slug's coverage** over the camera's pixel at the hit; past a bounce that footprint is too small, which the jitter makes up for.
+- **Its shapes live in the drawing manager's decal atlas**, apart from the pages, since a trace binds one atlas as `slug.tables`.
+  A set that does not fit empties it, unless a decal drew from it this frame; then the set draws nothing, and the manager says so once.
+
+`examples/decals.cc` projects a badge over a metal ball onto the floor, and a target onto a cube's face.
+
 ## Annotations
 
 An annotation is a label flat on screen, anchored at a point of a scene: `scene_ref::add_annotation(anchor, text, style)`.
@@ -108,5 +123,6 @@ A job's draw sits in its view target's pass at the layer's place, so a canvas dr
 | strokes, with joins, caps and dashes, as filled outlines; shapes; nested drawings | [done] |
 | annotations: a 2D box placed near a 3D anchor, a marker, a leader, hidden-line occlusion | [done] |
 | view titles, drawn by default and opted out per leaf | [done] |
-| decals on traced surfaces, projector first | [planned] |
+| decals on traced surfaces, by a projector box | [done] |
+| decals by a surface's own uv, text as a decal | [planned] |
 | SVG | deferred |

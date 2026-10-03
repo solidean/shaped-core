@@ -48,6 +48,28 @@ struct sv::instance_3d
     tg::vec4f tint = tg::vec4f(1, 1, 1, 1);
 };
 
+/// A drawing projected onto the traced surfaces of a scene, which it paints as part of their material.
+///
+/// The drawing is placed on a plane as `instance_3d` places it, and projected along `y_axis × x_axis` — away from a
+/// viewer who reads it the right way round — to `depth` world units on either side of that plane.
+/// Every surface inside that box takes the drawing's colors as its base color on the side facing the projector, and is
+/// lit, shadowed and reflected with it, whichever way its mesh is wound.
+/// A surface met at a grazing angle fades out instead of smearing the drawing along it.
+/// The axes should be orthogonal, since the projection runs along their cross product.
+struct sv::decal
+{
+    tg::pos3f at = tg::pos3f(0, 0, 0);
+    tg::vec3f x_axis = tg::vec3f(1, 0, 0);
+    tg::vec3f y_axis = tg::vec3f(0, 1, 0);
+    f32 scale = 1.0f;
+
+    /// How far the projection reaches either side of the plane, in world units; must be > 0.
+    f32 depth = 0.0f;
+
+    /// Multiplies the drawing's own colors; straight alpha, sRGB-encoded, in [0, 1].
+    tg::vec4f tint = tg::vec4f(1, 1, 1, 1);
+};
+
 /// One instance as a layer keeps it: the drawing resolved to its records in the manager's atlas, and the frame placing it.
 /// `scale` is already folded into the axes; a 2D placement's `at` is still measured from `from`, which needs the view's size.
 struct sv::drawing_placement

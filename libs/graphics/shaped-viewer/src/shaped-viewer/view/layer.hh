@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-viewer/drawing/annotation.hh>
+#include <shaped-viewer/drawing/decal.hh>
 #include <shaped-viewer/drawing/instance.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/scene/background.hh>
@@ -75,6 +76,9 @@ struct sv::layer
 
     /// scene_3d: labels flat on screen at points of the scene, placed every frame through the view's camera.
     cc::vector<annotation_record> annotations;
+
+    /// scene_3d: drawings projected onto the traced surfaces, painted at every hit in the order they were added.
+    cc::vector<decal_placement> decals;
 
     /// scene_3d: whether anything drawn after the trace needs its primary-hit depth.
     [[nodiscard]] bool needs_primary_depth() const { return !drawings.empty() || !annotations.empty(); }

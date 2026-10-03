@@ -80,7 +80,7 @@ TEST("sv::generate_material_shader - constants come out of the parameter block")
     auto const type = make_type();
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
 
-    CHECK(g.source.contains("use material\nuse openpbr\nuse tracer\n"));
+    CHECK(g.source.contains("use material\nuse openpbr\nuse slug\nuse tracer\n"));
     CHECK(g.source.contains("fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> "
                             "openpbr.surface:"));
 

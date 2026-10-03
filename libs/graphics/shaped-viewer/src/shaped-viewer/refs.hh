@@ -219,6 +219,17 @@ public:
     /// The same for a lone drawing, acquired as a one-element set of its own.
     void add_drawing(drawing const& d, instance_3d const& instance);
 
+    /// Projects drawing `id` of `set` onto this scene's traced surfaces, as part of their material — see `sv::decal`.
+    ///
+    /// Unlike a drawing, a decal is traced: it is lit and shadowed with the surface it lies on, curves with it, and
+    /// shows in reflections.
+    /// Every hit of the trace tests every decal of the layer, so a layer carries tens of them, not thousands.
+    /// The set is acquired into the drawing manager's decal atlas, apart from the same set drawn as an instance.
+    void add_decal(drawing_set const& set, drawing_id id, sv::decal const& decal);
+
+    /// The same for a lone drawing.
+    void add_decal(drawing const& d, sv::decal const& decal);
+
     /// Sets the UTF-8 `text` in `style` and places it on the plane `instance` spans, its box's top-left at `at`.
     /// The style's size is in world units here, so a label one tenth of a unit tall is `{.size = 0.1f}`.
     /// One drawing per glyph, from the font's glyph sets — see `sv::font`.

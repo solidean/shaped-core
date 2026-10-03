@@ -36,10 +36,26 @@ drawing_set_id drawing_manager::acquire(drawing const& d)
     return _place(hash, cc::span<drawing const>(&d, 1));
 }
 
+drawing_set_id drawing_manager::acquire_decal(drawing_set const& set)
+{
+    auto const hash
+        = impl::combine_digests(set.hash(), cc::hash128::create(cc::span<byte const>(), impl::decal_hash_seed));
+    auto const resident = find_by_hash(hash);
+    return resident.has_value() ? resident.value() : _place_decal(hash, set.drawings());
+}
+
+drawing_set_id drawing_manager::acquire_decal(drawing const& d)
+{
+    u64 const key[] = {impl::drawing_set_hash_seed, impl::decal_hash_seed};
+    auto const hash = impl::combine_digests(d.hash(), cc::hash128::create(cc::span<u64 const>(key).as_bytes(), 0));
+    auto const resident = find_by_hash(hash);
+    return resident.has_value() ? resident.value() : _place_decal(hash, cc::span<drawing const>(&d, 1));
+}
+
 u32 drawing_manager::first_record(drawing_set_id id, u32 index)
 {
     auto const& r = get(id);
-    _pages[isize(r.page)].last_used = _epoch;
+    _page(r.page).last_used = _epoch;
     return r.first_record[isize(index)];
 }
 
@@ -98,7 +114,7 @@ tg::aabb2f drawing_manager::bounds(drawing_set_id id, u32 index)
 }
 
 drawing_manager::drawing_manager(int page_rows, isize max_pages)
-  : _page_rows(page_rows), _max_pages(cc::max(max_pages, isize(1)))
+  : _decals{.atlas = sr::slug_atlas(page_rows)}, _page_rows(page_rows), _max_pages(cc::max(max_pages, isize(1)))
 {
     _pages.push_back({.atlas = sr::slug_atlas(_page_rows)});
 }
@@ -212,13 +228,7 @@ drawing_set_id drawing_manager::_place(cc::hash128 hash, cc::span<drawing const>
         if (!_warned_full)
             CC_LOG_WARNING("a drawing set does not fit one atlas page, so it draws nothing");
         _warned_full = true;
-        record.first_record.clear();
-        record.record_count.clear();
-        for (auto i = isize(0); i < drawings.size(); ++i)
-        {
-            record.first_record.push_back(0);
-            record.record_count.push_back(0);
-        }
+        record = _empty_record(drawings.size());
         bytes = 0;
     }
 
@@ -227,5 +237,47 @@ drawing_set_id drawing_manager::_place(cc::hash128 hash, cc::span<drawing const>
     auto const id = insert(hash, cc::move(record), bytes);
     _pages[_current].sets.push_back(id);
     return id;
+}
+
+drawing_set_id drawing_manager::_place_decal(cc::hash128 hash, cc::span<drawing const> drawings)
+{
+    auto record = drawing_set_record();
+    auto bytes = isize(0);
+
+    // A full atlas starts over, unless a decal drew from it this frame: its placements name its records.
+    auto placed = _try_place(_decals, drawings, record, bytes);
+    if (!placed && _decals.last_used != _epoch)
+    {
+        for (auto const id : _decals.sets)
+            (void)evict(id);
+        _decals = page{.atlas = sr::slug_atlas(_page_rows)};
+        placed = _try_place(_decals, drawings, record, bytes);
+    }
+    if (!placed)
+    {
+        if (!_warned_decals_full)
+            CC_LOG_WARNING("the decal atlas is full of this frame's decals, so a decal draws nothing");
+        _warned_decals_full = true;
+        record = _empty_record(drawings.size());
+        bytes = 0;
+    }
+
+    record.page = decal_page;
+    _decals.last_used = _epoch;
+    auto const id = insert(hash, cc::move(record), bytes);
+    _decals.sets.push_back(id);
+    return id;
+}
+
+drawing_set_record drawing_manager::_empty_record(isize count)
+{
+    auto record = drawing_set_record();
+    for (auto i = isize(0); i < count; ++i)
+    {
+        record.first_record.push_back(0);
+        record.record_count.push_back(0);
+        record.bounds.push_back(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(0, 0)));
+    }
+    return record;
 }
 } // namespace sv

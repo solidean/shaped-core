@@ -69,9 +69,15 @@ What is left is the interaction on top of it, in dependency order:
   Decluttering is greedy in priority order against the previous frame's boxes, which wants the boxes to persist across frames and an identity per annotation.
 - **The drawing atlas reclaims space a page at a time.** A page holding one long-lived set and much that is gone stays whole until it is the least recently drawn from.
   Packing a page's survivors into a fresh one, or a free list in `sr::slug_atlas`, would reclaim the rest.
-- **Shapes on traced geometry are not wired into the tracer yet.**
-  Module `slug` traces them already, as quads `slug.decide` cuts and as decals at a hit (libs/graphics/shaped-rendering/docs/slug.md).
-  The tracer is SGL now, so its hit groups can `use slug`; what is missing is the scene side that places shapes and the rows that trace them.
+- **Shapes are not traced as geometry of their own yet.**
+  Module `slug` cuts quads down to their shapes with `slug.decide` (libs/graphics/shaped-rendering/docs/slug.md), which is what a label casting a letter-shaped shadow needs.
+  Decals paint surfaces that already exist; what is missing for shapes as geometry is the scene side that places their quads and the rows that trace them.
+- **Every hit tests every decal of its layer.** A projector box is a few dot products to reject, so tens of decals cost little, and thousands would want a structure over the boxes.
+- **A decal's footprint past a bounce is too small.** It is the camera's pixel at the segment's own length, exact for a primary ray.
+  A reflected ray would carry a ray cone, which the tracer does not yet; its jitter antialiases the edges there instead, slowly.
+- **Every decal lives in one atlas**, since a trace binds one `slug.tables`; the frame's decals have to fit its 512 rows together.
+  Binding the atlas pages as an array would lift that, once SGL has arrays of bindings.
+- **Text cannot be a decal yet.** `add_text` places glyph instances, while a decal takes one drawing; a string set into one drawing would close the gap.
 - **A traced layer has no alpha.** The raygen in `tracer_pipeline.sgl` writes none, so a `scene_3d` layer is forced to
   `layer_blend::replace`. Writing coverage into `.a` is what would let a traced layer composite `over` another.
   Until then `view_ref::add_scene` can express two scene layers on one view but only the last is visible.

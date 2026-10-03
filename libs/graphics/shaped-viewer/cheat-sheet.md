@@ -534,6 +534,8 @@ d.add_drawing(badge, {.at = tg::pos2f(8, 8), .scale = 24, .tint = c});   // a CO
 auto set = sv::drawing_set();                    // the value you keep, like sv::mesh; hashed whole, acquired whole
 auto const arrow = set.add(d);                   // sv::drawing_id, its index in the set
 scene.add_drawing(set, arrow, {.at = p, .x_axis = e, .y_axis = n, .scale = 1, .tint = c});   // 3D, world units; drawn AFTER the trace
+scene.add_decal(set, logo, {.at = p, .x_axis = r, .y_axis = down, .scale = 2, .depth = 0.5f});   // TRACED: paints base color at hits
+// projected along y_axis × x_axis (away from its reader) to `depth` each side; only the side facing the projector, any winding
 auto canvas = f.add_canvas();                    // appends a 2D layer each call — keep the handle
 canvas.add_drawing(set, arrow, {.at = tg::pos2f(16, 16), .scale = 48, .from = sv::corner::bottom_right});   // logical pixels
 canvas.add_drawing(d, {...});                    // a lone drawing: an implicit one-element set
@@ -548,6 +550,7 @@ scene.add_annotation(p, "inlet", {.side = sv::annotation_side::automatic, .offse
 auto const mono = sv::font::from_bytes(pinned).value();   // TrueType only; keyed by the file's hash
 sv::default_font();                              // the OS's UI font, loaded once; null where there is none
 // resources.drawings: sv::drawing_manager, an lru_pool over atlas pages (512 rows, 4 pages; the LRU page empties)
+// decals live in its one decal_atlas(), since a trace binds one; it empties when full unless drawn from this frame
 // a placement carries its page; a layer's job draws once per page it reaches
 // glyphs reach the GPU as glyph_set(font, g): 64 consecutive glyph ids per set, compiled on first use
 ```

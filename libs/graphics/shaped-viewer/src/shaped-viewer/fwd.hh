@@ -156,6 +156,8 @@ enum class corner : u8;
 struct instance_2d;
 struct instance_3d;
 struct drawing_placement;
+struct decal;                        // a drawing projected onto whatever traced surface its box reaches
+struct decal_placement;              // a decal as a layer keeps it, resolved to its records in the decal atlas
 enum class drawing_job_kind : u8;    // a layer's drawings, annotations, or title strips
 enum class annotation_side : u8;     // where an annotation's box goes relative to its anchor
 enum class annotation_occluded : u8; // what an annotation draws while its anchor is hidden

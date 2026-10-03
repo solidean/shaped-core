@@ -88,8 +88,42 @@ struct frame_constants:
     /// the camera the previous frame of this layer was traced from, which motion vectors reproject into
     previous_camera: camera_record
 
-    reserved0: float4
+    /// How many decals `traced.decals` holds.
+    decal_count: uint
+    /// The angle one pixel spans at the image's center, in radians: a hit's footprint is this times its distance.
+    pixel_spread: float
+    decal_pad: uint2
+
     reserved1: float4
+
+/// One decal as `traced.decals` holds it, 96 bytes; the host fills it through `sv::impl::decal_record_of`.
+///
+/// The rows take a world point (x, y, z, 1) to the drawing's own units and to the projection's depth.
+/// That depth is -1 to 1 where the projection reaches.
+struct decal_record:
+    to_x: float4
+    to_y: float4
+    to_depth: float4
+    /// the drawing's extent in its own units: min in xy, max in zw
+    bounds: float4
+    /// the unit direction the drawing is projected along, its y axis crossed with its x axis
+    direction: float3
+    first_shape: uint
+    /// the world length of one drawing unit along each axis, which turns a world footprint into the drawing's units
+    unit_length: float2
+    shape_count: uint
+    /// rgba8, sRGB-encoded, straight, red in the low byte
+    tint: uint
+
+/// One shape a decal covers, as `traced.decal_shapes` holds it — `sr::slug_instance` laid out for a buffer, 80 bytes; the host fills it through `sv::impl::decal_shape_of`.
+struct decal_shape:
+    em_to_object: float4
+    em_bounds: float4
+    banding: float4
+    origin: float2
+    glyph: uint2
+    color: uint
+    pad: uint3
 
 /// Every resource the pipeline's stages share — group 0.
 ///
@@ -136,6 +170,10 @@ binding traced:
 
     /// The clip-space depth of the first primary hit per pixel, 1 where it escaped, written while `frame.write_primary_depth` is set.
     primary_depth: out image_2d[.r32_float]
+
+    /// The decals every hit is painted with, `frame.decal_count` of them, and the shapes they cover in the atlas bound as `slug.tables`.
+    decals: buffer[decal_record]
+    decal_shapes: buffer[decal_shape]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //

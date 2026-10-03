@@ -60,6 +60,19 @@ namespace
     return place_drawing(drawings, set, index, i.at, i.x_axis, i.y_axis, i.scale, i.tint, sv::corner::top_left);
 }
 
+[[nodiscard]] decal_placement place_decal(drawing_manager& drawings, drawing_set_id set, u32 index, sv::decal const& d)
+{
+    CC_ASSERT(d.depth > 0.0f, "a decal's projection must reach some depth");
+    return {.first_record = drawings.first_record(set, index),
+            .record_count = drawings.record_count(set, index),
+            .bounds = drawings.bounds(set, index),
+            .at = d.at,
+            .x_axis = d.x_axis * d.scale,
+            .y_axis = d.y_axis * d.scale,
+            .depth = d.depth,
+            .tint = sr::pack_rgba8(d.tint)};
+}
+
 
 } // namespace
 
@@ -264,6 +277,19 @@ void scene_ref::add_drawing(drawing const& d, instance_3d const& instance)
 {
     auto& drawings = _frame->resources().drawings;
     target().drawings.push_back(place_3d(drawings, drawings.acquire(d), 0, instance));
+}
+
+void scene_ref::add_decal(drawing_set const& set, drawing_id id, sv::decal const& decal)
+{
+    CC_ASSERT(u32(id) < u32(set.size()), "a drawing_id names a drawing of the set that minted it");
+    auto& drawings = _frame->resources().drawings;
+    target().decals.push_back(place_decal(drawings, drawings.acquire_decal(set), u32(id), decal));
+}
+
+void scene_ref::add_decal(drawing const& d, sv::decal const& decal)
+{
+    auto& drawings = _frame->resources().drawings;
+    target().decals.push_back(place_decal(drawings, drawings.acquire_decal(d), 0, decal));
 }
 
 void scene_ref::add_text(cc::string_view text, instance_3d const& instance, text_style const& style)

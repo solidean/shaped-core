@@ -18,6 +18,7 @@ add_library(shaped-viewer
     src/shaped-viewer/scene/quadric.cc
     src/shaped-viewer/scene/quadric_set.cc
     src/shaped-viewer/drawing/annotation.cc
+    src/shaped-viewer/drawing/decal.cc
     src/shaped-viewer/drawing/drawing.cc
     src/shaped-viewer/drawing/drawing_manager.cc
     src/shaped-viewer/drawing/font.cc
@@ -173,7 +174,7 @@ sc_add_shader_package(
     NAMESPACE   sv::shaders
     SOURCE_DIR  shaders
     LANGUAGE    sgl
-    MODULE_DIRS shaders/sgl
+    MODULE_DIRS shaders/sgl ${SR_SGL_MODULE_DIR}
     SHADERS
         module:tracer
         tracer_pipeline.sgl:*
@@ -204,6 +205,7 @@ if(SC_BUILD_TESTS)
         tests/layout-test.cc
         tests/render-plan-test.cc
         tests/drawing-test.cc
+        tests/decal-test.cc
         tests/view-convergence-test.cc
         tests/bindless-tables-test.cc
         tests/material-resolution-test.cc
@@ -246,6 +248,7 @@ if(SC_BUILD_TESTS)
             tests/gpu-resource-manager-test.cc
             tests/quadric-manager-test.cc
             tests/quadric-trace-test.cc
+            tests/decal-trace-test.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
             tests/immediate-viewer-window-manual-test.cc
@@ -269,7 +272,7 @@ if(SC_BUILD_TESTS)
             NAMESPACE   sv_test::shaders
             SOURCE_DIR  tests/shaders
             LANGUAGE    sgl
-            MODULE_DIRS shaders/sgl
+            MODULE_DIRS shaders/sgl ${SR_SGL_MODULE_DIR}
             SHADERS
                 bsdf_probe.sgl:*
                 camera_probe.sgl:*

@@ -10,6 +10,7 @@ use openpbr
 use pt
 use quadric
 use scene
+use slug
 
 /// Whether anything blocks the segment from `origin` along `dir` for `dist`.
 ///
@@ -145,13 +146,71 @@ fun estimate_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p:
     out_diffuse = f_diffuse * scale
     out_specular = f_specular * scale
 
+// ---- Decals ---------------------------------------------------------------------------------------------------------
+
+/// An sRGB-encoded channel as linear.
+fun srgb_to_linear(c: float) -> float:
+    if c <= 0.04045 => return c / 12.92
+    return pow((c + 0.055) / 1.055, 2.4)
+
+/// An rgba8 color, sRGB-encoded and straight, as linear and straight.
+fun linear_rgba8(c: uint) -> float4:
+    let r = ((c & 0xff) as float) / 255.0
+    let g = (((c >> 8) & 0xff) as float) / 255.0
+    let b = (((c >> 16) & 0xff) as float) / 255.0
+    let a = ((c >> 24) as float) / 255.0
+    return float4(srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), a)
+
+/// Paints every decal reaching `p` into `surface`'s base, each over the ones added before it.
+///
+/// A decal's shapes are paint: where they cover, the base takes their color and loses its metalness.
+/// Only the side of a surface facing the projector is painted, judged by `n`, the geometric normal turned to face the ray.
+/// So it does not depend on how a mesh is wound: a decal marks the side of a thin wall it is projected onto, seen from there.
+/// It fades out on a surface it meets at a grazing angle rather than smearing along it.
+/// `footprint` is the world width one pixel spans at the hit, which the shapes' edges are antialiased over.
+fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){traced, slug.tables}:
+    let count = traced.frame[0].decal_count
+    let q = float4(p.x, p.y, p.z, 1.0)
+    for i in 0 ..< (count as int):
+        let d = traced.decals[i]
+        if abs(dot(d.to_depth, q)) > 1.0 => continue
+        let x = dot(d.to_x, q)
+        let y = dot(d.to_y, q)
+        if x < d.bounds.x or y < d.bounds.y or x > d.bounds.z or y > d.bounds.w => continue
+        let fade = saturate((-dot(n, d.direction) - 0.05) * 4.0)
+        if fade <= 0.0 => continue
+
+        let tint = linear_rgba8(d.tint)
+        let units = float2(footprint / d.unit_length.x, footprint / d.unit_length.y)
+        let first = d.first_shape as int
+        for k in 0 ..< (d.shape_count as int):
+            let s = traced.decal_shapes[first + k]
+
+            // The record places em space on the drawing's plane; its inverse takes the hit back into em space.
+            let col0 = float2(s.em_to_object.x, s.em_to_object.y)
+            let col1 = float2(s.em_to_object.z, s.em_to_object.w)
+            let rel = float2(x, y) - s.origin
+            let det = col0.x * col1.y - col1.x * col0.y
+            let em = float2(rel.x * col1.y - rel.y * col1.x, rel.y * col0.x - rel.x * col0.y) / det
+            let em_per_pixel = float2(units.x / length(col0), units.y / length(col1))
+
+            // Past the shape's box by more than a pixel, its coverage is 0 without walking a band.
+            if em.x < s.em_bounds.x - em_per_pixel.x or em.y < s.em_bounds.y - em_per_pixel.y => continue
+            if em.x > s.em_bounds.z + em_per_pixel.x or em.y > s.em_bounds.w + em_per_pixel.y => continue
+
+            let coverage = slug.coverage(em, em_per_pixel, s.banding, slug.glyph_of(s.glyph), false)
+            let color = linear_rgba8(s.color) * tint
+            let a = saturate(coverage) * color.w * fade
+            surface.base_color = mix(surface.base_color, float3(color.x, color.y, color.z), a)
+            surface.base_metalness = mix(surface.base_metalness, 0.0, a)
+
 /// Shades a located hit and writes the whole payload.
 ///
 /// `surface` is what the hit's material evaluated to, `n` the GEOMETRIC normal already turned to face the ray, and `v` the direction back toward the viewer.
 /// `exiting` says the ray arrived from inside the surface, which a refraction needs, since the index ratio inverts between going in and coming back out.
 /// `ray_origin`, `ray_dir` and `hit_t` are the ray as the hit received it.
 /// `authored` is the material's tangent frame in world space, and means something only where `has_authored` holds.
-fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool){traced}:
+fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool){traced, slug.tables}:
     payload.normal = n
     payload.hit_t = hit_t
 
@@ -159,6 +218,11 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
     let mut rng = payload.rng
 
     let mut surface = surface_in
+
+    // Painted before anything reads the base, the guides included.
+    // The footprint is the camera's pixel at this segment's length: exact for a primary ray, and too small past a bounce, whose jitter antialiases instead.
+    apply_decals(mut surface, ray_origin + ray_dir * hit_t, n, traced.frame[0].pixel_spread * hit_t)
+
     // Before any early return below: every path out must have written all three.
     payload.albedo = openpbr.pt_diffuse_albedo(surface)
     payload.specular_albedo = openpbr.pt_specular_albedo(surface)
@@ -300,7 +364,7 @@ fun triangle_context(h: triangle_hit){traced, bindless} -> material.shading_cont
 ///
 /// The flat face normal comes from the triangle's own corners, read through the instance, which is what lets one view hold many meshes.
 /// `supplied_tangent_frame` is whether the material's `geometry_tangent_frame` was authored rather than defaulted, which the generated material knows.
-fun shade_triangle(h: triangle_hit, payload: mut surface_payload, ctx: material.shading_context, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless}:
+fun shade_triangle(h: triangle_hit, payload: mut surface_payload, ctx: material.shading_context, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables}:
     let inst = scene.instance(..traced.instances[h.instance_id])
     let v0 = instance_position(inst, ctx.corner.x)
     let v1 = instance_position(inst, ctx.corner.y)
@@ -383,7 +447,7 @@ fun quadric_context(h: procedural_hit[quadric_attributes]){traced} -> material.s
 ///
 /// A quadric is two-sided in earnest: an open cylinder's inside wall is a hit, whose outward gradient points away from the viewer.
 /// `supplied_tangent_frame` is what `shade_triangle` takes it as.
-fun shade_quadric(h: procedural_hit[quadric_attributes], payload: mut surface_payload, surface: openpbr.surface, supplied_tangent_frame: bool){traced}:
+fun shade_quadric(h: procedural_hit[quadric_attributes], payload: mut surface_payload, surface: openpbr.surface, supplied_tangent_frame: bool){traced, slug.tables}:
     let n_obj = h.attributes.normal
     // By the inverse transpose: a batch under a non-uniform scale is a documented capability, a sphere becoming an ellipsoid.
     let n_world = h.normal_to_world(vec3(n_obj.x, n_obj.y, n_obj.z))

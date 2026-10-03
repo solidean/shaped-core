@@ -234,7 +234,7 @@ benchmark: runtime fill rule against nonzero-only          [planned]
 babel::font: CFF / CFF2 charstrings, cubics split in sr    [planned]
 atlas eviction                                             [planned]  rewrite band lists that point at moved curves
 a decal past a bounce                                      [planned]  a ray-cone footprint, once a tracer carries cones
-shaped-viewer's tracer                                     [planned]  after it moves to SGL
+shaped-viewer's tracer: decals by a projector box          [done]     shaped-viewer's canvas.md
 viewer depth for labels                                    [done]     the trace's primary-hit depth, in shaped-viewer
 shaping: ligatures, marks, reordering scripts              [planned]  its own design
 the canvas                                                 [done]     shaped-viewer's canvas layer, drawing through slug_routine

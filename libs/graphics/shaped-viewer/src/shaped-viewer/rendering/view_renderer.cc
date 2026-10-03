@@ -7,6 +7,10 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/mix_routine.hh>
 #include <shaped-rendering/reconstruct.hh>
+#include <shaped-rendering/slug_atlas.hh>
+#include <shaped-rendering/slug_routine.hh> // sr::slug_instance
+#include <shaped-viewer/drawing/decal.hh>
+#include <shaped-viewer/drawing/drawing_manager.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -236,6 +240,53 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
     return buffer;
 }
 
+/// A layer's decals as the trace reads them: each projector, and the shapes it covers read back from the decal atlas.
+struct traced_decals
+{
+    cc::vector<shaders::tracer::decal_record> decals;
+    cc::vector<shaders::tracer::decal_shape> shapes;
+};
+
+/// `l`'s decals over `atlas`, skipping one that draws nothing.
+[[nodiscard]] traced_decals decals_of(layer const& l, sr::slug_atlas const& atlas)
+{
+    auto out = traced_decals{};
+    for (auto const& d : l.decals)
+    {
+        if (d.record_count == 0)
+            continue;
+        out.decals.push_back(impl::decal_record_of(d, u32(out.shapes.size())));
+        for (auto i = u32(0); i < d.record_count; ++i)
+            out.shapes.push_back(impl::decal_shape_of(atlas.record(d.first_record + i)));
+    }
+    return out;
+}
+
+/// What a trace binds for `decals`: the two buffers and the atlas, prepared, or all null for none.
+struct uploaded_decals
+{
+    sg::buffer<shaders::tracer::decal_record> decals;
+    sg::buffer<shaders::tracer::decal_shape> shapes;
+    sr::slug_atlas const* atlas = nullptr;
+};
+
+[[nodiscard]] uploaded_decals upload_decals(sg::command_list& cmd, traced_decals const& decals, sr::slug_atlas& atlas)
+{
+    if (decals.decals.empty())
+        return {};
+
+    auto& ctx = cmd.context();
+    atlas.prepare(cmd);
+    auto out = uploaded_decals{.decals = ctx.transient.create_buffer<shaders::tracer::decal_record>(
+                                   decals.decals.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst),
+                               .shapes = ctx.transient.create_buffer<shaders::tracer::decal_shape>(
+                                   decals.shapes.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst),
+                               .atlas = &atlas};
+    cmd.upload.data_to_buffer(out.decals, decals.decals);
+    cmd.upload.data_to_buffer(out.shapes, decals.shapes);
+    return out;
+}
+
 shaders::tracer::frame_constants make_frame_constants(view_data const& v,
                                                       layer const& l,
                                                       pt_light_table const& lights,
@@ -248,6 +299,7 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     auto cam = v.camera;
     cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1] > 0 ? resolution[1] : 1);
     fc.camera = camera_record_of(cam);
+    fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(resolution[1] > 0 ? resolution[1] : 1);
 
     lights.describe_in(fc);
 
@@ -280,6 +332,7 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
 [[nodiscard]] u64 trace_hash(shaders::tracer::frame_constants fc,
                              background_gpu const& bg,
                              pt_light_table const& lights,
+                             traced_decals const& decals,
                              resolved_view const& r,
                              tg::vec2i resolution,
                              u64 shader_generation)
@@ -294,6 +347,10 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     // Every byte of a shaders::tracer::light_record is written, pads included, so equal lights hash equal and any change is seen.
     h = cc::combine_hash(
         h, cc::make_hash_of_bytes(cc::span<shaders::tracer::light_record const>(lights.records).as_bytes()));
+
+    // Every byte of both is written too, pads included.
+    h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<shaders::tracer::decal_record const>(decals.decals).as_bytes()));
+    h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<shaders::tracer::decal_shape const>(decals.shapes).as_bytes()));
     h = cc::combine_hash(h, cc::make_hash(resolution[0], resolution[1], shader_generation));
 
     // tlas_instance holds a handle and an optional, so its padding is not hashable — take the fields the build reads.
@@ -518,15 +575,17 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.
     auto const lights = traced_lights(l);
+    auto const decals = decals_of(l, resources.drawings.decal_atlas());
     auto fc = make_frame_constants(v, l, lights, tr.resolution);
+    fc.decal_count = u32(decals.decals.size());
     auto const bg = background_gpu::from(l.background);
-    auto const hash = trace_hash(fc, bg, lights, resolved, tr.resolution, self->_shader_generation);
+    auto const hash = trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation);
 
     // The same, with the camera left out: what a temporal denoiser's history restarts on.
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
     auto scene_fc = fc;
     scene_fc.camera = {};
-    auto const scene_hash = trace_hash(scene_fc, bg, lights, resolved, tr.resolution, self->_shader_generation);
+    auto const scene_hash = trace_hash(scene_fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation);
 
     auto& rec = store.get_or_create(v.id);
 
@@ -668,6 +727,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     auto const instance_table = upload_instances(cmd, resolved);
     auto const light_buffer = upload_lights(cmd, lights);
+    auto const decal_buffers = upload_decals(cmd, decals, resources.drawings.decal_atlas());
 
     // Held across the dispatch: the tables are what the closest-hit reaches every mesh and texture through, and
     // nothing may mint a descriptor the bound snapshot would not contain while it is being recorded against.
@@ -706,7 +766,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
               // compile, and a triangle-only scene must not owe a drain for a group it can never select.
               .fallback = &resources.shaders.acquire_fallback(),
               .quadric_fallback = quadric_fallback,
-              .bindless = &bindless});
+              .bindless = &bindless,
+              .decals = decal_buffers.decals,
+              .decal_shapes = decal_buffers.shapes,
+              .decal_atlas = decal_buffers.atlas});
 
     // Only a frame that actually dispatched advances the accumulation: counting a declined one would make the blend
     // weight say more samples had landed than did, and the estimate would stop moving toward the answer.
@@ -927,9 +990,11 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const resolved = resolve_scene(cmd, *scene, resources);
 
     auto const lights = traced_lights(*scene);
+    auto const decals = decals_of(*scene, resources.drawings.decal_atlas());
     auto fc = make_frame_constants(v, *scene, lights, v.resolution);
+    fc.decal_count = u32(decals.decals.size());
     auto const bg = background_gpu::from(scene->background);
-    auto const hash = trace_hash(fc, bg, lights, resolved, v.resolution, shader_generation);
+    auto const hash = trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation);
 
     // No plan here to size the view's temporal inputs, so this path resolves the ones it needs itself.
     // The layer index is the primary scene_3d's, which `primary_scene_3d` already found.
@@ -971,6 +1036,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     auto const instance_table = upload_instances(cmd, resolved);
     auto const light_buffer = upload_lights(cmd, lights);
+    auto const decal_buffers = upload_decals(cmd, decals, resources.drawings.decal_atlas());
     auto const bindless = resources.freeze();
 
     // Acquired as soon as the view holds a quadric batch, rather than when one is caught uncompiled: the trace
@@ -996,7 +1062,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
               // compile, and a triangle-only scene must not owe a drain for a group it can never select.
               .fallback = &resources.shaders.acquire_fallback(),
               .quadric_fallback = quadric_fallback,
-              .bindless = &bindless});
+              .bindless = &bindless,
+              .decals = decal_buffers.decals,
+              .decal_shapes = decal_buffers.shapes,
+              .decal_atlas = decal_buffers.atlas});
 
     // As above: a declined trace recorded nothing, so it must not count as a sample.
     if (traced == sg::routine_outcome::executed && slot.accum_frame < accumulation_frame_cap)

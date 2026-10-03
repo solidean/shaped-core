@@ -75,6 +75,21 @@ public:
     [[nodiscard]] sr::slug_atlas& atlas(u32 page) { return _pages[isize(page)].atlas; }
     [[nodiscard]] isize page_count() const { return _pages.size(); }
 
+    /// The id for `set` placed in the decal atlas rather than a page, keyed apart from the same set drawn as an instance.
+    /// **Every decal lives in one atlas**, since a trace binds one: when a set does not fit it, the atlas is emptied
+    /// and its sets placed again as they are next acquired, unless a decal drew from it this frame.
+    /// Then the set draws nothing, and the manager says so once.
+    [[nodiscard]] drawing_set_id acquire_decal(drawing_set const& set);
+
+    /// The same for a lone drawing.
+    [[nodiscard]] drawing_set_id acquire_decal(drawing const& d);
+
+    /// The atlas every decal's shapes and records live in; whoever traces with it prepares it.
+    [[nodiscard]] sr::slug_atlas& decal_atlas() { return _decals.atlas; }
+
+    /// What `page_of` answers for a set in the decal atlas.
+    static constexpr u32 decal_page = u32(-1);
+
 private:
     struct page
     {
@@ -83,7 +98,13 @@ private:
         sg::epoch last_used = sg::epoch(0);
     };
 
+    [[nodiscard]] page& _page(u32 index) { return index == decal_page ? _decals : _pages[isize(index)]; }
+
     [[nodiscard]] drawing_set_id _place(cc::hash128 hash, cc::span<drawing const> drawings);
+    [[nodiscard]] drawing_set_id _place_decal(cc::hash128 hash, cc::span<drawing const> drawings);
+
+    /// A record of `count` drawings that draw nothing, for a set that fits nowhere.
+    [[nodiscard]] static drawing_set_record _empty_record(isize count);
 
     /// Places every drawing of a set in `p`, or reports that one did not fit.
     [[nodiscard]] bool _try_place(page& p, cc::span<drawing const> drawings, drawing_set_record& out, isize& bytes);
@@ -92,10 +113,12 @@ private:
     [[nodiscard]] u32 _fresh_page();
 
     cc::vector<page> _pages;
+    page _decals;
     u32 _current = 0;
     int _page_rows = 512;
     isize _max_pages = 4;
     sg::epoch _epoch = sg::epoch(0);
     bool _warned_full = false;
     bool _warned_over = false;
+    bool _warned_decals_full = false;
 };
