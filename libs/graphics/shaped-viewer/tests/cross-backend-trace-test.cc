@@ -6,6 +6,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -532,6 +533,17 @@ constexpr trace_case all_cases[] = {trace_case::pbr,
                                     trace_case::cutout,
                                     trace_case::unlit,
                                     trace_case::quadrics};
+
+/// One triangle spelling and the quadrics, the two kinds of hit group; every spelling only under --thorough.
+/// A debug build compiles each spelling's hit groups through an unoptimized SGL front end, which is what this narrows.
+constexpr trace_case default_cases[] = {trace_case::pbr, trace_case::quadrics};
+
+[[nodiscard]] cc::span<trace_case const> cases_to_trace()
+{
+    if (nx::is_thorough())
+        return all_cases;
+    return default_cases;
+}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - every material spelling traces a lit, finite image",
@@ -540,7 +552,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - every material spelling traces a l
     if (auto const reason = cannot_trace(*ctx_h); reason.has_value())
         SKIP(reason.value());
     // In sequence on the one context rather than as sections, which would bring the invocation up again per case.
-    for (auto const c : all_cases)
+    for (auto const c : cases_to_trace())
     {
         auto const image = co_await image_of(ctx_h.get(), c);
         auto const mean = checked_mean(image, name_of(c));
@@ -563,7 +575,7 @@ ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to roundi
 
     auto reference = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
     auto const has_reference = reference.has_value() && !cannot_trace(*reference.value()).has_value();
-    for (auto const c : all_cases)
+    for (auto const c : cases_to_trace())
     {
         auto const own = co_await image_of(ctx.value().get(), c);
         auto const mean = checked_mean(own, cc::format("{} on vulkan", name_of(c)));
