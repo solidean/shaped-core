@@ -2,8 +2,6 @@
 //
 // The guides are the one part of the shading a denoiser reads directly, so they are also the part worth asserting on numerically rather than through an image.
 // They take nothing but the surface, so a probe can call them without the path tracer's bindings.
-//
-// The SGL port of shaders/pt_guides.hlsli.
 module openpbr
 
 /// The reflectance a denoiser divides out before it filters, so texture detail is not averaged away with the noise.

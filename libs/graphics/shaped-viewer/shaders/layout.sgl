@@ -1,0 +1,73 @@
+// The one shader that draws a layout: the frame's chrome, and every view placed where the layout put it.
+// Paired with sv::layout_routine, which draws 3 vertices and no vertex buffer.
+//
+// One entry point per draw kind rather than an uber-shader branch, so each gets its own pipeline through the routine's keyed cache.
+// The covering triangle is generated from the vertex index, and the caller's viewport is what confines it to the draw's rect — nothing here knows a rect.
+//
+// Every sv view target holds PREMULTIPLIED alpha: straight alpha is not associative across a nesting chain, and a three-level composite would visibly darken edges.
+
+/// Rewritten per draw.
+@inline binding layout_constants:
+    /// xy scale, zw bias — the primary source's sub-rect
+    uv_scale_bias_0: float4
+    /// the wipe's second source
+    uv_scale_bias_1: float4
+    /// multiplied into the sample; also the border's flat color
+    tint: float4
+    /// x split in [0,1], y axis (0 = horizontal), z separator half-width in uv, w unused
+    wipe: float4
+    /// the wipe's seam band
+    separator_color: float4
+
+/// The sampler is dynamic rather than static: a draw picks nearest or linear, so its state is the caller's.
+binding layout_sources:
+    source_0: texture_2d[float4]
+    source_1: texture_2d[float4]
+    source_sampler: sampler
+
+struct layout_varyings:
+    @position position: hpos4
+    uv0: float2
+    uv1: float2
+
+    /// The draw-local [0,1] coordinate, before any source sub-rect.
+    /// A wipe's split must sit where the leaf is on screen, whatever each side happens to sample.
+    local: float2
+
+@pixel struct layout_target:
+    color: float4
+
+// Vertices 0, 1 and 2 land at (0,0), (2,0) and (0,2): one triangle covering the viewport the caller set to this draw's rect.
+@vertex fun main_vs(@vertex_index vertex: int){layout_constants} -> layout_varyings:
+    let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return {
+        position = hpos4(clip.x, clip.y, 0.0, 1.0)
+        uv0 = t * layout_constants.uv_scale_bias_0.xy + layout_constants.uv_scale_bias_0.zw
+        uv1 = t * layout_constants.uv_scale_bias_1.xy + layout_constants.uv_scale_bias_1.zw
+        local = t
+    }
+
+// A border band: one flat color over the viewport.
+@pixel fun border_ps(v: layout_varyings){layout_constants} -> layout_target:
+    return { color = layout_constants.tint }
+
+// One view across its rect.
+@pixel fun view_ps(v: layout_varyings){layout_sources, layout_constants} -> layout_target:
+    let sample = layout_sources.source_0.sample(v.uv0, layout_sources.source_sampler, level = 0.0)
+    return { color = sample * layout_constants.tint }
+
+// Two views split along an axis, with an optional separator band on the split itself.
+@pixel fun wipe_ps(v: layout_varyings){layout_sources, layout_constants} -> layout_target:
+    let wipe = layout_constants.wipe
+    let along = if wipe.y < 0.5 => v.local.x else v.local.y
+    let split = wipe.x
+    let a = layout_sources.source_0.sample(v.uv0, layout_sources.source_sampler, level = 0.0)
+    let b = layout_sources.source_1.sample(v.uv1, layout_sources.source_sampler, level = 0.0)
+    let mut c = if along < split => a else b
+
+    // The separator is drawn opaque over the seam; a zero half-width draws none.
+    let half_width = wipe.z
+    if half_width > 0.0 and abs(along - split) < half_width:
+        c = layout_constants.separator_color
+    return { color = c * layout_constants.tint }

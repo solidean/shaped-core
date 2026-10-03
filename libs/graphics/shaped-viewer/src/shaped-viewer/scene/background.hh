@@ -66,9 +66,9 @@ namespace sv
 [[nodiscard]] sky_and_sun daylight();
 } // namespace sv
 
-/// GPU-side SH probe, mirroring the `Background` cbuffer in shaders/background.hlsli.
-/// Each coefficient sits in its own 16-byte lane (`.xyz` = RGB radiance, `.w` unused), because HLSL pads cbuffer array elements to a full float4 lane.
-/// Bound at b1, evaluated by the miss shaders (`background_radiance`).
+/// GPU-side SH probe, the `float4[16]` the tracer reads as `traced.background`.
+/// Each coefficient sits in its own 16-byte lane (`.xyz` = RGB radiance, `.w` unused).
+/// Evaluated by the miss shaders through `scene.background_radiance`.
 struct sv::background_gpu
 {
     tg::vec4f sh[background::sh_coefficient_count] = {};
@@ -86,5 +86,5 @@ struct sv::background_gpu
 namespace sv
 {
 static_assert(sizeof(background_gpu) == sizeof(tg::vec4f) * background::sh_coefficient_count,
-              "background_gpu must be a tight array of vec4 lanes to match the HLSL cbuffer");
+              "background_gpu must be a tight array of vec4 lanes, as traced.background reads it");
 } // namespace sv

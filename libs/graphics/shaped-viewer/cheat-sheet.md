@@ -9,7 +9,8 @@ The authoring surface sits at the root; everything else is one folder down — `
 > **Scope note:** early stage, in three layers.
 > A frame is authored through the fluent handles (`sv::interactive` → `frame` → `window_ref` → `view_ref` → `scene_ref`), flattened into a `render_plan`, and replayed by `viewer_renderer`.
 > A **view is the definition of one texture**, and a view's layer may itself be a whole layout tree — so views nest, at any depth.
-> Rendering needs a ray-tracing backend: dx12 + DXR on Windows today, since vulkan RT is stubbed upstream.
+> Rendering needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracer runs on dx12 and vulkan.
+> The default context and the examples are dx12's.
 > The API is present everywhere; without a backend a routine just draws nothing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
@@ -78,9 +79,7 @@ sv::background::lobe(direction, radiance)      // -> background — soft lobe pe
 sv::background::studio()                       // -> background — neutral gray brighter overhead
 sv::daylight()                                 // -> sky_and_sun { background sky; light sun; } — the sky holds NO sun; set both: background(d.sky) + add_light("sun", d.sun)
 bg.combined_with(other) / bg.scaled(factor)    // -> background — SH is linear, so environments superpose and scale; how a gradient and a lobe compose
-sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss's Background cbuffer at b1
-sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — pbr_raytrace_routine's vocabulary, flat per-triangle
-                                 //   the path tracer shades through sv::material instead; the same four fields are attributes of the builtin `pbr` type
+sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss reads it as `traced.background`
 ```
 
 ## Layout — the tree a view is filled with
@@ -169,7 +168,7 @@ m.create_mesh(sv::mesh)                // -> resident_mesh const&, INTO the mesh
 m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
 m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_mesh followed by the resolution above
-m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
+m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a hit reads by its instance id
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
 m.attributes_resident(instance_id)              // -> bool; until true the item shades through the fallback, binding no still-streaming attribute
 sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv::instance
@@ -192,16 +191,16 @@ Gotchas:
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
 - **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
-- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `sv::instance` in `shaders/material_runtime.hlsli`.
+- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `scene.instance` in `shaders/sgl/scene_items.sgl`.
 
 ## Materials — a type, an instance, and the frequency chain
 
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
 
 ```cpp
-sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute; string sgl_shader; hash128 hash; }
-sv::material_type::create(name, signature, shader, opacity_attribute = {}, sgl_shader = {})  // -> hashes all five; asserts a name declared twice, and a default that is not its format's size
-                                 //   sgl_shader: the same fragment in SGL, unindented; a type without one shades with the SGL tracer's fallback
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute; hash128 hash; }
+sv::material_type::create(name, signature, shader, opacity_attribute = {})  // -> hashes all four; asserts a name declared twice, and a default that is not its format's size
+                                 //   shader: an SGL FRAGMENT, statements unindented, attributes immutable locals, `surface` the one `let mut`
 t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
 sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
 sv::material_signature_entry::of("roughness", 0.5f)   // -> format deduced via attribute_format_of<T>; trailing bool pins it final
@@ -260,9 +259,20 @@ Gotchas:
 - **Nothing is ever evicted from a library.** A `material_id` is written into GPU memory outliving its frame, so the ids have to stay meaningful; this is why it is not an `impl::lru_pool`.
 - **`material::create` validates nothing** against the type, because it cannot see one.
   `material_library::acquire` is where a binding naming an undeclared attribute asserts.
-- **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
-- **A type carries its fragment twice while both tracers stand**: `shader` in HLSL, `sgl_shader` in SGL, statements unindented and attributes immutable.
-  `shader` goes with the HLSL tracer.
+- **A `material_type::shader` is an SGL FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+  SGL is the one portable form, so it is the only one: the same fragment shades on every backend the tracer runs on.
+
+```cpp
+// A custom type: one tint, lit like plaster, cut out where its opacity says.
+auto signature = cc::vector<sv::material_signature_entry>();
+signature.push_back(sv::material_signature_entry::of("tint", tg::vec3f(0.9f, 0.9f, 0.85f)));
+signature.push_back(sv::material_signature_entry::of("opacity", 1.0f));
+auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::move(signature),
+                                                                 "surface.base_color = saturate(tint)\n"
+                                                                 "surface.specular_roughness = 0.8\n"
+                                                                 "surface.geometry_opacity = saturate(opacity)\n",
+                                                                 "opacity"));
+```
 - **An acquire creates the buffer and hands the payload to `ctx.stream`; it does not upload.**
   `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.
   The buffer exists immediately, so a descriptor naming it is always valid; only its contents are in flight.
@@ -294,50 +304,40 @@ Gotchas:
   A `zero` / `one` selector cannot be spelled as a letter swizzle, so the generator widens it through the declaration's own type (`float3(texel.b, texel.g, 1.0)`).
 - **Color space is part of `texture_data`'s `sg::pixel_format`**, and therefore part of its hash — so a texture bound as both sRGB and linear uploads twice.
   Rare, correct, and better than a per-sample decode flag that makes one resident texture mean two things.
-- **`surface` is OpenPBR's parameter set** (`sv::surface`, `shaders/openpbr.hlsli`), not a metallic-roughness struct.
+- **`surface` is OpenPBR's parameter set** (`openpbr.surface`, `shaders/sgl/openpbr_closure.sgl`), not a metallic-roughness struct.
   Every type writes that one vocabulary, which is what lets the integrator evaluate a single layered BSDF whatever the material was authored as.
-- **The generator emits `#define SV_ATTR_SUPPLIED_<name> 0/1` per attribute**, one constant per permutation.
+- **The generator emits `const sv_supplied_<name> = false/true` per attribute**, one constant per permutation.
   It separates "something supplied this" from "the declaration's default came through", which a fragment cannot tell and the tangent frame depends on:
   an unsupplied frame must fall back to the geometric one rather than trust the identity rotation, which points at object-space +z.
 
 ## Material shaders — one permutation, generated
 
-`material/shader_generator.hh`; `shaders/material_runtime.hlsli` is the hand-authored half it is written against.
+`material/shader_generator.hh`; modules `material`, `openpbr` and `tracer` (shaders/sgl) are the hand-authored half it is written against.
 
 ```cpp
-sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; layout; string sgl_source; vector<sg::sampler> samplers; bool can_cut_out; hash128 key;}
-                                 //   samplers[i] is what `sv_sampler_i` must be bound to; the generated text names no register, and nothing else records the state
-                                 //   sgl_source: `hit_group sv_material for path_rays`, the SGL tracer's group for the permutation, empty without an sgl_shader
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; layout; bool can_cut_out; hash128 key;}
+                                 //   source: `hit_group sv_material for path_rays`, one SGL file slib::compile_hit_group takes
 sv::sgl_palette_sampler(sampler) // -> "palette_<mag filter>_<u>_<v>", module tracer's static sampler a texture of that state is sampled through
-sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
-sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; geometry_kind kind; }
-                                 //   kind picks the SGL group's geometry: a triangle group, or a procedural one with the quadric intersection
-                                 //   epilogue_include is emitted AFTER the entry function, for code that CALLS it
-{.epilogue_include = "pt_material_hit.hlsli"}   // -> a full DXR closest-hit for this permutation, not just the material function
+sv::sgl_type_of(format)          // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
+sv::material_shader_options      // { geometry_kind kind = triangles; } — a triangle group, or a procedural one with the quadric intersection
 sv::material_shader_key(permutation_key, opts)  // -> hash128 — what `g.key` is, without generating anything
 
-resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, in the context's preferred format, over cfg.bindless
-sv::material_shader_cache::create(format, opts = {}, ctx = nullptr)   // one compiled closest-hit per permutation; `opts` is COPIED and is part of the key
-                                 //   ctx is what the SGL hit groups compile for; null makes every permutation's SGL group an error
-sv::material_shader_cache::hit_entry_point / hit_epilogue_include   // "PtClosestHit" / "pt_material_hit.hlsli"
-cache.generation_options()       // -> material_shader_options borrowing from the cache — what to pass material_shader_key
-cache.acquire(resolved)          // -> material_permutation const& {hash128 key; layout; vector<sg::sampler> samplers; async_compiled_shader shader; string source;}
-p.sgl_hit_group                  // -> shared_async<vector<sg::hit_shader>>, COLD: slib::compile_hit_group over p.sgl_source, which only the SGL tracer starts
+resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, compiling for its context
+sv::material_shader_cache::create(&ctx)   // one hit group per permutation; a null ctx makes every permutation's hit group an error
+cache.acquire(resolved, kind = triangles) // -> material_permutation const& {hash128 key; layout; geometry_kind kind; bool can_cut_out; hit_group; string source;}
+p.hit_group                      // -> shared_async<vector<sg::hit_shader>>, COLD: one hit shader per ray type, which pathtrace_routine starts
+cache.acquire_fallback(kind) / acquire_quadric_fallback()  // the neutral permutation of each kind, over an EMPTY signature
 cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
 sv::material_parameter_layout    // { vector<material_slot> slots; i32 size_bytes; } — the per-instance block, 4-byte aligned
 sv::material_slot                // { string name; material_slot_kind kind; i32 offset, size_bytes; attribute_format format; i32 attribute_index; }
 sv::material_slot_kind           // constant | attribute_descriptor (an sv::attribute_desc) | texture_index (a u32 into the 2D table)
-
-slib::shader_library::compile_source(src, stage, entry, format, {.include_dir = "sv_shaders"})  // -> sg::async_compiled_shader
 ```
 
-The generated source is, in order: the runtime include, every budgeted bindless table (a subset would renumber them), one `SamplerState` per
-distinct sampler, then the entry function.
-That function declares one local per signature attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
-and then runs the type's fragment verbatim over them.
-The loads run in a NESTED BLOCK, so the parameter buffer, an attribute's descriptor and a sampled uv never reach the fragment's scope.
-`g.key` is `material_shader_key(resolved.permutation_key, opts)`: the resolution's shape AND how these options spell it.
-Two calls agreeing on that pair generate byte-identical source, and nothing else may share their cache entry — a second cache over different bindless budgets gets its own.
+The generated hit group joins modules `material`, `openpbr`, `tracer` and, for quadrics, `quadric`, then holds, in order:
+a `const sv_supplied_<name>` per attribute, a `fun sv_attribute_<name>(ctx)` per attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
+then `sv_evaluate_material(ctx)`, which binds each attribute to an immutable local and runs the type's fragment, and the stages over it.
+`g.key` is `material_shader_key(resolved.permutation_key, opts)`: the resolution's shape AND the geometry it is spelled for.
+Two calls agreeing on that pair generate byte-identical source, and nothing else may share their cache entry.
 
 Gotchas:
 
@@ -345,19 +345,17 @@ Gotchas:
   Nothing recomputes it independently, which is why it comes back with the source rather than being derivable.
 - **A sampled attribute takes TWO slots** — the texture index, and the `sv::attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
 - **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
-  Three strides plus a runtime branch would be the other trade; see `material_runtime.hlsli`.
-- **`SampleLevel`, never `Sample`** — a ray tracing hit shader has no derivatives to pick a mip from.
-- **Every bindless index is wrapped in `NonUniformResourceIndex`**, because it varies per instance within a wave.
+- **A sample names its level, 0** — a ray tracing hit shader has no derivatives to pick a mip from.
+- **Every bindless index is `nonuniform`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
-- **The runtime lives in `namespace sv`**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
-  `sv_` survives only for `sv_sampler_i` and the entry point, whose names are what reflection reports and what the trace matches on.
-- **An attribute name is pasted in as a local**, so `material_type::create` rejects one that is not a plain identifier, is an HLSL keyword or builtin type, starts with `sv_`, or is `surface` / `ctx`.
+- **Each load is a function of its own**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
+  `sv_` is the generator's prefix: `sv_attribute_*`, `sv_supplied_*` and the material function.
+- **An attribute name is pasted in as a local**, so `material_type::create` rejects one that is not a plain identifier or is a keyword or builtin type.
+  So is one naming a module a hit group uses, one starting with `sv_`, and `surface` / `ctx`.
   Rejected rather than sanitized: the type's own fragment is written against the declared name.
-- **A generated permutation does not hot-reload on an include edit** — the key hashes the resolution and the options, not the include's contents.
-- **The SGL group samples through a fixed palette**, never through per-permutation samplers: module `tracer` declares one static sampler per magnification filter and address mode of each axis.
+- **A generated permutation does not hot-reload on a module edit** — the key hashes the resolution and the geometry kind, not the modules' contents.
+- **A texture samples through a fixed palette**, never through per-permutation samplers: module `tracer` declares one static sampler per magnification filter and address mode of each axis.
   A hit samples level 0, where only the magnification filter applies, so the minification and mip filters are dropped; `sgl_palette_sampler` says what else is.
-- **The SGL group's loads are functions, `sv_attribute_<name>(ctx)`**, which is the nested block of the HLSL source: the fragment still shares its scope with the attributes, `surface` and `ctx` alone.
-  `const sv_supplied_<name>` is what `SV_ATTR_SUPPLIED_<name>` is in HLSL.
 
 ## Mesh authoring — geometry + what a material reads
 
@@ -491,7 +489,7 @@ s.add_arrow(tg::segment3f(a, b), 0.01f, steel);     //   ...or to a fixed shaft,
 **`add` is the only mutator** — the named factories all funnel through it, and `add(quadric_primitive)` takes a record the factories do not cover.
 That is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
 The hash is one pass over the primitive span, taken on the first `hash()` after a mutation and cached, so a set filled once and placed every frame hashes once.
-It is order-SENSITIVE without arranging for it, because the byte range IS the primitive order, which is what `PrimitiveIndex()` reads.
+It is order-SENSITIVE without arranging for it, because the byte range IS the primitive order, which is what a hit's primitive index reads.
 The bounds fold alongside it and stay OUT of the identity, as do the name, the material and the transform — so recoloring or re-placing a million-primitive batch re-uploads nothing.
 
 **The primitives live in the SET's space**, and `transform` places that space in the world.
@@ -506,7 +504,7 @@ Where the joints already carry vertex spheres, the default `open` end is exact t
 
 **There is ONE frequency set and a geometry admits the subset its own primitives number**, which is what lets one material definition generate one shader body for both.
 A batch numbers its primitives and nothing else, so it admits `per_instance` and `per_triangle`.
-The latter means "one value per element of the primitive stream, indexed by `PrimitiveIndex()`" — a triangle for a mesh, a quadric for a batch.
+The latter means "one value per element of the primitive stream, indexed by the hit's primitive index" — a triangle for a mesh, a quadric for a batch.
 The two geometries differ in the PREAMBLE that builds the shading context, and in nothing the material fragment reads.
 A frequency the geometry cannot number loses to the coarser rank like any other unusable candidate.
 The texture ranks are unreachable on a quadric, because a sample needs a uv and a general quadric has no surface parameterization.
@@ -645,27 +643,24 @@ Reachable through `view.camera_style(sv::camera_style::fly)` — a caller does n
 ## Resources by id — the managers
 
 ```cpp
-sv::gpu_resource_manager::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, materials, textures; bindless_config bindless }
+sv::gpu_resource_manager::create(ctx, cfg)  // named ctor; cfg = { manager_config meshes, quadrics, textures, attributes; texture_policy; work_budget }
 sv::mesh_manager::create(ctx, cfg)     // cfg = manager_config { resource_budget budget }; ctx must outlive it
 
 // What you hand a manager: an owning cc::pinned_data payload + the cc::hash128 that identifies it.
 sv::triangle_data          // { pinned_data<pos3f const> positions; hash128 hash; } — non-indexed list, 3 positions per triangle
 sv::indexed_triangle_data  // { pinned_data<pos3f const> positions; pinned_data<u32 const> indices; hash128 hash; } — 3 indices per triangle
-sv::material_data          // { pinned_data<pbr_material const> materials; hash128 hash; } — one per triangle
 T::create(range…)          // pins (moving an owning rvalue in, deep-copying a borrow) + hashes now (XXH3-128); call once at authoring time, not per frame
 sv::hash_bytes_of(span) / sv::combine_hashes(a, b)  // the hashing primitives, if you key content yourself
 
 mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else uploads + builds a non-indexed BLAS
-mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, but an indexed BLAS: PrimitiveIndex() order follows the index buffer
+mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, but an indexed BLAS: primitive order follows the index buffer
 sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas; }
-material_manager::acquire(material_data) -> material_set_id  // O(1) if resident; else uploads (one pbr_material_gpu per triangle)
-                                                             //   pbr_raytrace_routine's path only — the path tracer reads a per-instance block instead
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
 manager.used_bytes() / count() / evict(id)          // current residency; manual drop
 resources.advance_to(epoch)                         // reclaim + advance; IDEMPOTENT, so every window's draw path may call it and the first one pays
 resources.current_epoch()                           // -> sg::epoch — what it last advanced to
-sv::mesh_id / material_set_id / instance_id / attribute_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
+sv::mesh_id / instance_id / attribute_id / tlas_id / texture_id / buffer_id   // enum class : u32; ::invalid == u32(-1) (ids mint from 0)
 ```
 
 The managers ride on `sv::impl::lru_pool<Id, Record>`, the reusable id-pool.
@@ -674,20 +669,16 @@ It never evicts this frame's working set; `advance_to` in its header states that
 It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
 A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
 
-### Bindless tables — declared by sv, owned by the manager
+### Bindless tables — declared by module `tracer`, owned by the manager
 
 ```cpp
 sv::bindless_table          // enum class : u8 — textures_1d / _1d_array / _2d / _2d_array / cube / cube_array / _3d / buffers (+ count_)
-sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: gBindlessTextures2D, gBindlessBuffers, …
-sv::bindless_group          // -> int — the ONE group every table shares; the binding pass numbers them in declaration order
-sv::bindless_declarations(cfg)  // -> cc::string — the annotated HLSL namespace declaring every budgeted table, for the generator to emit
-sv::material_sampler_group  // -> int — the group a permutation's OWN samplers go in, separate from the tables'; its layout is the third in the pipeline layout
-sv::material_sampler_namespace  // -> cc::string_view — the annotated namespace the generator emits them into
-sv::bindless_table_budget   // { bindless_table table; u32 count; }  — count 0 OMITS the table; a non-zero count < 2 ASSERTS (sg reads 1 as a scalar binding)
-sv::bindless_config         // { cc::vector<bindless_table_budget> tables = default_bindless_tables(); }
-sv::make_bindless_bindings(cfg)  // -> cc::vector<sg::binding> — the hand-declared layout; pure, so it needs no context
+sv::bindless_bindings()     // -> span<sg::binding const> — `binding bindless` of shaders/sgl/tracer_bindings.sgl, in table order: THE layout
+sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: bindless.textures_2d, bindless.buffers, … — what a footprint resolves by
+sv::capacity_of(table)      // -> u32 — the module's element count for it; a size is changed in the .sgl, not in a config
+sv::bindless_group          // -> int — 1: the slot the tables bind at in the tracer's pipeline layout
 
-m.acquire_texture(table, raw_view) -> sg::bindless_index   // THIS EPOCH ONLY; asserts when frozen or when the table is not declared
+m.acquire_texture(table, raw_view) -> sg::bindless_index   // THIS EPOCH ONLY; asserts when frozen
 m.acquire_buffer(raw_view) -> sg::bindless_index           // the same for the byte-address table
 m.pin_texture(table, raw_view) -> sg::bindless_element_handle  // pinned; h->index() outlives the epoch. NOTHING in sv uses one
 m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for the byte-address table
@@ -696,9 +687,9 @@ m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot 
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
 bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
-bound.declare_raytracing_access(cmd)        // declares EVERY declared table for the next dispatch_rays, empty ones included
+bound.declare_raytracing_access(cmd)        // declares EVERY table for the next dispatch_rays, empty ones included
 m.bindless_layout()                         // -> the same layout, without taking a snapshot
-m.has_table(table) / m.table_capacity(table)
+m.table_capacity(table)                     // -> u32 — capacity_of(table), as the array holds it
 
 // textures + the follow-up work their policy asks for
 sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; the SHAPE is part of the key, not just the bytes
@@ -750,36 +741,28 @@ sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // outp
                                                           //   an empty plan still opens no pass; an empty def leaves the clear alone to land
 
 // The leaf routines they drive — each an sg::render_routine<> (everything that traces/draws is a routine):
-sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches the GI integrator into the UAV target (no-op if the shaders did not compile)
+sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches shaders/tracer_pipeline.sgl into the image target; declines until its hit groups, description and pipeline land
 sv::pathtrace_routine::is_ready(cmd)                 // -> whether the LAST execute dispatched; false before the first one
 sv::pt_trace_desc                                    // the trace's targets and constants, plus:
                                                      //   instance_table — one sv::instance_gpu per TLAS instance, in that order
-                                                     //   hit_groups     — the permutations, in hit-group index order; tlas_instance::hit_group_offset indexes it
+                                                     //   hit_groups     — the permutations; tlas_instance::hit_group_offset is 2 * index, rewritten to that permutation's row
+                                                     //                    one not compiled yet is substituted by fallback / quadric_fallback, by its kind
                                                      //   lights         — every light, grouped by path (pt_light_table::records); NULL means none, and light_count must be 0
                                                      //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
+                                                     //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
+                                                     //   the guide and split targets are typed: rgba16_float / r32_float / rg32_float as sv allocates them
 sv::pt_frame_constants_gpu                           // { camera_gpu camera; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; u32 light_count; u32 path_offset[4], path_count[4]; } — 256 bytes
 sv::pt_light_table::grouped(span<light_gpu>)         // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
 table.describe_in(fc)                                // writes light_count + the per-path table into the frame block, so the two cannot disagree
 
-// Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
-sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + one image-based-lit sample per pixel (SH diffuse irradiance + Fresnel env reflection) into the UAV target (no-op if the shaders did not compile)
-
-// The tracer's SGL port (shaders/tracer_pipeline.sgl + module `tracer`), side by side until it is proven; no viewer reaches it yet.
-sv::sgl_pathtrace_routine::execute(cmd, pt_trace_desc) // the same desc, the same estimate; declines until its hit groups, description and pipeline land
-                                                     //   hit_groups shade through each permutation's sgl_hit_group, substituted by fallback / quadric_fallback by kind
-                                                     //   an instance's hit_group_offset is read as the HLSL tracer's, 2 * permutation, and rewritten to that row
-                                                     //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
-                                                     //   the guide and split targets are typed: rgba16_float / r32_float / rg32_float as sv allocates them
-
-sv::shader_package()                                 // register once on an slib::shader_library before rendering
-sv::sgl_shader_package()                             // the SGL tracer's package, beside it; sv's default library adds both
+sv::shader_package()                                 // the one SGL package: tracer + module tracer, layout and depth fill; sv's default library adds it
 ```
 
 [`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward one light, picked uniformly, and the SH environment.
 Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
 What a caller supplies is a view.
-The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `Lights`, and writes its table into `pt_frame_constants_gpu`.
+The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `traced.lights`, and writes its table into `pt_frame_constants_gpu`.
 Every path is traced; a point or a parallel light is a delta and has next-event estimation alone (docs/lights.md).
 The pick probability `1/N` is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced whatever N is.
 A layer with no lights falls back to `layer::fallback_light` — `sv::default_fallback_light()`, a sun — which `scene.fallback_light(cc::nullopt)` turns off.
@@ -796,7 +779,7 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   It is sticky until a frame traces the view, and it restarts no accumulation of its own.
 - **The specular guides** `temporal_id::specular_albedo_guide` (F0, blended to the base colour by metalness) and `roughness_guide` (the coat's where a coat covers the base).
   Declared for every member with the other guides: a split member reads them beside the diffuse albedo, and à-trous and SVGF demodulate by the sum of the two, since a metal's diffuse albedo is zero.
-  `pt_guides.hlsli` holds all three guide functions apart from the tracer's bindings, which is what lets `bsdf_probe.hlsl` assert on them.
+  Module `openpbr`'s guides (shaders/sgl/openpbr_guides.sgl) hold all three functions apart from the tracer's bindings, which is what lets `tests/shaders/bsdf_probe.sgl` assert on them.
 - **Slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
   A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
   The tracer writes those two only on the frames the temporal member runs, so a still view past the hand-off pays for neither.
@@ -1045,20 +1028,12 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
 
 ## Gotchas
 
-- **Ray tracing shaders compile at SM 6.8 through slib** — the payload struct needs the DXR 1.1 annotation
-  (`struct [raypayload] Payload { ... : read(...) : write(...); }`), unlike SM 6.3 examples elsewhere.
-- **The payload-access qualifiers are checked with `-Werror`** — a `read(caller)` field must actually be read
-  after the `TraceRay` (and be written on every path that can run, else "undefined"). Read all payload fields
-  into locals right after the trace, and give shadow rays their own minimal payload + miss shader (a shadow
-  ray reads only visibility) rather than reusing the surface payload.
-- **The frame-constants cbuffer is padded to 256 bytes** — a D3D12 CBV is sized in 256-byte multiples, so a
-  smaller backing buffer overruns.
+- **The frame block is a storage buffer's single element**, 256 bytes, mirrored by `tracer.frame_constants` with every pad named on both sides.
+- **A shadow ray carries its own minimal payload** (`tracer.shadow_payload`, visibility alone) and its own miss, so a cutout needs an any-hit per payload.
 - **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
-  `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's closest-hit through `instance_gpu::is_indexed`, per instance.
-  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `slib::gpu_bool`, so the plain `bool` off the record assigns straight into it.
-  A test driving that routine directly must set it, or it will read `Indices` as if it were real.
+  `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's hit through `instance_gpu::is_indexed`, per instance.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.
   Seed with `initial_camera` / `initial_orbit` / `initial_fps` instead for a view that should converge.

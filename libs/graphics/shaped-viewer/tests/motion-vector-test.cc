@@ -9,7 +9,6 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/view/camera.hh>
-#include <sv_test_sgl_shaders.hh>
 #include <sv_test_shaders.hh>
 
 using namespace cc::primitive_defines;
@@ -20,15 +19,12 @@ using namespace cc::primitive_defines;
 // denoiser doing its job.
 // So nothing downstream catches this, and reading the guide out of a rendered frame cannot tell a wrong vector from a
 // wrong trace.
-// `shaders/camera_probe.hlsl` therefore calls the raygen's own `camera_project` and `camera_ray_offset`, and every
-// number below comes back from the GPU rather than from a second implementation here.
-//
-// Every case runs twice: through camera.hlsli, and through its SGL port in shaders/sgl, by tests/shaders/camera_probe.sgl.
-// Both are held to the same checks, and to each other bit for bit, which is what proves the port.
+// `tests/shaders/camera_probe.sgl` therefore calls the raygen's own `scene.camera_project` and `scene.camera_ray_offset`, and
+// every number below comes back from the GPU rather than from a second implementation here.
 
 namespace
 {
-/// Mirrors `sv::camera_probe_case` in shaders/camera_probe.hlsl lane-for-lane, and `camera_probe_case` in tests/shaders/camera_probe.sgl.
+/// Mirrors `camera_probe_case` in tests/shaders/camera_probe.sgl lane-for-lane.
 struct camera_probe_case
 {
     sv::camera_gpu cam;
@@ -56,50 +52,27 @@ struct probe_result
     return cam;
 }
 
-/// Which camera a case is projected through: shaders/camera_probe.hlsl over shaders/camera.hlsli, or
-/// tests/shaders/camera_probe.sgl over the SGL port in shaders/sgl, module `scene`.
-enum class probe_shader
-{
-    hlsl,
-    sgl,
-};
-
-constexpr probe_shader probe_shaders[] = {probe_shader::hlsl, probe_shader::sgl};
-
-cc::string_view name_of(probe_shader shader)
-{
-    return shader == probe_shader::hlsl ? "hlsl" : "sgl";
-}
-
-static_assert(sizeof(sv_test::sgl_shaders::camera_probe_case) == sizeof(camera_probe_case),
+static_assert(sizeof(sv_test::shaders::camera_probe_case) == sizeof(camera_probe_case),
               "camera_probe_case must match camera_probe_case in tests/shaders/camera_probe.sgl");
 
-/// Dispatches `cases` through `shader`'s probe and reads one result back per case.
+/// Dispatches `cases` through the probe and reads one result back per case.
 ///
 /// Built inline rather than behind a routine, exactly as the BSDF probe is: nothing a viewer runs dispatches this, so a
 /// routine would put test-only machinery in the library.
-cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx,
-                                                     probe_shader shader,
-                                                     cc::span<camera_probe_case const> cases)
+cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, cc::span<camera_probe_case const> cases)
 {
-    auto const& sgl_entry = sv_test::sgl_shaders::camera_probe.camera_measure;
-    auto const compiled_shader = shader == probe_shader::hlsl
-                                   ? sv_test::shaders::camera_probe.compute.CameraProbe->acquire(ctx)
-                                   : sgl_entry->acquire(ctx);
+    auto const& entry = sv_test::shaders::camera_probe.camera_measure;
+    auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
-        FAIL(cc::format("the {} camera probe shader did not compile:\n{}", name_of(shader),
+        FAIL(cc::format("the camera probe shader did not compile:\n{}",
                         compiled_shader->try_error()->underlying().to_string()));
 
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // without it every check below is vacuous
 
-    auto const hlsl_group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::camera_probe_bindings>();
-    auto const sgl_group_layout = ctx.cached.acquire_binding_group_layout<sv_test::sgl_shaders::camera_probe_io>();
-    auto const pipeline_layout = shader == probe_shader::hlsl
-                                   ? ctx.cached.acquire_pipeline_layout({.groups = {hlsl_group_layout}})
-                                   : sgl_entry.acquire_layout(ctx);
-    auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::camera_probe_io>();
+    auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
 
@@ -113,25 +86,14 @@ cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx,
         cases.size(), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     cmd->compute.bind_pipeline(*built);
-    if (shader == probe_shader::hlsl)
-    {
-        auto const group = ctx.transient.create_binding_group(
-            *cmd, hlsl_group_layout,
-            sv_test::shaders::camera_probe_bindings{.Cases = case_buffer.as_readonly_buffer(),
-                                                    .Results = result_buffer.as_readwrite_buffer()});
-        cmd->compute.bind<sv_test::shaders::camera_probe_bindings>(*group);
-    }
-    else
-    {
-        // SGL reads no buffer's length, so the probe is told the count the HLSL one reads off its buffer.
-        auto const group = ctx.transient.create_binding_group(
-            *cmd, sgl_group_layout,
-            sv_test::sgl_shaders::camera_probe_io{
-                .cases = case_buffer.reinterpret_as<sv_test::sgl_shaders::camera_probe_case>().as_readonly_buffer(),
-                .results = result_buffer.as_readwrite_buffer(),
-                .count = u32(cases.size())});
-        cmd->compute.bind_group(0, *group);
-    }
+    // SGL reads no buffer's length, so the probe is told the count.
+    auto const group = ctx.transient.create_binding_group(
+        *cmd, group_layout,
+        sv_test::shaders::camera_probe_io{
+            .cases = case_buffer.reinterpret_as<sv_test::shaders::camera_probe_case>().as_readonly_buffer(),
+            .results = result_buffer.as_readwrite_buffer(),
+            .count = u32(cases.size())});
+    cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(cases.size());
 
     auto readback = cmd->download.data_from_buffer(result_buffer);
@@ -175,19 +137,12 @@ ASYNC_INVOCABLE_TEST("sv - a camera projects its own primary ray back to the pix
     for (auto const& p : pixels)
         cases.push_back({.cam = cam, .prev = cam, .pixel = p, .dim = dim, .world = tg::vec3f(0, 0, 0)});
 
-    for (auto const shader : probe_shaders)
+    auto const results = co_await run_probe(ctx, cases);
+    for (auto i = isize(0); i < pixels.size(); ++i)
     {
-        auto const results = co_await run_probe(ctx, shader, cases);
-        for (auto i = isize(0); i < pixels.size(); ++i)
-        {
-            auto const d = results[i].round_trip - pixels[i];
-            CHECK(tg::abs(d[0]) < 0.01f)
-                .context(cc::format("{}: pixel {} came back as {}", name_of(shader), pixels[i][0],
-                                    results[i].round_trip[0]));
-            CHECK(tg::abs(d[1]) < 0.01f)
-                .context(cc::format("{}: pixel {} came back as {}", name_of(shader), pixels[i][1],
-                                    results[i].round_trip[1]));
-        }
+        auto const d = results[i].round_trip - pixels[i];
+        CHECK(tg::abs(d[0]) < 0.01f).context(cc::format("pixel {} came back as {}", pixels[i][0], results[i].round_trip[0]));
+        CHECK(tg::abs(d[1]) < 0.01f).context(cc::format("pixel {} came back as {}", pixels[i][1], results[i].round_trip[1]));
     }
 }
 
@@ -245,34 +200,30 @@ ASYNC_INVOCABLE_TEST("sv - motion vectors follow the camera, and the sky ignores
     cases[c_turned_sky].prev = sv::camera_gpu::from(turned);
     cases[c_turned_sky].at_infinity = 1;
 
-    for (auto const shader : probe_shaders)
-    {
-        auto const r = co_await run_probe(ctx, shader, cases);
-        auto const where = name_of(shader);
+    auto const r = co_await run_probe(ctx, cases);
+    auto const where = cc::string_view("camera");
 
-        // A camera that did not move reprojects every pixel onto itself, so the guide is exactly zero.
-        // Exactly, rather than nearly: the denoiser reads a non-zero vector on a still frame as motion, and a still frame
-        // is when its history is worth the most.
-        CHECK(tg::abs(r[c_unchanged].motion[0]) < 0.01f)
-            .context(cc::format("{}: a still camera moved by {}", where, r[c_unchanged].motion[0]));
-        CHECK(tg::abs(r[c_unchanged].motion[1]) < 0.01f)
-            .context(cc::format("{}: a still camera moved by {}", where, r[c_unchanged].motion[1]));
+    // A camera that did not move reprojects every pixel onto itself, so the guide is exactly zero.
+    // Exactly, rather than nearly: the denoiser reads a non-zero vector on a still frame as motion, and a still frame
+    // is when its history is worth the most.
+    CHECK(tg::abs(r[c_unchanged].motion[0]) < 0.01f)
+        .context(cc::format("a still camera moved by {}", where, r[c_unchanged].motion[0]));
+    CHECK(tg::abs(r[c_unchanged].motion[1]) < 0.01f)
+        .context(cc::format("a still camera moved by {}", where, r[c_unchanged].motion[1]));
 
-        // The previous camera stood to the RIGHT of this one, so the point sat further left on its image, and this
-        // frame's pixel minus that one is positive.
-        // The sign is the half of a motion vector that is easy to get backwards and impossible to see.
-        CHECK(r[c_translated].motion[0] > 1.0f)
-            .context(cc::format("{}: a sideways step gave {}", where, r[c_translated].motion[0]));
-        CHECK(tg::abs(r[c_translated].motion[1]) < 0.01f).context(where); // the step was horizontal, so nothing moved vertically
+    // The previous camera stood to the RIGHT of this one, so the point sat further left on its image, and this
+    // frame's pixel minus that one is positive.
+    // The sign is the half of a motion vector that is easy to get backwards and impossible to see.
+    CHECK(r[c_translated].motion[0] > 1.0f).context(cc::format("a sideways step gave {}", where, r[c_translated].motion[0]));
+    CHECK(tg::abs(r[c_translated].motion[1]) < 0.01f).context(where); // the step was horizontal, so nothing moved vertically
 
-        // Parallax is the whole difference between the two: the sky is infinitely far away, so a step does not move it.
-        CHECK(tg::abs(r[c_translated_sky].motion[0]) < 0.01f)
-            .context(cc::format("{}: the sky moved by {} under a pure translation", where, r[c_translated_sky].motion[0]));
+    // Parallax is the whole difference between the two: the sky is infinitely far away, so a step does not move it.
+    CHECK(tg::abs(r[c_translated_sky].motion[0]) < 0.01f)
+        .context(cc::format("the sky moved by {} under a pure translation", where, r[c_translated_sky].motion[0]));
 
-        // ...and a turn does, which is what makes the case above a measurement rather than a stuck zero.
-        CHECK(tg::abs(r[c_turned_sky].motion[0]) > 1.0f)
-            .context(cc::format("{}: the sky moved by {} under a turn", where, r[c_turned_sky].motion[0]));
-    }
+    // ...and a turn does, which is what makes the case above a measurement rather than a stuck zero.
+    CHECK(tg::abs(r[c_turned_sky].motion[0]) > 1.0f)
+        .context(cc::format("the sky moved by {} under a turn", where, r[c_turned_sky].motion[0]));
 }
 
 // A hit that was BEHIND the previous camera has no pixel to come from, and the guide has to say so rather than
@@ -299,86 +250,13 @@ ASYNC_INVOCABLE_TEST("sv - a point behind the previous camera reprojects off the
                                                       .dim = dim,
                                                       .world = tg::vec3f(0, 0, 0)}};
 
-    for (auto const shader : probe_shaders)
-    {
-        auto const r = co_await run_probe(ctx, shader, cases);
+    auto const r = co_await run_probe(ctx, cases);
 
-        // Far off, not merely outside: a denoiser clamps its history lookup, so "just off the edge" would sample the
-        // border rather than reject the pixel.
-        CHECK(r[0].motion[0] > dim[0])
-            .context(cc::format("{}: a point behind the camera reprojected to {}", name_of(shader), r[0].motion[0]));
-    }
+    // Far off, not merely outside: a denoiser clamps its history lookup, so "just off the edge" would sample the
+    // border rather than reject the pixel.
+    CHECK(r[0].motion[0] > dim[0]).context(cc::format("a point behind the camera reprojected to {}", r[0].motion[0]));
 }
 
-// The SGL port of the camera computes the HLSL's numbers exactly, not merely numbers that pass the checks above.
-//
-// Exactly is the bar because the two are one pinhole: the raygen will trace with one and reproject with whichever
-// side of the port a pass was written in, and a one-ulp disagreement between them is a still camera that moves.
-// The cases sweep cameras that are off every axis, not square, and both moved and still, with hits near and at infinity.
-ASYNC_INVOCABLE_TEST("sv - the SGL camera projects exactly as the HLSL one", (sg::context_handle const& ctx_h))
-{
-    auto& ctx = *ctx_h;
-    if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
-
-    auto const dim = tg::vec2f(320, 180);
-
-    auto cameras = cc::vector<sv::camera_gpu>();
-    for (auto i = 0; i < 4; ++i)
-    {
-        auto const f = double(i);
-        auto cam = sv::camera::looking_at(tg::pos3d(3.0 - f, 2.0 + 0.5 * f, -4.0 + f), tg::pos3d(0.5, -0.3 * f, 1.0),
-                                          tg::vec3d(0.2 * f, 0.9, 0.1));
-        cam.projection.aspect_ratio = 16.0 / 9.0;
-        cameras.push_back(sv::camera_gpu::from(cam));
-    }
-
-    auto cases = cc::vector<camera_probe_case>();
-    for (auto ci = isize(0); ci < cameras.size(); ++ci)
-        for (auto pi = isize(0); pi < cameras.size(); ++pi)
-            for (auto k = 0; k < 6; ++k)
-            {
-                auto const fk = float(k);
-                cases.push_back({.cam = cameras[ci],
-                                 .prev = cameras[pi],
-                                 .pixel = tg::vec2f(0.5f + 63.25f * fk, 179.5f - 29.75f * fk),
-                                 .dim = dim,
-                                 .world = tg::vec3f(0.25f * fk - 0.5f, 0.125f * fk, 1.5f - 0.5f * fk),
-                                 .at_infinity = u32(k % 2)});
-            }
-
-    auto const hlsl = co_await run_probe(ctx, probe_shader::hlsl, cases);
-    auto const sgl = co_await run_probe(ctx, probe_shader::sgl, cases);
-    REQUIRE(hlsl.size() == cases.size());
-    REQUIRE(sgl.size() == cases.size());
-
-    auto mismatches = 0;
-    for (auto i = isize(0); i < cases.size(); ++i)
-        for (auto lane = 0; lane < 2; ++lane)
-        {
-            auto const same_motion = cc::bit_cast<u32>(hlsl[i].motion[lane]) == cc::bit_cast<u32>(sgl[i].motion[lane]);
-            auto const same_trip
-                = cc::bit_cast<u32>(hlsl[i].round_trip[lane]) == cc::bit_cast<u32>(sgl[i].round_trip[lane]);
-            if (!same_motion || !same_trip)
-                ++mismatches;
-            CHECK(same_motion)
-                .context(cc::format("case {} motion[{}]: hlsl {} vs sgl {}", i, lane, hlsl[i].motion[lane],
-                                    sgl[i].motion[lane]));
-            CHECK(same_trip).context(cc::format("case {} round_trip[{}]: hlsl {} vs sgl {}", i, lane,
-                                                hlsl[i].round_trip[lane], sgl[i].round_trip[lane]));
-        }
-    CHECK(mismatches == 0).context(cc::format("{} of {} cases disagree", mismatches, cases.size()));
-}
-
-// The matrices `sv::matrices_of` hands a denoiser, against the frustum the raygen actually traces.
-//
-// sv rasterizes nothing, so these two matrices have no other use and nothing else would notice them being wrong.
-// A denoiser reprojecting through a transposed or mis-scaled projection ghosts rather than fails, which is the same
-// failure mode the probe above exists for.
-//
-// Checked as properties of the frustum rather than by recomputing the formula: `forward`, `right_scaled` and
-// `up_scaled` ARE the frustum's axes — a point one `right_scaled` off the axis sits exactly on its right edge — so a
-// folded aspect ratio, a swapped axis or a flipped sign each move one of these numbers and none of them survives.
 TEST("sv - a camera's matrices describe the frustum its rays sweep")
 {
     // Off every axis, with a rolled-up vector, and not square.

@@ -14,7 +14,6 @@
 // The transmissive and subsurface bases share the specular interface and differ only in what lies beyond it.
 // A dispersive crossing collapses the path onto one wavelength rather than bending three at once.
 //
-// The SGL port of shaders/openpbr.hlsli, function for function and with the same numerics.
 // The two run side by side until the path tracer has moved over, and the BSDF probe holds them to the same numbers.
 // This file holds the primitives the lobes are built from; openpbr_closure.sgl and openpbr_evaluate.sgl hold the closure.
 module openpbr
@@ -117,11 +116,11 @@ fun ggx_refraction_pdf(wo: float3, wi: float3, alpha: float2, eta: float) -> flo
 fun alpha_iso(alpha: float2) -> float:
     return sqrt(max(alpha.x * alpha.y, 1e-12))
 
-/// `v` reflected about the unit normal `n`, as HLSL's `reflect` on plain vectors.
+/// `v` reflected about the unit normal `n`, as the textbook `reflect` on plain vectors.
 /// The prelude's `reflect` takes directions, and the closure works in plain `float3`s.
 fun reflect_about(v: float3, n: float3) -> float3 => reflect(vec3(..v), vec3(..n)).xyz
 
-/// `v` bent through a surface of unit normal `n` by the ratio of indices `eta`, as HLSL's `refract` on plain vectors.
+/// `v` bent through a surface of unit normal `n` by the ratio of indices `eta`, as the textbook `refract` on plain vectors.
 /// It is zero where the bend has no solution and the interface reflects entirely.
 fun refract_through(v: float3, n: float3, eta: float) -> float3 => refract(vec3(..v), vec3(..n), eta).xyz
 

@@ -1,6 +1,6 @@
 // The OpenPBR closure at work: evaluating it, its pdf, and drawing a direction from it.
 //
-// The SGL port of the second half of shaders/openpbr.hlsli; openpbr_microfacet.sgl says what the model is.
+// openpbr_microfacet.sgl says what the model is.
 module openpbr
 
 /// The BSDF at (`wo`, `wi`) split into the halves a denoiser filters apart, with the cosine NOT folded in.

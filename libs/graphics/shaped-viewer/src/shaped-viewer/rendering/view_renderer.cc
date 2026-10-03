@@ -159,13 +159,13 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         CC_ASSERT(mesh != nullptr, "scene_item references an unknown mesh_id");
         CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
 
-        // The TLAS instance's own id is the row of the instance table this item occupies, which is what `InstanceID()` reads.
-        // The opaque override is what makes an any-hit reachable at all: a BLAS is built opaque, and DXR then behaves as
-        // if the hit group carried no any-hit whatever the pipeline attached.
+        // The TLAS instance's own id is the row of the instance table this item occupies, which is what a hit's instance id reads.
+        // The opaque override is what makes an any-hit reachable at all: a BLAS is built opaque, and the trace then behaves
+        // as if the hit group carried no any-hit whatever the pipeline attached.
         // Per instance rather than per BLAS, because "can this cut out" is a property of the MATERIAL — the same mesh
         // under an opaque material and a cutout one would otherwise need two acceleration structures.
-        // Two records per permutation — the primary one and the shadow one — so the offset is the permutation's index
-        // doubled, and `pt_occluded` reaches the second by adding 1 at the trace.
+        // Two records per permutation — the surface one and the shadow one — so the offset is the permutation's index
+        // doubled, which `pathtrace_routine` rewrites to that permutation's row of its table.
         // A mesh whose geometry has not landed keeps its place in the scene as a box, so a load reads as an asset
         // sharpening rather than as objects popping into existence one at a time.
         // One that declared no bounds is skipped instead: there is no honest extent to draw it at, and an invented one
@@ -646,11 +646,11 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     }
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
-        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+        1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(frame, fc);
 
-    auto const background = ctx.transient.create_buffer<background_gpu>(
-        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+    auto const background
+        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(background, bg);
 
     auto const instance_table = upload_instances(cmd, resolved);
@@ -946,13 +946,13 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     fc.seed = slot.accum_frame + 1;
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
-        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+        1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(frame, fc);
 
     // The view's SH environment probe, packed into its GPU lane layout.
     // The miss reconstructs the radiance an escaped ray sees from it.
-    auto const background = ctx.transient.create_buffer<background_gpu>(
-        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+    auto const background
+        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(background, bg);
 
     auto const instance_table = upload_instances(cmd, resolved);

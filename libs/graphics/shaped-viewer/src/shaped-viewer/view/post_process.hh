@@ -12,7 +12,7 @@ enum class sv::post_process_kind : sv::u8
 
 namespace sv
 {
-// todo: fade, difference, false_color, tonemap — each wants its own entry point in shaders/layout.hlsl
+// todo: fade, difference, false_color, tonemap — each wants its own entry point in shaders/layout.sgl
 } // namespace sv
 
 /// One combining step applied to a leaf's views before they land in its rect.

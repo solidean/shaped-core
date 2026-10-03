@@ -6,13 +6,11 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh> // pt_light_table, pt_frame_constants_gpu
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
-#include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 #include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -175,36 +173,9 @@ TEST("sv - indexed_triangle_data hashes both buffers")
     CHECK(base.hash != sv::triangle_data::create(positions).hash);
 }
 
-TEST("sv - material_data hashes content")
-{
-    auto const red = sv::pbr_material{.base_color = tg::vec3f(1, 0, 0)};
-    auto const green = sv::pbr_material{.base_color = tg::vec3f(0, 1, 0)};
-
-    auto const a = cc::vector<sv::pbr_material>{red, green};
-    auto const same_content = cc::vector<sv::pbr_material>{red, green}; // different storage, equal bytes
-    auto const reordered = cc::vector<sv::pbr_material>{green, red};    // same set, different triangle order
-
-    CHECK(sv::material_data::create(a).hash == sv::material_data::create(same_content).hash);
-    CHECK(sv::material_data::create(a).hash != sv::material_data::create(reordered).hash);
-}
-
-TEST("sv - pbr_material_gpu::from preserves fields")
-{
-    auto const m = sv::pbr_material{.base_color = tg::vec3f(0.1f, 0.2f, 0.3f),
-                                    .metallic = 0.5f,
-                                    .roughness = 0.25f,
-                                    .emissive = tg::vec3f(1, 0, 0)};
-    auto const g = sv::pbr_material_gpu::from(m);
-
-    CHECK(g.base_color == m.base_color);
-    CHECK(g.metallic == m.metallic);
-    CHECK(g.roughness == m.roughness);
-    CHECK(g.emissive == m.emissive);
-}
-
 namespace
 {
-/// The radiance `shaders/background.hlsli` reconstructs along `d`, evaluated on the CPU so the factories can be
+/// The radiance `scene.background_radiance` (shaders/sgl/scene_items.sgl) reconstructs along `d`, evaluated on the CPU so the factories can be
 /// checked against the basis they are written for rather than against their own coefficients.
 /// `d` must be unit.
 /// The shader's `max(L, 0)` clamp is deliberately left out — a factory's promise is the unclamped function, and clamping would hide a sign error.
@@ -483,18 +454,6 @@ TEST("sv - a mesh carries the data its material draws it with")
     CHECK(copy.geometry.positions.data() == m.geometry.positions.data());
 }
 
-TEST("sv - frame_constants_gpu takes a plain bool for its gpu_bool lane")
-{
-    static_assert(sizeof(sv::frame_constants_gpu) == 256);
-
-    auto fc = sv::frame_constants_gpu{};
-    CHECK(fc.mesh_is_indexed.value == 0u);
-
-    auto const record_is_indexed = true; // what a caller has: a plain bool off the mesh record
-    fc.mesh_is_indexed = record_is_indexed;
-    CHECK(fc.mesh_is_indexed.value == 1u);
-}
-
 TEST("sv - camera aims at the target")
 {
     // The default orientation frames the origin from `position`.
@@ -722,7 +681,8 @@ TEST("sv - two equal lights compare equal, and any difference is seen")
 
 TEST("sv - light_gpu::from lays out the rect and its emitting face")
 {
-    static_assert(sizeof(sv::light_gpu) == 96); // six 16-byte lanes, as sv::light in shaders/light.hlsli
+    static_assert(sizeof(sv::light_gpu)
+                  == 96); // six 16-byte lanes, as tracer.light_record in shaders/sgl/tracer_bindings.sgl
 
     auto const light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.5f)).nits(12);
     auto const g = sv::light_gpu::from(light);

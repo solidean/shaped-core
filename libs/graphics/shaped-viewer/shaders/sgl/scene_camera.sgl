@@ -1,7 +1,6 @@
 // The pinhole camera the path tracer's primary rays leave from, and the projection a reprojection inverts it by.
 //
-// The SGL port of shaders/camera.hlsli, function for function and with the same numerics.
-// The camera probe (tests/shaders/camera_probe.sgl) holds the two to the same numbers.
+// The camera probe (tests/shaders/camera_probe.sgl) holds the projection to what the primary ray inverts.
 module scene
 
 /// Pinhole camera basis (see `sv::camera_gpu::from`), mirroring `sv::camera_gpu` lane for lane.

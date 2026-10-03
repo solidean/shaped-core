@@ -12,25 +12,24 @@
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/scene/quadric.hh>
-#include <sv_test_sgl_shaders.hh>
 #include <sv_test_shaders.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 #include <typed-geometry/scalar/scalar.hh>  // tg::abs
 
 using namespace cc::primitive_defines;
 
-// The SGL port of the material and quadric runtimes, held to the HLSL ones bit for bit.
+// The material and quadric runtimes, held to CPU references.
 //
-// `shaders/runtime_probe.hlsl` calls the real `load_quadric`, `roots_of` and `intersect_quadric`, and the real attribute
-// loads, and `tests/shaders/runtime_probe.sgl` calls their ports in modules `material` and `quadric`.
-// The quadric root solve is why this is a probe rather than a compile check: it is the numerically delicate half, and a
-// port that formed one product in another order would move a grazing hit or lose a small primitive seen from afar.
+// `tests/shaders/runtime_probe.sgl` calls the real `quadric.intersect` and `quadric.roots_of` of module `quadric`, and the
+// real attribute loads of module `material`.
+// The quadric root solve is why this is a probe rather than a compile check: it is the numerically delicate half, and an
+// edit that formed one product in another order would move a grazing hit or lose a small primitive seen from afar.
 // So the cases lean on exactly those: grazing rays, a sphere a hundredth of a unit across seen from a hundred units, a
 // ray down a cylinder's axis where the quadratic term vanishes, and a plane whose equation is linear everywhere.
 
 namespace
 {
-/// Mirrors `sv::runtime_probe_case` in shaders/runtime_probe.hlsl and `runtime_probe_case` in tests/shaders/runtime_probe.sgl.
+/// Mirrors `runtime_probe_case` in tests/shaders/runtime_probe.sgl.
 struct runtime_probe_case
 {
     tg::vec3f origin;
@@ -45,25 +44,13 @@ struct runtime_probe_case
     u32 pad[2] = {};
 };
 
-static_assert(sizeof(runtime_probe_case) == 64, "runtime_probe_case must match sv::runtime_probe_case");
-static_assert(sizeof(sv_test::sgl_shaders::runtime_probe_case) == sizeof(runtime_probe_case),
+static_assert(sizeof(sv_test::shaders::runtime_probe_case) == sizeof(runtime_probe_case),
               "runtime_probe_case must match runtime_probe_case in tests/shaders/runtime_probe.sgl");
 
-/// How many float4s one case writes, in the order both probes write them.
+/// How many float4s one case writes, in the order the probe writes them.
 constexpr isize results_per_case = 8;
 
-enum class probe_shader
-{
-    hlsl,
-    sgl,
-};
-
-cc::string_view name_of(probe_shader shader)
-{
-    return shader == probe_shader::hlsl ? "hlsl" : "sgl";
-}
-
-/// The memory both probes read: quadric records, attribute descriptors with their elements, and triangle indices.
+/// The memory the probe reads: quadric records, attribute descriptors with their elements, and triangle indices.
 struct runtime_probe_memory
 {
     cc::vector<sv::quadric_gpu> quadrics;
@@ -242,30 +229,23 @@ runtime_probe_memory make_memory()
     return memory;
 }
 
-/// Dispatches `cases` through `shader`'s probe and reads back `results_per_case` float4s per case.
+/// Dispatches `cases` through the probe and reads back `results_per_case` float4s per case.
 cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
-                                                  probe_shader shader,
                                                   runtime_probe_memory const& memory,
                                                   cc::span<runtime_probe_case const> cases)
 {
-    auto const& sgl_entry = sv_test::sgl_shaders::runtime_probe.runtime_measure;
-    auto const compiled_shader = shader == probe_shader::hlsl
-                                   ? sv_test::shaders::runtime_probe.compute.RuntimeProbe->acquire(ctx)
-                                   : sgl_entry->acquire(ctx);
+    auto const& entry = sv_test::shaders::runtime_probe.runtime_measure;
+    auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
-        FAIL(cc::format("the {} runtime probe shader did not compile:\n{}", name_of(shader),
+        FAIL(cc::format("the runtime probe shader did not compile:\n{}",
                         compiled_shader->try_error()->underlying().to_string()));
 
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // without it every check below is vacuous
 
-    auto const hlsl_group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::runtime_probe_bindings>();
-    auto const sgl_group_layout = ctx.cached.acquire_binding_group_layout<sv_test::sgl_shaders::runtime_probe_io>();
-    auto const pipeline_layout = shader == probe_shader::hlsl
-                                   ? ctx.cached.acquire_pipeline_layout({.groups = {hlsl_group_layout}})
-                                   : sgl_entry.acquire_layout(ctx);
-    auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::runtime_probe_io>();
+    auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
 
@@ -289,31 +269,17 @@ cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
         result_count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     cmd->compute.bind_pipeline(*built);
-    if (shader == probe_shader::hlsl)
-    {
-        auto const group = ctx.transient.create_binding_group(
-            *cmd, hlsl_group_layout,
-            sv_test::shaders::runtime_probe_bindings{.Cases = case_buffer.as_readonly_buffer(),
-                                                     .Quadrics = quadric_buffer.as_readonly_buffer(),
-                                                     .Attributes = attribute_buffer.as_readonly_buffer(),
-                                                     .Indices = index_buffer.as_readonly_buffer(),
-                                                     .Results = result_buffer.as_readwrite_buffer()});
-        cmd->compute.bind<sv_test::shaders::runtime_probe_bindings>(*group);
-    }
-    else
-    {
-        // SGL reads no buffer's length, so the probe is told the count the HLSL one reads off its buffer.
-        auto const group = ctx.transient.create_binding_group(
-            *cmd, sgl_group_layout,
-            sv_test::sgl_shaders::runtime_probe_io{
-                .cases = case_buffer.reinterpret_as<sv_test::sgl_shaders::runtime_probe_case>().as_readonly_buffer(),
-                .quadrics = quadric_buffer.as_readonly_buffer(),
-                .attributes = attribute_buffer.as_readonly_buffer(),
-                .indices = index_buffer.as_readonly_buffer(),
-                .results = result_buffer.as_readwrite_buffer(),
-                .count = u32(cases.size())});
-        cmd->compute.bind_group(0, *group);
-    }
+    // SGL reads no buffer's length, so the probe is told the count.
+    auto const group = ctx.transient.create_binding_group(
+        *cmd, group_layout,
+        sv_test::shaders::runtime_probe_io{
+            .cases = case_buffer.reinterpret_as<sv_test::shaders::runtime_probe_case>().as_readonly_buffer(),
+            .quadrics = quadric_buffer.as_readonly_buffer(),
+            .attributes = attribute_buffer.as_readonly_buffer(),
+            .indices = index_buffer.as_readonly_buffer(),
+            .results = result_buffer.as_readwrite_buffer(),
+            .count = u32(cases.size())});
+    cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(cases.size());
 
     auto readback = cmd->download.data_from_buffer(result_buffer);
@@ -332,7 +298,26 @@ cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sv - the SGL quadric and material runtimes compute exactly what the HLSL ones do",
+namespace
+{
+/// Element `i` of the attribute streams `make_attributes` writes, as the probe reads them.
+[[nodiscard]] f32 f1_element(u32 i)
+{
+    return 0.5f + 1.25f * float(i);
+}
+
+[[nodiscard]] tg::vec3f f3_element(u32 i)
+{
+    return tg::vec3f(float(i), -0.3f * float(i), 2.0f + 0.01f * float(i));
+}
+
+[[nodiscard]] bool near(f32 a, f32 b, f32 eps = 1e-5f)
+{
+    return tg::abs(a - b) <= eps * cc::max(1.0f, tg::abs(b));
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their CPU references do",
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
@@ -347,18 +332,18 @@ ASYNC_INVOCABLE_TEST("sv - the SGL quadric and material runtimes compute exactly
     auto const cases = make_cases();
     auto const primitives = make_primitives();
 
-    auto const hlsl = co_await run_probe(ctx, probe_shader::hlsl, memory, cases);
-    auto const sgl = co_await run_probe(ctx, probe_shader::sgl, memory, cases);
+    auto const results = co_await run_probe(ctx, memory, cases);
+    REQUIRE(results.size() == cases.size() * results_per_case);
 
-    // The probe must be measuring something: the HLSL runtime against the CPU reference it mirrors, and a share of hits.
+    // The root solve against the CPU reference it mirrors, and a share of hits so the probe is measuring something.
     auto hits = 0;
     for (auto i = isize(0); i < cases.size(); ++i)
     {
         auto const& c = cases[i];
         auto const reference = sv::intersect(
             primitives[c.quadric], tg::ray3f(tg::pos3f(c.origin[0], c.origin[1], c.origin[2]), c.dir), c.t_min, c.t_max);
-        auto const gpu_valid = hlsl[i * results_per_case + 1][0] != 0.0f;
-        auto const gpu_t = hlsl[i * results_per_case][0];
+        auto const gpu_valid = results[i * results_per_case + 1][0] != 0.0f;
+        auto const gpu_t = results[i * results_per_case][0];
         CHECK(gpu_valid == reference.has_value())
             .context(cc::format("case {}: the GPU and the CPU reference disagree on a hit", i));
         if (gpu_valid && reference.has_value())
@@ -370,18 +355,42 @@ ASYNC_INVOCABLE_TEST("sv - the SGL quadric and material runtimes compute exactly
     }
     CHECK(hits >= isize(cases.size()) / 3).context(cc::format("only {} of {} rays hit", hits, cases.size()));
 
-    // The port: every lane of every case, bit for bit.
-    REQUIRE(sgl.size() == hlsl.size());
-    auto mismatches = 0;
-    for (auto i = isize(0); i < hlsl.size(); ++i)
-        for (auto lane = 0; lane < 4; ++lane)
+    // The attribute loads: the corners a triangle reads, and the per-vertex streams blended across them.
+    for (auto i = isize(0); i < cases.size(); ++i)
+    {
+        auto const& c = cases[i];
+        auto const* const r = &results[i * results_per_case];
+
+        // An indexed triangle reads its corners through the index buffer, a plain list numbers them three per primitive.
+        u32 corner[3] = {};
+        for (auto k = 0; k < 3; ++k)
+            corner[k] = c.is_indexed != 0 ? memory.indices[c.primitive * 3 + u32(k)] : c.primitive * 3 + u32(k);
+        for (auto k = 0; k < 3; ++k)
+            CHECK(r[6][k] == float(corner[k])).context(cc::format("case {}: corner {} is {}", i, k, r[6][k]));
+
+        // The weights the hit hands the loads, whichever convention orders them, sum to one.
+        auto const w = tg::vec3f(r[6][3], 1.0f - r[6][3] - r[7][2], r[7][2]);
+        CHECK(near(w[0] + w[1] + w[2], 1.0f)).context(cc::format("case {}: the barycentrics do not sum to one", i));
+
+        auto f1 = 0.0f;
+        auto f3 = tg::vec3f(0, 0, 0);
+        for (auto k = 0; k < 3; ++k)
         {
-            auto const same = cc::bit_cast<u32>(hlsl[i][lane]) == cc::bit_cast<u32>(sgl[i][lane]);
-            if (same)
-                continue;
-            ++mismatches;
-            CHECK(same).context(cc::format("case {}, result {}, lane {}: hlsl {} vs sgl {}", i / results_per_case,
-                                           i % results_per_case, lane, hlsl[i][lane], sgl[i][lane]));
+            f1 += w[k] * f1_element(corner[k]);
+            f3 = f3 + f3_element(corner[k]) * w[k];
         }
-    CHECK(mismatches == 0).context(cc::format("{} of {} lanes disagree", mismatches, hlsl.size() * 4));
+        CHECK(near(r[3][3], f1, 1e-4f)).context(cc::format("case {}: f1 is {}, the CPU blend {}", i, r[3][3], f1));
+        for (auto lane = 0; lane < 3; ++lane)
+            CHECK(near(r[3][lane], f3[lane], 1e-4f))
+                .context(cc::format("case {}: f3[{}] is {}, the CPU blend {}", i, lane, r[3][lane], f3[lane]));
+
+        // The rotation blend aligns the corners into one hemisphere before it sums, so a blend of unit quaternions stays a
+        // rotation even where every third one is stored negated.
+        if (c.desc_offset == 0)
+        {
+            auto const q = tg::vec4f(r[5][0], r[5][1], r[5][2], r[5][3]);
+            auto const length = tg::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+            CHECK(near(length, 1.0f, 1e-4f)).context(cc::format("case {}: the blended rotation has length {}", i, length));
+        }
+    }
 }

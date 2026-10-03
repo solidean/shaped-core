@@ -7,10 +7,9 @@
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/angle.hh>
 
-/// GPU-side pinhole camera constants, matching the `Camera` struct in shaders/common.hlsli.
+/// GPU-side pinhole camera constants, matching `scene.camera` (shaders/sgl/scene_camera.sgl) and `tracer.camera_record`.
 ///
-/// Each `float3` sits in its own 16-byte lane (the trailing pad scalars), which is the std140-ish cbuffer layout HLSL expects.
-/// So this struct uploads straight into a constants buffer.
+/// Each `float3` sits in its own 16-byte lane, the trailing pad scalars named on both sides.
 /// `right_scaled` / `up_scaled` carry the aspect and field-of-view scaling pre-baked, so the raygen just forms `forward + right_scaled * ndc.x - up_scaled * ndc.y`.
 struct sv::camera_gpu
 {

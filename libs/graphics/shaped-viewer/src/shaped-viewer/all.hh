@@ -21,7 +21,6 @@
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/mesh_flags.hh>
 #include <shaped-viewer/scene/mesh_texture.hh>
-#include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 #include <shaped-viewer/scene/scene_item.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
@@ -64,10 +63,8 @@
 #include <shaped-viewer/resources/resource_managers.hh>
 
 // rendering
-#include <shaped-viewer/rendering/frame_constants.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
-#include <shaped-viewer/rendering/raytrace_routine.hh>
 #include <shaped-viewer/rendering/render_plan.hh>
 #include <shaped-viewer/rendering/shaders.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>

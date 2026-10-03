@@ -1,7 +1,7 @@
 // The OpenPBR closure's vocabulary: the surface a material describes, the lobes `bsdf_prepare` makes of it, and the
 // layer couplings between them.
 //
-// The SGL port of shaders/openpbr.hlsli and shaders/bsdf_lobe.hlsli; openpbr_microfacet.sgl says what the model is.
+// openpbr_microfacet.sgl says what the model is.
 module openpbr
 
 // ---- Lobes ----------------------------------------------------------------------------------------------------------

@@ -98,23 +98,16 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
     // The neutral quadric permutation: one hard-coded gray surface, which is all a first trace needs.
     auto const& permutation = resources.shaders.acquire_quadric_fallback();
 
-    // What makes its hit group PROCEDURAL, and the one thing a triangle permutation never carries.
-    REQUIRE(permutation.intersection.is_valid());
+    // What makes its hit group PROCEDURAL, and the one thing a triangle permutation never is.
+    REQUIRE(permutation.kind == sv::geometry_kind::quadrics);
 
-    // Driven and checked here rather than left to the trace loop below: a shader that does not compile makes the trace
-    // decline forever, which arrives as a timeout with nothing to point at instead of as DXC's own message.
-    co_await cc::async_settled(permutation.shader);
-    if (permutation.shader->has_error())
-        FAIL(cc::format("quadric closest-hit: {}\n--- source ---\n{}",
-                        permutation.shader->try_error()->underlying().to_string(), permutation.source));
-
-    co_await cc::async_settled(permutation.intersection);
-    if (permutation.intersection->has_error())
-        FAIL(cc::format("quadric intersection: {}\n--- source ---\n{}",
-                        permutation.intersection->try_error()->underlying().to_string(), permutation.source));
-
-    REQUIRE(permutation.intersection->try_value() != nullptr);
-    CHECK(permutation.intersection->try_value()->stage == sg::shader_stage::intersection);
+    // Driven and checked here rather than left to the trace loop below: a hit group that does not compile makes the trace
+    // decline forever, which arrives as a timeout with nothing to point at instead of as the compiler's own message.
+    co_await cc::async_settled(permutation.hit_group);
+    if (permutation.hit_group->has_error())
+        FAIL(cc::format("quadric hit group: {}\n--- source ---\n{}",
+                        permutation.hit_group->try_error()->underlying().to_string(), permutation.source));
+    REQUIRE(permutation.hit_group->try_value() != nullptr);
 
     auto instances = cc::vector<sg::tlas_instance>();
     instances.push_back(sg::tlas_instance{.blas = record->blas, .instance_id = 0, .hit_group_offset = 0});
@@ -141,12 +134,12 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd,
             sv::pt_frame_constants_gpu{.camera = sv::camera_gpu::from(camera), .samples_per_pixel = 8, .max_bounces = 2},
-            sv_test::pt_block_usage);
+            sg::buffer_usage::readonly_buffer);
 
         // A uniform environment, so the background is a known constant and anything darker than it was HIT.
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sv_test::pt_block_usage);
+            sg::buffer_usage::readonly_buffer);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -159,13 +152,13 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
-        auto const outcome = sv_test::trace_path(cmd, {.frame = frame,
-                                                       .background = background,
-                                                       .instances = instances,
-                                                       .output = target,
-                                                       .instance_table = instance_table,
-                                                       .hit_groups = hit_groups,
-                                                       .bindless = &bindless});
+        auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .bindless = &bindless});
 
         if (outcome == sg::routine_outcome::executed)
             readback = sg::data_future<tg::vec4f>(cmd.download.bytes_from_texture(target.raw()));
@@ -269,7 +262,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute 
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("color", tg::vec3f(0.5f, 0.5f, 0.5f)));
     auto const type
-        = sv::material_type::create("sv_test_per_primitive", cc::move(signature), "    surface.base_color = color;");
+        = sv::material_type::create("sv_test_per_primitive", cc::move(signature), "surface.base_color = color\n");
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
     // One value per primitive, which is the finest a quadric batch can serve.
@@ -286,18 +279,12 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute 
 
     auto const& permutation = resources.shaders.acquire_quadric(resolved);
 
-    co_await cc::async_settled(permutation.shader);
-    if (permutation.shader->has_error())
-        FAIL(cc::format("quadric closest-hit: {}\n--- source ---\n{}",
-                        permutation.shader->try_error()->underlying().to_string(), permutation.source));
-
-    co_await cc::async_settled(permutation.intersection);
-    if (permutation.intersection->has_error())
-        FAIL(cc::format("quadric intersection: {}\n--- source ---\n{}",
-                        permutation.intersection->try_error()->underlying().to_string(), permutation.source));
-
-    CHECK(permutation.shader->try_value()->stage == sg::shader_stage::closest_hit);
-    CHECK(permutation.intersection->try_value()->stage == sg::shader_stage::intersection);
+    co_await cc::async_settled(permutation.hit_group);
+    if (permutation.hit_group->has_error())
+        FAIL(cc::format("quadric hit group: {}\n--- source ---\n{}",
+                        permutation.hit_group->try_error()->underlying().to_string(), permutation.source));
+    REQUIRE(permutation.hit_group->try_value() != nullptr);
+    CHECK(permutation.kind == sv::geometry_kind::quadrics);
 
     // The same material against a MESH is a different permutation, since the load code differs — which is the two-spellings
     // property the whole fork rests on.
@@ -340,17 +327,15 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
     CHECK(item.mesh == sv::mesh_id::invalid); // the arm a quadric item does NOT use
     CHECK(resources.contains_instance(item.instance));
 
-    // The permutation the resolution yielded is the quadric spelling, so it carries an intersection shader.
+    // The permutation the resolution yielded is the quadric spelling, so its hit group carries an intersection shader.
     auto const* const permutation = resources.shaders.find(item.shader_key);
     REQUIRE(permutation != nullptr);
-    CHECK(permutation->intersection.is_valid());
+    CHECK(permutation->kind == sv::geometry_kind::quadrics);
 
-    co_await cc::async_settled(permutation->shader);
-    if (permutation->shader->has_error())
-        FAIL(cc::format("quadric closest-hit: {}\n--- source ---\n{}",
-                        permutation->shader->try_error()->underlying().to_string(), permutation->source));
-    co_await cc::async_settled(permutation->intersection);
-    REQUIRE(permutation->intersection->has_value());
+    co_await cc::async_settled(permutation->hit_group);
+    if (permutation->hit_group->has_error())
+        FAIL(cc::format("quadric hit group: {}\n--- source ---\n{}",
+                        permutation->hit_group->try_error()->underlying().to_string(), permutation->source));
 
     // Placing the same set again is the same everything: the slot short-circuits, and the content hashes behind it agree.
     auto const again = resources.acquire_scene_item(set);
@@ -371,14 +356,13 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
     auto const other_item = resources.acquire_scene_item(other);
     CHECK(other_item.quadrics != item.quadrics);
 
-    // A batch with no attributes resolves differently, so it is a second permutation and a second pair of compiles.
+    // A batch with no attributes resolves differently, so it is a second permutation and a second compile.
     // Driven here because a node this test started is async work still holding its context when it ends, which nexus
     // reports as a failure of the test itself.
     auto const* const other_permutation = resources.shaders.find(other_item.shader_key);
     REQUIRE(other_permutation != nullptr);
     CHECK(other_permutation->key != permutation->key);
-    co_await cc::async_settled(other_permutation->shader);
-    co_await cc::async_settled(other_permutation->intersection);
+    co_await cc::async_settled(other_permutation->hit_group);
 
     // `other` was acquired AFTER the drain above, and acquiring a batch queues two stream uploads — its primitive
     // buffer and its box buffer.
@@ -523,11 +507,11 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
 
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 4, .max_bounces = 1},
-            sv_test::pt_block_usage);
+            sg::buffer_usage::readonly_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sv_test::pt_block_usage);
+            sg::buffer_usage::readonly_buffer);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -539,13 +523,13 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
-        auto const outcome = sv_test::trace_path(cmd, {.frame = frame,
-                                                       .background = background,
-                                                       .instances = instances,
-                                                       .output = target,
-                                                       .instance_table = instance_table,
-                                                       .hit_groups = hit_groups,
-                                                       .bindless = &bindless});
+        auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .bindless = &bindless});
 
         if (outcome == sg::routine_outcome::executed)
             readback = sg::data_future<tg::vec4f>(cmd.download.bytes_from_texture(target.raw()));
@@ -731,8 +715,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("tint", tg::vec3f(0.9f, 0.2f, 0.1f)));
     auto const type = sv::material_type::create("sv_test_uncompilable", cc::move(signature),
-                                                "    surface.base_color = tint;\n"
-                                                "    this_function_does_not_exist(surface);");
+                                                "surface.base_color = tint\n"
+                                                "this_function_does_not_exist(surface)\n");
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
     auto resident = sv::resident_quadric_set{.name = "one sphere", .geometry = batch, .primitive_count = 1};
@@ -740,17 +724,16 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
     auto const* const own = &resources.shaders.acquire_quadric(resolved);
 
     // The premise: it settles without a value, so the trace has to substitute.
-    co_await cc::async_settled(own->shader);
-    REQUIRE(own->shader->has_error());
-    REQUIRE(own->shader->try_value() == nullptr);
+    co_await cc::async_settled(own->hit_group);
+    REQUIRE(own->hit_group->has_error());
+    REQUIRE(own->hit_group->try_value() == nullptr);
 
     // The stand-in the trace would pick, and the one thing that makes it usable here: it is procedural.
     auto const& stand_in = resources.shaders.acquire_quadric_fallback();
-    REQUIRE(stand_in.intersection.is_valid());
+    REQUIRE(stand_in.kind == sv::geometry_kind::quadrics);
 
-    co_await cc::async_settled(stand_in.shader);
-    co_await cc::async_settled(stand_in.intersection);
-    REQUIRE(stand_in.shader->try_value() != nullptr);
+    co_await cc::async_settled(stand_in.hit_group);
+    REQUIRE(stand_in.hit_group->try_value() != nullptr);
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(own);
@@ -773,11 +756,11 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
 
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 2, .max_bounces = 1},
-            sv_test::pt_block_usage);
+            sg::buffer_usage::readonly_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sv_test::pt_block_usage);
+            sg::buffer_usage::readonly_buffer);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -789,15 +772,15 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
-        auto const outcome = sv_test::trace_path(cmd, {.frame = frame,
-                                                       .background = background,
-                                                       .instances = instances,
-                                                       .output = target,
-                                                       .instance_table = instance_table,
-                                                       .hit_groups = hit_groups,
-                                                       .fallback = &resources.shaders.acquire_fallback(),
-                                                       .quadric_fallback = &stand_in,
-                                                       .bindless = &bindless});
+        auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .fallback = &resources.shaders.acquire_fallback(),
+                                                                  .quadric_fallback = &stand_in,
+                                                                  .bindless = &bindless});
 
         if (outcome == sg::routine_outcome::executed)
             readback = sg::data_future<tg::vec4f>(cmd.download.bytes_from_texture(target.raw()));
@@ -843,9 +826,6 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
     // with no intersection shader and report nothing at all.
     auto const expected = covered_fraction(1.0, 4.0, 60.0) * double(image_size) * double(image_size);
     CHECK(double(covered) > expected * 0.5);
-
-    // Drained so nothing this test started outlives it; both settled on the error rather than on a value.
-    co_await cc::async_settled(own->intersection);
 
     // Everything this test set going, including what the routine started on the frame path.
     // `sv::background_work` is the context-wide answer, and that is the point: a trace kicks off compiles nothing

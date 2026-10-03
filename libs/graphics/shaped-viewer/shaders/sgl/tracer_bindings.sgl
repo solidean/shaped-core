@@ -1,6 +1,5 @@
 // What the path tracer's ray-tracing stages share: the frame constants, the two binding groups, the payloads and the ray set.
 //
-// The SGL port of the declarations of shaders/pt_common.hlsli.
 // A module rather than the pipeline's own file, because a hit group the host compiles at run time lists the same groups and traces the same rays.
 module tracer
 
@@ -53,7 +52,7 @@ struct instance_record:
 
 /// The per-frame constants, mirroring `sv::pt_frame_constants_gpu` (rendering/pathtrace_routine.hh) byte for byte, 256 bytes.
 ///
-/// A buffer's single element rather than a constant block, so the host binds the very buffer the HLSL tracer reads as its `frame`.
+/// A buffer's single element rather than a constant block, which `sv::pt_trace_desc::frame` is created as.
 /// Placed as a buffer element is (EMIT-111): tightly, every value aligned to 4, which is why every pad of the C++ struct is named here.
 struct frame_constants:
     /// the pinhole camera the primary rays leave from
@@ -81,10 +80,7 @@ struct frame_constants:
 
     /// whether to write `frame_diffuse`, `frame_specular` and `guide_hit_distance`, for a split-signal denoiser
     write_split: uint
-    /// whether to write `primary_depth`, at the camera's `near_plane`
-    write_primary_depth: uint
-    near_plane: float
-    split_pad: uint
+    split_pad: uint3
 
     /// the camera the previous frame of this layer was traced from, which motion vectors reproject into
     previous_camera: camera_record
@@ -92,9 +88,9 @@ struct frame_constants:
     reserved0: float4
     reserved1: float4
 
-/// Every resource the pipeline's stages share — group 0, as `pt_bindings` is in the HLSL tracer.
+/// Every resource the pipeline's stages share — group 0.
 ///
-/// The images' formats are the ones sv allocates them in (view/view_data.cc), and the stand-ins `sv::sgl_pathtrace_routine` binds when a target is absent.
+/// The images' formats are the ones sv allocates them in (view/view_data.cc), and the stand-ins `sv::pathtrace_routine` binds when a target is absent.
 binding traced:
     require readwrite_image_formats
     require extended_image_formats
@@ -134,9 +130,6 @@ binding traced:
 
     /// Every light the trace samples, grouped by path — what `sv::pt_light_table` builds.
     lights: buffer[light_record]
-
-    /// The clip-space depth of the first primary hit per pixel, 1 where it escaped, written while `frame.write_primary_depth` is set.
-    primary_depth: out image_2d[.r32_float]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //
@@ -217,10 +210,10 @@ binding traced:
         address_u = .clamp_edge
         address_v = .clamp_edge
 
-/// The manager's bindless tables — group 1, which the host binds as the manager's own group (resources/bindless_tables.hh).
+/// The manager's bindless tables — group 1, which the host binds as the manager's own group.
 ///
-/// Every table sv declares, in its order and at its default budget, so each lands on the slots the manager's layout gives it.
-/// The host builds the pipeline over the manager's layout rather than over this one, which is why the two must not disagree.
+/// This is THE declaration of them: `sv::gpu_resource_manager` lays its staging group out from this binding's reflection (resources/bindless_tables.hh).
+/// So a table's size is changed here, and the order must stay `sv::bindless_table`'s, which the host asserts.
 binding bindless:
     require binding_arrays
 

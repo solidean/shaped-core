@@ -1,6 +1,5 @@
 // The path tracer as an SGL ray-tracing pipeline: the raygen that integrates, the two misses, and the pipeline over them.
 //
-// The SGL port of shaders/pathtrace.hlsl and shaders/pt_hit.hlsl, with the same numerics.
 // The hit groups are the host's, `.host`, because a closest hit is generated per material and compiled at run time.
 // The file joins module `tracer` (shaders/sgl), which holds what those hit groups share with it: the bindings, the payloads, the rays and the shading.
 //
@@ -39,9 +38,6 @@ rays path_rays:
     let mut guide_albedo = float3(0.0)
     let mut guide_specular_albedo = float3(0.0)
     let mut guide_roughness = 0.0
-
-    // The first sample's primary hit, as clip-space depth; 1 is the far plane, which is also what an escaped ray stays at.
-    let mut primary_depth = 1.0
 
     // The primary hits' motion, summed over this frame's samples: where each landed on the previous frame's screen.
     let mut motion = float2(0.0)
@@ -127,16 +123,6 @@ rays path_rays:
                     guide_albedo += albedo
                     guide_specular_albedo += specular_albedo
                     guide_roughness += roughness
-
-                    // The depth raster sees at the pixel CENTER: the center ray met with the plane the sample hit.
-                    // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
-                    if s == 0:
-                        let center = normalize(scene.camera_ray_offset(cam, px_f + 0.5, dim_f))
-                        let facing = dot(n, center)
-                        let t = if abs(facing) > 1e-6 => dot(n, dir * hit_t) / facing else hit_t
-                        let t_forward = if t > 0.0 => t else hit_t
-                        let view_depth = t_forward * dot(center, normalize(cam.forward))
-                        primary_depth = max(1.0 - f.near_plane / view_depth, 0.0)
 
                 // An escaped ray reprojects as a point at infinity, so the sky moves with rotation and not with translation.
                 let prev = scene.camera(..f.previous_camera)
@@ -341,8 +327,6 @@ rays path_rays:
         color = (tracer.traced.output[xy].xyz * frames + color) / (frames + 1.0)
 
     tracer.traced.output[xy] = float4(..color, 1.0)
-
-    if f.write_primary_depth != 0u => tracer.traced.primary_depth[xy] = primary_depth
 
     // The guides blend exactly as the color does, but on a count of their own.
     if f.write_guides != 0u:

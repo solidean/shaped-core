@@ -1,7 +1,6 @@
 // The quadric half of what a generated material shader is compiled against: the primitive records, the ray solve, and the shading context.
 //
-// The SGL port of shaders/quadric_runtime.hlsli, function for function and with the same numerics.
-// The runtime probe (tests/shaders/runtime_probe.sgl) holds the two to the same numbers, the root solve above all.
+// The runtime probe (tests/shaders/runtime_probe.sgl) holds the root solve to a CPU reference.
 // Everything a material fragment reads comes from module `material`; what is here is only what a quadric has and a triangle does not.
 //
 // The geometry is analytic: no vertices, no corners, no barycentrics.

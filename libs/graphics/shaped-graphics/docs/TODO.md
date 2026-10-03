@@ -240,9 +240,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   So a shader authored in SGL compiles for metal like any other target, and the gap that is left is narrower than it was.
 
   **What remains is HLSL.**
-  `sv`'s path tracer is written in HLSL against the DXR pipeline path, and there is no macOS route from HLSL to anything metal reads.
-  DXC publishes no macOS binary, and SPIRV-Cross is unvendored.
-  Porting `sv` to metal therefore means either an SGL rewrite of its shaders or an HLSL route built elsewhere.
+  DXC publishes no macOS binary, and SPIRV-Cross is unvendored, so a shader authored in HLSL has no route to metal.
+  `sv` is not one of them any more: its path tracer and raster passes are SGL, and what is unverified is its ray-tracing pipeline on metal.
 
   **And the tier-2 fixtures are still `xxd -i` dumps**: `double_compute.metallib.h` and its neighbours, with their reflection written by hand beside them.
   Compiling them through the wrapper at build time would drop the dumps.

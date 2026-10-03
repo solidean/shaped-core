@@ -80,7 +80,7 @@ inline constexpr u32 bound_samplers_space = 10;
 /// The attribute takes no arguments: the register is always `b0` and the space is `inline_constants_space`.
 ///
 /// The block's layout is here, because the generator emits a C++ mirror of it and `sizeof` is then simply true
-/// rather than asserted — which is what `sv::frame_constants_gpu` carries by hand and by comment today.
+/// rather than asserted by hand.
 /// `block_size` also keeps coming from reflection, which is how a routine reads it and is never wrong.
 struct slib::shader_inline_constants
 {

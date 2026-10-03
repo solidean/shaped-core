@@ -28,7 +28,7 @@ namespace
 {
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("color", tg::vec3f(0.5f, 0.5f, 0.5f)));
-    return sv::material_type::create("sv_test_color", cc::move(signature), "    surface.base_color = color;");
+    return sv::material_type::create("sv_test_color", cc::move(signature), "surface.base_color = color\n");
 }
 
 [[nodiscard]] sv::mesh_attribute_binding bind(sv::mesh_attribute const& a)
@@ -169,7 +169,7 @@ TEST("sv::generate_material_shader emits a flat load for per_triangle")
     auto const generated = sv::generate_material_shader(r);
 
     // One element at PrimitiveIndex(), so it loads rather than blending.
-    CHECK(contains(generated.source, "sv::load_element_f3"));
+    CHECK(contains(generated.source, "material.load_element_f3"));
     CHECK(contains(generated.source, "ctx.primitive"));
     CHECK(!contains(generated.source, "ctx.barycentrics"));
 }

@@ -1,8 +1,7 @@
 // A Monte-Carlo probe over the OpenPBR closure, so a test can assert on NUMBERS rather than on an image.
 //
-// The SGL twin of shaders/bsdf_probe.hlsl, over module `openpbr` rather than shaders/openpbr.hlsli.
-// openpbr-bsdf-test.cc runs every case through both and holds both to the same tolerances, which is what proves the port.
-// That file says what each estimator measures and why its expected value is known in closed form.
+// Over module `openpbr`, the closure the tracer shades with.
+// openpbr-bsdf-test.cc says what each estimator measures and why its expected value is known in closed form.
 //
 // Work is split so a case gets many more samples than one thread would finish: item `i` is case `i / blocks_per_case`, drawing its own independent block of samples.
 // The CPU sums the blocks belonging to one case.
@@ -75,7 +74,7 @@ struct probe_surface:
 /// One measurement to make — mirrors `sv_test::probe_case` lane-for-lane, so keep the two in lockstep.
 ///
 /// A buffer element is packed tightly, so `surface` lands at byte 32 as the C++ struct has it.
-/// The pads keep the HLSL probe's layout, which is the same 320 bytes; `probe_echo` pins the agreement.
+/// The pads round it to 320 bytes; `probe_echo` pins the agreement.
 struct probe_case:
     wo: float3
     mode: uint
@@ -99,11 +98,19 @@ binding probe:
     /// The cases to run, one per block of work items.
     cases: buffer[probe_case]
 
-    /// One accumulator per work item, summed across a case's blocks by the CPU.
-    /// What the lanes mean is per mode, as shaders/bsdf_probe.hlsl lists them.
+    /// One accumulator per work item, summed across a case's blocks by the CPU; what the lanes mean is per mode.
+    ///
+    ///   - `probe_albedo`: `xyz` is the summed estimate and `w` the samples that produced it.
+    ///   - `probe_pdf_norm`: `x` is the summed estimate, `w` the sample count.
+    ///   - `probe_reciprocity`: `x` is the summed absolute difference and `y` the summed magnitude it is relative to.
+    ///   - `probe_medium`: how many samples reported an interior disagreeing with the side they went to, how many entered the
+    ///     transmissive interior, and how many the subsurface one.
+    ///   - `probe_transmitted`: the summed estimate over the samples that left on the FAR side only, so its channel RATIOS are
+    ///     the transmitted lobe's own colour.
+    ///   - `probe_echo`: the decoded fields the CPU checks its own packing against.
     results: mut buffer[float4]
 
-    /// How many elements `results` and `cases` hold, which the HLSL probe reads off the buffers themselves.
+    /// How many elements `results` and `cases` hold, since SGL reads no buffer's length.
     item_count: uint
     case_count: uint
 

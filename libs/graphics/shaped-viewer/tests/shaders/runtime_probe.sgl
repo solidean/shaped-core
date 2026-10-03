@@ -1,7 +1,6 @@
-// A probe over modules `material` and `quadric`, so a test can hold the port to the numbers of the HLSL runtimes.
+// A probe over modules `material` and `quadric`, so a test can hold the runtimes to CPU references.
 //
-// The SGL twin of shaders/runtime_probe.hlsl, over shaders/sgl rather than shaders/material_runtime.hlsli and shaders/quadric_runtime.hlsli.
-// runtime-probe-test.cc runs every case through both and compares them bit for bit; that file says what the cases cover.
+// runtime-probe-test.cc says what the cases cover.
 use material
 use quadric
 use scene
@@ -39,7 +38,7 @@ binding runtime_probe_io:
     /// Eight per case, in the order `runtime_measure` writes them.
     results: mut buffer[float4]
 
-    /// How many elements `cases` holds, which the HLSL probe reads off the buffer itself.
+    /// How many elements `cases` holds, since SGL reads no buffer's length.
     count: uint
 
 @compute(64) fun runtime_measure(@thread_id id: int3){runtime_probe_io}:

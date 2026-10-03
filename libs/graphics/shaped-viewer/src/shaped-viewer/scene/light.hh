@@ -288,7 +288,7 @@ struct sv::scene_light
     sv::light light;
 };
 
-/// One light as the path tracer reads it — mirrors `sv::light` in shaders/light.hlsli, so keep the two in lockstep.
+/// One light as the path tracer reads it — mirrors `scene.light` (shaders/sgl/scene_items.sgl) and `tracer.light_record`, so keep the three in lockstep.
 ///
 /// Tagged by `path` rather than typed per kind, which is what lets the trace hold every light in one buffer.
 /// Units are resolved before this, so the shader never sees one, and `emission` means one canonical quantity per path:
@@ -341,5 +341,5 @@ struct sv::light_gpu
 
 namespace sv
 {
-static_assert(sizeof(light_gpu) == 96, "light_gpu must match sv::light in shaders/light.hlsli");
+static_assert(sizeof(light_gpu) == 96, "light_gpu must match scene.light in shaders/sgl/scene_items.sgl");
 } // namespace sv

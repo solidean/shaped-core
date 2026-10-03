@@ -44,15 +44,14 @@ struct sv::texture_policy
     bool generate_mips = true;
 };
 
-/// Per-manager configuration for a whole scene's GPU resources, plus the bindless tables they are bound through.
+/// Per-manager configuration for a whole scene's GPU resources.
+/// The bindless tables they are bound through are module `tracer`'s, sized there (see resources/bindless_tables.hh).
 struct sv::gpu_resource_manager_config
 {
     manager_config meshes = {};
     manager_config quadrics = {};
-    manager_config materials = {};
     manager_config textures = {};
     manager_config attributes = {};
-    bindless_config bindless = {};
     texture_policy textures_policy = {};
     work_budget work = {};
 };
@@ -140,11 +139,7 @@ private:
 class sv::gpu_resource_manager
 {
 public:
-    /// Creates the five managers, the staging group over `cfg.bindless`'s layout, and one array per table.
-    ///
-    /// `cfg.bindless` must declare `textures_2d` and `buffers`, whatever else it declares or omits: a sampled texture is
-    /// acquired into the first, and every buffer a hit reads — geometry, attributes, the parameter block — into the second.
-    /// Both assert.
+    /// Creates the four managers, the staging group over module `tracer`'s bindless layout, and one array per table.
     [[nodiscard]] static gpu_resource_manager create(sg::context& ctx, gpu_resource_manager_config const& cfg = {});
 
     /// Reclaim and advance to epoch `e`, if not already there.
@@ -335,19 +330,15 @@ public:
     /// manager's contract a schema rather than a set of names a shader has to rediscover.
     [[nodiscard]] sg::binding_group_layout_handle const& bindless_layout() const;
 
-    /// Whether `table` was declared at all (a budget of 0 omits it).
-    [[nodiscard]] bool has_table(bindless_table table) const;
-
-    /// How many elements `table` holds, or 0 if it was not declared.
+    /// How many elements `table` holds.
     [[nodiscard]] u32 table_capacity(bindless_table table) const;
 
     mesh_manager meshes;
     quadric_manager quadrics;
-    material_manager materials;
     texture_manager textures;
     attribute_manager attributes;
 
-    /// One generated closest-hit per material permutation, in the first format the context accepts.
+    /// One generated hit group per material permutation, compiled for the manager's context.
     ///
     /// It lives here rather than next to the render path because a permutation is acquired where a mesh is *authored*
     /// — `scene_ref::add_mesh` resolves the material and needs the layout back in the same breath — and this is the
@@ -385,8 +376,7 @@ private:
     /// differently to come back the same, and a placeholder that ignored that would be visibly off.
     [[nodiscard]] sg::texture_2d const& _placeholder_texture(tg::vec4f texel, sg::pixel_format format);
 
-    /// One entry per declared table, in table order; a table budgeted at 0 has none.
-    /// `_slot_of` maps a table onto its entry, so a caller never indexes this by table.
+    /// One entry per table, indexed by `bindless_table`.
     struct table_entry
     {
         bindless_table table = bindless_table::textures_2d;
@@ -402,7 +392,6 @@ private:
     gpu_resource_manager(sg::context& ctx,
                          mesh_manager meshes,
                          quadric_manager quadrics,
-                         material_manager materials,
                          texture_manager textures,
                          attribute_manager attributes,
                          material_shader_cache shaders,
@@ -422,12 +411,6 @@ private:
     [[nodiscard]] bool _is_live(sv::resident_quadric_set const& set);
     [[nodiscard]] bool _is_resident(sv::resident_quadric_set const& set);
 
-    /// The entry for `table` in a freshly built list, before `_slot_of` exists to index it.
-    [[nodiscard]] static table_entry const* _find_table(cc::span<table_entry const> tables, bindless_table table);
-
-    /// The position of `table` in `_tables`, asserting that it was declared at all.
-    [[nodiscard]] i32 _declared_slot_of(bindless_table table) const;
-
     /// Whether `id` is already queued for follow-up work, so a re-acquire does not queue it twice.
     [[nodiscard]] bool _is_pending(texture_id id) const;
 
@@ -444,10 +427,6 @@ private:
     sg::staging_binding_group_handle _group;
 
     cc::vector<table_entry> _tables;
-
-    /// Position of each table in `_tables`, or -1 when it was not declared.
-    /// Indexed by `bindless_table`.
-    i32 _slot_of[u32(bindless_table::count_)] = {};
 
     /// One resource waiting for its post-load step, in request order.
     /// A texture whose record is gone by the time its turn comes is skipped: eviction is the answer to

@@ -138,7 +138,7 @@ image_stats trace_furnace(sg::context& ctx,
          .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 
     // A declined frame integrated nothing, so it must not count as one of the `frames` being accumulated: a trace
-    // declines until its DXR state object lands, which is built asynchronously.
+    // declines until its ray-tracing state object lands, which is built asynchronously.
     // Same workaround as sv_test::frames_until_executed, spelled inline because this loop owns its frame index.
     auto const loop_start = cc::current_time_steady_secs();
     for (auto f = 0; f < frames;)
@@ -168,23 +168,23 @@ image_stats trace_furnace(sg::context& ctx,
         auto records = cc::vector<sv::instance_gpu>();
         records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
 
-        auto const frame = ctx.transient.create_buffer_from_pod(*cmd, fc, sv_test::pt_block_usage);
+        auto const frame = ctx.transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::readonly_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(
-            *cmd, sv::background_gpu::from(sv::background::uniform(environment)), sv_test::pt_block_usage);
+            *cmd, sv::background_gpu::from(sv::background::uniform(environment)), sg::buffer_usage::readonly_buffer);
 
         auto const instance_table
             = ctx.transient.create_buffer_from_data(*cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
 
-        auto const traced = sv_test::trace_path(*cmd, {.frame = frame,
-                                                       .background = background,
-                                                       .instances = instances,
-                                                       .output = target,
-                                                       .instance_table = instance_table,
-                                                       .hit_groups = hit_groups,
-                                                       .bindless = &bindless});
+        auto const traced = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .bindless = &bindless});
 
         // The routine degrades to a no-op when its shaders do not build, and every number below would then be read off a
         // target nothing ever wrote.

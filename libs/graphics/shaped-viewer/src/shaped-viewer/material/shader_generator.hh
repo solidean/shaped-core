@@ -50,20 +50,14 @@ struct sv::material_parameter_layout
     i32 size_bytes = 0;
 };
 
-/// A material permutation, as HLSL and as an SGL hit group, plus the parameter layout both sources read.
+/// A material permutation as an SGL hit group, plus the parameter layout it reads.
 struct sv::generated_material_shader
 {
-    cc::string source;
-    material_parameter_layout layout;
-
-    /// The SGL tracer's hit group for this permutation, `hit_group sv_material for path_rays`, or empty where the type has no
-    /// `sgl_shader`.
+    /// `hit_group sv_material for path_rays`, one file the host compiles through `slib::compile_hit_group`.
     /// `generate_material_shader` says what it holds.
-    cc::string sgl_source;
+    cc::string source;
 
-    /// The sampler states this source declares, in declaration order — `samplers[i]` is what `sv_sampler_i` must be.
-    /// The generated text names a register, never a state, so nothing else can recover which state belongs to which register.
-    cc::vector<sg::sampler> samplers;
+    material_parameter_layout layout;
 
     /// Whether a cutout is possible on THIS permutation: its type declares an `opacity_attribute`, and something other
     /// than the signature's own default supplied it.
@@ -76,72 +70,47 @@ struct sv::generated_material_shader
     /// can be invoked at all rather than only whether one is compiled.
     bool can_cut_out = false;
 
-    /// What the compile is cached on: the resolution's shape and how these options spell it (see `material_shader_key`).
+    /// What the compile is cached on: the resolution's shape and the geometry it is spelled for (see `material_shader_key`).
     cc::hash128 key;
 };
 
-/// How a generated shader is spelled, for a caller that is not the default trace.
+/// How a generated hit group is spelled.
 struct sv::material_shader_options
 {
-    /// the function the fragment ends up inside
-    cc::string_view entry_point = "sv_evaluate_material";
-
-    /// the runtime contract to include; must be resolvable by whatever compiles the result
-    cc::string_view runtime_include = "material_runtime.hlsli";
-
-    /// Emitted AFTER the entry function, for code that calls it — the path tracer's closest-hit above all.
-    ///
-    /// It has to be an epilogue rather than an ordinary include: HLSL needs `sv_evaluate_material` defined before anything calls
-    /// it, and this file is where that definition lands.
-    /// Empty emits nothing, which is what a caller wanting only the material function asks for.
-    cc::string_view epilogue_include = {};
-
-    /// how many elements each bindless table is declared with; must match the `gpu_resource_manager`'s budgets
-    bindless_config const* bindless = nullptr;
-
-    /// Which geometry the SGL hit group traces: a triangle group, or a procedural one with the quadric intersection.
+    /// Which geometry the hit group traces: a triangle group, or a procedural one with the quadric intersection.
     /// The resolution must be against geometry of the same kind.
     geometry_kind kind = geometry_kind::triangles;
 };
 
 namespace sv
 {
-/// The HLSL for `r`, plus the parameter layout it reads.
+/// The SGL hit group for `r`, plus the parameter layout it reads.
 ///
-/// The source is, in order: the runtime include, every budgeted bindless table, one `SamplerState` per distinct
-/// sampler it samples with, then the entry function.
-/// That function declares one local per signature attribute — a constant loaded from the parameter block, a mesh attribute
-/// interpolated across the hit triangle, or a texture sampled through its uv attribute — and then runs the type's fragment
-/// verbatim over them.
+/// It joins modules `material`, `openpbr`, `tracer` and, for quadrics, `quadric`, and restates `tracer`'s ray set as `path_rays`.
+/// Then, in order:
+/// - a `const sv_supplied_<attribute>` per attribute, whether anything but the declaration's default supplied it;
+/// - a `fun sv_attribute_<attribute>(ctx)` per attribute: a constant loaded from the parameter block, a mesh attribute
+///   interpolated across the hit triangle, or a texture sampled through its uv attribute, all through the bindless tables;
+/// - `sv_evaluate_material(ctx)`, which binds each attribute to an immutable local of its own name and runs the type's fragment;
+/// - the stages, which `tracer` shades through, and `hit_group sv_material for path_rays` over them.
 ///
-/// The loads themselves happen in a nested block, so the attribute names, `surface` and `ctx` are the only names the fragment
-/// shares a scope with.
+/// The fragment shares its scope with the attribute locals, `surface` and `ctx` alone, since every load sits in a function of
+/// its own.
 /// That is what lets a material type name an attribute `params` or `uv` without the generator having to know.
 ///
-/// Only what the permutation touches is declared: a material sampling no texture emits no texture table, so the reflection a
-/// caller binds against stays as small as the material is.
+/// A triangle group is `tracer.shade_triangle`'s closest hit, and the cutout any-hits on both records where `can_cut_out`.
+/// A procedural group is `tracer.intersect_quadric`'s intersection, shared by both records, and `tracer.shade_quadric`'s closest hit.
+/// A texture is sampled through the palette sampler `sgl_palette_sampler` names for its state, at level 0.
 ///
 /// The generated text depends on `r.permutation_key` AND on `opts`, so `key` covers both — two calls agreeing on the pair
 /// generate the same source, byte for byte, and nothing else may share their cache entry.
 ///
 /// Every attribute must be a scalar or vector of `f32`, `i32` or `u32`; a matrix or a 64-bit / narrow scalar asserts, since
-/// neither has a settled `ByteAddressBuffer` layout here yet.
-///
-/// **The SGL hit group** reads the same layout, and is one file the host compiles through `slib::compile_hit_group`.
-/// It joins modules `material`, `openpbr`, `tracer` and, for quadrics, `quadric`, and restates `tracer`'s ray set as `path_rays`.
-/// Then, in order:
-/// - a `const sv_supplied_<attribute>` per attribute, whether anything but the declaration's default supplied it;
-/// - a `fun sv_attribute_<attribute>(ctx)` per attribute, the load the HLSL source does inline, through the bindless tables;
-/// - `sv_evaluate_material(ctx)`, which binds each attribute to a local of its own name and runs the type's `sgl_shader`;
-/// - the stages, which `tracer` shades through, and `hit_group sv_material for path_rays` over them.
-///
-/// A triangle group is `tracer.shade_triangle`'s closest hit, and the cutout any-hits on both records where `can_cut_out`.
-/// A procedural group is `tracer.intersect_quadric`'s intersection, shared by both records, and `tracer.shade_quadric`'s closest hit.
-/// A texture is sampled through the palette sampler `sgl_palette_sampler` names for its state, at level 0.
+/// neither has a settled raw-buffer layout here yet.
 [[nodiscard]] generated_material_shader generate_material_shader(resolved_material const& r,
                                                                  material_shader_options const& opts = {});
 
-/// The sampler of module `tracer`'s palette (shaders/sgl/tracer_bindings.sgl) that the SGL tracer samples `s`'s texture through.
+/// The sampler of module `tracer`'s palette (shaders/sgl/tracer_bindings.sgl) that the tracer samples `s`'s texture through.
 ///
 /// The palette has one sampler per magnification filter and address mode of `u` and of `v`, which is everything a hit's sample can tell apart.
 /// A hit samples level 0 explicitly, and at level 0 only the magnification filter applies, so `min_filter` and `mip_filter` are dropped.
@@ -150,15 +119,13 @@ namespace sv
 /// Anisotropy and a comparison are dropped too, and sv's importers produce none of the four.
 [[nodiscard]] cc::string sgl_palette_sampler(sg::sampler const& s);
 
-/// The HLSL type `format` maps to — `float`, `float3`, `uint2`, ...
+/// The SGL type `format` maps to — `float`, `float3`, `uint2`, ...
 /// Empty for a format the generator does not support, which is what `generate_material_shader` asserts on.
-[[nodiscard]] cc::string_view hlsl_type_of(attribute_format format);
+[[nodiscard]] cc::string_view sgl_type_of(attribute_format format);
 
 /// The key `generate_material_shader` would return for `permutation_key` under `opts`, without generating anything.
 ///
-/// `permutation_key` is the resolution's shape; `opts` is how that shape is spelled — the entry point, the two includes, and
-/// the bindless budgets the tables are declared with.
-/// A cache computes this first and only generates on a miss, which is also why the budgets enter by value rather than as the
-/// `bindless_config const*` the caller happened to pass.
+/// `permutation_key` is the resolution's shape; `opts` is the geometry it is spelled for.
+/// A cache computes this first and only generates on a miss.
 [[nodiscard]] cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_options const& opts);
 } // namespace sv

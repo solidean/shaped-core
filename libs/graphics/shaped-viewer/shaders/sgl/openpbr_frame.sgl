@@ -1,6 +1,4 @@
 // The shading frame: the local coordinates every lobe of the closure works in, and how a hit builds them.
-//
-// The SGL port of the frame helpers of shaders/openpbr.hlsli.
 module openpbr
 
 /// The local frame a lobe is evaluated in: three world-space axes whose `n` is the shading normal.

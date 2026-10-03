@@ -14,7 +14,6 @@
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh> // attribute_format / attribute_frequency, which a record carries
-#include <shaped-viewer/scene/pbr_material.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/pos.hh>
 
@@ -68,8 +67,7 @@ enum class sv::residency : sv::u8
 /// Indexed and non-indexed geometry stay distinct all the way down.
 /// An `indexed_triangle_data` acquire uploads the caller's index buffer and builds an indexed BLAS, while a `triangle_data` acquire uploads nothing extra and builds a non-indexed one.
 /// `is_indexed` is what a shader branches on.
-/// It reaches the path tracer's closest-hit per instance, through `instance_gpu::is_indexed` and `InstanceID()`;
-/// the flat `pbr_raytrace_routine` still takes it per frame, in `frame_constants_gpu::mesh_is_indexed`.
+/// It reaches the path tracer's closest-hit per instance, through `instance_gpu::is_indexed` and the hit's instance id.
 /// It is also the only thing that makes `indices` meaningful.
 struct sv::mesh_record
 {
@@ -269,34 +267,6 @@ private:
 
     sg::context& _ctx;
     cc::map<quadric_set_id, pending_set> _settling;
-};
-
-/// One uploaded material set: a StructuredBuffer of `pbr_material_gpu`, one entry per triangle, indexed by
-/// `PrimitiveIndex()` in `sv::pbr_raytrace_routine`'s closest-hit.
-/// The path tracer reads none of this — a material there is a `sv::material` resolved into a per-instance parameter block.
-struct sv::material_record
-{
-    residency state = residency::pending;
-
-    sg::buffer<pbr_material_gpu> materials;
-    isize count = 0;
-};
-
-/// Hands out `material_set_id`s and owns the per-set material buffer, with LRU budgeting (see resource_budget).
-class sv::material_manager : public impl::lru_pool<material_set_id, material_record>
-{
-public:
-    /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`.
-    [[nodiscard]] static material_manager create(sg::context& ctx, manager_config const& cfg = {});
-
-    /// The material_set_id for `materials.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
-    /// On a miss the set is packed to its GPU layout and uploaded into a read-only structured buffer on one command list submitted before returning.
-    [[nodiscard]] material_set_id acquire(material_data const& materials);
-
-private:
-    explicit material_manager(sg::context& ctx) : _ctx(ctx) {}
-
-    sg::context& _ctx;
 };
 
 /// One uploaded mesh attribute: its bytes as a byte-address buffer, plus what a shader has to know to read them.

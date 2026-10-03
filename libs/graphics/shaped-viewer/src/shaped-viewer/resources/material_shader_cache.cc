@@ -11,21 +11,12 @@
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 #include <shaped-viewer/shader_library.hh>
-#include <sv_sgl_shaders.hh>
+#include <sv_shaders.hh>
 
 namespace sv
 {
 namespace
 {
-/// Where a generated source looks for its includes: sv's own package mount, which is what carries
-/// `material_runtime.hlsli` and `pt_material_hit.hlsli`.
-constexpr cc::string_view include_dir = "sv_shaders";
-
-[[nodiscard]] sg::async_compiled_shader failed(cc::string message)
-{
-    return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::move(message))));
-}
-
 [[nodiscard]] cc::shared_async<cc::vector<sg::hit_shader>> failed_hit_group(cc::string message)
 {
     return cc::make_async_from_error<cc::vector<sg::hit_shader>>(
@@ -41,9 +32,6 @@ constexpr cc::string_view include_dir = "sv_shaders";
 resolved_material fallback_resolution(geometry_kind kind)
 {
     static auto const type = material_type::create("sv_fallback", {},
-                                                   "    surface.base_color = float3(0.5, 0.5, 0.5);\n"
-                                                   "    surface.specular_roughness = 1.0;",
-                                                   {},
                                                    "surface.base_color = float3(0.5, 0.5, 0.5)\n"
                                                    "surface.specular_roughness = 1.0\n");
     static auto const material = sv::material::create("sv_fallback", material_type_id::invalid, {});
@@ -56,44 +44,12 @@ resolved_material fallback_resolution(geometry_kind kind)
 } // namespace
 
 
-material_shader_cache material_shader_cache::create(sg::shader_format format,
-                                                    material_shader_options const& opts,
-                                                    sg::context* ctx)
+material_shader_cache material_shader_cache::create(sg::context* ctx)
 {
     auto cache = material_shader_cache();
-    cache._format = format;
     cache._context = ctx;
-    cache._entry_point = cc::string(opts.entry_point);
-    cache._runtime_include = cc::string(opts.runtime_include);
-    cache._epilogue_include = cc::string(opts.epilogue_include);
-    if (opts.bindless != nullptr)
-        cache._bindless = *opts.bindless;
     return cache;
 }
-
-material_shader_options material_shader_cache::generation_options() const
-{
-    return generation_options(geometry_kind::triangles);
-}
-
-material_shader_options material_shader_cache::generation_options(geometry_kind kind) const
-{
-    auto opts = material_shader_options{.entry_point = _entry_point,
-                                        .runtime_include = _runtime_include,
-                                        .epilogue_include = _epilogue_include,
-                                        .bindless = &_bindless,
-                                        .kind = kind};
-
-    // `entry_point` names the generated MATERIAL function and is the same either way; what the kind picks is the pair
-    // of includes, which is exactly what `material_shader_key` folds in to keep the two spellings apart in one cache.
-    if (kind == geometry_kind::quadrics)
-    {
-        opts.runtime_include = quadric_runtime_include;
-        opts.epilogue_include = quadric_hit_epilogue_include;
-    }
-    return opts;
-}
-
 
 material_permutation const& material_shader_cache::acquire_fallback(geometry_kind kind)
 {
@@ -119,16 +75,14 @@ material_permutation const* material_shader_cache::find(cc::hash128 key) const
 material_permutation const& material_shader_cache::acquire(resolved_material const& r, geometry_kind kind)
 {
     // Computed rather than generated-then-read: a miss is what has to generate, and the key does not need the text.
-    // The kind is in the key through the options' two includes, so the same material on a mesh and on a quadric batch
-    // is two entries here rather than a collision.
-    auto const opts = generation_options(kind);
+    // The kind is in the key, so the same material on a mesh and on a quadric batch is two entries here rather than a
+    // collision.
+    auto const opts = material_shader_options{.kind = kind};
     auto const key = material_shader_key(r.permutation_key, opts);
     if (auto const* const resident = _by_key.get_ptr(key); resident != nullptr)
         return *resident;
 
     auto const procedural = kind == geometry_kind::quadrics;
-
-    // The epilogue is what makes this a shader rather than a function: it defines the closest-hit that calls the material.
     auto generated = generate_material_shader(r, opts);
 
     // A cutout on a quadric batch is not merely unimplemented, it is unreachable: the instance is submitted with
@@ -139,72 +93,23 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                        "is submitted opaque, so it will draw fully opaque",
                        r.type->name);
 
+    // Left cold: the tracer starts it the first time a trace names this permutation.
     auto lib = acquire_shader_library();
-    auto shader
-        = lib.has_error()
-            ? failed(cc::format("shaped-viewer: no shader library to compile material '{}' through", r.type->name))
-            : lib.value()->compile_source(
-                  generated.source, sg::shader_stage::closest_hit,
-                  procedural ? quadric_hit_entry_point : hit_entry_point, _format,
-                  {.include_dir = include_dir,
-                   .label = cc::format("<material '{}'{}>", r.type->name, procedural ? " quadric" : "")});
-
-    // The same source at its other entry points, which is what keeps the stages from disagreeing about the layout
-    // they read.
-    //
-    // Which other entry points there are is the kind's: a procedural permutation owes an INTERSECTION shader, since
-    // that is what makes its hit group procedural and a procedural BLAS cannot be traced without one.
-    // A triangle one owes the cutout test instead, and only where the material can cut out -- otherwise the any-hit
-    // could reject nothing, and a hit group carrying one gives up the hardware's opaque path for every intersection.
-    auto intersection = sg::async_compiled_shader();
-    auto any_hit = sg::async_compiled_shader();
-    auto shadow_any_hit = sg::async_compiled_shader();
-
-    if (procedural)
-    {
-        intersection
-            = lib.has_error()
-                ? failed(cc::format("shaped-viewer: no shader library to compile material '{}' intersection through",
-                                    r.type->name))
-                : lib.value()->compile_source(
-                      generated.source, sg::shader_stage::intersection, quadric_intersection_entry_point, _format,
-                      {.include_dir = include_dir, .label = cc::format("<material '{}' intersection>", r.type->name)});
-    }
-    else if (generated.can_cut_out && lib.has_value())
-    {
-        any_hit = lib.value()->compile_source(
-            generated.source, sg::shader_stage::any_hit, any_hit_entry_point, _format,
-            {.include_dir = include_dir, .label = cc::format("<material '{}' any-hit>", r.type->name)});
-
-        // The shadow record's copy, which differs only in the payload it declares.
-        shadow_any_hit = lib.value()->compile_source(
-            generated.source, sg::shader_stage::any_hit, shadow_any_hit_entry_point, _format,
-            {.include_dir = include_dir, .label = cc::format("<material '{}' shadow any-hit>", r.type->name)});
-    }
-
-    // The SGL spelling of the same permutation, left cold: only the SGL tracer starts it.
-    auto sgl_hit_group = cc::shared_async<cc::vector<sg::hit_shader>>();
-    if (generated.sgl_source.empty())
-        sgl_hit_group = failed_hit_group(cc::format("material type '{}' has no SGL fragment", r.type->name));
-    else if (_context == nullptr || lib.has_error())
-        sgl_hit_group = failed_hit_group(cc::format(
-            "shaped-viewer: no context and shader library to compile material '{}' as SGL through", r.type->name));
+    auto hit_group = cc::shared_async<cc::vector<sg::hit_shader>>();
+    if (_context == nullptr || lib.has_error())
+        hit_group = failed_hit_group(
+            cc::format("shaped-viewer: no context and shader library to compile material '{}' through", r.type->name));
     else
-        sgl_hit_group = slib::compile_hit_group(
-            _context, lib.value(), &sv::sgl_shaders::tracer_pipeline_path_t::definition(), generated.sgl_source,
-            "sv_material", cc::format("<material '{}'{} SGL>", r.type->name, procedural ? " quadric" : ""));
+        hit_group = slib::compile_hit_group(_context, lib.value(), &sv::shaders::tracer_pipeline_path_t::definition(),
+                                            generated.source, "sv_material",
+                                            cc::format("<material '{}'{}>", r.type->name, procedural ? " quadric" : ""));
 
     auto entry = _by_key.entry(key);
     return entry.get_or_emplace(material_permutation{.key = generated.key,
                                                      .layout = cc::move(generated.layout),
-                                                     .samplers = cc::move(generated.samplers),
-                                                     .shader = cc::move(shader),
-                                                     .any_hit = cc::move(any_hit),
-                                                     .shadow_any_hit = cc::move(shadow_any_hit),
-                                                     .intersection = cc::move(intersection),
+                                                     .kind = kind,
                                                      .can_cut_out = !procedural && generated.can_cut_out,
-                                                     .source = cc::move(generated.source),
-                                                     .sgl_hit_group = cc::move(sgl_hit_group),
-                                                     .sgl_source = cc::move(generated.sgl_source)});
+                                                     .hit_group = cc::move(hit_group),
+                                                     .source = cc::move(generated.source)});
 }
 } // namespace sv

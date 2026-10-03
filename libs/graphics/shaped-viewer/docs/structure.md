@@ -39,20 +39,19 @@ authoring API (interactive / refs)       [done]         sv::interactive -> frame
                                                         A frame inherits the window surface, which inherits the view surface, so f.add_scene() == f.window().view().add_scene()
 context provider (set_acquire_context)   [done]         an overridable hook, called at most once per process; the default brings up dx12 (hardware, then WARP)
 shader library provider                  [done]         the same shape for slib: the library is process-wide rather than a viewer's, because a generated material permutation is compiled from the render path.
-                                                        The default registers sv's and sr's packages plus DXC; viewer and the GPU tests both reach it through the hook rather than each assembling one
+                                                        The default registers sv's and sr's packages plus every compiler edge; viewer and the GPU tests both reach it through the hook rather than each assembling one
 input routing + key-bound zoom           [done]         picks the leaf under the cursor in painter's order through the plan's region links;
                                                         Ctrl+wheel magnifies what a leaf samples without touching a camera or a trace
 mesh / triangle_geometry / attributes    [in progress]  the authoring-side mesh: triangle_geometry (raw or indexed, pinned + hashed) plus named attributes (per element, or per instance for a per-mesh value), a material id, flags and textures
-resource managers (mesh / material)      [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
-resource data (triangle / indexed / material)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
+resource managers (mesh / quadric / texture / attribute)  [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
+resource data (triangle / indexed / texture)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
 gpu_resource_manager                     [in progress]  where resource management comes together: the four managers, the staging binding group, and one sg::bindless_array per table.
                                                         Its tick is `advance_to(epoch)` — idempotent, so N windows drawing at N rates each call it and the first one pays.
                                                         It holds the bindless lock too, since that invariant spans every array over one group rather than any single one
-bindless tables                          [in progress]  sv hand-declares the layout (resources/bindless_tables.hh): one table per view dimension, byte-address buffers, budgets from the config.
-                                                        Every generated permutation reads gBindlessBuffers — its epilogue reaches the mesh's positions through it — and declares gBindlessTextures2D only where an attribute samples one; both are bound as the trace's second group
-pathtrace_routine                        [in progress]  the DXR GI trace view_renderer drives: TLAS + dispatch_rays into a UAV target
-pbr_raytrace_routine                     [in progress]  the flat single-bounce IBL DXR trace (SH environment), driven directly
-sv_shaders package                       [in progress]  raygen / miss+closest-hit, plus layout.hlsl (border / view / wipe), via slib
+bindless tables                          [in progress]  module tracer's `binding bindless` is the one declaration (shaders/sgl/tracer_bindings.sgl): one table per view dimension, raw byte buffers.
+                                                        The manager's staging group is laid out from its reflection, so the trace's group 1 is the very layout its pipeline was compiled against and sg resolves its footprint by name
+pathtrace_routine                        [in progress]  the GI trace view_renderer drives: shaders/tracer_pipeline.sgl over module tracer, TLAS + dispatch_rays into an image target, one hit group per material permutation
+sv_shaders package                       [in progress]  one SGL package: the tracer pipeline with module tracer exported, plus layout.sgl (border / view / wipe) and depth_fill.sgl, via slib
 camera / controls                        [in progress]  dev-friendly pinhole camera, plus sv::orbit_camera_controller (event-driven) and sv::fps_camera_controller (integrated over time).
                                                         BOTH are wired in: `view_ref::camera_style` picks one, the viewer routes that view's events to it and runs the per-frame update, and switching mid-session re-seeds the incoming controller from where the outgoing one left the camera
 persistent per-view state                [in progress]  view_id keys what a view keeps — camera, controller, zoom, display name, last rect, composite target and accumulators — all in one sv::view_store the frame owns
@@ -68,25 +67,25 @@ denoising                                [in progress]  render_settings::reconst
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
                                                         Follow-up steps (mip generation through whichever sr mipmap routine the format admits) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
                                                         Still to come: async streaming, placeholders while pending, and mapping visibility onto sg's stream priorities
-material system (material/)              [in progress]  material_type (signature + HLSL fragment) -> material (a type with attributes bound) -> material_library (content-addressed, never evicted, provider hook like the context's).
+material system (material/)              [in progress]  material_type (signature + SGL fragment) -> material (a type with attributes bound) -> material_library (content-addressed, never evicted, provider hook like the context's).
                                                         resolve_material walks one attribute down the frequency chain — type default, material, per-instance, mesh attribute, material texture, mesh texture — finest wins, `final` blocks finer.
                                                         It yields TWO keys: permutation_key over the resolution's shape (what a shader is generated from), parameter_key over its values (what a per-instance slot is filled from).
                                                         So two materials differing only in constants share one shader; only a texture sample forces a second.
                                                         CPU-side and complete
-material shader generation               [in progress]  generate_material_shader turns a resolved_material into HLSL plus the parameter layout that source reads.
-                                                        Emits every budgeted bindless table (bindless_declarations from bindless_tables.hh), one SamplerState per distinct sampler, and one initializer per attribute — a parameter-block load, a barycentric interpolation, or a uv sample.
-                                                        The type's fragment then runs verbatim over those locals; shaders/material_runtime.hlsli is the hand-authored half it is written against.
-                                                        Compiled through slib::shader_library::compile_source
+material shader generation               [in progress]  generate_material_shader turns a resolved_material into an SGL hit group plus the parameter layout that source reads.
+                                                        Emits one load per attribute — a parameter-block load, a barycentric interpolation, or a uv sample through module tracer's sampler palette — and binds each to a local.
+                                                        The type's fragment then runs over those locals; modules material, openpbr and tracer (shaders/sgl) are the hand-authored half it is written against.
+                                                        Compiled through slib::compile_hit_group against the tracer pipeline
 material data on the GPU                 [in progress]  attribute_manager uploads any mesh_attribute to a byte-address buffer keyed on its own hash, which is what makes the mesh_attribute rank of the chain reachable at all.
                                                         gpu_resource_manager::acquire_instance resolves a parameter block down to ids, content-keyed on parameter_key; build_instance_parameters turns one into bytes for THIS epoch, into the record's own persistent buffer.
                                                         Every index in a block is that epoch's, minted where it is written — which is what makes the trace's access declaration complete by construction rather than by remembering.
-                                                        sv::instance_gpu is the per-item record a closest-hit reads by InstanceID() — its material's parameter block, and its own geometry, all four indices acquired by describe_instance.
+                                                        sv::instance_gpu is the per-item record a hit reads by its instance id — its material's parameter block, and its own geometry, all four indices acquired by describe_instance.
                                                         Mesh geometry is acquired into the buffers table too, so a view is no longer limited to one mesh by its bindings.
-                                                        material_shader_cache — which gpu_resource_manager owns, so a mesh is authored and its shader acquired in one call — compiles one closest-hit per material_shader_key through sv::acquire_shader_library.
+                                                        material_shader_cache — which gpu_resource_manager owns, so a mesh is authored and its shader acquired in one call — compiles one hit group per material_shader_key through sv::acquire_shader_library, once the tracer starts it.
                                                         So gold and copper are one compile and only a texture sample costs a second.
-                                                        scene_ref::add_mesh resolves the material and the block; view_renderer builds one instance_gpu per item on its own command list, and pathtrace_routine builds a DXR pipeline with one hit group per permutation, selected per instance by tlas_instance::hit_group_offset.
+                                                        scene_ref::add_mesh resolves the material and the block; view_renderer builds one instance_gpu per item on its own command list, and pathtrace_routine builds a ray-tracing pipeline with one hit group per permutation, selected per instance by tlas_instance::hit_group_offset.
                                                         The trace binds two groups: its own bindings, and the manager's bindless tables.
-                                                        Still to come: several parameter blocks per buffer, and a local root signature so two permutations may disagree about a sampler register
+                                                        Still to come: several parameter blocks per buffer
 glTF material mapping                    [done]         openpbr declares alpha_cutoff (glTF's MASK, 0 = off) and occlusion (imported, and deliberately ignored by the path-tracing fragment — a baked AO term double-counts what the integrator computes per bounce).
                                                         texture_sample_source carries a channel_swizzle, so one packed metallic-roughness or ORM map binds several attributes over a single upload.
                                                         The swizzle is generated code rather than a value, so it lives in permutation_key — and only as far as the declaration reads it, which canonicalizes identity swizzles.
@@ -152,28 +151,16 @@ A shader reload is folded into that same hash as a reload generation, since `sg:
 
 ## Platform / backend status
 
-Ray tracing runs on **dx12 + DXR** (Windows), hardware or WARP.
-Vulkan ray tracing is real in shaped-graphics now, and sv still does not run on it — the blocker moved rather than cleared.
-Both backends take HLSL, and it is not the same HLSL.
-A SPIR-V target needs `[[vk::binding]]`, `[[vk::location]]` and `[[vk::push_constant]]` annotations — see sg's [shaders](../../shaped-graphics/docs/shaders.md).
-sv's generated material shaders carry none.
-Emitting them from the generator would make the generated half portable and leave the hand-written `.hlsli` library to follow; a genuinely portable shader language is the larger follow-up.
-The whole sv API compiles everywhere, though: without a backend a routine simply acquires no shader and draws nothing.
+Every sv shader is SGL — the tracer, the generated material hit groups and the two raster passes — so one source compiles for every backend.
+The path tracer runs on **dx12** (hardware or WARP) and on **vulkan**; `cross-backend-trace-test.cc` holds the vulkan image to the dx12 one to rounding, material spelling by material spelling.
+The viewer's default context (`sv::set_acquire_context` unset), the examples and the rest of the GPU tests are dx12's.
+Metal and webgpu are untried: metal has the ray-tracing pipeline sg needs, webgpu has ray queries alone.
+The whole sv API compiles everywhere: without a backend a routine simply acquires no shader and draws nothing.
 
 ## First library-extension seams (per the "living libraries" rule)
 
-- **The BSDF is sv's own**, in `shaders/openpbr.hlsli`: the OpenPBR Surface subset the path tracer shades through, plus the GGX / Fresnel / sheen primitives under it.
+- **The BSDF is sv's own**, SGL module `openpbr` (shaders/sgl/openpbr_*.sgl): the OpenPBR Surface subset the path tracer shades through, plus the GGX / Fresnel / sheen primitives under it.
   A shared shader BRDF library in shaped-rendering is the natural home once a second consumer appears, and the primitives are the half that would move.
-  The flat `pbr_raytrace_routine` still has its own `shaders/pbr.hlsli`, which is one of the reasons to retire that routine.
-- **The shader-side `sv::` namespace is provisional**, and a new shader type should not land at its top level by default.
-  It replaced the old `sv_` prefix and now holds four unrelated groups flat: the microfacet and Fresnel primitives
-  (`ggx_*`, `fresnel_*`, `sheen_*`, `oren_nayar`, `dispersive_ior`, `thin_film_reflectance`, `luminance`), the shading frame
-  (`frame`, `make_frame`, `to_local`, `perturb_frame`, …), the material model (`surface`, `bsdf`, `bsdf_*`, `medium_*`), and
-  the generated-shader runtime (`instance`, `attribute_desc`, `shading_context`, `interpolate_*`).
-  Names a layer above or below will want are already in it — `sv::surface`, `sv::luminance`, and `sv::frame`, which is an
-  orthonormal shading basis in HLSL and the immediate-mode frame in C++.
-  The split is deliberately deferred rather than skipped: it wants doing together with the move of the primitives to
-  shaped-rendering above, since that move decides which group leaves and what the rest is named around.
 - **Meshing primitives belong in typed-geometry.** Both examples hand-roll their geometry: a cube in `hello-cube`, a UV sphere in `openpbr-spheres`.
   Two callers is enough to want a `tg::` sphere / box tessellation.
 - **The id-pool now exists** as `sv::impl::lru_pool<Id, Record>` (budget + idle eviction, LRU).

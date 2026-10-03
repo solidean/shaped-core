@@ -1,7 +1,6 @@
 // A probe over module `scene`'s projection, so a test can assert on the NUMBERS the raygen's motion guide is built from.
 //
-// The SGL twin of shaders/camera_probe.hlsl, over shaders/sgl/scene_camera.sgl rather than shaders/camera.hlsli.
-// motion-vector-test.cc runs every case through both and holds both to the same checks, and the two to each other bit for bit.
+// Over shaders/sgl/scene_camera.sgl, the camera the raygen projects through.
 // That file says why motion vectors need a probe at all.
 use scene
 
@@ -41,7 +40,7 @@ binding camera_probe_io:
     /// `zw` is the round trip of `pixel` through `camera_ray_offset` and back through `camera_project`, which must come back as `pixel` itself.
     results: mut buffer[float4]
 
-    /// How many elements `cases` and `results` hold, which the HLSL probe reads off the buffer itself.
+    /// How many elements `cases` and `results` hold, since SGL reads no buffer's length.
     count: uint
 
 /// The two measurements of one case.

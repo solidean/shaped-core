@@ -1,6 +1,5 @@
 // The path tracer's SHADING, once a hit has been located: what every closest hit runs after it has described its surface.
 //
-// The SGL port of shaders/pt_shade.hlsli, shaders/pt_material_hit.hlsli and shaders/pt_quadric_hit.hlsli, with the same numerics.
 // SGL hands no function to another, so a closest hit evaluates its material itself and hands `shade` the surface it got.
 // Everything from there on is the same for every geometry kind: prepare the closure, estimate direct light through it, sample the continuation.
 // What a generated hit group adds around this is `sv::generate_material_shader`'s, which material/shader_generator.hh describes.
@@ -192,7 +191,7 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
     if surface.geometry_tangent != float3(1.0, 0.0, 0.0) => f = openpbr.rotate_frame_to_tangent(f, surface.geometry_tangent)
 
     // The coat's normal, re-expressed in the frame the closure works in.
-    // It lands AFTER `bsdf_prepare` read the surface, exactly as shaders/pt_shade.hlsli has it, so the closure still sees the authored one.
+    // It lands AFTER `bsdf_prepare` read the surface, so the closure still sees the authored one.
     if surface.geometry_coat_normal != float3(0.0, 0.0, 1.0):
         let coat_world = normalize(openpbr.to_world(authored_frame, normalize(surface.geometry_coat_normal)))
         surface.geometry_coat_normal = normalize(openpbr.to_local(f, coat_world))

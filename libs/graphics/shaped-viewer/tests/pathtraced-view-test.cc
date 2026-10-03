@@ -12,7 +12,7 @@ using namespace cc::primitive_defines;
 // Headless end-to-end path trace.
 // It builds a simple Cornell box through the managers, integrates one small view with global illumination, and drives it to completion.
 // Beyond the flat direct-lit raytraced-view test, this exercises the whole GI path.
-// The path-tracing shaders compile through slib, the DXR pipeline + shader table build, the TLAS is built, and the raygen bounces rays with NEE toward the ceiling light.
+// The path-tracing shaders compile through slib, the ray-tracing pipeline and shader table build, the TLAS is built, and the raygen bounces rays with NEE toward the ceiling light.
 //
 // No pixel readback: this asserts the pipeline runs rather than inspecting the image (same philosophy as the
 // raytraced-view test). Reaching the end without an assert/exception means every GPU stage succeeded.
@@ -94,7 +94,7 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
     // still passes against a target nothing ever wrote.
     // That silence is expensive: a shader break shows up as a debugging session on the image, not a failing test.
     //
-    // Driven as whole frames rather than asserted on one: the trace additionally waits on a DXR state object that is
+    // Driven as whole frames rather than asserted on one: the trace additionally waits on a ray-tracing state object that is
     // built asynchronously and polled across frames — see sv_test::frames_until_executed.
     REQUIRE(sv_test::frames_until_executed(
         ctx,
@@ -103,10 +103,10 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
             records.clear();
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sv_test::pt_block_usage);
+            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer);
 
-            auto const background
-                = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(bg), sv_test::pt_block_usage);
+            auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(bg),
+                                                                         sg::buffer_usage::readonly_buffer);
 
             // rgba32_float, which the routine asserts on: the raygen reads the target back to blend into it.
             auto const target
@@ -123,17 +123,17 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
             // The tables the closest-hit reaches all of that through, locked for the recording.
             auto const bindless = resources.freeze();
 
-            return sv_test::trace_path(cmd, {.frame = frame,
-                                             .background = background,
-                                             .instances = instances,
-                                             .output = target,
-                                             .instance_table = instance_table,
-                                             .lights = light_buffer,
-                                             .hit_groups = hit_groups,
-                                             .bindless = &bindless});
+            return sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                        .background = background,
+                                                        .instances = instances,
+                                                        .output = target,
+                                                        .instance_table = instance_table,
+                                                        .lights = light_buffer,
+                                                        .hit_groups = hit_groups,
+                                                        .bindless = &bindless});
         }));
 
-    // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
+    // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, ray dispatch) without a device error.
     CHECK(mesh_rec->triangle_count == box.materials.size());
     CHECK(!mesh_rec->is_indexed); // the non-indexed path: the corner indices come from the primitive, not a buffer
     CHECK(records[0].is_indexed == 0u);
@@ -157,13 +157,13 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     if (!env.has_compiler)
         SKIP("no DXC compiler to build the path-tracing shaders");
 
-    // A material type whose fragment is not HLSL, which is the case the fallback exists for: before it, one of these
+    // A material type whose fragment does not compile, which is the case the fallback exists for: before it, one of these
     // anywhere in a scene made the whole trace a no-op.
     auto& lib = *sv::acquire_material_library().value();
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
     auto const type = lib.register_type(
-        sv::material_type::create("sv_test_broken", cc::move(signature), "    surface.x = not_a_function(roughness);"));
+        sv::material_type::create("sv_test_broken", cc::move(signature), "surface.x = not_a_function(roughness)\n"));
 
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -195,10 +195,10 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
         records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
         auto const frame = ctx.transient.create_buffer_from_pod(
-            cmd, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1}, sv_test::pt_block_usage);
+            cmd, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1}, sg::buffer_usage::readonly_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(sv::background{}),
-                                                                     sv_test::pt_block_usage);
+                                                                     sg::buffer_usage::readonly_buffer);
 
         auto const target
             = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
@@ -210,19 +210,19 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
-        return sv_test::trace_path(cmd, {.frame = frame,
-                                         .background = background,
-                                         .instances = instances,
-                                         .output = target,
-                                         .instance_table = instance_table,
-                                         .hit_groups = hit_groups,
-                                         .fallback = fallback,
-                                         .bindless = &bindless});
+        return sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                    .background = background,
+                                                    .instances = instances,
+                                                    .output = target,
+                                                    .instance_table = instance_table,
+                                                    .hit_groups = hit_groups,
+                                                    .fallback = fallback,
+                                                    .bindless = &bindless});
     };
 
     // The permutation genuinely does not build, so it cannot be traced with.
-    co_await cc::async_settled(permutation->shader);
-    REQUIRE(permutation->shader->has_error());
+    co_await cc::async_settled(permutation->hit_group);
+    REQUIRE(permutation->hit_group->has_error());
 
     // With nothing to stand in for it the trace is a no-op — the old all-or-nothing behavior, still what a caller
     // supplying no fallback gets.
@@ -245,15 +245,13 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
 
 // The same trace, shaded through a texture rather than through per-face colours.
 //
-// A permutation declares a sampler only when its material samples something, and those samplers are a group of
-// their own -- a third `binding_group_layout` and a third slot in the pipeline layout (see
-// `sv::material_sampler_group`).
-// Every other path-traced scene in this suite is untextured, so without this the three-way split in
-// `_build_variant` and the layout it builds are never reached at all.
+// A permutation samples only when its material does, through module tracer's palette in the trace's own group.
+// Every other path-traced scene in this suite is untextured, so without this a hit group reaching the palette and the
+// bindless texture table is never traced at all.
 //
-// What makes this test mean something is the sampler count below: a change that stopped generating samplers would
+// What makes this test mean something is the palette check below: a change that stopped generating samples would
 // otherwise leave it green while testing nothing.
-ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler group (headless)",
+ASYNC_INVOCABLE_TEST("sv - a path-traced textured material samples through the palette (headless)",
                      (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
@@ -282,9 +280,8 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
     auto const* const permutation = resources.shaders.find(item.shader_key);
     REQUIRE(permutation != nullptr);
 
-    // The guard this test rests on: a textured material is what puts a sampler in the permutation, and a sampler
-    // is what puts a third group in the pipeline layout.
-    REQUIRE(permutation->samplers.size() >= 1);
+    // The guard this test rests on: a textured material is what puts a sample in the permutation.
+    REQUIRE(permutation->source.contains("tracer.traced.palette_"));
 
     auto instances = cc::vector<sg::tlas_instance>();
     instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
@@ -312,12 +309,12 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
                                             .height = size[1],
                                             .usage = sg::texture_usage::texture | sg::texture_usage::image});
 
-    // A root signature the sampler group broke would fail pipeline creation, and the routine would degrade to a
-    // no-op rather than say so -- which is exactly what this REQUIRE is here to stop.
+    // A hit group that did not build would degrade the routine to a no-op rather than say so -- which is exactly what
+    // this REQUIRE is here to stop.
     //
-    // Driven over frames rather than asserted on the first one: the permutation's own closest-hit still has to
-    // compile and the DXR state object is built across frames, so "traced within one frame" would be a statement
-    // about the machine rather than about the layout.
+    // Driven over frames rather than asserted on the first one: the permutation's own hit group still has to compile
+    // and the state object is built across frames, so "traced within one frame" would be a statement about the
+    // machine rather than about the layout.
     REQUIRE(sv_test::frames_until_executed(
         ctx,
         [&](sg::command_list& cmd)
@@ -325,10 +322,10 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
             auto records = cc::vector<sv::instance_gpu>();
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sv_test::pt_block_usage);
+            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer);
 
             auto const background = ctx.transient.create_buffer_from_pod(
-                cmd, sv::background_gpu::from(sv::background{}), sv_test::pt_block_usage);
+                cmd, sv::background_gpu::from(sv::background{}), sg::buffer_usage::readonly_buffer);
 
             auto const instance_table
                 = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
@@ -336,14 +333,14 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
 
             auto const bindless = resources.freeze();
 
-            return sv_test::trace_path(cmd, {.frame = frame,
-                                             .background = background,
-                                             .instances = instances,
-                                             .output = target,
-                                             .instance_table = instance_table,
-                                             .lights = light_buffer,
-                                             .hit_groups = hit_groups,
-                                             .bindless = &bindless});
+            return sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                        .background = background,
+                                                        .instances = instances,
+                                                        .output = target,
+                                                        .instance_table = instance_table,
+                                                        .lights = light_buffer,
+                                                        .hit_groups = hit_groups,
+                                                        .bindless = &bindless});
         }));
 
     co_await cc::async_settled(sv::background_work(ctx));
@@ -427,11 +424,11 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
             auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-                1, sv_test::pt_block_usage | sg::buffer_usage::copy_dst);
+                1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
             cmd.upload.pod_to_buffer(frame, fc);
 
             auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-                1, sv_test::pt_block_usage | sg::buffer_usage::copy_dst);
+                1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
             cmd.upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
 
             auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
@@ -440,19 +437,19 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
             auto const light_buffer = sv_test::upload_lights(cmd, lights);
 
             auto const bindless = resources.freeze();
-            return sv_test::trace_path(cmd, {.frame = frame,
-                                             .background = background,
-                                             .instances = instances,
-                                             .output = accumulator,
-                                             .frame_output = total,
-                                             .guide_motion = motion,
-                                             .frame_diffuse = diffuse,
-                                             .frame_specular = specular,
-                                             .guide_hit_distance = hit_distance,
-                                             .instance_table = instance_table,
-                                             .lights = light_buffer,
-                                             .hit_groups = hit_groups,
-                                             .bindless = &bindless});
+            return sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                        .background = background,
+                                                        .instances = instances,
+                                                        .output = accumulator,
+                                                        .frame_output = total,
+                                                        .guide_motion = motion,
+                                                        .frame_diffuse = diffuse,
+                                                        .frame_specular = specular,
+                                                        .guide_hit_distance = hit_distance,
+                                                        .instance_table = instance_table,
+                                                        .lights = light_buffer,
+                                                        .hit_groups = hit_groups,
+                                                        .bindless = &bindless});
         }));
 
     auto cmd = ctx.create_command_list();
@@ -540,7 +537,7 @@ struct light_scene
 /// The mesh `positions` / `materials` describe, acquired and ready to trace, or empty when it did not build.
 [[nodiscard]] cc::optional<light_scene> make_light_scene(sv::gpu_resource_manager& resources,
                                                          cc::vector<tg::pos3f> const& positions,
-                                                         cc::vector<sv::pbr_material> const& materials,
+                                                         cc::vector<sv_test::pbr_material> const& materials,
                                                          sv::camera const& camera)
 {
     auto scene = light_scene{};
@@ -587,10 +584,10 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
             fc.max_bounces = scene.max_bounces;
             fc.seed = 1u;
 
-            auto const frame = ctx->transient.create_buffer_from_pod(*cmd, fc, sv_test::pt_block_usage);
+            auto const frame = ctx->transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::readonly_buffer);
 
             auto const background = ctx->transient.create_buffer_from_pod(
-                *cmd, sv::background_gpu::from(scene.environment), sv_test::pt_block_usage);
+                *cmd, sv::background_gpu::from(scene.environment), sg::buffer_usage::readonly_buffer);
 
             auto const target = ctx->transient.create_texture_2d(
                 {.format = sg::pixel_format::rgba32_float,
@@ -608,14 +605,14 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
                 = lights.records.empty() ? sg::buffer<sv::light_gpu>() : sv_test::upload_lights(*cmd, lights);
 
             auto const bindless = resources->freeze();
-            auto const outcome = sv_test::trace_path(*cmd, {.frame = frame,
-                                                            .background = background,
-                                                            .instances = scene.instances,
-                                                            .output = target,
-                                                            .instance_table = instance_table,
-                                                            .lights = light_buffer,
-                                                            .hit_groups = scene.hit_groups,
-                                                            .bindless = &bindless});
+            auto const outcome = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
+                                                                       .background = background,
+                                                                       .instances = scene.instances,
+                                                                       .output = target,
+                                                                       .instance_table = instance_table,
+                                                                       .lights = light_buffer,
+                                                                       .hit_groups = scene.hit_groups,
+                                                                       .bindless = &bindless});
             if (outcome != sg::routine_outcome::executed)
             {
                 all_executed = false;
@@ -787,7 +784,7 @@ ASYNC_INVOCABLE_TEST("sv - every kind of light delivers the illuminance its unit
 
     // A white floor at y = 0, seen from above.
     auto floor = sv_test::cornell_box{};
-    auto const white = sv::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
     sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
                           white);
 
@@ -850,7 +847,7 @@ ASYNC_INVOCABLE_TEST("sv - a sun delivers its illuminance with its bounce-ray st
     using namespace tg::literals;
 
     auto floor = sv_test::cornell_box{};
-    auto const white = sv::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
     sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
                           white);
 
@@ -913,8 +910,8 @@ ASYNC_INVOCABLE_TEST("sv - a surface's emission and an area light's nits are the
     {
         // Black and emissive, so the pixel is the emission and nothing it reflects.
         auto panel = sv_test::cornell_box{};
-        auto const emitter
-            = sv::pbr_material{.base_color = tg::vec3f(0, 0, 0), .emissive = tg::vec3f(luminance, luminance, luminance)};
+        auto const emitter = sv_test::pbr_material{.base_color = tg::vec3f(0, 0, 0),
+                                                   .emissive = tg::vec3f(luminance, luminance, luminance)};
         sv_test::cb_push_quad(panel, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
                               emitter);
 
@@ -930,7 +927,7 @@ ASYNC_INVOCABLE_TEST("sv - a surface's emission and an area light's nits are the
     // A rect of L nits filling the sky lights a floor as a sky of radiance L does.
     {
         auto floor = sv_test::cornell_box{};
-        auto const white = sv::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
+        auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
         sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
                               white);
 
@@ -982,7 +979,7 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
 
     using namespace tg::literals;
 
-    auto const white = sv::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
     auto open = sv_test::cornell_box{};
     sv_test::cb_push_quad(open, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
                           white);
@@ -1048,7 +1045,7 @@ ASYNC_INVOCABLE_TEST("sv - a light visible to the camera is seen at its radiance
         SKIP(reason.value());
 
     auto floor = sv_test::cornell_box{};
-    auto const white = sv::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
     sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
                           white);
 

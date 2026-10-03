@@ -1,8 +1,7 @@
 // The path tracer's pure helpers: its random numbers, its multiple-importance weights, its light densities and its direction samplers.
 //
-// The SGL port of the helpers of shaders/pt_common.hlsli, function for function and with the same numerics.
-// The bindings, the payloads and the frame constants stay behind, since those belong to the pipeline rather than to a helper.
-// So where the HLSL reads `frame.light_count`, a function here takes `light_count` from its caller.
+// The bindings, the payloads and the frame constants live in module `tracer`, since those belong to the pipeline rather than to a helper.
+// So where the raygen reads `frame.light_count`, a function here takes `light_count` from its caller.
 module pt
 
 use scene
@@ -21,7 +20,7 @@ const scatter_cap = 4096
 
 /// The pdf of the environment sampler a closest-hit estimates with: one uniform-hemisphere direction.
 /// The raygen needs the same number to weight a bounce ray that escaped, so it lives here rather than in either of them.
-/// A function rather than a `const`, since a `const` holds a literal and this is the float the HLSL folds.
+/// A function rather than a `const`, since a `const` holds a literal and this is a folded expression.
 fun env_pdf() -> float:
     return 1.0 / (2.0 * pi)
 

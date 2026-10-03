@@ -1,8 +1,7 @@
 // The contract a GENERATED material shader is written against: the structs both sides agree on, and the loads that are the same whatever the material.
 //
-// The SGL port of shaders/material_runtime.hlsli, function for function and with the same numerics.
 // A material fragment reads each attribute its type declares as an already-initialized local and writes `surface`.
-// Everything around that — the bindless tables, the loads that initialize those locals, the samplers — is emitted per permutation by `sv::generate_material_shader`.
+// Everything around that — the loads that initialize those locals and the samples through the palette — is emitted per permutation by `sv::generate_material_shader`.
 //
 // Nothing here declares a resource.
 // A helper that reads memory takes it as a `bytes` parameter, which the caller hands an element of its bindless table: `table[nonuniform i]`.
@@ -106,7 +105,7 @@ fun corner_elements(ctx: shading_context) -> uint3:
 /// The three vertex indices of triangle `primitive` on `inst`.
 ///
 /// The guard is load-bearing on the non-indexed path: a non-indexed mesh hands in a stand-in for `index_buffer` that has no elements to read.
-/// So the loads sit inside an `if` statement and are never selected between, which the HLSL's `[branch]` said and SGL has no spelling for.
+/// So the loads sit inside an `if` statement and are never selected between.
 fun triangle_corners(inst: scene.instance, index_buffer: bytes, primitive: uint) -> uint3:
     let base = primitive * 3
     if inst.is_indexed != 0:

@@ -5,7 +5,7 @@ Bigger design intent lives in [structure.md](structure.md).
 
 - **Denoising: both halves run; what is left**, in order — shaped-rendering's [reconstruction.md](../../shaped-rendering/docs/reconstruction.md) is the design:
   - **Measure what the guides' and the split's payload growth costs.**
-    `PtPayload` went from 27 to 38 scalar components: 3 for the diffuse albedo, 4 for the specular pair, and 4 more for the split
+    `tracer.surface_payload` went from 27 to 38 scalar components: 3 for the diffuse albedo, 4 for the specular pair, and 4 more for the split
     (`direct_specular` and `lobe`) — on every ray rather than only primary ones.
   - **The specular and split guides are declared for `automatic` whatever the device supports**, because `build_render_plan` is a pure function with no context to ask.
     That is five textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
@@ -68,9 +68,10 @@ What is left is the interaction on top of it, in dependency order:
 - **A canvas over a traced scene cannot be occluded by it.**
   The composited image carries no depth, so a label meant to lie on a face would show through when the face turns away.
   Occlusion needs the trace to write a primary-hit depth target, which `sr::slug_routine` already tests against when a scope has one.
-- **Shapes on traced geometry wait for the tracer's SGL port.**
-  SGL module `slug`'s `coverage` takes the pixel footprint as an argument, so a hit can pass one from its ray cone; the tracer is HLSL today.
-- **A traced layer has no alpha.** `pathtrace.hlsl`'s raygen writes none, so a `scene_3d` layer is forced to
+- **Shapes on traced geometry are not wired into the tracer yet.**
+  SGL module `slug`'s `coverage` takes the pixel footprint as an argument, so a hit can pass one from its ray cone.
+  The tracer is SGL now, so its hit groups can `use slug`.
+- **A traced layer has no alpha.** The raygen in `tracer_pipeline.sgl` writes none, so a `scene_3d` layer is forced to
   `layer_blend::replace`. Writing coverage into `.a` is what would let a traced layer composite `over` another.
   Until then `view_ref::add_scene` can express two scene layers on one view but only the last is visible.
 - **The accumulated image is never read back.** The tests pin the *policy* — a camera or scene change restarts the
@@ -126,66 +127,44 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
   A clean `snapshot()` is the cached handle, so it is nearly free.
   The lock refuses instead.
 
-## What the SGL tracer still needs
+## What the path tracer still needs
 
-`sv::sgl_pathtrace_routine` traces `shaders/tracer_pipeline.sgl` over module `tracer`, and `sgl-tracer-parity-test.cc` holds it to the HLSL tracer on dx12 and vulkan.
-Each permutation shades through its own generated SGL hit group: constants, mesh attributes, textures, cutouts, all three builtin types, and quadrics.
-`SV_TEST_SGL_TRACER=1` runs the path-tracing tests through it instead of the HLSL tracer.
+`sv::pathtrace_routine` traces `shaders/tracer_pipeline.sgl` over module `tracer` (shaders/sgl), with one generated hit group per material permutation.
 
-- **A custom material type needs its fragment twice until cutover.**
-  `material_type::sgl_shader` beside `shader`, and a type without one shades with the SGL tracer's fallback.
-  SGL is where a material type is written from then on, since it is the one portable form: at cutover `shader` goes, and so do the HLSL halves of `material_permutation`.
-- **A permutation's SGL group does not reload with a module it uses.**
-  It is compiled once per permutation key, which hashes the fragment and the resolution, so an edit to module `tracer` reaches the raygen and not the hit groups.
+- **A permutation's hit group does not reload with a module it uses.**
+  It is compiled once per permutation key, which hashes the resolution and the geometry kind, so an edit to module `tracer` reaches the raygen and not the hit groups.
+  What is needed is for `slib::compile_hit_group` to report the modules it read, so the cache can hash their contents and rebuild precisely what moved.
 - **The SGL front end runs once per entry point of a group.**
   `slib::compile_hit_group` compiles each stage from the source, and a cutout group has three, so the parse and the check run three times.
   A compile that DXC answers from its cache still costs the SGL front end, about 70 ms a stage.
 - **A ray set a module declares is named by no other file.**
   `rays = tracer.path_rays` is `invalid-pipeline`, a trace of `tracer.path_rays.surface` is refused, and `sgl describe` lists no module's set for a file joining the module.
-  So the pipeline file and the host's hit group each restate `path_rays` over the module's payloads, which slib holds to the same names, sizes and shapes.
+  So the pipeline file and each generated hit group restate `path_rays` over the module's payloads, which slib holds to the same names, sizes and shapes.
 - **Module `scene`'s structs are restated as `tracer.*_record`.**
   A module exports only the structs its own bindings place, and `scene` declares no binding, so `tracer`'s buffers of them would have no C++ type.
-- **sv's bindless tables carry HLSL's names, so the SGL pipeline has no footprint.**
-  A group fits only the layout it was created against, so the pipeline's group 1 is the manager's layout, `gBindlessBuffers` and all.
-  sg resolves a footprint by name, and SGL's are `bindless.*`, so every view the trace binds is barriered by its class.
-  Naming the tables as SGL does, once the HLSL tracer retires, lets the footprint through.
-- **The two tracers agree to rounding rather than to the bit.**
-  DXC compiles without `-Gis`, and the SGL text reaches it in another shape, so fast-math reassociates the environment's MIS weight differently.
-  With `-Gis` the images are bit-identical; the parity test's tolerance is eight units in the last place.
+- **The bindless budgets are the module's, not a config.**
+  `binding bindless` in shaders/sgl/tracer_bindings.sgl is the one declaration, and the manager lays its group out from it, so a table's size is an edit to that file.
+  A per-viewer budget would need the module to take its counts as options, which SGL's `require` and option machinery does not reach for binding arrays yet.
+- **dx12 and vulkan agree to rounding rather than to the bit.**
+  DXC compiles without `-Gis` and each driver compiles DXIL or SPIR-V its own way, so fast-math reassociates terms differently, the quadric root solve above all.
+  `cross-backend-trace-test.cc` holds the two to 64 units in the last place; measured, the worst case is about 30.
+- **The path tracer is traced on dx12 and vulkan alone.**
+  The viewer's default context and the examples are dx12's; metal has the ray-tracing pipeline the tracer needs and has never run it.
 
 ## What the material system still needs
 
 The chain is joined end to end.
 A `sv::resident_mesh` names a material, `scene_ref::add_mesh` resolves it against the mesh, and `gpu_resource_manager` generates and compiles its permutation and fills its parameter block.
-`pathtrace_routine` then traces a DXR pipeline carrying one hit group per permutation.
+`pathtrace_routine` then traces a ray-tracing pipeline carrying one hit group per permutation.
 What is left is narrower than it was:
 
-- **The generated HLSL is DXIL-shaped, which is what keeps sv off vulkan.**
-  A SPIR-V target needs `[[vk::binding]]`, `[[vk::location]]` and `[[vk::push_constant]]` annotations — see sg's [shaders](../../shaped-graphics/docs/shaders.md).
-  Neither the generator nor the hand-written `.hlsli` library emits any.
-  So `sv::shader_library` registers both compilers and a vulkan context still resolves nothing it can build a pipeline from.
-  Emitting them from the generator makes the generated half portable; the `.hlsli` library is the larger half, and a genuinely portable shader language is the larger answer still.
-
-  **And the material sampler group has to be bound there.**
-  On DX12 a static sampler is a root-signature entry, so `pathtrace_routine` builds that group's layout and binds nothing at its slot.
-  Vulkan writes a static sampler into the group's own descriptor set instead, so the same scene needs the group created and bound — a difference the dx12-only path has never had to notice.
-
-- **slib has no named-HLSL-fragment asset kind.**
-  A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
+- **slib has no named-fragment asset kind.**
+  A material type's `shader` is an SGL fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
-- **Two permutations may not disagree about a sampler register.**
-  A generated source names `sv_sampler_0` at `s0` and the pipeline bakes the states in as name-matched static samplers, so one register is one state for the whole pipeline.
-  The DXR-native answer is a per-hit-group *local* root signature, which sg's shader table does not carry yet.
-  Until it does, `collect_samplers` asserts when two materials claim one register with different states — loudly on the dev box, rather than an image nobody can explain.
-  Two materials sampling the same way still share it silently, which is the case that is actually fine.
-  The SGL tracer has neither this collision nor the vulkan binding gap above: it samples through a fixed palette of static samplers in its own group.
-
-- **A generated permutation does not hot-reload when an `.hlsli` it includes is edited.**
-  The generated source carries a literal `#include` line whose bytes never change when the file does.
-  `material_shader_key` hashes the resolution and the generation options, never the include's contents.
-  Folding `slib::current_reload_generation()` in is not the fix: it is bumped for any watched file, so it would rebuild every permutation rather than the ones that changed.
-  What is needed is for `shader_library::compile_source` to return its `outcome.dependencies`, which it already computes and discards.
-  The cache can then hash the resolved include contents and rebuild precisely what moved.
+- **A texture samples through a palette, so some sampler states approximate.**
+  A hit samples level 0 through one of module `tracer`'s eighteen static samplers, picked per texture by `sv::sgl_palette_sampler`.
+  The palette tells apart the magnification filter and the address mode of each axis, which is everything a level-0 sample can.
+  A `mip_lod_bias`, a level clamp, anisotropy and a comparison are dropped, and sv's importers produce none of them.
 
 - **A sampled attribute cannot say what it is sampled THROUGH.**
   `resolved_attribute::uv` is one hardcoded field: a `float2` mesh attribute, found by name, and nothing else may play that role.
@@ -210,8 +189,8 @@ What is left is narrower than it was:
   Two views whose scenes hold the same materials in a different order build two pipelines over the same shaders.
   Sorting the set before keying it would collapse them, at the cost of a `hit_group_offset` that no longer follows first use — worth doing once a scene has enough materials for it to matter.
 - **The generator handles scalars and vectors of f32 / i32 / u32 only.**
-  A matrix attribute has no settled `ByteAddressBuffer` layout here, and the narrow and 64-bit scalars need SM 6.2 16-bit types or a split load.
-  `hlsl_type_of` returns empty for those and `generate_material_shader` asserts, rather than emitting something that will not compile.
+  A matrix attribute has no settled raw-buffer layout here, and the narrow and 64-bit scalars need 16-bit types or a split load.
+  `sgl_type_of` returns empty for those and `generate_material_shader` asserts, rather than emitting something that will not compile.
 - **The accumulation hash can restart a converged image for something that is not a scene change.**
   `trace_hash` hashes each record's `vertices` and `indices` bindless indices plus its BLAS pointer.
   Those are stable while a working set is.
@@ -257,9 +236,9 @@ sg's own `transfer/download-async-test.cc` passes on that leg, so whatever this 
 
 ## What the OpenPBR surface still needs
 
-`sv::surface` is OpenPBR's parameter set and `shaders/openpbr.hlsli` is the layered BSDF over it: fuzz over coat over a base that
+`openpbr.surface` is OpenPBR's parameter set and module `openpbr` (shaders/sgl/openpbr_*.sgl) is the layered BSDF over it: fuzz over coat over a base that
 mixes the metal against a dielectric specular layer over the diffuse substrate.
-The path tracer shades through it — the closest-hit evaluates the closure, estimates both light sources through it, and
+The path tracer shades through it — the closest hit evaluates the closure, estimates both light sources through it, and
 importance-samples the continuation — so what is left is coverage of the model rather than plumbing.
 
 - **Tangent frames are quaternions, and not yet quantized.**
@@ -270,11 +249,11 @@ importance-samples the continuation — so what is left is coverage of the model
   which is a format change on one attribute plus a decode in the generated prologue — the same seam `attribute_interpolation`
   already opened, and not a content migration, because handedness deliberately lives beside the quaternion rather than in the
   sign of its `w`.
-  `quat10x3+i2` rather than the article's own `oct11x2+d9` pick, because a closest-hit decodes three corners per hit and then
+  `quat10x3+i2` rather than the article's own `oct11x2+d9` pick, because a closest hit decodes three corners per hit and then
   blends them: the quaternion is the form the blend wants, where an octahedral normal plus a diamond angle would have to be
   built into a basis per corner first.
 - **A non-uniform instance scale shears the tangent frame.**
-  The hit rotates the authored frame by `ObjectToWorld3x4` and renormalizes, which is exact for a rigid or uniformly scaled
+  The hit rotates the authored frame by the object-to-world matrix and renormalizes, which is exact for a rigid or uniformly scaled
   placement and wrong for anything else — the tangent wants the matrix itself while the normal wants the inverse transpose,
   so the two cannot both come out of one rotation of one frame.
   The GEOMETRIC normal is not affected: both hit shaders take it through `WorldToObject3x4` in the row-vector form, which is
@@ -379,14 +358,10 @@ importance-samples the continuation — so what is left is coverage of the model
   normal, so it follows the same uv layout the base does and cannot point its own way.
   It is `geometry_tangent`'s mechanism a second time over, and nothing needs it yet.
 - **A cutout is stochastic and its draw does not come from the path's own stream.**
-  `PtAnyHit` hashes the pixel, the frame seed and the primitive instead, because an any-hit writing the path's random state
+  `tracer.cutout` hashes the pixel, the frame seed and the primitive instead, because an any-hit writing the path's random state
   would have to be granted access to it — and every ray would then carry a stream whose length depends on how many
   alpha-tested triangles it happened to graze.
   Independent draws per bounce are what it costs, which accumulation hides and a single-sample preview would not.
-- **No test traces a material that can cut out.**
-  `material-shader-cache-test` compiles the any-hit for a type that writes `geometry_opacity`, so the HLSL is covered; what
-  is not is a pipeline built with an any-hit attached and a trace through it.
-  Every tracing test drives the glTF type, which never writes opacity and so deliberately gets no any-hit.
 - **A GGX sample that reflects below the horizon is dropped rather than redistributed**, so `bsdf_pdf` legitimately claims
   less than the full hemisphere — around a tenth of it for a rough lobe.
   That is unbiased and standard, and the probe asserts the direction that matters (never MORE than 1) rather than equality.
@@ -397,13 +372,13 @@ importance-samples the continuation — so what is left is coverage of the model
   `probe_medium` now counts that disagreement and the test requires zero, which is exact rather than statistical.
   Multiple-scattering GGX sampling is what would put that mass back, and it is the same tabulated-albedo work as the
   compensation entry below.
-- **Three lobes are approximations, named at the top of `openpbr.hlsli`.**
+- **Three lobes are approximations, named at the top of `openpbr_microfacet.sgl`.**
   The fuzz is a Conty-Estevez sheen rather than the specified Zeltner microflake, the coat tints what passes through it once
   rather than absorbing along the refracted path, and GGX energy compensation is Turquin's analytic fit rather than a tabulated
   directional albedo.
   Each is a self-contained replacement, and the sheen is the one that most visibly deviates.
 - **The closure is measured; the IMAGE still is not.**
-  `shaders/bsdf_probe.hlsl` plus `tests/openpbr-bsdf-test.cc` run estimators over `sv::bsdf` on the GPU and read the numbers
+  `tests/shaders/bsdf_probe.sgl` plus `tests/openpbr-bsdf-test.cc` run estimators over `openpbr.bsdf` on the GPU and read the numbers
   back — directional albedo, the mass `bsdf_pdf` claims against what `bsdf_sample_direction` draws, Helmholtz reciprocity,
   which interior a sampled direction entered against the side it went to, the transmitted lobe's channel ratios, and a layout
   echo pinning the struct against the GPU's own decode — over `surfaces_under_test` at three incidences each.
@@ -422,26 +397,23 @@ importance-samples the continuation — so what is left is coverage of the model
   estimation samples the analytic lights alone, so emissive geometry is direct-visibility only and contributes no
   indirect light.
   What it needs is light sampling over emissive triangles — an emitter list built per trace with its own area pdf,
-  balanced against the BSDF sampler the way `pt_rect_intersect` already balances a rect.
-- **A partly-covered surface is expressible now**, through `PtAnyHit` in `shaders/pt_material_hit.hlsli`.
+  balanced against the BSDF sampler the way a rect light already is.
+- **A partly-covered surface is expressible now**, through the cutout any hits a generated hit group carries.
   Reaching it takes two things, and for a while it only had one.
   The hit group needs the any-hit attached, which `material_permutation::can_cut_out` decides — and that is now a
   DECLARATION rather than a substring test: a type names its `opacity_attribute`, and a permutation can cut out only where
   something other than the signature's own default supplied it.
   The instance then has to be non-opaque, which `view_renderer` sets from the same flag through
   `sg::tlas_instance::opaque_override`.
-  Without that second half every BLAS sv builds is opaque, and DXR behaves as if no any-hit were attached at all — so the
+  Without that second half every BLAS sv builds is opaque, and the trace behaves as if no any-hit were attached at all — so the
   whole path was unreachable and `geometry_opacity` affected nothing.
 - **A cutout costs two hit records and two any-hit compiles per permutation**, which is what it takes for a shadow ray to
   see through one.
-  An any-hit is invoked with whatever payload its caller passed and declares exactly one type, so the raygen's ray
-  (`PtPayload`) and a shadow ray (`ShadowPayload`) cannot share a record.
-  The primary record sits at `2 * i` and the shadow record at `2 * i + 1`; `pt_occluded` reaches the second with
-  `RayContributionToHitGroupIndex` 1, and the shadow record carries no closest hit because the trace skips it.
-  Two cheaper shapes were tried and neither works: an empty payload for the any-hit is rejected by DXC ("shader must
-  include inout payload structure parameter"), and putting `PtPayload` on the shadow trace as well compiles every shader
-  and then fails the pipeline build.
-  `pt_cutout_rejects` is the test itself, and the two entry points over it differ only in what they declare.
+  An any-hit is invoked with whatever payload its caller passed and declares exactly one type, so the surface ray
+  (`tracer.surface_payload`) and a shadow ray (`tracer.shadow_payload`) cannot share a record.
+  Each permutation's row holds the surface record and then the shadow one, one per ray type of `path_rays`, and the shadow
+  record carries no closest hit because the trace skips it.
+  `tracer.cutout` is the test itself, and the two entry points over it differ only in the payload they declare.
 
 ## What asset loading still needs
 
@@ -560,14 +532,3 @@ What follows is everything else the importer left behind.
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
 
-- **The path tracer cannot use a generated group struct for its own bindings, only the pass's addresses.**
-  Its group layout is scene-dependent: a material permutation is generated and compiled at runtime, so the trace's
-  own group is built from merged reflection and `pt_common.hlsli` registers no `path:binding:namespace` entry.
-  What would close it is a generated struct for a permutation at all: the group is assembled at runtime, so
-  there is no annotated namespace for the generator to have emitted one from.
-  The permutation's own samplers no longer block it: they are declared through the pass, in a group of their own.
-
-- **`mesh_is_indexed` still rides in `frame_constants_gpu`**, for `pbr_raytrace_routine` alone.
-  The path tracer reads it per instance now, out of `instance_gpu`, and its own frame block no longer carries it.
-  The flat routine keeps the global `Vertices` / `Indices` / `Materials` bindings `shaders/mesh.hlsli` declares, which is the reason the flag is still per frame there.
-  Retiring it means giving that routine the same instance table, or retiring the routine.

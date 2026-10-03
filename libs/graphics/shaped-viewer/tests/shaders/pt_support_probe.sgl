@@ -1,7 +1,6 @@
-// A probe that calls every helper of modules `pt` and `scene` the camera probe does not, so the port is compiled, run and measured.
+// A probe that calls every helper of modules `pt` and `scene` the camera probe does not, so each is compiled, run and measured.
 //
-// The helpers' HLSL originals sit in shaders/pt_common.hlsli beside the path tracer's binding group, which a probe cannot include without binding that whole group too.
-// So these are held to properties a test can check exactly — a unit direction, a weight pair summing to one, a ray landing where it was aimed — rather than to the HLSL's numbers.
+// These are held to properties a test can check exactly — a unit direction, a weight pair summing to one, a ray landing where it was aimed.
 // pt-support-probe-test.cc says what each lane must hold.
 use pt
 use scene

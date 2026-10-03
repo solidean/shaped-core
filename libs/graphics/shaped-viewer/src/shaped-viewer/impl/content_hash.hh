@@ -15,7 +15,6 @@ namespace sv::impl
 {
 inline constexpr u64 position_hash_seed = 0x4358345;
 inline constexpr u64 index_hash_seed = 0x623435;
-inline constexpr u64 material_hash_seed = 0x523453;
 inline constexpr u64 attribute_hash_seed = 0x7a11b2;
 inline constexpr u64 texture_hash_seed = 0x9c4d17;
 inline constexpr u64 quadric_hash_seed = 0x6b3f28;

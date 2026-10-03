@@ -128,8 +128,7 @@ Both directions matter:
 
 It catches hand-written `register()` collisions just as well, which is why it was worth having before the pass existed.
 Ray tracing is where it earns its keep, since a pipeline's shaders naturally live in separate files.
-sv is exposed to this today, hand-numbering across files with nothing checking the overlap.
-`scene` sits at `t0` in [pathtrace.hlsl](../../shaped-viewer/shaders/pathtrace.hlsl), and `Vertices` and `Indices` take `t2` and `t3` in [mesh.hlsli](../../shaped-viewer/shaders/mesh.hlsli).
+sv's HLSL tracer was exposed to this, hand-numbering across files with nothing checking the overlap, before it moved to SGL.
 [done]
 
 **Across targets, at build time: compile every package to every format the toolchain can produce, and compare the reflections.**

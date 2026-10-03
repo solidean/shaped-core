@@ -248,7 +248,7 @@ The definition is the recipe.
 - **The parameter block** (`instance_record`) is a GPU buffer content-keyed on `parameter_key`.
   Its bytes are already rebuilt every epoch, since every bindless index in it is that epoch's, so eviction costs nothing.
 - **The compiled permutation** is the slow one.
-  Generating HLSL and compiling it is genuinely asynchronous, and it is the resource most likely to be missing when a frame wants to draw.
+  Generating a hit group and compiling it is genuinely asynchronous, and it is the resource most likely to be missing when a frame wants to draw.
   It is also the best `bcache` candidate in the design — `ssc::dxc` already has an async content-keyed cache to build on.
 
 A mesh whose permutation has not compiled draws through the fallback hit group: geometry visible, placement correct, neutral
@@ -352,7 +352,7 @@ uploads twice — rare, correct, and better than a per-sample decode flag that m
 ## Tangent frames
 
 The renderer wants a **tangent frame**, not normals: openpbr declares `tangent_frame` (a rotation taking tangent space to object
-space) plus `tangent_handedness` (the mirror bit no rotation carries), and `SV_ATTR_SUPPLIED_tangent_frame` is what makes the hit
+space) plus `tangent_handedness` (the mirror bit no rotation carries), and `sv_supplied_tangent_frame` is what makes the hit
 fall back to the geometric frame when nothing supplied one.
 That is half the memory of a normal plus a tangent as vectors.
 

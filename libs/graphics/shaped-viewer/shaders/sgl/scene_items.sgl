@@ -1,6 +1,5 @@
 // What the path tracer reads about the scene it traces: one light, one scene item, and the environment a missed ray sees.
 //
-// The SGL port of shaders/light.hlsli, shaders/instance.hlsli and shaders/background.hlsli, with the same numerics.
 // `light` and `instance` are byte layouts the host writes, placed as a buffer's element is (EMIT-111): tightly, every value aligned to 4.
 module scene
 
@@ -84,9 +83,9 @@ struct instance:
 // The view's environment probe: an order-3 real spherical-harmonics radiance function, 16 RGB coefficients, mirroring `sv::background_gpu`.
 // Each coefficient is a `float4` whose `xyz` is radiance and whose `w` is unused, and index 0 is the constant (DC) term.
 //
-// The coefficients are a PARAMETER, `sh: float4[16]`, as they are in the HLSL, because a binding belongs to one group and several pipelines evaluate them.
-// SGL places no array in a constant block yet, so the binding the tracer will declare is a `buffer[float4]` of 16 elements, which is `sv::background_gpu` byte for byte.
-// A caller copies it into the array before it calls these; every call is inlined, so the copy is what the HLSL's array argument already was.
+// The coefficients are a PARAMETER, `sh: float4[16]`, because a binding belongs to one group and several pipelines evaluate them.
+// SGL places no array in a constant block yet, so the tracer declares a `buffer[float4]` of 16 elements, which is `sv::background_gpu` byte for byte.
+// A caller copies it into the array before it calls these; every call is inlined, so the copy costs what an array argument would.
 
 /// Radiance L(d) = sum_i sh[i] * Y_i(d) from the standard real-SH basis up to order 3.
 /// `d` must be a unit direction.

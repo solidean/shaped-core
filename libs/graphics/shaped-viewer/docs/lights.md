@@ -120,7 +120,7 @@ A setter applies its change to a copy and commits it only once `light_problem` f
 
 ## On the GPU
 
-`sv::light_gpu` is one tagged 96-byte record per light, mirroring `sv::light` in shaders/light.hlsli.
+`sv::light_gpu` is one tagged 96-byte record per light, mirroring `scene.light` in shaders/sgl/scene_items.sgl.
 Its `emission` is one canonical quantity per path: a point's intensity, a rect's radiance per face, a parallel light's irradiance, a sun's radiance.
 A sun's radiance is its illuminance over `pi * sin(r)^2`, the projected solid angle of a disc of angular radius r, so a surface facing it receives exactly the lux it was given.
 Its size is stored as `1 - cos(r)` rather than as a cosine, which near 1 would round away most of a small disc, and the shader's sampler, density and in-disc test all work in that quantity.

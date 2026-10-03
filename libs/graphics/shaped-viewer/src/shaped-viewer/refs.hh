@@ -115,8 +115,7 @@ public:
     ///
     /// The geometry, the attributes and the textures are uploaded here, keyed by the content hashes the mesh already
     /// carries — so calling this every frame with an unchanged mesh uploads nothing and stays O(1).
-    /// Per-face PBR is read from the `sv::pbr_attribute` attributes; a mesh carrying none is shaded with
-    /// `pbr_material`'s defaults.
+    /// The material reads the mesh's attributes of its signature's names, and one the mesh lacks takes its declared default.
     mesh_ref add_mesh(sv::mesh const& mesh);
 
     /// The same for a mesh already made of resources — nothing to look up, since its ids are minted.

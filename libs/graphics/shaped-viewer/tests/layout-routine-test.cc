@@ -5,7 +5,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
-#include <sv_shaders.hh> // sv::shaders::layout_bindings, for the group-creation test at the bottom
+#include <sv_shaders.hh> // sv::shaders::layout_sources, for the group-creation test at the bottom
 
 // Headless: the layout routine records a whole target's draw list — border bands, placed views and a wipe — in one pass.
 //
@@ -190,16 +190,16 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     // which is what makes the samplers overload unusable with the create rather than merely redundant.
     auto& ctx = *ctx_h;
 
-    using group = sv::shaders::layout_bindings;
+    using group = sv::shaders::layout_sources;
 
     sg::named_sampler const runtime[]
-        = {{.name = "source_sampler", .sampler = {.min_filter = sg::sampler_filter::nearest}}};
+        = {{.name = "layout_sources.source_sampler", .sampler = {.min_filter = sg::sampler_filter::nearest}}};
     auto const layout = ctx.cached.acquire_binding_group_layout<group>(runtime);
     REQUIRE(layout != nullptr);
 
     // The layout owns it now, which is the precondition the create has to respect.
     REQUIRE(layout->static_samplers().size() == 1);
-    CHECK(layout->static_samplers()[0].name == "source_sampler");
+    CHECK(layout->static_samplers()[0].name == "layout_sources.source_sampler");
 
     auto const source = make_source(ctx, 8, 8);
     auto cmd = ctx.create_command_list();
@@ -226,11 +226,11 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     if (!env.has_compiler)
     {
         ctx.drop_command_list(cc::move(cmd));
-        SKIP("no DXC compiler to build layout.hlsl");
+        SKIP("no DXC compiler to build layout.sgl");
     }
 
-    auto const vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
-    auto const ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
+    auto const vs = sv::shaders::layout.main_vs->acquire(ctx);
+    auto const ps = sv::shaders::layout.border_ps->acquire(ctx);
     co_await cc::async_settled(vs);
     co_await cc::async_settled(ps);
 
@@ -239,17 +239,8 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     REQUIRE(compiled_vs != nullptr);
     REQUIRE(compiled_ps != nullptr);
 
-    auto const* const constants_binding = [&]() -> sg::binding const*
-    {
-        for (auto const& b : compiled_vs->bindings)
-            if (b.type == sg::binding_type::constants_buffer)
-                return &b;
-        return nullptr;
-    }();
-    REQUIRE(constants_binding != nullptr);
-
-    auto const pipeline_layout
-        = ctx.cached.acquire_pipeline_layout({.groups = {layout}, .inline_constants = *constants_binding});
+    auto const pipeline_layout = ctx.cached.acquire_pipeline_layout(
+        {.groups = {layout}, .inline_constants = sv::shaders::layout_constants::inline_binding()});
     auto pipeline = ctx.cached.acquire_raster_pipeline(
         sg::raster_pipeline_description{.layout = pipeline_layout,
                                         .vertex_shader = *compiled_vs,
@@ -266,7 +257,7 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
         auto scope
             = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
         scope.bind_pipeline(*built);
-        scope.bind<group>(*g);
+        scope.bind_group(0, *g);
     }
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();

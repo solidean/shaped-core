@@ -10,7 +10,7 @@
 
 /// One quadric primitive as the intersection shader reads it, by `PrimitiveIndex()`.
 ///
-/// Keep this and the HLSL `sv::quadric` in lockstep: it is a byte layout, not a description of one.
+/// Keep this and `quadric.load_primitive` (shaders/sgl/quadric_runtime.sgl) in lockstep: it is a byte layout, not a description of one.
 ///
 /// It is the CPU `sv::quadric_primitive` MINUS its box, because the two travel to the GPU in different buffers.
 /// The boxes are the procedural BLAS's own build input and are never read by a shader — an intersection shader cannot reach the
