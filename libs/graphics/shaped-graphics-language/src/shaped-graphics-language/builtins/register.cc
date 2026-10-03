@@ -15,6 +15,7 @@ void sgl::builtins::register_builtins(registry& r)
     register_bit_math(r);
     register_math(r);
     register_textures(r);
+    register_bytes(r);
     register_sync(r);
     register_subgroups(r);
     register_raytracing(r);

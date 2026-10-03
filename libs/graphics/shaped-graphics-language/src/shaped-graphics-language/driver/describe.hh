@@ -25,6 +25,8 @@ enum class sgl::described_member_kind : sgl::u8
     constant,
     /// A `buffer[T]`, which the host binds as a resource of its own.
     buffer,
+    /// `bytes` or `mut bytes`: raw memory the host binds as a byte-addressed view of a buffer.
+    bytes,
     /// A sampled texture, `texture_2d[float4]` or a depth texture.
     texture,
     /// A storage texture, `out image_2d[.rgba8_unorm]`.

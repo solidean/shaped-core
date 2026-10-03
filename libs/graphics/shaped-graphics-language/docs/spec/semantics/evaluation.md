@@ -212,6 +212,8 @@ fun graded(a: float) -> float:
 * **EVAL-90** An index outside `0 ..< length` of an array, or past the end of a buffer, is the status `program-error` as well.
   No target agrees on what one does, and a correct program has none, so no target pays to define it ([why](why/evaluation.md#eval-84)).
 * **EVAL-91** A square literal evaluates its elements in the order written, and so does a construction.
+* **EVAL-97** A load or store of `bytes` at an offset that is no multiple of 4, or reaching a word past the end of the memory, is the status `program-error`.
+  No target agrees on a word that straddles two, and EVAL-90 already says why none defines one past the end.
 * **EVAL-92** A run holds the memory of each `@workgroup` binding it reaches, from its start, and a read of any part of it nothing was stored to is a `program-error`.
   A run is one invocation, so a barrier waits for nobody and what it stored is all the memory holds.
 * **EVAL-93** An atomic's update names its place first, then evaluates its other arguments, then reads, updates and writes the atomic in one step, giving the value it read.
@@ -220,6 +222,7 @@ fun graded(a: float) -> float:
   A value is its scalars in field order, 4 bytes each and never padded, and a buffer its elements one after another, each laid out so.
   A member the driver leaves out is zero, a buffer it leaves out is empty, and an acceleration member it leaves out is the empty TLAS.
   A store to a `mut buffer` the driver bound as mutable bytes is written back into them when the run ends.
+  `bytes` is its words, 4 bytes each, and must be a whole number of them.
   A member name its binding lacks, or bytes that are no whole value or no whole number of elements, fail the test as `invalid-bindings`, and it never runs.
 * **EVAL-95** A trace runs its emulated form, over the acceleration pool the driver binds, laid out as sg's webgpu backend lays it out.
   `acceleration_root(world)` is the root unit the driver gives that member, and `acceleration_pool_load(u)` is unit `u` of the pool.

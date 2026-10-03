@@ -31,6 +31,8 @@ cc::string_view kind_name(sgl::described_member_kind k)
         return "constant";
     case sgl::described_member_kind::buffer:
         return "buffer";
+    case sgl::described_member_kind::bytes:
+        return "bytes";
     case sgl::described_member_kind::texture:
         return "texture";
     case sgl::described_member_kind::image:

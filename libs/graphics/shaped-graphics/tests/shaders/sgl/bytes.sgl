@@ -1,0 +1,23 @@
+// Raw memory, a 32-bit word at a time at byte offsets: a record of a float and three uints per thread, repacked.
+// The second entry reads one of several such blocks, picked per thread from a binding array.
+
+binding raw:
+    records: bytes
+    repacked: mut bytes
+
+@compute(64) fun repack(@thread_id id: int3){raw}:
+    let at = (id.x as uint) * 16u
+    let scale = reinterpret_as_float(raw.records.load(at))
+    let ids = raw.records.load3(at + 4u)
+    raw.repacked.store(at, uint3(ids.z, ids.y, ids.x))
+    raw.repacked.store(at + 12u, reinterpret_as_uint(scale * 2.0))
+
+require binding_arrays
+
+binding blocks:
+    tables: bytes[3]
+    merged: mut buffer[uint]
+
+@compute(64) fun pick(@thread_id id: int3){blocks}:
+    let i = id.x % 3
+    blocks.merged[id.x] = blocks.tables[nonuniform i].load((id.x as uint) * 4u)

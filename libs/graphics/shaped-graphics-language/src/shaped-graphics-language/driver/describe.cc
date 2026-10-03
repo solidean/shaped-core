@@ -1,6 +1,7 @@
 #include "describe.hh"
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/check/structural_hash.hh>
@@ -108,13 +109,20 @@ described_binding_member describe_resource(check::checked_module const& m,
         result.kind = described_member_kind::acceleration_structure;
         result.type = cc::string(m.name_of(member.type));
         break;
-    default:
+    case check::type_kind::bytes:
+        result.kind = described_member_kind::bytes;
+        result.type = cc::string(m.name_of(member.type));
+        result.access = cc::string(access_name(t.access));
+        break;
+    case check::type_kind::sampler:
         result.kind = described_member_kind::sampler;
         result.type = cc::string(m.name_of(member.type));
         result.sampler_type = cc::string(sampler_type_of(m, member));
         if (member.static_sampler >= 0)
             result.static_sampler = describe_settings(m.samplers[member.static_sampler]);
         break;
+    default:
+        CC_UNREACHABLE("a resource kind the host has no description of");
     }
     return result;
 }

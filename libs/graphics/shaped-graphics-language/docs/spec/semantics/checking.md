@@ -118,6 +118,8 @@ use view
   `half` and its vectors name `shader_f16`, and `short`, `ushort` and their vectors name `shader_int16`.
   An entry point whose flat tree holds a value of such a type needs its feature, and a binding member that holds one is a form CHK-201 judges.
 * **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
+* **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
+  The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
 
 ## Members and constructors

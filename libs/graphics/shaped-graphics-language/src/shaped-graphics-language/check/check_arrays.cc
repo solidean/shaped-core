@@ -40,7 +40,7 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     if (n != nullptr)
     {
         auto const text = text_of(file, n->where);
-        if (text == "sampler" || text == "comparison_sampler")
+        if (text == "sampler" || text == "comparison_sampler" || text == "bytes")
             return true;
         for (auto const& shape : k_shapes)
             if (shape.depth == text)

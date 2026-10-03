@@ -380,6 +380,10 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
             if "static_sampler" not in member:
                 out.append(f"    sg::sampler {member['name']}; ///< `{member['type']}`, which the group binds\n")
             continue
+        if member["kind"] == "bytes":
+            access = "readwrite" if member["access"] == "read_write" else "readonly"
+            out.append(f"    {array(f'sg::{access}_buffer_view<cc::byte>')} {member['name']}; ///< `{member['type']}`\n")
+            continue
         element = host_type(package, memory, where, member["type"])
         is_written = member["access"] == "read_write"
         access = "readwrite" if is_written else "readonly"
@@ -481,6 +485,9 @@ def binding_entry(member: dict) -> str:
     if kind == "buffer":
         access = "" if member["access"] == "read" else f", .access = sg::access_mode::{member['access']}"
         return head + f".type = sg::binding_type::buffer{access}}}"
+    if kind == "bytes":
+        access = "" if member["access"] == "read" else f", .access = sg::access_mode::{member['access']}"
+        return head + f".type = sg::binding_type::bytes{access}}}"
     if kind == "texture":
         return head + (f".type = sg::binding_type::texture, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
@@ -498,7 +505,7 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     name = binding["name"]
     qualified = f"{namespace}::{name}"
     resources = [m for m in binding["members"] if m["kind"] != "constant"]
-    views = [m for m in resources if m["kind"] in ("buffer", "texture", "image", "acceleration_structure")]
+    views = [m for m in resources if m["kind"] in ("buffer", "bytes", "texture", "image", "acceleration_structure")]
     statics = [m for m in resources if m["kind"] == "sampler" and "static_sampler" in m]
     dynamic = [m for m in resources if m["kind"] == "sampler" and "static_sampler" not in m]
     out = [f"\n// `binding {name}` of {file.path}: the table the shader's resources were numbered from.\n"]

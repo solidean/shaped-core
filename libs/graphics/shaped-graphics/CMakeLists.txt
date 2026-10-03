@@ -427,6 +427,7 @@ if(SC_BUILD_TESTS)
                 layout.sgl:*
                 sync.sgl:*
                 binding_arrays.sgl:*
+                bytes.sgl:*
                 rects.sgl:*
                 draws.sgl:*
                 vertex_input.sgl:*

@@ -146,7 +146,7 @@ public:
             return;
         auto const address = cc::format("@group({}) @binding({})", b.group, b.slot);
         // WGSL has no static sampler: the layout carries it, and the group binds it (slib's WGSL notes).
-        if (t.kind == type_kind::buffer)
+        if (t.kind == type_kind::buffer || t.kind == type_kind::bytes)
             out.appendf("{} var<storage, {}> {}: {};\n", address, b.is_mut ? "read_write" : "read", b.name,
                         b.element_form.has_value() ? cc::format("array<{}>", b.element_form.value().name)
                                                    : resource_text(p, b.type));
@@ -168,6 +168,8 @@ public:
         {
         case type_kind::buffer:
             return cc::format("array<{}>", type_text(p, *this, t.element));
+        case type_kind::bytes:
+            return "array<u32>";
         case type_kind::texture:
             if (t.is_depth)
                 return cc::string(k_depth_names[isize(t.shape)]);

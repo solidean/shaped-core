@@ -2199,6 +2199,24 @@
 @builtin @pure fun layer_count(t: texture_cube_array_depth) -> int
 @builtin @pure fun level_count(t: texture_cube_array_depth) -> int
 
+// raw memory: 32-bit words of `bytes` at a byte offset, which must be a multiple of 4
+/// The word at byte `offset`, a multiple of 4.
+@builtin fun load(b: bytes, offset: uint) -> uint
+/// Stores `value` as the word at byte `offset`, a multiple of 4.
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint)
+/// The 2 words from byte `offset`, a multiple of 4.
+@builtin fun load2(b: bytes, offset: uint) -> uint2
+/// Stores `value` as the 2 words from byte `offset`, a multiple of 4.
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint2)
+/// The 3 words from byte `offset`, a multiple of 4.
+@builtin fun load3(b: bytes, offset: uint) -> uint3
+/// Stores `value` as the 3 words from byte `offset`, a multiple of 4.
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint3)
+/// The 4 words from byte `offset`, a multiple of 4.
+@builtin fun load4(b: bytes, offset: uint) -> uint4
+/// Stores `value` as the 4 words from byte `offset`, a multiple of 4.
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint4)
+
 // A geometry stage's stream, called as its methods: `stream.emit(v)` appends the vertex `v`, which the
 // check pass takes as the stream's own type, and `stream.end_strip()` ends the strip (CHK-303).
 /// Appends a vertex, handed as a second argument of the stream's own type.

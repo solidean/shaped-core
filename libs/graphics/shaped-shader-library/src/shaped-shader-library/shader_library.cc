@@ -42,7 +42,11 @@ void compare_binding(sg::binding const& reflected, sg::binding const& declared, 
     auto const differs = [&](cc::string_view what, auto const& a, auto const& b)
     { out += cc::format("'{}' reflects {} {}, and SGL states {}\n", name, what, a, b); };
 
-    if (reflected.type != declared.type)
+    // Only DXIL keeps raw memory a kind of its own: SPIR-V, WGSL and MSL hold `bytes` as an array of words, and read
+    // it back as a buffer
+    auto const is_bytes_as_buffer = declared.type == sg::binding_type::bytes
+                                 && reflected.type == sg::binding_type::buffer && format != sg::shader_format::dxil;
+    if (reflected.type != declared.type && !is_bytes_as_buffer)
         differs("kind", int(reflected.type), int(declared.type));
     if (reflected.index != declared.index)
         differs("index", reflected.index, declared.index);

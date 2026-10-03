@@ -23,6 +23,8 @@ void register_transforms(registry& r);
 void register_conversions(registry& r);
 /// The texture and image methods, for every shape.
 void register_textures(registry& r);
+/// The loads and stores of raw memory, `bytes`, a 32-bit word at a time.
+void register_bytes(registry& r);
 /// `&`, `|`, `^`, `~`, `<<` and `>>` of `int`, `uint` and their vectors.
 void register_bit_math(registry& r);
 /// Transcendentals, rounding, derivatives, geometry, integer bit functions, packing and reinterpreting bits.

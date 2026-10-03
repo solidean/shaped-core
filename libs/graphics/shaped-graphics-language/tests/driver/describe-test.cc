@@ -93,6 +93,30 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
     CHECK(d.entry_points[0].workgroup[2] == 1);
 }
 
+TEST("sgl describe - bytes are a kind of their own, read or read_write, and an array of them takes a slot each")
+{
+    auto const d = described(R"(require binding_arrays
+binding raw:
+    tables: bytes[3]
+    scratch: mut bytes
+
+@compute(64) fun main(@thread_id id: int3){raw}:
+    raw.scratch.store(0u, raw.tables[nonuniform (id.x % 3)].load(0u))
+)");
+
+    REQUIRE(d.bindings.size() == 1);
+    auto const& raw = d.bindings[0];
+    REQUIRE(raw.members.size() == 2);
+    CHECK(raw.members[0].kind == sgl::described_member_kind::bytes);
+    CHECK(raw.members[0].access == "read");
+    CHECK(raw.members[0].slot == 0);
+    CHECK(raw.members[0].count == 3);
+    CHECK(raw.members[0].host_name == "raw.tables");
+    CHECK(raw.members[1].kind == sgl::described_member_kind::bytes);
+    CHECK(raw.members[1].access == "read_write");
+    CHECK(raw.members[1].slot == 3);
+}
+
 TEST("sgl describe - an entry point and a pipeline name the sg features a device needs for them")
 {
     // Both stages may use the image format the file requires, and only the pixel stage lists what does.

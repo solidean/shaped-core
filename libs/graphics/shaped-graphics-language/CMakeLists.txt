@@ -35,6 +35,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register.cc
     src/shaped-graphics-language/builtins/impl/soft_math.cc
     src/shaped-graphics-language/builtins/register_bit_math.cc
+    src/shaped-graphics-language/builtins/register_bytes.cc
     src/shaped-graphics-language/builtins/register_math.cc
     src/shaped-graphics-language/builtins/register_sync.cc
     src/shaped-graphics-language/builtins/register_subgroups.cc
@@ -401,6 +402,7 @@ if(SC_BUILD_TESTS)
         tests/emit/array-emit-test.cc
         tests/emit/primitive-stage-emit-test.cc
         tests/emit/buffer-emit-test.cc
+        tests/emit/bytes-emit-test.cc
         tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc
         tests/emit/subgroup-emit-test.cc

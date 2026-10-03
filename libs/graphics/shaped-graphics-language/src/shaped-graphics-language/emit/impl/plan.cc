@@ -389,17 +389,18 @@ struct planner
                 if (!check::is_resource(t.kind))
                     continue;
                 auto const count = is_array ? whole.count : 1;
-                p.resources.push_back({.binding = id,
-                                       .member = i32(i),
-                                       .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
-                                       .host_name = cc::format("{}.{}", s.name, members[i].name),
-                                       .type = is_array ? whole.element : members[i].type,
-                                       .element = t.element,
-                                       .is_mut = t.is_mut,
-                                       .is_coherent = members[i].is_coherent,
-                                       .group = group,
-                                       .slot = slot,
-                                       .count = count});
+                p.resources.push_back(
+                    {.binding = id,
+                     .member = i32(i),
+                     .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
+                     .host_name = cc::format("{}.{}", s.name, members[i].name),
+                     .type = is_array ? whole.element : members[i].type,
+                     .element = t.element,
+                     .is_mut = t.is_mut || (t.kind == type_kind::bytes && t.access == check::access_mode::read_write),
+                     .is_coherent = members[i].is_coherent,
+                     .group = group,
+                     .slot = slot,
+                     .count = count});
                 slot += count;
             }
             ++group;

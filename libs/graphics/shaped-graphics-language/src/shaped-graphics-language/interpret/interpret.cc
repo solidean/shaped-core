@@ -259,12 +259,68 @@ struct machine
         return {};
     }
 
+    /// EVAL-97: a load or store of `bytes`, a word at a time at a byte offset, against the memory the inputs hold.
+    flow bytes_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
+    {
+        auto const arguments = e.at(c.arguments);
+        auto const count = record.is_bytes_store ? 3 : 2;
+        if (arguments.size() != count || !is_known(e, arguments[0]))
+            return type_error(cc::format("a call of '{}' without its bytes", record.name));
+        auto const* const named = e.at(arguments[0]).node.try_as<flat_binding_member>();
+        if (named == nullptr)
+            return type_error("bytes that no binding member names");
+        auto buffer = isize(-1);
+        for (auto i = isize(0); i < out.buffers.size(); ++i)
+            if (out.buffers[i].binding == named->binding && out.buffers[i].member == named->member)
+                buffer = i;
+        if (buffer < 0)
+            return type_error("bytes the inputs do not hold");
+
+        auto offset = value();
+        if (auto const f = eval(arguments[1], offset); !f.is_normal())
+            return f;
+        if (offset.leaves.size() != 1 || offset.leaves[0].kind != value_kind::scalar_uint)
+            return type_error("a byte offset that is no uint");
+        auto stored = value();
+        if (record.is_bytes_store)
+            if (auto const f = eval(arguments[2], stored); !f.is_normal())
+                return f;
+
+        // no target agrees on a word that straddles two, or on one past the end, so a correct program has neither
+        auto const at = isize(offset.leaves[0].as_uint());
+        auto const words = isize(record.bytes_words);
+        auto& memory = out.buffers[buffer].leaves;
+        if (at % 4 != 0)
+            return fail(run_status::program_error, cc::format("the byte offset {} is no multiple of 4", at));
+        if (at / 4 + words > memory.size())
+            return fail(run_status::program_error,
+                        cc::format("{} words from byte {} are out of bounds of {} bytes", words, at, memory.size() * 4));
+
+        result.type = x.type;
+        result.leaves.clear();
+        if (record.is_bytes_store)
+        {
+            if (stored.leaves.size() != words)
+                return type_error(cc::format("a call of '{}' storing a value of the wrong width", record.name));
+            for (auto k = isize(0); k < words; ++k)
+                memory[at / 4 + k] = stored.leaves[k];
+            is_stored[buffer] = true;
+        }
+        else
+            for (auto k = isize(0); k < words; ++k)
+                result.leaves.push_back(memory[at / 4 + k]);
+        out.trace.push_back(result);
+        return {};
+    }
+
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
         // a texel of an `@atomic` image is no memory a test holds, so its update is evaluated as a load of one is
         if (auto const* const record = m.builtin_function(c.intrinsic);
             record != nullptr && record->is_atomic && !is_texel_atomic(c))
             return atomic_call(x, c, *record, result);
+        if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->bytes_words > 0)
+            return bytes_call(x, c, *record, result);
         auto args = cc::vector<value>();
         if (auto const f = eval_all(c.arguments, args); !f.is_normal())
             return f;
@@ -1348,6 +1404,18 @@ cc::result<run_inputs> sgl::check::resolve_inputs(checked_module const& m,
             if (type.kind == type_kind::acceleration_structure)
             {
                 inputs.acceleration_roots.push_back(d == nullptr ? 0 : d->acceleration_root);
+                continue;
+            }
+            if (type.kind == type_kind::bytes)
+            {
+                if (bytes.size() % 4 != 0)
+                    return cc::error(cc::format("{}.{} is {} bytes, which is no whole number of 4-byte words", name,
+                                                member.name, bytes.size()));
+                auto contents = buffer_contents{.binding = binding, .member = i32(i)};
+                for (auto k = isize(0); k < bytes.size() / 4; ++k)
+                    contents.leaves.push_back(scalar::of_uint(0));
+                read_leaves(bytes, contents.leaves);
+                inputs.buffers.push_back(cc::move(contents));
                 continue;
             }
             if (type.kind == type_kind::buffer)

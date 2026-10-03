@@ -91,6 +91,7 @@ void fold_type(cc::byte_stream_builder& b, checked_module const& m, type_id type
         else
             fold_members(b, m, m.at(t.members));
         return;
+    case type_kind::bytes:
     case type_kind::texture:
     case type_kind::image:
     case type_kind::sampler:

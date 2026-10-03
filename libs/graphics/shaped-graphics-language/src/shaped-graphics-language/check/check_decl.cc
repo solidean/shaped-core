@@ -773,15 +773,15 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         {
             auto const& r = out.at(innermost);
             if ((r.kind == type_kind::buffer && r.is_mut)
-                || (r.kind == type_kind::image && r.access == access_mode::read_write))
+                || ((r.kind == type_kind::image || r.kind == type_kind::bytes) && r.access == access_mode::read_write))
             {
                 judge_feature(file, coherent->name, "a @coherent member", feature::device_coherence);
                 is_coherent = true;
             }
             else
                 report(diagnostic_kind::wrong_kind_of_name, file, coherent->name,
-                       "only a `mut buffer` or a `mut` image is written by one workgroup for another, so only one can "
-                       "be @coherent");
+                       "only a `mut buffer`, `mut bytes` or a `mut` image is written by one workgroup for another, so "
+                       "only one can be @coherent");
         }
         if (atomic != nullptr && type != checked_module::error_type)
         {

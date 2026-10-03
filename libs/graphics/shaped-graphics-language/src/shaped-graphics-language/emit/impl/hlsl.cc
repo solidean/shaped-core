@@ -411,7 +411,8 @@ public:
     {
         if (t.kind == type_kind::sampler)
             return 's';
-        if (t.kind == type_kind::image || (t.kind == type_kind::buffer && t.is_mut))
+        if (t.kind == type_kind::image || (t.kind == type_kind::buffer && t.is_mut)
+            || (t.kind == type_kind::bytes && t.access == check::access_mode::read_write))
             return 'u';
         return 't';
     }
@@ -423,6 +424,8 @@ public:
         {
         case type_kind::buffer:
             return cc::format("{}StructuredBuffer<{}>", t.is_mut ? "RW" : "", type_text(p, *this, t.element));
+        case type_kind::bytes:
+            return t.access == check::access_mode::read_write ? "RWByteAddressBuffer" : "ByteAddressBuffer";
         case type_kind::texture:
             // A depth texture samples to one float, which is how HLSL declares it.
             return cc::format("{}<{}>", k_texture_names[isize(t.shape)],
