@@ -235,6 +235,8 @@ if(SC_BUILD_TESTS)
             tests/pathtraced-view-test.cc
             tests/openpbr-bsdf-test.cc
             tests/motion-vector-test.cc
+            tests/runtime-probe-test.cc
+            tests/pt-support-probe-test.cc
             tests/volumetric-furnace-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
@@ -250,8 +252,8 @@ if(SC_BUILD_TESTS)
         )
         target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-dx12)
 
-        # The probes: compute shaders over shaders/openpbr.hlsli and shaders/camera.hlsli, so a test can measure what the
-        # closure returns and where the camera projects.
+        # The probes: compute shaders over shaders/openpbr.hlsli, shaders/camera.hlsli and the material and quadric runtimes.
+        # A test can then measure what the closure returns, where the camera projects and where a ray meets a quadric.
         # Their own package rather than entries in sv_shaders, because nothing a viewer runs dispatches them — and a package
         # is per target, so the two mount side by side over the same source directory.
         sc_add_shader_package(
@@ -265,11 +267,14 @@ if(SC_BUILD_TESTS)
                 bsdf_probe.hlsl:binding:probe_bindings
                 camera_probe.hlsl:compute:CameraProbe
                 camera_probe.hlsl:binding:camera_probe_bindings
+                runtime_probe.hlsl:compute:RuntimeProbe
+                runtime_probe.hlsl:binding:runtime_probe_bindings
         )
         target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
 
-        # The BSDF probe again, over the SGL port of the closure in shaders/sgl, module `openpbr`.
-        # openpbr-bsdf-test.cc runs every case through both probes, which is what holds the port to the HLSL closure.
+        # The probes again, over the SGL port of the tracer's shader code in shaders/sgl.
+        # Each test runs its cases through both twins, which is what holds the port to the HLSL.
+        # pt_support_probe.sgl has no twin: its helpers share shaders/pt_common.hlsli with the tracer's binding group.
         sc_add_shader_package(
             TARGET      shaped-viewer-test
             NAME        sv_test_sgl_shaders
@@ -279,6 +284,9 @@ if(SC_BUILD_TESTS)
             MODULE_DIRS shaders/sgl
             SHADERS
                 bsdf_probe.sgl:*
+                camera_probe.sgl:*
+                runtime_probe.sgl:*
+                pt_support_probe.sgl:*
         )
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the

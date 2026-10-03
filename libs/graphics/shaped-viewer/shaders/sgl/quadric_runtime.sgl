@@ -1,0 +1,207 @@
+// The quadric half of what a generated material shader is compiled against: the primitive records, the ray solve, and the shading context.
+//
+// The SGL port of shaders/quadric_runtime.hlsli, function for function and with the same numerics.
+// The runtime probe (tests/shaders/runtime_probe.sgl) holds the two to the same numbers, the root solve above all.
+// Everything a material fragment reads comes from module `material`; what is here is only what a quadric has and a triangle does not.
+//
+// The geometry is analytic: no vertices, no corners, no barycentrics.
+// A ray meets a quadric where a quadratic in the ray parameter is zero, which is the whole reason these are cheap.
+module quadric
+
+use material
+use scene
+
+/// One quadric surface: the 10 distinct entries of the symmetric 4x4 Q, as `sv::quadric3` holds them.
+///
+/// The surface is the zero set of Q(p) = pᵀ A p + 2 bᵀ p + c, with `diag` and `off_diag` the symmetric 3x3 block, `linear_term` the b term and `constant` the c.
+/// The factor 2 is folded into the evaluation rather than into the storage.
+struct quadric3:
+    diag: float3
+    off_diag: float3
+    linear_term: float3
+    constant: float
+
+/// One drawn primitive as the intersection shader reads it — mirrors `sv::quadric_gpu` (resources/quadric_data.hh).
+///
+/// `origin` is what both quadrics are expressed about, and it is there for precision rather than convenience.
+/// A world-space quadric loses a small radius to float32 entirely at mesh scale.
+struct primitive:
+    origin: float3
+    surface: quadric3
+    clip: quadric3
+    flags: uint
+
+/// The stride of one primitive record in bytes: 12 + 40 + 40 + 4.
+const stride = 96
+
+/// Set in `flags` when the clipper's own surface is drawn too — a cylinder's end caps, a hemisphere's floor.
+/// Mirrors `sv::quadric_primitive::flag_emit_clip_surface`.
+const flag_emit_clip_surface = 1
+
+fun load_quadric3(b: bytes, offset: uint) -> quadric3:
+    let diag = reinterpret_as_float(b.load3(offset))
+    let off_diag = reinterpret_as_float(b.load3(offset + 12))
+    let linear_term = reinterpret_as_float(b.load3(offset + 24))
+    let constant = reinterpret_as_float(b.load(offset + 36))
+    return quadric3(diag, off_diag, linear_term, constant)
+
+/// The primitive at `index` out of the batch's own primitive buffer, which is a run of `sv::quadric_gpu` records.
+fun load_primitive(b: bytes, index: uint) -> primitive:
+    let base = index * (stride as uint)
+    let origin = reinterpret_as_float(b.load3(base))
+    let surface = load_quadric3(b, base + 12)
+    let clip = load_quadric3(b, base + 52)
+    let flags = b.load(base + 92)
+    return primitive(origin, surface, clip, flags)
+
+/// Q(p), with `p` the displacement from the primitive's origin.
+/// Negative is inside for every quadric sv builds, which is what makes a clipper's test a single sign check.
+fun evaluate(q: quadric3, p: float3) -> float:
+    let quadratic = q.diag.x * p.x * p.x + q.diag.y * p.y * p.y + q.diag.z * p.z * p.z + 2.0 * (q.off_diag.x * p.x * p.y + q.off_diag.y * p.x * p.z + q.off_diag.z * p.y * p.z)
+    return quadratic + 2.0 * dot(q.linear_term, p) + q.constant
+
+/// ∇Q(p) = 2 (A p + b), which is the outward surface normal wherever it does not vanish.
+fun gradient(q: quadric3, p: float3) -> float3:
+    let x = q.diag.x * p.x + q.off_diag.x * p.y + q.off_diag.y * p.z + q.linear_term.x
+    let y = q.off_diag.x * p.x + q.diag.y * p.y + q.off_diag.z * p.z + q.linear_term.y
+    let z = q.off_diag.y * p.x + q.off_diag.z * p.y + q.diag.z * p.z + q.linear_term.z
+    return 2.0 * float3(x, y, z)
+
+/// What a ray hit on a quadric is: how far along, the outward normal there, and whether there was one at all.
+struct hit:
+    t: float
+    /// object space, normalized
+    normal: float3
+    valid: bool
+
+/// `v` transformed by the quadric's symmetric 3x3 block.
+fun a_mul(q: quadric3, v: float3) -> float3:
+    let x = q.diag.x * v.x + q.off_diag.x * v.y + q.off_diag.y * v.z
+    let y = q.off_diag.x * v.x + q.diag.y * v.y + q.off_diag.z * v.z
+    let z = q.off_diag.y * v.x + q.off_diag.z * v.y + q.diag.z * v.z
+    return float3(x, y, z)
+
+/// The real roots of a quadric along a ray, ascending, plus the point they were solved about; `count` is 0, 1 or 2.
+///
+/// `t0` / `t1` are along the original ray, so a caller compares and reports them directly.
+/// `shifted_origin` and `t_closest` are what the solve actually used.
+/// A caller wanting the HIT POINT must build it from those, `shifted_origin + d * (t - t_closest)`, or it throws away the precision the shift bought.
+struct roots:
+    count: int
+    t0: float
+    t1: float
+    shifted_origin: float3
+    t_closest: float
+
+/// The roots of `q` along the ray `o_in + t d`.
+///
+/// A vanishing quadratic term is a ray parallel to a degenerate direction of the quadric — a slab or a plane pair.
+/// There the equation is linear and has exactly one root, and treating it as a quadratic would divide by zero.
+fun roots_of(q: quadric3, o_in: float3, d: float3) -> roots:
+    let a_d = a_mul(q, d)
+    let qa = dot(d, a_d)
+
+    if qa == 0.0:
+        let qb_linear = 2.0 * (dot(d, a_mul(q, o_in)) + dot(q.linear_term, d))
+        if qb_linear == 0.0 => return roots(0, 0.0, 0.0, o_in, 0.0)
+        return roots(1, -evaluate(q, o_in) / qb_linear, 0.0, o_in, 0.0)
+
+    // Re-expressed about the ray's closest approach before the roots are formed.
+    //
+    // A PRECISION REQUIREMENT rather than a simplification, and the CPU reference does the same thing for the same reason.
+    // `qc` is Q at whatever origin the solve is expressed about, so for a small primitive seen from far away it is dominated by the distance rather than by the radius.
+    // A sphere of radius 0.01 seen from 100 units has a qc of 1e4 - 1e-4, and the ulp of 1e4 in float32 is about 1e-3, so the radius is gone before the discriminant is formed.
+    // What is left is a difference of two huge nearly-equal numbers whose SIGN is rounding noise.
+    //
+    // The per-primitive origin fixes distance from the WORLD origin; this fixes distance from the RAY origin.
+    // Exact for any quadric, because shifting the origin along the ray is a reparameterization.
+    let qb_in = 2.0 * (dot(d, a_mul(q, o_in)) + dot(q.linear_term, d))
+    let t_closest = -qb_in / (2.0 * qa)
+    let o = o_in + d * t_closest
+
+    let qb = 2.0 * (dot(d, a_mul(q, o)) + dot(q.linear_term, d))
+    let qc = evaluate(q, o)
+
+    let disc = qb * qb - 4.0 * qa * qc
+    if disc < 0.0 => return roots(0, 0.0, 0.0, o, t_closest)
+
+    let root = sqrt(disc)
+
+    // The numerically stable pair: forming both roots from -b - sign(b) sqrt(disc) avoids the cancellation that (-b + sqrt(disc)) suffers.
+    // That cancellation strikes when b and sqrt(disc) nearly agree, which is exactly the grazing hit.
+    let s = if qb >= 0.0 => -0.5 * (qb + root) else -0.5 * (qb - root)
+    let r0 = s / qa
+    let r1 = if s == 0.0 => r0 else qc / s
+
+    return roots(2, min(r0, r1) + t_closest, max(r0, r1) + t_closest, o, t_closest)
+
+/// The nearest point of the SOLID {surface <= 0} AND {clip <= 0} along the ray, within [t_min, t_max].
+///
+/// Up to four candidates: the two roots of each quadric.
+/// Each counts only where it lies inside the OTHER's interior.
+/// That is what makes a cylinder's flat cap fall out of the clipper rather than needing geometry of its own, and an open tube and a capped one one record and one bit.
+///
+/// Mirrors `sv::intersect` (scene/quadric.hh) exactly; a divergence between them is a bug in one rather than a difference of intent.
+fun intersect(prim: primitive, origin: float3, dir: float3, t_min: float, t_max: float) -> hit:
+    let mut r = hit(0.0, float3(0.0, 0.0, 1.0), false)
+
+    let o = origin - prim.origin
+
+    let surface_roots = roots_of(prim.surface, o, dir)
+    let emit_clip = (prim.flags & (flag_emit_clip_surface as uint)) != 0
+    let mut clip_roots = roots(0, 0.0, 0.0, o, 0.0)
+    if emit_clip:
+        clip_roots = roots_of(prim.clip, o, dir)
+
+    // Over the four candidates rather than over two lists, because the shapes are known.
+    for i in 0 ..< 4:
+        let on_surface = i < 2
+        let slot = i & 1
+
+        // The point is built from the SHIFTED origin its own roots were solved about, never from `o` — see `roots_of`.
+        // Rebuilding it as `o + dir * t` at a hundred times the primitive's radius throws the precision straight back away.
+        // The clip test and the gradient would then be taken at a point that is not on the surface.
+        let mut t = 0.0
+        let mut solved_from = o
+        let mut t_closest = 0.0
+        if on_surface:
+            if surface_roots.count <= slot => continue
+            t = if slot == 0 => surface_roots.t0 else surface_roots.t1
+            solved_from = surface_roots.shifted_origin
+            t_closest = surface_roots.t_closest
+        else:
+            if clip_roots.count <= slot => continue
+            t = if slot == 0 => clip_roots.t0 else clip_roots.t1
+            solved_from = clip_roots.shifted_origin
+            t_closest = clip_roots.t_closest
+
+        if t < t_min or t > t_max => continue
+        if r.valid and t >= r.t => continue
+
+        let p = solved_from + dir * (t - t_closest)
+
+        // A candidate on one boundary counts only where it lies inside the OTHER's interior.
+        let mut outside = 0.0
+        let mut normal = float3(0.0, 0.0, 0.0)
+        if on_surface:
+            outside = evaluate(prim.clip, p)
+            normal = gradient(prim.surface, p)
+        else:
+            outside = evaluate(prim.surface, p)
+            normal = gradient(prim.clip, p)
+
+        if outside > 0.0 => continue
+
+        r = hit(t, normalize(normal), true)
+
+    return r
+
+/// The shading context for a hit on a quadric.
+///
+/// **This is the whole preamble difference between the two geometries.**
+/// A quadric numbers its primitives and nothing else, so `primitive` is the one field a generated material can read.
+/// That is exactly `per_triangle`, and exactly what the mesh preamble puts there too.
+/// The triangle fields are zeroed rather than faked: resolution refuses to source an attribute at a frequency this geometry does not number.
+/// So nothing generated for a quadric ever reads them.
+fun make_context(inst: scene.instance, primitive: uint) -> material.shading_context:
+    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, uint3(0, 0, 0), float3(1.0, 0.0, 0.0))

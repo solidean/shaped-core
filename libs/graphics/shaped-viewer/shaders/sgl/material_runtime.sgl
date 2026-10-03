@@ -1,0 +1,120 @@
+// The contract a GENERATED material shader is written against: the structs both sides agree on, and the loads that are the same whatever the material.
+//
+// The SGL port of shaders/material_runtime.hlsli, function for function and with the same numerics.
+// A material fragment reads each attribute its type declares as an already-initialized local and writes `surface`.
+// Everything around that — the bindless tables, the loads that initialize those locals, the samplers — is emitted per permutation by `sv::generate_material_shader`.
+//
+// Nothing here declares a resource.
+// A helper that reads memory takes it as a `bytes` parameter, which the caller hands an element of its bindless table: `table[nonuniform i]`.
+module material
+
+use scene
+
+/// Where one mesh attribute's elements live.
+///
+/// One stride, not three: the geometric frequency is part of the permutation key, so the generated code already knows whether to index by vertex, by corner or by primitive.
+/// It emits that index directly.
+/// Carrying three strides and branching would trade a smaller permutation count for a branch per attribute per hit.
+struct attribute_desc:
+    /// index into the bindless table of raw buffers
+    buffer: uint
+    /// byte offset of element 0 within that buffer
+    offset: uint
+    /// bytes between elements
+    stride: uint
+
+/// What a hit knows about where it is, filled by the caller rather than by the material.
+///
+/// `corner` is the three vertex indices of the hit triangle, which is what makes a per-vertex attribute readable without the material knowing whether the mesh is indexed.
+/// The caller resolves that when it fills this in.
+struct shading_context:
+    /// index into the bindless table of the buffer holding this instance's parameter block
+    param_buffer: uint
+    /// byte offset of that block
+    param_offset: uint
+    /// the primitive index of the hit
+    primitive: uint
+    /// the three vertex indices of the hit triangle; zero on a quadric, which has no corners
+    corner: uint3
+    /// (1 - b.x - b.y, b.x, b.y), so the three weigh the three corners in order
+    barycentrics: float3
+
+/// One attribute descriptor out of a parameter block.
+fun load_attribute_desc(params: bytes, offset: uint) -> attribute_desc:
+    let raw = params.load3(offset)
+    return attribute_desc(raw.x, raw.y, raw.z)
+
+// Element loads, by component count.
+
+fun load_element_f1(b: bytes, d: attribute_desc, element: uint) -> float:
+    return reinterpret_as_float(b.load(d.offset + element * d.stride))
+
+fun load_element_f2(b: bytes, d: attribute_desc, element: uint) -> float2:
+    return reinterpret_as_float(b.load2(d.offset + element * d.stride))
+
+fun load_element_f3(b: bytes, d: attribute_desc, element: uint) -> float3:
+    return reinterpret_as_float(b.load3(d.offset + element * d.stride))
+
+fun load_element_f4(b: bytes, d: attribute_desc, element: uint) -> float4:
+    return reinterpret_as_float(b.load4(d.offset + element * d.stride))
+
+// Barycentric interpolation of the three corners of the hit triangle.
+// `e` is the three element indices the generated code resolved from the frequency.
+// Those are vertex indices for per_vertex, and `primitive * 3 + k` for per_corner.
+
+fun interpolate_f1(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float:
+    return load_element_f1(b, d, e.x) * w.x + load_element_f1(b, d, e.y) * w.y + load_element_f1(b, d, e.z) * w.z
+
+fun interpolate_f2(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float2:
+    return load_element_f2(b, d, e.x) * w.x + load_element_f2(b, d, e.y) * w.y + load_element_f2(b, d, e.z) * w.z
+
+fun interpolate_f3(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float3:
+    return load_element_f3(b, d, e.x) * w.x + load_element_f3(b, d, e.y) * w.y + load_element_f3(b, d, e.z) * w.z
+
+fun interpolate_f4(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float4:
+    return load_element_f4(b, d, e.x) * w.x + load_element_f4(b, d, e.y) * w.y + load_element_f4(b, d, e.z) * w.z
+
+/// Barycentric blend of three unit quaternions, as a rotation rather than as four numbers.
+///
+/// The alignment is what makes the sum mean anything.
+/// `q` and `-q` are the same rotation, so two corners can describe neighboring frames and still sit nearly antipodal in 4D.
+/// Summing those cancels toward zero, and the normalized result is a frame belonging to neither, which reads as a swirl across the triangle.
+/// Aligning both corners into the first's hemisphere first is the fix, and it is why a rotation cannot go through `interpolate_f4`.
+///
+/// This is a normalized linear blend rather than a spherical one.
+/// Over one triangle the corners are close enough that the angular error is far below what a shading normal resolves, and nlerp costs no trigonometry.
+fun interpolate_rotation(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float4:
+    let q0 = load_element_f4(b, d, e.x)
+    let q1_loaded = load_element_f4(b, d, e.y)
+    let q2_loaded = load_element_f4(b, d, e.z)
+
+    let q1 = if dot(q1_loaded, q0) < 0.0 => -q1_loaded else q1_loaded
+    let q2 = if dot(q2_loaded, q0) < 0.0 => -q2_loaded else q2_loaded
+
+    let q = q0 * w.x + q1 * w.y + q2 * w.z
+    let len = length(q)
+
+    // Three corners cannot cancel once aligned, so a zero length means the attribute held no rotation at all.
+    let rotation = if len > 1e-8 => q / len else float4(0.0, 0.0, 0.0, 1.0)
+    return rotation
+
+/// The three element indices a per_corner attribute reads, in the order `barycentrics` weighs them.
+fun corner_elements(ctx: shading_context) -> uint3:
+    let base = ctx.primitive * 3
+    return uint3(base, base + 1, base + 2)
+
+/// The three vertex indices of triangle `primitive` on `inst`.
+///
+/// The guard is load-bearing on the non-indexed path: a non-indexed mesh hands in a stand-in for `index_buffer` that has no elements to read.
+/// So the loads sit inside an `if` statement and are never selected between, which the HLSL's `[branch]` said and SGL has no spelling for.
+fun triangle_corners(inst: scene.instance, index_buffer: bytes, primitive: uint) -> uint3:
+    let base = primitive * 3
+    if inst.is_indexed != 0:
+        return uint3(index_buffer.load(4 * base), index_buffer.load(4 * (base + 1)), index_buffer.load(4 * (base + 2)))
+    return uint3(base, base + 1, base + 2)
+
+/// The shading context for a hit on `inst`, which is all a generated material needs to know about where it is.
+/// `bary` is the two barycentrics a hit attribute carries; the third is what is left of one.
+fun make_context(inst: scene.instance, index_buffer: bytes, primitive: uint, bary: float2) -> shading_context:
+    let corner = triangle_corners(inst, index_buffer, primitive)
+    return shading_context(inst.param_buffer, inst.param_offset, primitive, corner, float3(1.0 - bary.x - bary.y, bary.x, bary.y))

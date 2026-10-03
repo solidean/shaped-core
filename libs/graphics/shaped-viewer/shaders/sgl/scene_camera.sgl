@@ -1,0 +1,41 @@
+// The pinhole camera the path tracer's primary rays leave from, and the projection a reprojection inverts it by.
+//
+// The SGL port of shaders/camera.hlsli, function for function and with the same numerics.
+// The camera probe (tests/shaders/camera_probe.sgl) holds the two to the same numbers.
+module scene
+
+/// Pinhole camera basis (see `sv::camera_gpu::from`), mirroring `sv::camera_gpu` lane for lane.
+///
+/// Each `float3` is followed by a pad scalar, so it fills one 16-byte row of a constant block and the same 16 bytes of a buffer's element.
+/// The pads are named rather than left to the layout, since this is a byte layout the host writes, not a description of one.
+struct camera:
+    position: float3
+    pad0: float
+    forward: float3
+    pad1: float
+    /// right * aspect * tan(fov_y / 2)
+    right_scaled: float3
+    pad2: float
+    /// true_up * tan(fov_y / 2)
+    up_scaled: float3
+    pad3: float
+
+/// The primary ray's offset from the camera position, for a continuous pixel position over `dim`.
+///
+/// `pixel` carries whatever sub-pixel jitter the caller drew, so a pixel's center is its integer coordinate plus 0.5.
+/// Unnormalized, because `camera_project` inverts exactly this and the length is the view depth it divides by.
+fun camera_ray_offset(cam: camera, pixel: float2, dim: float2) -> float3:
+    // [-1, 1], y down
+    let ndc = pixel / dim * 2.0 - 1.0
+    return cam.forward + cam.right_scaled * ndc.x - cam.up_scaled * ndc.y
+
+/// Where `offset` lands on `cam`'s image, as a continuous pixel position over `dim`.
+/// `offset` is a point relative to the camera's position, or a direction for a point at infinity.
+///
+/// The inverse of `camera_ray_offset`, and a reprojection is only as good as that: the two describe one pinhole, so a change to either is a change to both.
+/// Behind the camera is reported far off the image, which a reprojection reads as "not visible last frame".
+fun camera_project(cam: camera, offset: float3, dim: float2) -> float2:
+    let z = dot(offset, normalize(cam.forward))
+    if z <= 1e-6 => return float2(-1e6, -1e6)
+    let ndc = float2(dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled), -dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)) / z
+    return (ndc + 1.0) * 0.5 * dim

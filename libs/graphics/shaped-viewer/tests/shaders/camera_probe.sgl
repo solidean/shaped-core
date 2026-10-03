@@ -1,0 +1,63 @@
+// A probe over module `scene`'s projection, so a test can assert on the NUMBERS the raygen's motion guide is built from.
+//
+// The SGL twin of shaders/camera_probe.hlsl, over shaders/sgl/scene_camera.sgl rather than shaders/camera.hlsli.
+// motion-vector-test.cc runs every case through both and holds both to the same checks, and the two to each other bit for bit.
+// That file says why motion vectors need a probe at all.
+use scene
+
+/// `scene.camera` as a case carries it, field for field, which `camera_probe_run` converts with `scene.camera(..c.cam)`.
+/// A struct of its own because a buffer element naming a module's struct has no C++ mirror yet.
+struct probe_camera:
+    position: float3
+    pad0: float
+    forward: float3
+    pad1: float
+    right_scaled: float3
+    pad2: float
+    up_scaled: float3
+    pad3: float
+
+/// One projection to measure — mirrors `camera_probe_case` in motion-vector-test.cc lane for lane, so keep the two in lockstep.
+///
+/// `world` is the primary hit this pixel's ray found.
+/// `at_infinity` replaces it with the ray's own direction, which is what an escaped ray reprojects as.
+/// That is the reason the sky moves under rotation and not under translation.
+struct camera_probe_case:
+    /// this frame's camera
+    cam: probe_camera
+    /// the camera the previous frame was traced from
+    prev: probe_camera
+    /// the continuous pixel position the primary ray leaves from
+    pixel: float2
+    /// the image extent, in pixels
+    dim: float2
+    world: float3
+    at_infinity: uint
+
+binding camera_probe_io:
+    cases: buffer[camera_probe_case]
+
+    /// `xy` is the motion vector the raygen would write for this case.
+    /// `zw` is the round trip of `pixel` through `camera_ray_offset` and back through `camera_project`, which must come back as `pixel` itself.
+    results: mut buffer[float4]
+
+    /// How many elements `cases` and `results` hold, which the HLSL probe reads off the buffer itself.
+    count: uint
+
+/// The two measurements of one case.
+fun camera_probe_run(c: camera_probe_case) -> float4:
+    let cam = scene.camera(..c.cam)
+    let prev = scene.camera(..c.prev)
+
+    // The same two lines the raygen runs, against the same functions.
+    let dir = normalize(scene.camera_ray_offset(cam, c.pixel, c.dim))
+    let offset = if c.at_infinity != 0 => dir else c.world - prev.position
+    let motion = c.pixel - scene.camera_project(prev, offset, c.dim)
+
+    let round_trip = scene.camera_project(cam, scene.camera_ray_offset(cam, c.pixel, c.dim), c.dim)
+    return float4(motion.x, motion.y, round_trip.x, round_trip.y)
+
+@compute(64) fun camera_measure(@thread_id id: int3){camera_probe_io}:
+    let item = id.x as uint
+    if item >= camera_probe_io.count => return
+    camera_probe_io.results[id.x] = camera_probe_run(camera_probe_io.cases[id.x])
