@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <shaped-viewer/drawing/instance.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/box_style.hh>
 #include <shaped-viewer/layout/solvers.hh>
@@ -85,6 +86,16 @@ struct sv::layout_leaf
     /// Where the magnified window sits, in the source's own uv.
     /// Clamped so the window never leaves the source, which is why zooming out always lands back on the whole image.
     tg::pos2f zoom_center = tg::pos2f(0.5f, 0.5f);
+
+    /// Whether a strip above the leaf shows its first view's display name.
+    /// On for every leaf a caller adds; the window's own single view, which the window title already names, has none.
+    bool title = true;
+
+    /// The title's glyphs in logical pixels, measured from the strip's top-left: resolved from the display name before
+    /// the plan is built, since the plan has no fonts.
+    /// The strip is reserved exactly when this holds something, so a leaf with no name, or no font to set it in, keeps
+    /// its whole rect.
+    cc::vector<drawing_placement> title_text;
 };
 
 /// One node of a layout tree.
@@ -140,6 +151,9 @@ struct sv::resolved_item
     layout_node_id node = invalid_node;
     tg::aabb2i rect = {};
     tg::vec4f color = tg::vec4f(0, 0, 0, 0); ///< background and border only
+
+    /// leaf only: the title strip above `rect`, cut from the top of the leaf's content box; empty when it has none.
+    tg::aabb2i title = {};
 };
 
 /// A layout tree resolved against a rect: everything to draw, in the order to draw it.
@@ -154,7 +168,16 @@ struct sv::layout_solution
 
 namespace sv
 {
+/// A title strip's height in logical pixels, and the size its text is set at.
+inline constexpr f32 title_strip_height = 22.0f;
+inline constexpr f32 title_text_size = 13.0f;
+
 /// Walks the tree rooted at `root`, assigning each node a rect within `rect`, and returns everything to draw.
+/// A leaf with title text gives the top `title_height` pixels of its content box to the strip, unless that would leave
+/// it nothing.
 /// An empty tree, or an out-of-range root, resolves to nothing.
-[[nodiscard]] layout_solution resolve_layout(layout_tree const& tree, layout_node_id root, tg::aabb2i rect);
+[[nodiscard]] layout_solution resolve_layout(layout_tree const& tree,
+                                             layout_node_id root,
+                                             tg::aabb2i rect,
+                                             int title_height = 0);
 } // namespace sv

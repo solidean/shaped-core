@@ -4,6 +4,7 @@
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -31,9 +32,26 @@ struct sr::slug_instance
     u32 color = 0xffffffff;
 };
 
+/// Whether a frame's shapes draw, by what its probe finds in the draw's depth texture.
+enum class sr::slug_visibility : sr::u8
+{
+    /// Drawn whatever the depth holds; the probe is not read.
+    always,
+
+    /// Drawn only where nothing in the depth texture lies in front of the probe.
+    if_visible,
+
+    /// Drawn only where something does: the other half of a pair that shows one look or the other.
+    if_hidden,
+};
+
 /// Where a job places a plane of shapes: the plane's (x, y) lands at `at + x * x_axis + y * y_axis`, in whatever space
 /// the draw's `object_to_clip` starts from — pixels for a 2D overlay, the world for a scene.
 /// The axes are free: their lengths and angle stretch and shear the plane.
+///
+/// A frame can be shown or hidden as a whole by one depth test at its probe, made per quad in the vertex stage.
+/// That is what an annotation flat on screen wants: hidden when the point it marks is, never cut in half where it
+/// crosses a silhouette.
 struct sr::slug_frame
 {
     tg::pos3f at;
@@ -42,6 +60,14 @@ struct sr::slug_frame
 
     /// rgba8, sRGB-encoded, straight alpha, red in the low byte; multiplies the colour of every shape under this frame.
     u32 tint = 0xffffffff;
+
+    slug_visibility visibility = slug_visibility::always;
+
+    /// Where the probe reads the draw's `slug_view::probe_depth`, in [0, 1] across it with y down, kept to 1/32767.
+    tg::vec2f probe = tg::vec2f(0, 0);
+
+    /// The probed point's own depth, as `1 - near / distance`: what the depth texture holds where it is in front.
+    f32 probe_depth = 0.0f;
 };
 
 /// One quad of a job: the atlas record it draws, under which of the job's frames.
@@ -63,6 +89,14 @@ struct sr::slug_view
 
     /// Takes the square root of coverage, which makes thin shapes optically heavier.
     bool weight_boost = false;
+
+    /// What a job's probing frames test against: an r32_float texture of `1 - near / distance`, 1 where nothing is.
+    /// Without one every probe counts as visible, so `if_visible` frames draw and `if_hidden` ones do not.
+    sg::texture_2d probe_depth;
+
+    /// How much nearer than the probe, as a fraction of its distance, the depth must be to hide it.
+    /// A point lying on a surface then stays visible, though the depth there is the surface's own.
+    f32 probe_tolerance = 0.01f;
 };
 
 /// The routine's parameter: the scope's colour format, and its depth format or undefined for none.
@@ -158,6 +192,9 @@ private:
 
     /// The six corners of the unit square every quad is drawn from, two triangles.
     sg::buffer<tg::vec2f> _corners;
+
+    /// Bound when a job's view has no probe depth of its own, so the group is complete; never read.
+    sg::texture_2d _no_probe_depth;
 };
 
 namespace sr

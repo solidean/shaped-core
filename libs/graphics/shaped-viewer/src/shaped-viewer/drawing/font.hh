@@ -54,3 +54,19 @@ namespace sv
 /// shaped-core ships no font of its own, so what this is differs between operating systems, and captures with it.
 [[nodiscard]] font const* default_font();
 } // namespace sv
+
+namespace sv::impl
+{
+/// Sets `text` in `style` and appends a placement per visible glyph to `out`, returning the laid-out box's extent.
+/// The layout's own coordinates, y down, land at `at + u * x_axis + v * y_axis`; a glyph's outline is y up, so its
+/// drawing is placed with the y axis negated.
+tg::pos2f place_text(drawing_manager& drawings,
+                     cc::vector<drawing_placement>& out,
+                     cc::string_view text,
+                     text_style const& style,
+                     tg::pos3f at,
+                     tg::vec3f x_axis,
+                     tg::vec3f y_axis,
+                     tg::vec4f tint,
+                     sv::corner from);
+} // namespace sv::impl

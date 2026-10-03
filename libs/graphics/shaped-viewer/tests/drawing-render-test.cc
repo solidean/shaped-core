@@ -189,6 +189,119 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// An annotation on a device: a marker in front of a traced quad is filled, one behind it is a hollow ring.
+ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor shows, and a ring while it is hidden",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    tg::pos3f const quad[] = {tg::pos3f(-1, -1, 0), tg::pos3f(1, -1, 0), tg::pos3f(1, 1, 0),
+                              tg::pos3f(-1, -1, 0), tg::pos3f(1, 1, 0),  tg::pos3f(-1, 1, 0)};
+    sv_test::pbr_material const grey[] = {{}, {}};
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("quad", quad, grey));
+    resources.wait_for_pending_uploads();
+
+    // A marker 8 px across with a ring 2 px wide, in red; no box, and a leader pointed well away from the marker.
+    auto const parts = resources.drawings.annotation_parts(8.0f, 2.0f);
+    auto const part = [&](u32 index)
+    {
+        return sv::drawing_placement{.set = parts,
+                                     .first_record = resources.drawings.first_record(parts, index),
+                                     .record_count = resources.drawings.record_count(parts, index),
+                                     .tint = sr::pack_rgba8(tg::vec4f(1, 0, 0, 1))};
+    };
+    auto const annotation = [&](tg::pos3f anchor)
+    {
+        return sv::annotation_record{.anchor = anchor,
+                                     .box_size = tg::vec2f(4, 4),
+                                     .side = sv::annotation_side::above_right,
+                                     .offset = tg::vec2f(30, 30),
+                                     .margin = 0.0f,
+                                     .hidden_dashes = {4, 3},
+                                     .marker_radius = 8.0f,
+                                     .disk = part(0),
+                                     .ring = part(1),
+                                     .segment = part(2),
+                                     .dot = part(3)};
+    };
+
+    // Right of centre and in front of the quad; left of centre and behind it.
+    auto const size = tg::vec2i(128, 128);
+    auto v = sv::view_data{};
+    v.id = sv::view_id::from_string("annotated");
+    v.resolution = size;
+    v.resolution_follows_layout = false;
+    v.camera = sv::camera::looking_at(tg::pos3d(0, 0, -3), tg::pos3d(0, 0, 0));
+    auto& scene = sv::ensure_scene_3d(v);
+    scene.items.push_back(item);
+    scene.annotations.push_back(annotation(tg::pos3f(0.4f, -0.4f, -0.5f)));
+    scene.annotations.push_back(annotation(tg::pos3f(-0.4f, -0.4f, 0.5f)));
+
+    auto def = sv::viewer_definition{};
+    def.views.push_back(cc::move(v));
+    def.root_view = sv::view_index(0);
+    auto const plan = sv::build_render_plan(def, size, 0, {});
+    REQUIRE(plan.validate());
+    REQUIRE(plan.drawing_jobs.size() == 1);
+    CHECK(plan.drawing_jobs[0].trace == 0);
+
+    // where each marker landed, from the plan's own placements
+    auto centres = cc::vector<tg::pos2f>();
+    for (auto const& p : plan.drawing_jobs[0].placements)
+        if (p.first_record == resources.drawings.first_record(parts, 0))
+            centres.push_back(tg::pos2f(p.at[0], p.at[1]));
+    REQUIRE(centres.size() == 2);
+
+    auto const output
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                            .width = size[0],
+                                            .height = size[1],
+                                            .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+    auto store = sv::view_store{};
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               resources.advance_to(ctx.current_epoch());
+                                               return sv::viewer_renderer::execute(
+                                                   cmd, def, plan, resources, store,
+                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+                                           }));
+    (void)co_await ctx.idle_completion();
+
+    auto read = ctx.create_command_list();
+    auto const future = read->download.bytes_from_texture(output.raw());
+    ctx.submit_command_list(cc::move(read));
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == isize(size[0]) * size[1] * 4);
+    auto const is_red = [&](tg::pos2f at, f32 dx)
+    {
+        auto const x = int(at[0] + dx);
+        auto const y = int(at[1]);
+        auto const* const px = pixels.data() + (isize(y) * size[0] + x) * 4;
+        return int(u8(px[0])) > 200 && int(u8(px[1])) < 60;
+    };
+
+    // in front: filled, so red at its centre and inside its edge
+    CHECK(is_red(centres[0], 0.0f));
+    CHECK(is_red(centres[0], 7.0f));
+    // behind: hollow, so the quad shows at its centre, and the ring is red 6 to 8 px out
+    CHECK(!is_red(centres[1], 0.0f));
+    CHECK(is_red(centres[1], 7.0f));
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // Text through the whole path: one glyph from the top-left and the same from the bottom-right, each inside its box.
 // The default font is whatever the operating system ships, so this measures with that font rather than with numbers.
 ASYNC_INVOCABLE_TEST("sv - canvas text lands inside its laid-out box, from either corner",

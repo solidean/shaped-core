@@ -101,7 +101,7 @@ sv::box_insets                   // { int left, top, right, bottom; } — constr
                                  //   ::all(v) / ::symmetric(horizontal, vertical) are the named spellings of the first two
 sv::relative_placement           // { pos2f position; vec2f size; vec2i position_offset, size_offset; } — fraction of the parent's content box, plus pixels
                                  //   a `relative` node is OUT OF FLOW: siblings tile as if it were absent, and it draws in front
-sv::layout_leaf                  // { vector<view_index> views; vector<post_process> post_processes; fit_mode fit; sampler_mode sampler; bool allow_zoom; float zoom; pos2f zoom_center; }
+sv::layout_leaf                  // { vector<view_index> views; vector<post_process> post_processes; fit_mode fit; sampler_mode sampler; bool allow_zoom; float zoom; pos2f zoom_center; bool title; vector<drawing_placement> title_text; }
 sv::fit_mode                     // stretch | native                    (todo: fill, contain, crop)
 sv::sampler_mode                 // nearest | linear                    (nearest + zoom is a pixel-exact readout)
 sv::post_process                 // { post_process_kind kind; float split; bool horizontal; int separator_width; vec4f separator_color; } — none | wipe
@@ -541,6 +541,10 @@ canvas.add_drawing(d, {...});                    // a lone drawing: an implicit 
 // from a right/bottom corner, `at` is where the drawing's FAR edge sits in from that edge
 canvas.add_text("fps 144", tg::pos2f(16, 16), {.size = 14, .color = c});   // logical px; + an instance_2d overload (corners, axes)
 scene.add_text("+X", {.at = p, .x_axis = r, .y_axis = down}, {.size = 0.1f});  // world units: SET the size
+scene.add_annotation(p, "inlet", {.side = sv::annotation_side::automatic, .offset = {32, 28},
+                                  .leader = {.shape = sv::leader_shape::elbow}, .occluded = sv::annotation_occluded::hidden_line});
+// a label flat on screen at world point p, logical px; placed every frame; hidden by the GPU at the anchor's pixel
+// occluded: hidden_line (box stays, marker hollow, leader dashed) | hide | show (e.g. a centre of mass inside the part)
 auto const mono = sv::font::from_bytes(pinned).value();   // TrueType only; keyed by the file's hash
 sv::default_font();                              // the OS's UI font, loaded once; null where there is none
 // resources.drawings: sv::drawing_manager, an lru_pool over one sr::slug_atlas; one Slug job (one draw) per layer
@@ -937,7 +941,8 @@ layout.relative(placement, style)-> layout_ref                 // out of flow, d
 layout.style(box_style)
 
 // on a leaf / a scene
-leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.sampler(m);  leaf.allow_zoom(b)
+leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.sampler(m);  leaf.allow_zoom(b);  leaf.title(false)
+// every leaf shows its view's display_name in a 22-logical-px strip above it unless title(false); the strip is cut from its rect
 scene.add_mesh(sv::mesh)    -> mesh_ref                   // geometry, attributes and textures upload here, keyed by the mesh's own hashes
 scene.add_mesh(sv::resident_mesh)         -> mesh_ref                   // already resources: nothing to look up
 scene.add_light("id", sv::light) -> light_ref               // the id is hashed under the id stack, like a view's; one id twice in a layer ASSERTS

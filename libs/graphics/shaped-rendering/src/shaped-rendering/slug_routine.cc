@@ -68,6 +68,9 @@ cc::shared_async<cc::unit> slug_routine::init(sg::routine_init_scope scope)
             = {tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(1, 1), tg::vec2f(0, 0), tg::vec2f(1, 1), tg::vec2f(0, 1)};
         _corners = ctx.persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
     }
+    if (_no_probe_depth.raw() == nullptr)
+        _no_probe_depth = ctx.persistent.create_texture_2d(
+            {.format = sg::pixel_format::r32_float, .width = 1, .height = 1, .usage = sg::texture_usage::texture});
 
     _group_layout = ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>();
     auto const layout = ctx.cached.acquire_pipeline_layout<sgl_modules::slug::tables, sgl_shaders::slug_draw>();
@@ -117,7 +120,18 @@ namespace
             .row3 = row(3),
             .viewport = tg::vec2f(f32(size[0]), f32(size[1])),
             .depth_bias = view.depth_bias,
-            .weight_boost = view.weight_boost ? 1 : 0};
+            .weight_boost = view.weight_boost ? 1 : 0,
+            .probe_tolerance = view.probe_tolerance,
+            .has_probe_depth = view.probe_depth.raw() != nullptr ? 1 : 0};
+}
+
+/// Every draw places shapes across the whole target, as the dilation assumes, so it sets the viewport and scissor
+/// itself rather than inherit whatever rect an earlier draw in the scope narrowed them to.
+void cover_whole_target(sg::rendering_scope& scope)
+{
+    auto const size = scope.render_target_size();
+    scope.set_viewport({.offset = tg::pos2f(0, 0), .size = tg::vec2f(f32(size[0]), f32(size[1]))});
+    scope.set_scissor(tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(size[0], size[1])));
 }
 
 [[nodiscard]] slug_pipeline_key key_of(sg::rendering_scope const& scope)
@@ -153,13 +167,19 @@ slug_routine::prepared_job slug_routine::prepare_job(sg::command_list& cmd,
     auto const rows = int((frames.size() + frames_per_row - 1) / frames_per_row);
     auto texels = cc::vector<cc::fixed_array<u32, 4>>::create_defaulted(isize(rows) * 4096);
     auto const bits = [](f32 v) { return cc::bit_cast<u32>(v); };
+    auto const fixed15 = [](f32 v) { return u32(cc::clamp(v, 0.0f, 1.0f) * 32767.0f + 0.5f); };
     for (auto i = isize(0); i < frames.size(); ++i)
     {
         auto const& f = frames[i];
         auto const at = isize(i / frames_per_row) * 4096 + (i % frames_per_row) * texels_per_frame;
-        texels[at + 0] = {bits(f.at[0]), bits(f.at[1]), bits(f.at[2]), 0};
+        // the probe word, as slug_quads.sgl's is_drawn reads it
+        auto probe = u32(0);
+        if (f.visibility != slug_visibility::always)
+            probe = fixed15(f.probe[0]) | (1u << 15) | (fixed15(f.probe[1]) << 16)
+                  | (f.visibility == slug_visibility::if_hidden ? 1u << 31 : 0u);
+        texels[at + 0] = {bits(f.at[0]), bits(f.at[1]), bits(f.at[2]), probe};
         texels[at + 1] = {bits(f.x_axis[0]), bits(f.x_axis[1]), bits(f.x_axis[2]), f.tint};
-        texels[at + 2] = {bits(f.y_axis[0]), bits(f.y_axis[1]), bits(f.y_axis[2]), 0};
+        texels[at + 2] = {bits(f.y_axis[0]), bits(f.y_axis[1]), bits(f.y_axis[2]), bits(f.probe_depth)};
     }
 
     auto& ctx = cmd.context();
@@ -201,11 +221,14 @@ sg::routine_outcome slug_routine::execute(sg::rendering_scope& scope,
         cmd, self->_group_layout,
         sgl_modules::slug::tables{.curves = atlas.curve_texture().as_texture_view(),
                                   .bands = atlas.band_texture().as_texture_view()});
+    auto const& probe = view.probe_depth.raw() != nullptr ? view.probe_depth : self->_no_probe_depth;
     auto const job_tables
         = ctx.transient.create_binding_group(cmd, self->_job_group_layout,
                                              sgl_shaders::slug_job{.records = atlas.record_texture().as_texture_view(),
-                                                                   .frames = job.frames.as_texture_view()});
+                                                                   .frames = job.frames.as_texture_view(),
+                                                                   .probe_depth = probe.as_texture_view()});
 
+    cover_whole_target(scope);
     scope.bind_pipeline(**pipeline);
     scope.bind_group(0, *tables);
     scope.bind_group(1, *job_tables);
@@ -268,6 +291,7 @@ sg::routine_outcome slug_routine::execute(sg::rendering_scope& scope,
         sgl_modules::slug::tables{.curves = atlas.curve_texture().as_texture_view(),
                                   .bands = atlas.band_texture().as_texture_view()});
 
+    cover_whole_target(scope);
     scope.bind_pipeline(**pipeline);
     scope.bind_group(0, *group);
     scope.bind_vertex_buffers({self->_corners.as_vertex_buffer(), instances.as_vertex_buffer()});

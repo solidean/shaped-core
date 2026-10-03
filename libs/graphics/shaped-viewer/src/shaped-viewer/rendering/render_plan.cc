@@ -1,5 +1,6 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/utility.hh> // cc::clamp, cc::max, cc::min, cc::move
+#include <shaped-viewer/drawing/annotation.hh>
 #include <shaped-viewer/rendering/render_plan.hh>
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/view_data.hh>
@@ -32,6 +33,16 @@ namespace
 }
 
 constexpr tg::aabb2f full_uv = tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1));
+
+/// A title strip's band, flat and opaque, a shade off black.
+constexpr tg::vec4f title_color = tg::vec4f(0.1f, 0.11f, 0.13f, 1.0f);
+
+/// `view` widened to take in its leaf's title strip above it.
+[[nodiscard]] tg::aabb2i with_title(tg::aabb2i view, tg::aabb2i title)
+{
+    return tg::aabb2i(tg::pos2i(cc::min(view.min[0], title.min[0]), cc::min(view.min[1], title.min[1])),
+                      tg::pos2i(cc::max(view.max[0], title.max[0]), cc::max(view.max[1], title.max[1])));
+}
 
 /// What `emit` returns for a subtree it refused: an index into `render_plan::targets` that names none.
 constexpr u32 invalid_target = u32(-1);
@@ -203,9 +214,9 @@ struct builder
             if (l.kind != layer_kind::layout)
                 continue;
 
-            auto const solution
-                = resolve_layout(def.nodes, l.root_node,
-                                 tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(resolution[index][0], resolution[index][1])));
+            auto const solution = resolve_layout(
+                def.nodes, l.root_node,
+                tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(resolution[index][0], resolution[index][1])), title_texels());
             for (auto const& item : solution.items)
             {
                 if (item.kind != resolved_item::item_kind::leaf)
@@ -287,6 +298,7 @@ struct builder
                                      .opacity = l.opacity});
                 }
                 emit_drawings(view, layer_index, l, res, trace, local);
+                emit_annotations(view, layer_index, l, res, trace, local);
                 break;
             }
             case layer_kind::layout:
@@ -344,6 +356,43 @@ struct builder
                          .job = job});
     }
 
+    /// Appends one 2D job for a scene layer's annotations, if any land in view this frame, after its drawings.
+    /// The anchors are projected through the view's camera here; which are hidden, the GPU decides.
+    void emit_annotations(view_index view,
+                          u32 layer_index,
+                          layer const& l,
+                          tg::vec2i res,
+                          u32 trace,
+                          cc::vector<layout_draw>& local)
+    {
+        if (l.annotations.empty() || res[0] <= 0 || res[1] <= 0)
+            return;
+
+        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto const logical = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale);
+        auto const camera = world_to_clip(def[view].camera, res);
+        auto placements = cc::vector<drawing_placement>();
+        for (auto const& a : l.annotations)
+            impl::place_annotation(a, camera, logical, placements);
+        if (placements.empty())
+            return;
+
+        auto const job = u32(plan.drawing_jobs.size());
+        plan.drawing_jobs.push_back({.view = view,
+                                     .layer = layer_index,
+                                     .is_3d = false,
+                                     .object_to_clip = logical_pixels_to_clip(res, scale),
+                                     .logical_size = logical,
+                                     .trace = trace,
+                                     .kind = drawing_job_kind::annotations,
+                                     .placements = cc::move(placements)});
+        local.push_back({.kind = draw_kind::drawings,
+                         .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
+                         .blend = layer_blend::over,
+                         .opacity = l.opacity,
+                         .job = job});
+    }
+
     void emit_layout(view_index view,
                      layer const& l,
                      tg::vec2i res,
@@ -351,8 +400,10 @@ struct builder
                      int depth,
                      cc::vector<layout_draw>& local)
     {
-        auto const solution
-            = resolve_layout(def.nodes, l.root_node, tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])));
+        auto const solution = resolve_layout(def.nodes, l.root_node,
+                                             tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])), title_texels());
+        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto titles = cc::vector<drawing_placement>();
 
         for (auto const& item : solution.items)
         {
@@ -367,6 +418,23 @@ struct builder
             auto const& leaf = def.nodes[item.node].leaf;
             if (leaf.views.empty())
                 continue;
+
+            // The strip: a flat band, and the name over it, cut where it would run past the strip's right edge.
+            auto const has_title = item.title.max[0] > item.title.min[0] && item.title.max[1] > item.title.min[1];
+            if (has_title)
+            {
+                local.push_back(
+                    {.kind = draw_kind::background, .dst_rect = item.title, .color = title_color, .node = item.node});
+                auto const origin = tg::vec3f(f32(item.title.min[0]) / scale, f32(item.title.min[1]) / scale, 0);
+                auto const room = f32(rect_w(item.title)) / scale - title_text_size;
+                for (auto p : leaf.title_text)
+                {
+                    if (p.offset[0] > room)
+                        continue;
+                    p.at = p.at + origin;
+                    titles.push_back(p);
+                }
+            }
 
             // Everything the sources below push belongs *inside* this leaf, which is what the parent links record.
             auto const first_inner = u32(plan.hit_regions.size());
@@ -425,19 +493,42 @@ struct builder
             // between two differently-placed leaves makes its interior ambiguous, which only a z-ordered pick can settle.
             auto const child_map = compose(map, first_fit, first_res);
             auto const me = u32(plan.hit_regions.size());
-            plan.hit_regions.push_back({.view = leaf.views[0],
-                                        .id = def[leaf.views[0]].id,
-                                        .node = item.node,
-                                        .window_rect = map_rect(map, first_fit.dst),
-                                        .scale = child_map.scale,
-                                        .offset = child_map.offset,
-                                        .order = order++});
+            plan.hit_regions.push_back(
+                {.view = leaf.views[0],
+                 .id = def[leaf.views[0]].id,
+                 .node = item.node,
+                 .window_rect = map_rect(map, first_fit.dst),
+                 .scale = child_map.scale,
+                 .offset = child_map.offset,
+                 .leaf_rect = map_rect(map, has_title ? with_title(first_fit.dst, item.title) : first_fit.dst),
+                 .order = order++});
 
             // Only the regions still unclaimed are this leaf's *direct* children; a deeper leaf already took its own.
             for (auto i = first_inner; i < me; ++i)
                 if (plan.hit_regions[i].parent == invalid_hit_region)
                     plan.hit_regions[i].parent = me;
         }
+
+        // Every title of this layout in one 2D job, drawn after the views below them.
+        if (titles.empty())
+            return;
+        auto const job = u32(plan.drawing_jobs.size());
+        plan.drawing_jobs.push_back({.view = view,
+                                     .object_to_clip = logical_pixels_to_clip(res, scale),
+                                     .logical_size = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale),
+                                     .kind = drawing_job_kind::titles,
+                                     .placements = cc::move(titles)});
+        local.push_back({.kind = draw_kind::drawings,
+                         .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
+                         .blend = layer_blend::over,
+                         .opacity = l.opacity,
+                         .job = job});
+    }
+
+    /// A title strip's height in the targets' texels, at the definition's content scale.
+    [[nodiscard]] int title_texels() const
+    {
+        return int(tg::round(title_strip_height * (def.content_scale > 0.0f ? def.content_scale : 1.0f)));
     }
 };
 } // namespace

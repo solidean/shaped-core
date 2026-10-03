@@ -34,7 +34,7 @@ namespace
     return tg::aabb2i(tg::pos2i(x0, y0), tg::pos2i(cc::max(x1, x0), cc::max(y1, y0)));
 }
 
-void resolve_node(layout_tree const& tree, layout_node_id index, tg::aabb2i rect, layout_solution& out);
+void resolve_node(layout_tree const& tree, layout_node_id index, tg::aabb2i rect, int title_height, layout_solution& out);
 
 /// Resolves `child` against the cell it was given, unless it is `relative` — which ignores the cell and places itself
 /// inside `parent_content` instead.
@@ -43,14 +43,15 @@ void resolve_child(layout_tree const& tree,
                    layout_node_id child,
                    tg::aabb2i cell,
                    tg::aabb2i parent_content,
+                   int title_height,
                    layout_solution& out)
 {
     auto const& node = tree[child];
-    resolve_node(tree, child,
-                 node.kind == layout_kind::relative ? place_relative(parent_content, node.placement) : cell, out);
+    resolve_node(tree, child, node.kind == layout_kind::relative ? place_relative(parent_content, node.placement) : cell,
+                 title_height, out);
 }
 
-void resolve_node(layout_tree const& tree, layout_node_id index, tg::aabb2i rect, layout_solution& out)
+void resolve_node(layout_tree const& tree, layout_node_id index, tg::aabb2i rect, int title_height, layout_solution& out)
 {
     auto const& node = tree[index];
 
@@ -78,7 +79,14 @@ void resolve_node(layout_tree const& tree, layout_node_id index, tg::aabb2i rect
 
     if (node.kind == layout_kind::leaf)
     {
-        out.items.push_back({.kind = resolved_item::item_kind::leaf, .node = index, .rect = content});
+        auto view = content;
+        auto title = tg::aabb2i();
+        if (!node.leaf.title_text.empty() && title_height > 0 && content.max[1] - content.min[1] > title_height)
+        {
+            title = tg::aabb2i(content.min, tg::pos2i(content.max[0], content.min[1] + title_height));
+            view.min[1] += title_height;
+        }
+        out.items.push_back({.kind = resolved_item::item_kind::leaf, .node = index, .rect = view, .title = title});
         return;
     }
 
@@ -86,7 +94,7 @@ void resolve_node(layout_tree const& tree, layout_node_id index, tg::aabb2i rect
     {
         CC_ASSERT(node.children.size() <= 1, "a relative layout node holds at most one child");
         if (!node.children.empty())
-            resolve_child(tree, node.children[0], content, content, out);
+            resolve_child(tree, node.children[0], content, content, title_height, out);
         return;
     }
 
@@ -106,13 +114,13 @@ void resolve_node(layout_tree const& tree, layout_node_id index, tg::aabb2i rect
         // Row-major: child i lands in cell i; a grid with more cells than children leaves the tail empty.
         auto const assignable = cc::min(int(cells.size()), n);
         for (auto i = 0; i < assignable; ++i)
-            resolve_child(tree, flowed[i], cells[i], content, out);
+            resolve_child(tree, flowed[i], cells[i], content, title_height, out);
     }
 
     // Out-of-flow children emit last, so they draw over every flowed sibling of this container.
     // That ordering holds within one container; ranking one against another container's subtree wants a real z-order.
     for (auto const child : out_of_flow)
-        resolve_child(tree, child, content, content, out);
+        resolve_child(tree, child, content, content, title_height, out);
 }
 } // namespace
 
@@ -143,11 +151,11 @@ layout_node_id layout_tree::add_relative(layout_node_id parent, relative_placeme
     return index;
 }
 
-layout_solution resolve_layout(layout_tree const& tree, layout_node_id root, tg::aabb2i rect)
+layout_solution resolve_layout(layout_tree const& tree, layout_node_id root, tg::aabb2i rect, int title_height)
 {
     auto out = layout_solution();
     if (root != invalid_node && isize(u32(root)) < tree.nodes.size())
-        resolve_node(tree, root, rect, out);
+        resolve_node(tree, root, rect, title_height, out);
     return out;
 }
 } // namespace sv

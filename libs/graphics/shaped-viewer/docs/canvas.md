@@ -33,6 +33,36 @@ They differ in where they are added and in what depth means.
   That depth is the first sample's, reprojected to the pixel centre on the plane it hit, so a drawing lying on a face tests equal to the face rather than flickering with the jitter.
   A drawing that has to belong to the surface it lies on — lit, shadowed, curved with it — is a decal, which is traced.
 
+## Annotations
+
+An annotation is a label flat on screen, anchored at a point of a scene: `scene_ref::add_annotation(anchor, text, style)`.
+It is text in a box, a marker on the anchor, and a leader from the marker to the box, all in logical pixels and drawn over the scene.
+
+- **The plan places it every frame.**
+  The layer keeps the anchor and the box's content, already resolved to atlas records; the plan projects the anchor through the view's camera and puts the box on its side.
+  `automatic` puts it away from the view's centre, so labels fan outward, and a box that would cross an edge is pushed back inside the margin.
+  Nothing is compiled for a moving camera: the marker and the leader are a few fixed drawings, a disk, a ring, a unit segment and a dot, placed by their frames.
+- **The GPU decides whether the anchor is hidden**, by Slug's frame probes against the trace's primary-hit depth at the anchor's pixel.
+  One test per label, so it is never cut in half where it crosses a silhouette.
+- **What a hidden anchor draws is a per-annotation policy.**
+  `hidden_line` is the default: the box stays, the marker turns hollow and the leader dashed.
+  `hide` drops the whole label, and `show` draws it as if the anchor were in view, for a point inside a part such as its centre of mass.
+- **Leaders are straight or elbowed**, with a width, a colour and a dash pattern of their own, and another for the hidden look.
+
+An anchor behind the camera or outside the view draws nothing.
+Labels do not avoid each other yet; decluttering is its own feature, in [TODO.md](TODO.md).
+
+## View titles
+
+A layout leaf shows its first view's display name in a strip above it, 22 logical pixels tall.
+Every leaf a caller adds has one unless `leaf_ref::title(false)` turns it off; the window's own single view has none, since the window's title bar names it.
+
+- **The layout reserves the strip**, so a title never covers the image: the solver cuts it from the top of the leaf's rect, and fitting, hit-testing and the views' resolution follow the smaller rect.
+  A pane lifted by a drag keeps the strip, since its hit region carries the whole leaf.
+- **The name is set in glyphs before the plan**, which has no fonts.
+  A leaf whose name is empty, or that has no font to set it in, reserves nothing, so a headless machine without a system font lays out as it always did.
+- **All of a layout's titles are one 2D job** in its target, over a flat band per strip.
+
 ## Residency
 
 A set is acquired whole, through the frame's resource manager, into `sv::drawing_manager` beside `mesh_manager`.
@@ -68,7 +98,7 @@ A job's draw sits in its view target's pass at the layer's place, so a canvas dr
 | atlas pages when one fills, and freeing on eviction | [planned] |
 | text: `sv::font`, the system UI font by default, kerned multi-line layout, `add_text` on canvas and scene | [done] |
 | strokes, with joins, caps and dashes, as filled outlines; shapes; nested drawings | [done] |
-| annotations: a 2D box placed near a 3D anchor, a marker, a leader, hidden-line occlusion | [planned] |
-| view titles, drawn by default and opted out per leaf | [planned] |
+| annotations: a 2D box placed near a 3D anchor, a marker, a leader, hidden-line occlusion | [done] |
+| view titles, drawn by default and opted out per leaf | [done] |
 | decals on traced surfaces, projector first | [planned] |
 | SVG | deferred |

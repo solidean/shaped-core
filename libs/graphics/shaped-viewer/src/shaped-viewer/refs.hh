@@ -224,6 +224,15 @@ public:
     /// One drawing per glyph, from the font's glyph sets — see `sv::font`.
     void add_text(cc::string_view text, instance_3d const& instance, text_style const& style = {});
 
+    /// A label flat on screen at the scene point `anchor`: the UTF-8 `text` in a box, a marker on the point, and a
+    /// leader between them, all in logical pixels and drawn over the scene.
+    ///
+    /// The box moves with the anchor every frame, on the side `style.side` names and kept inside the view.
+    /// Whether the anchor is hidden is decided on the GPU by the trace's depth at the anchor, once for the whole label,
+    /// so a label is never cut where it crosses a silhouette; `style.occluded` says what it draws then.
+    /// An anchor behind the camera or outside the view draws nothing.
+    void add_annotation(tg::pos3f anchor, cc::string_view text, annotation_style const& style = {});
+
 private:
     [[nodiscard]] layer& target() const;
 
@@ -355,7 +364,7 @@ public:
     ///
     /// It is persistent, like the camera: set once and it survives every later frame that does not set it again.
     /// Setting an empty name restores the default rather than leaving the view nameless.
-    /// Nothing draws it yet — sv has no text renderer — so this is what a title bar will read, not what one does.
+    /// A layout leaf showing this view draws it in its title strip; the window's own view is named by the window.
     void display_name(cc::string_view name);
 
     template <class Arg0, class... Args>
@@ -433,6 +442,9 @@ public:
 
     /// Whether the key-bound zoom may magnify this leaf.
     void allow_zoom(bool v = true);
+
+    /// Whether a strip above the leaf shows its view's display name; on unless turned off.
+    void title(bool v = true);
 
 private:
     [[nodiscard]] layout_leaf& target() const;

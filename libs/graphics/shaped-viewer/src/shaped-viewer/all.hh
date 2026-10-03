@@ -26,6 +26,7 @@
 #include <shaped-viewer/scene/triangle_geometry.hh>
 
 // drawings
+#include <shaped-viewer/drawing/annotation.hh>
 #include <shaped-viewer/drawing/drawing.hh>
 #include <shaped-viewer/drawing/font.hh>
 #include <shaped-viewer/drawing/instance.hh>

@@ -48,6 +48,11 @@ public:
     /// The glyph is drawing `u32(g) % glyphs_per_set` of the set.
     [[nodiscard]] drawing_set_id glyph_set(font const& f, babel::font::glyph_id g);
 
+    /// The pieces annotations are built from, in logical pixels: a disk of `marker_radius` (0), a ring of that outer
+    /// radius `ring_width` wide (1), a unit segment from (0, -0.5) to (1, 0.5) (2), and a disk of radius 1 (3).
+    /// Keyed by the two sizes, so every annotation of one style shares one set.
+    [[nodiscard]] drawing_set_id annotation_parts(f32 marker_radius, f32 ring_width);
+
     /// The extent of drawing `index` of the set `id` names, in the drawing's own units.
     [[nodiscard]] tg::aabb2f bounds(drawing_set_id id, u32 index);
 

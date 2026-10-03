@@ -64,6 +64,9 @@ What is left is the interaction on top of it, in dependency order:
 - **A 3D drawing is occluded by the depth of the trace's first sample, reprojected to the pixel centre.**
   Exact on flat faces; on a curved or normal-mapped one the plane taken is the shading normal's, a sub-pixel step off the surface.
   A silhouette pixel holds one surface's depth, so a drawing's edge along a silhouette is hard rather than antialiased.
+- **Annotations do not avoid each other.**
+  Each is placed on its own, so labels whose anchors are close overlap.
+  Decluttering is greedy in priority order against the previous frame's boxes, which wants the boxes to persist across frames and an identity per annotation.
 - **The drawing atlas never shrinks.** `sr::slug_atlas` is append-only, so `drawing_manager` runs without eviction limits, and one atlas is all it has.
   Freeing blocks on eviction and a second page when one fills are the two halves (docs/canvas.md).
 - **Shapes on traced geometry are not wired into the tracer yet.**
@@ -493,8 +496,8 @@ What follows is everything else the importer left behind.
   So any assert reached from a viewer frame loses its own message behind an `abort()`, which is what made the empty
   scene layer above expensive to find.
   The viewer's destructor should be able to tear down a viewer whose frame did not complete.
-- **A view's display name is stored and never drawn.** `impl::view_state` keeps it (defaulting to the id up to its `##`) for the title bar a view has no way to draw yet —
-  The canvas draws text now; what is missing is the title strip a leaf reserves for it (docs/canvas.md).
+- **A title strip is cut, never shortened.** A name wider than its leaf loses the glyphs that would run past the strip's edge, with no ellipsis.
+  Its look is fixed too — the default font at 13 logical pixels on a near-black band — until a `title_style` on the leaf is wanted.
 - **`per_edge` attributes need an edge table on `triangle_geometry`.**
   The enumerator exists and `mesh_attribute::create` rejects it; what is missing is the numbering — the edges themselves (each naming its two vertices) plus each triangle's three edge indices.
   That table also decides whether opposite half-edges share one entry, which is the real design question.

@@ -1,3 +1,4 @@
+#include <clean-core/math/bit.hh>
 #include <clean-core/record/log.hh>
 #include <shaped-rendering/slug_routine.hh>
 #include <shaped-rendering/slug_shape.hh>
@@ -66,6 +67,26 @@ drawing_set_id drawing_manager::glyph_set(font const& f, babel::font::glyph_id g
         glyphs.push_back(cc::move(d));
     }
     return _place(hash, glyphs);
+}
+
+drawing_set_id drawing_manager::annotation_parts(f32 marker_radius, f32 ring_width)
+{
+    u64 const key[]
+        = {u64(cc::bit_cast<u32>(marker_radius)), u64(cc::bit_cast<u32>(ring_width)), impl::annotation_parts_hash_seed};
+    auto const hash = cc::hash128::create(cc::span<u64 const>(key).as_bytes(), impl::annotation_parts_hash_seed);
+    if (auto const resident = find_by_hash(hash); resident.has_value())
+        return resident.value();
+
+    auto const origin = tg::pos2f(0, 0);
+    auto parts = cc::vector<drawing>();
+    parts.push_back(drawing().add_fill(path::circle(origin, marker_radius)));
+    auto ring = drawing();
+    ring.add_stroke(path::circle(origin, cc::max(marker_radius - ring_width * 0.5f, ring_width * 0.5f)),
+                    {.width = ring_width});
+    parts.push_back(cc::move(ring));
+    parts.push_back(drawing().add_fill(path::rectangle(tg::aabb2f(tg::pos2f(0, -0.5f), tg::pos2f(1, 0.5f)))));
+    parts.push_back(drawing().add_fill(path::circle(origin, 1.0f)));
+    return _place(hash, parts);
 }
 
 tg::aabb2f drawing_manager::bounds(drawing_set_id id, u32 index)

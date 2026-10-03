@@ -72,6 +72,12 @@ So one draw covers any mix of shapes under any number of frames, and a shape pla
 The vertex stage folds a quad's frame into the draw's matrix rows, then dilates exactly as an instance does; a frame's tint multiplies the record's colour.
 Records and frames are textures rather than buffers because a vertex stage may read no storage buffer on WebGPU.
 
+**A frame can be shown or hidden by a probe.**
+It names a point in a depth texture the draw binds, and that point's own depth; the vertex stage reads the texel once per quad.
+A frame drawn `if_visible` is dropped where something nearer is there, one drawn `if_hidden` only there, so a pair of frames gives a visible look and a hidden one.
+That is what a label flat on screen wants: its anchor decides for the whole label, which is never cut where it crosses a silhouette.
+Depth is `1 - near / distance`, so comparing `1 - depth` compares near over distance and needs no near plane; the tolerance is a fraction of the distance.
+
 **Colour is linear and premultiplied.**
 An instance carries its colour as 8-bit sRGB, the vertex stage linearizes it, and output blends premultiplied — what shaped-viewer's targets hold.
 

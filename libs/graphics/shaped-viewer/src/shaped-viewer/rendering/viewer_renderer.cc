@@ -25,7 +25,8 @@ namespace
                                                                  plan_drawing_job const& job,
                                                                  drawing_manager& drawings)
 {
-    auto const& placements = def[job.view].layers[job.layer].drawings;
+    auto const& placements
+        = job.kind == drawing_job_kind::layer ? def[job.view].layers[job.layer].drawings : job.placements;
     auto frames = cc::vector<sr::slug_frame>();
     auto quads = cc::vector<sr::slug_quad>();
     frames.reserve(placements.size());
@@ -47,25 +48,32 @@ namespace
         }
 
         auto const frame = u32(frames.size());
-        frames.push_back({.at = at, .x_axis = p.x_axis, .y_axis = p.y_axis, .tint = p.tint});
+        frames.push_back({.at = at,
+                          .x_axis = p.x_axis,
+                          .y_axis = p.y_axis,
+                          .tint = p.tint,
+                          .visibility = p.visibility,
+                          .probe = p.probe,
+                          .probe_depth = p.probe_depth});
         for (auto r = p.first_record; r < p.first_record + p.record_count; ++r)
             quads.push_back({.record = r, .frame = frame});
     }
     return sr::slug_routine::prepare_job(cmd, drawings.atlas(), frames, quads);
 }
 
-/// One layer's drawings as this frame records them: the uploaded job, and for a 3D one the trace's depth it is tested
-/// against, or null for a job drawn untested.
+/// One layer's drawings as this frame records them: the uploaded job, for a 3D one the trace's depth it is tested
+/// against, and for annotations the same depth their probes read; null where neither applies.
 struct recorded_job
 {
     sr::slug_routine::prepared_job job;
     sg::texture_2d depth;
+    sg::texture_2d probe;
 };
 
-/// The primary-hit depth the trace of `job`'s layer writes this frame, or null when it has none to be tested against.
-[[nodiscard]] sg::texture_2d depth_of(plan_drawing_job const& job, viewer_definition const& def, view_store& store)
+/// The primary-hit depth the trace of `job`'s layer writes this frame, or null when it has none.
+[[nodiscard]] sg::texture_2d primary_depth_of(plan_drawing_job const& job, viewer_definition const& def, view_store& store)
 {
-    if (!job.is_3d || job.trace == u32(-1))
+    if (job.trace == u32(-1))
         return {};
     auto const* const state = store.get_ptr(def[job.view].id);
     auto const* const slot
@@ -120,7 +128,8 @@ struct recorded_job
                 flush(k);
                 run_start = k + 1;
                 if (sr::slug_routine::execute(scope, atlas, jobs[draws[k].job].job,
-                                              {.object_to_clip = plan.drawing_jobs[draws[k].job].object_to_clip})
+                                              {.object_to_clip = plan.drawing_jobs[draws[k].job].object_to_clip,
+                                               .probe_depth = jobs[draws[k].job].probe})
                     == sg::routine_outcome::declined)
                     declined = true;
             }
@@ -200,8 +209,12 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
     auto jobs = cc::vector<recorded_job>();
     jobs.reserve(plan.drawing_jobs.size());
     for (auto const& job : plan.drawing_jobs)
-        jobs.push_back(
-            {.job = prepare_drawing_job(cmd, def, job, resources.drawings), .depth = depth_of(job, def, store)});
+    {
+        auto const depth = primary_depth_of(job, def, store);
+        jobs.push_back({.job = prepare_drawing_job(cmd, def, job, resources.drawings),
+                        .depth = job.is_3d ? depth : sg::texture_2d(),
+                        .probe = job.kind == drawing_job_kind::annotations ? depth : sg::texture_2d()});
+    }
 
     // Every trace first.
     //

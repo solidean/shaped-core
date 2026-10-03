@@ -156,8 +156,15 @@ enum class corner : u8;
 struct instance_2d;
 struct instance_3d;
 struct drawing_placement;
-class font;        // a TrueType face and its hash, the content text is drawn from
-struct text_style; // a string's font, size, layout and colour
+enum class drawing_job_kind : u8;    // a layer's drawings, annotations, or title strips
+enum class annotation_side : u8;     // where an annotation's box goes relative to its anchor
+enum class annotation_occluded : u8; // what an annotation draws while its anchor is hidden
+enum class leader_shape : u8;        // straight or elbow
+struct leader_style;
+struct annotation_style;
+struct annotation_record; // an annotation as a layer keeps it, placed on screen by the plan
+class font;               // a TrueType face and its hash, the content text is drawn from
+struct text_style;        // a string's font, size, layout and colour
 namespace impl
 {
 struct drawing_set_gpu_slot;

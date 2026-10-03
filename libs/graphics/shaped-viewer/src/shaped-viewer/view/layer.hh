@@ -2,6 +2,7 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <shaped-viewer/drawing/annotation.hh>
 #include <shaped-viewer/drawing/instance.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/scene/background.hh>
@@ -71,6 +72,12 @@ struct sv::layer
     /// scene_3d and canvas: the drawings instanced on this layer, in the order they were added.
     /// A scene's are 3D, in world units, drawn after its trace; a canvas's are 2D, in the view's logical pixels.
     cc::vector<drawing_placement> drawings;
+
+    /// scene_3d: labels flat on screen at points of the scene, placed every frame through the view's camera.
+    cc::vector<annotation_record> annotations;
+
+    /// scene_3d: whether anything drawn after the trace needs its primary-hit depth.
+    [[nodiscard]] bool needs_primary_depth() const { return !drawings.empty() || !annotations.empty(); }
 
     /// ui: which of the frame's registered draw callbacks fills this layer.
     u32 ui_callback = u32(-1);

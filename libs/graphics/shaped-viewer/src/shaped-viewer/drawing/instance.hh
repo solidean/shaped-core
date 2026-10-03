@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shaped-rendering/fwd.hh>
 #include <shaped-viewer/fwd.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -69,4 +70,10 @@ struct sv::drawing_placement
     /// A drawing is a block of its own, at offset zero; a glyph of a string is one of many in its string's block.
     tg::vec2f reach = tg::vec2f(0, 0);
     tg::vec2f offset = tg::vec2f(0, 0);
+
+    /// Whether the placement draws by a probe of the trace's depth, and where and at what depth it probes.
+    /// Value-initialized, it is `sr::slug_visibility::always` and nothing is probed.
+    sr::slug_visibility visibility = {};
+    tg::vec2f probe = tg::vec2f(0, 0);
+    f32 probe_depth = 0.0f;
 };

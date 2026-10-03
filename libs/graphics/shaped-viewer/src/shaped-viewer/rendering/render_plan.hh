@@ -97,6 +97,19 @@ struct sv::layout_draw
     u32 job = 0;
 };
 
+/// Where a drawing job's placements come from.
+enum class sv::drawing_job_kind : sv::u8
+{
+    /// A canvas or scene layer's own `drawings`, read through `view` and `layer`.
+    layer,
+
+    /// A scene layer's annotations, placed on screen for this frame and probing the trace's depth.
+    annotations,
+
+    /// A layout's title strips, in its target's logical pixels.
+    titles,
+};
+
 /// One layer's drawings, drawn as one Slug job in its target's pass at the layer's place.
 ///
 /// The instances stay on the layer, which the renderer reads through `view` and `layer`; the plan carries what the
@@ -118,7 +131,15 @@ struct sv::plan_drawing_job
 
     /// 3D: the trace of the same layer, into `render_plan::traces`, whose primary-hit depth the drawings are tested
     /// against; `u32(-1)` for a layer with no geometry to trace, whose drawings then draw untested.
+    /// Annotations: the trace whose depth their probes read.
     u32 trace = u32(-1);
+
+    drawing_job_kind kind = drawing_job_kind::layer;
+
+    /// Annotations and titles: the placements themselves, which no layer holds.
+    /// An annotation's place depends on the camera, a title's on the layout; both are 2D and drawn untested, and an
+    /// annotation's parts are shown or hidden by their probe of its anchor.
+    cc::vector<drawing_placement> placements;
 };
 
 /// One texture the frame writes: a view's composite target, or the frame's output.
@@ -186,6 +207,10 @@ struct sv::hit_region
     tg::aabb2i window_rect = {};
     tg::vec2f scale = tg::vec2f(1, 1);
     tg::vec2f offset = tg::vec2f(0, 0);
+
+    /// `window_rect` together with the leaf's title strip: what a pane lifted by a drag keeps, so it does not lose the
+    /// strip's height on every lift.
+    tg::aabb2i leaf_rect = {};
 
     /// The region this one sits inside, or `invalid_hit_region` at the top level.
     /// An index into `render_plan::hit_regions`, not a layout node — a region is per *reference*, so two of them can

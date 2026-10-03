@@ -97,19 +97,33 @@ struct slug_fixture
     }
 
     /// Draws a job over the atlas's records, cleared to black, and reads the target back.
+    /// `probe_depth`, when given, is uploaded into an r32_float texture one row tall that the frames probe.
     [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> draw_job(cc::vector<sr::slug_frame> frames,
-                                                                         cc::vector<sr::slug_quad> quads)
+                                                                         cc::vector<sr::slug_quad> quads,
+                                                                         cc::vector<f32> probe_depth = {})
     {
         sr::slug_routine::prewarm(*ctx, {.color = target_format, .depth = sg::pixel_format::undefined});
         (void)co_await ctx->routines.idle_completion();
         nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
         auto cmd = ctx->create_command_list();
+        auto probe = sg::texture_2d();
+        if (!probe_depth.empty())
+        {
+            auto const width = int(probe_depth.size());
+            probe = ctx->transient.create_texture_2d({.format = sg::pixel_format::r32_float,
+                                                      .width = width,
+                                                      .height = 1,
+                                                      .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+            cmd->upload.bytes_to_texture(
+                probe.raw(), cc::span<f32 const>(probe_depth).as_bytes(), {},
+                sg::texture_region{.offset = tg::pos3i(0, 0, 0), .size = tg::vec3i(width, 1, 1)});
+        }
         auto const job = sr::slug_routine::prepare_job(*cmd, atlas, frames, quads);
         {
             auto pass = cmd->raster.render_to(
                 {.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
-            CHECK(sr::slug_routine::execute(pass, atlas, job, {.object_to_clip = pixels_to_clip()})
+            CHECK(sr::slug_routine::execute(pass, atlas, job, {.object_to_clip = pixels_to_clip(), .probe_depth = probe})
                   == sg::routine_outcome::executed);
         }
         ctx->submit_command_list(cc::move(cmd));
@@ -330,6 +344,56 @@ ASYNC_INVOCABLE_TEST("sr::slug_routine - a job places one record under many fram
     CHECK(channel_at(pixels, 50, 15, 3) < 0.01f);
 }
 
+ASYNC_INVOCABLE_TEST("sr::slug_routine - a frame's probe shows or hides it by the depth found there",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    auto const f = make_fixture(ctx);
+    auto const ref
+        = f->atlas
+              .add(sr::compile_slug_shape(sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1)))))
+              .value();
+    auto const record
+        = sr::make_slug_instance(ref, tg::pos2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1), tg::vec4f(1, 1, 1, 1));
+    auto const first = f->atlas.add_records(cc::span<sr::slug_instance const>(&record, 1)).value();
+
+    // Five 16-pixel squares in a row, each probing one of two depth texels.
+    // The left texel holds something at depth one half, twice the near distance away; the right one holds nothing.
+    auto const square = [](f32 x, sr::slug_visibility visibility, f32 probe_x, f32 depth)
+    {
+        return sr::slug_frame{.at = tg::pos3f(x, 56, 0),
+                              .x_axis = tg::vec3f(16, 0, 0),
+                              .y_axis = tg::vec3f(0, 16, 0),
+                              .visibility = visibility,
+                              .probe = tg::vec2f(probe_x, 0.5f),
+                              .probe_depth = depth};
+    };
+    auto const frames = cc::vector<sr::slug_frame>{
+        square(4, sr::slug_visibility::if_visible, 0.25f, 0.8f),  // behind what the left texel holds: hidden
+        square(28, sr::slug_visibility::if_hidden, 0.25f, 0.8f),  // so its hidden look draws
+        square(52, sr::slug_visibility::if_visible, 0.75f, 0.8f), // nothing on the right: visible
+        square(76, sr::slug_visibility::if_hidden, 0.75f, 0.8f),
+        square(100, sr::slug_visibility::if_visible, 0.25f, 0.5f), // on the surface itself, within the tolerance
+    };
+    auto quads = cc::vector<sr::slug_quad>();
+    for (auto i = u32(0); i < u32(frames.size()); ++i)
+        quads.push_back({.record = first, .frame = i});
+
+    auto const probed = co_await f->draw_job(frames, quads, {0.5f, 1.0f});
+    CHECK(red_at(probed, 12, 64) < 0.01f);
+    CHECK(red_at(probed, 36, 64) > 0.99f);
+    CHECK(red_at(probed, 60, 64) > 0.99f);
+    CHECK(red_at(probed, 84, 64) < 0.01f);
+    CHECK(red_at(probed, 108, 64) > 0.99f);
+
+    // with no depth to probe, every probe counts as visible
+    auto const unprobed = co_await f->draw_job(frames, quads);
+    CHECK(red_at(unprobed, 12, 64) > 0.99f);
+    CHECK(red_at(unprobed, 36, 64) < 0.01f);
+    CHECK(red_at(unprobed, 84, 64) < 0.01f);
+}
+
 ASYNC_INVOCABLE_TEST("sr::slug_routine - a retained draw covers its sub-range of a persistent buffer and nothing else",
                      (sg::context_handle const& ctx),
                      exclusive("sg-reload-generation"))
@@ -346,4 +410,41 @@ ASYNC_INVOCABLE_TEST("sr::slug_routine - a retained draw covers its sub-range of
     CHECK(red_at(pixels, 60, 70) > 0.99f);
     CHECK(red_at(pixels, 20, 70) < 0.01f);
     CHECK(red_at(pixels, 100, 70) < 0.01f);
+}
+
+ASYNC_INVOCABLE_TEST("sr::slug_routine - a draw covers the whole target whatever viewport the scope was left with",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    auto const f = make_fixture(ctx);
+    (void)add(*f, sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(20, 20))), tg::pos2f(90, 110), 1.0f);
+
+    sr::slug_routine::prewarm(*ctx, {.color = target_format, .depth = sg::pixel_format::undefined});
+    (void)co_await ctx->routines.idle_completion();
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
+    auto cmd = ctx->create_command_list();
+    auto const prepared = sr::slug_routine::prepare(*cmd, f->atlas, f->instances);
+    {
+        auto pass = cmd->raster.render_to(
+            {.color_targets = {f->target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
+        // as a layout draw before it leaves them: narrowed to the top-left quarter
+        pass.set_viewport({.offset = tg::pos2f(0, 0), .size = tg::vec2f(64, 64)});
+        pass.set_scissor(tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(64, 64)));
+        CHECK(sr::slug_routine::execute(pass, f->atlas, prepared, {.object_to_clip = pixels_to_clip()})
+              == sg::routine_outcome::executed);
+    }
+    ctx->submit_command_list(cc::move(cmd));
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+
+    auto read = ctx->create_command_list();
+    auto const future = read->download.bytes_from_texture(f->target.raw());
+    ctx->submit_command_list(cc::move(read));
+    auto const pixels = co_await future.bytes();
+
+    // the square sits in the bottom-right quarter, where it lands, and nothing of it in the top-left one
+    CHECK(red_at(pixels, 100, 100) > 0.99f);
+    CHECK(red_at(pixels, 30, 30) < 0.01f);
 }

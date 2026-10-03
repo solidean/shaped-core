@@ -418,14 +418,14 @@ void viewer::begin_move(tg::pos2f window_point)
     auto const w = f32(im.window->width() > 0 ? im.window->width() : 1);
     auto const h = f32(im.window->height() > 0 ? im.window->height() : 1);
 
-    st->placement.size = tg::vec2f(f32(region.window_rect.max[0] - region.window_rect.min[0]) / w,
-                                   f32(region.window_rect.max[1] - region.window_rect.min[1]) / h);
+    st->placement.size = tg::vec2f(f32(region.leaf_rect.max[0] - region.leaf_rect.min[0]) / w,
+                                   f32(region.leaf_rect.max[1] - region.leaf_rect.min[1]) / h);
     st->placement.position_offset = tg::vec2i(0, 0);
     st->placement.size_offset = tg::vec2i(0, 0);
 
     im.moving_view = region.id;
     im.move_grab_offset
-        = tg::vec2f(window_point[0] - f32(region.window_rect.min[0]), window_point[1] - f32(region.window_rect.min[1]));
+        = tg::vec2f(window_point[0] - f32(region.leaf_rect.min[0]), window_point[1] - f32(region.leaf_rect.min[1]));
 }
 
 void viewer::move_to(tg::pos2f window_point)
@@ -791,6 +791,7 @@ void viewer::finish_frame(frame& f)
         auto const node = def.nodes.add_container(invalid_node);
         auto leaf = layout_leaf{};
         leaf.views.push_back(window_view);
+        leaf.title = false; // the window's title bar names it already
         (void)def.nodes.add_leaf(node, cc::move(leaf));
         root.layers.push_back({.kind = layer_kind::layout, .blend = layer_blend::replace, .root_node = node});
     }
@@ -850,6 +851,28 @@ void viewer::finish_frame(frame& f)
         auto const& st = im.views.get_or_create(def[node.leaf.views[0]].id);
         node.leaf.zoom = st.zoom;
         node.leaf.zoom_center = st.zoom_center;
+    }
+
+    // Every titled leaf's name, set in glyphs now: the plan has no fonts, and the layout reserves a strip only for a
+    // leaf that has text to put in it.
+    for (auto& node : def.nodes.nodes)
+    {
+        if (node.kind != layout_kind::leaf || !node.leaf.title || node.leaf.views.empty())
+            continue;
+        if (isize(u32(node.leaf.views[0])) >= def.views.size())
+            continue;
+        auto const& name = im.views.get_or_create(def[node.leaf.views[0]].id).display_name;
+        if (name.empty())
+            continue;
+
+        // Laid out first at the strip's top-left, then moved down so the line sits in the middle of the strip.
+        auto& text = node.leaf.title_text;
+        auto const extent = sv::impl::place_text(
+            im.resources.drawings, text, name, {.size = title_text_size, .color = tg::vec4f(0.86f, 0.88f, 0.92f, 1)},
+            tg::pos3f(8, 0, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 1, 0), tg::vec4f(1, 1, 1, 1), corner::top_left);
+        auto const down = tg::vec3f(0, cc::max((title_strip_height - extent[1]) * 0.5f, 0.0f), 0);
+        for (auto& p : text)
+            p.at = p.at + down;
     }
 
     // What the store already holds for each view, so the plan can decide what refreshes.

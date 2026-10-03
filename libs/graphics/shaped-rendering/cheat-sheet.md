@@ -308,6 +308,8 @@ auto const prepared = sr::slug_routine::prepare(cmd, atlas, instances);         
 (void)sr::slug_routine::execute(scope, atlas, retained_buffer, first, count, view);  // instances the caller keeps
 auto const first = atlas.add_records(records).value();                             // instances kept IN the atlas, for jobs
 auto const job = sr::slug_routine::prepare_job(cmd, atlas, frames, quads);         // slug_frame {at, x_axis, y_axis, tint}; slug_quad {record, frame}
+// a frame may probe: {.visibility = sr::slug_visibility::if_visible / if_hidden, .probe = uv, .probe_depth = 1 - near / d}
+(void)sr::slug_routine::execute(scope, atlas, job, {.object_to_clip = m, .probe_depth = r32_float_depth});   // none: all visible
 (void)sr::slug_routine::execute(scope, atlas, job, view);                          // every quad, one draw: record placed by its frame
 // execute ASSERTS the atlas has no pending upload: a glyph added after prepare would otherwise draw nothing
 sr::slug_routine::prewarm(ctx, {.color = f, .depth = sg::pixel_format::undefined});  // one pipeline per format pair

@@ -650,7 +650,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The depth a layer's 3D drawings are occluded by, on every frame that traces it — after the hash, so a drawing
     // coming or going never restarts the image.
     // Keyed on the same condition `temporal_inputs_of` declares it on, so the slot was sized by this frame's resolve.
-    auto* const depth_slot = l.drawings.empty() ? nullptr : rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer));
+    auto* const depth_slot
+        = l.needs_primary_depth() ? rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer)) : nullptr;
     if (depth_slot != nullptr)
     {
         fc.write_primary_depth = 1;

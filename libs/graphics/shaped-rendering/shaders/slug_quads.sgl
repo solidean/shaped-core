@@ -19,6 +19,8 @@ use slug
     viewport: float2
     depth_bias: float
     weight_boost: int
+    probe_tolerance: float
+    has_probe_depth: int
 
 // `corner` is a corner of the unit square, six of them per quad; everything else is the shape instance.
 @vertex struct slug_vertex:
@@ -108,10 +110,11 @@ fun premultiplied_linear(c: float4) -> float4:
 // sr::slug_frame: the plane's (x, y) lands at at + x * x_axis + y * y_axis.
 // Both are textures rather than buffers, since a vertex stage may read no storage buffer on WebGPU.
 
-// The records of sr::slug_atlas, five texels each, and this job's frames, three texels each.
+// The records of sr::slug_atlas, five texels each, this job's frames, three texels each, and the depth frames probe.
 binding slug_job:
     records: texture_2d[uint4]
     frames: texture_2d[uint4]
+    @unfilterable probe_depth: texture_2d[float]
 
 @vertex struct slug_job_vertex:
     corner: float2
@@ -124,6 +127,24 @@ fun table_texel(index: uint, per_item: uint, k: uint) -> int2:
 
 fun unpack_rgba8(c: uint) -> float4:
     return float4((c & 0xff) as float, ((c >> 8) & 0xff) as float, ((c >> 16) & 0xff) as float, (c >> 24) as float) / 255.0
+
+/// Whether a frame whose probe word is `probe`, probing a point at `depth`, is drawn.
+/// The word holds the probe's x and y in 15 bits each, whether it is tested at bit 15, and whether it wants the point
+/// hidden at bit 31.
+/// The point is hidden where the depth texture holds something nearer by more than the tolerance.
+/// With depth `1 - near / distance`, `1 - depth` is near over the distance, so comparing those drops near out.
+fun is_drawn(probe: uint, depth: float){slug_job, slug_draw} -> bool:
+    if (probe & 0x8000) == 0 => return true
+    if slug_draw.has_probe_depth == 0 => return (probe >> 31) == 0
+    let size = slug_job.probe_depth.size()
+    let u = ((probe & 0x7fff) as float) / 32767.0
+    let v = (((probe >> 16) & 0x7fff) as float) / 32767.0
+    let x = clamp((u * (size.x as float)) as int, 0, size.x - 1)
+    let y = clamp((v * (size.y as float)) as int, 0, size.y - 1)
+    let found = slug_job.probe_depth.load(int2(x, y))
+    let visible = 1.0 - found <= (1.0 + slug_draw.probe_tolerance) * (1.0 - depth)
+    let wants_hidden = (probe >> 31) != 0
+    return visible != wants_hidden
 
 /// The row `r` of a view matrix composed with a frame: what it takes the frame's plane (x, y, 0, 1) to.
 fun framed_row(r: float4, at: float3, x_axis: float3, y_axis: float3) -> float4:
@@ -157,6 +178,16 @@ fun framed_row(r: float4, at: float3, x_axis: float3, y_axis: float3) -> float4:
     // The frame's tint multiplies the shape's own colour, both linear and premultiplied.
     let shape_color = premultiplied_linear(unpack_rgba8(color))
     let tint = premultiplied_linear(unpack_rgba8(f1.w))
+
+    // A frame its probe rules out collapses every corner to one point outside the clip volume, so it covers nothing.
+    if not is_drawn(f0.w, float.from_bits(f2.w)):
+        return {
+            position = hpos4(2.0, 2.0, 2.0, 1.0)
+            color = float4(0.0, 0.0, 0.0, 0.0)
+            em = float2(0.0, 0.0)
+            banding = banding
+            glyph = slug.glyph_of(uint2(packed.z, packed.w))
+        }
     return {
         position = hpos4(c.clip.x, c.clip.y, c.clip.z, c.clip.w)
         color = shape_color * tint

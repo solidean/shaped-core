@@ -66,8 +66,8 @@ struct view_state
 {
     /// What this view is called where a human reads it — the id up to its `##`, unless the caller set one.
     ///
-    /// Persistent rather than per-frame because a `view_data` is rebuilt every frame, and nothing renders a name yet:
-    /// paying a string allocation per view per frame for text no pass reads would be the wrong trade.
+    /// Persistent rather than per-frame because a `view_data` is rebuilt every frame; a title strip reads it once per
+    /// frame, when the leaves' titles are set in glyphs before the plan.
     cc::string display_name;
 
     /// Whether the one-shot seeding setters have already run for this view.

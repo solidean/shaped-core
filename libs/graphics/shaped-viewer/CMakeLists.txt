@@ -17,6 +17,7 @@ add_library(shaped-viewer
     src/shaped-viewer/scene/background.cc
     src/shaped-viewer/scene/quadric.cc
     src/shaped-viewer/scene/quadric_set.cc
+    src/shaped-viewer/drawing/annotation.cc
     src/shaped-viewer/drawing/drawing.cc
     src/shaped-viewer/drawing/drawing_manager.cc
     src/shaped-viewer/drawing/font.cc
@@ -80,6 +81,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/triangle_geometry.hh
     src/shaped-viewer/scene/resident_mesh.hh
     src/shaped-viewer/scene/mesh.hh
+    src/shaped-viewer/drawing/annotation.hh
     src/shaped-viewer/drawing/drawing.hh
     src/shaped-viewer/drawing/drawing_manager.hh
     src/shaped-viewer/drawing/instance.hh
