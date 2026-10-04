@@ -223,6 +223,12 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
     // to drain that queue, so it drains it itself.
     resources.wait_for_pending_uploads();
 
+    // The warm-up below must trace with the item's own hit group rather than the fallback standing in while it compiles.
+    // The frame that compile lands on builds a new pipeline and declines, which the counted frames cannot absorb.
+    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(permutation != nullptr);
+    co_await cc::async_settled(permutation->hit_group);
+
     auto const output_size = tg::vec2i(64, 64);
     auto const traced_id = sv::view_id::from_string("planned");
 
