@@ -87,60 +87,73 @@ TEST("cimd bvh8 - every kernel finds exactly the boxes a brute-force scan finds"
         if (!cimd::cpu_supports(id))
             continue;
         cimd::scoped_forced_kernel const forced(id);
+        REQUIRE(CIMD_DISPATCH_KERNEL(bvh8_query_dispatched) == id).context(cimd::kernel_name(id));
         for (auto const& q : queries)
             CHECK(same(dispatched(tree, q), brute_force(prims, q))).context(cimd::kernel_name(id));
     }
 }
 
-TEST("cimd bvh8 - the avx512 kernel finds what scalar does")
+#if defined(CC_ARCH_X64)
+TEST("cimd bvh8 - the avx512 kernel finds exactly the boxes a brute-force scan finds")
 {
     if (!cimd::cpu_supports(cimd::kernel_id::avx512))
         SKIP("no avx512 on this CPU");
     auto rng = nx::test_random();
     auto const prims = random_boxes(rng, 2000, 2.f);
     auto const tree = build_bvh8(prims);
+    cimd::scoped_forced_kernel const forced(cimd::kernel_id::avx512);
+    REQUIRE(CIMD_DISPATCH_KERNEL(bvh8_query_dispatched) == cimd::kernel_id::avx512);
     for (auto const& q : random_boxes(rng, 50, 8.f))
-    {
-        cimd::scoped_forced_kernel const forced(cimd::kernel_id::avx512);
         CHECK(same(dispatched(tree, q), brute_force(prims, q)));
-    }
 }
+#endif
 
-BENCHMARK("cimd bvh8 - query per kernel against a brute-force scan")
+namespace
+{
+/// One table per size, since a ratio between rows that measure different amounts of work says nothing.
+/// The first row is the baseline: a brute-force scan where `brute_force_too`, else the scalar kernel.
+void bench_query(int count, bool brute_force_too)
 {
     auto rng = cc::random(7);
-    for (auto const count : {10000, 1000000})
-    {
-        auto const prims = random_boxes(rng, count, 0.5f);
-        auto const tree = build_bvh8(prims);
-        auto const queries = random_boxes(rng, 256, 2.f);
-        i32 out[4096];
+    auto const prims = random_boxes(rng, count, 0.5f);
+    auto const tree = build_bvh8(prims);
+    auto const queries = random_boxes(rng, 256, 2.f);
+    i32 out[4096];
 
-        if (count <= 10000)
-            nx::bench::run(cc::format("{} boxes - brute force", count),
-                           [&]
-                           {
-                               auto hits = 0;
-                               for (auto const& q : queries)
-                                   for (auto const& p : prims)
-                                       hits += overlaps(p, q) ? 1 : 0;
-                               nx::bench::sink(hits);
-                           });
-        for (auto const id :
-             {cimd::kernel_id::scalar, cimd::kernel_id::sse2, cimd::kernel_id::sse42, cimd::kernel_id::avx2,
-              cimd::kernel_id::avx512, cimd::kernel_id::neon, cimd::kernel_id::simd128})
-        {
-            if (!cimd::cpu_supports(id))
-                continue;
-            nx::bench::run(cc::format("{} boxes - {}", count, cimd::kernel_name(id)),
-                           [&]
-                           {
-                               cimd::scoped_forced_kernel const forced(id);
-                               auto hits = 0;
-                               for (auto const& q : queries)
-                                   hits += CIMD_DISPATCH(bvh8_query_dispatched)(tree.view(), q, out, 4096);
-                               nx::bench::sink(hits);
-                           });
-        }
+    if (brute_force_too)
+        nx::bench::run(cc::format("{} boxes - brute force", count),
+                       [&]
+                       {
+                           auto hits = 0;
+                           for (auto const& q : queries)
+                               for (auto const& p : prims)
+                                   hits += overlaps(p, q) ? 1 : 0;
+                           nx::bench::sink(hits);
+                       });
+    for (auto const id : {cimd::kernel_id::scalar, cimd::kernel_id::sse2, cimd::kernel_id::sse42, cimd::kernel_id::avx2,
+                          cimd::kernel_id::avx512, cimd::kernel_id::neon, cimd::kernel_id::simd128})
+    {
+        if (!cimd::cpu_supports(id))
+            continue;
+        nx::bench::run(cc::format("{} boxes - {}", count, cimd::kernel_name(id)),
+                       [&]
+                       {
+                           cimd::scoped_forced_kernel const forced(id);
+                           auto hits = 0;
+                           for (auto const& q : queries)
+                               hits += CIMD_DISPATCH(bvh8_query_dispatched)(tree.view(), q, out, 4096);
+                           nx::bench::sink(hits);
+                       });
     }
+}
+} // namespace
+
+BENCHMARK("cimd bvh8 - query per kernel against a brute-force scan, 10k boxes")
+{
+    bench_query(10000, true);
+}
+
+BENCHMARK("cimd bvh8 - query per kernel against the scalar kernel, 1M boxes")
+{
+    bench_query(1000000, false);
 }

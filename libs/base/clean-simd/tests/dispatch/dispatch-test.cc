@@ -91,18 +91,50 @@ void dispatch_kernel_test(cimd::kernel_id id)
 {
     if (!cimd::cpu_supports(id))
         SKIP(cc::format("no {} on this CPU", cimd::kernel_name(id)));
+    {
+        cimd::scoped_forced_kernel const forced(id);
+        if (CIMD_DISPATCH_KERNEL(cimd_battery) != id)
+            SKIP(cc::format("{} is not compiled into this build", cimd::kernel_name(id)));
+    }
     compare_with_scalar(id);
 }
 } // namespace
 
 TEST("cimd dispatch - the best kernel this CPU runs is the one picked")
 {
+    // The strongest kernel both in the table and on this CPU; the table lists them weakest first.
+    auto expected = cimd::kernel_id::scalar;
+    for (auto const id : {cimd::kernel_id::sse2, cimd::kernel_id::sse42, cimd::kernel_id::avx2, cimd::kernel_id::avx512,
+                          cimd::kernel_id::neon, cimd::kernel_id::simd128})
+    {
+        if (!cimd::cpu_supports(id))
+            continue;
+        cimd::scoped_forced_kernel const forced(id);
+        if (CIMD_DISPATCH_KERNEL(cimd_battery) == id)
+            expected = id;
+    }
+
     auto rng = nx::test_random();
     auto const inputs = random_io(rng);
     auto io = cc::make_unique<battery_io>(*inputs);
+    REQUIRE(CIMD_DISPATCH_KERNEL(cimd_battery) == expected).context(cimd::kernel_name(expected));
     CIMD_DISPATCH(cimd_battery)(*io);
-    CHECK(cimd::cpu_supports(io->ran));
-    CHECK(io->ran != cimd::kernel_id::scalar);
+    CHECK(io->ran == expected).context(cimd::kernel_name(expected));
+}
+
+TEST("cimd dispatch - a scoped force restores the one around it")
+{
+    auto const best = CIMD_DISPATCH_KERNEL(cimd_battery);
+    {
+        cimd::scoped_forced_kernel const outer(cimd::kernel_id::scalar);
+        CHECK(CIMD_DISPATCH_KERNEL(cimd_battery) == cimd::kernel_id::scalar);
+        {
+            cimd::scoped_forced_kernel const inner(best);
+            CHECK(CIMD_DISPATCH_KERNEL(cimd_battery) == best);
+        }
+        CHECK(CIMD_DISPATCH_KERNEL(cimd_battery) == cimd::kernel_id::scalar);
+    }
+    CHECK(CIMD_DISPATCH_KERNEL(cimd_battery) == best);
 }
 
 TEST("cimd dispatch - a kernel the CPU cannot run is never forced")

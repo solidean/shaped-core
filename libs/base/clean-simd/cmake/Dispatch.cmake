@@ -42,10 +42,13 @@ function(cimd_dispatch target)
 #include "@_header@"
 
 using cimd_fn_t = decltype(&@_fn@<cimd::scalar>);
+using cimd_row_t = cimd::impl::dispatch_entry<cimd_fn_t>;
 @_externs@
-cimd_fn_t cimd_dispatch_@_name@()
+namespace
 {
-    static cimd::impl::dispatch_entry<cimd_fn_t> const table[] = {
+cimd_row_t const& cimd_row_@_name@()
+{
+    static cimd_row_t const table[] = {
         {cimd::kernel_id::scalar, &@_fn@<cimd::scalar>},
 #if CIMD_HAS_SSE2
         {cimd::kernel_id::sse2, &@_fn@<cimd::sse2>},
@@ -66,8 +69,19 @@ cimd_fn_t cimd_dispatch_@_name@()
         {cimd::kernel_id::simd128, &@_fn@<cimd::simd128>},
 #endif
 @_rows@    };
-    static cimd_fn_t const best = cimd::impl::best_entry(table);
-    return cimd::impl::dispatch_select(table, best);
+    static cimd_row_t const& best = cimd::impl::best_entry(table, "@_name@");
+    return cimd::impl::dispatch_select(table, best, "@_name@");
+}
+} // namespace
+
+cimd_fn_t cimd_dispatch_@_name@()
+{
+    return cimd_row_@_name@().fn;
+}
+
+cimd::kernel_id cimd_dispatch_kernel_@_name@()
+{
+    return cimd_row_@_name@().id;
 }
 ]=])
     target_sources(${target} PRIVATE "${_dir}/${_name}-dispatch.cc")

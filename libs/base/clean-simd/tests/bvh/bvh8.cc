@@ -44,7 +44,7 @@ void build_into(bvh8& tree, int at, cc::span<bvh8_box const> prims, cc::span<int
         return;
     }
 
-    // Median split along the longest axis of the centroids' extent, into eight equal runs.
+    // Median split along the longest axis of the boxes' bounds, into eight equal runs by centroid.
     auto const all = bounds_of(prims, ids);
     auto axis = 0;
     for (auto a = 1; a < 3; ++a)

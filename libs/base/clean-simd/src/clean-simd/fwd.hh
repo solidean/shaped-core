@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/fwd.hh>
+#include <clean-core/record/domain_fwd.hh>
 
 // The API index: every clean-simd type, declared once, with the header that defines it.
 
@@ -28,6 +29,9 @@ struct storage; // kernel-free bytes for data structures
 
 // dispatch (dispatch.hh) — one algorithm, compiled per kernel, picked per CPU
 struct scoped_forced_kernel; // pins this thread's dispatch to one kernel, for tests and benchmarks
+
+/// The domain every recording site in clean-simd is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
 
 namespace impl
 {
