@@ -127,6 +127,30 @@ Windows is unaffected either way, since it never used the chain.
 So `OFF` means "this build does not capture stacks on clang or GCC" — which is a real choice for a shipping target that wants the register back, and never a free one.
 Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to nothing on arm64, where macOS mandates the chain anyway.
 
+## x86-64 feature level (`SC_X64_LEVEL`)
+
+`SC_X64_LEVEL` (default `v3`) is the x86-64 feature level every function in the build may assume: `v1` (SSE2), `v2` (SSE4.2, POPCNT), `v3` (AVX2, FMA, F16C, BMI) or `v4` (AVX-512 F/BW/CD/DQ/VL).
+It reaches the compiler as `-march=x86-64-vN`, as `/clang:-march=…` under clang-cl, or as MSVC's `/arch:` spelling, and as `CC_X64_LEVEL=N`.
+The define exists because cl.exe reports `__AVX2__` but none of the SSE levels, so a header cannot recover `v2` from the predefined macros alone.
+It is a no-op on targets that are not x86-64.
+
+**It is a floor, not a ceiling.**
+The compiler spends the flag in every function it emits, `cc` and user loops included: at `v4` a plain AABB loop compiles to AVX-512 scatters with k-register masks.
+So a binary built at a level faults on the first instruction a weaker CPU lacks, wherever that is.
+Using more than the floor where the CPU has it is clean-simd's dispatched kernels, which compile only their own TUs above it — never this switch.
+
+`v3` by default: every mainstream desktop x86 since Haswell (2013) and Zen 1 (2017) has it.
+Android x86_64 defaults to `v2`, the most its ABI guarantees.
+cl.exe builds `v4` as `/arch:AVX2`, because its AVX-512 code for AVX2-shaped source moves every vector compare into a k-register and back and comes out slower.
+
+Whole-build, never per-target, like `SC_THREADS`: an inline function compiled at two levels is an ODR violation the linker resolves by keeping whichever copy it saw first.
+
+## WebAssembly SIMD (`SC_WASM_SIMD`)
+
+`SC_WASM_SIMD` (default `ON`) builds wasm with SIMD128 (`-msimd128`), which clean-simd's `simd128` kernel is written in.
+Every current engine runs it — Chrome and Firefox since 2021, Safari since 16.4, and the Node the emsdk carries.
+`OFF` builds the scalar kernel instead, for an engine that predates it.
+
 ## Threading (`SC_THREADS`)
 
 `SC_THREADS` (default `ON`) is the repo-wide threading knob; it reaches C++ as clean-core's `CC_HAS_THREADS`, 0 or 1.

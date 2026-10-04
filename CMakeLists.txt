@@ -118,6 +118,19 @@ else()
     set(SC_ARCH_X64 OFF)
 endif()
 
+# The x86-64 feature level the whole build may assume: v1 (SSE2), v2 (SSE4.2, POPCNT), v3 (AVX2, FMA, F16C, BMI) or
+# v4 (AVX-512 F/BW/CD/DQ/VL). A floor, not a ceiling — a binary built at v3 faults on the first AVX2 instruction of a
+# v2 machine, wherever that instruction is. Anything above it is clean-simd's dispatched kernels, never this switch.
+# v3 by default: every mainstream desktop x86 since Haswell (2013) and Zen 1 (2017) has it.
+# Android x86_64 defaults to v2, the most its ABI guarantees. Applied by tools/cmake/Simd.cmake; see docs/platforms.md.
+if(ANDROID)
+    set(_sc_x64_level_default v2)
+else()
+    set(_sc_x64_level_default v3)
+endif()
+set(SC_X64_LEVEL "${_sc_x64_level_default}" CACHE STRING "x86-64 feature level every function may assume: v1, v2, v3 or v4")
+set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v3 v4)
+
 # Repo-wide build configuration helpers live in tools/cmake/.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 
@@ -127,6 +140,7 @@ include(Coverage)     # SC_COVERAGE  — LLVM source-based test coverage
 include(Sanitizers)   # SANITIZE     — ASan/UBSan wiring (clang only)
 include(PGO)          # SC_PGO_*     — IR-based profile-guided optimization (clang only)
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
+include(Simd)         # SC_X64_LEVEL — the x86-64 feature level every function may assume
 
 # Per-target precompiled headers.
 # Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();

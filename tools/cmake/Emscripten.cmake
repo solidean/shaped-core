@@ -36,6 +36,14 @@ if(EMSCRIPTEN)
         add_link_options("SHELL:-s DEFAULT_PTHREAD_STACK_SIZE=1MB")
     endif()
 
+    # WebAssembly's 128-bit SIMD, which clean-simd's simd128 kernel is built on.
+    # On by default: every current engine runs it (Chrome and Firefox since 2021, Safari since 16.4, the emsdk's Node).
+    # OFF builds the scalar kernel instead, for an engine that predates it.
+    option(SC_WASM_SIMD "Build with WebAssembly SIMD128 (-msimd128)" ON)
+    if(SC_WASM_SIMD)
+        add_compile_options(-msimd128)
+    endif()
+
     # emdawnwebgpu ships inside the emsdk, so WebGPU costs no vendored dependency -- which is the reason this
     # tier is cheaper to reach than a native Dawn backend would be.
     # Needed on compile and link both: the port supplies webgpu.h to one and its JS bindings to the other.

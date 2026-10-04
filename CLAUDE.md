@@ -277,6 +277,10 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
   Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
+* `SC_X64_LEVEL` (default `v3`; `v2` on Android) is the x86-64 feature level **every** function may assume → `-march=x86-64-vN` / `/arch:` and `CC_X64_LEVEL`.
+  A floor, not a ceiling: anything above it is clean-simd's dispatched kernels, never this switch.
+  `SC_WASM_SIMD` (default ON) is the wasm counterpart, `-msimd128`.
+  See [docs/platforms.md](docs/platforms.md#x86-64-feature-level-sc_x64_level).
 * `SC_CHECK_GEOMETRY_SPECIAL_CASES` (default OFF) logs each special case a typed-geometry query assumes away — collinear lines, a ray in a triangle's plane → `TG_CHECK_SPECIAL_CASES`.
   The `debug-nopch` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
   See [docs/platforms.md](docs/platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases).
