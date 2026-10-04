@@ -33,7 +33,9 @@ MSVC accepts any intrinsic anywhere, which is how shaped-simd looked portable fr
 The algorithm is an ordinary `template <class K>` function in an ordinary header, and nothing else is annotated.
 Kernels at or below the build's floor are instantiated in the target itself.
 Each kernel above it gets a generated TU compiled with that kernel's `-march`, in a static library linked behind the target.
-The table picks, once per process, the best kernel `cc::get_cpu_features()` says the CPU runs; `cimd::force_kernel` pins one per thread, for tests and benchmarks.
+The table picks, once per process, the best kernel `cc::get_cpu_features()` says the CPU runs, and logs it at info in domain `cimd`.
+`cimd::force_kernel` pins one per thread, for tests and benchmarks, and `CIMD_DISPATCH_KERNEL(name)` says which kernel a call runs.
+A force costs nothing while no thread holds one: the dispatch path reads one relaxed counter inline, and the thread-local only when it is non-zero.
 
 **Why not compile everything at the highest level.**
 The compiler spends a `-march` flag in every function it emits.
@@ -55,7 +57,7 @@ Only MSVC accepts the one-TU form, because it compiles any intrinsic anywhere.
 
 **Why the kernel TUs live in a static library.**
 A TU compiled with a kernel's flags emits every inline function it uses — clean-core's, typed-geometry's — under the same name the floor's copy has, and the linker keeps one program-wide.
-Measured with two TUs each emitting `inline int which()` (floor returns 1, kernel 2), linked by clang-cl's objects:
+Measured with two TUs each emitting `inline int which()` (floor returns 1, kernel 2), linked by clang-cl's objects, and by clang 22's for x86_64-linux-gnu:
 
 | link line | both callers get |
 |---|---|
@@ -65,15 +67,30 @@ Measured with two TUs each emitting `inline int which()` (floor returns 1, kerne
 | link.exe `main kernel floor` | 2 |
 | lld-link `main floor k.lib` | 1 |
 | link.exe `main k.lib floor` | 1 |
+| ld.lld `main floor k.a` | 1 |
+| ld.lld `main k.a floor` | 2 |
+| ld.lld `main k.a floor.a` | 2 |
+| ld.lld `main floor.a k.a` | 1 |
 
-The first copy seen wins, and a library member is seen only when it is pulled, so the floor's copy wins even with the library listed first.
-That leaves one hole: an inline function the kernel TU uses that no floor *object* emits but a floor *library* does, where the pull order decides.
-`cimd_check_link_map(<executable>)` closes it: the final link writes a map, and any code symbol a kernel object supplied without the kernel's type in its mangled name fails the build.
-GNU ld, ELF lld and ThinLTO were not measured; the kernel libraries opt out of interprocedural optimization.
+The first copy seen wins.
+On COFF (lld-link, link.exe) a library member is seen only after every object, so the floor's copy wins even with the library listed first.
+ld.lld pulls a member as soon as one of its symbols is pending, so there the command-line order decides.
+CMake always puts the target's own objects first, which is what keeps the floor's dispatch TU ahead of the kernel library.
+That leaves one hole on every linker: an inline function the kernel TU uses that no floor *object* emits but a floor *library* does, where the pull order decides.
+`cimd_check_link_map(<executable>)` checks it: the final link writes a map, and any code symbol a kernel object supplied without that kernel's type in its mangled name fails the build.
+A dispatching consumer must call it on each final executable, since a library cannot see the link it ends up in.
+GNU ld (BFD) and ThinLTO were not measured; the kernel libraries opt out of interprocedural optimization.
+
+**Why no non-template inline helper in a dispatched header.**
+The floor's dispatch TU always instantiates `fn<scalar>`, so any helper that floor code reaches has a floor copy, and that copy is the one kept.
+The only helper left with a single, kernel-compiled copy is one reached from kernel code alone.
+It is harmless at run time, since only that kernel calls it, but the link-map check cannot tell it from a kernel copy that won, and fails the build.
 
 **Alternatives kept on record.**
 Brackets around every K-templated definition — a `#pragma` target region per kernel, compiled by a define rather than a flag — are safe without relying on any linker.
 They are the fallback if the map check proves noisy.
+Localizing every kernel-TU symbol except `cimd_entry_*` on ELF — a partial link with `ld -r`, or `objcopy --keep-global-symbol` — would make the collision structurally impossible on Linux and Android.
+COFF has no equivalent, so the map check is needed anyway.
 Building the whole library once per level, as separate shared libraries with a loader, needs no dispatch in the source at all, at the price of shipping the binary twice.
 
 ## Native widths below, fixed widths on top

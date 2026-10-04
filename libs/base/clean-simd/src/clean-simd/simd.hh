@@ -45,6 +45,10 @@ inline constexpr bool valid_lane_shape = N > 0 && (N & (N - 1)) == 0 && LaneBits
 template <class T, int N>
 inline constexpr bool valid_shape = valid_lane_shape<int(8 * sizeof(T)), N>;
 
+/// False, but only once instantiated: what a primary template asserts so that reaching it never compiles.
+template <class T>
+inline constexpr bool always_false = false;
+
 } // namespace cimd::impl
 
 /// N lanes of T for data structures: no kernel, no operations, converts to and from every `simd<T, N, K>`.
@@ -54,7 +58,8 @@ struct alignas(cimd::impl::alignment<T, N>) cimd::storage
     T lanes[N];
 };
 
-/// The primary template is reached only by a shape or a kernel that has no code here, so all it does is say which.
+/// The primary template is reached only by a shape, a kernel or an include that has no code here, so all it does is say
+/// which, and it never compiles.
 template <class T, int N, class K>
 struct cimd::simd
 {
@@ -64,6 +69,8 @@ struct cimd::simd
                   "cimd::simd<T, N, K>: this TU's flags do not allow kernel K. Code above the build's floor is "
                   "compiled "
                   "through cimd_dispatch (clean-simd/dispatch.hh); local code uses cimd::local");
+    static_assert(impl::always_false<T>,
+                  "cimd::simd<T, N, K>: no generated specialization is visible; include <clean-simd/all.hh>");
     static constexpr bool generated = false;
 };
 
@@ -75,6 +82,8 @@ struct cimd::mask
                   "KiB "
                   "of lanes");
     static_assert(is_available<K>, "cimd::mask: this TU's flags do not allow kernel K; see cimd::simd");
+    static_assert(impl::always_false<K>,
+                  "cimd::mask<LaneBits, N, K>: no generated specialization is visible; include <clean-simd/all.hh>");
     static constexpr bool generated = false;
 };
 

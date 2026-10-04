@@ -13,6 +13,7 @@ K::native_bits; K::has_native_fma;   // 256 and true on avx2; scalar's "register
 cimd::native_lanes<K, f32>           // 8 on avx2, 4 on sse/neon/simd128/scalar
 cimd::native<K, f32>                 // simd<f32, native_lanes, K> — on avx2 the SAME type as f32x8<K>
 cimd::kernel_name(K::id)             // "avx2"
+cimd::kernel<K>                      // concept: K has ::id and ::native_bits; nothing constrains on it yet
 ```
 
 ## Types
@@ -68,19 +69,22 @@ M::from_bits(b)
 ```cpp
 // header: an ordinary template whose signature does not depend on K
 template <class K> int query(bvh8 const& b, box q, i32* out, int cap);
-CIMD_DISPATCH_DECLARE(bvh8_query, query);
-CIMD_DISPATCH(bvh8_query)(b, q, out, cap);    // the best kernel this CPU runs, resolved once
+CIMD_DISPATCH_DECLARE(bvh8_query, query);     // at GLOBAL scope — the generated definition lives there
+CIMD_DISPATCH(bvh8_query)(b, q, out, cap);    // the best kernel this CPU runs, resolved once and logged at info ("cimd")
+CIMD_DISPATCH_KERNEL(bvh8_query);             // -> kernel_id the next CIMD_DISPATCH on this thread runs, forced or not
 cimd::cpu_supports(cimd::kernel_id::avx512);  // x86-64-v4 and the OS saving zmm
-cimd::scoped_forced_kernel const f(cimd::kernel_id::avx2); // this thread only; ignored where the CPU lacks it
+cimd::scoped_forced_kernel const f(cimd::kernel_id::avx2); // this thread only; nests; ignored (debug log) where the table or CPU lacks it
 ```
 
 ```cmake
-cimd_dispatch(my-target NAME bvh8_query HEADER bvh8-query.hh FUNCTION query LINK typed-geometry)
-cimd_check_link_map(my-executable)            # fails the build if a kernel TU's copy of shared code won the link
+cimd_dispatch(my-target NAME bvh8_query HEADER bvh8-query.hh FUNCTION query LINK typed-geometry)  # any directory; NAME unique
+cimd_check_link_map(my-executable)            # on EACH final executable: fails the build if a kernel TU's copy of shared code won
 ```
 
-- Kernels above `SC_X64_LEVEL` (`SC_SIMD_KERNELS`, default every one) are compiled in their own TUs with their own `-march`.
-- A dispatched header must not define a non-template inline function only it uses; the link-map check is what catches it.
+- Kernels above `SC_X64_LEVEL` (`SC_SIMD_KERNELS`, default every one) are compiled in their own TUs, `<name>-<kernel>.cc`, with their own `-march`.
+- A dispatched header must not define a non-template inline function that only kernel code reaches.
+  Floor code always has its own copy of a helper it reaches, and that copy wins; one reached only from kernel code is harmless at run time, but the link-map check fails it.
+- On COFF the floor's copy of shared inline code always wins; on ELF it usually does, and the link-map check is what makes sure.
 
 ## Gotchas
 
