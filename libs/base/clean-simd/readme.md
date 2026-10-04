@@ -31,7 +31,9 @@ for (auto b = hit.bits(); b != 0; b &= b - 1)
   `cimd::storage<T, N>` (`f32x8_storage`) is the kernel-free form a data structure holds, and converts to and from every kernel's type with one aligned load or store.
 - **The results**, except where a kernel's hardware disagrees and the docs say so: `mul_add` fuses only where `K::has_native_fma`, NaN in `min`/`max` and out-of-range conversions are unspecified.
   Reductions use one fixed order on every kernel, so they agree bit for bit.
+  `rcp_approx` and `rsqrt_approx` are within a relative 2^-11 of exact everywhere, and their last bits differ by kernel.
 - **No loops.** Every type up to eight registers is flat generated code; `T::is_loop_free` is the static fact a hot path asserts.
+  `shuffle` and `permute` are the exception for now: they go through memory, a store and a reload around a pick per lane.
 
 ## What is not here, on purpose
 
