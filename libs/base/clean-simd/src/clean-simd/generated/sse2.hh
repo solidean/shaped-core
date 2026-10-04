@@ -803,13 +803,13 @@ struct cimd::impl::reg<cimd::u8, cimd::sse2, 128>
         __m128i const f = _mm_set1_epi8(i8(u8(1) << 7));
         return _mm_cmpgt_epi8(_mm_xor_si128(b, f), _mm_xor_si128(a, f));
     }
-    static CC_FORCE_INLINE mtype le(type a, type b) { return mr::bit_not(gt(a, b)); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmpeq_epi8(_mm_max_epu8(a, b), b); }
     static CC_FORCE_INLINE mtype gt(type a, type b)
     {
         __m128i const f = _mm_set1_epi8(i8(u8(1) << 7));
         return _mm_cmpgt_epi8(_mm_xor_si128(a, f), _mm_xor_si128(b, f));
     }
-    static CC_FORCE_INLINE mtype ge(type a, type b) { return mr::bit_not(lt(a, b)); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpeq_epi8(_mm_max_epu8(a, b), a); }
     static CC_FORCE_INLINE type select(mtype m, type a, type b)
     {
         return _mm_or_si128(_mm_and_si128(m, a), _mm_andnot_si128(m, b));

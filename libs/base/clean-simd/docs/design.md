@@ -120,6 +120,12 @@ Every operator has a member twin (`add`, `mul`, `lt`, …), present on every typ
 
 The rule is code, not a list: each implementation in the generator's tables carries a cost class (`single`, `short`, `emulated`), and the operators are derived from it.
 So `u32 <` (a sign flip on x86) has an operator, `u8 *` (no x86 level and no SIMD128 has an 8-bit multiply) has none, and neither has `i64 *` (no 64-bit multiply on AVX2 or NEON).
+**A compare's negation counts as the compare.**
+`u64 <=` on AVX2 is `not >`, and `>` is a sign flip and a compare, so the count would be four.
+A mask is consumed by a select, a mask combine or a lane test, though, and each absorbs a negation: the select swaps its arms, `and` becomes `andnot`, `any` becomes `not all`.
+So the generator classes a negated compare by the compare it negates, and `u64 <=` keeps its operator.
+Where a shorter form exists the tables use it instead: unsigned `<=` on x86 is `max(a, b) == b` wherever an unsigned max exists, from SSE2 for 8-bit lanes and SSE4.1 for 16- and 32-bit.
+
 [op-matrix.md](op-matrix.md) is the derived result for every element.
 A hand-written list can drift: shaped-simd's cheat sheet promised an `i64 *` its generator never emitted.
 

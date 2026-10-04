@@ -693,13 +693,13 @@ struct cimd::impl::reg<cimd::u8, cimd::sse42, 128>
         __m128i const f = _mm_set1_epi8(i8(u8(1) << 7));
         return _mm_cmpgt_epi8(_mm_xor_si128(b, f), _mm_xor_si128(a, f));
     }
-    static CC_FORCE_INLINE mtype le(type a, type b) { return mr::bit_not(gt(a, b)); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmpeq_epi8(_mm_max_epu8(a, b), b); }
     static CC_FORCE_INLINE mtype gt(type a, type b)
     {
         __m128i const f = _mm_set1_epi8(i8(u8(1) << 7));
         return _mm_cmpgt_epi8(_mm_xor_si128(a, f), _mm_xor_si128(b, f));
     }
-    static CC_FORCE_INLINE mtype ge(type a, type b) { return mr::bit_not(lt(a, b)); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpeq_epi8(_mm_max_epu8(a, b), a); }
     static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_blendv_epi8(b, a, m); }
     static CC_FORCE_INLINE u8 reduce_add(type a)
     {
@@ -805,13 +805,13 @@ struct cimd::impl::reg<cimd::u16, cimd::sse42, 128>
         __m128i const f = _mm_set1_epi16(i16(u16(1) << 15));
         return _mm_cmpgt_epi16(_mm_xor_si128(b, f), _mm_xor_si128(a, f));
     }
-    static CC_FORCE_INLINE mtype le(type a, type b) { return mr::bit_not(gt(a, b)); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmpeq_epi16(_mm_max_epu16(a, b), b); }
     static CC_FORCE_INLINE mtype gt(type a, type b)
     {
         __m128i const f = _mm_set1_epi16(i16(u16(1) << 15));
         return _mm_cmpgt_epi16(_mm_xor_si128(a, f), _mm_xor_si128(b, f));
     }
-    static CC_FORCE_INLINE mtype ge(type a, type b) { return mr::bit_not(lt(a, b)); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpeq_epi16(_mm_max_epu16(a, b), a); }
     static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_blendv_epi8(b, a, m); }
     static CC_FORCE_INLINE u16 reduce_add(type a)
     {
@@ -900,13 +900,13 @@ struct cimd::impl::reg<cimd::u32, cimd::sse42, 128>
         __m128i const f = _mm_set1_epi32(i32(u32(1) << 31));
         return _mm_cmpgt_epi32(_mm_xor_si128(b, f), _mm_xor_si128(a, f));
     }
-    static CC_FORCE_INLINE mtype le(type a, type b) { return mr::bit_not(gt(a, b)); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmpeq_epi32(_mm_max_epu32(a, b), b); }
     static CC_FORCE_INLINE mtype gt(type a, type b)
     {
         __m128i const f = _mm_set1_epi32(i32(u32(1) << 31));
         return _mm_cmpgt_epi32(_mm_xor_si128(a, f), _mm_xor_si128(b, f));
     }
-    static CC_FORCE_INLINE mtype ge(type a, type b) { return mr::bit_not(lt(a, b)); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpeq_epi32(_mm_max_epu32(a, b), a); }
     static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_blendv_epi8(b, a, m); }
     static CC_FORCE_INLINE u32 reduce_add(type a)
     {

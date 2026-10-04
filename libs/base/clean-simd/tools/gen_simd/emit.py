@@ -31,7 +31,10 @@ def header(purpose: str) -> list[str]:
 
 
 def has_operator(e: Elem, op: str) -> bool:
-    """The operator rule: every reference kernel implements `op` as SINGLE or SHORT."""
+    """The operator rule: every reference kernel implements `op` as SINGLE or SHORT.
+
+    A compare written as another's negation carries that compare's class (`model.negated`), so it is judged by it.
+    """
     for kernel, w in REFERENCE:
         impl = module(kernel).ops(kernel, e, w).get(op)
         if impl is None or impl.cost not in (SINGLE, SHORT):
@@ -426,6 +429,7 @@ def emit_op_matrix() -> str:
         "Generated from the kernel tables in `tools/gen_simd/`, the same tables the code is generated from.",
         "An operator exists where AVX2, NEON and SIMD128 each implement the operation in at most three lane-wise "
         "instructions; [design.md](design.md#the-operator-rule) has the rule.",
+        "A compare's negation counts as the compare, so `<=` written as `not >` costs what `>` does.",
         "Every operation also has a member of the same name, whatever it costs.",
         "",
         "## Operators",

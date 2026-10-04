@@ -60,7 +60,7 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     out["sub"] = _ret(f"vsubq_{s}(a, b)")
 
     if wide64:
-        # No 64-bit multiply: the low halves' full product plus the two cross products, shifted into place.
+        # No 64-bit multiply: each lane multiplied as a scalar, through memory.
         out["mul"] = Impl(EMULATED, f"{t} x[2], y[2];\nvst1q_{s}(x, a);\nvst1q_{s}(y, b);\n"
                                     f"x[0] = {t}(u64(x[0]) * u64(y[0]));\nx[1] = {t}(u64(x[1]) * u64(y[1]));\n"
                                     f"return vld1q_{s}(x);")
@@ -110,8 +110,9 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     if e.is_float:
         # The estimate is good to 8 bits; one Newton step takes it past the 11 every kernel promises.
         out["rcp_approx"] = Impl(SHORT, f"{_TYPE[t]} const r = vrecpeq_{s}(a);\nreturn vmulq_{s}(r, vrecpsq_{s}(a, r));")
-        out["rsqrt_approx"] = Impl(SHORT, f"{_TYPE[t]} const r = vrsqrteq_{s}(a);\n"
-                                          f"return vmulq_{s}(r, vrsqrtsq_{s}(vmulq_{s}(a, r), r));")
+        # Four instructions, one past the rule's three.
+        out["rsqrt_approx"] = Impl(EMULATED, f"{_TYPE[t]} const r = vrsqrteq_{s}(a);\n"
+                                             f"return vmulq_{s}(r, vrsqrtsq_{s}(vmulq_{s}(a, r), r));")
 
     if e.is_float and e.bits == 32:
         # Lanes i and i + 2 first, then the two halves: the tree every kernel reduces in.

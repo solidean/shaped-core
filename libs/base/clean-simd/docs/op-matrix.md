@@ -3,6 +3,7 @@
 
 Generated from the kernel tables in `tools/gen_simd/`, the same tables the code is generated from.
 An operator exists where AVX2, NEON and SIMD128 each implement the operation in at most three lane-wise instructions; [design.md](design.md#the-operator-rule) has the rule.
+A compare's negation counts as the compare, so `<=` written as `not >` costs what `>` does.
 Every operation also has a member of the same name, whatever it costs.
 
 ## Operators
@@ -84,6 +85,7 @@ These are correct everywhere, and slower than their neighbours.
 **neon**
 
 - `gather`: f32, f64, i8, i16, i32, i64, u8, u16, u32, u64
+- `rsqrt_approx`: f32, f64
 - `mul`: i64, u64
 - `mul_add`: i64, u64
 

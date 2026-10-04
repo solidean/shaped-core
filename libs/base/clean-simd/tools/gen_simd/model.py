@@ -13,6 +13,7 @@ from dataclasses import dataclass
 SINGLE = "single"  # one instruction
 SHORT = "short"  # at most three lane-wise instructions: a sign flip and a compare, a shift and a mask
 EMULATED = "emulated"  # anything longer: widening, a multi-step sequence, a per-lane loop
+# A compare that is another compare's negation takes that compare's class rather than its own count; see `negated`.
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,16 @@ REGISTER_COUNTS = (1, 2, 4, 8)
 class Impl:
     cost: str
     body: str  # C++ statements, ending in a return where the signature returns
+
+
+def negated(compare: Impl, body: str) -> Impl:
+    """A compare spelled as another compare's negation, such as `le` as `not gt`, classed as that compare.
+
+    A mask is consumed by a select, a mask combine or a lane test, and each absorbs a negation: the select swaps its
+    arms, `and` becomes `andnot`, `any` becomes `not all`.
+    So the negation is not counted, and `u64 <=` on AVX2 has an operator because `u64 >` does.
+    """
+    return Impl(compare.cost, body)
 
 
 # Register-layer signatures: name -> (return, parameters), in terms of

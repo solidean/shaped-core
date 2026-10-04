@@ -7,7 +7,7 @@ Where a level lacks an instruction the body says how it is emulated, and the cos
 
 from __future__ import annotations
 
-from .model import CONVERSIONS, ELEM, EMULATED, SHORT, SINGLE, Elem, Impl
+from .model import CONVERSIONS, ELEM, EMULATED, SHORT, SINGLE, Elem, Impl, negated
 
 LEVEL = {"sse2": 0, "sse42": 1, "avx2": 2, "avx512": 3}
 
@@ -341,9 +341,14 @@ def _int_ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
                 flip = f"{it} const f = {_set1(b, w, f'u{b}(1) << {b - 1}')};\n"
                 out["gt"] = Impl(SHORT, f"{flip}return {p}_cmpgt_epi{b}({p}_xor_{si}(a, f), {p}_xor_{si}(b, f));")
                 out["lt"] = Impl(SHORT, f"{flip}return {p}_cmpgt_epi{b}({p}_xor_{si}(b, f), {p}_xor_{si}(a, f));")
-        out["ne"] = Impl(SHORT, "return mr::bit_not(eq(a, b));")
-        out["le"] = Impl(out["gt"].cost if out["gt"].cost == EMULATED else SHORT, "return mr::bit_not(gt(a, b));")
-        out["ge"] = Impl(out["lt"].cost if out["lt"].cost == EMULATED else SHORT, "return mr::bit_not(lt(a, b));")
+        out["ne"] = negated(out["eq"], "return mr::bit_not(eq(a, b));")
+        if not signed and (b == 8 or (b in (16, 32) and lvl >= 1)):
+            # a <= b exactly where max(a, b) is b: an unsigned max and an equality, with no sign flip.
+            out["le"] = Impl(SHORT, f"return {p}_cmpeq_epi{b}({p}_max_epu{b}(a, b), b);")
+            out["ge"] = Impl(SHORT, f"return {p}_cmpeq_epi{b}({p}_max_epu{b}(a, b), a);")
+        else:
+            out["le"] = negated(out["gt"], "return mr::bit_not(gt(a, b));")
+            out["ge"] = negated(out["lt"], "return mr::bit_not(lt(a, b));")
 
     if k:
         out["select"] = _ret(f"{p}_mask_blend_epi{b}(m, b, a)")
