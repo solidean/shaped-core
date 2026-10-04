@@ -151,6 +151,16 @@ Whole-build, never per-target, like `SC_THREADS`: an inline function compiled at
 Every current engine runs it — Chrome and Firefox since 2021, Safari since 16.4, and the Node the emsdk carries.
 `OFF` builds the scalar kernel instead, for an engine that predates it.
 
+## Floating-point contraction is off
+
+**shaped-core does not support floating-point contraction, the same way it does not support fast-math.**
+No option turns it on: `tools/cmake/FloatingPoint.cmake` passes `-ffp-contract=off` to clang and GCC, and `/clang:-ffp-contract=off` under clang-cl.
+MSVC needs nothing, since `/fp:precise` does not contract unless `/fp:contract` is given.
+
+Contraction lets a compiler fuse `a * b + c` into one FMA wherever the target has one, which moves the result's last bit.
+At their defaults clang contracts within an expression, GCC across statements and MSVC not at all, so the same source gave different bits per toolchain and per `SC_X64_LEVEL`.
+Fusion is written where it is wanted — clean-simd's `mul_add`, or `std::fma` — and nowhere else.
+
 ## Threading (`SC_THREADS`)
 
 `SC_THREADS` (default `ON`) is the repo-wide threading knob; it reaches C++ as clean-core's `CC_HAS_THREADS`, 0 or 1.

@@ -281,6 +281,8 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   A floor, not a ceiling: anything above it is clean-simd's dispatched kernels, never this switch.
   `SC_WASM_SIMD` (default ON) is the wasm counterpart, `-msimd128`.
   See [docs/platforms.md](docs/platforms.md#x86-64-feature-level-sc_x64_level).
+* **Floating-point contraction is off on every compiler, and there is no switch for it** — like fast-math, shaped-core does not support it.
+  Write `mul_add` or `std::fma` where a fused result is wanted; see [docs/platforms.md](docs/platforms.md#floating-point-contraction-is-off).
 * `SC_MIMALLOC` (default ON) picks what backs `cc::default_memory_resource` → clean-core's `CC_HAS_MIMALLOC`.
   OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
