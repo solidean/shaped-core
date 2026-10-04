@@ -109,9 +109,11 @@ if (SC_FRAME_POINTERS)
     endif()
 endif()
 
-# Target CPU is x86-64. Only the instruction-tracer tool and its Zydis decoder ask — both are x86-64 by
-# construction, not by omission — so this is a plain variable rather than a cached option: it describes the
-# target, it is not a choice. Must precede add_subdirectory(extern), which gates the zydis build on it.
+# Target CPU is x86-64.
+# tools/cmake/Simd.cmake asks, to decide the x86-64 floor and clean-simd's dispatched kernels.
+# So do the instruction-tracer tool and its Zydis decoder, which are x86-64 by construction rather than by omission.
+# A plain variable rather than a cached option: it describes the target, it is not a choice.
+# Must precede add_subdirectory(extern), which gates the zydis build on it.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Mm][Dd]64|[Xx]86_64)$")
     set(SC_ARCH_X64 ON)
 else()

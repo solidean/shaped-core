@@ -12,9 +12,12 @@
 # A whole-build switch, never per-target: an inline function compiled at two levels is an ODR violation the linker
 # resolves silently, by keeping whichever copy it saw first.
 
-# What clean-simd's cimd_dispatch reads: the kernels compiled above the floor, and each one's flags.
+# What clean-simd's cimd_dispatch reads: the kernels compiled above the floor, and each one's flags and x86-64 level.
+# GLOBAL properties rather than variables, so a cimd_dispatch outside this directory tree sees them too — the case when
+# shaped-core is consumed with add_subdirectory.
 # Empty off x86-64: neon and simd128 are the floor there, and nothing sits above them.
 set(SC_SIMD_DISPATCH_KERNELS "")
+set_property(GLOBAL PROPERTY SC_SIMD_DISPATCH_KERNELS "")
 
 if(NOT SC_ARCH_X64)
     if(SC_SIMD_KERNELS AND NOT SC_SIMD_KERNELS STREQUAL "auto")
@@ -36,8 +39,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
     endif()
 elseif(MSVC)
     # cl.exe has no v4 spelling that keeps its AVX2-tier code at AVX2 quality: with /arch:AVX512 it moves every vector
-    # compare into a k-register and back. v4 therefore builds as /arch:AVX2; clean-simd's avx512 kernel uses
-    # k-register intrinsics directly and needs no flag on cl.exe.
+    # compare into a k-register and back.
+    # v4 therefore builds as /arch:AVX2, and the avx512 kernel stays a dispatched one: its TU alone gets /arch:AVX512,
+    # which is what defines the __AVX512*__ macros clean-simd's kernel.hh requires.
     if(_sc_x64_level STREQUAL "v2")
         add_compile_options(/arch:SSE4.2)
     elseif(_sc_x64_level STREQUAL "v3" OR _sc_x64_level STREQUAL "v4")
@@ -74,8 +78,14 @@ else()
                                 "(${_sc_x64_level}); those are: ${_sc_above}")
         endif()
     endforeach()
-    set(SC_SIMD_DISPATCH_KERNELS ${SC_SIMD_KERNELS})
+    # Weakest first whatever order the list was given in: a dispatch table's last supported row is its best.
+    foreach(_k IN LISTS _sc_kernel_order)
+        if(_k IN_LIST SC_SIMD_KERNELS)
+            list(APPEND SC_SIMD_DISPATCH_KERNELS ${_k})
+        endif()
+    endforeach()
 endif()
+set_property(GLOBAL PROPERTY SC_SIMD_DISPATCH_KERNELS "${SC_SIMD_DISPATCH_KERNELS}")
 
 # Each dispatched kernel's flags, spelled the way this compiler takes a level.
 set(_sc_cl_arch_sse42 "/arch:SSE4.2")
@@ -91,4 +101,6 @@ foreach(_k IN ITEMS sse42 avx2 avx512)
     else()
         set(SC_SIMD_KERNEL_FLAGS_${_k} "-march=x86-64-v${_level}")
     endif()
+    set_property(GLOBAL PROPERTY SC_SIMD_KERNEL_FLAGS_${_k} "${SC_SIMD_KERNEL_FLAGS_${_k}}")
+    set_property(GLOBAL PROPERTY SC_SIMD_KERNEL_LEVEL_${_k} ${_level})
 endforeach()

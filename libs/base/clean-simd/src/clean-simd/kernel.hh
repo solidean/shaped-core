@@ -93,10 +93,12 @@ concept kernel = requires {
 // Which kernels this TU's flags allow, as 0/1 macros so a generated header can be skipped entirely where its
 // intrinsics would not compile.
 // MSVC reports __AVX2__ and the AVX-512 macros but none of the SSE levels, which is what CC_X64_LEVEL is for.
+// A dispatched kernel's TU is compiled above that floor, so cimd_dispatch defines CIMD_KERNEL_LEVEL, its own level.
 
 #if defined(CC_ARCH_X64)
 #define CIMD_HAS_SSE2 1
-#if defined(__SSE4_2__) || (defined(CC_X64_LEVEL) && CC_X64_LEVEL >= 2) || defined(__AVX2__)
+#if defined(__SSE4_2__) || (defined(CC_X64_LEVEL) && CC_X64_LEVEL >= 2) \
+    || (defined(CIMD_KERNEL_LEVEL) && CIMD_KERNEL_LEVEL >= 2) || defined(__AVX2__)
 #define CIMD_HAS_SSE42 1
 #else
 #define CIMD_HAS_SSE42 0
