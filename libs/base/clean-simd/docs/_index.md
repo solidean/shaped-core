@@ -3,6 +3,7 @@
 [readme.md](../readme.md) is the orientation and [cheat-sheet.md](../cheat-sheet.md) the API at a glance.
 
 - [design.md](design.md) — the decisions behind the types, the masks, the operator rule and the generator, each with what would reopen it.
+- [op-matrix.md](op-matrix.md) — generated: which operations are operators per element, and what each kernel emulates.
 
 ## Repo-wide context
 

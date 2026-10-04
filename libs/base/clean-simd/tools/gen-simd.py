@@ -32,7 +32,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from gen_simd.emit import COMMAND, emit_aliases, emit_fixed, emit_fixed_masks, emit_kernel  # noqa: E402
+from gen_simd.emit import COMMAND, emit_aliases, emit_fixed, emit_fixed_masks, emit_kernel, emit_op_matrix  # noqa: E402
 from gen_simd.model import ELEMS, KERNELS  # noqa: E402
 
 LIB = HERE.parent
@@ -70,7 +70,10 @@ def generate(exe: str) -> dict[Path, str]:
     texts[GENERATED / "fixed" / "masks.hh"] = emit_fixed_masks()
     for e in ELEMS:
         texts[GENERATED / "fixed" / f"{e.name}.hh"] = emit_fixed(e)
-    return {path: clang_format(text, path, exe) for path, text in texts.items()}
+    out = {path: clang_format(text, path, exe) for path, text in texts.items()}
+    # Markdown is not C++, so it skips clang-format.
+    out[LIB / "docs" / "op-matrix.md"] = emit_op_matrix()
+    return out
 
 
 def main() -> int:

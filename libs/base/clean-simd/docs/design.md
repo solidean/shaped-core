@@ -118,7 +118,8 @@ Below the reference kernels (SSE2, SSE4.2, scalar) the operator exists anyway an
 Every operator has a member twin (`add`, `mul`, `lt`, …), present on every type that supports the semantics at any cost, so generic code has one spelling.
 
 The rule is code, not a list: each implementation in the generator's tables carries a cost class (`single`, `short`, `emulated`), and the operators are derived from it.
-So `u32 <` (a sign flip on x86) has an operator, `u8 *` (no x86 level and no SIMD128 has an 8-bit multiply) will not, and `i64 *` (no 64-bit multiply on AVX2 or NEON) will not.
+So `u32 <` (a sign flip on x86) has an operator, `u8 *` (no x86 level and no SIMD128 has an 8-bit multiply) has none, and neither has `i64 *` (no 64-bit multiply on AVX2 or NEON).
+[op-matrix.md](op-matrix.md) is the derived result for every element.
 A hand-written list can drift: shaped-simd's cheat sheet promised an `i64 *` its generator never emitted.
 
 **Scalars broadcast from exactly the element type.**
