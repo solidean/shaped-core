@@ -573,7 +573,10 @@ ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to roundi
     if (auto const reason = cannot_trace(*ctx.value()); reason.has_value())
         SKIP(reason.value());
 
-    auto reference = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+    // The debug layer has to be active before the process's first dx12 device, and this test may race dx12-entry.cc's
+    // drivers to it, so the reference asks for the layer exactly as they do.
+    auto reference = sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     auto const has_reference = reference.has_value() && !cannot_trace(*reference.value()).has_value();
     for (auto const c : cases_to_trace())
     {
