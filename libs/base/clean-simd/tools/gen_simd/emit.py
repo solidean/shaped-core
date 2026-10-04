@@ -46,6 +46,8 @@ def _signature(name: str, table: dict[str, tuple[str, str]], e: Elem | None, mod
     ret, params = table[name]
     if ret.startswith("to:"):
         ret = mod.reg_type(ELEM[ret[3:]], w)
+    if e is not None and "itype" in params:
+        params = params.replace("itype", mod.reg_type(ELEM[f"i{e.bits}"], w))
     if e is not None:
         ret = ret.replace("E", e.name) if ret == "E" else ret
         params = params.replace("E ", f"{e.name} ").replace("E* ", f"{e.name}* ")
@@ -215,7 +217,7 @@ def emit_value(e: Elem, r: int) -> list[str]:
         if name in ops:
             lines += _fn(f"CC_FORCE_INLINE simd {name}(simd b) const",
                          ["simd v;"] + _each(r, f"v._r[{{i}}] = reg_t::{name}(_r[{{i}}], b._r[{{i}}]);") + ["return v;"])
-    for name in ("neg", "abs", "sqrt", "floor", "ceil", "round", "trunc", "bit_not"):
+    for name in ("neg", "abs", "sqrt", "floor", "ceil", "round", "trunc", "bit_not", "rcp_approx", "rsqrt_approx"):
         if name in ops:
             lines += _fn(f"CC_FORCE_INLINE simd {name}() const",
                          ["simd v;"] + _each(r, f"v._r[{{i}}] = reg_t::{name}(_r[{{i}}]);") + ["return v;"])
@@ -224,6 +226,21 @@ def emit_value(e: Elem, r: int) -> list[str]:
             lines += _fn(f"CC_FORCE_INLINE simd {name}(int n) const",
                          ['CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");', "simd v;"]
                          + _each(r, f"v._r[{{i}}] = reg_t::{name}(_r[{{i}}], n);") + ["return v;"])
+    lines += ["    /// Lane i takes lane N - 1 - i."]
+    lines += _fn("CC_FORCE_INLINE simd reverse() const",
+                 ["simd v;"] + [f"v._r[{i}] = reg_t::reverse(_r[{r - 1 - i}]);" for i in range(r)] + ["return v;"])
+    lines += ["    /// Lane i takes lane I_i; every index must be in [0, N)."]
+    lines += ["    template <int... I>", '        requires(sizeof...(I) == N && ((0 <= I && I < N) && ...))']
+    lines += _fn("CC_FORCE_INLINE simd shuffle() const",
+                 ["storage_t const s = *this;", "return simd(storage_t{{s.lanes[I]...}});"])
+    lines += ["    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe."]
+    lines += _fn(f"CC_FORCE_INLINE simd permute(simd<i{e.bits}, N, K> idx) const",
+                 ["storage_t const s = *this;", f"storage<i{e.bits}, N> const x = idx;", "storage_t r;",
+                  "for (auto i = 0; i < N; ++i)", f"    r.lanes[i] = s.lanes[x.lanes[i] & i{e.bits}(N - 1)];",
+                  "return simd(r);"])
+    lines += ["    /// Lane i loads base[idx_i]; every index must address a valid element."]
+    lines += _fn(f"static CC_FORCE_INLINE simd gather({t} const* base, simd<i{e.bits}, N, K> idx)",
+                 ["simd v;"] + _each(r, "v._r[{i}] = reg_t::gather(base, idx._r[{i}]);") + ["return v;"])
     lines += ["    /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere."]
     lines += _fn("CC_FORCE_INLINE simd mul_add(simd b, simd c) const",
                  ["simd v;"] + _each(r, "v._r[{i}] = reg_t::mul_add(_r[{i}], b._r[{i}], c._r[{i}]);") + ["return v;"])
@@ -250,6 +267,28 @@ def emit_value(e: Elem, r: int) -> list[str]:
         body += ["    " + line for line in _each(r, f"v._r[{{i}}] = reg_t::to_{target}(_r[{{i}}]);")]
         body += ["    return v;", "}"]
     lines += _fn("CC_FORCE_INLINE simd<U, N, K> convert() const", body)
+    if e.is_float:
+        it = f"i{e.bits}"
+        hi = "2147483648.f" if e.bits == 32 else "9223372036854775808.0"
+        lines += [
+            "    /// convert<U>(), with a value above U's range giving its maximum, below its minimum, and NaN zero.",
+            "    template <class U>",
+            f"        requires(std::is_same_v<U, {it}>)",
+        ]
+        # NEON, SIMD128 and the scalar kernel saturate already; x86 truncation gives the minimum for anything out of
+        # range, NaN included, so the selects fix the two cases it gets wrong.
+        lines += _fn("CC_FORCE_INLINE simd<U, N, K> convert_saturating() const",
+                     ["if constexpr (K::id == kernel_id::neon || K::id == kernel_id::simd128 || K::id == kernel_id::scalar)",
+                      "{",
+                      "    return convert<U>();",
+                      "}",
+                      "else",
+                      "{",
+                      f"    using R = simd<{it}, N, K>;",
+                      "    auto const r = convert<U>();",
+                      f"    auto const in_range = this->lt(simd({t}({hi})));",
+                      f"    return this->eq(*this).select(in_range.select(r, R({it}(~0ull >> {65 - e.bits}))), R::zero());",
+                      "}"])
     lines += [""]
 
     # operators: a hidden friend per operation the rule allows, and the member twin always

@@ -176,6 +176,18 @@ struct cimd::impl::reg<cimd::f32, cimd::sse2, 128>
         t = max(t, _mm_shuffle_ps(t, t, 1));
         return _mm_cvtss_f32(t);
     }
+    static CC_FORCE_INLINE type reverse(type a) { return _mm_shuffle_ps(a, a, _MM_SHUFFLE(0, 1, 2, 3)); }
+    static CC_FORCE_INLINE type gather(f32 const* p, __m128i idx)
+    {
+        alignas(16) i32 x[4];
+        alignas(16) f32 r[4];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return load_aligned(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return _mm_xor_ps(a, _mm_set1_ps(-0.f)); }
     static CC_FORCE_INLINE type abs(type a) { return _mm_andnot_ps(_mm_set1_ps(-0.f), a); }
     static CC_FORCE_INLINE type div(type a, type b) { return _mm_div_ps(a, b); }
@@ -222,6 +234,8 @@ struct cimd::impl::reg<cimd::f32, cimd::sse2, 128>
         __m128 const s = _mm_set1_ps(-0.f);
         return _mm_or_ps(_mm_andnot_ps(s, a), _mm_and_ps(s, b));
     }
+    static CC_FORCE_INLINE type rcp_approx(type a) { return _mm_rcp_ps(a); }
+    static CC_FORCE_INLINE type rsqrt_approx(type a) { return _mm_rsqrt_ps(a); }
     static CC_FORCE_INLINE __m128i to_i32(type a) { return _mm_cvttps_epi32(a); }
 };
 
@@ -264,6 +278,16 @@ struct cimd::impl::reg<cimd::f64, cimd::sse2, 128>
     static CC_FORCE_INLINE f64 reduce_add(type a) { return _mm_cvtsd_f64(add(a, _mm_unpackhi_pd(a, a))); }
     static CC_FORCE_INLINE f64 reduce_min(type a) { return _mm_cvtsd_f64(min(a, _mm_unpackhi_pd(a, a))); }
     static CC_FORCE_INLINE f64 reduce_max(type a) { return _mm_cvtsd_f64(max(a, _mm_unpackhi_pd(a, a))); }
+    static CC_FORCE_INLINE type reverse(type a) { return _mm_shuffle_pd(a, a, 1); }
+    static CC_FORCE_INLINE type gather(f64 const* p, __m128i idx)
+    {
+        alignas(16) i64 x[2];
+        alignas(16) f64 r[2];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return load_aligned(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return _mm_xor_pd(a, _mm_set1_pd(-0.0)); }
     static CC_FORCE_INLINE type abs(type a) { return _mm_andnot_pd(_mm_set1_pd(-0.0), a); }
     static CC_FORCE_INLINE type div(type a, type b) { return _mm_div_pd(a, b); }
@@ -310,6 +334,8 @@ struct cimd::impl::reg<cimd::f64, cimd::sse2, 128>
         __m128d const s = _mm_set1_pd(-0.0);
         return _mm_or_pd(_mm_andnot_pd(s, a), _mm_and_pd(s, b));
     }
+    static CC_FORCE_INLINE type rcp_approx(type a) { return _mm_div_pd(_mm_set1_pd(1.0), a); }
+    static CC_FORCE_INLINE type rsqrt_approx(type a) { return _mm_div_pd(_mm_set1_pd(1.0), _mm_sqrt_pd(a)); }
     static CC_FORCE_INLINE __m128i to_i64(type a)
     {
         alignas(16) f64 x[2];
@@ -397,6 +423,34 @@ struct cimd::impl::reg<cimd::i8, cimd::sse2, 128>
         t = max(t, _mm_srli_si128(t, 1));
         return i8(_mm_cvtsi128_si32(t));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        __m128i const t = _mm_or_si128(_mm_slli_epi16(a, 8), _mm_srli_epi16(a, 8));
+        return _mm_shuffle_epi32(_mm_shufflelo_epi16(_mm_shufflehi_epi16(t, 0x1B), 0x1B), _MM_SHUFFLE(1, 0, 3, 2));
+    }
+    static CC_FORCE_INLINE type gather(i8 const* p, __m128i idx)
+    {
+        alignas(16) i8 x[16];
+        alignas(16) i8 r[16];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        r[8] = p[x[8]];
+        r[9] = p[x[9]];
+        r[10] = p[x[10]];
+        r[11] = p[x[11]];
+        r[12] = p[x[12]];
+        r[13] = p[x[13]];
+        r[14] = p[x[14]];
+        r[15] = p[x[15]];
+        return load_aligned(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return _mm_sub_epi8(_mm_setzero_si128(), a); }
     static CC_FORCE_INLINE type abs(type a) { return select(lt(a, zero()), neg(a), a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
@@ -478,6 +532,26 @@ struct cimd::impl::reg<cimd::i16, cimd::sse2, 128>
         t = max(t, _mm_srli_si128(t, 2));
         return i16(_mm_cvtsi128_si32(t));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        __m128i const t = a;
+        return _mm_shuffle_epi32(_mm_shufflelo_epi16(_mm_shufflehi_epi16(t, 0x1B), 0x1B), _MM_SHUFFLE(1, 0, 3, 2));
+    }
+    static CC_FORCE_INLINE type gather(i16 const* p, __m128i idx)
+    {
+        alignas(16) i16 x[8];
+        alignas(16) i16 r[8];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        return load_aligned(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return _mm_sub_epi16(_mm_setzero_si128(), a); }
     static CC_FORCE_INLINE type abs(type a) { return select(lt(a, zero()), neg(a), a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
@@ -552,6 +626,18 @@ struct cimd::impl::reg<cimd::i32, cimd::sse2, 128>
         t = max(t, _mm_srli_si128(t, 8));
         t = max(t, _mm_srli_si128(t, 4));
         return i32(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE type reverse(type a) { return _mm_shuffle_epi32(a, _MM_SHUFFLE(0, 1, 2, 3)); }
+    static CC_FORCE_INLINE type gather(i32 const* p, __m128i idx)
+    {
+        alignas(16) i32 x[4];
+        alignas(16) i32 r[4];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return load_aligned(r);
     }
     static CC_FORCE_INLINE type neg(type a) { return _mm_sub_epi32(_mm_setzero_si128(), a); }
     static CC_FORCE_INLINE type abs(type a) { return select(lt(a, zero()), neg(a), a); }
@@ -639,6 +725,16 @@ struct cimd::impl::reg<cimd::i64, cimd::sse2, 128>
         __m128i t = a;
         t = max(t, _mm_srli_si128(t, 8));
         return i64(_mm_cvtsi128_si64(t));
+    }
+    static CC_FORCE_INLINE type reverse(type a) { return _mm_shuffle_epi32(a, _MM_SHUFFLE(1, 0, 3, 2)); }
+    static CC_FORCE_INLINE type gather(i64 const* p, __m128i idx)
+    {
+        alignas(16) i64 x[2];
+        alignas(16) i64 r[2];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return load_aligned(r);
     }
     static CC_FORCE_INLINE type neg(type a) { return _mm_sub_epi64(_mm_setzero_si128(), a); }
     static CC_FORCE_INLINE type abs(type a) { return select(lt(a, zero()), neg(a), a); }
@@ -741,6 +837,34 @@ struct cimd::impl::reg<cimd::u8, cimd::sse2, 128>
         t = max(t, _mm_srli_si128(t, 1));
         return u8(_mm_cvtsi128_si32(t));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        __m128i const t = _mm_or_si128(_mm_slli_epi16(a, 8), _mm_srli_epi16(a, 8));
+        return _mm_shuffle_epi32(_mm_shufflelo_epi16(_mm_shufflehi_epi16(t, 0x1B), 0x1B), _MM_SHUFFLE(1, 0, 3, 2));
+    }
+    static CC_FORCE_INLINE type gather(u8 const* p, __m128i idx)
+    {
+        alignas(16) i8 x[16];
+        alignas(16) u8 r[16];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        r[8] = p[x[8]];
+        r[9] = p[x[9]];
+        r[10] = p[x[10]];
+        r[11] = p[x[11]];
+        r[12] = p[x[12]];
+        r[13] = p[x[13]];
+        r[14] = p[x[14]];
+        r[15] = p[x[15]];
+        return load_aligned(r);
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
@@ -825,6 +949,26 @@ struct cimd::impl::reg<cimd::u16, cimd::sse2, 128>
         t = max(t, _mm_srli_si128(t, 2));
         return u16(_mm_cvtsi128_si32(t));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        __m128i const t = a;
+        return _mm_shuffle_epi32(_mm_shufflelo_epi16(_mm_shufflehi_epi16(t, 0x1B), 0x1B), _MM_SHUFFLE(1, 0, 3, 2));
+    }
+    static CC_FORCE_INLINE type gather(u16 const* p, __m128i idx)
+    {
+        alignas(16) i16 x[8];
+        alignas(16) u16 r[8];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        return load_aligned(r);
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
@@ -905,6 +1049,18 @@ struct cimd::impl::reg<cimd::u32, cimd::sse2, 128>
         t = max(t, _mm_srli_si128(t, 8));
         t = max(t, _mm_srli_si128(t, 4));
         return u32(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE type reverse(type a) { return _mm_shuffle_epi32(a, _MM_SHUFFLE(0, 1, 2, 3)); }
+    static CC_FORCE_INLINE type gather(u32 const* p, __m128i idx)
+    {
+        alignas(16) i32 x[4];
+        alignas(16) u32 r[4];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return load_aligned(r);
     }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
@@ -996,6 +1152,16 @@ struct cimd::impl::reg<cimd::u64, cimd::sse2, 128>
         __m128i t = a;
         t = max(t, _mm_srli_si128(t, 8));
         return u64(_mm_cvtsi128_si64(t));
+    }
+    static CC_FORCE_INLINE type reverse(type a) { return _mm_shuffle_epi32(a, _MM_SHUFFLE(1, 0, 3, 2)); }
+    static CC_FORCE_INLINE type gather(u64 const* p, __m128i idx)
+    {
+        alignas(16) i64 x[2];
+        alignas(16) u64 r[2];
+        _mm_store_si128(reinterpret_cast<__m128i*>(x), idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return load_aligned(r);
     }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }

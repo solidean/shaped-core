@@ -539,6 +539,24 @@ struct cimd::impl::reg<cimd::f32, cimd::scalar, 128>
         auto const f = [](f32 x, f32 y) { return x < y ? y : x; };
         return f(f(a.v[0], a.v[2]), f(a.v[1], a.v[3]));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[3 - 0];
+        r.v[1] = a.v[3 - 1];
+        r.v[2] = a.v[3 - 2];
+        r.v[3] = a.v[3 - 3];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(f32 const* p, scalar_reg<i32, 4> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        r.v[2] = p[idx.v[2]];
+        r.v[3] = p[idx.v[3]];
+        return r;
+    }
     static CC_FORCE_INLINE type neg(type a)
     {
         type r;
@@ -658,6 +676,24 @@ struct cimd::impl::reg<cimd::f32, cimd::scalar, 128>
             u32((cc::bit_cast<u32>(a.v[2]) & ~0x80000000u) | (cc::bit_cast<u32>(b.v[2]) & 0x80000000u)));
         r.v[3] = cc::bit_cast<f32>(
             u32((cc::bit_cast<u32>(a.v[3]) & ~0x80000000u) | (cc::bit_cast<u32>(b.v[3]) & 0x80000000u)));
+        return r;
+    }
+    static CC_FORCE_INLINE type rcp_approx(type a)
+    {
+        type r;
+        r.v[0] = f32(1) / a.v[0];
+        r.v[1] = f32(1) / a.v[1];
+        r.v[2] = f32(1) / a.v[2];
+        r.v[3] = f32(1) / a.v[3];
+        return r;
+    }
+    static CC_FORCE_INLINE type rsqrt_approx(type a)
+    {
+        type r;
+        r.v[0] = f32(1) / std::sqrt(a.v[0]);
+        r.v[1] = f32(1) / std::sqrt(a.v[1]);
+        r.v[2] = f32(1) / std::sqrt(a.v[2]);
+        r.v[3] = f32(1) / std::sqrt(a.v[3]);
         return r;
     }
     static CC_FORCE_INLINE scalar_reg<i32, 4> to_i32(type a)
@@ -836,6 +872,20 @@ struct cimd::impl::reg<cimd::f64, cimd::scalar, 128>
         auto const f = [](f64 x, f64 y) { return x < y ? y : x; };
         return f(a.v[0], a.v[1]);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[1 - 0];
+        r.v[1] = a.v[1 - 1];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(f64 const* p, scalar_reg<i64, 2> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        return r;
+    }
     static CC_FORCE_INLINE type neg(type a)
     {
         type r;
@@ -933,6 +983,20 @@ struct cimd::impl::reg<cimd::f64, cimd::scalar, 128>
                                        | (cc::bit_cast<u64>(b.v[0]) & 0x8000000000000000ull)));
         r.v[1] = cc::bit_cast<f64>(u64((cc::bit_cast<u64>(a.v[1]) & ~0x8000000000000000ull)
                                        | (cc::bit_cast<u64>(b.v[1]) & 0x8000000000000000ull)));
+        return r;
+    }
+    static CC_FORCE_INLINE type rcp_approx(type a)
+    {
+        type r;
+        r.v[0] = f64(1) / a.v[0];
+        r.v[1] = f64(1) / a.v[1];
+        return r;
+    }
+    static CC_FORCE_INLINE type rsqrt_approx(type a)
+    {
+        type r;
+        r.v[0] = f64(1) / std::sqrt(a.v[0]);
+        r.v[1] = f64(1) / std::sqrt(a.v[1]);
         return r;
     }
     static CC_FORCE_INLINE scalar_reg<i64, 2> to_i64(type a)
@@ -1397,6 +1461,48 @@ struct cimd::impl::reg<cimd::i8, cimd::scalar, 128>
         return f(f(f(f(a.v[0], a.v[8]), f(a.v[4], a.v[12])), f(f(a.v[2], a.v[10]), f(a.v[6], a.v[14]))),
                  f(f(f(a.v[1], a.v[9]), f(a.v[5], a.v[13])), f(f(a.v[3], a.v[11]), f(a.v[7], a.v[15]))));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[15 - 0];
+        r.v[1] = a.v[15 - 1];
+        r.v[2] = a.v[15 - 2];
+        r.v[3] = a.v[15 - 3];
+        r.v[4] = a.v[15 - 4];
+        r.v[5] = a.v[15 - 5];
+        r.v[6] = a.v[15 - 6];
+        r.v[7] = a.v[15 - 7];
+        r.v[8] = a.v[15 - 8];
+        r.v[9] = a.v[15 - 9];
+        r.v[10] = a.v[15 - 10];
+        r.v[11] = a.v[15 - 11];
+        r.v[12] = a.v[15 - 12];
+        r.v[13] = a.v[15 - 13];
+        r.v[14] = a.v[15 - 14];
+        r.v[15] = a.v[15 - 15];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(i8 const* p, scalar_reg<i8, 16> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        r.v[2] = p[idx.v[2]];
+        r.v[3] = p[idx.v[3]];
+        r.v[4] = p[idx.v[4]];
+        r.v[5] = p[idx.v[5]];
+        r.v[6] = p[idx.v[6]];
+        r.v[7] = p[idx.v[7]];
+        r.v[8] = p[idx.v[8]];
+        r.v[9] = p[idx.v[9]];
+        r.v[10] = p[idx.v[10]];
+        r.v[11] = p[idx.v[11]];
+        r.v[12] = p[idx.v[12]];
+        r.v[13] = p[idx.v[13]];
+        r.v[14] = p[idx.v[14]];
+        r.v[15] = p[idx.v[15]];
+        return r;
+    }
     static CC_FORCE_INLINE type neg(type a)
     {
         type r;
@@ -1846,6 +1952,32 @@ struct cimd::impl::reg<cimd::i16, cimd::scalar, 128>
         auto const f = [](i16 x, i16 y) { return x < y ? y : x; };
         return f(f(f(a.v[0], a.v[4]), f(a.v[2], a.v[6])), f(f(a.v[1], a.v[5]), f(a.v[3], a.v[7])));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[7 - 0];
+        r.v[1] = a.v[7 - 1];
+        r.v[2] = a.v[7 - 2];
+        r.v[3] = a.v[7 - 3];
+        r.v[4] = a.v[7 - 4];
+        r.v[5] = a.v[7 - 5];
+        r.v[6] = a.v[7 - 6];
+        r.v[7] = a.v[7 - 7];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(i16 const* p, scalar_reg<i16, 8> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        r.v[2] = p[idx.v[2]];
+        r.v[3] = p[idx.v[3]];
+        r.v[4] = p[idx.v[4]];
+        r.v[5] = p[idx.v[5]];
+        r.v[6] = p[idx.v[6]];
+        r.v[7] = p[idx.v[7]];
+        return r;
+    }
     static CC_FORCE_INLINE type neg(type a)
     {
         type r;
@@ -2150,6 +2282,24 @@ struct cimd::impl::reg<cimd::i32, cimd::scalar, 128>
         auto const f = [](i32 x, i32 y) { return x < y ? y : x; };
         return f(f(a.v[0], a.v[2]), f(a.v[1], a.v[3]));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[3 - 0];
+        r.v[1] = a.v[3 - 1];
+        r.v[2] = a.v[3 - 2];
+        r.v[3] = a.v[3 - 3];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(i32 const* p, scalar_reg<i32, 4> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        r.v[2] = p[idx.v[2]];
+        r.v[3] = p[idx.v[3]];
+        return r;
+    }
     static CC_FORCE_INLINE type neg(type a)
     {
         type r;
@@ -2387,6 +2537,20 @@ struct cimd::impl::reg<cimd::i64, cimd::scalar, 128>
     {
         auto const f = [](i64 x, i64 y) { return x < y ? y : x; };
         return f(a.v[0], a.v[1]);
+    }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[1 - 0];
+        r.v[1] = a.v[1 - 1];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(i64 const* p, scalar_reg<i64, 2> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        return r;
     }
     static CC_FORCE_INLINE type neg(type a)
     {
@@ -2896,6 +3060,48 @@ struct cimd::impl::reg<cimd::u8, cimd::scalar, 128>
         return f(f(f(f(a.v[0], a.v[8]), f(a.v[4], a.v[12])), f(f(a.v[2], a.v[10]), f(a.v[6], a.v[14]))),
                  f(f(f(a.v[1], a.v[9]), f(a.v[5], a.v[13])), f(f(a.v[3], a.v[11]), f(a.v[7], a.v[15]))));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[15 - 0];
+        r.v[1] = a.v[15 - 1];
+        r.v[2] = a.v[15 - 2];
+        r.v[3] = a.v[15 - 3];
+        r.v[4] = a.v[15 - 4];
+        r.v[5] = a.v[15 - 5];
+        r.v[6] = a.v[15 - 6];
+        r.v[7] = a.v[15 - 7];
+        r.v[8] = a.v[15 - 8];
+        r.v[9] = a.v[15 - 9];
+        r.v[10] = a.v[15 - 10];
+        r.v[11] = a.v[15 - 11];
+        r.v[12] = a.v[15 - 12];
+        r.v[13] = a.v[15 - 13];
+        r.v[14] = a.v[15 - 14];
+        r.v[15] = a.v[15 - 15];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(u8 const* p, scalar_reg<i8, 16> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        r.v[2] = p[idx.v[2]];
+        r.v[3] = p[idx.v[3]];
+        r.v[4] = p[idx.v[4]];
+        r.v[5] = p[idx.v[5]];
+        r.v[6] = p[idx.v[6]];
+        r.v[7] = p[idx.v[7]];
+        r.v[8] = p[idx.v[8]];
+        r.v[9] = p[idx.v[9]];
+        r.v[10] = p[idx.v[10]];
+        r.v[11] = p[idx.v[11]];
+        r.v[12] = p[idx.v[12]];
+        r.v[13] = p[idx.v[13]];
+        r.v[14] = p[idx.v[14]];
+        r.v[15] = p[idx.v[15]];
+        return r;
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b)
     {
         type r;
@@ -3303,6 +3509,32 @@ struct cimd::impl::reg<cimd::u16, cimd::scalar, 128>
         auto const f = [](u16 x, u16 y) { return x < y ? y : x; };
         return f(f(f(a.v[0], a.v[4]), f(a.v[2], a.v[6])), f(f(a.v[1], a.v[5]), f(a.v[3], a.v[7])));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[7 - 0];
+        r.v[1] = a.v[7 - 1];
+        r.v[2] = a.v[7 - 2];
+        r.v[3] = a.v[7 - 3];
+        r.v[4] = a.v[7 - 4];
+        r.v[5] = a.v[7 - 5];
+        r.v[6] = a.v[7 - 6];
+        r.v[7] = a.v[7 - 7];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(u16 const* p, scalar_reg<i16, 8> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        r.v[2] = p[idx.v[2]];
+        r.v[3] = p[idx.v[3]];
+        r.v[4] = p[idx.v[4]];
+        r.v[5] = p[idx.v[5]];
+        r.v[6] = p[idx.v[6]];
+        r.v[7] = p[idx.v[7]];
+        return r;
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b)
     {
         type r;
@@ -3581,6 +3813,24 @@ struct cimd::impl::reg<cimd::u32, cimd::scalar, 128>
         auto const f = [](u32 x, u32 y) { return x < y ? y : x; };
         return f(f(a.v[0], a.v[2]), f(a.v[1], a.v[3]));
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[3 - 0];
+        r.v[1] = a.v[3 - 1];
+        r.v[2] = a.v[3 - 2];
+        r.v[3] = a.v[3 - 3];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(u32 const* p, scalar_reg<i32, 4> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        r.v[2] = p[idx.v[2]];
+        r.v[3] = p[idx.v[3]];
+        return r;
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b)
     {
         type r;
@@ -3800,6 +4050,20 @@ struct cimd::impl::reg<cimd::u64, cimd::scalar, 128>
     {
         auto const f = [](u64 x, u64 y) { return x < y ? y : x; };
         return f(a.v[0], a.v[1]);
+    }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        type r;
+        r.v[0] = a.v[1 - 0];
+        r.v[1] = a.v[1 - 1];
+        return r;
+    }
+    static CC_FORCE_INLINE type gather(u64 const* p, scalar_reg<i64, 2> idx)
+    {
+        type r;
+        r.v[0] = p[idx.v[0]];
+        r.v[1] = p[idx.v[1]];
+        return r;
     }
     static CC_FORCE_INLINE type bit_and(type a, type b)
     {

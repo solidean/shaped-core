@@ -130,8 +130,23 @@ A hand-written list can drift: shaped-simd's cheat sheet promised an `i64 *` its
 - **`mul_add`** fuses where `K::has_native_fma` and rounds twice elsewhere, the scalar kernel included; the last bit is kernel-dependent.
 - **NaN in `min`/`max`** and **out-of-range float-to-int conversion** are unspecified.
   Making them consistent costs a compare and a select on some kernel for every call, and SIMD hot paths keep NaN out.
+- **`rcp_approx` and `rsqrt_approx`** are within a relative 2^-11 of the exact result on every kernel, which is what SSE's 12-bit estimate guarantees.
+  NEON's estimate is 8 bits, so it takes one Newton step; SIMD128, and doubles below AVX-512, have no estimate and divide exactly.
+  At zero, infinity and below zero the result is unspecified.
+- **`convert_saturating`** is the conversion that pins every input: the maximum above the range, the minimum below, zero for NaN.
+  NEON and SIMD128 saturate natively; x86 pays two compares and two selects for it.
 - **Reductions** use one order on every kernel — lane `i` with lane `i + N/2`, recursively — so they agree bit for bit.
   It is x86's natural order; NEON's pairwise adds cost one extra step per level to match it.
+
+## Moving lanes
+
+`reverse` is generated per kernel: a lane shuffle, or pshufb within each 128-bit block and a block swap above it.
+`gather` uses AVX2's gathers for 32- and 64-bit lanes and loads lane by lane everywhere else, since NEON and SIMD128 have none.
+
+`shuffle<I...>()` and `permute(idx)` go through memory on every kernel for now: the vector is stored, its lanes are picked, and the result is loaded.
+That is correct and loop-free in effect, and a store-to-load stall slower than a register permute.
+The native forms — pshufb and `permutevar` on x86, `tbl` on NEON, `i8x16.swizzle` on SIMD128 — are the follow-up.
+They belong in the register tables like every other operation, which is what will put their cost in the [op matrix](op-matrix.md).
 
 ## Committed codegen
 

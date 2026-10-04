@@ -68,6 +68,38 @@ def _through_memory(e: Elem, to: Elem, w: int, expr: str) -> Impl:
     return Impl(EMULATED, "\n".join(body))
 
 
+def _table(t: str, w: int, values: list[int]) -> str:
+    """A constant vector as an aligned array named k, for the bodies that load one."""
+    return f"alignas({w // 8}) static constexpr {t} k[{len(values)}] = {{{', '.join(str(v) for v in values)}}};\n"
+
+
+def _load_k(w: int) -> str:
+    return "_mm512_load_si512(k)" if w == 512 else f"{_P[w]}_load_{_SI[w]}(reinterpret_cast<{_I[w]} const*>(k))"
+
+
+def _byte_reverse(lane_bits: int, w: int) -> list[int]:
+    """pshufb indices reversing the lanes within each 128-bit block."""
+    size = lane_bits // 8
+    return [(16 // size - 1 - j // size) * size + j % size for j in range(16)] * (w // 128)
+
+
+def _gather(kernel: str, e: Elem, w: int) -> Impl:
+    """AVX2 gathers 32- and 64-bit lanes; anything else goes through memory, one load per lane."""
+    p = _P[w]
+    b = e.bits
+    if LEVEL[kernel] >= 2 and b >= 32:
+        fn = {32: "i32gather_ps", 64: "i64gather_pd"}[b] if e.is_float else {32: "i32gather_epi32", 64: "i64gather_epi64"}[b]
+        if w == 512:
+            return _ret(f"_mm512_{fn}(idx, p, {b // 8})")
+        base = "p" if e.is_float else ("reinterpret_cast<int const*>(p)" if b == 32 else "reinterpret_cast<long long const*>(p)")
+        return _ret(f"{p}_{fn}({base}, idx, {b // 8})")
+    lanes = w // b
+    store = "_mm512_store_si512(x, idx);" if w == 512 else f"{p}_store_{_SI[w]}(reinterpret_cast<{_I[w]}*>(x), idx);"
+    body = [f"alignas({w // 8}) i{b} x[{lanes}];", f"alignas({w // 8}) {e.name} r[{lanes}];", store]
+    body += [f"r[{k}] = p[x[{k}]];" for k in range(lanes)]
+    return Impl(EMULATED, "\n".join(body + ["return load_aligned(r);"]))
+
+
 def _float_ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     lvl = LEVEL[kernel]
     p = _P[w]
@@ -109,6 +141,28 @@ def _float_ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     else:
         out["select"] = Impl(SHORT, f"{ft} const f = _mm_castsi128_{s}(m);\n"
                                     f"return _mm_or_{s}(_mm_and_{s}(f, a), _mm_andnot_{s}(f, b));")
+
+    if w == 128:
+        out["reverse"] = _ret("_mm_shuffle_ps(a, a, _MM_SHUFFLE(0, 1, 2, 3))" if e.bits == 32 else "_mm_shuffle_pd(a, a, 1)")
+    elif w == 256 and e.bits == 32:
+        out["reverse"] = Impl(SINGLE, _table("i32", w, list(range(7, -1, -1))) + f"return _mm256_permutevar8x32_ps(a, {_load_k(w)});")
+    elif w == 256:
+        out["reverse"] = _ret("_mm256_permute4x64_pd(a, _MM_SHUFFLE(0, 1, 2, 3))")
+    else:
+        it = f"i{e.bits}"
+        out["reverse"] = Impl(SINGLE, _table(it, w, list(range(lanes - 1, -1, -1)))
+                              + f"return _mm512_permutexvar_{s}({_load_k(w)}, a);")
+    out["gather"] = _gather(kernel, e, w)
+    if k:
+        out["rcp_approx"] = _ret(f"{p}_rcp14_{s}(a)")
+        out["rsqrt_approx"] = _ret(f"{p}_rsqrt14_{s}(a)")
+    elif e.bits == 32:
+        out["rcp_approx"] = _ret(f"{p}_rcp_ps(a)")
+        out["rsqrt_approx"] = _ret(f"{p}_rsqrt_ps(a)")
+    else:
+        # No double estimate below AVX-512: the exact quotient.
+        out["rcp_approx"] = _ret(f"{p}_div_pd({p}_set1_pd(1.0), a)")
+        out["rsqrt_approx"] = Impl(SHORT, f"return {p}_div_pd({p}_set1_pd(1.0), {p}_sqrt_pd(a));")
 
     if lvl >= 1:
         modes = {"floor": "_MM_FROUND_TO_NEG_INF", "ceil": "_MM_FROUND_TO_POS_INF",
@@ -309,6 +363,35 @@ def _int_ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
         else:
             out["abs"] = Impl(EMULATED if out["lt"].cost == EMULATED else SHORT,
                               "return select(lt(a, zero()), neg(a), a);")
+
+    # reverse: a lane shuffle where one exists, pshufb within each 128-bit block and a block swap above
+    if b >= 32 and w == 128:
+        out["reverse"] = _ret(f"_mm_shuffle_epi32(a, {'_MM_SHUFFLE(0, 1, 2, 3)' if b == 32 else '_MM_SHUFFLE(1, 0, 3, 2)'})")
+    elif b == 32 and w == 256:
+        out["reverse"] = Impl(SINGLE, _table("i32", w, list(range(7, -1, -1)))
+                              + f"return _mm256_permutevar8x32_epi32(a, {_load_k(w)});")
+    elif b == 64 and w == 256:
+        out["reverse"] = _ret("_mm256_permute4x64_epi64(a, _MM_SHUFFLE(0, 1, 2, 3))")
+    elif w == 512 and b >= 16:
+        out["reverse"] = Impl(SINGLE, _table(f"i{b}", w, list(range(lanes - 1, -1, -1)))
+                              + f"return _mm512_permutexvar_epi{b}({_load_k(w)}, a);")
+    elif w == 128 and lvl >= 1:
+        out["reverse"] = Impl(SINGLE, _table("u8", w, _byte_reverse(b, w)) + f"return _mm_shuffle_epi8(a, {_load_k(w)});")
+    elif w == 256:
+        out["reverse"] = Impl(SHORT, _table("u8", w, _byte_reverse(b, w))
+                              + f"return _mm256_permute4x64_epi64(_mm256_shuffle_epi8(a, {_load_k(w)}), _MM_SHUFFLE(1, 0, 3, 2));")
+    elif w == 512:
+        out["reverse"] = Impl(SHORT, _table("u8", w, _byte_reverse(b, w))
+                              + f"__m512i const t = _mm512_shuffle_epi8(a, {_load_k(w)});\n"
+                              "return _mm512_shuffle_i64x2(t, t, _MM_SHUFFLE(0, 1, 2, 3));")
+    else:
+        # SSE2 has no byte shuffle: reverse the 16-bit lanes, after swapping the bytes within each for 8-bit lanes.
+        words = ("__m128i const t = _mm_or_si128(_mm_slli_epi16(a, 8), _mm_srli_epi16(a, 8));\n" if b == 8
+                 else "__m128i const t = a;\n")
+        out["reverse"] = Impl(SHORT if b == 16 else EMULATED,
+                              words + "return _mm_shuffle_epi32(_mm_shufflelo_epi16(_mm_shufflehi_epi16(t, 0x1B), 0x1B), "
+                                      "_MM_SHUFFLE(1, 0, 3, 2));")
+    out["gather"] = _gather(kernel, e, w)
 
     # reductions: lane i with lane i + n/2, by shifting the register down half its live bytes each step
     for op in ("add", "min", "max"):

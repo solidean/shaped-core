@@ -34,6 +34,7 @@ These are correct everywhere, and slower than their neighbours.
 
 **sse2**
 
+- `gather`: f32, f64, i8, i16, i32, i64, u8, u16, u32, u64
 - `round`: f32, f64
 - `floor`: f32, f64
 - `ceil`: f32, f64
@@ -42,6 +43,7 @@ These are correct everywhere, and slower than their neighbours.
 - `mul`: i8, i32, i64, u8, u32, u64
 - `mul_add`: i8, i32, i64, u8, u32, u64
 - `shr`: i8
+- `reverse`: i8, u8
 - `gt`: i64, u64
 - `lt`: i64, u64
 - `le`: i64, u64
@@ -54,6 +56,7 @@ These are correct everywhere, and slower than their neighbours.
 
 **sse42**
 
+- `gather`: f32, f64, i8, i16, i32, i64, u8, u16, u32, u64
 - `to_i64`: f64
 - `mul`: i8, i64, u8, u64
 - `mul_add`: i8, i64, u8, u64
@@ -67,6 +70,7 @@ These are correct everywhere, and slower than their neighbours.
 - `mul`: i8, i64, u8, u64
 - `mul_add`: i8, i64, u8, u64
 - `shr`: i8
+- `gather`: i8, i16, u8, u16
 - `to_f64`: i64, u64
 - `to_f32`: u32
 
@@ -75,14 +79,17 @@ These are correct everywhere, and slower than their neighbours.
 - `mul`: i8, u8
 - `mul_add`: i8, u8
 - `shr`: i8
+- `gather`: i8, i16, u8, u16
 
 **neon**
 
+- `gather`: f32, f64, i8, i16, i32, i64, u8, u16, u32, u64
 - `mul`: i64, u64
 - `mul_add`: i64, u64
 
 **simd128**
 
+- `gather`: f32, f64, i8, i16, i32, i64, u8, u16, u32, u64
 - `to_i64`: f64
 - `mul`: i8, u8
 - `mul_add`: i8, u8

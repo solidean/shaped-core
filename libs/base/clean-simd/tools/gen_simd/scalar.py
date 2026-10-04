@@ -109,6 +109,12 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     for name, op in (("eq", "=="), ("ne", "!="), ("lt", "<"), ("le", "<="), ("gt", ">"), ("ge", ">=")):
         out[name] = _lanes(lanes, f"a.v[{{i}}] {op} b.v[{{i}}]", "mtype")
     out["select"] = _lanes(lanes, "m.v[{i}] ? a.v[{i}] : b.v[{i}]")
+    out["reverse"] = _lanes(lanes, f"a.v[{lanes - 1} - {{i}}]")
+    out["gather"] = _lanes(lanes, "p[idx.v[{i}]]")
+    if e.is_float:
+        # Exact: the reference the other kernels' estimates are measured against.
+        out["rcp_approx"] = _lanes(lanes, f"{t}(1) / a.v[{{i}}]")
+        out["rsqrt_approx"] = _lanes(lanes, f"{t}(1) / std::sqrt(a.v[{{i}}])")
 
     if e.is_float:
         out["reduce_add"] = Impl(SINGLE, f"return {_tree(lanes, lambda x, y: f'({x} + {y})')};")

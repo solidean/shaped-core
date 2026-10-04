@@ -175,6 +175,38 @@ struct alignas(cimd::impl::alignment<cimd::i64, N>) cimd::simd<cimd::i64, N, K>
         v._r[0] = reg_t::shr(_r[0], n);
         return v;
     }
+    /// Lane i takes lane N - 1 - i.
+    CC_FORCE_INLINE simd reverse() const
+    {
+        simd v;
+        v._r[0] = reg_t::reverse(_r[0]);
+        return v;
+    }
+    /// Lane i takes lane I_i; every index must be in [0, N).
+    template <int... I>
+        requires(sizeof...(I) == N && ((0 <= I && I < N) && ...))
+    CC_FORCE_INLINE simd shuffle() const
+    {
+        storage_t const s = *this;
+        return simd(storage_t{{s.lanes[I]...}});
+    }
+    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe.
+    CC_FORCE_INLINE simd permute(simd<i64, N, K> idx) const
+    {
+        storage_t const s = *this;
+        storage<i64, N> const x = idx;
+        storage_t r;
+        for (auto i = 0; i < N; ++i)
+            r.lanes[i] = s.lanes[x.lanes[i] & i64(N - 1)];
+        return simd(r);
+    }
+    /// Lane i loads base[idx_i]; every index must address a valid element.
+    static CC_FORCE_INLINE simd gather(i64 const* base, simd<i64, N, K> idx)
+    {
+        simd v;
+        v._r[0] = reg_t::gather(base, idx._r[0]);
+        return v;
+    }
     /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.
     CC_FORCE_INLINE simd mul_add(simd b, simd c) const
     {
@@ -472,6 +504,40 @@ struct alignas(cimd::impl::alignment<cimd::i64, N>) cimd::simd<cimd::i64, N, K>
         simd v;
         v._r[0] = reg_t::shr(_r[0], n);
         v._r[1] = reg_t::shr(_r[1], n);
+        return v;
+    }
+    /// Lane i takes lane N - 1 - i.
+    CC_FORCE_INLINE simd reverse() const
+    {
+        simd v;
+        v._r[0] = reg_t::reverse(_r[1]);
+        v._r[1] = reg_t::reverse(_r[0]);
+        return v;
+    }
+    /// Lane i takes lane I_i; every index must be in [0, N).
+    template <int... I>
+        requires(sizeof...(I) == N && ((0 <= I && I < N) && ...))
+    CC_FORCE_INLINE simd shuffle() const
+    {
+        storage_t const s = *this;
+        return simd(storage_t{{s.lanes[I]...}});
+    }
+    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe.
+    CC_FORCE_INLINE simd permute(simd<i64, N, K> idx) const
+    {
+        storage_t const s = *this;
+        storage<i64, N> const x = idx;
+        storage_t r;
+        for (auto i = 0; i < N; ++i)
+            r.lanes[i] = s.lanes[x.lanes[i] & i64(N - 1)];
+        return simd(r);
+    }
+    /// Lane i loads base[idx_i]; every index must address a valid element.
+    static CC_FORCE_INLINE simd gather(i64 const* base, simd<i64, N, K> idx)
+    {
+        simd v;
+        v._r[0] = reg_t::gather(base, idx._r[0]);
+        v._r[1] = reg_t::gather(base, idx._r[1]);
         return v;
     }
     /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.
@@ -829,6 +895,44 @@ struct alignas(cimd::impl::alignment<cimd::i64, N>) cimd::simd<cimd::i64, N, K>
         v._r[1] = reg_t::shr(_r[1], n);
         v._r[2] = reg_t::shr(_r[2], n);
         v._r[3] = reg_t::shr(_r[3], n);
+        return v;
+    }
+    /// Lane i takes lane N - 1 - i.
+    CC_FORCE_INLINE simd reverse() const
+    {
+        simd v;
+        v._r[0] = reg_t::reverse(_r[3]);
+        v._r[1] = reg_t::reverse(_r[2]);
+        v._r[2] = reg_t::reverse(_r[1]);
+        v._r[3] = reg_t::reverse(_r[0]);
+        return v;
+    }
+    /// Lane i takes lane I_i; every index must be in [0, N).
+    template <int... I>
+        requires(sizeof...(I) == N && ((0 <= I && I < N) && ...))
+    CC_FORCE_INLINE simd shuffle() const
+    {
+        storage_t const s = *this;
+        return simd(storage_t{{s.lanes[I]...}});
+    }
+    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe.
+    CC_FORCE_INLINE simd permute(simd<i64, N, K> idx) const
+    {
+        storage_t const s = *this;
+        storage<i64, N> const x = idx;
+        storage_t r;
+        for (auto i = 0; i < N; ++i)
+            r.lanes[i] = s.lanes[x.lanes[i] & i64(N - 1)];
+        return simd(r);
+    }
+    /// Lane i loads base[idx_i]; every index must address a valid element.
+    static CC_FORCE_INLINE simd gather(i64 const* base, simd<i64, N, K> idx)
+    {
+        simd v;
+        v._r[0] = reg_t::gather(base, idx._r[0]);
+        v._r[1] = reg_t::gather(base, idx._r[1]);
+        v._r[2] = reg_t::gather(base, idx._r[2]);
+        v._r[3] = reg_t::gather(base, idx._r[3]);
         return v;
     }
     /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.
@@ -1302,6 +1406,52 @@ struct alignas(cimd::impl::alignment<cimd::i64, N>) cimd::simd<cimd::i64, N, K>
         v._r[5] = reg_t::shr(_r[5], n);
         v._r[6] = reg_t::shr(_r[6], n);
         v._r[7] = reg_t::shr(_r[7], n);
+        return v;
+    }
+    /// Lane i takes lane N - 1 - i.
+    CC_FORCE_INLINE simd reverse() const
+    {
+        simd v;
+        v._r[0] = reg_t::reverse(_r[7]);
+        v._r[1] = reg_t::reverse(_r[6]);
+        v._r[2] = reg_t::reverse(_r[5]);
+        v._r[3] = reg_t::reverse(_r[4]);
+        v._r[4] = reg_t::reverse(_r[3]);
+        v._r[5] = reg_t::reverse(_r[2]);
+        v._r[6] = reg_t::reverse(_r[1]);
+        v._r[7] = reg_t::reverse(_r[0]);
+        return v;
+    }
+    /// Lane i takes lane I_i; every index must be in [0, N).
+    template <int... I>
+        requires(sizeof...(I) == N && ((0 <= I && I < N) && ...))
+    CC_FORCE_INLINE simd shuffle() const
+    {
+        storage_t const s = *this;
+        return simd(storage_t{{s.lanes[I]...}});
+    }
+    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe.
+    CC_FORCE_INLINE simd permute(simd<i64, N, K> idx) const
+    {
+        storage_t const s = *this;
+        storage<i64, N> const x = idx;
+        storage_t r;
+        for (auto i = 0; i < N; ++i)
+            r.lanes[i] = s.lanes[x.lanes[i] & i64(N - 1)];
+        return simd(r);
+    }
+    /// Lane i loads base[idx_i]; every index must address a valid element.
+    static CC_FORCE_INLINE simd gather(i64 const* base, simd<i64, N, K> idx)
+    {
+        simd v;
+        v._r[0] = reg_t::gather(base, idx._r[0]);
+        v._r[1] = reg_t::gather(base, idx._r[1]);
+        v._r[2] = reg_t::gather(base, idx._r[2]);
+        v._r[3] = reg_t::gather(base, idx._r[3]);
+        v._r[4] = reg_t::gather(base, idx._r[4]);
+        v._r[5] = reg_t::gather(base, idx._r[5]);
+        v._r[6] = reg_t::gather(base, idx._r[6]);
+        v._r[7] = reg_t::gather(base, idx._r[7]);
         return v;
     }
     /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.

@@ -3,6 +3,8 @@
 #include <clean-simd/all.hh>
 #include <clean-simd/dispatch.hh>
 
+#include <utility>
+
 // Every operation of every element type, on fixed inputs, written out as bytes: what a dispatched kernel computes,
 // compared by a floor TU against the scalar kernel's run.
 // Dispatched, so it compiles in the kernel TUs: it includes clean-simd and nothing else, and every helper is a template.
@@ -49,6 +51,10 @@ struct battery_io
     // mul_add on floats, which fuses only where the kernel has FMA, compared within a tolerance.
     cimd::f64 approx[8192] = {};
     int napprox = 0;
+
+    // rcp_approx and rsqrt_approx, compared within the relative error every kernel promises.
+    cimd::f64 estimate[8192] = {};
+    int nestimate = 0;
 };
 
 template <class V>
@@ -68,6 +74,22 @@ void battery_put_scalar(battery_io& io, T x)
     auto const* bytes = reinterpret_cast<cimd::u8 const*>(&x);
     for (auto i = 0; i < int(sizeof(T)); ++i)
         io.out[io.n++] = bytes[i];
+}
+
+/// Lane i takes lane i + 1, the last lane the first: a shuffle whose pattern depends on N.
+template <class V, int... I>
+V battery_rotate(V const& v, std::integer_sequence<int, I...>)
+{
+    return v.template shuffle<((I + 1) % V::lanes)...>();
+}
+
+template <class V>
+void battery_estimate(battery_io& io, V const& v)
+{
+    alignas(64) typename V::element_t tmp[V::lanes];
+    v.store(tmp);
+    for (auto const x : tmp)
+        io.estimate[io.nestimate++] = cimd::f64(x);
 }
 
 template <class K, class T, int N>
@@ -102,6 +124,18 @@ void battery_element(battery_io& io)
     if constexpr (N <= 64)
         battery_put_scalar<cimd::u64>(io, cimd::u64(M::from_bits(typename M::bits_t(0x5A5A5A5A5A5A5A5Aull)).bits()));
 
+    // Index vectors from the signed integer of T's width: any bits for permute, which reads only the low ones, and
+    // masked into the three input blocks for gather.
+    using I = std::conditional_t<
+        sizeof(T) == 1, cimd::i8,
+        std::conditional_t<sizeof(T) == 2, cimd::i16, std::conditional_t<sizeof(T) == 4, cimd::i32, cimd::i64>>>;
+    using IV = cimd::simd<I, N, K>;
+    auto const idx = IV::load(reinterpret_cast<I const*>(io.in[battery_index<I>()][2]));
+    battery_put(io, a.reverse());
+    battery_put(io, battery_rotate(a, std::make_integer_sequence<int, N>{}));
+    battery_put(io, a.permute(idx));
+    battery_put(io, V::gather(in, idx.bit_and(IV(I(256 / sizeof(T) - 1)))));
+
     battery_put_scalar<T>(io, a.reduce_add());
     battery_put_scalar<T>(io, a.reduce_min());
     battery_put_scalar<T>(io, a.reduce_max());
@@ -117,8 +151,15 @@ void battery_element(battery_io& io)
         battery_put(io, a.round());
         battery_put(io, a.trunc());
         battery_put(io, a.copysign(b));
-        using I = std::conditional_t<sizeof(T) == 4, cimd::i32, cimd::i64>;
         battery_put(io, a.template convert<I>());
+        // Lanes beyond the integer's range both ways, and NaN, where a.lt(b) does not hold.
+        auto const big = a.mul(V(T(sizeof(T) == 4 ? 1e7 : 1e17)));
+        auto const zero = V::zero();
+        battery_put(io, a.lt(b).select(big, zero.div(zero)).template convert_saturating<I>());
+        auto const x = a.abs().add(V(T(0.5)));
+        battery_estimate(io, x.rcp_approx());
+        battery_estimate(io, x.neg().rcp_approx());
+        battery_estimate(io, x.rsqrt_approx());
         alignas(64) T fused[N];
         a.mul_add(b, c).store(fused);
         for (auto i = 0; i < N; ++i)
@@ -163,6 +204,7 @@ void battery(battery_io& io)
     io.ran = K::id;
     io.n = 0;
     io.napprox = 0;
+    io.nestimate = 0;
     battery_type<K, cimd::f32>(io);
     battery_type<K, cimd::f64>(io);
     battery_type<K, cimd::i8>(io);

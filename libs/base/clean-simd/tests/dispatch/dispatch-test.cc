@@ -8,7 +8,7 @@ using namespace cc::primitive_defines;
 
 // The battery is dispatched through cimd_dispatch, so a kernel above the build's floor runs here the way it would in
 // production: compiled in its own TU with its own flags, selected per CPU.
-// Every kernel is compared with the scalar kernel's run, bit for bit except mul_add.
+// Every kernel is compared with the scalar kernel's run, bit for bit except mul_add and the estimates.
 
 namespace
 {
@@ -54,10 +54,11 @@ void compare_with_scalar(cimd::kernel_id id)
 
     REQUIRE(reference->ran == cimd::kernel_id::scalar);
     REQUIRE(got->ran == id);
-    // Ten element types at four widths, a few dozen results each — 50600 bytes when written: less means some were skipped.
-    REQUIRE(reference->n >= 50600);
+    // Ten element types at four widths, a few dozen results each — 60680 bytes when written: less means some were skipped.
+    REQUIRE(reference->n >= 60680);
     REQUIRE(got->n == reference->n);
     REQUIRE(got->napprox == reference->napprox);
+    REQUIRE(got->nestimate == reference->nestimate);
 
     auto first_mismatch = -1;
     auto mismatches = 0;
@@ -75,6 +76,14 @@ void compare_with_scalar(cimd::kernel_id id)
         auto const diff = got->approx[i] - reference->approx[i];
         auto const mag = reference->approx[i];
         CHECK((diff < 0 ? -diff : diff) <= (mag < 0 ? -mag : mag) * 0x1p-22 + 0x1p-10).context(kn);
+    }
+
+    // rcp_approx and rsqrt_approx: the scalar kernel's are exact, and every kernel promises 11 bits.
+    for (auto i = 0; i < got->nestimate; ++i)
+    {
+        auto const diff = got->estimate[i] - reference->estimate[i];
+        auto const mag = reference->estimate[i];
+        CHECK((diff < 0 ? -diff : diff) <= (mag < 0 ? -mag : mag) * 0x1p-11).context(kn);
     }
 }
 

@@ -153,6 +153,22 @@ struct cimd::impl::reg<cimd::f32, cimd::neon, 128>
         float32x2_t const h = vmax_f32(vget_low_f32(a), vget_high_f32(a));
         return vget_lane_f32(vpmax_f32(h, h), 0);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        float32x4_t const r = vrev64q_f32(a);
+        return vextq_f32(r, r, 2);
+    }
+    static CC_FORCE_INLINE type gather(f32 const* p, int32x4_t idx)
+    {
+        i32 x[4];
+        f32 r[4];
+        vst1q_s32(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return vld1q_f32(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return vnegq_f32(a); }
     static CC_FORCE_INLINE type abs(type a) { return vabsq_f32(a); }
     static CC_FORCE_INLINE type div(type a, type b) { return vdivq_f32(a, b); }
@@ -162,6 +178,16 @@ struct cimd::impl::reg<cimd::f32, cimd::neon, 128>
     static CC_FORCE_INLINE type round(type a) { return vrndnq_f32(a); }
     static CC_FORCE_INLINE type trunc(type a) { return vrndq_f32(a); }
     static CC_FORCE_INLINE type copysign(type a, type b) { return vbslq_f32(vdupq_n_u32(u32(1) << 31), b, a); }
+    static CC_FORCE_INLINE type rcp_approx(type a)
+    {
+        float32x4_t const r = vrecpeq_f32(a);
+        return vmulq_f32(r, vrecpsq_f32(a, r));
+    }
+    static CC_FORCE_INLINE type rsqrt_approx(type a)
+    {
+        float32x4_t const r = vrsqrteq_f32(a);
+        return vmulq_f32(r, vrsqrtsq_f32(vmulq_f32(a, r), r));
+    }
     static CC_FORCE_INLINE int32x4_t to_i32(type a) { return vcvtq_s32_f32(a); }
 };
 
@@ -200,6 +226,16 @@ struct cimd::impl::reg<cimd::f64, cimd::neon, 128>
     static CC_FORCE_INLINE f64 reduce_add(type a) { return vgetq_lane_f64(add(a, vextq_f64(a, a, 1)), 0); }
     static CC_FORCE_INLINE f64 reduce_min(type a) { return vgetq_lane_f64(min(a, vextq_f64(a, a, 1)), 0); }
     static CC_FORCE_INLINE f64 reduce_max(type a) { return vgetq_lane_f64(max(a, vextq_f64(a, a, 1)), 0); }
+    static CC_FORCE_INLINE type reverse(type a) { return vextq_f64(a, a, 1); }
+    static CC_FORCE_INLINE type gather(f64 const* p, int64x2_t idx)
+    {
+        i64 x[2];
+        f64 r[2];
+        vst1q_s64(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return vld1q_f64(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return vnegq_f64(a); }
     static CC_FORCE_INLINE type abs(type a) { return vabsq_f64(a); }
     static CC_FORCE_INLINE type div(type a, type b) { return vdivq_f64(a, b); }
@@ -209,6 +245,16 @@ struct cimd::impl::reg<cimd::f64, cimd::neon, 128>
     static CC_FORCE_INLINE type round(type a) { return vrndnq_f64(a); }
     static CC_FORCE_INLINE type trunc(type a) { return vrndq_f64(a); }
     static CC_FORCE_INLINE type copysign(type a, type b) { return vbslq_f64(vdupq_n_u64(u64(1) << 63), b, a); }
+    static CC_FORCE_INLINE type rcp_approx(type a)
+    {
+        float64x2_t const r = vrecpeq_f64(a);
+        return vmulq_f64(r, vrecpsq_f64(a, r));
+    }
+    static CC_FORCE_INLINE type rsqrt_approx(type a)
+    {
+        float64x2_t const r = vrsqrteq_f64(a);
+        return vmulq_f64(r, vrsqrtsq_f64(vmulq_f64(a, r), r));
+    }
     static CC_FORCE_INLINE int64x2_t to_i64(type a) { return vcvtq_s64_f64(a); }
 };
 
@@ -247,6 +293,34 @@ struct cimd::impl::reg<cimd::i8, cimd::neon, 128>
     static CC_FORCE_INLINE i8 reduce_add(type a) { return i8(vaddvq_s8(a)); }
     static CC_FORCE_INLINE i8 reduce_min(type a) { return vminvq_s8(a); }
     static CC_FORCE_INLINE i8 reduce_max(type a) { return vmaxvq_s8(a); }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        int8x16_t const r = vrev64q_s8(a);
+        return vextq_s8(r, r, 8);
+    }
+    static CC_FORCE_INLINE type gather(i8 const* p, int8x16_t idx)
+    {
+        i8 x[16];
+        i8 r[16];
+        vst1q_s8(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        r[8] = p[x[8]];
+        r[9] = p[x[9]];
+        r[10] = p[x[10]];
+        r[11] = p[x[11]];
+        r[12] = p[x[12]];
+        r[13] = p[x[13]];
+        r[14] = p[x[14]];
+        r[15] = p[x[15]];
+        return vld1q_s8(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return vnegq_s8(a); }
     static CC_FORCE_INLINE type abs(type a) { return vabsq_s8(a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return vandq_s8(a, b); }
@@ -292,6 +366,26 @@ struct cimd::impl::reg<cimd::i16, cimd::neon, 128>
     static CC_FORCE_INLINE i16 reduce_add(type a) { return i16(vaddvq_s16(a)); }
     static CC_FORCE_INLINE i16 reduce_min(type a) { return vminvq_s16(a); }
     static CC_FORCE_INLINE i16 reduce_max(type a) { return vmaxvq_s16(a); }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        int16x8_t const r = vrev64q_s16(a);
+        return vextq_s16(r, r, 4);
+    }
+    static CC_FORCE_INLINE type gather(i16 const* p, int16x8_t idx)
+    {
+        i16 x[8];
+        i16 r[8];
+        vst1q_s16(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        return vld1q_s16(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return vnegq_s16(a); }
     static CC_FORCE_INLINE type abs(type a) { return vabsq_s16(a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return vandq_s16(a, b); }
@@ -337,6 +431,22 @@ struct cimd::impl::reg<cimd::i32, cimd::neon, 128>
     static CC_FORCE_INLINE i32 reduce_add(type a) { return i32(vaddvq_s32(a)); }
     static CC_FORCE_INLINE i32 reduce_min(type a) { return vminvq_s32(a); }
     static CC_FORCE_INLINE i32 reduce_max(type a) { return vmaxvq_s32(a); }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        int32x4_t const r = vrev64q_s32(a);
+        return vextq_s32(r, r, 2);
+    }
+    static CC_FORCE_INLINE type gather(i32 const* p, int32x4_t idx)
+    {
+        i32 x[4];
+        i32 r[4];
+        vst1q_s32(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return vld1q_s32(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return vnegq_s32(a); }
     static CC_FORCE_INLINE type abs(type a) { return vabsq_s32(a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return vandq_s32(a, b); }
@@ -391,6 +501,16 @@ struct cimd::impl::reg<cimd::i64, cimd::neon, 128>
     static CC_FORCE_INLINE i64 reduce_add(type a) { return vgetq_lane_s64(add(a, vextq_s64(a, a, 1)), 0); }
     static CC_FORCE_INLINE i64 reduce_min(type a) { return vgetq_lane_s64(min(a, vextq_s64(a, a, 1)), 0); }
     static CC_FORCE_INLINE i64 reduce_max(type a) { return vgetq_lane_s64(max(a, vextq_s64(a, a, 1)), 0); }
+    static CC_FORCE_INLINE type reverse(type a) { return vextq_s64(a, a, 1); }
+    static CC_FORCE_INLINE type gather(i64 const* p, int64x2_t idx)
+    {
+        i64 x[2];
+        i64 r[2];
+        vst1q_s64(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return vld1q_s64(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return vnegq_s64(a); }
     static CC_FORCE_INLINE type abs(type a) { return vabsq_s64(a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return vandq_s64(a, b); }
@@ -437,6 +557,34 @@ struct cimd::impl::reg<cimd::u8, cimd::neon, 128>
     static CC_FORCE_INLINE u8 reduce_add(type a) { return u8(vaddvq_u8(a)); }
     static CC_FORCE_INLINE u8 reduce_min(type a) { return vminvq_u8(a); }
     static CC_FORCE_INLINE u8 reduce_max(type a) { return vmaxvq_u8(a); }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        uint8x16_t const r = vrev64q_u8(a);
+        return vextq_u8(r, r, 8);
+    }
+    static CC_FORCE_INLINE type gather(u8 const* p, int8x16_t idx)
+    {
+        i8 x[16];
+        u8 r[16];
+        vst1q_s8(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        r[8] = p[x[8]];
+        r[9] = p[x[9]];
+        r[10] = p[x[10]];
+        r[11] = p[x[11]];
+        r[12] = p[x[12]];
+        r[13] = p[x[13]];
+        r[14] = p[x[14]];
+        r[15] = p[x[15]];
+        return vld1q_u8(r);
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return vandq_u8(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return vorrq_u8(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return veorq_u8(a, b); }
@@ -480,6 +628,26 @@ struct cimd::impl::reg<cimd::u16, cimd::neon, 128>
     static CC_FORCE_INLINE u16 reduce_add(type a) { return u16(vaddvq_u16(a)); }
     static CC_FORCE_INLINE u16 reduce_min(type a) { return vminvq_u16(a); }
     static CC_FORCE_INLINE u16 reduce_max(type a) { return vmaxvq_u16(a); }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        uint16x8_t const r = vrev64q_u16(a);
+        return vextq_u16(r, r, 4);
+    }
+    static CC_FORCE_INLINE type gather(u16 const* p, int16x8_t idx)
+    {
+        i16 x[8];
+        u16 r[8];
+        vst1q_s16(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        return vld1q_u16(r);
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return vandq_u16(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return vorrq_u16(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return veorq_u16(a, b); }
@@ -523,6 +691,22 @@ struct cimd::impl::reg<cimd::u32, cimd::neon, 128>
     static CC_FORCE_INLINE u32 reduce_add(type a) { return u32(vaddvq_u32(a)); }
     static CC_FORCE_INLINE u32 reduce_min(type a) { return vminvq_u32(a); }
     static CC_FORCE_INLINE u32 reduce_max(type a) { return vmaxvq_u32(a); }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        uint32x4_t const r = vrev64q_u32(a);
+        return vextq_u32(r, r, 2);
+    }
+    static CC_FORCE_INLINE type gather(u32 const* p, int32x4_t idx)
+    {
+        i32 x[4];
+        u32 r[4];
+        vst1q_s32(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return vld1q_u32(r);
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return vandq_u32(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return vorrq_u32(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return veorq_u32(a, b); }
@@ -575,6 +759,16 @@ struct cimd::impl::reg<cimd::u64, cimd::neon, 128>
     static CC_FORCE_INLINE u64 reduce_add(type a) { return vgetq_lane_u64(add(a, vextq_u64(a, a, 1)), 0); }
     static CC_FORCE_INLINE u64 reduce_min(type a) { return vgetq_lane_u64(min(a, vextq_u64(a, a, 1)), 0); }
     static CC_FORCE_INLINE u64 reduce_max(type a) { return vgetq_lane_u64(max(a, vextq_u64(a, a, 1)), 0); }
+    static CC_FORCE_INLINE type reverse(type a) { return vextq_u64(a, a, 1); }
+    static CC_FORCE_INLINE type gather(u64 const* p, int64x2_t idx)
+    {
+        i64 x[2];
+        u64 r[2];
+        vst1q_s64(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return vld1q_u64(r);
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return vandq_u64(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return vorrq_u64(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return veorq_u64(a, b); }

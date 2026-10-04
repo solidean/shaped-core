@@ -29,6 +29,16 @@ def _ret(expr: str, cost: str = SINGLE) -> Impl:
     return Impl(cost, f"return {expr};")
 
 
+def _gather(e: Elem, lanes: int) -> Impl:
+    """NEON has no gather: the indices through memory, then one load per lane."""
+    t = e.name
+    i = f"i{e.bits}"
+    body = [f"{i} x[{lanes}];", f"{t} r[{lanes}];", f"vst1q_{_SFX[i]}(x, idx);"]
+    body += [f"r[{k}] = p[x[{k}]];" for k in range(lanes)]
+    body += [f"return vld1q_{_SFX[t]}(r);"]
+    return Impl(EMULATED, "\n".join(body))
+
+
 def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     s = _SFX[e.name]
     t = e.name
@@ -92,6 +102,16 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     else:
         out["ne"] = Impl(SHORT, f"return vmvnq_{ms}(vceqq_{s}(a, b));")
     out["select"] = _ret(f"vbslq_{s}(m, a, b)")
+    if e.bits == 64:
+        out["reverse"] = _ret(f"vextq_{s}(a, a, 1)")
+    else:
+        out["reverse"] = Impl(SHORT, f"{_TYPE[t]} const r = vrev64q_{s}(a);\nreturn vextq_{s}(r, r, {lanes // 2});")
+    out["gather"] = _gather(e, lanes)
+    if e.is_float:
+        # The estimate is good to 8 bits; one Newton step takes it past the 11 every kernel promises.
+        out["rcp_approx"] = Impl(SHORT, f"{_TYPE[t]} const r = vrecpeq_{s}(a);\nreturn vmulq_{s}(r, vrecpsq_{s}(a, r));")
+        out["rsqrt_approx"] = Impl(SHORT, f"{_TYPE[t]} const r = vrsqrteq_{s}(a);\n"
+                                          f"return vmulq_{s}(r, vrsqrtsq_{s}(vmulq_{s}(a, r), r));")
 
     if e.is_float and e.bits == 32:
         # Lanes i and i + 2 first, then the two halves: the tree every kernel reduces in.

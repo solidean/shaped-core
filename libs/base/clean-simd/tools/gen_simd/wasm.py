@@ -106,6 +106,17 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
         for name in ("lt", "le", "gt", "ge"):
             out[name] = _ret(f"wasm_{v}_{name}(a, b)")
     out["select"] = _ret("wasm_v128_bitselect(a, b, m)")
+    size = e.bits // 8
+    rev = ", ".join(str((lanes - 1 - j // size) * size + j % size) for j in range(16))
+    out["reverse"] = _ret(f"wasm_i8x16_shuffle(a, a, {rev})")
+    gather = [f"i{e.bits} x[{lanes}];", f"{t} r[{lanes}];", "wasm_v128_store(x, idx);"]
+    gather += [f"r[{k}] = p[x[{k}]];" for k in range(lanes)]
+    out["gather"] = Impl(EMULATED, "\n".join(gather + ["return wasm_v128_load(r);"]))
+    if e.is_float:
+        # SIMD128 has no estimate, so the approximation is the exact quotient.
+        one = "1.f" if e.bits == 32 else "1.0"
+        out["rcp_approx"] = _ret(f"wasm_{v}_div(wasm_{v}_splat({one}), a)")
+        out["rsqrt_approx"] = Impl(SHORT, f"return wasm_{v}_div(wasm_{v}_splat({one}), wasm_{v}_sqrt(a));")
 
     # Lane i with lane i + n/2, recursively: rotate the register down by half its live bytes each step.
     extract = f"wasm_{v}_extract_lane"

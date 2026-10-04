@@ -72,7 +72,8 @@ class Impl:
 
 
 # Register-layer signatures: name -> (return, parameters), in terms of
-#   E (the element), type (the register), mtype (the mask register), and to:<elem> (another element's register).
+#   E (the element), type (the register), mtype (the mask register), itype (the register of the signed integer as wide
+#   as E, which indexes it), and to:<elem> (another element's register).
 SIGNATURES: dict[str, tuple[str, str]] = {
     "broadcast": ("type", "E x"),
     "zero": ("type", ""),
@@ -112,6 +113,10 @@ SIGNATURES: dict[str, tuple[str, str]] = {
     "copysign": ("type", "type a, type b"),
     "shl": ("type", "type a, int n"),
     "shr": ("type", "type a, int n"),
+    "reverse": ("type", "type a"),
+    "gather": ("type", "E const* p, itype idx"),
+    "rcp_approx": ("type", "type a"),
+    "rsqrt_approx": ("type", "type a"),
     "to_i32": ("to:i32", "type a"),
     "to_f32": ("to:f32", "type a"),
     "to_i64": ("to:i64", "type a"),
@@ -136,7 +141,7 @@ COMMON_OPS = [
     "broadcast", "zero", "iota", "load", "load_aligned", "store", "store_aligned",
     "add", "sub", "mul", "min", "max", "mul_add",
     "eq", "ne", "lt", "le", "gt", "ge", "select",
-    "reduce_add", "reduce_min", "reduce_max",
+    "reduce_add", "reduce_min", "reduce_max", "reverse", "gather",
 ]  # fmt: skip
 
 
@@ -146,7 +151,7 @@ def ops_of(e: Elem) -> list[str]:
     if e.kind != "unsigned":
         out += ["neg", "abs"]
     if e.is_float:
-        out += ["div", "sqrt", "floor", "ceil", "round", "trunc", "copysign"]
+        out += ["div", "sqrt", "floor", "ceil", "round", "trunc", "copysign", "rcp_approx", "rsqrt_approx"]
     else:
         out += ["bit_and", "bit_or", "bit_xor", "bit_not", "shl", "shr"]
     out += [f"to_{target}" for target in CONVERSIONS.get(e.name, [])]

@@ -141,6 +141,21 @@ struct cimd::impl::reg<cimd::f32, cimd::simd128, 128>
         t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_f32x4_extract_lane(t, 0);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+    }
+    static CC_FORCE_INLINE type gather(f32 const* p, v128_t idx)
+    {
+        i32 x[4];
+        f32 r[4];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return wasm_v128_load(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return wasm_f32x4_neg(a); }
     static CC_FORCE_INLINE type abs(type a) { return wasm_f32x4_abs(a); }
     static CC_FORCE_INLINE type div(type a, type b) { return wasm_f32x4_div(a, b); }
@@ -152,6 +167,11 @@ struct cimd::impl::reg<cimd::f32, cimd::simd128, 128>
     static CC_FORCE_INLINE type copysign(type a, type b)
     {
         return wasm_v128_bitselect(b, a, wasm_i32x4_splat(int(0x80000000u)));
+    }
+    static CC_FORCE_INLINE type rcp_approx(type a) { return wasm_f32x4_div(wasm_f32x4_splat(1.f), a); }
+    static CC_FORCE_INLINE type rsqrt_approx(type a)
+    {
+        return wasm_f32x4_div(wasm_f32x4_splat(1.f), wasm_f32x4_sqrt(a));
     }
     static CC_FORCE_INLINE v128_t to_i32(type a) { return wasm_i32x4_trunc_sat_f32x4(a); }
 };
@@ -205,6 +225,19 @@ struct cimd::impl::reg<cimd::f64, cimd::simd128, 128>
         t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
         return wasm_f64x2_extract_lane(t, 0);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7);
+    }
+    static CC_FORCE_INLINE type gather(f64 const* p, v128_t idx)
+    {
+        i64 x[2];
+        f64 r[2];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return wasm_v128_load(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return wasm_f64x2_neg(a); }
     static CC_FORCE_INLINE type abs(type a) { return wasm_f64x2_abs(a); }
     static CC_FORCE_INLINE type div(type a, type b) { return wasm_f64x2_div(a, b); }
@@ -216,6 +249,11 @@ struct cimd::impl::reg<cimd::f64, cimd::simd128, 128>
     static CC_FORCE_INLINE type copysign(type a, type b)
     {
         return wasm_v128_bitselect(b, a, wasm_i64x2_splat(i64(0x8000000000000000ull)));
+    }
+    static CC_FORCE_INLINE type rcp_approx(type a) { return wasm_f64x2_div(wasm_f64x2_splat(1.0), a); }
+    static CC_FORCE_INLINE type rsqrt_approx(type a)
+    {
+        return wasm_f64x2_div(wasm_f64x2_splat(1.0), wasm_f64x2_sqrt(a));
     }
     static CC_FORCE_INLINE v128_t to_i64(type a)
     {
@@ -316,6 +354,33 @@ struct cimd::impl::reg<cimd::i8, cimd::simd128, 128>
         t = max(t, wasm_i8x16_shuffle(t, t, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0));
         return wasm_i8x16_extract_lane(t, 0);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+    }
+    static CC_FORCE_INLINE type gather(i8 const* p, v128_t idx)
+    {
+        i8 x[16];
+        i8 r[16];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        r[8] = p[x[8]];
+        r[9] = p[x[9]];
+        r[10] = p[x[10]];
+        r[11] = p[x[11]];
+        r[12] = p[x[12]];
+        r[13] = p[x[13]];
+        r[14] = p[x[14]];
+        r[15] = p[x[15]];
+        return wasm_v128_load(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return wasm_i8x16_neg(a); }
     static CC_FORCE_INLINE type abs(type a) { return wasm_i8x16_abs(a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
@@ -381,6 +446,25 @@ struct cimd::impl::reg<cimd::i16, cimd::simd128, 128>
         t = max(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
         return wasm_i16x8_extract_lane(t, 0);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 14, 15, 12, 13, 10, 11, 8, 9, 6, 7, 4, 5, 2, 3, 0, 1);
+    }
+    static CC_FORCE_INLINE type gather(i16 const* p, v128_t idx)
+    {
+        i16 x[8];
+        i16 r[8];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        return wasm_v128_load(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return wasm_i16x8_neg(a); }
     static CC_FORCE_INLINE type abs(type a) { return wasm_i16x8_abs(a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
@@ -443,6 +527,21 @@ struct cimd::impl::reg<cimd::i32, cimd::simd128, 128>
         t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_i32x4_extract_lane(t, 0);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+    }
+    static CC_FORCE_INLINE type gather(i32 const* p, v128_t idx)
+    {
+        i32 x[4];
+        i32 r[4];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return wasm_v128_load(r);
+    }
     static CC_FORCE_INLINE type neg(type a) { return wasm_i32x4_neg(a); }
     static CC_FORCE_INLINE type abs(type a) { return wasm_i32x4_abs(a); }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
@@ -502,6 +601,19 @@ struct cimd::impl::reg<cimd::i64, cimd::simd128, 128>
         v128_t t = a;
         t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
         return wasm_i64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7);
+    }
+    static CC_FORCE_INLINE type gather(i64 const* p, v128_t idx)
+    {
+        i64 x[2];
+        i64 r[2];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return wasm_v128_load(r);
     }
     static CC_FORCE_INLINE type neg(type a) { return wasm_i64x2_neg(a); }
     static CC_FORCE_INLINE type abs(type a) { return wasm_i64x2_abs(a); }
@@ -604,6 +716,33 @@ struct cimd::impl::reg<cimd::u8, cimd::simd128, 128>
         t = max(t, wasm_i8x16_shuffle(t, t, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0));
         return wasm_u8x16_extract_lane(t, 0);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+    }
+    static CC_FORCE_INLINE type gather(u8 const* p, v128_t idx)
+    {
+        i8 x[16];
+        u8 r[16];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        r[8] = p[x[8]];
+        r[9] = p[x[9]];
+        r[10] = p[x[10]];
+        r[11] = p[x[11]];
+        r[12] = p[x[12]];
+        r[13] = p[x[13]];
+        r[14] = p[x[14]];
+        r[15] = p[x[15]];
+        return wasm_v128_load(r);
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
@@ -667,6 +806,25 @@ struct cimd::impl::reg<cimd::u16, cimd::simd128, 128>
         t = max(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
         return wasm_u16x8_extract_lane(t, 0);
     }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 14, 15, 12, 13, 10, 11, 8, 9, 6, 7, 4, 5, 2, 3, 0, 1);
+    }
+    static CC_FORCE_INLINE type gather(u16 const* p, v128_t idx)
+    {
+        i16 x[8];
+        u16 r[8];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        r[4] = p[x[4]];
+        r[5] = p[x[5]];
+        r[6] = p[x[6]];
+        r[7] = p[x[7]];
+        return wasm_v128_load(r);
+    }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
@@ -726,6 +884,21 @@ struct cimd::impl::reg<cimd::u32, cimd::simd128, 128>
         t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
         t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_u32x4_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+    }
+    static CC_FORCE_INLINE type gather(u32 const* p, v128_t idx)
+    {
+        i32 x[4];
+        u32 r[4];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        r[2] = p[x[2]];
+        r[3] = p[x[3]];
+        return wasm_v128_load(r);
     }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
@@ -800,6 +973,19 @@ struct cimd::impl::reg<cimd::u64, cimd::simd128, 128>
         v128_t t = a;
         t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
         return wasm_u64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type reverse(type a)
+    {
+        return wasm_i8x16_shuffle(a, a, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7);
+    }
+    static CC_FORCE_INLINE type gather(u64 const* p, v128_t idx)
+    {
+        i64 x[2];
+        u64 r[2];
+        wasm_v128_store(x, idx);
+        r[0] = p[x[0]];
+        r[1] = p[x[1]];
+        return wasm_v128_load(r);
     }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
