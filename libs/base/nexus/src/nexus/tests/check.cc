@@ -60,7 +60,8 @@ nx::impl::check_handle::~check_handle() noexcept(false)
 
 nx::impl::check_handle nx::impl::check_handle::add_extra_line(cc::string line) &&
 {
-    if (!passed)
+    // A passing check's lines are never shown, so they are dropped; a SKIP passes and still has a reason to report.
+    if (!passed || ctx->op == cmp_op::skip)
         ctx->extra_lines.push_back(cc::move(line));
     return cc::move(*this);
 }

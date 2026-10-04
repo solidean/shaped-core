@@ -303,6 +303,7 @@ def test(
                             "serial_s": summary.serial_s,
                             "serial_group": summary.serial_group,
                             "serial_group_s": summary.serial_group_s,
+                            "skip_reasons": [list(s) for s in summary.skip_reasons],
                         }
                         if summary
                         else None

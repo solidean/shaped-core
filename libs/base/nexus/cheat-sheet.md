@@ -266,7 +266,7 @@ REQUIRE_THROWS(expr);  REQUIRE_THROWS_AS(expr, ExceptionType);  REQUIRE_ASSERTS(
 auto v = REQUIRED_VALUE(expr);           // REQUIRE a cc::result/cc::optional holds a value, then evaluate to it
                                          // returns BY VALUE (moves out of an rvalue), so move-only payloads work
 FAIL();  FAIL("msg");                    // unconditional hard fail
-SKIP();  SKIP("not implemented yet");    // skip the test (not counted as a failure)
+SKIP();  SKIP("not implemented yet");    // skip the test (a pass, but named by reason in the summary and JUnit's <skipped>)
 ```
 
 ## Checks off the test's own thread

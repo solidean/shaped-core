@@ -184,10 +184,15 @@ def parse_junit(path: Path) -> TestSummary | None:
     totals = dict(tests=0, failures=0, errors=0, skipped=0, assertions=0)
     time_s = 0.0
     resources: dict[str, str] = {}
+    skip_reasons: list[tuple[str, str]] = []
     for suite in tree.getroot().iter("testsuite"):
         for attr in totals:
             totals[attr] += int(suite.get(attr, "0"))
         time_s += float(suite.get("time", "0"))
+        for case in suite.iter("testcase"):
+            skipped = case.find("skipped")
+            if skipped is not None:
+                skip_reasons.append((case.get("name", ""), skipped.get("message", "")))
         for attr in ("cpu_load", "cores_used", "peak_resident_bytes", "serial_time", "serial_group", "serial_group_time"):
             if suite.get(attr) is not None:
                 resources[attr] = suite.get(attr)
@@ -205,6 +210,7 @@ def parse_junit(path: Path) -> TestSummary | None:
         serial_s=float(resources["serial_time"]) if "serial_time" in resources else None,
         serial_group=resources.get("serial_group") or None,
         serial_group_s=float(resources["serial_group_time"]) if "serial_group_time" in resources else None,
+        skip_reasons=tuple(skip_reasons),
     )
 
 
