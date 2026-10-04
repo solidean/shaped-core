@@ -2547,6 +2547,26 @@ def test_an_empty_changes_heading_or_discharges_is_refused(root: Path) -> None:
     assert "040-fine" not in out, out
 
 
+def test_shown_changes_no_ask_discharges_are_warned_about(root: Path) -> None:
+    """A `## changes` block shows its ids, and only an ask's `discharges:` accounts for them.
+
+    An entry showing a change it never discharges reads as covering it while coverage counts it as open.
+    It is a warning rather than an error, since another entry may discharge the change on purpose.
+    """
+    front = "---\nid: {n}\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhat, and the options.\n\n"
+    ask = "## ask  which\n{line}\n\nWhich way?\n\n- radio: this\n"
+    run = design_review(root, {
+        "010-partial": front.format(n="010") + "## changes  X-1 X-2 X-3\nshow: collapsed\n\n"
+        + ask.format(line="discharges: X-2"),
+        "020-whole": front.format(n="020") + "## changes  X-1 X-2\nshow: collapsed\n\n"
+        + ask.format(line="discharges: X-2 X-1"),
+    })
+    code, out = run("validate", "d")
+    assert code == 0, f"an undischarged shown change is a warning, not an error: {out}"
+    assert "warning: 010-partial:11: `## changes` shows X-1 X-3, which none of this entry's asks discharges" in out, out
+    assert "020-whole" not in out, out
+
+
 def test_a_stray_carriage_return_does_not_end_a_line(root: Path) -> None:
     """`ids=$(review changes --ids | tr '\\n' ' ')` keeps the `\\r` of a CRLF tool's last line, mid-line.
 

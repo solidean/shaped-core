@@ -53,6 +53,26 @@ def orphan_answer_warnings(entry, answers) -> list[str]:
     ]
 
 
+def shown_undischarged_warnings(entry) -> list[str]:
+    """One warning per `## changes` block showing change ids that none of this entry's asks discharges.
+
+    Showing a change is not accounting for it, so the entry reads as covering an id that coverage still counts as open.
+    A warning rather than an error, since another entry may discharge the change on purpose.
+    """
+    discharged = set(entry.discharged_changes())
+    out: list[str] = []
+    for block in entry.live_blocks:
+        if block.type != "changes":
+            continue
+        missing = [i for i in dict.fromkeys(block.change_ids) if i not in discharged]
+        if missing:
+            out.append(
+                f"{entry.slug}:{block.line}: `## changes` shows {' '.join(missing)}, which none of this entry's asks "
+                f"discharges — add them to an ask's `discharges:`, or drop them from the heading"
+            )
+    return out
+
+
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Check every entry parses and every reference resolves")
     a.review_name(p)
@@ -115,6 +135,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     for entry in entries:
         warnings.extend(mojibake_warnings(entry))
+        warnings.extend(shown_undischarged_warnings(entry))
         problems.extend(f"{entry.slug}:{line}: {problem}" for line, problem in review.empty_references(entry))
         answers = ctx.answers(paths, entry)
         open_asks = {b.name for b in entry.asks if (answers.get(b.name) is None or answers.get(b.name).tentative)}

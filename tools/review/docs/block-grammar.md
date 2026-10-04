@@ -368,6 +368,10 @@ One entry can therefore carry five questions discharging five different change s
 - `discharges:` lists the change ids this question accounts for.
   `validate` refuses one naming none, and a `## changes` heading naming none, with the line.
   Both are what a script writes when the command feeding it ids failed, and coverage would silently count nothing for them.
+- **Showing a change is not discharging it.**
+  `validate` warns about an id a `## changes` heading shows that none of the entry's asks discharges, naming the entry and the ids.
+  The entry otherwise reads as covering a change that coverage still counts as open.
+  It is a warning rather than an error, since another entry may discharge the change on purpose.
 - `follows:` names the earlier ask this is a follow-up to.
 - Option lines are `- radio:`, `- check:` or `- rank:`; a trailing `(recommended)` is recognised and shown as a badge.
 - **An option label is markdown**, rendered the way a `prose` block is, and its references resolve like any other.
