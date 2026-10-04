@@ -122,21 +122,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     problems: list[str] = [str(e) for e in broken]
     warnings: list[str] = []
 
-    if cfg.has_changeset:
-        problems.extend(ctx.check_references(paths, entries))
-
-    # A file reference the tool cannot resolve renders as plain text, which is indistinguishable from one nobody
-    # meant as a reference — so the check goes looking rather than waiting to be tripped over.
-    problems.extend(ctx.reference_problems(paths, entries))
-
-    # A paragraph in a glossary block that is not a term is a term nobody finds out is missing,
-    # which is the whole reason the block is marked rather than scraped.
-    problems.extend(review.glossary_problems(entries))
+    problems.extend(ctx.entry_problems(paths, cfg, entries))
 
     for entry in entries:
         warnings.extend(mojibake_warnings(entry))
         warnings.extend(shown_undischarged_warnings(entry))
-        problems.extend(f"{entry.slug}:{line}: {problem}" for line, problem in review.empty_references(entry))
         answers = ctx.answers(paths, entry)
         open_asks = {b.name for b in entry.asks if (answers.get(b.name) is None or answers.get(b.name).tentative)}
         if not review.is_orientation(entry.group):
@@ -184,22 +174,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             f"{slug}: comment {comment.id} (on {comment.where()}) has no answer — "
             f"append a block with `addresses: {comment.id}`, which a block that declines to act also satisfies"
         )
-
-    # An `addresses:` naming a comment its entry does not have satisfies nothing and misleads whoever reads the thread,
-    # and nothing else would catch it: the obligation above only asks whether every comment is claimed.
-    # A finalized round cannot be edited, so only the round still being written is held to it.
-    for entry in entries:
-        known = set(ctx.answers(paths, entry).comments)
-        for block in entry.blocks:
-            if block.round and block.round <= cfg.watermark:
-                continue
-            for comment_id in block.addresses:
-                if comment_id not in known:
-                    listed = ", ".join(sorted(known)) if known else "none"
-                    problems.append(
-                        f"{entry.slug}: block {block.name!r} addresses {comment_id!r}, which is no comment of this entry "
-                        f"— its comments are: {listed}"
-                    )
 
     total = len(paths.entry_files())
     # A broken entry was still checked, so it counts toward what the problems were found across.

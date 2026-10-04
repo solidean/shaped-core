@@ -7,7 +7,8 @@ it was done by hand, on a file the server is reading, with no check that the res
 Nothing is ever rewritten here.
 The text is appended, the new blocks are stamped with the round about to be served, and the result is parsed before it is written —
 so a malformed addition fails with a line number instead of leaving an entry the page cannot render.
-Its file references and change ids are resolved then too, so one `validate` would reject is refused before it lands.
+Every check `validate` makes of an entry's own text runs on the merged result then too, so one `validate` would reject is refused before it lands.
+The exception is a comment still owed an answer, since an append answering one comment of two must still land.
 """
 
 from __future__ import annotations
@@ -87,11 +88,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     except review.ReviewParseError as e:
         ctx.die(f"the result would not parse: {e}")
 
-    # A reference that does not resolve is refused here like a parse error, so the fix happens before the server reads
-    # the file rather than by hand-editing it afterwards; `validate` would report the same problems.
-    problems = ctx.reference_problems(paths, [merged])
-    if cfg.has_changeset:
-        problems.extend(ctx.check_references(paths, [merged]))
+    # What `validate` would refuse is refused here like a parse error, so the fix happens before the server reads the
+    # file rather than by hand-editing it afterwards.
+    problems = ctx.entry_problems(paths, cfg, [merged])
     if problems:
         ctx.die("the result would not validate:\n  " + "\n  ".join(problems))
 

@@ -2598,6 +2598,61 @@ def test_an_addresses_naming_no_comment_of_its_entry_is_refused(root: Path) -> N
     assert code != 0 and "addresses 'c1', which is no comment of this entry" in out and "none" in out, out
 
 
+def test_append_refuses_what_validate_would(root: Path) -> None:
+    """`append` checks the merged entry the way `validate` does, so nothing it writes is refused a moment later.
+
+    Found when three appended blocks named an ask in `addresses:` on an entry with no comments, and only `validate` objected.
+    """
+    entry = "---\nid: 010\ntitle: t\ngroup: topics\n---\n\n## prose\n\nA point.\n"
+    run = design_review(root, {"010-x": entry})
+    addition = root / "reply.md"
+    addition.write_text("## prose\naddresses: rounding-sign\n\nReplying to nothing.\n", encoding="utf-8")
+    code, out = run("append", "d", "010", "--file", str(addition))
+    assert code != 0 and "would not validate" in out and "addresses 'rounding-sign'" in out, out
+    written = root / "repo" / ".tmp" / "reviews" / "d" / "entries" / "010-x.md"
+    assert written.read_text(encoding="utf-8") == entry, "a refused append must write nothing"
+
+
+def test_addresses_may_name_an_ask_whose_answer_left_a_remark(root: Path) -> None:
+    """The text typed under an ask is a remark, and a later round replies to it the way it replies to a comment.
+
+    An ask answered by a pick alone left no remark, so naming it still replies to nothing.
+    A remark is no obligation, unlike a comment: the ask it sits under is the tracked question, and its answer was handed over.
+    """
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.serve.app import ReviewApp
+    from tools.review.lib.serve.watch import Watcher
+
+    entry = ("---\nid: 010\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhich way, and the options.\n\n"
+             "## ask  which\n\nWhich way?\n\n- radio: this\n- radio: that\n\n"
+             "## ask  picked\n\nAnd this?\n\n- radio: yes\n")
+    run = design_review(root, {"010-x": entry})
+    paths = ReviewPaths(root / "repo" / ".tmp" / "reviews" / "d")
+    app = ReviewApp(root / "repo", paths, Watcher(paths))
+    next_round = app.config().next_round
+    status, _ = app.save_answer({"entry": "010-x", "ask": "which", "selected": ["this"], "text": "but mind the sign",
+                                 "round": next_round})
+    assert status == 200
+    status, _ = app.save_answer({"entry": "010-x", "ask": "picked", "selected": ["yes"], "text": "", "round": next_round})
+    assert status == 200
+    code, out = run("delta", "d", "--finalize")
+    assert code == 0, out
+
+    code, out = run("validate", "d")
+    assert code == 0, f"an unreplied remark must not block a round the way a comment does: {out}"
+
+    reply = root / "reply.md"
+    reply.write_text("## prose\naddresses: which\n\nThe sign is handled.\n", encoding="utf-8")
+    code, out = run("append", "d", "010", "--file", str(reply))
+    assert code == 0, out
+    code, out = run("validate", "d")
+    assert code == 0, out
+
+    reply.write_text("## prose\naddresses: picked\n\nReplying to a pick.\n", encoding="utf-8")
+    code, out = run("append", "d", "010", "--file", str(reply))
+    assert code != 0 and "addresses 'picked'" in out and "it has: which" in out, out
+
+
 def test_validate_checks_only_the_entries_it_is_given(root: Path) -> None:
     """Parallel writers each own a number range, and each grepped one shared report for their own lines.
 

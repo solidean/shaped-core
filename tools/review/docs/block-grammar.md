@@ -182,6 +182,14 @@ Outstanding is computed from those references the way an undischarged change is,
 `validate` refuses to let a round be handed back while a comment from a finalized round has no `addresses:` anywhere.
 A block that declines to act satisfies it, because the obligation is to answer rather than to comply.
 
+**A remark is addressable the same way.**
+The text typed under an ask is a remark, and `addresses:` may name that ask once its answer is finalized, so a later round replies to the remark beside the asks it replies to.
+An ask answered by a pick alone left no remark, and naming it is refused like naming a comment the entry does not have.
+A remark is no obligation, unlike a comment: the ask it sits under is the tracked question, and its answer has already been handed over.
+
+`append` runs the same checks on the merged entry, so an `addresses:` that `validate` would refuse never lands.
+The obligation is the one check it leaves out, since an append answering one comment of two must still land.
+
 Comments live in `answers/<entry>.json`, which the server owns, and are tentative until the round is finalized.
 
 ## Priced bullets

@@ -127,6 +127,7 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 - **The maintainer can comment on any block, and on any line of a diff.**
   A comment is a remark rather than a tracked question: the agent answers it next round by appending a block with `addresses:`,
   and `validate` will not let a round be handed back while one is unanswered.
+  `addresses:` may also name an ask whose answer carried typed text, which replies to that remark without making it an obligation.
 - **A block can be superseded rather than edited.**
   `supersedes:` retires an earlier block in the same entry; the page shows the replacement with the original struck beside it.
   A retired block's references still link where they can, and never fail `validate`: nothing could fix them there, and the replacement is what is judged.
