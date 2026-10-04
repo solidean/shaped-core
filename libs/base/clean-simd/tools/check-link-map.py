@@ -27,9 +27,14 @@ import sys
 from pathlib import Path
 
 
-def kernel_tags(kernel: str) -> tuple[str, ...]:
-    """How a mangled name spells `cimd::<kernel>`: MSVC's `U<k>@cimd@@` and Itanium's `4cimd<len><k>E`."""
-    return (f"U{kernel}@cimd@@", f"4cimd{len(kernel)}{kernel}E")
+def has_kernel_tag(symbol: str, kernel: str) -> bool:
+    """Whether a mangled name names `cimd::<kernel>`: MSVC's `U<k>@cimd@@`, or Itanium's `<len><k>E` after `4cimd`.
+
+    Itanium compresses a repeated prefix, so once `cimd` has appeared the tag is spelled `NS0_6avx512E` instead.
+    """
+    if f"U{kernel}@cimd@@" in symbol:
+        return True
+    return re.search(rf"(?:4cimd|S[0-9A-Z]*_){len(kernel)}{kernel}E", symbol) is not None
 
 
 def is_kernel_object(origin: str, objects: list[str]) -> bool:
@@ -62,8 +67,8 @@ def elf_findings(text: str, objects: list[str]) -> list[tuple[str, str]]:
 
 def violations(text: str, kernels: list[str], objects: list[str]) -> list[tuple[str, str]]:
     findings = coff_findings(text, objects) if re.search(r"^\s*0001:", text, re.M) else elf_findings(text, objects)
-    tags = [t for k in kernels for t in kernel_tags(k)]
-    return [(s, o) for s, o in findings if not any(t in s for t in tags) and "cimd_entry_" not in s]
+    return [(s, o) for s, o in findings
+            if not any(has_kernel_tag(s, k) for k in kernels) and "cimd_entry_" not in s]
 
 
 # One kept copy of a K-templated function (fine) and one of a shared inline helper (the finding), per map format.
@@ -80,6 +85,7 @@ _SELF_TEST_COFF = """
 """
 _SELF_TEST_ELF = """
  .text._Z5queryIN4cimd6avx512EEiv  0x0000000000401000  0x20 libapp-cimd-q.a(q-avx512.cc.o)
+ .text._Z3putIN4cimd4simdIfLi4ENS0_6avx512EEEEvRKT_  0x0000000000401010  0x10 libapp-cimd-q.a(q-avx512.cc.o)
  .text._Z13shared_helperv  0x0000000000401020  0x10 libapp-cimd-q.a(q-avx512.cc.o)
  .text._Z14shared_helper2v  0x0000000000401030  0x10 floor.cc.o
 """
