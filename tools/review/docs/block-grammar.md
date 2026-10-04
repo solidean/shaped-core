@@ -288,6 +288,18 @@ A fence holds more of what needs this than a span does, because every line of it
 Narrowing what counts as a reference would trade a loud false positive for a silent one.
 The loud one costs the author a `raw:`; the silent one is a typo'd path staying plain text, which is the failure the strictness exists to prevent.
 
+## `foreign:` — a path in another checkout
+
+A review of a port names the files it ports from, and those live in a repository this index has never seen.
+`raw:` would hide that they are paths at all, and `planned:` makes it worse: a bare foreign name resolves nowhere, so it is drawn as a file the design will create.
+
+```markdown
+Ported from `foreign:C:/work/ember/src/simd/cpu_info.cc`.
+```
+
+`foreign:` is skipped by every provider exactly as `raw:` is, so it is never resolved, planned, missing or ambiguous.
+The page draws it as an external path rather than as plain code, and the prefix is dropped from what the reader sees and from text that leaves the page.
+
 ## Glossary blocks
 
 `glossary: true` on a `prose` block says its bold leads are terms.

@@ -153,6 +153,8 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   for a span that looks like a reference and is not.
   A whole fence opts out the same way, with `raw` or `raw:` in front of its usual `lang:path` info string.
   The matchers stay eager on purpose: narrowing them would trade a loud false positive for a typo'd path silently staying plain.
+- **`foreign:` on a code span is a path in another checkout** — the source of a port, say.
+  It is skipped like `raw:`, so `planned:` can never claim it as a file the design will create, and the page draws it as external.
 - **Hovering a file reference shows the whole file**, bounded and scrollable, scrolled to the line when one was named.
   **An image is drawn rather than decoded as text** — a hovered `.png` / `.jpg` / `.svg` paints in the popover, with its
   pixel size and file size in the head line, and the file page shows it the same way.

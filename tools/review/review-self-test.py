@@ -1779,6 +1779,22 @@ def test_a_planned_folder_never_shadows_a_real_file(root: Path) -> None:
     assert by_text["src/stages/08_ring_ir/compile.rs"].css == "ref", by_text
 
 
+def test_a_foreign_path_is_never_claimed_by_the_plan_nor_resolved(root: Path) -> None:
+    """A port names files in the checkout it ports from, and `planned:` would otherwise draw a bare one as new.
+
+    `foreign:` says the path lives in another checkout: it is never resolved, so it is never a problem,
+    and the page draws it as external, with the prefix dropped and the provider walk skipping it.
+    """
+    blocks = "## prose\n\nPorted from `foreign:cpu_info.cc` and `foreign:C:/work/ember/src/x86.rs:12`.\n"
+    assert not _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
+
+    html = render_markdown("From `foreign:C:/work/ember/src/x86.rs`.")
+    assert '<code class="raw ref-foreign" title="outside this repository">C:/work/ember/src/x86.rs</code>' in html, html
+
+    from tools.review.lib.render.markdown import strip_raw
+    assert strip_raw("From `foreign:a/b.cc`.") == "From `a/b.cc`.", strip_raw("From `foreign:a/b.cc`.")
+
+
 def test_a_path_outside_the_planned_folder_is_still_a_problem(root: Path) -> None:
     """The plan excuses one folder, so a typo'd path elsewhere keeps failing, and so does a bare folder name."""
     blocks = "## prose\n\nSee `src/stages/11_nope/framing.rs` and `wire/`.\n"

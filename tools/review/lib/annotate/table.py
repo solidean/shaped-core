@@ -51,6 +51,7 @@ def _referencing_text(text: str) -> list[str]:
 
     A `raw:` span, a `raw:` link destination and a `raw` fence are left out: that is the author saying this looks
     like a reference and is not, which is the one thing the matcher cannot work out for itself.
+    A `foreign:` span is left out too: it is a reference, but to another checkout, so this index cannot judge it.
 
     A link destination has to opt out the same way a code span does, and dropping the prefix is not enough on its
     own — the file matcher's lookbehind rejects a `:`, so a `raw:` left in front makes it start one segment late
@@ -58,7 +59,7 @@ def _referencing_text(text: str) -> list[str]:
     """
     out = [body for _, info, body in _FENCE_BODY_RE.findall(text) if not _is_raw(info)]
     without_fences = _FENCE_BODY_RE.sub("", text)
-    out.extend(span for span in _CODE_SPAN_RE.findall(without_fences) if not span.startswith("raw:"))
+    out.extend(span for span in _CODE_SPAN_RE.findall(without_fences) if not span.startswith(("raw:", "foreign:")))
     out.extend(target for target in _LINK_TARGET_RE.findall(without_fences) if not target.startswith("raw:"))
     return out
 
@@ -167,7 +168,8 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
 # The remedy every reference failure carries.
 # An author hitting one is looking for exactly this feature at exactly that moment, and has no reason to go and read
 # the grammar to find out it exists — so the message says it rather than leaving it to be discovered.
-_RAW_REMEDY = "write it as `raw:<path>`, or open the fence as ```raw, to say this is not a reference"
+_RAW_REMEDY = ("write it as `raw:<path>`, or open the fence as ```raw, to say this is not a reference, "
+               "or as `foreign:<path>` for a path in another checkout")
 
 
 def problems(entry: Entry, tokens: list[Token]) -> list[str]:
