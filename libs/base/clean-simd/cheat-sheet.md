@@ -53,6 +53,25 @@ m.any()  m.all()  m.none()           // cheaper than bits() != 0 where the kerne
 M::from_bits(b)
 ```
 
+## Dispatch
+
+```cpp
+// header: an ordinary template whose signature does not depend on K
+template <class K> int query(bvh8 const& b, box q, i32* out, int cap);
+CIMD_DISPATCH_DECLARE(bvh8_query, query);
+CIMD_DISPATCH(bvh8_query)(b, q, out, cap);    // the best kernel this CPU runs, resolved once
+cimd::cpu_supports(cimd::kernel_id::avx512);  // x86-64-v4 and the OS saving zmm
+cimd::scoped_forced_kernel const f(cimd::kernel_id::avx2); // this thread only; ignored where the CPU lacks it
+```
+
+```cmake
+cimd_dispatch(my-target NAME bvh8_query HEADER bvh8-query.hh FUNCTION query LINK typed-geometry)
+cimd_check_link_map(my-executable)            # fails the build if a kernel TU's copy of shared code won the link
+```
+
+- Kernels above `SC_X64_LEVEL` (`SC_SIMD_KERNELS`, default every one) are compiled in their own TUs with their own `-march`.
+- A dispatched header must not define a non-template inline function only it uses; the link-map check is what catches it.
+
 ## Gotchas
 
 - **No `value & mask`.** `mask.select(value, 0)` — equal code on AVX2, one masked move on AVX-512.

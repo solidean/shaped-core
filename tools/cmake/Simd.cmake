@@ -12,7 +12,14 @@
 # A whole-build switch, never per-target: an inline function compiled at two levels is an ODR violation the linker
 # resolves silently, by keeping whichever copy it saw first.
 
+# What clean-simd's cimd_dispatch reads: the kernels compiled above the floor, and each one's flags.
+# Empty off x86-64: neon and simd128 are the floor there, and nothing sits above them.
+set(SC_SIMD_DISPATCH_KERNELS "")
+
 if(NOT SC_ARCH_X64)
+    if(SC_SIMD_KERNELS AND NOT SC_SIMD_KERNELS STREQUAL "auto")
+        message(FATAL_ERROR "SC_SIMD_KERNELS names x86-64 kernels ('${SC_SIMD_KERNELS}'), but this target is not x86-64.")
+    endif()
     return()
 endif()
 
@@ -41,3 +48,47 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 add_compile_definitions(CC_X64_LEVEL=${_sc_x64_level_number})
+
+# The kernel the floor compiles everywhere: one per level, except that cl.exe builds v4 as AVX2 (above).
+set(_sc_kernel_order sse2 sse42 avx2 avx512)
+set(_sc_floor_index ${_sc_x64_level_number})
+math(EXPR _sc_floor_index "${_sc_floor_index} - 1")
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND _sc_floor_index GREATER 2)
+    set(_sc_floor_index 2)
+endif()
+
+set(_sc_above "")
+foreach(_k IN LISTS _sc_kernel_order)
+    list(FIND _sc_kernel_order ${_k} _i)
+    if(_i GREATER _sc_floor_index)
+        list(APPEND _sc_above ${_k})
+    endif()
+endforeach()
+
+if(SC_SIMD_KERNELS STREQUAL "auto")
+    set(SC_SIMD_DISPATCH_KERNELS ${_sc_above})
+else()
+    foreach(_k IN LISTS SC_SIMD_KERNELS)
+        if(NOT _k IN_LIST _sc_above)
+            message(FATAL_ERROR "SC_SIMD_KERNELS: '${_k}' is not a kernel above the SC_X64_LEVEL floor "
+                                "(${_sc_x64_level}); those are: ${_sc_above}")
+        endif()
+    endforeach()
+    set(SC_SIMD_DISPATCH_KERNELS ${SC_SIMD_KERNELS})
+endif()
+
+# Each dispatched kernel's flags, spelled the way this compiler takes a level.
+set(_sc_cl_arch_sse42 "/arch:SSE4.2")
+set(_sc_cl_arch_avx2 "/arch:AVX2")
+set(_sc_cl_arch_avx512 "/arch:AVX512")
+foreach(_k IN ITEMS sse42 avx2 avx512)
+    list(FIND _sc_kernel_order ${_k} _i)
+    math(EXPR _level "${_i} + 1")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
+        set(SC_SIMD_KERNEL_FLAGS_${_k} "/clang:-march=x86-64-v${_level}")
+    elseif(MSVC)
+        set(SC_SIMD_KERNEL_FLAGS_${_k} "${_sc_cl_arch_${_k}}")
+    else()
+        set(SC_SIMD_KERNEL_FLAGS_${_k} "-march=x86-64-v${_level}")
+    endif()
+endforeach()

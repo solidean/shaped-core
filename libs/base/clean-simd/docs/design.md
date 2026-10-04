@@ -27,6 +27,55 @@ A template instantiation takes its target from where the template is *defined*, 
 So each kernel's generated header is guarded by `CIMD_HAS_<KERNEL>`, and naming an unavailable kernel is a `static_assert` in the primary template.
 MSVC accepts any intrinsic anywhere, which is how shaped-simd looked portable from Windows: it forced `-mavx2` PUBLIC on every consumer, which defeated its own template parameter.
 
+## Runtime dispatch
+
+`cimd_dispatch(<target> NAME … HEADER … FUNCTION …)` and `CIMD_DISPATCH(name)(args…)`, in `dispatch.hh`.
+The algorithm is an ordinary `template <class K>` function in an ordinary header, and nothing else is annotated.
+Kernels at or below the build's floor are instantiated in the target itself.
+Each kernel above it gets a generated TU compiled with that kernel's `-march`, in a static library linked behind the target.
+The table picks, once per process, the best kernel `cc::get_cpu_features()` says the CPU runs; `cimd::force_kernel` pins one per thread, for tests and benchmarks.
+
+**Why not compile everything at the highest level.**
+The compiler spends a `-march` flag in every function it emits.
+At `x86-64-v4` a plain AABB loop with no intrinsics in it became `vscatterqps` with k-register masks, which faults on an AVX2 CPU before any dispatch is reached.
+So the library compiles at the floor, and only a kernel's own code may be compiled above it.
+
+**Why not a lambda or an attributed entry in one ordinary TU.**
+With clang 22 under `-mavx2`, four spellings fail the same way:
+
+- an entry function carrying `__attribute__((target("avx512f,…")))` that calls `algo<avx512>`;
+- the same entry with `flatten`;
+- a generic lambda inside it;
+- an explicit instantiation inside a `#pragma clang attribute` target region.
+
+The error is "always_inline function 'add' requires target feature 'avx512f', but would be inlined into function 'algo' that is compiled without support for 'avx512f'".
+A template instantiation takes its target from where the template is defined.
+Dropping `always_inline` compiles, and turns every op into an out-of-line call with its `__m512` passed through memory.
+Only MSVC accepts the one-TU form, because it compiles any intrinsic anywhere.
+
+**Why the kernel TUs live in a static library.**
+A TU compiled with a kernel's flags emits every inline function it uses — clean-core's, typed-geometry's — under the same name the floor's copy has, and the linker keeps one program-wide.
+Measured with two TUs each emitting `inline int which()` (floor returns 1, kernel 2), linked by clang-cl's objects:
+
+| link line | both callers get |
+|---|---|
+| lld-link `main floor kernel` | 1 |
+| lld-link `main kernel floor` | 2 |
+| link.exe `main floor kernel` | 1 |
+| link.exe `main kernel floor` | 2 |
+| lld-link `main floor k.lib` | 1 |
+| link.exe `main k.lib floor` | 1 |
+
+The first copy seen wins, and a library member is seen only when it is pulled, so the floor's copy wins even with the library listed first.
+That leaves one hole: an inline function the kernel TU uses that no floor *object* emits but a floor *library* does, where the pull order decides.
+`cimd_check_link_map(<executable>)` closes it: the final link writes a map, and any code symbol a kernel object supplied without the kernel's type in its mangled name fails the build.
+GNU ld, ELF lld and ThinLTO were not measured; the kernel libraries opt out of interprocedural optimization.
+
+**Alternatives kept on record.**
+Brackets around every K-templated definition — a `#pragma` target region per kernel, compiled by a define rather than a flag — are safe without relying on any linker.
+They are the fallback if the map check proves noisy.
+Building the whole library once per level, as separate shared libraries with a loader, needs no dispatch in the source at all, at the price of shipping the binary twice.
+
 ## Native widths below, fixed widths on top
 
 Each kernel has a register layer, `impl::reg<T, K, Bits>`, generated per element and register width: one static function per operation.

@@ -126,17 +126,20 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         # extern/'s manifest resolution runs here for the same reason: which upstream is available on which machine is
         # answered on every configure and reported by nothing, so a wrong answer surfaces as a link error on one runner.
         # Not fixable and not scopable, so fix and scope are ignored.
+        # clean-simd's link-map check runs after every link of a dispatching binary, where a parser that silently stopped
+        # matching would look exactly like a clean link.
         ok = True
         runners = (
-            Path("tools") / "dev" / "profile-self-test.py",
-            Path("tools") / "dev" / "changes-self-test.py",
-            Path("tools") / "dev" / "ui-self-test.py",
-            Path("tools") / "dev" / "symbolize-self-test.py",
-            Path("extern") / "manifest-self-test.py",
+            (Path("tools") / "dev" / "profile-self-test.py", []),
+            (Path("tools") / "dev" / "changes-self-test.py", []),
+            (Path("tools") / "dev" / "ui-self-test.py", []),
+            (Path("tools") / "dev" / "symbolize-self-test.py", []),
+            (Path("extern") / "manifest-self-test.py", []),
+            (Path("libs") / "base" / "clean-simd" / "tools" / "check-link-map.py", ["--self-test"]),
         )
-        for runner in runners:
+        for runner, args in runners:
             result = dev.run_step(
-                ["uv", "run", str(ctx.root / runner)],
+                ["uv", "run", str(ctx.root / runner), *args],
                 step_type="selftest", name=runner.name.removesuffix(".py"),
                 build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
             )
@@ -395,7 +398,8 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("deps-licenses", "verify docs/licenses/ matches the extern/ manifests, and each license is on the allowlist",
                   False, check_deps_licenses),
-        dev.Check("dev-selftest", "dev.py's own self-tests (job profile, change scope, progress region, dependency manifests)",
+        dev.Check("dev-selftest", "dev.py's own self-tests (job profile, change scope, progress region, dependency manifests, "
+                                  "clean-simd's link-map check)",
                   False, check_dev_selftest),
         dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
                   False, check_review),

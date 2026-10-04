@@ -131,6 +131,11 @@ endif()
 set(SC_X64_LEVEL "${_sc_x64_level_default}" CACHE STRING "x86-64 feature level every function may assume: v1, v2, v3 or v4")
 set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v3 v4)
 
+# The clean-simd kernels compiled for runtime dispatch on top of that floor: `auto` (every x86-64 kernel above it, up
+# to avx512), a list such as `avx2;avx512`, or empty for none. Only kernels above the floor belong here — the ones at or
+# below it are instantiated in the dispatching target itself. See libs/base/clean-simd/src/clean-simd/dispatch.hh.
+set(SC_SIMD_KERNELS "auto" CACHE STRING "clean-simd kernels above SC_X64_LEVEL compiled for dispatch: auto, a list, or empty")
+
 # Repo-wide build configuration helpers live in tools/cmake/.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 

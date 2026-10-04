@@ -26,6 +26,9 @@ struct mask;
 template <class T, int N>
 struct storage; // kernel-free bytes for data structures
 
+// dispatch (dispatch.hh) — one algorithm, compiled per kernel, picked per CPU
+struct scoped_forced_kernel; // pins this thread's dispatch to one kernel, for tests and benchmarks
+
 namespace impl
 {
 template <class T, class K, int Bits>

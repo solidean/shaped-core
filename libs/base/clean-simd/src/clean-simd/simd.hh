@@ -56,7 +56,7 @@ struct cimd::simd
     static_assert(is_available<K>,
                   "cimd::simd<T, N, K>: this TU's flags do not allow kernel K. Code above the build's floor is "
                   "compiled "
-                  "through cimd_dispatch (libs/base/clean-simd/docs/dispatch.md); local code uses cimd::local");
+                  "through cimd_dispatch (clean-simd/dispatch.hh); local code uses cimd::local");
     static_assert(impl::reg_count<T, N, K> <= 8, "cimd::simd<T, N, K>: more than eight registers is not generated yet");
     static constexpr bool generated = false;
 };
