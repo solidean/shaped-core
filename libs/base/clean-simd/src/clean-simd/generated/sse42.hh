@@ -144,8 +144,8 @@ struct cimd::impl::reg<cimd::f32, cimd::sse42, 128>
     static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_ps(a, b); }
     static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_ps(a, b); }
     static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mul_ps(a, b); }
-    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_ps(a, b); }
-    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_ps(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_ps(b, a); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_ps(b, a); }
     static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return _mm_add_ps(_mm_mul_ps(a, b), c); }
     static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_castps_si128(_mm_cmpeq_ps(a, b)); }
     static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_castps_si128(_mm_cmpneq_ps(a, b)); }
@@ -224,8 +224,8 @@ struct cimd::impl::reg<cimd::f64, cimd::sse42, 128>
     static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_pd(a, b); }
     static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_pd(a, b); }
     static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mul_pd(a, b); }
-    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_pd(a, b); }
-    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_pd(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_pd(b, a); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_pd(b, a); }
     static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return _mm_add_pd(_mm_mul_pd(a, b), c); }
     static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_castpd_si128(_mm_cmpeq_pd(a, b)); }
     static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_castpd_si128(_mm_cmpneq_pd(a, b)); }

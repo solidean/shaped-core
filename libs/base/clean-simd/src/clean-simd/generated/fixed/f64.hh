@@ -24,6 +24,8 @@ struct alignas(cimd::impl::alignment<cimd::f64, N>) cimd::simd<cimd::f64, N, K>
     static constexpr int lanes = N;
     static constexpr int registers = 1;
     static constexpr bool generated = true;
+    /// No operation loops over the registers.
+    /// shuffle and permute are the exception: they store the value, pick each lane, and reload it.
     static constexpr bool is_loop_free = true;
 
     typename reg_t::type _r[1];
@@ -206,14 +208,15 @@ struct alignas(cimd::impl::alignment<cimd::f64, N>) cimd::simd<cimd::f64, N, K>
         storage_t const s = *this;
         return simd(storage_t{{s.lanes[I]...}});
     }
-    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe.
+    /// Lane i takes lane idx_i, read as unsigned modulo N, so any index is safe.
+    /// Where the index type cannot address N lanes, permute does not compile.
     CC_FORCE_INLINE simd permute(simd<i64, N, K> idx) const
     {
         storage_t const s = *this;
         storage<i64, N> const x = idx;
         storage_t r;
         for (auto i = 0; i < N; ++i)
-            r.lanes[i] = s.lanes[x.lanes[i] & i64(N - 1)];
+            r.lanes[i] = s.lanes[u64(x.lanes[i]) & (N - 1)];
         return simd(r);
     }
     /// Lane i loads base[idx_i]; every index must address a valid element.
@@ -350,6 +353,8 @@ struct alignas(cimd::impl::alignment<cimd::f64, N>) cimd::simd<cimd::f64, N, K>
     static constexpr int lanes = N;
     static constexpr int registers = 2;
     static constexpr bool generated = true;
+    /// No operation loops over the registers.
+    /// shuffle and permute are the exception: they store the value, pick each lane, and reload it.
     static constexpr bool is_loop_free = true;
 
     typename reg_t::type _r[2];
@@ -567,14 +572,15 @@ struct alignas(cimd::impl::alignment<cimd::f64, N>) cimd::simd<cimd::f64, N, K>
         storage_t const s = *this;
         return simd(storage_t{{s.lanes[I]...}});
     }
-    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe.
+    /// Lane i takes lane idx_i, read as unsigned modulo N, so any index is safe.
+    /// Where the index type cannot address N lanes, permute does not compile.
     CC_FORCE_INLINE simd permute(simd<i64, N, K> idx) const
     {
         storage_t const s = *this;
         storage<i64, N> const x = idx;
         storage_t r;
         for (auto i = 0; i < N; ++i)
-            r.lanes[i] = s.lanes[x.lanes[i] & i64(N - 1)];
+            r.lanes[i] = s.lanes[u64(x.lanes[i]) & (N - 1)];
         return simd(r);
     }
     /// Lane i loads base[idx_i]; every index must address a valid element.
@@ -726,6 +732,8 @@ struct alignas(cimd::impl::alignment<cimd::f64, N>) cimd::simd<cimd::f64, N, K>
     static constexpr int lanes = N;
     static constexpr int registers = 4;
     static constexpr bool generated = true;
+    /// No operation loops over the registers.
+    /// shuffle and permute are the exception: they store the value, pick each lane, and reload it.
     static constexpr bool is_loop_free = true;
 
     typename reg_t::type _r[4];
@@ -995,14 +1003,15 @@ struct alignas(cimd::impl::alignment<cimd::f64, N>) cimd::simd<cimd::f64, N, K>
         storage_t const s = *this;
         return simd(storage_t{{s.lanes[I]...}});
     }
-    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe.
+    /// Lane i takes lane idx_i, read as unsigned modulo N, so any index is safe.
+    /// Where the index type cannot address N lanes, permute does not compile.
     CC_FORCE_INLINE simd permute(simd<i64, N, K> idx) const
     {
         storage_t const s = *this;
         storage<i64, N> const x = idx;
         storage_t r;
         for (auto i = 0; i < N; ++i)
-            r.lanes[i] = s.lanes[x.lanes[i] & i64(N - 1)];
+            r.lanes[i] = s.lanes[u64(x.lanes[i]) & (N - 1)];
         return simd(r);
     }
     /// Lane i loads base[idx_i]; every index must address a valid element.
@@ -1184,6 +1193,8 @@ struct alignas(cimd::impl::alignment<cimd::f64, N>) cimd::simd<cimd::f64, N, K>
     static constexpr int lanes = N;
     static constexpr int registers = 8;
     static constexpr bool generated = true;
+    /// No operation loops over the registers.
+    /// shuffle and permute are the exception: they store the value, pick each lane, and reload it.
     static constexpr bool is_loop_free = true;
 
     typename reg_t::type _r[8];
@@ -1557,14 +1568,15 @@ struct alignas(cimd::impl::alignment<cimd::f64, N>) cimd::simd<cimd::f64, N, K>
         storage_t const s = *this;
         return simd(storage_t{{s.lanes[I]...}});
     }
-    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe.
+    /// Lane i takes lane idx_i, read as unsigned modulo N, so any index is safe.
+    /// Where the index type cannot address N lanes, permute does not compile.
     CC_FORCE_INLINE simd permute(simd<i64, N, K> idx) const
     {
         storage_t const s = *this;
         storage<i64, N> const x = idx;
         storage_t r;
         for (auto i = 0; i < N; ++i)
-            r.lanes[i] = s.lanes[x.lanes[i] & i64(N - 1)];
+            r.lanes[i] = s.lanes[u64(x.lanes[i]) & (N - 1)];
         return simd(r);
     }
     /// Lane i loads base[idx_i]; every index must address a valid element.

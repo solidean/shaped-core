@@ -595,74 +595,78 @@ struct cimd::impl::reg<cimd::f32, cimd::scalar, 128>
     }
     static CC_FORCE_INLINE type floor(type a)
     {
-        auto const nearest = [](f32 x)
+        auto const f = [](f32 x)
         {
             f32 const ax = x < 0 ? -x : x;
             if (!(ax < 8388608.f))
                 return x;
-            f32 const r = (ax + 8388608.f) - 8388608.f;
-            return x < 0 ? -r : r;
+            f32 const m = (ax + 8388608.f) - 8388608.f;
+            f32 const n = x < 0 ? -m : m;
+            f32 const r = n > x ? n - f32(1) : n;
+            return cc::bit_cast<f32>(u32(cc::bit_cast<u32>(r) | (cc::bit_cast<u32>(x) & 0x80000000u)));
         };
         type r;
-        r.v[0] = (nearest(a.v[0]) > a.v[0] ? nearest(a.v[0]) - f32(1) : nearest(a.v[0]));
-        r.v[1] = (nearest(a.v[1]) > a.v[1] ? nearest(a.v[1]) - f32(1) : nearest(a.v[1]));
-        r.v[2] = (nearest(a.v[2]) > a.v[2] ? nearest(a.v[2]) - f32(1) : nearest(a.v[2]));
-        r.v[3] = (nearest(a.v[3]) > a.v[3] ? nearest(a.v[3]) - f32(1) : nearest(a.v[3]));
+        r.v[0] = f(a.v[0]);
+        r.v[1] = f(a.v[1]);
+        r.v[2] = f(a.v[2]);
+        r.v[3] = f(a.v[3]);
         return r;
     }
     static CC_FORCE_INLINE type ceil(type a)
     {
-        auto const nearest = [](f32 x)
+        auto const f = [](f32 x)
         {
             f32 const ax = x < 0 ? -x : x;
             if (!(ax < 8388608.f))
                 return x;
-            f32 const r = (ax + 8388608.f) - 8388608.f;
-            return x < 0 ? -r : r;
+            f32 const m = (ax + 8388608.f) - 8388608.f;
+            f32 const n = x < 0 ? -m : m;
+            f32 const r = n < x ? n + f32(1) : n;
+            return cc::bit_cast<f32>(u32(cc::bit_cast<u32>(r) | (cc::bit_cast<u32>(x) & 0x80000000u)));
         };
         type r;
-        r.v[0] = (nearest(a.v[0]) < a.v[0] ? nearest(a.v[0]) + f32(1) : nearest(a.v[0]));
-        r.v[1] = (nearest(a.v[1]) < a.v[1] ? nearest(a.v[1]) + f32(1) : nearest(a.v[1]));
-        r.v[2] = (nearest(a.v[2]) < a.v[2] ? nearest(a.v[2]) + f32(1) : nearest(a.v[2]));
-        r.v[3] = (nearest(a.v[3]) < a.v[3] ? nearest(a.v[3]) + f32(1) : nearest(a.v[3]));
+        r.v[0] = f(a.v[0]);
+        r.v[1] = f(a.v[1]);
+        r.v[2] = f(a.v[2]);
+        r.v[3] = f(a.v[3]);
         return r;
     }
     static CC_FORCE_INLINE type round(type a)
     {
-        auto const nearest = [](f32 x)
+        auto const f = [](f32 x)
         {
             f32 const ax = x < 0 ? -x : x;
             if (!(ax < 8388608.f))
                 return x;
-            f32 const r = (ax + 8388608.f) - 8388608.f;
-            return x < 0 ? -r : r;
+            f32 const m = (ax + 8388608.f) - 8388608.f;
+            f32 const n = x < 0 ? -m : m;
+            f32 const r = n;
+            return cc::bit_cast<f32>(u32(cc::bit_cast<u32>(r) | (cc::bit_cast<u32>(x) & 0x80000000u)));
         };
         type r;
-        r.v[0] = nearest(a.v[0]);
-        r.v[1] = nearest(a.v[1]);
-        r.v[2] = nearest(a.v[2]);
-        r.v[3] = nearest(a.v[3]);
+        r.v[0] = f(a.v[0]);
+        r.v[1] = f(a.v[1]);
+        r.v[2] = f(a.v[2]);
+        r.v[3] = f(a.v[3]);
         return r;
     }
     static CC_FORCE_INLINE type trunc(type a)
     {
-        auto const nearest = [](f32 x)
+        auto const f = [](f32 x)
         {
             f32 const ax = x < 0 ? -x : x;
             if (!(ax < 8388608.f))
                 return x;
-            f32 const r = (ax + 8388608.f) - 8388608.f;
-            return x < 0 ? -r : r;
+            f32 const m = (ax + 8388608.f) - 8388608.f;
+            f32 const n = x < 0 ? -m : m;
+            f32 const r = x < 0 ? (n < x ? n + f32(1) : n) : (n > x ? n - f32(1) : n);
+            return cc::bit_cast<f32>(u32(cc::bit_cast<u32>(r) | (cc::bit_cast<u32>(x) & 0x80000000u)));
         };
         type r;
-        r.v[0] = a.v[0] < 0 ? (nearest(a.v[0]) < a.v[0] ? nearest(a.v[0]) + f32(1) : nearest(a.v[0]))
-                            : (nearest(a.v[0]) > a.v[0] ? nearest(a.v[0]) - f32(1) : nearest(a.v[0]));
-        r.v[1] = a.v[1] < 0 ? (nearest(a.v[1]) < a.v[1] ? nearest(a.v[1]) + f32(1) : nearest(a.v[1]))
-                            : (nearest(a.v[1]) > a.v[1] ? nearest(a.v[1]) - f32(1) : nearest(a.v[1]));
-        r.v[2] = a.v[2] < 0 ? (nearest(a.v[2]) < a.v[2] ? nearest(a.v[2]) + f32(1) : nearest(a.v[2]))
-                            : (nearest(a.v[2]) > a.v[2] ? nearest(a.v[2]) - f32(1) : nearest(a.v[2]));
-        r.v[3] = a.v[3] < 0 ? (nearest(a.v[3]) < a.v[3] ? nearest(a.v[3]) + f32(1) : nearest(a.v[3]))
-                            : (nearest(a.v[3]) > a.v[3] ? nearest(a.v[3]) - f32(1) : nearest(a.v[3]));
+        r.v[0] = f(a.v[0]);
+        r.v[1] = f(a.v[1]);
+        r.v[2] = f(a.v[2]);
+        r.v[3] = f(a.v[3]);
         return r;
     }
     static CC_FORCE_INLINE type copysign(type a, type b)
@@ -916,64 +920,70 @@ struct cimd::impl::reg<cimd::f64, cimd::scalar, 128>
     }
     static CC_FORCE_INLINE type floor(type a)
     {
-        auto const nearest = [](f64 x)
+        auto const f = [](f64 x)
         {
             f64 const ax = x < 0 ? -x : x;
             if (!(ax < 4503599627370496.0))
                 return x;
-            f64 const r = (ax + 4503599627370496.0) - 4503599627370496.0;
-            return x < 0 ? -r : r;
+            f64 const m = (ax + 4503599627370496.0) - 4503599627370496.0;
+            f64 const n = x < 0 ? -m : m;
+            f64 const r = n > x ? n - f64(1) : n;
+            return cc::bit_cast<f64>(u64(cc::bit_cast<u64>(r) | (cc::bit_cast<u64>(x) & 0x8000000000000000ull)));
         };
         type r;
-        r.v[0] = (nearest(a.v[0]) > a.v[0] ? nearest(a.v[0]) - f64(1) : nearest(a.v[0]));
-        r.v[1] = (nearest(a.v[1]) > a.v[1] ? nearest(a.v[1]) - f64(1) : nearest(a.v[1]));
+        r.v[0] = f(a.v[0]);
+        r.v[1] = f(a.v[1]);
         return r;
     }
     static CC_FORCE_INLINE type ceil(type a)
     {
-        auto const nearest = [](f64 x)
+        auto const f = [](f64 x)
         {
             f64 const ax = x < 0 ? -x : x;
             if (!(ax < 4503599627370496.0))
                 return x;
-            f64 const r = (ax + 4503599627370496.0) - 4503599627370496.0;
-            return x < 0 ? -r : r;
+            f64 const m = (ax + 4503599627370496.0) - 4503599627370496.0;
+            f64 const n = x < 0 ? -m : m;
+            f64 const r = n < x ? n + f64(1) : n;
+            return cc::bit_cast<f64>(u64(cc::bit_cast<u64>(r) | (cc::bit_cast<u64>(x) & 0x8000000000000000ull)));
         };
         type r;
-        r.v[0] = (nearest(a.v[0]) < a.v[0] ? nearest(a.v[0]) + f64(1) : nearest(a.v[0]));
-        r.v[1] = (nearest(a.v[1]) < a.v[1] ? nearest(a.v[1]) + f64(1) : nearest(a.v[1]));
+        r.v[0] = f(a.v[0]);
+        r.v[1] = f(a.v[1]);
         return r;
     }
     static CC_FORCE_INLINE type round(type a)
     {
-        auto const nearest = [](f64 x)
+        auto const f = [](f64 x)
         {
             f64 const ax = x < 0 ? -x : x;
             if (!(ax < 4503599627370496.0))
                 return x;
-            f64 const r = (ax + 4503599627370496.0) - 4503599627370496.0;
-            return x < 0 ? -r : r;
+            f64 const m = (ax + 4503599627370496.0) - 4503599627370496.0;
+            f64 const n = x < 0 ? -m : m;
+            f64 const r = n;
+            return cc::bit_cast<f64>(u64(cc::bit_cast<u64>(r) | (cc::bit_cast<u64>(x) & 0x8000000000000000ull)));
         };
         type r;
-        r.v[0] = nearest(a.v[0]);
-        r.v[1] = nearest(a.v[1]);
+        r.v[0] = f(a.v[0]);
+        r.v[1] = f(a.v[1]);
         return r;
     }
     static CC_FORCE_INLINE type trunc(type a)
     {
-        auto const nearest = [](f64 x)
+        auto const f = [](f64 x)
         {
             f64 const ax = x < 0 ? -x : x;
             if (!(ax < 4503599627370496.0))
                 return x;
-            f64 const r = (ax + 4503599627370496.0) - 4503599627370496.0;
-            return x < 0 ? -r : r;
+            f64 const m = (ax + 4503599627370496.0) - 4503599627370496.0;
+            f64 const n = x < 0 ? -m : m;
+            f64 const r = x < 0 ? (n < x ? n + f64(1) : n) : (n > x ? n - f64(1) : n);
+            return cc::bit_cast<f64>(u64(cc::bit_cast<u64>(r) | (cc::bit_cast<u64>(x) & 0x8000000000000000ull)));
         };
         type r;
-        r.v[0] = a.v[0] < 0 ? (nearest(a.v[0]) < a.v[0] ? nearest(a.v[0]) + f64(1) : nearest(a.v[0]))
-                            : (nearest(a.v[0]) > a.v[0] ? nearest(a.v[0]) - f64(1) : nearest(a.v[0]));
-        r.v[1] = a.v[1] < 0 ? (nearest(a.v[1]) < a.v[1] ? nearest(a.v[1]) + f64(1) : nearest(a.v[1]))
-                            : (nearest(a.v[1]) > a.v[1] ? nearest(a.v[1]) - f64(1) : nearest(a.v[1]));
+        r.v[0] = f(a.v[0]);
+        r.v[1] = f(a.v[1]);
         return r;
     }
     static CC_FORCE_INLINE type copysign(type a, type b)

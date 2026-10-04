@@ -176,6 +176,8 @@ def emit_value(e: Elem, r: int) -> list[str]:
         "    static constexpr int lanes = N;",
         f"    static constexpr int registers = {r};",
         "    static constexpr bool generated = true;",
+        "    /// No operation loops over the registers.",
+        "    /// shuffle and permute are the exception: they store the value, pick each lane, and reload it.",
         "    static constexpr bool is_loop_free = true;",
         "",
         f"    typename reg_t::type _r[{r}];",
@@ -233,10 +235,13 @@ def emit_value(e: Elem, r: int) -> list[str]:
     lines += ["    template <int... I>", '        requires(sizeof...(I) == N && ((0 <= I && I < N) && ...))']
     lines += _fn("CC_FORCE_INLINE simd shuffle() const",
                  ["storage_t const s = *this;", "return simd(storage_t{{s.lanes[I]...}});"])
-    lines += ["    /// Lane i takes lane idx_i; only the low log2(N) bits of an index are read, so any index is safe."]
-    lines += _fn(f"CC_FORCE_INLINE simd permute(simd<i{e.bits}, N, K> idx) const",
+    # An i8 index addresses 256 lanes, which a u8 type of 512 lanes outgrows; wider indices address any N.
+    addressable = f" requires(N <= {1 << e.bits})" if e.bits < 32 else ""
+    lines += ["    /// Lane i takes lane idx_i, read as unsigned modulo N, so any index is safe.",
+              "    /// Where the index type cannot address N lanes, permute does not compile."]
+    lines += _fn(f"CC_FORCE_INLINE simd permute(simd<i{e.bits}, N, K> idx) const{addressable}",
                  ["storage_t const s = *this;", f"storage<i{e.bits}, N> const x = idx;", "storage_t r;",
-                  "for (auto i = 0; i < N; ++i)", f"    r.lanes[i] = s.lanes[x.lanes[i] & i{e.bits}(N - 1)];",
+                  "for (auto i = 0; i < N; ++i)", f"    r.lanes[i] = s.lanes[u{e.bits}(x.lanes[i]) & (N - 1)];",
                   "return simd(r);"])
     lines += ["    /// Lane i loads base[idx_i]; every index must address a valid element."]
     lines += _fn(f"static CC_FORCE_INLINE simd gather({t} const* base, simd<i{e.bits}, N, K> idx)",

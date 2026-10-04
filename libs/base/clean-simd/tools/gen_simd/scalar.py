@@ -38,15 +38,25 @@ def _tree(lanes: int, f) -> str:
     return level[0]
 
 
-# Round to nearest, ties to even, for a float whose magnitude is below 2^mantissa; anything above is already integral.
-# The sum and difference round in the default mode, which is what makes this the hardware's nearest.
-_NEAREST = {
-    "f32": "auto const nearest = [](f32 x) { f32 const ax = x < 0 ? -x : x; "
-           "if (!(ax < 8388608.f)) return x; f32 const r = (ax + 8388608.f) - 8388608.f; return x < 0 ? -r : r; };\n",
-    "f64": "auto const nearest = [](f64 x) { f64 const ax = x < 0 ? -x : x; "
-           "if (!(ax < 4503599627370496.0)) return x; f64 const r = (ax + 4503599627370496.0) - 4503599627370496.0; "
-           "return x < 0 ? -r : r; };\n",
-}
+def _rounding(t: str, step: str) -> str:
+    """A lambda `f` rounding one lane: nearest, ties to even, then `step` from the nearest `n` toward the result.
+
+    Below 2^mantissa the sum and difference round in the default mode, which is what makes `n` the hardware's nearest;
+    anything above is already integral, and so is a NaN or an infinity.
+    The input's sign is ORed into the result: stepping -1 up by one, or nearest of -0, gives +0, and rounding never
+    changes a sign.
+    """
+    big = "8388608.f" if t == "f32" else "4503599627370496.0"
+    bits, sign = ("u32", "0x80000000u") if t == "f32" else ("u64", "0x8000000000000000ull")
+    return (f"auto const f = []({t} x) {{\n"
+            f"    {t} const ax = x < 0 ? -x : x;\n"
+            f"    if (!(ax < {big}))\n"
+            f"        return x;\n"
+            f"    {t} const m = (ax + {big}) - {big};\n"
+            f"    {t} const n = x < 0 ? -m : m;\n"
+            f"    {t} const r = {step};\n"
+            f"    return cc::bit_cast<{t}>({bits}(cc::bit_cast<{bits}>(r) | (cc::bit_cast<{bits}>(x) & {sign})));\n"
+            "};\n")
 
 
 def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
@@ -85,14 +95,11 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
         out["abs"] = _lanes(lanes, f"cc::bit_cast<{t}>({bits}(cc::bit_cast<{bits}>(a.v[{{i}}]) & {mask}))")
         out["div"] = _lanes(lanes, "a.v[{i}] / b.v[{i}]")
         out["sqrt"] = _lanes(lanes, "std::sqrt(a.v[{i}])")
-        nearest = _NEAREST[t]
-        rounded = "nearest(a.v[{i}])"
-        down = f"({rounded} > a.v[{{i}}] ? {rounded} - {t}(1) : {rounded})"
-        up = f"({rounded} < a.v[{{i}}] ? {rounded} + {t}(1) : {rounded})"
-        out["round"] = Impl(SINGLE, nearest + _lanes(lanes, rounded).body)
-        out["floor"] = Impl(SINGLE, nearest + _lanes(lanes, down).body)
-        out["ceil"] = Impl(SINGLE, nearest + _lanes(lanes, up).body)
-        out["trunc"] = Impl(SINGLE, nearest + _lanes(lanes, f"a.v[{{i}}] < 0 ? {up} : {down}").body)
+        down = f"n > x ? n - {t}(1) : n"
+        up = f"n < x ? n + {t}(1) : n"
+        steps = {"round": "n", "floor": down, "ceil": up, "trunc": f"x < 0 ? ({up}) : ({down})"}
+        for name, step in steps.items():
+            out[name] = Impl(SINGLE, _rounding(t, step) + _lanes(lanes, "f(a.v[{i}])").body)
         out["copysign"] = _lanes(lanes, f"cc::bit_cast<{t}>({bits}((cc::bit_cast<{bits}>(a.v[{{i}}]) & ~{sign}) | "
                                         f"(cc::bit_cast<{bits}>(b.v[{{i}}]) & {sign})))")
     else:

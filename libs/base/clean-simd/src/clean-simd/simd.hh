@@ -12,6 +12,7 @@
 /// The value types are generated per element type and register count (generated/fixed/), on top of one register
 /// layer per kernel (generated/<kernel>/).
 /// Everything up to eight registers is flat code with no loop; `T::is_loop_free` is the static fact a hot path asserts.
+/// shuffle and permute are the exception: they go through memory, picking one lane at a time.
 ///
 /// A mask is opaque (`cimd::mask<Bits, N, K>`, `m32x8<K>`): one per lane width, so a float comparison selects integers.
 /// It has no layout guarantee — on avx512 it is a k-register.

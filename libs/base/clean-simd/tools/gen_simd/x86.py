@@ -118,8 +118,11 @@ def _float_ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     out["load_aligned"] = _ret(f"{p}_load_{s}(p)")
     out["store"] = Impl(SINGLE, f"{p}_storeu_{s}(p, a);")
     out["store_aligned"] = Impl(SINGLE, f"{p}_store_{s}(p, a);")
-    for name in ("add", "sub", "mul", "min", "max", "div"):
+    for name in ("add", "sub", "mul", "div"):
         out[name] = _ret(f"{p}_{name}_{s}(a, b)")
+    # x86 returns the second operand on a tie or a NaN, so swapping them returns `a`, as scalar and simd128 do.
+    for name in ("min", "max"):
+        out[name] = _ret(f"{p}_{name}_{s}(b, a)")
     out["sqrt"] = _ret(f"{p}_sqrt_{s}(a)")
     sign = f"{p}_set1_{s}({'-0.f' if e.bits == 32 else '-0.0'})"
     out["neg"] = _ret(f"{p}_xor_{s}(a, {sign})")
@@ -176,6 +179,9 @@ def _float_ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
         # SSE2 has no rounding instruction, so nearest adds and subtracts 2^mantissa to the magnitude.
         # Floor, ceil and trunc step off it by one where it overshot.
         # Above 2^mantissa every float is integral already.
+        # Stepping -1 up by one gives +0, so the input's sign is ORed back in: rounding never changes a sign, and a
+        # NaN keeps its own.
+        # Nearest carries it already.
         big = "8388608.f" if e.bits == 32 else "4503599627370496.0"
         one = f"_mm_set1_{s}({'1.f' if e.bits == 32 else '1.0'})"
         nearest = (f"{ft} const s = _mm_and_{s}(a, {sign});\n"
@@ -185,10 +191,11 @@ def _float_ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
                    f"{ft} const n = select(lt(ax, big), r, a);\n")
         down = f"_mm_sub_{s}(n, _mm_and_{s}(_mm_castsi128_{s}(gt(n, a)), {one}))"
         up = f"_mm_add_{s}(n, _mm_and_{s}(_mm_castsi128_{s}(lt(n, a)), {one}))"
+        signed = lambda x: f"return _mm_or_{s}({x}, s);"  # noqa: E731
         out["round"] = Impl(EMULATED, nearest + "return n;")
-        out["floor"] = Impl(EMULATED, nearest + f"return {down};")
-        out["ceil"] = Impl(EMULATED, nearest + f"return {up};")
-        out["trunc"] = Impl(EMULATED, nearest + f"return select(lt(a, _mm_setzero_{s}()), {up}, {down});")
+        out["floor"] = Impl(EMULATED, nearest + signed(down))
+        out["ceil"] = Impl(EMULATED, nearest + signed(up))
+        out["trunc"] = Impl(EMULATED, nearest + signed(f"select(lt(a, _mm_setzero_{s}()), {up}, {down})"))
 
     for op in ("add", "min", "max"):
         if w == 128 and e.bits == 32:

@@ -209,6 +209,119 @@ TEST("cimd simd - float negation, abs and mul_add")
         });
 }
 
+namespace
+{
+template <class T>
+auto bits_of(T x)
+{
+    if constexpr (sizeof(T) == 4)
+        return cc::bit_cast<u32>(x);
+    else
+        return cc::bit_cast<u64>(x);
+}
+
+// A payload of one, so a kernel that returns some other NaN is caught.
+template <class T>
+T quiet_nan()
+{
+    if constexpr (sizeof(T) == 4)
+        return cc::bit_cast<f32>(0x7FC00001u);
+    else
+        return cc::bit_cast<f64>(0x7FF8000000000001ull);
+}
+
+// The IEEE results, signed zeros included: an emulation that steps -1 up to +0 is wrong here and nowhere else.
+template <class T, class K>
+void check_rounding()
+{
+    using V = cimd::simd<T, 16, K>;
+    auto const kn = cimd::kernel_name(K::id);
+    auto const x = cimd::storage<T, 16>{{T(-0.0), T(-0.3), T(-0.5), T(-0.7), T(-1.0), T(0.3), T(2.5), T(-2.5), T(1.5),
+                                         T(-1.5), T(0.0), T(0.5), T(0.7), T(-2.7), T(8388609.0), T(3.5)}};
+    auto const floor = cimd::storage<T, 16>{{T(-0.0), T(-1), T(-1), T(-1), T(-1), T(0), T(2), T(-3), T(1), T(-2), T(0),
+                                             T(0), T(0), T(-3), T(8388609.0), T(3)}};
+    auto const ceil = cimd::storage<T, 16>{{T(-0.0), T(-0.0), T(-0.0), T(-0.0), T(-1), T(1), T(3), T(-2), T(2), T(-1),
+                                            T(0), T(1), T(1), T(-2), T(8388609.0), T(4)}};
+    auto const round = cimd::storage<T, 16>{{T(-0.0), T(-0.0), T(-0.0), T(-1), T(-1), T(0), T(2), T(-2), T(2), T(-2),
+                                             T(0), T(0), T(1), T(-3), T(8388609.0), T(4)}};
+    auto const trunc = cimd::storage<T, 16>{{T(-0.0), T(-0.0), T(-0.0), T(-0.0), T(-1), T(0), T(2), T(-2), T(1), T(-1),
+                                             T(0), T(0), T(0), T(-2), T(8388609.0), T(3)}};
+    V const v = x;
+    cimd::storage<T, 16> const got_floor = v.floor();
+    cimd::storage<T, 16> const got_ceil = v.ceil();
+    cimd::storage<T, 16> const got_round = v.round();
+    cimd::storage<T, 16> const got_trunc = v.trunc();
+    for (auto i = 0; i < 16; ++i)
+    {
+        CHECK(bits_of(got_floor.lanes[i]) == bits_of(floor.lanes[i])).context(kn).dump("x", x.lanes[i]);
+        CHECK(bits_of(got_ceil.lanes[i]) == bits_of(ceil.lanes[i])).context(kn).dump("x", x.lanes[i]);
+        CHECK(bits_of(got_round.lanes[i]) == bits_of(round.lanes[i])).context(kn).dump("x", x.lanes[i]);
+        CHECK(bits_of(got_trunc.lanes[i]) == bits_of(trunc.lanes[i])).context(kn).dump("x", x.lanes[i]);
+    }
+}
+
+// NEON's vminq and vmaxq order -0 below +0 and propagate a NaN, so it alone is left out.
+template <class T, class K>
+void check_min_max_ties()
+{
+    using V = cimd::simd<T, 8, K>;
+    auto const kn = cimd::kernel_name(K::id);
+    auto const nan = quiet_nan<T>();
+    auto const a = cimd::storage<T, 8>{{T(0.0), T(-0.0), T(0.0), T(-0.0), nan, T(1), T(-0.0), nan}};
+    auto const b = cimd::storage<T, 8>{{T(-0.0), T(0.0), T(0.0), T(-0.0), T(1), nan, nan, T(0.0)}};
+    cimd::storage<T, 8> const lo = V(a).min(V(b));
+    cimd::storage<T, 8> const hi = V(a).max(V(b));
+    for (auto i = 0; i < 8; ++i)
+    {
+        CHECK(bits_of(lo.lanes[i]) == bits_of(a.lanes[i])).context(kn).dump("lane", i);
+        CHECK(bits_of(hi.lanes[i]) == bits_of(a.lanes[i])).context(kn).dump("lane", i);
+    }
+}
+} // namespace
+
+TEST("cimd simd - floor, ceil, round and trunc give the IEEE result, the sign of zero included")
+{
+    for_each_kernel(
+        []<class K>
+        {
+            check_rounding<f32, K>();
+            check_rounding<f64, K>();
+        });
+}
+
+TEST("cimd simd - min and max return a on a tie of zeros or a NaN, on every kernel but neon")
+{
+    for_each_kernel(
+        []<class K>
+        {
+            if constexpr (K::id != cimd::kernel_id::neon)
+            {
+                check_min_max_ties<f32, K>();
+                check_min_max_ties<f64, K>();
+            }
+        });
+}
+
+TEST("cimd simd - permute reads an 8-bit index unsigned, so all 256 lanes are reachable")
+{
+    for_each_kernel(
+        []<class K>
+        {
+            // 256 lanes where the kernel generates them, else 128, whose indices here are all negative as an i8.
+            constexpr int n = cimd::impl::reg_count<u8, 256, K> <= 8 ? 256 : 128;
+            cimd::storage<u8, n> values;
+            cimd::storage<i8, n> indices;
+            for (auto i = 0; i < n; ++i)
+            {
+                values.lanes[i] = u8(i);
+                indices.lanes[i] = i8(u8(255 - i));
+            }
+            cimd::storage<u8, n> const got = cimd::simd<u8, n, K>(values).permute(indices);
+            for (auto i = 0; i < n; ++i)
+                CHECK(got.lanes[i] == u8((255 - i) & (n - 1))).context(cimd::kernel_name(K::id));
+        });
+}
+
 TEST("cimd simd - conversions between f32 and 32-bit integers")
 {
     auto rng = nx::test_random();

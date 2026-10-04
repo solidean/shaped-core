@@ -85,6 +85,7 @@ It is a partial specialization constrained on `impl::reg_count<T, N, K>`, which 
 
 **Flat up to eight registers.**
 Every operation is written out once per register, with no loop and no index sequence, so a debug build pays one call per operation and `T::is_loop_free` is a compile-time fact.
+`shuffle` and `permute` are the exception: they store the value, pick its lanes one by one, and reload it, as [Moving lanes](#moving-lanes) says.
 Wider types are not generated yet; the primary template says so.
 
 **The scalar kernel's register is a 128-bit array**, so every kernel has a native width of at least 128 bits and fixed types start at 128 bits.
@@ -128,10 +129,12 @@ A hand-written list can drift: shaped-simd's cheat sheet promised an `i64 *` its
 ## Results that differ by kernel
 
 - **`mul_add`** fuses where `K::has_native_fma` and rounds twice elsewhere, the scalar kernel included; the last bit is kernel-dependent.
-- **NaN in `min`/`max`** and **out-of-range float-to-int conversion** are unspecified.
-  Making them consistent costs a compare and a select on some kernel for every call, and SIMD hot paths keep NaN out.
+- **A NaN or a ±0 pair in `min`/`max`** is where results differ, and only NEON differs.
+  x86, scalar and SIMD128 return `a` on a tie or a NaN, and agree bit for bit; NEON's `vminq`/`vmaxq` propagate the NaN and order -0 below +0.
+  Making NEON agree costs a compare and a select for every call, and SIMD hot paths keep NaN out.
+- **Out-of-range float-to-int conversion** is unspecified; `convert_saturating` is the spelling that pins it.
 - **`rcp_approx` and `rsqrt_approx`** are within a relative 2^-11 of the exact result on every kernel, which is what SSE's 12-bit estimate guarantees.
-  NEON's estimate is 8 bits, so it takes one Newton step; SIMD128, and doubles below AVX-512, have no estimate and divide exactly.
+  NEON's estimate is 8 bits, so it takes one Newton step; SIMD128, and x86 doubles below AVX-512, have no estimate and divide exactly.
   At zero, infinity and below zero the result is unspecified.
 - **`convert_saturating`** is the conversion that pins every input: the maximum above the range, the minimum below, zero for NaN.
   NEON and SIMD128 saturate natively; x86 pays two compares and two selects for it.

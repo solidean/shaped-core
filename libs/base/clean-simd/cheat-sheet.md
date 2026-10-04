@@ -36,9 +36,10 @@ v.lane(i);  v.with_lane(i, x);       // through storage; not for hot loops
 a + b  a - b  a * b  -a              // operators exist only where AVX2, NEON and SIMD128 are each <= 3 instructions
 a.add(b)  a.sub(b)  a.mul(b)  a.neg()// the member twin of every operator
 a & b  a | b  a ^ b  ~a              // integer types only; floats go through cc::bit_cast
-a << n  a >> n                       // one int count for every lane; >> is arithmetic on signed types
+a << n  a >> n                       // one int count for every lane, 0 <= n < bits (outside it results differ by kernel,
+                                     // and the CC_ASSERT fires only with asserts on); >> is arithmetic on signed types
 a / b  a.sqrt()  a.floor()  ceil()  round()  trunc()  a.copysign(b)   // floats; round is to nearest, ties to even
-a.min(b)  a.max(b)  a.abs()          // NaN in min/max is unspecified
+a.min(b)  a.max(b)  a.abs()          // a NaN or ±0 pair gives `a` on x86, scalar and simd128; NEON alone differs
 a.mul_add(b, c)                      // a*b + c — fused only where K::has_native_fma
 a.reduce_add()  reduce_min()  reduce_max()  // lane i with i + N/2, recursively: the same bits on every kernel
 f.convert<i32>()  i.convert<f32>()   // f32<->i32, u32->f32, f64<->i64, u64->f64; truncating, out of range unspecified
@@ -46,7 +47,7 @@ f.convert_saturating<i32>()          // out of range clamps, NaN gives 0
 a.rcp_approx()  a.rsqrt_approx()     // floats; relative error <= 2^-11 on every kernel, unspecified at 0, inf and below 0
 a.reverse()                          // lane i takes lane N - 1 - i
 a.shuffle<1, 0, 3, 2>()              // lane i takes lane I_i; exactly N indices in [0, N)
-a.permute(idx)  V::gather(base, idx) // idx is simd<iB, N, K> for B the element's bits; permute reads its low log2(N) bits
+a.permute(idx)  V::gather(base, idx) // idx is simd<iB, N, K> for B the element's bits; permute reads it unsigned, modulo N
 // No operator where AVX2, NEON or SIMD128 needs more than three instructions — the member twin is there instead:
 // u8/i8 a.mul(b) (no 8-bit multiply on x86 or wasm), i64/u64 a.mul(b) (none below AVX-512), i8 a.shr(n)
 ```

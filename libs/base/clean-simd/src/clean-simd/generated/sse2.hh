@@ -144,8 +144,8 @@ struct cimd::impl::reg<cimd::f32, cimd::sse2, 128>
     static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_ps(a, b); }
     static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_ps(a, b); }
     static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mul_ps(a, b); }
-    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_ps(a, b); }
-    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_ps(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_ps(b, a); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_ps(b, a); }
     static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return _mm_add_ps(_mm_mul_ps(a, b), c); }
     static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_castps_si128(_mm_cmpeq_ps(a, b)); }
     static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_castps_si128(_mm_cmpneq_ps(a, b)); }
@@ -199,7 +199,7 @@ struct cimd::impl::reg<cimd::f32, cimd::sse2, 128>
         __m128 const big = _mm_set1_ps(8388608.f);
         __m128 const r = _mm_or_ps(_mm_sub_ps(_mm_add_ps(ax, big), big), s);
         __m128 const n = select(lt(ax, big), r, a);
-        return _mm_sub_ps(n, _mm_and_ps(_mm_castsi128_ps(gt(n, a)), _mm_set1_ps(1.f)));
+        return _mm_or_ps(_mm_sub_ps(n, _mm_and_ps(_mm_castsi128_ps(gt(n, a)), _mm_set1_ps(1.f))), s);
     }
     static CC_FORCE_INLINE type ceil(type a)
     {
@@ -208,7 +208,7 @@ struct cimd::impl::reg<cimd::f32, cimd::sse2, 128>
         __m128 const big = _mm_set1_ps(8388608.f);
         __m128 const r = _mm_or_ps(_mm_sub_ps(_mm_add_ps(ax, big), big), s);
         __m128 const n = select(lt(ax, big), r, a);
-        return _mm_add_ps(n, _mm_and_ps(_mm_castsi128_ps(lt(n, a)), _mm_set1_ps(1.f)));
+        return _mm_or_ps(_mm_add_ps(n, _mm_and_ps(_mm_castsi128_ps(lt(n, a)), _mm_set1_ps(1.f))), s);
     }
     static CC_FORCE_INLINE type round(type a)
     {
@@ -226,8 +226,10 @@ struct cimd::impl::reg<cimd::f32, cimd::sse2, 128>
         __m128 const big = _mm_set1_ps(8388608.f);
         __m128 const r = _mm_or_ps(_mm_sub_ps(_mm_add_ps(ax, big), big), s);
         __m128 const n = select(lt(ax, big), r, a);
-        return select(lt(a, _mm_setzero_ps()), _mm_add_ps(n, _mm_and_ps(_mm_castsi128_ps(lt(n, a)), _mm_set1_ps(1.f))),
-                      _mm_sub_ps(n, _mm_and_ps(_mm_castsi128_ps(gt(n, a)), _mm_set1_ps(1.f))));
+        return _mm_or_ps(
+            select(lt(a, _mm_setzero_ps()), _mm_add_ps(n, _mm_and_ps(_mm_castsi128_ps(lt(n, a)), _mm_set1_ps(1.f))),
+                   _mm_sub_ps(n, _mm_and_ps(_mm_castsi128_ps(gt(n, a)), _mm_set1_ps(1.f)))),
+            s);
     }
     static CC_FORCE_INLINE type copysign(type a, type b)
     {
@@ -261,8 +263,8 @@ struct cimd::impl::reg<cimd::f64, cimd::sse2, 128>
     static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_pd(a, b); }
     static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_pd(a, b); }
     static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mul_pd(a, b); }
-    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_pd(a, b); }
-    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_pd(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_pd(b, a); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_pd(b, a); }
     static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return _mm_add_pd(_mm_mul_pd(a, b), c); }
     static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_castpd_si128(_mm_cmpeq_pd(a, b)); }
     static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_castpd_si128(_mm_cmpneq_pd(a, b)); }
@@ -299,7 +301,7 @@ struct cimd::impl::reg<cimd::f64, cimd::sse2, 128>
         __m128d const big = _mm_set1_pd(4503599627370496.0);
         __m128d const r = _mm_or_pd(_mm_sub_pd(_mm_add_pd(ax, big), big), s);
         __m128d const n = select(lt(ax, big), r, a);
-        return _mm_sub_pd(n, _mm_and_pd(_mm_castsi128_pd(gt(n, a)), _mm_set1_pd(1.0)));
+        return _mm_or_pd(_mm_sub_pd(n, _mm_and_pd(_mm_castsi128_pd(gt(n, a)), _mm_set1_pd(1.0))), s);
     }
     static CC_FORCE_INLINE type ceil(type a)
     {
@@ -308,7 +310,7 @@ struct cimd::impl::reg<cimd::f64, cimd::sse2, 128>
         __m128d const big = _mm_set1_pd(4503599627370496.0);
         __m128d const r = _mm_or_pd(_mm_sub_pd(_mm_add_pd(ax, big), big), s);
         __m128d const n = select(lt(ax, big), r, a);
-        return _mm_add_pd(n, _mm_and_pd(_mm_castsi128_pd(lt(n, a)), _mm_set1_pd(1.0)));
+        return _mm_or_pd(_mm_add_pd(n, _mm_and_pd(_mm_castsi128_pd(lt(n, a)), _mm_set1_pd(1.0))), s);
     }
     static CC_FORCE_INLINE type round(type a)
     {
@@ -326,8 +328,10 @@ struct cimd::impl::reg<cimd::f64, cimd::sse2, 128>
         __m128d const big = _mm_set1_pd(4503599627370496.0);
         __m128d const r = _mm_or_pd(_mm_sub_pd(_mm_add_pd(ax, big), big), s);
         __m128d const n = select(lt(ax, big), r, a);
-        return select(lt(a, _mm_setzero_pd()), _mm_add_pd(n, _mm_and_pd(_mm_castsi128_pd(lt(n, a)), _mm_set1_pd(1.0))),
-                      _mm_sub_pd(n, _mm_and_pd(_mm_castsi128_pd(gt(n, a)), _mm_set1_pd(1.0))));
+        return _mm_or_pd(
+            select(lt(a, _mm_setzero_pd()), _mm_add_pd(n, _mm_and_pd(_mm_castsi128_pd(lt(n, a)), _mm_set1_pd(1.0))),
+                   _mm_sub_pd(n, _mm_and_pd(_mm_castsi128_pd(gt(n, a)), _mm_set1_pd(1.0)))),
+            s);
     }
     static CC_FORCE_INLINE type copysign(type a, type b)
     {
