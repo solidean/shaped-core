@@ -184,6 +184,7 @@ struct nx::test_schedule_execution
     [[nodiscard]] int count_failed_checks() const;
 
     /// Every test that ended at a SKIP, dispatched children included, as its addressable name and its reason.
+    /// A test that failed before it skipped is failed, not skipped, and is not listed.
     [[nodiscard]] cc::vector<skipped_test> skipped_tests() const;
 
     /// The floor of this run that no scheduling could have overlapped, read off where each top-level test sat and what it held.

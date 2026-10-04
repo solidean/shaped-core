@@ -621,6 +621,27 @@ TEST("check - a SKIP keeps its reason, so the summary and JUnit can name it", no
     CHECK(xml.contains("<skipped message=\"no AVX-512 on this CPU\"/>"));
 }
 
+TEST("check - a test that fails and then skips is failed, not skipped", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("fails then skips", {},
+                        []
+                        {
+                            CHECK(false);
+                            SKIP("gave up");
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    CHECK(exec.count_failed_tests() == 1);
+    CHECK(exec.skipped_tests().empty());
+
+    auto const xml = nx::write_junit_xml("suite", exec, {}, {});
+    CHECK(xml.contains("skipped=\"0\""));
+    CHECK(xml.contains("<failure"));
+    CHECK(!xml.contains("<skipped"));
+}
+
 TEST("check - complex expression with multiple operators", no_scheduler)
 {
     nx::test_registry reg;

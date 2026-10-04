@@ -2033,7 +2033,7 @@ cc::vector<nx::skipped_test> nx::test_schedule_execution::skipped_tests() const
             name += exec.invocation_group + " / ";
         if (exec.instance.declaration != nullptr)
             name += exec.instance.declaration->name;
-        if (!exec.skip_reason.empty())
+        if (!exec.skip_reason.empty() && !exec.root.is_considered_failing)
             out.push_back({.name = name, .reason = exec.skip_reason});
         for (auto const& child : exec.nested)
             self(self, child, name + " / ");

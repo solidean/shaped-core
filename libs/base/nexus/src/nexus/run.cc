@@ -61,7 +61,7 @@ cc::result<cc::unit> write_report_file(cc::string_view path, cc::string_view con
 // "runs only under --thorough" alone can account for hundreds, which is why each group is capped rather than listed.
 void print_skipped(cc::span<nx::skipped_test const> skipped)
 {
-    constexpr auto names_per_reason = 5;
+    constexpr auto names_per_reason = 3;
     auto reasons = cc::vector<cc::string_view>();
     for (auto const& s : skipped)
     {
