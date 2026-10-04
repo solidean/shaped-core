@@ -18,11 +18,11 @@ cimd::kernel_name(K::id)             // "avx2"
 ## Types
 
 ```cpp
-cimd::simd<T, N, K>                  // T: f32 f64 i8 i16 i32 i64 u8 u16 u32 u64; N a power of two, >= 128 bits, <= 8 registers
+cimd::simd<T, N, K>                  // T: f32 f64 i8 i16 i32 i64 u8 u16 u32 u64; N a power of two, 128 bits to 64 KiB
 cimd::f32x8<K>  f64x4<K>  i8x16<K>   // every element at 128, 256 and 512 bits: f32x4/x8/x16, u8x16/x32/x64, …
 cimd::m32x8<K>                       // mask over 32-bit lanes: what f32x8, i32x8 AND u32x8 compares return; m8/m16/m64 too
 cimd::f32x8_storage                  // kernel-free bytes for data structures; implicit both ways, an aligned load/store
-V::is_loop_free  V::registers  V::generated
+V::is_loop_free  V::registers  V::generated   // flat up to 8 registers; above, every operation loops (is_loop_free false)
 ```
 
 ## Values

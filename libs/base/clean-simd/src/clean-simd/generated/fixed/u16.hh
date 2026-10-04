@@ -1570,4 +1570,346 @@ struct alignas(cimd::impl::alignment<cimd::u16, N>) cimd::simd<cimd::u16, N, K>
     CC_FORCE_INLINE friend mask_t operator>=(simd a, simd b) { return a.ge(b); }
 };
 
+/// u16 lanes held in more than 8 registers of whichever kernel K is, looped over.
+template <int N, class K>
+    requires(cimd::impl::valid_shape<cimd::u16, N> && cimd::is_available<K> && cimd::impl::reg_count<cimd::u16, N, K> > 8)
+struct alignas(cimd::impl::alignment<cimd::u16, N>) cimd::simd<cimd::u16, N, K>
+{
+    using element_t = u16;
+    using kernel_t = K;
+    using mask_t = mask<16, N, K>;
+    using storage_t = storage<u16, N>;
+    using reg_t = impl::reg<u16, K, impl::reg_bits<u16, N, K>>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = impl::reg_count<u16, N, K>;
+    static constexpr bool generated = true;
+    /// Every operation loops over the registers; the flat specializations stop at eight.
+    static constexpr bool is_loop_free = false;
+
+    typename reg_t::type _r[registers];
+
+    simd() = default;
+
+    /// Broadcast; only from exactly the element type, so `v * 2.0` is an error rather than a silent conversion.
+    CC_FORCE_INLINE simd(u16 x)
+    {
+        auto const v = reg_t::broadcast(x);
+        for (auto i = 0; i < registers; ++i)
+            _r[i] = v;
+    }
+    template <class U>
+    simd(U) = delete;
+
+    CC_FORCE_INLINE simd(storage_t const& s)
+    {
+        for (auto i = 0; i < registers; ++i)
+            _r[i] = reg_t::load_aligned(s.lanes + i * reg_t::lanes);
+    }
+    CC_FORCE_INLINE operator storage_t() const
+    {
+        storage_t s;
+        for (auto i = 0; i < registers; ++i)
+            reg_t::store_aligned(s.lanes + i * reg_t::lanes, _r[i]);
+        return s;
+    }
+
+    static CC_FORCE_INLINE simd zero()
+    {
+        simd v;
+        auto const z = reg_t::zero();
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = z;
+        return v;
+    }
+    /// 0, 1, 2, … N - 1.
+    static CC_FORCE_INLINE simd iota()
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::iota(u16(i * reg_t::lanes));
+        return v;
+    }
+    template <class... A>
+        requires(sizeof...(A) == N && (std::is_same_v<A, u16> && ...))
+    static CC_FORCE_INLINE simd from_lanes(A... v)
+    {
+        return simd(storage_t{{v...}});
+    }
+    static CC_FORCE_INLINE simd load(u16 const* p)
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::load(p + i * reg_t::lanes);
+        return v;
+    }
+    static CC_FORCE_INLINE simd load_aligned(u16 const* p)
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::load_aligned(p + i * reg_t::lanes);
+        return v;
+    }
+    CC_FORCE_INLINE void store(u16* p) const
+    {
+        for (auto i = 0; i < registers; ++i)
+            reg_t::store(p + i * reg_t::lanes, _r[i]);
+    }
+    CC_FORCE_INLINE void store_aligned(u16* p) const
+    {
+        for (auto i = 0; i < registers; ++i)
+            reg_t::store_aligned(p + i * reg_t::lanes, _r[i]);
+    }
+
+    CC_FORCE_INLINE u16 lane(int i) const
+    {
+        CC_ASSERT(0 <= i && i < N, "lane index out of range");
+        return storage_t(*this).lanes[i];
+    }
+    CC_FORCE_INLINE simd with_lane(int i, u16 x) const
+    {
+        CC_ASSERT(0 <= i && i < N, "lane index out of range");
+        storage_t s = *this;
+        s.lanes[i] = x;
+        return simd(s);
+    }
+
+    CC_FORCE_INLINE simd add(simd b) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::add(_r[i], b._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd sub(simd b) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::sub(_r[i], b._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd mul(simd b) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::mul(_r[i], b._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd min(simd b) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::min(_r[i], b._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd max(simd b) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::max(_r[i], b._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd bit_and(simd b) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::bit_and(_r[i], b._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd bit_or(simd b) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::bit_or(_r[i], b._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd bit_xor(simd b) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::bit_xor(_r[i], b._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd bit_not() const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::bit_not(_r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE simd shl(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::shl(_r[i], n);
+        return v;
+    }
+    CC_FORCE_INLINE simd shr(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::shr(_r[i], n);
+        return v;
+    }
+    /// Lane i takes lane N - 1 - i.
+    CC_FORCE_INLINE simd reverse() const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::reverse(_r[registers - 1 - i]);
+        return v;
+    }
+    /// Lane i takes lane I_i; every index must be in [0, N).
+    template <int... I>
+        requires(sizeof...(I) == N && ((0 <= I && I < N) && ...))
+    CC_FORCE_INLINE simd shuffle() const
+    {
+        storage_t const s = *this;
+        return simd(storage_t{{s.lanes[I]...}});
+    }
+    /// Lane i takes lane idx_i, read as unsigned modulo N, so any index is safe.
+    /// Where the index type cannot address N lanes, permute does not compile.
+    CC_FORCE_INLINE simd permute(simd<i16, N, K> idx) const
+        requires(N <= 65536)
+    {
+        storage_t const s = *this;
+        storage<i16, N> const x = idx;
+        storage_t r;
+        for (auto i = 0; i < N; ++i)
+            r.lanes[i] = s.lanes[u16(x.lanes[i]) & (N - 1)];
+        return simd(r);
+    }
+    /// Lane i loads base[idx_i]; every index must address a valid element.
+    static CC_FORCE_INLINE simd gather(u16 const* base, simd<i16, N, K> idx)
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::gather(base, idx._r[i]);
+        return v;
+    }
+    /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.
+    CC_FORCE_INLINE simd mul_add(simd b, simd c) const
+    {
+        simd v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = reg_t::mul_add(_r[i], b._r[i], c._r[i]);
+        return v;
+    }
+    CC_FORCE_INLINE mask_t eq(simd b) const
+    {
+        mask_t m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::eq(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask_t ne(simd b) const
+    {
+        mask_t m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::ne(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask_t lt(simd b) const
+    {
+        mask_t m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::lt(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask_t le(simd b) const
+    {
+        mask_t m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::le(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask_t gt(simd b) const
+    {
+        mask_t m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::gt(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask_t ge(simd b) const
+    {
+        mask_t m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::ge(_r[i], b._r[i]);
+        return m;
+    }
+
+    /// Lane i combined with lane i + N/2, recursively, so every kernel produces the same bits.
+    CC_FORCE_INLINE u16 reduce_add() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::add(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::reduce_add(x0);
+    }
+    CC_FORCE_INLINE u16 reduce_min() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::min(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::reduce_min(x0);
+    }
+    CC_FORCE_INLINE u16 reduce_max() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::max(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::reduce_max(x0);
+    }
+
+    /// Lane-wise conversion to another element of the same width; float to integer truncates, and a value out of
+    /// range is unspecified.
+    template <class U>
+        requires(std::is_same_v<U, u16>)
+    CC_FORCE_INLINE simd<U, N, K> convert() const
+    {
+        if constexpr (std::is_same_v<U, u16>)
+        {
+            return *this;
+        }
+    }
+
+    CC_FORCE_INLINE friend simd operator+(simd a, simd b) { return a.add(b); }
+    CC_FORCE_INLINE simd& operator+=(simd b) { return *this = add(b); }
+    CC_FORCE_INLINE friend simd operator-(simd a, simd b) { return a.sub(b); }
+    CC_FORCE_INLINE simd& operator-=(simd b) { return *this = sub(b); }
+    CC_FORCE_INLINE friend simd operator*(simd a, simd b) { return a.mul(b); }
+    CC_FORCE_INLINE simd& operator*=(simd b) { return *this = mul(b); }
+    CC_FORCE_INLINE friend simd operator&(simd a, simd b) { return a.bit_and(b); }
+    CC_FORCE_INLINE simd& operator&=(simd b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend simd operator|(simd a, simd b) { return a.bit_or(b); }
+    CC_FORCE_INLINE simd& operator|=(simd b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend simd operator^(simd a, simd b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE simd& operator^=(simd b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend simd operator~(simd a) { return a.bit_not(); }
+    CC_FORCE_INLINE friend simd operator<<(simd a, int n) { return a.shl(n); }
+    CC_FORCE_INLINE simd& operator<<=(int n) { return *this = shl(n); }
+    CC_FORCE_INLINE friend simd operator>>(simd a, int n) { return a.shr(n); }
+    CC_FORCE_INLINE simd& operator>>=(int n) { return *this = shr(n); }
+    CC_FORCE_INLINE friend mask_t operator==(simd a, simd b) { return a.eq(b); }
+    CC_FORCE_INLINE friend mask_t operator!=(simd a, simd b) { return a.ne(b); }
+    CC_FORCE_INLINE friend mask_t operator<(simd a, simd b) { return a.lt(b); }
+    CC_FORCE_INLINE friend mask_t operator<=(simd a, simd b) { return a.le(b); }
+    CC_FORCE_INLINE friend mask_t operator>(simd a, simd b) { return a.gt(b); }
+    CC_FORCE_INLINE friend mask_t operator>=(simd a, simd b) { return a.ge(b); }
+};
+
 // NOLINTEND

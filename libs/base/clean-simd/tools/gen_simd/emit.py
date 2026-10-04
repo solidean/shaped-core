@@ -141,13 +141,23 @@ def emit_kernel(k: Kernel) -> str:
 # --- fixed layer ------------------------------------------------------------------------------------------------
 
 
+# The register count the looped specialization is emitted for: every count above REGISTER_COUNTS' largest.
+LOOPED = 0
+
+
 def _each(r: int, stmt: str) -> list[str]:
-    """`stmt` written out once per register, with `{i}` the index and `{o}` its first lane."""
+    """`stmt` once per register, with `{i}` the index and `{o}` its first lane: written out, or a loop where LOOPED."""
+    if r == LOOPED:
+        return ["for (auto i = 0; i < registers; ++i)", "    " + stmt.format(i="i", o="i * reg_t::lanes")]
     return [stmt.format(i=i, o=f"{i} * reg_t::lanes" if i else "0") for i in range(r)]
 
 
 def _tree(r: int, combine: str, first: str = "_r") -> list[str]:
     """Registers folded pairwise — register i with register i + r/2 — into `x0`, which the caller reduces."""
+    if r == LOOPED:
+        return ["typename reg_t::type x[registers];", "for (auto i = 0; i < registers; ++i)", f"    x[i] = {first}[i];",
+                "for (auto w = registers / 2; w > 0; w /= 2)", "    for (auto i = 0; i < w; ++i)",
+                f"        x[i] = {combine.format(a='x[i]', b='x[i + w]')};", "auto const x0 = x[0];"]
     lines = [f"auto x{i} = {first}[{i}];" for i in range(r)]
     width = r
     while width > 1:
@@ -160,14 +170,24 @@ def _fn(signature: str, body: list[str], indent: str = "    ") -> list[str]:
     return [f"{indent}{signature}", f"{indent}{{"] + [f"{indent}    {line}" for line in body] + [f"{indent}}}"]
 
 
+def _loop_free_doc(r: int) -> list[str]:
+    if r == LOOPED:
+        return ["    /// Every operation loops over the registers; the flat specializations stop at eight."]
+    return ["    /// No operation loops over the registers.",
+            "    /// shuffle and permute are the exception: they store the value, pick each lane, and reload it."]
+
+
 def emit_value(e: Elem, r: int) -> list[str]:
     t = e.name
     ops = ops_of(e)
+    looped = r == LOOPED
+    count = f"cimd::impl::reg_count<cimd::{t}, N, K>"
     lines = [
-        f"/// {t} lanes held in {r} register{'s' if r > 1 else ''} of whichever kernel K is.",
+        f"/// {t} lanes held in more than {REGISTER_COUNTS[-1]} registers of whichever kernel K is, looped over."
+        if looped else f"/// {t} lanes held in {r} register{'s' if r > 1 else ''} of whichever kernel K is.",
         "template <int N, class K>",
         f"    requires(cimd::impl::valid_shape<cimd::{t}, N> && cimd::is_available<K>"
-        f" && cimd::impl::reg_count<cimd::{t}, N, K> == {r})",
+        + (f" && {count} > {REGISTER_COUNTS[-1]})" if looped else f" && {count} == {r})"),
         f"struct alignas(cimd::impl::alignment<cimd::{t}, N>) cimd::simd<cimd::{t}, N, K>",
         "{",
         f"    using element_t = {t};",
@@ -177,13 +197,12 @@ def emit_value(e: Elem, r: int) -> list[str]:
         f"    using reg_t = impl::reg<{t}, K, impl::reg_bits<{t}, N, K>>;",
         "",
         "    static constexpr int lanes = N;",
-        f"    static constexpr int registers = {r};",
+        f"    static constexpr int registers = {f'impl::reg_count<{t}, N, K>' if looped else r};",
         "    static constexpr bool generated = true;",
-        "    /// No operation loops over the registers.",
-        "    /// shuffle and permute are the exception: they store the value, pick each lane, and reload it.",
-        "    static constexpr bool is_loop_free = true;",
+    ] + _loop_free_doc(r) + [
+        f"    static constexpr bool is_loop_free = {'false' if looped else 'true'};",
         "",
-        f"    typename reg_t::type _r[{r}];",
+        f"    typename reg_t::type _r[{'registers' if looped else r}];",
         "",
         "    simd() = default;",
         "",
@@ -232,8 +251,11 @@ def emit_value(e: Elem, r: int) -> list[str]:
                          ['CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");', "simd v;"]
                          + _each(r, f"v._r[{{i}}] = reg_t::{name}(_r[{{i}}], n);") + ["return v;"])
     lines += ["    /// Lane i takes lane N - 1 - i."]
-    lines += _fn("CC_FORCE_INLINE simd reverse() const",
-                 ["simd v;"] + [f"v._r[{i}] = reg_t::reverse(_r[{r - 1 - i}]);" for i in range(r)] + ["return v;"])
+    if looped:
+        reverse = ["for (auto i = 0; i < registers; ++i)", "    v._r[i] = reg_t::reverse(_r[registers - 1 - i]);"]
+    else:
+        reverse = [f"v._r[{i}] = reg_t::reverse(_r[{r - 1 - i}]);" for i in range(r)]
+    lines += _fn("CC_FORCE_INLINE simd reverse() const", ["simd v;"] + reverse + ["return v;"])
     lines += ["    /// Lane i takes lane I_i; every index must be in [0, N)."]
     lines += ["    template <int... I>", '        requires(sizeof...(I) == N && ((0 <= I && I < N) && ...))']
     lines += _fn("CC_FORCE_INLINE simd shuffle() const",
@@ -319,11 +341,15 @@ def emit_value(e: Elem, r: int) -> list[str]:
 
 
 def emit_mask(lane_bits: int, r: int) -> list[str]:
+    looped = r == LOOPED
+    count = f"cimd::impl::lane_reg_count<{lane_bits}, N, K>"
     lines = [
+        f"/// A mask over {lane_bits}-bit lanes, in more than {REGISTER_COUNTS[-1]} mask registers of whichever kernel K "
+        "is, looped over." if looped else
         f"/// A mask over {lane_bits}-bit lanes, in {r} mask register{'s' if r > 1 else ''} of whichever kernel K is.",
         "template <int N, class K>",
-        f"    requires(N > 0 && (N & (N - 1)) == 0 && N * {lane_bits} >= 128 && cimd::is_available<K>"
-        f" && cimd::impl::lane_reg_count<{lane_bits}, N, K> == {r})",
+        f"    requires(cimd::impl::valid_lane_shape<{lane_bits}, N> && cimd::is_available<K>"
+        + (f" && {count} > {REGISTER_COUNTS[-1]})" if looped else f" && {count} == {r})"),
         f"struct cimd::mask<{lane_bits}, N, K>",
         "{",
         "    using kernel_t = K;",
@@ -331,11 +357,11 @@ def emit_mask(lane_bits: int, r: int) -> list[str]:
         "    using bits_t = std::conditional_t<(N > 32), u64, u32>;",
         "",
         "    static constexpr int lanes = N;",
-        f"    static constexpr int registers = {r};",
+        f"    static constexpr int registers = {f'impl::lane_reg_count<{lane_bits}, N, K>' if looped else r};",
         "    static constexpr bool generated = true;",
-        "    static constexpr bool is_loop_free = true;",
+        f"    static constexpr bool is_loop_free = {'false' if looped else 'true'};",
         "",
-        f"    typename reg_t::type _r[{r}];",
+        f"    typename reg_t::type _r[{'registers' if looped else r}];",
         "",
     ]
     for name in ("bit_and", "bit_or", "bit_xor"):
@@ -344,11 +370,13 @@ def emit_mask(lane_bits: int, r: int) -> list[str]:
     lines += _fn("CC_FORCE_INLINE mask bit_not() const",
                  ["mask m;"] + _each(r, "m._r[{i}] = reg_t::bit_not(_r[{i}]);") + ["return m;"])
     lines += ["", "    /// Bit i is lane i; there is no bits() beyond 64 lanes."]
+    if looped:
+        gather_bits = ["for (auto i = 1; i < registers; ++i)", "    b |= bits_t(reg_t::bits(_r[i])) << (i * reg_t::lanes);"]
+    else:
+        gather_bits = [f"b |= bits_t(reg_t::bits(_r[{i}])) << ({i} * reg_t::lanes);" for i in range(1, r)]
     lines += _fn("CC_FORCE_INLINE bits_t bits() const",
                  ['static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");']
-                 + [f"bits_t b = bits_t(reg_t::bits(_r[0]));"]
-                 + [f"b |= bits_t(reg_t::bits(_r[{i}])) << ({i} * reg_t::lanes);" for i in range(1, r)]
-                 + ["return b;"])
+                 + ["bits_t b = bits_t(reg_t::bits(_r[0]));"] + gather_bits + ["return b;"])
     lines += _fn("static CC_FORCE_INLINE mask from_bits(bits_t b)",
                  ['static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");', "mask m;"]
                  + _each(r, "m._r[{i}] = reg_t::from_bits(u64(b) >> ({o}));") + ["return m;"])
@@ -379,7 +407,7 @@ def emit_fixed_masks() -> str:
     lines += ["#include <clean-simd/simd.hh>", "", "#include <clean-core/common/assert.hh>", "",
               "#include <type_traits>", "", "// NOLINTBEGIN", ""]
     for lane_bits in LANE_BITS:
-        for r in REGISTER_COUNTS:
+        for r in (*REGISTER_COUNTS, LOOPED):
             lines += emit_mask(lane_bits, r)
     lines += ["// NOLINTEND", ""]
     return "\n".join(lines)
@@ -389,7 +417,7 @@ def emit_fixed(e: Elem) -> str:
     lines = header(f"cimd::simd<{e.name}, N, K> by register count, for every kernel at once.")
     lines += ["#include <clean-simd/generated/fixed/masks.hh>", "#include <clean-simd/simd.hh>", "",
               "#include <clean-core/common/assert.hh>", "", "#include <type_traits>", "", "// NOLINTBEGIN", ""]
-    for r in REGISTER_COUNTS:
+    for r in (*REGISTER_COUNTS, LOOPED):
         lines += emit_value(e, r)
     lines += ["// NOLINTEND", ""]
     return "\n".join(lines)

@@ -13,6 +13,7 @@
 /// layer per kernel (generated/<kernel>/).
 /// Everything up to eight registers is flat code with no loop; `T::is_loop_free` is the static fact a hot path asserts.
 /// shuffle and permute are the exception: they go through memory, picking one lane at a time.
+/// Above eight registers every operation loops over them, with the same results, and `is_loop_free` is false.
 ///
 /// A mask is opaque (`cimd::mask<Bits, N, K>`, `m32x8<K>`): one per lane width, so a float comparison selects integers.
 /// It has no layout guarantee — on avx512 it is a k-register.
@@ -26,7 +27,7 @@ inline constexpr int alignment = int(sizeof(T)) * N < 64 ? int(sizeof(T)) * N : 
 template <int LaneBits, int N, class K>
 inline constexpr int lane_reg_bits = LaneBits * N < K::native_bits ? LaneBits * N : K::native_bits;
 
-/// How many registers of `lane_reg_bits` the type spans; 1, 2, 4 and 8 are generated flat.
+/// How many registers of `lane_reg_bits` the type spans; 1, 2, 4 and 8 are generated flat, and more are looped.
 template <int LaneBits, int N, class K>
 inline constexpr int lane_reg_count = LaneBits * N / lane_reg_bits<LaneBits, N, K>;
 
@@ -36,8 +37,13 @@ inline constexpr int reg_bits = lane_reg_bits<int(8 * sizeof(T)), N, K>;
 template <class T, int N, class K>
 inline constexpr int reg_count = lane_reg_count<int(8 * sizeof(T)), N, K>;
 
+/// N lanes of LaneBits: a power of two, at least 128 bits and at most 64 KiB.
+/// The ceiling keeps every bit count in an int; a value that large is a buffer rather than a register value.
+template <int LaneBits, int N>
+inline constexpr bool valid_lane_shape = N > 0 && (N & (N - 1)) == 0 && LaneBits* N >= 128 && N <= 524288 / LaneBits;
+
 template <class T, int N>
-inline constexpr bool valid_shape = N > 0 && (N & (N - 1)) == 0 && int(sizeof(T)) * N >= 16;
+inline constexpr bool valid_shape = valid_lane_shape<int(8 * sizeof(T)), N>;
 
 } // namespace cimd::impl
 
@@ -53,18 +59,21 @@ template <class T, int N, class K>
 struct cimd::simd
 {
     static_assert(impl::valid_shape<T, N>,
-                  "cimd::simd<T, N, K>: N must be a power of two and the type at least 128 bits");
+                  "cimd::simd<T, N, K>: N must be a power of two and the type at least 128 bits and at most 64 KiB");
     static_assert(is_available<K>,
                   "cimd::simd<T, N, K>: this TU's flags do not allow kernel K. Code above the build's floor is "
                   "compiled "
                   "through cimd_dispatch (clean-simd/dispatch.hh); local code uses cimd::local");
-    static_assert(impl::reg_count<T, N, K> <= 8, "cimd::simd<T, N, K>: more than eight registers is not generated yet");
     static constexpr bool generated = false;
 };
 
 template <int LaneBits, int N, class K>
 struct cimd::mask
 {
+    static_assert(impl::valid_lane_shape<LaneBits, N>,
+                  "cimd::mask<LaneBits, N, K>: N must be a power of two and the mask at least 128 bits and at most 64 "
+                  "KiB "
+                  "of lanes");
     static_assert(is_available<K>, "cimd::mask: this TU's flags do not allow kernel K; see cimd::simd");
     static constexpr bool generated = false;
 };

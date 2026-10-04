@@ -83,10 +83,12 @@ The fixed layer, `simd<T, N, K>`, is generated per element and **register count*
 Its code depends only on how many registers the type spans, so `simd<f32, N, K>` with two registers is the same text whether they are SSE, NEON or 128-bit arrays.
 It is a partial specialization constrained on `impl::reg_count<T, N, K>`, which keeps `simd` a real class template and keeps `template <class K> f(f32x8<K>)` deducible.
 
-**Flat up to eight registers.**
-Every operation is written out once per register, with no loop and no index sequence, so a debug build pays one call per operation and `T::is_loop_free` is a compile-time fact.
+**Flat up to eight registers, looped above.**
+Up to eight registers every operation is written out once per register, with no loop and no index sequence, so a debug build pays one call per operation.
 `shuffle` and `permute` are the exception: they store the value, pick its lanes one by one, and reload it, as [Moving lanes](#moving-lanes) says.
-Wider types are not generated yet; the primary template says so.
+Above eight, one more specialization per element loops over the registers, with the same results: reductions pair register `r` with `r + R/2` before reducing within one, which is the same lane order.
+`T::is_loop_free` is the compile-time fact that says which a type got, so a hot path that must stay flat asserts it.
+A type is at most 64 KiB, which keeps every bit count in an `int`; past that it is a buffer, not a value.
 
 **The scalar kernel's register is a 128-bit array**, so every kernel has a native width of at least 128 bits and fixed types start at 128 bits.
 A narrower type (`f32x2`) is an addition for when a caller wants one.

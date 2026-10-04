@@ -33,7 +33,8 @@ for (auto b = hit.bits(); b != 0; b &= b - 1)
   A NaN or a ±0 pair in `min`/`max` is where results differ, and only NEON differs: x86, scalar and SIMD128 return `a`, bit for bit.
   Reductions use one fixed order on every kernel, so they agree bit for bit.
   `rcp_approx` and `rsqrt_approx` are within a relative 2^-11 of exact everywhere, and their last bits differ by kernel.
-- **No loops.** Every type up to eight registers is flat generated code; `T::is_loop_free` is the static fact a hot path asserts.
+- **No loops up to eight registers.** Every type up to eight registers is flat generated code; `T::is_loop_free` is the static fact a hot path asserts.
+  A wider type loops over its registers, with the same results, and its `is_loop_free` is false.
   `shuffle` and `permute` are the exception for now: they go through memory, a store and a reload around a pick per lane.
 
 ## What is not here, on purpose

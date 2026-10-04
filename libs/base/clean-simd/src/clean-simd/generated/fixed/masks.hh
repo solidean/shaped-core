@@ -11,8 +11,7 @@
 
 /// A mask over 8-bit lanes, in 1 mask register of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 8 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 1)
+    requires(cimd::impl::valid_lane_shape<8, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 1)
 struct cimd::mask<8, N, K>
 {
     using kernel_t = K;
@@ -99,8 +98,7 @@ struct cimd::mask<8, N, K>
 
 /// A mask over 8-bit lanes, in 2 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 8 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 2)
+    requires(cimd::impl::valid_lane_shape<8, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 2)
 struct cimd::mask<8, N, K>
 {
     using kernel_t = K;
@@ -198,8 +196,7 @@ struct cimd::mask<8, N, K>
 
 /// A mask over 8-bit lanes, in 4 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 8 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 4)
+    requires(cimd::impl::valid_lane_shape<8, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 4)
 struct cimd::mask<8, N, K>
 {
     using kernel_t = K;
@@ -319,8 +316,7 @@ struct cimd::mask<8, N, K>
 
 /// A mask over 8-bit lanes, in 8 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 8 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 8)
+    requires(cimd::impl::valid_lane_shape<8, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 8)
 struct cimd::mask<8, N, K>
 {
     using kernel_t = K;
@@ -482,10 +478,116 @@ struct cimd::mask<8, N, K>
     CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
 };
 
+/// A mask over 8-bit lanes, in more than 8 mask registers of whichever kernel K is, looped over.
+template <int N, class K>
+    requires(cimd::impl::valid_lane_shape<8, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> > 8)
+struct cimd::mask<8, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<8, K, impl::lane_reg_bits<8, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = impl::lane_reg_count<8, N, K>;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = false;
+
+    typename reg_t::type _r[registers];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_and(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_or(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_xor(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_not(_r[i]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        for (auto i = 1; i < registers; ++i)
+            b |= bits_t(reg_t::bits(_r[i])) << (i * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::from_bits(u64(b) >> (i * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::bit_or(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::bit_and(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 8)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = simd<T, N, K>::reg_t::select(_r[i], a._r[i], b._r[i]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
 /// A mask over 16-bit lanes, in 1 mask register of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 16 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 1)
+    requires(cimd::impl::valid_lane_shape<16, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 1)
 struct cimd::mask<16, N, K>
 {
     using kernel_t = K;
@@ -572,8 +674,7 @@ struct cimd::mask<16, N, K>
 
 /// A mask over 16-bit lanes, in 2 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 16 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 2)
+    requires(cimd::impl::valid_lane_shape<16, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 2)
 struct cimd::mask<16, N, K>
 {
     using kernel_t = K;
@@ -671,8 +772,7 @@ struct cimd::mask<16, N, K>
 
 /// A mask over 16-bit lanes, in 4 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 16 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 4)
+    requires(cimd::impl::valid_lane_shape<16, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 4)
 struct cimd::mask<16, N, K>
 {
     using kernel_t = K;
@@ -792,8 +892,7 @@ struct cimd::mask<16, N, K>
 
 /// A mask over 16-bit lanes, in 8 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 16 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 8)
+    requires(cimd::impl::valid_lane_shape<16, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 8)
 struct cimd::mask<16, N, K>
 {
     using kernel_t = K;
@@ -955,10 +1054,116 @@ struct cimd::mask<16, N, K>
     CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
 };
 
+/// A mask over 16-bit lanes, in more than 8 mask registers of whichever kernel K is, looped over.
+template <int N, class K>
+    requires(cimd::impl::valid_lane_shape<16, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> > 8)
+struct cimd::mask<16, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<16, K, impl::lane_reg_bits<16, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = impl::lane_reg_count<16, N, K>;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = false;
+
+    typename reg_t::type _r[registers];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_and(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_or(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_xor(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_not(_r[i]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        for (auto i = 1; i < registers; ++i)
+            b |= bits_t(reg_t::bits(_r[i])) << (i * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::from_bits(u64(b) >> (i * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::bit_or(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::bit_and(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 16)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = simd<T, N, K>::reg_t::select(_r[i], a._r[i], b._r[i]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
 /// A mask over 32-bit lanes, in 1 mask register of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 32 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> == 1)
+    requires(cimd::impl::valid_lane_shape<32, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> == 1)
 struct cimd::mask<32, N, K>
 {
     using kernel_t = K;
@@ -1045,8 +1250,7 @@ struct cimd::mask<32, N, K>
 
 /// A mask over 32-bit lanes, in 2 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 32 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> == 2)
+    requires(cimd::impl::valid_lane_shape<32, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> == 2)
 struct cimd::mask<32, N, K>
 {
     using kernel_t = K;
@@ -1144,8 +1348,7 @@ struct cimd::mask<32, N, K>
 
 /// A mask over 32-bit lanes, in 4 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 32 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> == 4)
+    requires(cimd::impl::valid_lane_shape<32, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> == 4)
 struct cimd::mask<32, N, K>
 {
     using kernel_t = K;
@@ -1265,8 +1468,7 @@ struct cimd::mask<32, N, K>
 
 /// A mask over 32-bit lanes, in 8 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 32 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> == 8)
+    requires(cimd::impl::valid_lane_shape<32, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> == 8)
 struct cimd::mask<32, N, K>
 {
     using kernel_t = K;
@@ -1428,10 +1630,116 @@ struct cimd::mask<32, N, K>
     CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
 };
 
+/// A mask over 32-bit lanes, in more than 8 mask registers of whichever kernel K is, looped over.
+template <int N, class K>
+    requires(cimd::impl::valid_lane_shape<32, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<32, N, K> > 8)
+struct cimd::mask<32, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<32, K, impl::lane_reg_bits<32, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = impl::lane_reg_count<32, N, K>;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = false;
+
+    typename reg_t::type _r[registers];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_and(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_or(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_xor(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_not(_r[i]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        for (auto i = 1; i < registers; ++i)
+            b |= bits_t(reg_t::bits(_r[i])) << (i * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::from_bits(u64(b) >> (i * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::bit_or(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::bit_and(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 32)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = simd<T, N, K>::reg_t::select(_r[i], a._r[i], b._r[i]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
 /// A mask over 64-bit lanes, in 1 mask register of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 64 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 1)
+    requires(cimd::impl::valid_lane_shape<64, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 1)
 struct cimd::mask<64, N, K>
 {
     using kernel_t = K;
@@ -1518,8 +1826,7 @@ struct cimd::mask<64, N, K>
 
 /// A mask over 64-bit lanes, in 2 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 64 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 2)
+    requires(cimd::impl::valid_lane_shape<64, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 2)
 struct cimd::mask<64, N, K>
 {
     using kernel_t = K;
@@ -1617,8 +1924,7 @@ struct cimd::mask<64, N, K>
 
 /// A mask over 64-bit lanes, in 4 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 64 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 4)
+    requires(cimd::impl::valid_lane_shape<64, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 4)
 struct cimd::mask<64, N, K>
 {
     using kernel_t = K;
@@ -1738,8 +2044,7 @@ struct cimd::mask<64, N, K>
 
 /// A mask over 64-bit lanes, in 8 mask registers of whichever kernel K is.
 template <int N, class K>
-    requires(N > 0 && (N & (N - 1)) == 0 && N * 64 >= 128
-             && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 8)
+    requires(cimd::impl::valid_lane_shape<64, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 8)
 struct cimd::mask<64, N, K>
 {
     using kernel_t = K;
@@ -1889,6 +2194,113 @@ struct cimd::mask<64, N, K>
         v._r[5] = simd<T, N, K>::reg_t::select(_r[5], a._r[5], b._r[5]);
         v._r[6] = simd<T, N, K>::reg_t::select(_r[6], a._r[6], b._r[6]);
         v._r[7] = simd<T, N, K>::reg_t::select(_r[7], a._r[7], b._r[7]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 64-bit lanes, in more than 8 mask registers of whichever kernel K is, looped over.
+template <int N, class K>
+    requires(cimd::impl::valid_lane_shape<64, N> && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> > 8)
+struct cimd::mask<64, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<64, K, impl::lane_reg_bits<64, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = impl::lane_reg_count<64, N, K>;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = false;
+
+    typename reg_t::type _r[registers];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_and(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_or(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_xor(_r[i], b._r[i]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::bit_not(_r[i]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        for (auto i = 1; i < registers; ++i)
+            b |= bits_t(reg_t::bits(_r[i])) << (i * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        for (auto i = 0; i < registers; ++i)
+            m._r[i] = reg_t::from_bits(u64(b) >> (i * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::bit_or(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        typename reg_t::type x[registers];
+        for (auto i = 0; i < registers; ++i)
+            x[i] = _r[i];
+        for (auto w = registers / 2; w > 0; w /= 2)
+            for (auto i = 0; i < w; ++i)
+                x[i] = reg_t::bit_and(x[i], x[i + w]);
+        auto const x0 = x[0];
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 64)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        for (auto i = 0; i < registers; ++i)
+            v._r[i] = simd<T, N, K>::reg_t::select(_r[i], a._r[i], b._r[i]);
         return v;
     }
 
