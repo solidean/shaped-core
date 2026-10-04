@@ -53,6 +53,7 @@ neither costs the caller a multiply.
 | header | what it answers |
 |---|---|
 | `platform/system_info.hh` | CPU topology and caches, memory, OS — the description |
+| `platform/cpu_features.hh` | which ISA extensions this CPU and OS let the process use — a second, allocation-free description |
 | `platform/system_identifier.hh` | hostname, user, machine id — behind a required flags argument |
 | `platform/resource_limits.hh` | cgroup quota, job object, affinity, and `recommended_worker_count()` |
 | `platform/system_metrics.hh` | CPU load, memory usage, and the `query_error` every live query reports through |
@@ -74,6 +75,14 @@ together destroys the first.
 **Size from `cc::recommended_worker_count()`**, which folds the machine, the affinity mask and the CPU quota, whichever
 binds first.
 On a CI runner with a 4-CPU cgroup on a 64-core host, the two differ by 16x.
+
+## Instruction-set extensions are their own description
+
+`cc::get_cpu_features()` answers what runtime dispatch asks — AVX2, AVX-512, the x86-64 levels — and nothing else.
+It is a separate type from `cc::system_info` because a dispatch path asks it: a few bools, no allocation, no OS strings.
+**A flag is set only when the OS saves the registers too**, since AVX under an OS that does not save ymm faults on use.
+On x86 it is CPUID plus XGETBV, and on arm64 NEON is part of the base architecture.
+On wasm the answer is the build's, because a module using SIMD128 does not validate in an engine without it.
 
 ## Identity is a separate type on purpose
 

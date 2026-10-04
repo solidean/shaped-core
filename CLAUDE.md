@@ -32,6 +32,7 @@ One-liner per library:
   **Every library has a recording domain and logs its diagnostics** — a library never prints, and never writes its own `[lib]` prefix.
   Also home to the **system queries** (`platform/system_info.hh` and its neighbours) — what machine this is, how loaded it is, and what this process is consuming.
   Three concepts kept apart: a description cannot change, a snapshot is true now, a sampler is a rate.
+  `cc::get_cpu_features()` is the allocation-free description runtime dispatch asks: AVX2, AVX-512, the x86-64 levels.
   [docs/systems/system-info.md](libs/base/clean-core/docs/systems/system-info.md) is the map; GPU load and VRAM live in `sg`, since no OS reports them.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, PGO benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.

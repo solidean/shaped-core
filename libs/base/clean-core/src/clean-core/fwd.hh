@@ -72,7 +72,8 @@ enum class cache_kind : u8;         // what a cache level holds: data, instructi
 struct cpu_cache_level;             // one level of one core class's cache hierarchy (platform/system_info.hh)
 struct cpu_core_class;              // one group of alike cores, of which a modern CPU has several
 struct numa_node;
-struct system_info;        // what machine this is, gathered once (platform/system_info.hh)
+struct system_info;  // what machine this is, gathered once (platform/system_info.hh)
+struct cpu_features; // which instruction-set extensions this CPU and OS let a process use (platform/cpu_features.hh)
 enum class identity_field; // one identifying fact about the machine, requested by name (platform/system_identifier.hh)
 struct system_identifier;  // the identifying facts that were asked for, and only those
 struct resource_limits; // what THIS process may use, as opposed to what the machine has (platform/resource_limits.hh)

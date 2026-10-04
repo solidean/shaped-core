@@ -40,6 +40,8 @@ add_library(clean-core
     src/clean-core/platform/impl/text_file.cc
     src/clean-core/platform/impl/wasm_frames.cc
     src/clean-core/platform/system_info.cc
+    src/clean-core/platform/cpu_features.cc
+    src/clean-core/platform/impl/cpuid.cc
     src/clean-core/platform/system_identifier.cc
     src/clean-core/platform/resource_limits.cc
     src/clean-core/platform/system_metrics.cc
@@ -154,6 +156,8 @@ target_sources(clean-core
     src/clean-core/platform/impl/text_file.hh
     src/clean-core/platform/impl/wasm_frames.hh
     src/clean-core/platform/system_info.hh
+    src/clean-core/platform/cpu_features.hh
+    src/clean-core/platform/impl/cpuid.hh
     src/clean-core/platform/system_identifier.hh
     src/clean-core/platform/resource_limits.hh
     src/clean-core/platform/system_metrics.hh
@@ -518,6 +522,7 @@ if(SC_BUILD_TESTS)
         tests/platform/stacktrace-test.cc
         tests/platform/symbolize-test.cc
         tests/platform/system_info-test.cc
+        tests/platform/cpu_features-test.cc
         tests/platform/system_identifier-test.cc
         tests/platform/resource_limits-test.cc
         tests/platform/system_metrics-test.cc

@@ -246,14 +246,9 @@ rules:
     files: src/clean-core/streams/impl/native_file.cc
 
   - kind: allow-include
-    value: <intrin.h>
-    reason: __cpuid — the CPU brand and vendor strings, which no Win32 call reports
-    files: src/clean-core/platform/system_info.cc
-
-  - kind: allow-include
-    value: <cpuid.h>
-    reason: __get_cpuid — the same two strings on the GCC and Clang side
-    files: src/clean-core/platform/system_info.cc
+    value: [<intrin.h>, <cpuid.h>]
+    reason: CPUID and XGETBV — the CPU's brand, vendor, hypervisor bit and ISA extensions, which no OS call reports
+    files: src/clean-core/platform/impl/cpuid.cc
 
   - kind: allow-include
     value: [<sys/sysctl.h>, <sys/time.h>]
@@ -313,11 +308,6 @@ rules:
   - kind: allow-include
     value: [<sched.h>, <unistd.h>]
     reason: sched_getaffinity is the mask a container narrows, and sysconf is the fallback count
-    files: src/clean-core/platform/resource_limits.cc
-
-  - kind: allow-include
-    value: [<intrin.h>, <cpuid.h>]
-    reason: the CPUID hypervisor bit, which is the only in-process hint that this is a VM
     files: src/clean-core/platform/resource_limits.cc
 
   - kind: allow-include

@@ -1419,6 +1419,11 @@ si.os_name; si.os_version; si.os_build;             // cc::string
 si.timezone_at_start;                               // the _at_start suffix says WHEN it was captured
 si.uptime_secs();                                   // derived from boot_time_wall_secs
 
+#include <clean-core/platform/cpu_features.hh>
+auto const& f = cc::get_cpu_features();             // memoized, allocation-free; the question runtime dispatch asks
+f.avx2; f.avx512vl; f.x86_64_v3; f.x86_64_v4;       // true only when the OS also saves the registers
+f.neon; f.wasm_simd128;                             // false means "not usable", never "unknown"
+
 #include <clean-core/platform/resource_limits.hh>
 i32 n = cc::recommended_worker_count();             // SIZE POOLS FROM THIS — not logical_cores(), which is the machine
 auto lim = cc::query_resource_limits();             // NOT memoized: a cgroup quota is rewritten under a live process
