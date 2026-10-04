@@ -227,6 +227,10 @@ add_subdirectory(libs/base/typed-geometry)
 # of a maze of stubs.
 add_subdirectory(libs/base/clean-net)
 
+# clean-simd (cimd): fixed-width SIMD lane types templated on a kernel, over clean-core alone.
+# Above clean-core so its generated headers and intrinsics includes are paid only by what uses SIMD.
+add_subdirectory(libs/base/clean-simd)
+
 # data stack: babel-data + babel-serializer (both namespace babel) for the format codecs, then versioned-document (vdoc) -> versioned-document-file,
 # plus blob-cache (bcache) beside them.
 # Added in dependency order, the two babel libraries first because both persisting libraries store through babel::sqlite.

@@ -309,27 +309,29 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.ui.write_line(console.red(f"sgl-vscode-bundle: {rel} is stale -- run `uv run dev.py check --fix` to rebuild it"))
         return False
 
-    def check_fixed_int_gen(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
-        # typed-geometry commits the loop-free fixed_int specializations and their golden tests its generator writes.
-        # The generator compares (or, under --fix, rewrites) them itself; it formats with the repo's clang-format,
-        # so it runs before `format` and what it writes is already what `format` would leave.
+    def committed_codegen(name: str, script: Path):
+        # A library that commits what its generator writes: the generator compares (or, under --fix, rewrites) them
+        # itself, and formats with the repo's clang-format, so it runs before `format` and what it writes is already
+        # what `format` would leave.
         # A second or two of Python, so it runs whatever the scope.
-        from tools.dev.lib.quality.format import find_clang_format
+        def run(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+            from tools.dev.lib.quality.format import find_clang_format
 
-        script = ctx.root / "libs" / "base" / "typed-geometry" / "tools" / "gen-fixed-int.py"
-        clang_format = find_clang_format(root=ctx.root)
-        if clang_format is None:
-            dev.ui.write_line("fixed-int-gen: skipped -- clang-format not found")
-            return True
-        result = dev.run_step(
-            [sys.executable, str(script), "--write" if fix else "--check", "--clang-format", clang_format],
-            step_type="lint", name="fixed-int-gen",
-            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
-        )
-        if not result.ok:
-            dev.ui.write_line(console.red("fixed-int-gen: the committed files differ from the generator's output "
-                                          "-- run `uv run dev.py check --fix`"))
-        return result.ok
+            clang_format = find_clang_format(root=ctx.root)
+            if clang_format is None:
+                dev.ui.write_line(f"{name}: skipped -- clang-format not found")
+                return True
+            result = dev.run_step(
+                [sys.executable, str(ctx.root / script), "--write" if fix else "--check", "--clang-format", clang_format],
+                step_type="lint", name=name,
+                build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+            )
+            if not result.ok:
+                dev.ui.write_line(console.red(f"{name}: the committed files differ from the generator's output "
+                                              "-- run `uv run dev.py check --fix`"))
+            return result.ok
+
+        return run
 
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
@@ -383,7 +385,10 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("fixed-int-gen",
                   "typed-geometry's generated fixed_int headers and golden tests are what gen-fixed-int.py writes "
                   "(--fix regenerates them)",
-                  True, check_fixed_int_gen),
+                  True, committed_codegen("fixed-int-gen", Path("libs/base/typed-geometry/tools/gen-fixed-int.py"))),
+        dev.Check("simd-gen",
+                  "clean-simd's generated register and fixed layers are what gen-simd.py writes (--fix regenerates them)",
+                  True, committed_codegen("simd-gen", Path("libs/base/clean-simd/tools/gen-simd.py"))),
         dev.Check("format", "clang-format our C++ sources, last so it formats what the linters fixed "
                             "(--dirty-only, --commit or --all to rescope)",
                   True, check_format),
