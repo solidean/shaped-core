@@ -43,13 +43,21 @@ target_link_libraries(clean-simd PUBLIC clean-core)
 include(cmake/Dispatch.cmake)
 
 if(SC_BUILD_TESTS)
+    # The acceptance fixture: an 8-wide BVH whose query is dispatched from inside a static library, which is the link
+    # case the kernel-library ordering has to hold for.
+    add_library(clean-simd-bvh-fixture STATIC tests/bvh/bvh8.cc)
+    target_link_libraries(clean-simd-bvh-fixture PUBLIC clean-simd)
+    target_include_directories(clean-simd-bvh-fixture PUBLIC tests/bvh)
+    cimd_dispatch(clean-simd-bvh-fixture NAME bvh8_query_dispatched HEADER tests/bvh/bvh8-query.hh FUNCTION bvh8_query)
+
     add_executable(clean-simd-test
         tests/main.cc
         tests/simd-test.cc
         tests/dispatch/dispatch-test.cc
+        tests/bvh/bvh-test.cc
     )
     sc_nexus_binary(clean-simd-test KINDS tests)
-    target_link_libraries(clean-simd-test PRIVATE clean-simd nexus)
+    target_link_libraries(clean-simd-test PRIVATE clean-simd clean-simd-bvh-fixture nexus)
     target_include_directories(clean-simd-test PRIVATE tests/dispatch)
     cimd_dispatch(clean-simd-test NAME cimd_battery HEADER tests/dispatch/battery.hh FUNCTION battery)
     cimd_check_link_map(clean-simd-test)

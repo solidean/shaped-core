@@ -1,7 +1,8 @@
 // f16 benchmarks: the operations tg::half_float computes on its bits, against widening to f32 and narrowing back.
 // Comparison, rounding and base two stay on the bits because baseline x64 (SSE2) converts in software and has no
 // rounding instruction, while with F16C two conversions cost about what the integer path does.
-// These measure that claim on whatever the build targets; pass `-march=x86-64-v3` to see the F16C side.
+// These measure that claim on whatever the build targets.
+// The default SC_X64_LEVEL=v3 has F16C; a v1 build shows the software side.
 //
 // Run with
 //   uv run dev.py benchmark "tg f16"
