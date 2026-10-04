@@ -36,6 +36,7 @@ TEST("cc cpu_features - the CPU has every extension the build was compiled for")
 #if defined(CC_X64_LEVEL)
     CHECK((CC_X64_LEVEL < 2 || f.x86_64_v2));
     CHECK((CC_X64_LEVEL < 3 || f.x86_64_v3));
+    CHECK((CC_X64_LEVEL < 4 || f.x86_64_v4));
 #endif
 #if defined(CC_ARCH_ARM64)
     CHECK(f.neon);

@@ -82,6 +82,7 @@ On a CI runner with a 4-CPU cgroup on a 64-core host, the two differ by 16x.
 It is a separate type from `cc::system_info` because a dispatch path asks it: a few bools, no allocation, no OS strings.
 **A flag is set only when the OS saves the registers too**, since AVX under an OS that does not save ymm faults on use.
 On x86 it is CPUID plus XGETBV, and on arm64 NEON is part of the base architecture.
+On macOS x86-64, AVX-512 reads as absent: XNU enables its register state lazily, on a thread's first AVX-512 instruction, so XCR0's opmask and ZMM bits read clear.
 On wasm the answer is the build's, because a module using SIMD128 does not validate in an engine without it.
 
 ## Identity is a separate type on purpose

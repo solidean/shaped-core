@@ -236,8 +236,7 @@ void fill_topology(cc::system_info& info)
         if (classes.size() > 1)
             name = i == 0 ? cc::string("performance") : cc::string("efficiency");
 
-        // Ascending level, which the header promises and the record order does not: the loop above appends each
-        // distinct cache as Windows happens to list it.
+        // Ascending level, which the record order does not give: the loop above appends each distinct cache as Windows happens to list it.
         auto& caches = classes[i].caches;
         for (isize a = 1; a < caches.size(); ++a)
             for (isize b = a; b > 0 && caches[b].level < caches[b - 1].level; --b)

@@ -62,5 +62,6 @@ namespace cc
 /// The CPU's usable extensions, computed on the first call and reused by every later one.
 ///
 /// Thread-safe, allocation-free, and the returned reference stays valid for the rest of the process.
+/// On macOS x86-64, AVX-512 reads as absent: XNU enables its register state lazily, on a thread's first AVX-512 instruction, so XCR0's opmask and ZMM bits read clear.
 [[nodiscard]] cc::cpu_features const& get_cpu_features();
 } // namespace cc

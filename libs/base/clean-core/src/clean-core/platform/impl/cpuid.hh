@@ -18,7 +18,7 @@ struct cpuid_registers
     u32 edx = 0;
 };
 
-/// CPUID for `leaf` and `subleaf`, or all-zero registers when the leaf is above the CPU's maximum.
+/// CPUID for `leaf` and `subleaf`, or all-zero registers for a basic or extended leaf above the CPU's maximum.
 /// Checking the maximum first is what makes a zero meaningful: an unsupported leaf otherwise returns the highest
 /// basic leaf's data on Intel, which reads as features the CPU does not have.
 [[nodiscard]] cpuid_registers cpuid(u32 leaf, u32 subleaf = 0);
