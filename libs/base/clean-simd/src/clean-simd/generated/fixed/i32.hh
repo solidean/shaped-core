@@ -161,6 +161,20 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
         v._r[0] = reg_t::bit_not(_r[0]);
         return v;
     }
+    CC_FORCE_INLINE simd shl(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        v._r[0] = reg_t::shl(_r[0], n);
+        return v;
+    }
+    CC_FORCE_INLINE simd shr(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        v._r[0] = reg_t::shr(_r[0], n);
+        return v;
+    }
     /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.
     CC_FORCE_INLINE simd mul_add(simd b, simd c) const
     {
@@ -229,8 +243,10 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
     CC_FORCE_INLINE simd<U, N, K> convert() const
     {
         if constexpr (std::is_same_v<U, i32>)
+        {
             return *this;
-        else
+        }
+        else if constexpr (std::is_same_v<U, f32>)
         {
             simd<U, N, K> v;
             v._r[0] = reg_t::to_f32(_r[0]);
@@ -252,6 +268,10 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
     CC_FORCE_INLINE simd& operator^=(simd b) { return *this = bit_xor(b); }
     CC_FORCE_INLINE friend simd operator-(simd a) { return a.neg(); }
     CC_FORCE_INLINE friend simd operator~(simd a) { return a.bit_not(); }
+    CC_FORCE_INLINE friend simd operator<<(simd a, int n) { return a.shl(n); }
+    CC_FORCE_INLINE simd& operator<<=(int n) { return *this = shl(n); }
+    CC_FORCE_INLINE friend simd operator>>(simd a, int n) { return a.shr(n); }
+    CC_FORCE_INLINE simd& operator>>=(int n) { return *this = shr(n); }
     CC_FORCE_INLINE friend mask_t operator==(simd a, simd b) { return a.eq(b); }
     CC_FORCE_INLINE friend mask_t operator!=(simd a, simd b) { return a.ne(b); }
     CC_FORCE_INLINE friend mask_t operator<(simd a, simd b) { return a.lt(b); }
@@ -440,6 +460,22 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
         v._r[1] = reg_t::bit_not(_r[1]);
         return v;
     }
+    CC_FORCE_INLINE simd shl(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        v._r[0] = reg_t::shl(_r[0], n);
+        v._r[1] = reg_t::shl(_r[1], n);
+        return v;
+    }
+    CC_FORCE_INLINE simd shr(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        v._r[0] = reg_t::shr(_r[0], n);
+        v._r[1] = reg_t::shr(_r[1], n);
+        return v;
+    }
     /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.
     CC_FORCE_INLINE simd mul_add(simd b, simd c) const
     {
@@ -521,8 +557,10 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
     CC_FORCE_INLINE simd<U, N, K> convert() const
     {
         if constexpr (std::is_same_v<U, i32>)
+        {
             return *this;
-        else
+        }
+        else if constexpr (std::is_same_v<U, f32>)
         {
             simd<U, N, K> v;
             v._r[0] = reg_t::to_f32(_r[0]);
@@ -545,6 +583,10 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
     CC_FORCE_INLINE simd& operator^=(simd b) { return *this = bit_xor(b); }
     CC_FORCE_INLINE friend simd operator-(simd a) { return a.neg(); }
     CC_FORCE_INLINE friend simd operator~(simd a) { return a.bit_not(); }
+    CC_FORCE_INLINE friend simd operator<<(simd a, int n) { return a.shl(n); }
+    CC_FORCE_INLINE simd& operator<<=(int n) { return *this = shl(n); }
+    CC_FORCE_INLINE friend simd operator>>(simd a, int n) { return a.shr(n); }
+    CC_FORCE_INLINE simd& operator>>=(int n) { return *this = shr(n); }
     CC_FORCE_INLINE friend mask_t operator==(simd a, simd b) { return a.eq(b); }
     CC_FORCE_INLINE friend mask_t operator!=(simd a, simd b) { return a.ne(b); }
     CC_FORCE_INLINE friend mask_t operator<(simd a, simd b) { return a.lt(b); }
@@ -773,6 +815,26 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
         v._r[3] = reg_t::bit_not(_r[3]);
         return v;
     }
+    CC_FORCE_INLINE simd shl(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        v._r[0] = reg_t::shl(_r[0], n);
+        v._r[1] = reg_t::shl(_r[1], n);
+        v._r[2] = reg_t::shl(_r[2], n);
+        v._r[3] = reg_t::shl(_r[3], n);
+        return v;
+    }
+    CC_FORCE_INLINE simd shr(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        v._r[0] = reg_t::shr(_r[0], n);
+        v._r[1] = reg_t::shr(_r[1], n);
+        v._r[2] = reg_t::shr(_r[2], n);
+        v._r[3] = reg_t::shr(_r[3], n);
+        return v;
+    }
     /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.
     CC_FORCE_INLINE simd mul_add(simd b, simd c) const
     {
@@ -880,8 +942,10 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
     CC_FORCE_INLINE simd<U, N, K> convert() const
     {
         if constexpr (std::is_same_v<U, i32>)
+        {
             return *this;
-        else
+        }
+        else if constexpr (std::is_same_v<U, f32>)
         {
             simd<U, N, K> v;
             v._r[0] = reg_t::to_f32(_r[0]);
@@ -906,6 +970,10 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
     CC_FORCE_INLINE simd& operator^=(simd b) { return *this = bit_xor(b); }
     CC_FORCE_INLINE friend simd operator-(simd a) { return a.neg(); }
     CC_FORCE_INLINE friend simd operator~(simd a) { return a.bit_not(); }
+    CC_FORCE_INLINE friend simd operator<<(simd a, int n) { return a.shl(n); }
+    CC_FORCE_INLINE simd& operator<<=(int n) { return *this = shl(n); }
+    CC_FORCE_INLINE friend simd operator>>(simd a, int n) { return a.shr(n); }
+    CC_FORCE_INLINE simd& operator>>=(int n) { return *this = shr(n); }
     CC_FORCE_INLINE friend mask_t operator==(simd a, simd b) { return a.eq(b); }
     CC_FORCE_INLINE friend mask_t operator!=(simd a, simd b) { return a.ne(b); }
     CC_FORCE_INLINE friend mask_t operator<(simd a, simd b) { return a.lt(b); }
@@ -1214,6 +1282,34 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
         v._r[7] = reg_t::bit_not(_r[7]);
         return v;
     }
+    CC_FORCE_INLINE simd shl(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        v._r[0] = reg_t::shl(_r[0], n);
+        v._r[1] = reg_t::shl(_r[1], n);
+        v._r[2] = reg_t::shl(_r[2], n);
+        v._r[3] = reg_t::shl(_r[3], n);
+        v._r[4] = reg_t::shl(_r[4], n);
+        v._r[5] = reg_t::shl(_r[5], n);
+        v._r[6] = reg_t::shl(_r[6], n);
+        v._r[7] = reg_t::shl(_r[7], n);
+        return v;
+    }
+    CC_FORCE_INLINE simd shr(int n) const
+    {
+        CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");
+        simd v;
+        v._r[0] = reg_t::shr(_r[0], n);
+        v._r[1] = reg_t::shr(_r[1], n);
+        v._r[2] = reg_t::shr(_r[2], n);
+        v._r[3] = reg_t::shr(_r[3], n);
+        v._r[4] = reg_t::shr(_r[4], n);
+        v._r[5] = reg_t::shr(_r[5], n);
+        v._r[6] = reg_t::shr(_r[6], n);
+        v._r[7] = reg_t::shr(_r[7], n);
+        return v;
+    }
     /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere.
     CC_FORCE_INLINE simd mul_add(simd b, simd c) const
     {
@@ -1373,8 +1469,10 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
     CC_FORCE_INLINE simd<U, N, K> convert() const
     {
         if constexpr (std::is_same_v<U, i32>)
+        {
             return *this;
-        else
+        }
+        else if constexpr (std::is_same_v<U, f32>)
         {
             simd<U, N, K> v;
             v._r[0] = reg_t::to_f32(_r[0]);
@@ -1403,6 +1501,10 @@ struct alignas(cimd::impl::alignment<cimd::i32, N>) cimd::simd<cimd::i32, N, K>
     CC_FORCE_INLINE simd& operator^=(simd b) { return *this = bit_xor(b); }
     CC_FORCE_INLINE friend simd operator-(simd a) { return a.neg(); }
     CC_FORCE_INLINE friend simd operator~(simd a) { return a.bit_not(); }
+    CC_FORCE_INLINE friend simd operator<<(simd a, int n) { return a.shl(n); }
+    CC_FORCE_INLINE simd& operator<<=(int n) { return *this = shl(n); }
+    CC_FORCE_INLINE friend simd operator>>(simd a, int n) { return a.shr(n); }
+    CC_FORCE_INLINE simd& operator>>=(int n) { return *this = shr(n); }
     CC_FORCE_INLINE friend mask_t operator==(simd a, simd b) { return a.eq(b); }
     CC_FORCE_INLINE friend mask_t operator!=(simd a, simd b) { return a.ne(b); }
     CC_FORCE_INLINE friend mask_t operator<(simd a, simd b) { return a.lt(b); }

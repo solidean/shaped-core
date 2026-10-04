@@ -12,16 +12,27 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+template <class T>
+void fill_floats(battery_io& io, cc::random& rng)
+{
+    for (auto k = 0; k < 3; ++k)
+    {
+        auto* lanes = reinterpret_cast<T*>(io.in[battery_index<T>()][k]);
+        for (auto i = 0; i < int(128 / sizeof(T)); ++i)
+            lanes[i] = T(rng.uniform(-1000.f, 1000.f));
+    }
+}
+
 cc::unique_ptr<battery_io> random_io(cc::random& rng)
 {
     auto io = cc::make_unique<battery_io>();
-    for (auto k = 0; k < 3; ++k)
-        for (auto i = 0; i < 32; ++i)
-        {
-            io->f_in[k][i] = rng.uniform(-1000.f, 1000.f);
-            io->i_in[k][i] = i32(rng.next_u32());
-            io->u_in[k][i] = rng.next_u32();
-        }
+    // Integers take any bits; floats stay finite and in range, so nothing compared depends on NaN.
+    for (auto& element : io->in)
+        for (auto& input : element)
+            for (auto& byte : input)
+                byte = u8(rng.next_u32());
+    fill_floats<f32>(*io, rng);
+    fill_floats<f64>(*io, rng);
     return io;
 }
 
@@ -43,25 +54,26 @@ void compare_with_scalar(cimd::kernel_id id)
 
     REQUIRE(reference->ran == cimd::kernel_id::scalar);
     REQUIRE(got->ran == id);
-    REQUIRE(got->nf == reference->nf);
-    REQUIRE(got->ni == reference->ni);
-    REQUIRE(got->nu == reference->nu);
-    REQUIRE(got->nfma == reference->nfma);
+    // Ten element types at four widths, a few dozen results each — 50600 bytes when written: less means some were skipped.
+    REQUIRE(reference->n >= 50600);
+    REQUIRE(got->n == reference->n);
+    REQUIRE(got->napprox == reference->napprox);
 
+    auto first_mismatch = -1;
     auto mismatches = 0;
-    for (auto i = 0; i < got->nf; ++i)
-        mismatches += cc::bit_cast<u32>(got->f_out[i]) != cc::bit_cast<u32>(reference->f_out[i]) ? 1 : 0;
-    for (auto i = 0; i < got->ni; ++i)
-        mismatches += got->i_out[i] != reference->i_out[i] ? 1 : 0;
-    for (auto i = 0; i < got->nu; ++i)
-        mismatches += got->u_out[i] != reference->u_out[i] ? 1 : 0;
-    CHECK(mismatches == 0).context(kn);
+    for (auto i = 0; i < got->n; ++i)
+        if (got->out[i] != reference->out[i])
+        {
+            first_mismatch = first_mismatch < 0 ? i : first_mismatch;
+            ++mismatches;
+        }
+    CHECK(mismatches == 0).context(kn).dump("first mismatching byte", first_mismatch);
 
     // mul_add: one rounding or two, each within an f32 ulp of what it rounds.
-    for (auto i = 0; i < got->nfma; ++i)
+    for (auto i = 0; i < got->napprox; ++i)
     {
-        auto const diff = f64(got->fma_out[i]) - f64(reference->fma_out[i]);
-        auto const mag = f64(reference->fma_out[i]);
+        auto const diff = got->approx[i] - reference->approx[i];
+        auto const mag = reference->approx[i];
         CHECK((diff < 0 ? -diff : diff) <= (mag < 0 ? -mag : mag) * 0x1p-22 + 0x1p-10).context(kn);
     }
 }

@@ -18,9 +18,9 @@ cimd::kernel_name(K::id)             // "avx2"
 ## Types
 
 ```cpp
-cimd::simd<T, N, K>                  // N a power of two, N * sizeof(T) >= 16, up to eight registers for now
-cimd::f32x8<K>  i32x8<K>  u32x8<K>   // also x4, x16
-cimd::m32x8<K>                       // mask over 32-bit lanes: what f32x8, i32x8 AND u32x8 compares return
+cimd::simd<T, N, K>                  // T: f32 f64 i8 i16 i32 i64 u8 u16 u32 u64; N a power of two, >= 128 bits, <= 8 registers
+cimd::f32x8<K>  f64x4<K>  i8x16<K>   // every element at 128, 256 and 512 bits: f32x4/x8/x16, u8x16/x32/x64, …
+cimd::m32x8<K>                       // mask over 32-bit lanes: what f32x8, i32x8 AND u32x8 compares return; m8/m16/m64 too
 cimd::f32x8_storage                  // kernel-free bytes for data structures; implicit both ways, an aligned load/store
 V::is_loop_free  V::registers  V::generated
 ```
@@ -36,10 +36,14 @@ v.lane(i);  v.with_lane(i, x);       // through storage; not for hot loops
 a + b  a - b  a * b  -a              // operators exist only where AVX2, NEON and SIMD128 are each <= 3 instructions
 a.add(b)  a.sub(b)  a.mul(b)  a.neg()// the member twin of every operator
 a & b  a | b  a ^ b  ~a              // integer types only; floats go through cc::bit_cast
+a << n  a >> n                       // one int count for every lane; >> is arithmetic on signed types
+a / b  a.sqrt()  a.floor()  ceil()  round()  trunc()  a.copysign(b)   // floats; round is to nearest, ties to even
 a.min(b)  a.max(b)  a.abs()          // NaN in min/max is unspecified
 a.mul_add(b, c)                      // a*b + c — fused only where K::has_native_fma
 a.reduce_add()  reduce_min()  reduce_max()  // lane i with i + N/2, recursively: the same bits on every kernel
-f.convert<i32>()  i.convert<f32>()   // truncating; out of range is unspecified
+f.convert<i32>()  i.convert<f32>()   // f32<->i32, u32->f32, f64<->i64, u64->f64; truncating, out of range unspecified
+// No operator where AVX2, NEON or SIMD128 needs more than three instructions — the member twin is there instead:
+// u8/i8 a.mul(b) (no 8-bit multiply on x86 or wasm), i64/u64 a.mul(b) (none below AVX-512), i8 a.shr(n)
 ```
 
 ## Masks

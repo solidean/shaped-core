@@ -10,6 +10,38 @@
 // NOLINTBEGIN
 
 template <>
+struct cimd::impl::mreg<8, cimd::avx512, 128>
+{
+    using type = __mmask16;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask16(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask16(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask16(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask16(~u64(a) & 0xFFFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFFFull) == 0xFFFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask16(b & 0xFFFFull); }
+};
+
+template <>
+struct cimd::impl::mreg<16, cimd::avx512, 128>
+{
+    using type = __mmask8;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask8(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask8(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask8(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask8(~u64(a) & 0xFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFull) == 0xFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask8(b & 0xFFull); }
+};
+
+template <>
 struct cimd::impl::mreg<32, cimd::avx512, 128>
 {
     using type = __mmask8;
@@ -18,11 +50,27 @@ struct cimd::impl::mreg<32, cimd::avx512, 128>
     static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask8(a & b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask8(a | b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask8(a ^ b); }
-    static CC_FORCE_INLINE type bit_not(type a) { return __mmask8(~a & 0xFu); }
-    static CC_FORCE_INLINE u32 bits(type m) { return u32(m); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask8(~u64(a) & 0xFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
     static CC_FORCE_INLINE bool any(type m) { return m != 0; }
-    static CC_FORCE_INLINE bool all(type m) { return (u32(m) & 0xFu) == 0xFu; }
-    static CC_FORCE_INLINE type from_bits(u32 b) { return __mmask8(b & 0xFu); }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFull) == 0xFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask8(b & 0xFull); }
+};
+
+template <>
+struct cimd::impl::mreg<64, cimd::avx512, 128>
+{
+    using type = __mmask8;
+    static constexpr int lanes = 2;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask8(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask8(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask8(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask8(~u64(a) & 0x3ull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0x3ull) == 0x3ull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask8(b & 0x3ull); }
 };
 
 template <>
@@ -37,7 +85,8 @@ struct cimd::impl::reg<cimd::f32, cimd::avx512, 128>
     static CC_FORCE_INLINE type zero() { return _mm_setzero_ps(); }
     static CC_FORCE_INLINE type iota(f32 start)
     {
-        return _mm_add_ps(_mm_set1_ps(start), _mm_set_ps(3.f, 2.f, 1.f, 0.f));
+        alignas(16) static constexpr f32 k[4] = {0, 1, 2, 3};
+        return _mm_add_ps(_mm_set1_ps(start), _mm_load_ps(k));
     }
     static CC_FORCE_INLINE type load(f32 const* p) { return _mm_loadu_ps(p); }
     static CC_FORCE_INLINE type load_aligned(f32 const* p) { return _mm_load_ps(p); }
@@ -76,7 +125,224 @@ struct cimd::impl::reg<cimd::f32, cimd::avx512, 128>
     }
     static CC_FORCE_INLINE type neg(type a) { return _mm_xor_ps(a, _mm_set1_ps(-0.f)); }
     static CC_FORCE_INLINE type abs(type a) { return _mm_andnot_ps(_mm_set1_ps(-0.f), a); }
+    static CC_FORCE_INLINE type div(type a, type b) { return _mm_div_ps(a, b); }
+    static CC_FORCE_INLINE type sqrt(type a) { return _mm_sqrt_ps(a); }
+    static CC_FORCE_INLINE type floor(type a) { return _mm_round_ps(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type ceil(type a) { return _mm_round_ps(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type round(type a) { return _mm_round_ps(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type trunc(type a) { return _mm_round_ps(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type copysign(type a, type b)
+    {
+        __m128 const s = _mm_set1_ps(-0.f);
+        return _mm_or_ps(_mm_andnot_ps(s, a), _mm_and_ps(s, b));
+    }
     static CC_FORCE_INLINE __m128i to_i32(type a) { return _mm_cvttps_epi32(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::f64, cimd::avx512, 128>
+{
+    using type = __m128d;
+    using mr = mreg<64, avx512, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 2;
+
+    static CC_FORCE_INLINE type broadcast(f64 x) { return _mm_set1_pd(x); }
+    static CC_FORCE_INLINE type zero() { return _mm_setzero_pd(); }
+    static CC_FORCE_INLINE type iota(f64 start)
+    {
+        alignas(16) static constexpr f64 k[2] = {0, 1};
+        return _mm_add_pd(_mm_set1_pd(start), _mm_load_pd(k));
+    }
+    static CC_FORCE_INLINE type load(f64 const* p) { return _mm_loadu_pd(p); }
+    static CC_FORCE_INLINE type load_aligned(f64 const* p) { return _mm_load_pd(p); }
+    static CC_FORCE_INLINE void store(f64* p, type a) { _mm_storeu_pd(p, a); }
+    static CC_FORCE_INLINE void store_aligned(f64* p, type a) { _mm_store_pd(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_pd(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_pd(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mul_pd(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_pd(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_pd(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return _mm_fmadd_pd(a, b, c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_cmp_pd_mask(a, b, _CMP_EQ_OQ); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_cmp_pd_mask(a, b, _CMP_NEQ_UQ); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm_cmp_pd_mask(a, b, _CMP_LT_OQ); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmp_pd_mask(a, b, _CMP_LE_OQ); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm_cmp_pd_mask(a, b, _CMP_GT_OQ); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmp_pd_mask(a, b, _CMP_GE_OQ); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_pd(m, b, a); }
+    static CC_FORCE_INLINE f64 reduce_add(type a) { return _mm_cvtsd_f64(add(a, _mm_unpackhi_pd(a, a))); }
+    static CC_FORCE_INLINE f64 reduce_min(type a) { return _mm_cvtsd_f64(min(a, _mm_unpackhi_pd(a, a))); }
+    static CC_FORCE_INLINE f64 reduce_max(type a) { return _mm_cvtsd_f64(max(a, _mm_unpackhi_pd(a, a))); }
+    static CC_FORCE_INLINE type neg(type a) { return _mm_xor_pd(a, _mm_set1_pd(-0.0)); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm_andnot_pd(_mm_set1_pd(-0.0), a); }
+    static CC_FORCE_INLINE type div(type a, type b) { return _mm_div_pd(a, b); }
+    static CC_FORCE_INLINE type sqrt(type a) { return _mm_sqrt_pd(a); }
+    static CC_FORCE_INLINE type floor(type a) { return _mm_round_pd(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type ceil(type a) { return _mm_round_pd(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type round(type a) { return _mm_round_pd(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type trunc(type a) { return _mm_round_pd(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type copysign(type a, type b)
+    {
+        __m128d const s = _mm_set1_pd(-0.0);
+        return _mm_or_pd(_mm_andnot_pd(s, a), _mm_and_pd(s, b));
+    }
+    static CC_FORCE_INLINE __m128i to_i64(type a) { return _mm_cvttpd_epi64(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i8, cimd::avx512, 128>
+{
+    using type = __m128i;
+    using mr = mreg<8, avx512, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type broadcast(i8 x) { return _mm_set1_epi8(i8(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm_setzero_si128(); }
+    static CC_FORCE_INLINE type iota(i8 start)
+    {
+        alignas(16) static constexpr i8 k[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i8 const* p) { return _mm_loadu_si128(reinterpret_cast<__m128i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(i8 const* p)
+    {
+        return _mm_load_si128(reinterpret_cast<__m128i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(i8* p, type a) { _mm_storeu_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(i8* p, type a) { _mm_store_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_epi8(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_epi8(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b)
+    {
+        __m128i const even = _mm_mullo_epi16(a, b);
+        __m128i const odd = _mm_mullo_epi16(_mm_srli_epi16(a, 8), _mm_srli_epi16(b, 8));
+        return _mm_or_si128(_mm_slli_epi16(odd, 8), _mm_and_si128(even, _mm_set1_epi16(i16(0xFF))));
+    }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_epi8(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_epi8(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_cmpeq_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_cmpneq_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm_cmplt_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmple_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm_cmpgt_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpge_epi8_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_epi8(m, b, a); }
+    static CC_FORCE_INLINE i8 reduce_add(type a)
+    {
+        __m128i t = a;
+        t = add(t, _mm_srli_si128(t, 8));
+        t = add(t, _mm_srli_si128(t, 4));
+        t = add(t, _mm_srli_si128(t, 2));
+        t = add(t, _mm_srli_si128(t, 1));
+        return i8(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE i8 reduce_min(type a)
+    {
+        __m128i t = a;
+        t = min(t, _mm_srli_si128(t, 8));
+        t = min(t, _mm_srli_si128(t, 4));
+        t = min(t, _mm_srli_si128(t, 2));
+        t = min(t, _mm_srli_si128(t, 1));
+        return i8(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE i8 reduce_max(type a)
+    {
+        __m128i t = a;
+        t = max(t, _mm_srli_si128(t, 8));
+        t = max(t, _mm_srli_si128(t, 4));
+        t = max(t, _mm_srli_si128(t, 2));
+        t = max(t, _mm_srli_si128(t, 1));
+        return i8(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm_sub_epi8(_mm_setzero_si128(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm_abs_epi8(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm_xor_si128(a, _mm_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n)
+    {
+        return _mm_and_si128(_mm_sll_epi16(a, _mm_cvtsi32_si128(n)), _mm_set1_epi8(i8(u8(0xFF << n))));
+    }
+    static CC_FORCE_INLINE type shr(type a, int n)
+    {
+        __m128i const lo = _mm_srai_epi16(_mm_slli_epi16(a, 8), 8);
+        __m128i const hi = _mm_srai_epi16(a, 8);
+        return _mm_or_si128(_mm_and_si128(_mm_sra_epi16(lo, _mm_cvtsi32_si128(n)), _mm_set1_epi16(i16(0xFF))),
+                            _mm_slli_epi16(_mm_sra_epi16(hi, _mm_cvtsi32_si128(n)), 8));
+    }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i16, cimd::avx512, 128>
+{
+    using type = __m128i;
+    using mr = mreg<16, avx512, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type broadcast(i16 x) { return _mm_set1_epi16(i16(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm_setzero_si128(); }
+    static CC_FORCE_INLINE type iota(i16 start)
+    {
+        alignas(16) static constexpr i16 k[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i16 const* p) { return _mm_loadu_si128(reinterpret_cast<__m128i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(i16 const* p)
+    {
+        return _mm_load_si128(reinterpret_cast<__m128i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(i16* p, type a) { _mm_storeu_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(i16* p, type a) { _mm_store_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_epi16(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_epi16(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mullo_epi16(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_epi16(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_epi16(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_cmpeq_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_cmpneq_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm_cmplt_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmple_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm_cmpgt_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpge_epi16_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_epi16(m, b, a); }
+    static CC_FORCE_INLINE i16 reduce_add(type a)
+    {
+        __m128i t = a;
+        t = add(t, _mm_srli_si128(t, 8));
+        t = add(t, _mm_srli_si128(t, 4));
+        t = add(t, _mm_srli_si128(t, 2));
+        return i16(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE i16 reduce_min(type a)
+    {
+        __m128i t = a;
+        t = min(t, _mm_srli_si128(t, 8));
+        t = min(t, _mm_srli_si128(t, 4));
+        t = min(t, _mm_srli_si128(t, 2));
+        return i16(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE i16 reduce_max(type a)
+    {
+        __m128i t = a;
+        t = max(t, _mm_srli_si128(t, 8));
+        t = max(t, _mm_srli_si128(t, 4));
+        t = max(t, _mm_srli_si128(t, 2));
+        return i16(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm_sub_epi16(_mm_setzero_si128(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm_abs_epi16(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm_xor_si128(a, _mm_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm_sll_epi16(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm_sra_epi16(a, _mm_cvtsi32_si128(n)); }
 };
 
 template <>
@@ -87,11 +353,12 @@ struct cimd::impl::reg<cimd::i32, cimd::avx512, 128>
     using mtype = mr::type;
     static constexpr int lanes = 4;
 
-    static CC_FORCE_INLINE type broadcast(i32 x) { return _mm_set1_epi32(int(x)); }
+    static CC_FORCE_INLINE type broadcast(i32 x) { return _mm_set1_epi32(i32(x)); }
     static CC_FORCE_INLINE type zero() { return _mm_setzero_si128(); }
     static CC_FORCE_INLINE type iota(i32 start)
     {
-        return _mm_add_epi32(_mm_set1_epi32(int(start)), _mm_set_epi32(3, 2, 1, 0));
+        alignas(16) static constexpr i32 k[4] = {0, 1, 2, 3};
+        return add(broadcast(start), load_aligned(k));
     }
     static CC_FORCE_INLINE type load(i32 const* p) { return _mm_loadu_si128(reinterpret_cast<__m128i const*>(p)); }
     static CC_FORCE_INLINE type load_aligned(i32 const* p)
@@ -115,20 +382,23 @@ struct cimd::impl::reg<cimd::i32, cimd::avx512, 128>
     static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_epi32(m, b, a); }
     static CC_FORCE_INLINE i32 reduce_add(type a)
     {
-        __m128i t = add(a, _mm_shuffle_epi32(a, _MM_SHUFFLE(1, 0, 3, 2)));
-        t = add(t, _mm_shuffle_epi32(t, _MM_SHUFFLE(2, 3, 0, 1)));
+        __m128i t = a;
+        t = add(t, _mm_srli_si128(t, 8));
+        t = add(t, _mm_srli_si128(t, 4));
         return i32(_mm_cvtsi128_si32(t));
     }
     static CC_FORCE_INLINE i32 reduce_min(type a)
     {
-        __m128i t = min(a, _mm_shuffle_epi32(a, _MM_SHUFFLE(1, 0, 3, 2)));
-        t = min(t, _mm_shuffle_epi32(t, _MM_SHUFFLE(2, 3, 0, 1)));
+        __m128i t = a;
+        t = min(t, _mm_srli_si128(t, 8));
+        t = min(t, _mm_srli_si128(t, 4));
         return i32(_mm_cvtsi128_si32(t));
     }
     static CC_FORCE_INLINE i32 reduce_max(type a)
     {
-        __m128i t = max(a, _mm_shuffle_epi32(a, _MM_SHUFFLE(1, 0, 3, 2)));
-        t = max(t, _mm_shuffle_epi32(t, _MM_SHUFFLE(2, 3, 0, 1)));
+        __m128i t = a;
+        t = max(t, _mm_srli_si128(t, 8));
+        t = max(t, _mm_srli_si128(t, 4));
         return i32(_mm_cvtsi128_si32(t));
     }
     static CC_FORCE_INLINE type neg(type a) { return _mm_sub_epi32(_mm_setzero_si128(), a); }
@@ -137,7 +407,221 @@ struct cimd::impl::reg<cimd::i32, cimd::avx512, 128>
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return _mm_xor_si128(a, _mm_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm_sll_epi32(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm_sra_epi32(a, _mm_cvtsi32_si128(n)); }
     static CC_FORCE_INLINE __m128 to_f32(type a) { return _mm_cvtepi32_ps(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i64, cimd::avx512, 128>
+{
+    using type = __m128i;
+    using mr = mreg<64, avx512, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 2;
+
+    static CC_FORCE_INLINE type broadcast(i64 x) { return _mm_set1_epi64x(i64(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm_setzero_si128(); }
+    static CC_FORCE_INLINE type iota(i64 start)
+    {
+        alignas(16) static constexpr i64 k[2] = {0, 1};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i64 const* p) { return _mm_loadu_si128(reinterpret_cast<__m128i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(i64 const* p)
+    {
+        return _mm_load_si128(reinterpret_cast<__m128i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(i64* p, type a) { _mm_storeu_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(i64* p, type a) { _mm_store_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_epi64(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_epi64(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mullo_epi64(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_epi64(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_epi64(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_cmpeq_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_cmpneq_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm_cmplt_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmple_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm_cmpgt_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpge_epi64_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_epi64(m, b, a); }
+    static CC_FORCE_INLINE i64 reduce_add(type a)
+    {
+        __m128i t = a;
+        t = add(t, _mm_srli_si128(t, 8));
+        return i64(_mm_cvtsi128_si64(t));
+    }
+    static CC_FORCE_INLINE i64 reduce_min(type a)
+    {
+        __m128i t = a;
+        t = min(t, _mm_srli_si128(t, 8));
+        return i64(_mm_cvtsi128_si64(t));
+    }
+    static CC_FORCE_INLINE i64 reduce_max(type a)
+    {
+        __m128i t = a;
+        t = max(t, _mm_srli_si128(t, 8));
+        return i64(_mm_cvtsi128_si64(t));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm_sub_epi64(_mm_setzero_si128(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm_abs_epi64(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm_xor_si128(a, _mm_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm_sll_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm_sra_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE __m128d to_f64(type a) { return _mm_cvtepi64_pd(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u8, cimd::avx512, 128>
+{
+    using type = __m128i;
+    using mr = mreg<8, avx512, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type broadcast(u8 x) { return _mm_set1_epi8(i8(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm_setzero_si128(); }
+    static CC_FORCE_INLINE type iota(u8 start)
+    {
+        alignas(16) static constexpr u8 k[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u8 const* p) { return _mm_loadu_si128(reinterpret_cast<__m128i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(u8 const* p)
+    {
+        return _mm_load_si128(reinterpret_cast<__m128i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(u8* p, type a) { _mm_storeu_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(u8* p, type a) { _mm_store_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_epi8(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_epi8(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b)
+    {
+        __m128i const even = _mm_mullo_epi16(a, b);
+        __m128i const odd = _mm_mullo_epi16(_mm_srli_epi16(a, 8), _mm_srli_epi16(b, 8));
+        return _mm_or_si128(_mm_slli_epi16(odd, 8), _mm_and_si128(even, _mm_set1_epi16(i16(0xFF))));
+    }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_epu8(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_epu8(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_cmpeq_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_cmpneq_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm_cmplt_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmple_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm_cmpgt_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpge_epu8_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_epi8(m, b, a); }
+    static CC_FORCE_INLINE u8 reduce_add(type a)
+    {
+        __m128i t = a;
+        t = add(t, _mm_srli_si128(t, 8));
+        t = add(t, _mm_srli_si128(t, 4));
+        t = add(t, _mm_srli_si128(t, 2));
+        t = add(t, _mm_srli_si128(t, 1));
+        return u8(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE u8 reduce_min(type a)
+    {
+        __m128i t = a;
+        t = min(t, _mm_srli_si128(t, 8));
+        t = min(t, _mm_srli_si128(t, 4));
+        t = min(t, _mm_srli_si128(t, 2));
+        t = min(t, _mm_srli_si128(t, 1));
+        return u8(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE u8 reduce_max(type a)
+    {
+        __m128i t = a;
+        t = max(t, _mm_srli_si128(t, 8));
+        t = max(t, _mm_srli_si128(t, 4));
+        t = max(t, _mm_srli_si128(t, 2));
+        t = max(t, _mm_srli_si128(t, 1));
+        return u8(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm_xor_si128(a, _mm_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n)
+    {
+        return _mm_and_si128(_mm_sll_epi16(a, _mm_cvtsi32_si128(n)), _mm_set1_epi8(i8(u8(0xFF << n))));
+    }
+    static CC_FORCE_INLINE type shr(type a, int n)
+    {
+        return _mm_and_si128(_mm_srl_epi16(a, _mm_cvtsi32_si128(n)), _mm_set1_epi8(i8(u8(0xFF >> n))));
+    }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u16, cimd::avx512, 128>
+{
+    using type = __m128i;
+    using mr = mreg<16, avx512, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type broadcast(u16 x) { return _mm_set1_epi16(i16(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm_setzero_si128(); }
+    static CC_FORCE_INLINE type iota(u16 start)
+    {
+        alignas(16) static constexpr u16 k[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u16 const* p) { return _mm_loadu_si128(reinterpret_cast<__m128i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(u16 const* p)
+    {
+        return _mm_load_si128(reinterpret_cast<__m128i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(u16* p, type a) { _mm_storeu_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(u16* p, type a) { _mm_store_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_epi16(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_epi16(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mullo_epi16(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_epu16(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_epu16(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_cmpeq_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_cmpneq_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm_cmplt_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmple_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm_cmpgt_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpge_epu16_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_epi16(m, b, a); }
+    static CC_FORCE_INLINE u16 reduce_add(type a)
+    {
+        __m128i t = a;
+        t = add(t, _mm_srli_si128(t, 8));
+        t = add(t, _mm_srli_si128(t, 4));
+        t = add(t, _mm_srli_si128(t, 2));
+        return u16(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE u16 reduce_min(type a)
+    {
+        __m128i t = a;
+        t = min(t, _mm_srli_si128(t, 8));
+        t = min(t, _mm_srli_si128(t, 4));
+        t = min(t, _mm_srli_si128(t, 2));
+        return u16(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE u16 reduce_max(type a)
+    {
+        __m128i t = a;
+        t = max(t, _mm_srli_si128(t, 8));
+        t = max(t, _mm_srli_si128(t, 4));
+        t = max(t, _mm_srli_si128(t, 2));
+        return u16(_mm_cvtsi128_si32(t));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm_xor_si128(a, _mm_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm_sll_epi16(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm_srl_epi16(a, _mm_cvtsi32_si128(n)); }
 };
 
 template <>
@@ -148,11 +632,12 @@ struct cimd::impl::reg<cimd::u32, cimd::avx512, 128>
     using mtype = mr::type;
     static constexpr int lanes = 4;
 
-    static CC_FORCE_INLINE type broadcast(u32 x) { return _mm_set1_epi32(int(x)); }
+    static CC_FORCE_INLINE type broadcast(u32 x) { return _mm_set1_epi32(i32(x)); }
     static CC_FORCE_INLINE type zero() { return _mm_setzero_si128(); }
     static CC_FORCE_INLINE type iota(u32 start)
     {
-        return _mm_add_epi32(_mm_set1_epi32(int(start)), _mm_set_epi32(3, 2, 1, 0));
+        alignas(16) static constexpr u32 k[4] = {0, 1, 2, 3};
+        return add(broadcast(start), load_aligned(k));
     }
     static CC_FORCE_INLINE type load(u32 const* p) { return _mm_loadu_si128(reinterpret_cast<__m128i const*>(p)); }
     static CC_FORCE_INLINE type load_aligned(u32 const* p)
@@ -176,27 +661,126 @@ struct cimd::impl::reg<cimd::u32, cimd::avx512, 128>
     static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_epi32(m, b, a); }
     static CC_FORCE_INLINE u32 reduce_add(type a)
     {
-        __m128i t = add(a, _mm_shuffle_epi32(a, _MM_SHUFFLE(1, 0, 3, 2)));
-        t = add(t, _mm_shuffle_epi32(t, _MM_SHUFFLE(2, 3, 0, 1)));
+        __m128i t = a;
+        t = add(t, _mm_srli_si128(t, 8));
+        t = add(t, _mm_srli_si128(t, 4));
         return u32(_mm_cvtsi128_si32(t));
     }
     static CC_FORCE_INLINE u32 reduce_min(type a)
     {
-        __m128i t = min(a, _mm_shuffle_epi32(a, _MM_SHUFFLE(1, 0, 3, 2)));
-        t = min(t, _mm_shuffle_epi32(t, _MM_SHUFFLE(2, 3, 0, 1)));
+        __m128i t = a;
+        t = min(t, _mm_srli_si128(t, 8));
+        t = min(t, _mm_srli_si128(t, 4));
         return u32(_mm_cvtsi128_si32(t));
     }
     static CC_FORCE_INLINE u32 reduce_max(type a)
     {
-        __m128i t = max(a, _mm_shuffle_epi32(a, _MM_SHUFFLE(1, 0, 3, 2)));
-        t = max(t, _mm_shuffle_epi32(t, _MM_SHUFFLE(2, 3, 0, 1)));
+        __m128i t = a;
+        t = max(t, _mm_srli_si128(t, 8));
+        t = max(t, _mm_srli_si128(t, 4));
         return u32(_mm_cvtsi128_si32(t));
     }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return _mm_xor_si128(a, _mm_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm_sll_epi32(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm_srl_epi32(a, _mm_cvtsi32_si128(n)); }
     static CC_FORCE_INLINE __m128 to_f32(type a) { return _mm_cvtepu32_ps(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u64, cimd::avx512, 128>
+{
+    using type = __m128i;
+    using mr = mreg<64, avx512, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 2;
+
+    static CC_FORCE_INLINE type broadcast(u64 x) { return _mm_set1_epi64x(i64(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm_setzero_si128(); }
+    static CC_FORCE_INLINE type iota(u64 start)
+    {
+        alignas(16) static constexpr u64 k[2] = {0, 1};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u64 const* p) { return _mm_loadu_si128(reinterpret_cast<__m128i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(u64 const* p)
+    {
+        return _mm_load_si128(reinterpret_cast<__m128i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(u64* p, type a) { _mm_storeu_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(u64* p, type a) { _mm_store_si128(reinterpret_cast<__m128i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm_add_epi64(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm_sub_epi64(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm_mullo_epi64(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm_min_epu64(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm_max_epu64(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm_cmpeq_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm_cmpneq_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm_cmplt_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm_cmple_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm_cmpgt_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm_cmpge_epu64_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm_mask_blend_epi64(m, b, a); }
+    static CC_FORCE_INLINE u64 reduce_add(type a)
+    {
+        __m128i t = a;
+        t = add(t, _mm_srli_si128(t, 8));
+        return u64(_mm_cvtsi128_si64(t));
+    }
+    static CC_FORCE_INLINE u64 reduce_min(type a)
+    {
+        __m128i t = a;
+        t = min(t, _mm_srli_si128(t, 8));
+        return u64(_mm_cvtsi128_si64(t));
+    }
+    static CC_FORCE_INLINE u64 reduce_max(type a)
+    {
+        __m128i t = a;
+        t = max(t, _mm_srli_si128(t, 8));
+        return u64(_mm_cvtsi128_si64(t));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm_and_si128(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm_or_si128(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm_xor_si128(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm_xor_si128(a, _mm_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm_sll_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm_srl_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE __m128d to_f64(type a) { return _mm_cvtepu64_pd(a); }
+};
+
+template <>
+struct cimd::impl::mreg<8, cimd::avx512, 256>
+{
+    using type = __mmask32;
+    static constexpr int lanes = 32;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask32(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask32(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask32(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask32(~u64(a) & 0xFFFFFFFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFFFFFFFull) == 0xFFFFFFFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask32(b & 0xFFFFFFFFull); }
+};
+
+template <>
+struct cimd::impl::mreg<16, cimd::avx512, 256>
+{
+    using type = __mmask16;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask16(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask16(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask16(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask16(~u64(a) & 0xFFFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFFFull) == 0xFFFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask16(b & 0xFFFFull); }
 };
 
 template <>
@@ -208,11 +792,27 @@ struct cimd::impl::mreg<32, cimd::avx512, 256>
     static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask8(a & b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask8(a | b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask8(a ^ b); }
-    static CC_FORCE_INLINE type bit_not(type a) { return __mmask8(~a & 0xFFu); }
-    static CC_FORCE_INLINE u32 bits(type m) { return u32(m); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask8(~u64(a) & 0xFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
     static CC_FORCE_INLINE bool any(type m) { return m != 0; }
-    static CC_FORCE_INLINE bool all(type m) { return (u32(m) & 0xFFu) == 0xFFu; }
-    static CC_FORCE_INLINE type from_bits(u32 b) { return __mmask8(b & 0xFFu); }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFull) == 0xFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask8(b & 0xFFull); }
+};
+
+template <>
+struct cimd::impl::mreg<64, cimd::avx512, 256>
+{
+    using type = __mmask8;
+    static constexpr int lanes = 4;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask8(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask8(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask8(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask8(~u64(a) & 0xFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFull) == 0xFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask8(b & 0xFull); }
 };
 
 template <>
@@ -227,7 +827,8 @@ struct cimd::impl::reg<cimd::f32, cimd::avx512, 256>
     static CC_FORCE_INLINE type zero() { return _mm256_setzero_ps(); }
     static CC_FORCE_INLINE type iota(f32 start)
     {
-        return _mm256_add_ps(_mm256_set1_ps(start), _mm256_set_ps(7.f, 6.f, 5.f, 4.f, 3.f, 2.f, 1.f, 0.f));
+        alignas(32) static constexpr f32 k[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+        return _mm256_add_ps(_mm256_set1_ps(start), _mm256_load_ps(k));
     }
     static CC_FORCE_INLINE type load(f32 const* p) { return _mm256_loadu_ps(p); }
     static CC_FORCE_INLINE type load_aligned(f32 const* p) { return _mm256_load_ps(p); }
@@ -263,7 +864,222 @@ struct cimd::impl::reg<cimd::f32, cimd::avx512, 256>
     }
     static CC_FORCE_INLINE type neg(type a) { return _mm256_xor_ps(a, _mm256_set1_ps(-0.f)); }
     static CC_FORCE_INLINE type abs(type a) { return _mm256_andnot_ps(_mm256_set1_ps(-0.f), a); }
+    static CC_FORCE_INLINE type div(type a, type b) { return _mm256_div_ps(a, b); }
+    static CC_FORCE_INLINE type sqrt(type a) { return _mm256_sqrt_ps(a); }
+    static CC_FORCE_INLINE type floor(type a) { return _mm256_round_ps(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type ceil(type a) { return _mm256_round_ps(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type round(type a)
+    {
+        return _mm256_round_ps(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type trunc(type a) { return _mm256_round_ps(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type copysign(type a, type b)
+    {
+        __m256 const s = _mm256_set1_ps(-0.f);
+        return _mm256_or_ps(_mm256_andnot_ps(s, a), _mm256_and_ps(s, b));
+    }
     static CC_FORCE_INLINE __m256i to_i32(type a) { return _mm256_cvttps_epi32(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::f64, cimd::avx512, 256>
+{
+    using type = __m256d;
+    using mr = mreg<64, avx512, 256>;
+    using mtype = mr::type;
+    static constexpr int lanes = 4;
+
+    static CC_FORCE_INLINE type broadcast(f64 x) { return _mm256_set1_pd(x); }
+    static CC_FORCE_INLINE type zero() { return _mm256_setzero_pd(); }
+    static CC_FORCE_INLINE type iota(f64 start)
+    {
+        alignas(32) static constexpr f64 k[4] = {0, 1, 2, 3};
+        return _mm256_add_pd(_mm256_set1_pd(start), _mm256_load_pd(k));
+    }
+    static CC_FORCE_INLINE type load(f64 const* p) { return _mm256_loadu_pd(p); }
+    static CC_FORCE_INLINE type load_aligned(f64 const* p) { return _mm256_load_pd(p); }
+    static CC_FORCE_INLINE void store(f64* p, type a) { _mm256_storeu_pd(p, a); }
+    static CC_FORCE_INLINE void store_aligned(f64* p, type a) { _mm256_store_pd(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm256_add_pd(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm256_sub_pd(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm256_mul_pd(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm256_min_pd(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm256_max_pd(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return _mm256_fmadd_pd(a, b, c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm256_cmp_pd_mask(a, b, _CMP_EQ_OQ); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm256_cmp_pd_mask(a, b, _CMP_NEQ_UQ); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm256_cmp_pd_mask(a, b, _CMP_LT_OQ); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm256_cmp_pd_mask(a, b, _CMP_LE_OQ); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm256_cmp_pd_mask(a, b, _CMP_GT_OQ); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm256_cmp_pd_mask(a, b, _CMP_GE_OQ); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm256_mask_blend_pd(m, b, a); }
+    static CC_FORCE_INLINE f64 reduce_add(type a)
+    {
+        return reg<f64, avx512, 128>::reduce_add(
+            reg<f64, avx512, 128>::add(_mm256_castpd256_pd128(a), _mm256_extractf128_pd(a, 1)));
+    }
+    static CC_FORCE_INLINE f64 reduce_min(type a)
+    {
+        return reg<f64, avx512, 128>::reduce_min(
+            reg<f64, avx512, 128>::min(_mm256_castpd256_pd128(a), _mm256_extractf128_pd(a, 1)));
+    }
+    static CC_FORCE_INLINE f64 reduce_max(type a)
+    {
+        return reg<f64, avx512, 128>::reduce_max(
+            reg<f64, avx512, 128>::max(_mm256_castpd256_pd128(a), _mm256_extractf128_pd(a, 1)));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm256_xor_pd(a, _mm256_set1_pd(-0.0)); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm256_andnot_pd(_mm256_set1_pd(-0.0), a); }
+    static CC_FORCE_INLINE type div(type a, type b) { return _mm256_div_pd(a, b); }
+    static CC_FORCE_INLINE type sqrt(type a) { return _mm256_sqrt_pd(a); }
+    static CC_FORCE_INLINE type floor(type a) { return _mm256_round_pd(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type ceil(type a) { return _mm256_round_pd(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type round(type a)
+    {
+        return _mm256_round_pd(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type trunc(type a) { return _mm256_round_pd(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC); }
+    static CC_FORCE_INLINE type copysign(type a, type b)
+    {
+        __m256d const s = _mm256_set1_pd(-0.0);
+        return _mm256_or_pd(_mm256_andnot_pd(s, a), _mm256_and_pd(s, b));
+    }
+    static CC_FORCE_INLINE __m256i to_i64(type a) { return _mm256_cvttpd_epi64(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i8, cimd::avx512, 256>
+{
+    using type = __m256i;
+    using mr = mreg<8, avx512, 256>;
+    using mtype = mr::type;
+    static constexpr int lanes = 32;
+
+    static CC_FORCE_INLINE type broadcast(i8 x) { return _mm256_set1_epi8(i8(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm256_setzero_si256(); }
+    static CC_FORCE_INLINE type iota(i8 start)
+    {
+        alignas(32) static constexpr i8 k[32] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+                                                 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i8 const* p) { return _mm256_loadu_si256(reinterpret_cast<__m256i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(i8 const* p)
+    {
+        return _mm256_load_si256(reinterpret_cast<__m256i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(i8* p, type a) { _mm256_storeu_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(i8* p, type a) { _mm256_store_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm256_add_epi8(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm256_sub_epi8(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b)
+    {
+        __m256i const even = _mm256_mullo_epi16(a, b);
+        __m256i const odd = _mm256_mullo_epi16(_mm256_srli_epi16(a, 8), _mm256_srli_epi16(b, 8));
+        return _mm256_or_si256(_mm256_slli_epi16(odd, 8), _mm256_and_si256(even, _mm256_set1_epi16(i16(0xFF))));
+    }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm256_min_epi8(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm256_max_epi8(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm256_cmpeq_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm256_cmpneq_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm256_cmplt_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm256_cmple_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm256_cmpgt_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm256_cmpge_epi8_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm256_mask_blend_epi8(m, b, a); }
+    static CC_FORCE_INLINE i8 reduce_add(type a)
+    {
+        return reg<i8, avx512, 128>::reduce_add(
+            reg<i8, avx512, 128>::add(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE i8 reduce_min(type a)
+    {
+        return reg<i8, avx512, 128>::reduce_min(
+            reg<i8, avx512, 128>::min(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE i8 reduce_max(type a)
+    {
+        return reg<i8, avx512, 128>::reduce_max(
+            reg<i8, avx512, 128>::max(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm256_sub_epi8(_mm256_setzero_si256(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm256_abs_epi8(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm256_and_si256(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm256_or_si256(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm256_xor_si256(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm256_xor_si256(a, _mm256_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n)
+    {
+        return _mm256_and_si256(_mm256_sll_epi16(a, _mm_cvtsi32_si128(n)), _mm256_set1_epi8(i8(u8(0xFF << n))));
+    }
+    static CC_FORCE_INLINE type shr(type a, int n)
+    {
+        __m256i const lo = _mm256_srai_epi16(_mm256_slli_epi16(a, 8), 8);
+        __m256i const hi = _mm256_srai_epi16(a, 8);
+        return _mm256_or_si256(_mm256_and_si256(_mm256_sra_epi16(lo, _mm_cvtsi32_si128(n)), _mm256_set1_epi16(i16(0xFF))),
+                               _mm256_slli_epi16(_mm256_sra_epi16(hi, _mm_cvtsi32_si128(n)), 8));
+    }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i16, cimd::avx512, 256>
+{
+    using type = __m256i;
+    using mr = mreg<16, avx512, 256>;
+    using mtype = mr::type;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type broadcast(i16 x) { return _mm256_set1_epi16(i16(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm256_setzero_si256(); }
+    static CC_FORCE_INLINE type iota(i16 start)
+    {
+        alignas(32) static constexpr i16 k[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i16 const* p) { return _mm256_loadu_si256(reinterpret_cast<__m256i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(i16 const* p)
+    {
+        return _mm256_load_si256(reinterpret_cast<__m256i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(i16* p, type a) { _mm256_storeu_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(i16* p, type a) { _mm256_store_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm256_add_epi16(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm256_sub_epi16(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm256_mullo_epi16(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm256_min_epi16(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm256_max_epi16(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm256_cmpeq_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm256_cmpneq_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm256_cmplt_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm256_cmple_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm256_cmpgt_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm256_cmpge_epi16_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm256_mask_blend_epi16(m, b, a); }
+    static CC_FORCE_INLINE i16 reduce_add(type a)
+    {
+        return reg<i16, avx512, 128>::reduce_add(
+            reg<i16, avx512, 128>::add(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE i16 reduce_min(type a)
+    {
+        return reg<i16, avx512, 128>::reduce_min(
+            reg<i16, avx512, 128>::min(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE i16 reduce_max(type a)
+    {
+        return reg<i16, avx512, 128>::reduce_max(
+            reg<i16, avx512, 128>::max(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm256_sub_epi16(_mm256_setzero_si256(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm256_abs_epi16(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm256_and_si256(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm256_or_si256(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm256_xor_si256(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm256_xor_si256(a, _mm256_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm256_sll_epi16(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm256_sra_epi16(a, _mm_cvtsi32_si128(n)); }
 };
 
 template <>
@@ -274,11 +1090,12 @@ struct cimd::impl::reg<cimd::i32, cimd::avx512, 256>
     using mtype = mr::type;
     static constexpr int lanes = 8;
 
-    static CC_FORCE_INLINE type broadcast(i32 x) { return _mm256_set1_epi32(int(x)); }
+    static CC_FORCE_INLINE type broadcast(i32 x) { return _mm256_set1_epi32(i32(x)); }
     static CC_FORCE_INLINE type zero() { return _mm256_setzero_si256(); }
     static CC_FORCE_INLINE type iota(i32 start)
     {
-        return _mm256_add_epi32(_mm256_set1_epi32(int(start)), _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0));
+        alignas(32) static constexpr i32 k[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+        return add(broadcast(start), load_aligned(k));
     }
     static CC_FORCE_INLINE type load(i32 const* p) { return _mm256_loadu_si256(reinterpret_cast<__m256i const*>(p)); }
     static CC_FORCE_INLINE type load_aligned(i32 const* p)
@@ -321,7 +1138,198 @@ struct cimd::impl::reg<cimd::i32, cimd::avx512, 256>
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm256_or_si256(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm256_xor_si256(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return _mm256_xor_si256(a, _mm256_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm256_sll_epi32(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm256_sra_epi32(a, _mm_cvtsi32_si128(n)); }
     static CC_FORCE_INLINE __m256 to_f32(type a) { return _mm256_cvtepi32_ps(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i64, cimd::avx512, 256>
+{
+    using type = __m256i;
+    using mr = mreg<64, avx512, 256>;
+    using mtype = mr::type;
+    static constexpr int lanes = 4;
+
+    static CC_FORCE_INLINE type broadcast(i64 x) { return _mm256_set1_epi64x(i64(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm256_setzero_si256(); }
+    static CC_FORCE_INLINE type iota(i64 start)
+    {
+        alignas(32) static constexpr i64 k[4] = {0, 1, 2, 3};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i64 const* p) { return _mm256_loadu_si256(reinterpret_cast<__m256i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(i64 const* p)
+    {
+        return _mm256_load_si256(reinterpret_cast<__m256i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(i64* p, type a) { _mm256_storeu_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(i64* p, type a) { _mm256_store_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm256_add_epi64(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm256_sub_epi64(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm256_mullo_epi64(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm256_min_epi64(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm256_max_epi64(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm256_cmpeq_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm256_cmpneq_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm256_cmplt_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm256_cmple_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm256_cmpgt_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm256_cmpge_epi64_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm256_mask_blend_epi64(m, b, a); }
+    static CC_FORCE_INLINE i64 reduce_add(type a)
+    {
+        return reg<i64, avx512, 128>::reduce_add(
+            reg<i64, avx512, 128>::add(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE i64 reduce_min(type a)
+    {
+        return reg<i64, avx512, 128>::reduce_min(
+            reg<i64, avx512, 128>::min(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE i64 reduce_max(type a)
+    {
+        return reg<i64, avx512, 128>::reduce_max(
+            reg<i64, avx512, 128>::max(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm256_sub_epi64(_mm256_setzero_si256(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm256_abs_epi64(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm256_and_si256(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm256_or_si256(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm256_xor_si256(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm256_xor_si256(a, _mm256_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm256_sll_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm256_sra_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE __m256d to_f64(type a) { return _mm256_cvtepi64_pd(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u8, cimd::avx512, 256>
+{
+    using type = __m256i;
+    using mr = mreg<8, avx512, 256>;
+    using mtype = mr::type;
+    static constexpr int lanes = 32;
+
+    static CC_FORCE_INLINE type broadcast(u8 x) { return _mm256_set1_epi8(i8(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm256_setzero_si256(); }
+    static CC_FORCE_INLINE type iota(u8 start)
+    {
+        alignas(32) static constexpr u8 k[32] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+                                                 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u8 const* p) { return _mm256_loadu_si256(reinterpret_cast<__m256i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(u8 const* p)
+    {
+        return _mm256_load_si256(reinterpret_cast<__m256i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(u8* p, type a) { _mm256_storeu_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(u8* p, type a) { _mm256_store_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm256_add_epi8(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm256_sub_epi8(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b)
+    {
+        __m256i const even = _mm256_mullo_epi16(a, b);
+        __m256i const odd = _mm256_mullo_epi16(_mm256_srli_epi16(a, 8), _mm256_srli_epi16(b, 8));
+        return _mm256_or_si256(_mm256_slli_epi16(odd, 8), _mm256_and_si256(even, _mm256_set1_epi16(i16(0xFF))));
+    }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm256_min_epu8(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm256_max_epu8(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm256_cmpeq_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm256_cmpneq_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm256_cmplt_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm256_cmple_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm256_cmpgt_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm256_cmpge_epu8_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm256_mask_blend_epi8(m, b, a); }
+    static CC_FORCE_INLINE u8 reduce_add(type a)
+    {
+        return reg<u8, avx512, 128>::reduce_add(
+            reg<u8, avx512, 128>::add(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE u8 reduce_min(type a)
+    {
+        return reg<u8, avx512, 128>::reduce_min(
+            reg<u8, avx512, 128>::min(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE u8 reduce_max(type a)
+    {
+        return reg<u8, avx512, 128>::reduce_max(
+            reg<u8, avx512, 128>::max(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm256_and_si256(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm256_or_si256(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm256_xor_si256(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm256_xor_si256(a, _mm256_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n)
+    {
+        return _mm256_and_si256(_mm256_sll_epi16(a, _mm_cvtsi32_si128(n)), _mm256_set1_epi8(i8(u8(0xFF << n))));
+    }
+    static CC_FORCE_INLINE type shr(type a, int n)
+    {
+        return _mm256_and_si256(_mm256_srl_epi16(a, _mm_cvtsi32_si128(n)), _mm256_set1_epi8(i8(u8(0xFF >> n))));
+    }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u16, cimd::avx512, 256>
+{
+    using type = __m256i;
+    using mr = mreg<16, avx512, 256>;
+    using mtype = mr::type;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type broadcast(u16 x) { return _mm256_set1_epi16(i16(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm256_setzero_si256(); }
+    static CC_FORCE_INLINE type iota(u16 start)
+    {
+        alignas(32) static constexpr u16 k[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u16 const* p) { return _mm256_loadu_si256(reinterpret_cast<__m256i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(u16 const* p)
+    {
+        return _mm256_load_si256(reinterpret_cast<__m256i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(u16* p, type a) { _mm256_storeu_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(u16* p, type a) { _mm256_store_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm256_add_epi16(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm256_sub_epi16(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm256_mullo_epi16(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm256_min_epu16(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm256_max_epu16(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm256_cmpeq_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm256_cmpneq_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm256_cmplt_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm256_cmple_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm256_cmpgt_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm256_cmpge_epu16_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm256_mask_blend_epi16(m, b, a); }
+    static CC_FORCE_INLINE u16 reduce_add(type a)
+    {
+        return reg<u16, avx512, 128>::reduce_add(
+            reg<u16, avx512, 128>::add(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE u16 reduce_min(type a)
+    {
+        return reg<u16, avx512, 128>::reduce_min(
+            reg<u16, avx512, 128>::min(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE u16 reduce_max(type a)
+    {
+        return reg<u16, avx512, 128>::reduce_max(
+            reg<u16, avx512, 128>::max(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm256_and_si256(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm256_or_si256(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm256_xor_si256(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm256_xor_si256(a, _mm256_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm256_sll_epi16(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm256_srl_epi16(a, _mm_cvtsi32_si128(n)); }
 };
 
 template <>
@@ -332,11 +1340,12 @@ struct cimd::impl::reg<cimd::u32, cimd::avx512, 256>
     using mtype = mr::type;
     static constexpr int lanes = 8;
 
-    static CC_FORCE_INLINE type broadcast(u32 x) { return _mm256_set1_epi32(int(x)); }
+    static CC_FORCE_INLINE type broadcast(u32 x) { return _mm256_set1_epi32(i32(x)); }
     static CC_FORCE_INLINE type zero() { return _mm256_setzero_si256(); }
     static CC_FORCE_INLINE type iota(u32 start)
     {
-        return _mm256_add_epi32(_mm256_set1_epi32(int(start)), _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0));
+        alignas(32) static constexpr u32 k[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+        return add(broadcast(start), load_aligned(k));
     }
     static CC_FORCE_INLINE type load(u32 const* p) { return _mm256_loadu_si256(reinterpret_cast<__m256i const*>(p)); }
     static CC_FORCE_INLINE type load_aligned(u32 const* p)
@@ -377,7 +1386,100 @@ struct cimd::impl::reg<cimd::u32, cimd::avx512, 256>
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm256_or_si256(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm256_xor_si256(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return _mm256_xor_si256(a, _mm256_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm256_sll_epi32(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm256_srl_epi32(a, _mm_cvtsi32_si128(n)); }
     static CC_FORCE_INLINE __m256 to_f32(type a) { return _mm256_cvtepu32_ps(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u64, cimd::avx512, 256>
+{
+    using type = __m256i;
+    using mr = mreg<64, avx512, 256>;
+    using mtype = mr::type;
+    static constexpr int lanes = 4;
+
+    static CC_FORCE_INLINE type broadcast(u64 x) { return _mm256_set1_epi64x(i64(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm256_setzero_si256(); }
+    static CC_FORCE_INLINE type iota(u64 start)
+    {
+        alignas(32) static constexpr u64 k[4] = {0, 1, 2, 3};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u64 const* p) { return _mm256_loadu_si256(reinterpret_cast<__m256i const*>(p)); }
+    static CC_FORCE_INLINE type load_aligned(u64 const* p)
+    {
+        return _mm256_load_si256(reinterpret_cast<__m256i const*>(p));
+    }
+    static CC_FORCE_INLINE void store(u64* p, type a) { _mm256_storeu_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE void store_aligned(u64* p, type a) { _mm256_store_si256(reinterpret_cast<__m256i*>(p), a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm256_add_epi64(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm256_sub_epi64(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm256_mullo_epi64(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm256_min_epu64(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm256_max_epu64(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm256_cmpeq_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm256_cmpneq_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm256_cmplt_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm256_cmple_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm256_cmpgt_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm256_cmpge_epu64_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm256_mask_blend_epi64(m, b, a); }
+    static CC_FORCE_INLINE u64 reduce_add(type a)
+    {
+        return reg<u64, avx512, 128>::reduce_add(
+            reg<u64, avx512, 128>::add(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE u64 reduce_min(type a)
+    {
+        return reg<u64, avx512, 128>::reduce_min(
+            reg<u64, avx512, 128>::min(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE u64 reduce_max(type a)
+    {
+        return reg<u64, avx512, 128>::reduce_max(
+            reg<u64, avx512, 128>::max(_mm256_castsi256_si128(a), _mm256_extracti128_si256(a, 1)));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm256_and_si256(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm256_or_si256(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm256_xor_si256(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm256_xor_si256(a, _mm256_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm256_sll_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm256_srl_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE __m256d to_f64(type a) { return _mm256_cvtepu64_pd(a); }
+};
+
+template <>
+struct cimd::impl::mreg<8, cimd::avx512, 512>
+{
+    using type = __mmask64;
+    static constexpr int lanes = 64;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask64(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask64(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask64(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask64(~u64(a) & 0xFFFFFFFFFFFFFFFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFFFFFFFFFFFFFFFull) == 0xFFFFFFFFFFFFFFFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask64(b & 0xFFFFFFFFFFFFFFFFull); }
+};
+
+template <>
+struct cimd::impl::mreg<16, cimd::avx512, 512>
+{
+    using type = __mmask32;
+    static constexpr int lanes = 32;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask32(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask32(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask32(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask32(~u64(a) & 0xFFFFFFFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFFFFFFFull) == 0xFFFFFFFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask32(b & 0xFFFFFFFFull); }
 };
 
 template <>
@@ -389,11 +1491,27 @@ struct cimd::impl::mreg<32, cimd::avx512, 512>
     static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask16(a & b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask16(a | b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask16(a ^ b); }
-    static CC_FORCE_INLINE type bit_not(type a) { return __mmask16(~a & 0xFFFFu); }
-    static CC_FORCE_INLINE u32 bits(type m) { return u32(m); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask16(~u64(a) & 0xFFFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
     static CC_FORCE_INLINE bool any(type m) { return m != 0; }
-    static CC_FORCE_INLINE bool all(type m) { return (u32(m) & 0xFFFFu) == 0xFFFFu; }
-    static CC_FORCE_INLINE type from_bits(u32 b) { return __mmask16(b & 0xFFFFu); }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFFFull) == 0xFFFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask16(b & 0xFFFFull); }
+};
+
+template <>
+struct cimd::impl::mreg<64, cimd::avx512, 512>
+{
+    using type = __mmask8;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return __mmask8(a & b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return __mmask8(a | b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return __mmask8(a ^ b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return __mmask8(~u64(a) & 0xFFull); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(m); }
+    static CC_FORCE_INLINE bool any(type m) { return m != 0; }
+    static CC_FORCE_INLINE bool all(type m) { return (u64(m) & 0xFFull) == 0xFFull; }
+    static CC_FORCE_INLINE type from_bits(u64 b) { return __mmask8(b & 0xFFull); }
 };
 
 template <>
@@ -408,8 +1526,8 @@ struct cimd::impl::reg<cimd::f32, cimd::avx512, 512>
     static CC_FORCE_INLINE type zero() { return _mm512_setzero_ps(); }
     static CC_FORCE_INLINE type iota(f32 start)
     {
-        return _mm512_add_ps(_mm512_set1_ps(start), _mm512_set_ps(15.f, 14.f, 13.f, 12.f, 11.f, 10.f, 9.f, 8.f, 7.f,
-                                                                  6.f, 5.f, 4.f, 3.f, 2.f, 1.f, 0.f));
+        alignas(64) static constexpr f32 k[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        return _mm512_add_ps(_mm512_set1_ps(start), _mm512_load_ps(k));
     }
     static CC_FORCE_INLINE type load(f32 const* p) { return _mm512_loadu_ps(p); }
     static CC_FORCE_INLINE type load_aligned(f32 const* p) { return _mm512_load_ps(p); }
@@ -444,8 +1562,238 @@ struct cimd::impl::reg<cimd::f32, cimd::avx512, 512>
             reg<f32, avx512, 256>::max(_mm512_castps512_ps256(a), _mm512_extractf32x8_ps(a, 1)));
     }
     static CC_FORCE_INLINE type neg(type a) { return _mm512_xor_ps(a, _mm512_set1_ps(-0.f)); }
-    static CC_FORCE_INLINE type abs(type a) { return _mm512_abs_ps(a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm512_andnot_ps(_mm512_set1_ps(-0.f), a); }
+    static CC_FORCE_INLINE type div(type a, type b) { return _mm512_div_ps(a, b); }
+    static CC_FORCE_INLINE type sqrt(type a) { return _mm512_sqrt_ps(a); }
+    static CC_FORCE_INLINE type floor(type a)
+    {
+        return _mm512_roundscale_ps(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type ceil(type a)
+    {
+        return _mm512_roundscale_ps(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type round(type a)
+    {
+        return _mm512_roundscale_ps(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type trunc(type a)
+    {
+        return _mm512_roundscale_ps(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type copysign(type a, type b)
+    {
+        __m512 const s = _mm512_set1_ps(-0.f);
+        return _mm512_or_ps(_mm512_andnot_ps(s, a), _mm512_and_ps(s, b));
+    }
     static CC_FORCE_INLINE __m512i to_i32(type a) { return _mm512_cvttps_epi32(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::f64, cimd::avx512, 512>
+{
+    using type = __m512d;
+    using mr = mreg<64, avx512, 512>;
+    using mtype = mr::type;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type broadcast(f64 x) { return _mm512_set1_pd(x); }
+    static CC_FORCE_INLINE type zero() { return _mm512_setzero_pd(); }
+    static CC_FORCE_INLINE type iota(f64 start)
+    {
+        alignas(64) static constexpr f64 k[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+        return _mm512_add_pd(_mm512_set1_pd(start), _mm512_load_pd(k));
+    }
+    static CC_FORCE_INLINE type load(f64 const* p) { return _mm512_loadu_pd(p); }
+    static CC_FORCE_INLINE type load_aligned(f64 const* p) { return _mm512_load_pd(p); }
+    static CC_FORCE_INLINE void store(f64* p, type a) { _mm512_storeu_pd(p, a); }
+    static CC_FORCE_INLINE void store_aligned(f64* p, type a) { _mm512_store_pd(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm512_add_pd(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm512_sub_pd(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm512_mul_pd(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm512_min_pd(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm512_max_pd(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return _mm512_fmadd_pd(a, b, c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm512_cmp_pd_mask(a, b, _CMP_EQ_OQ); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm512_cmp_pd_mask(a, b, _CMP_NEQ_UQ); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm512_cmp_pd_mask(a, b, _CMP_LT_OQ); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm512_cmp_pd_mask(a, b, _CMP_LE_OQ); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm512_cmp_pd_mask(a, b, _CMP_GT_OQ); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm512_cmp_pd_mask(a, b, _CMP_GE_OQ); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm512_mask_blend_pd(m, b, a); }
+    static CC_FORCE_INLINE f64 reduce_add(type a)
+    {
+        return reg<f64, avx512, 256>::reduce_add(
+            reg<f64, avx512, 256>::add(_mm512_castpd512_pd256(a), _mm512_extractf64x4_pd(a, 1)));
+    }
+    static CC_FORCE_INLINE f64 reduce_min(type a)
+    {
+        return reg<f64, avx512, 256>::reduce_min(
+            reg<f64, avx512, 256>::min(_mm512_castpd512_pd256(a), _mm512_extractf64x4_pd(a, 1)));
+    }
+    static CC_FORCE_INLINE f64 reduce_max(type a)
+    {
+        return reg<f64, avx512, 256>::reduce_max(
+            reg<f64, avx512, 256>::max(_mm512_castpd512_pd256(a), _mm512_extractf64x4_pd(a, 1)));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm512_xor_pd(a, _mm512_set1_pd(-0.0)); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm512_andnot_pd(_mm512_set1_pd(-0.0), a); }
+    static CC_FORCE_INLINE type div(type a, type b) { return _mm512_div_pd(a, b); }
+    static CC_FORCE_INLINE type sqrt(type a) { return _mm512_sqrt_pd(a); }
+    static CC_FORCE_INLINE type floor(type a)
+    {
+        return _mm512_roundscale_pd(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type ceil(type a)
+    {
+        return _mm512_roundscale_pd(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type round(type a)
+    {
+        return _mm512_roundscale_pd(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type trunc(type a)
+    {
+        return _mm512_roundscale_pd(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    }
+    static CC_FORCE_INLINE type copysign(type a, type b)
+    {
+        __m512d const s = _mm512_set1_pd(-0.0);
+        return _mm512_or_pd(_mm512_andnot_pd(s, a), _mm512_and_pd(s, b));
+    }
+    static CC_FORCE_INLINE __m512i to_i64(type a) { return _mm512_cvttpd_epi64(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i8, cimd::avx512, 512>
+{
+    using type = __m512i;
+    using mr = mreg<8, avx512, 512>;
+    using mtype = mr::type;
+    static constexpr int lanes = 64;
+
+    static CC_FORCE_INLINE type broadcast(i8 x) { return _mm512_set1_epi8(i8(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm512_setzero_si512(); }
+    static CC_FORCE_INLINE type iota(i8 start)
+    {
+        alignas(64) static constexpr i8 k[64]
+            = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+               22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+               44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i8 const* p) { return _mm512_loadu_si512(p); }
+    static CC_FORCE_INLINE type load_aligned(i8 const* p) { return _mm512_load_si512(p); }
+    static CC_FORCE_INLINE void store(i8* p, type a) { _mm512_storeu_si512(p, a); }
+    static CC_FORCE_INLINE void store_aligned(i8* p, type a) { _mm512_store_si512(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm512_add_epi8(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm512_sub_epi8(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b)
+    {
+        __m512i const even = _mm512_mullo_epi16(a, b);
+        __m512i const odd = _mm512_mullo_epi16(_mm512_srli_epi16(a, 8), _mm512_srli_epi16(b, 8));
+        return _mm512_or_si512(_mm512_slli_epi16(odd, 8), _mm512_and_si512(even, _mm512_set1_epi16(i16(0xFF))));
+    }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm512_min_epi8(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm512_max_epi8(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm512_cmpeq_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm512_cmpneq_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm512_cmplt_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm512_cmple_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm512_cmpgt_epi8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm512_cmpge_epi8_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm512_mask_blend_epi8(m, b, a); }
+    static CC_FORCE_INLINE i8 reduce_add(type a)
+    {
+        return reg<i8, avx512, 256>::reduce_add(
+            reg<i8, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE i8 reduce_min(type a)
+    {
+        return reg<i8, avx512, 256>::reduce_min(
+            reg<i8, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE i8 reduce_max(type a)
+    {
+        return reg<i8, avx512, 256>::reduce_max(
+            reg<i8, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm512_sub_epi8(_mm512_setzero_si512(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm512_abs_epi8(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm512_and_si512(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm512_or_si512(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm512_xor_si512(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm512_xor_si512(a, _mm512_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n)
+    {
+        return _mm512_and_si512(_mm512_sll_epi16(a, _mm_cvtsi32_si128(n)), _mm512_set1_epi8(i8(u8(0xFF << n))));
+    }
+    static CC_FORCE_INLINE type shr(type a, int n)
+    {
+        __m512i const lo = _mm512_srai_epi16(_mm512_slli_epi16(a, 8), 8);
+        __m512i const hi = _mm512_srai_epi16(a, 8);
+        return _mm512_or_si512(_mm512_and_si512(_mm512_sra_epi16(lo, _mm_cvtsi32_si128(n)), _mm512_set1_epi16(i16(0xFF))),
+                               _mm512_slli_epi16(_mm512_sra_epi16(hi, _mm_cvtsi32_si128(n)), 8));
+    }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i16, cimd::avx512, 512>
+{
+    using type = __m512i;
+    using mr = mreg<16, avx512, 512>;
+    using mtype = mr::type;
+    static constexpr int lanes = 32;
+
+    static CC_FORCE_INLINE type broadcast(i16 x) { return _mm512_set1_epi16(i16(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm512_setzero_si512(); }
+    static CC_FORCE_INLINE type iota(i16 start)
+    {
+        alignas(64) static constexpr i16 k[32] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+                                                  16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i16 const* p) { return _mm512_loadu_si512(p); }
+    static CC_FORCE_INLINE type load_aligned(i16 const* p) { return _mm512_load_si512(p); }
+    static CC_FORCE_INLINE void store(i16* p, type a) { _mm512_storeu_si512(p, a); }
+    static CC_FORCE_INLINE void store_aligned(i16* p, type a) { _mm512_store_si512(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm512_add_epi16(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm512_sub_epi16(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm512_mullo_epi16(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm512_min_epi16(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm512_max_epi16(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm512_cmpeq_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm512_cmpneq_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm512_cmplt_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm512_cmple_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm512_cmpgt_epi16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm512_cmpge_epi16_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm512_mask_blend_epi16(m, b, a); }
+    static CC_FORCE_INLINE i16 reduce_add(type a)
+    {
+        return reg<i16, avx512, 256>::reduce_add(
+            reg<i16, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE i16 reduce_min(type a)
+    {
+        return reg<i16, avx512, 256>::reduce_min(
+            reg<i16, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE i16 reduce_max(type a)
+    {
+        return reg<i16, avx512, 256>::reduce_max(
+            reg<i16, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm512_sub_epi16(_mm512_setzero_si512(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm512_abs_epi16(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm512_and_si512(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm512_or_si512(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm512_xor_si512(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm512_xor_si512(a, _mm512_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm512_sll_epi16(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm512_sra_epi16(a, _mm_cvtsi32_si128(n)); }
 };
 
 template <>
@@ -456,12 +1804,12 @@ struct cimd::impl::reg<cimd::i32, cimd::avx512, 512>
     using mtype = mr::type;
     static constexpr int lanes = 16;
 
-    static CC_FORCE_INLINE type broadcast(i32 x) { return _mm512_set1_epi32(int(x)); }
+    static CC_FORCE_INLINE type broadcast(i32 x) { return _mm512_set1_epi32(i32(x)); }
     static CC_FORCE_INLINE type zero() { return _mm512_setzero_si512(); }
     static CC_FORCE_INLINE type iota(i32 start)
     {
-        return _mm512_add_epi32(_mm512_set1_epi32(int(start)),
-                                _mm512_set_epi32(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0));
+        alignas(64) static constexpr i32 k[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        return add(broadcast(start), load_aligned(k));
     }
     static CC_FORCE_INLINE type load(i32 const* p) { return _mm512_loadu_si512(p); }
     static CC_FORCE_INLINE type load_aligned(i32 const* p) { return _mm512_load_si512(p); }
@@ -483,17 +1831,17 @@ struct cimd::impl::reg<cimd::i32, cimd::avx512, 512>
     static CC_FORCE_INLINE i32 reduce_add(type a)
     {
         return reg<i32, avx512, 256>::reduce_add(
-            reg<i32, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti32x8_epi32(a, 1)));
+            reg<i32, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
     }
     static CC_FORCE_INLINE i32 reduce_min(type a)
     {
         return reg<i32, avx512, 256>::reduce_min(
-            reg<i32, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti32x8_epi32(a, 1)));
+            reg<i32, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
     }
     static CC_FORCE_INLINE i32 reduce_max(type a)
     {
         return reg<i32, avx512, 256>::reduce_max(
-            reg<i32, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti32x8_epi32(a, 1)));
+            reg<i32, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
     }
     static CC_FORCE_INLINE type neg(type a) { return _mm512_sub_epi32(_mm512_setzero_si512(), a); }
     static CC_FORCE_INLINE type abs(type a) { return _mm512_abs_epi32(a); }
@@ -501,7 +1849,192 @@ struct cimd::impl::reg<cimd::i32, cimd::avx512, 512>
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm512_or_si512(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm512_xor_si512(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return _mm512_xor_si512(a, _mm512_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm512_sll_epi32(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm512_sra_epi32(a, _mm_cvtsi32_si128(n)); }
     static CC_FORCE_INLINE __m512 to_f32(type a) { return _mm512_cvtepi32_ps(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i64, cimd::avx512, 512>
+{
+    using type = __m512i;
+    using mr = mreg<64, avx512, 512>;
+    using mtype = mr::type;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type broadcast(i64 x) { return _mm512_set1_epi64(i64(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm512_setzero_si512(); }
+    static CC_FORCE_INLINE type iota(i64 start)
+    {
+        alignas(64) static constexpr i64 k[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(i64 const* p) { return _mm512_loadu_si512(p); }
+    static CC_FORCE_INLINE type load_aligned(i64 const* p) { return _mm512_load_si512(p); }
+    static CC_FORCE_INLINE void store(i64* p, type a) { _mm512_storeu_si512(p, a); }
+    static CC_FORCE_INLINE void store_aligned(i64* p, type a) { _mm512_store_si512(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm512_add_epi64(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm512_sub_epi64(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm512_mullo_epi64(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm512_min_epi64(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm512_max_epi64(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm512_cmpeq_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm512_cmpneq_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm512_cmplt_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm512_cmple_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm512_cmpgt_epi64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm512_cmpge_epi64_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm512_mask_blend_epi64(m, b, a); }
+    static CC_FORCE_INLINE i64 reduce_add(type a)
+    {
+        return reg<i64, avx512, 256>::reduce_add(
+            reg<i64, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE i64 reduce_min(type a)
+    {
+        return reg<i64, avx512, 256>::reduce_min(
+            reg<i64, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE i64 reduce_max(type a)
+    {
+        return reg<i64, avx512, 256>::reduce_max(
+            reg<i64, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE type neg(type a) { return _mm512_sub_epi64(_mm512_setzero_si512(), a); }
+    static CC_FORCE_INLINE type abs(type a) { return _mm512_abs_epi64(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm512_and_si512(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm512_or_si512(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm512_xor_si512(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm512_xor_si512(a, _mm512_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm512_sll_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm512_sra_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE __m512d to_f64(type a) { return _mm512_cvtepi64_pd(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u8, cimd::avx512, 512>
+{
+    using type = __m512i;
+    using mr = mreg<8, avx512, 512>;
+    using mtype = mr::type;
+    static constexpr int lanes = 64;
+
+    static CC_FORCE_INLINE type broadcast(u8 x) { return _mm512_set1_epi8(i8(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm512_setzero_si512(); }
+    static CC_FORCE_INLINE type iota(u8 start)
+    {
+        alignas(64) static constexpr u8 k[64]
+            = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+               22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+               44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u8 const* p) { return _mm512_loadu_si512(p); }
+    static CC_FORCE_INLINE type load_aligned(u8 const* p) { return _mm512_load_si512(p); }
+    static CC_FORCE_INLINE void store(u8* p, type a) { _mm512_storeu_si512(p, a); }
+    static CC_FORCE_INLINE void store_aligned(u8* p, type a) { _mm512_store_si512(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm512_add_epi8(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm512_sub_epi8(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b)
+    {
+        __m512i const even = _mm512_mullo_epi16(a, b);
+        __m512i const odd = _mm512_mullo_epi16(_mm512_srli_epi16(a, 8), _mm512_srli_epi16(b, 8));
+        return _mm512_or_si512(_mm512_slli_epi16(odd, 8), _mm512_and_si512(even, _mm512_set1_epi16(i16(0xFF))));
+    }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm512_min_epu8(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm512_max_epu8(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm512_cmpeq_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm512_cmpneq_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm512_cmplt_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm512_cmple_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm512_cmpgt_epu8_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm512_cmpge_epu8_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm512_mask_blend_epi8(m, b, a); }
+    static CC_FORCE_INLINE u8 reduce_add(type a)
+    {
+        return reg<u8, avx512, 256>::reduce_add(
+            reg<u8, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE u8 reduce_min(type a)
+    {
+        return reg<u8, avx512, 256>::reduce_min(
+            reg<u8, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE u8 reduce_max(type a)
+    {
+        return reg<u8, avx512, 256>::reduce_max(
+            reg<u8, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm512_and_si512(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm512_or_si512(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm512_xor_si512(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm512_xor_si512(a, _mm512_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n)
+    {
+        return _mm512_and_si512(_mm512_sll_epi16(a, _mm_cvtsi32_si128(n)), _mm512_set1_epi8(i8(u8(0xFF << n))));
+    }
+    static CC_FORCE_INLINE type shr(type a, int n)
+    {
+        return _mm512_and_si512(_mm512_srl_epi16(a, _mm_cvtsi32_si128(n)), _mm512_set1_epi8(i8(u8(0xFF >> n))));
+    }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u16, cimd::avx512, 512>
+{
+    using type = __m512i;
+    using mr = mreg<16, avx512, 512>;
+    using mtype = mr::type;
+    static constexpr int lanes = 32;
+
+    static CC_FORCE_INLINE type broadcast(u16 x) { return _mm512_set1_epi16(i16(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm512_setzero_si512(); }
+    static CC_FORCE_INLINE type iota(u16 start)
+    {
+        alignas(64) static constexpr u16 k[32] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+                                                  16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u16 const* p) { return _mm512_loadu_si512(p); }
+    static CC_FORCE_INLINE type load_aligned(u16 const* p) { return _mm512_load_si512(p); }
+    static CC_FORCE_INLINE void store(u16* p, type a) { _mm512_storeu_si512(p, a); }
+    static CC_FORCE_INLINE void store_aligned(u16* p, type a) { _mm512_store_si512(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm512_add_epi16(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm512_sub_epi16(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm512_mullo_epi16(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm512_min_epu16(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm512_max_epu16(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm512_cmpeq_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm512_cmpneq_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm512_cmplt_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm512_cmple_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm512_cmpgt_epu16_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm512_cmpge_epu16_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm512_mask_blend_epi16(m, b, a); }
+    static CC_FORCE_INLINE u16 reduce_add(type a)
+    {
+        return reg<u16, avx512, 256>::reduce_add(
+            reg<u16, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE u16 reduce_min(type a)
+    {
+        return reg<u16, avx512, 256>::reduce_min(
+            reg<u16, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE u16 reduce_max(type a)
+    {
+        return reg<u16, avx512, 256>::reduce_max(
+            reg<u16, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm512_and_si512(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm512_or_si512(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm512_xor_si512(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm512_xor_si512(a, _mm512_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm512_sll_epi16(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm512_srl_epi16(a, _mm_cvtsi32_si128(n)); }
 };
 
 template <>
@@ -512,12 +2045,12 @@ struct cimd::impl::reg<cimd::u32, cimd::avx512, 512>
     using mtype = mr::type;
     static constexpr int lanes = 16;
 
-    static CC_FORCE_INLINE type broadcast(u32 x) { return _mm512_set1_epi32(int(x)); }
+    static CC_FORCE_INLINE type broadcast(u32 x) { return _mm512_set1_epi32(i32(x)); }
     static CC_FORCE_INLINE type zero() { return _mm512_setzero_si512(); }
     static CC_FORCE_INLINE type iota(u32 start)
     {
-        return _mm512_add_epi32(_mm512_set1_epi32(int(start)),
-                                _mm512_set_epi32(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0));
+        alignas(64) static constexpr u32 k[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        return add(broadcast(start), load_aligned(k));
     }
     static CC_FORCE_INLINE type load(u32 const* p) { return _mm512_loadu_si512(p); }
     static CC_FORCE_INLINE type load_aligned(u32 const* p) { return _mm512_load_si512(p); }
@@ -539,23 +2072,81 @@ struct cimd::impl::reg<cimd::u32, cimd::avx512, 512>
     static CC_FORCE_INLINE u32 reduce_add(type a)
     {
         return reg<u32, avx512, 256>::reduce_add(
-            reg<u32, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti32x8_epi32(a, 1)));
+            reg<u32, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
     }
     static CC_FORCE_INLINE u32 reduce_min(type a)
     {
         return reg<u32, avx512, 256>::reduce_min(
-            reg<u32, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti32x8_epi32(a, 1)));
+            reg<u32, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
     }
     static CC_FORCE_INLINE u32 reduce_max(type a)
     {
         return reg<u32, avx512, 256>::reduce_max(
-            reg<u32, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti32x8_epi32(a, 1)));
+            reg<u32, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
     }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm512_and_si512(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm512_or_si512(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm512_xor_si512(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return _mm512_xor_si512(a, _mm512_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm512_sll_epi32(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm512_srl_epi32(a, _mm_cvtsi32_si128(n)); }
     static CC_FORCE_INLINE __m512 to_f32(type a) { return _mm512_cvtepu32_ps(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u64, cimd::avx512, 512>
+{
+    using type = __m512i;
+    using mr = mreg<64, avx512, 512>;
+    using mtype = mr::type;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type broadcast(u64 x) { return _mm512_set1_epi64(i64(x)); }
+    static CC_FORCE_INLINE type zero() { return _mm512_setzero_si512(); }
+    static CC_FORCE_INLINE type iota(u64 start)
+    {
+        alignas(64) static constexpr u64 k[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+        return add(broadcast(start), load_aligned(k));
+    }
+    static CC_FORCE_INLINE type load(u64 const* p) { return _mm512_loadu_si512(p); }
+    static CC_FORCE_INLINE type load_aligned(u64 const* p) { return _mm512_load_si512(p); }
+    static CC_FORCE_INLINE void store(u64* p, type a) { _mm512_storeu_si512(p, a); }
+    static CC_FORCE_INLINE void store_aligned(u64* p, type a) { _mm512_store_si512(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return _mm512_add_epi64(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return _mm512_sub_epi64(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return _mm512_mullo_epi64(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return _mm512_min_epu64(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return _mm512_max_epu64(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return _mm512_cmpeq_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return _mm512_cmpneq_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return _mm512_cmplt_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return _mm512_cmple_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return _mm512_cmpgt_epu64_mask(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return _mm512_cmpge_epu64_mask(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return _mm512_mask_blend_epi64(m, b, a); }
+    static CC_FORCE_INLINE u64 reduce_add(type a)
+    {
+        return reg<u64, avx512, 256>::reduce_add(
+            reg<u64, avx512, 256>::add(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE u64 reduce_min(type a)
+    {
+        return reg<u64, avx512, 256>::reduce_min(
+            reg<u64, avx512, 256>::min(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE u64 reduce_max(type a)
+    {
+        return reg<u64, avx512, 256>::reduce_max(
+            reg<u64, avx512, 256>::max(_mm512_castsi512_si256(a), _mm512_extracti64x4_epi64(a, 1)));
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return _mm512_and_si512(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return _mm512_or_si512(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return _mm512_xor_si512(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return _mm512_xor_si512(a, _mm512_set1_epi32(-1)); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return _mm512_sll_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return _mm512_srl_epi64(a, _mm_cvtsi32_si128(n)); }
+    static CC_FORCE_INLINE __m512d to_f64(type a) { return _mm512_cvtepu64_pd(a); }
 };
 
 // NOLINTEND

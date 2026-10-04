@@ -10,6 +10,48 @@
 // NOLINTBEGIN
 
 template <>
+struct cimd::impl::mreg<8, cimd::simd128, 128>
+{
+    using type = v128_t;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(wasm_i8x16_bitmask(m)); }
+    static CC_FORCE_INLINE bool any(type m) { return wasm_v128_any_true(m); }
+    static CC_FORCE_INLINE bool all(type m) { return wasm_i8x16_all_true(m); }
+    static CC_FORCE_INLINE type from_bits(u64 b)
+    {
+        return wasm_i8x16_ne(wasm_v128_and(wasm_i8x16_shuffle(wasm_i64x2_splat(i64(b)), wasm_i64x2_splat(i64(b)), 0, 0,
+                                                              0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1),
+                                           wasm_i8x16_make(1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128)),
+                             wasm_i32x4_splat(0));
+    }
+};
+
+template <>
+struct cimd::impl::mreg<16, cimd::simd128, 128>
+{
+    using type = v128_t;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(wasm_i16x8_bitmask(m)); }
+    static CC_FORCE_INLINE bool any(type m) { return wasm_v128_any_true(m); }
+    static CC_FORCE_INLINE bool all(type m) { return wasm_i16x8_all_true(m); }
+    static CC_FORCE_INLINE type from_bits(u64 b)
+    {
+        return wasm_i16x8_ne(wasm_v128_and(wasm_i16x8_splat(i16(b)), wasm_i16x8_make(1, 2, 4, 8, 16, 32, 64, 128)),
+                             wasm_i32x4_splat(0));
+    }
+};
+
+template <>
 struct cimd::impl::mreg<32, cimd::simd128, 128>
 {
     using type = v128_t;
@@ -19,12 +61,31 @@ struct cimd::impl::mreg<32, cimd::simd128, 128>
     static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
-    static CC_FORCE_INLINE u32 bits(type m) { return u32(wasm_i32x4_bitmask(m)); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(wasm_i32x4_bitmask(m)); }
     static CC_FORCE_INLINE bool any(type m) { return wasm_v128_any_true(m); }
     static CC_FORCE_INLINE bool all(type m) { return wasm_i32x4_all_true(m); }
-    static CC_FORCE_INLINE type from_bits(u32 b)
+    static CC_FORCE_INLINE type from_bits(u64 b)
     {
-        return wasm_i32x4_ne(wasm_v128_and(wasm_i32x4_splat(int(b)), wasm_i32x4_make(1, 2, 4, 8)), wasm_i32x4_splat(0));
+        return wasm_i32x4_ne(wasm_v128_and(wasm_i32x4_splat(i32(b)), wasm_i32x4_make(1, 2, 4, 8)), wasm_i32x4_splat(0));
+    }
+};
+
+template <>
+struct cimd::impl::mreg<64, cimd::simd128, 128>
+{
+    using type = v128_t;
+    static constexpr int lanes = 2;
+
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE u64 bits(type m) { return u64(wasm_i64x2_bitmask(m)); }
+    static CC_FORCE_INLINE bool any(type m) { return wasm_v128_any_true(m); }
+    static CC_FORCE_INLINE bool all(type m) { return wasm_i64x2_all_true(m); }
+    static CC_FORCE_INLINE type from_bits(u64 b)
+    {
+        return wasm_i64x2_ne(wasm_v128_and(wasm_i64x2_splat(i64(b)), wasm_i64x2_make(1, 2)), wasm_i32x4_splat(0));
     }
 };
 
@@ -51,7 +112,7 @@ struct cimd::impl::reg<cimd::f32, cimd::simd128, 128>
     static CC_FORCE_INLINE type mul(type a, type b) { return wasm_f32x4_mul(a, b); }
     static CC_FORCE_INLINE type min(type a, type b) { return wasm_f32x4_pmin(a, b); }
     static CC_FORCE_INLINE type max(type a, type b) { return wasm_f32x4_pmax(a, b); }
-    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return wasm_f32x4_add(wasm_f32x4_mul(a, b), c); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
     static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_f32x4_eq(a, b); }
     static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_f32x4_ne(a, b); }
     static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_f32x4_lt(a, b); }
@@ -61,25 +122,273 @@ struct cimd::impl::reg<cimd::f32, cimd::simd128, 128>
     static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
     static CC_FORCE_INLINE f32 reduce_add(type a)
     {
-        v128_t t = add(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = add(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = add(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_f32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE f32 reduce_min(type a)
     {
-        v128_t t = min(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = min(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = min(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_f32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE f32 reduce_max(type a)
     {
-        v128_t t = max(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = max(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_f32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE type neg(type a) { return wasm_f32x4_neg(a); }
     static CC_FORCE_INLINE type abs(type a) { return wasm_f32x4_abs(a); }
+    static CC_FORCE_INLINE type div(type a, type b) { return wasm_f32x4_div(a, b); }
+    static CC_FORCE_INLINE type sqrt(type a) { return wasm_f32x4_sqrt(a); }
+    static CC_FORCE_INLINE type floor(type a) { return wasm_f32x4_floor(a); }
+    static CC_FORCE_INLINE type ceil(type a) { return wasm_f32x4_ceil(a); }
+    static CC_FORCE_INLINE type round(type a) { return wasm_f32x4_nearest(a); }
+    static CC_FORCE_INLINE type trunc(type a) { return wasm_f32x4_trunc(a); }
+    static CC_FORCE_INLINE type copysign(type a, type b)
+    {
+        return wasm_v128_bitselect(b, a, wasm_i32x4_splat(int(0x80000000u)));
+    }
     static CC_FORCE_INLINE v128_t to_i32(type a) { return wasm_i32x4_trunc_sat_f32x4(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::f64, cimd::simd128, 128>
+{
+    using type = v128_t;
+    using mr = mreg<64, simd128, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 2;
+
+    static CC_FORCE_INLINE type broadcast(f64 x) { return wasm_f64x2_splat(x); }
+    static CC_FORCE_INLINE type zero() { return wasm_i32x4_splat(0); }
+    static CC_FORCE_INLINE type iota(f64 start)
+    {
+        return wasm_f64x2_add(wasm_f64x2_splat(start), wasm_f64x2_make(0, 1));
+    }
+    static CC_FORCE_INLINE type load(f64 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE type load_aligned(f64 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE void store(f64* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE void store_aligned(f64* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return wasm_f64x2_add(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return wasm_f64x2_sub(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return wasm_f64x2_mul(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return wasm_f64x2_pmin(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return wasm_f64x2_pmax(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_f64x2_eq(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_f64x2_ne(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_f64x2_lt(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return wasm_f64x2_le(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return wasm_f64x2_gt(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return wasm_f64x2_ge(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
+    static CC_FORCE_INLINE f64 reduce_add(type a)
+    {
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_f64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE f64 reduce_min(type a)
+    {
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_f64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE f64 reduce_max(type a)
+    {
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_f64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type neg(type a) { return wasm_f64x2_neg(a); }
+    static CC_FORCE_INLINE type abs(type a) { return wasm_f64x2_abs(a); }
+    static CC_FORCE_INLINE type div(type a, type b) { return wasm_f64x2_div(a, b); }
+    static CC_FORCE_INLINE type sqrt(type a) { return wasm_f64x2_sqrt(a); }
+    static CC_FORCE_INLINE type floor(type a) { return wasm_f64x2_floor(a); }
+    static CC_FORCE_INLINE type ceil(type a) { return wasm_f64x2_ceil(a); }
+    static CC_FORCE_INLINE type round(type a) { return wasm_f64x2_nearest(a); }
+    static CC_FORCE_INLINE type trunc(type a) { return wasm_f64x2_trunc(a); }
+    static CC_FORCE_INLINE type copysign(type a, type b)
+    {
+        return wasm_v128_bitselect(b, a, wasm_i64x2_splat(i64(0x8000000000000000ull)));
+    }
+    static CC_FORCE_INLINE v128_t to_i64(type a)
+    {
+        f64 x[2];
+        i64 r[2];
+        wasm_v128_store(x, a);
+        r[0] = (x[0] != x[0]                    ? i64(0)
+                : x[0] >= 9223372036854775808.0 ? i64(~0ull >> 1)
+                : x[0] < -9223372036854775808.0 ? i64(-i64(~0ull >> 1) - 1)
+                                                : i64(x[0]));
+        r[1] = (x[1] != x[1]                    ? i64(0)
+                : x[1] >= 9223372036854775808.0 ? i64(~0ull >> 1)
+                : x[1] < -9223372036854775808.0 ? i64(-i64(~0ull >> 1) - 1)
+                                                : i64(x[1]));
+        return wasm_v128_load(r);
+    }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i8, cimd::simd128, 128>
+{
+    using type = v128_t;
+    using mr = mreg<8, simd128, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type broadcast(i8 x) { return wasm_i8x16_splat(x); }
+    static CC_FORCE_INLINE type zero() { return wasm_i32x4_splat(0); }
+    static CC_FORCE_INLINE type iota(i8 start)
+    {
+        return wasm_i8x16_add(wasm_i8x16_splat(start),
+                              wasm_i8x16_make(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+    }
+    static CC_FORCE_INLINE type load(i8 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE type load_aligned(i8 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE void store(i8* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE void store_aligned(i8* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return wasm_i8x16_add(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return wasm_i8x16_sub(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b)
+    {
+        i8 x[16], y[16];
+        i8 r[16];
+        wasm_v128_store(x, a);
+        wasm_v128_store(y, b);
+        r[0] = i8(u32(x[0]) * u32(y[0]));
+        r[1] = i8(u32(x[1]) * u32(y[1]));
+        r[2] = i8(u32(x[2]) * u32(y[2]));
+        r[3] = i8(u32(x[3]) * u32(y[3]));
+        r[4] = i8(u32(x[4]) * u32(y[4]));
+        r[5] = i8(u32(x[5]) * u32(y[5]));
+        r[6] = i8(u32(x[6]) * u32(y[6]));
+        r[7] = i8(u32(x[7]) * u32(y[7]));
+        r[8] = i8(u32(x[8]) * u32(y[8]));
+        r[9] = i8(u32(x[9]) * u32(y[9]));
+        r[10] = i8(u32(x[10]) * u32(y[10]));
+        r[11] = i8(u32(x[11]) * u32(y[11]));
+        r[12] = i8(u32(x[12]) * u32(y[12]));
+        r[13] = i8(u32(x[13]) * u32(y[13]));
+        r[14] = i8(u32(x[14]) * u32(y[14]));
+        r[15] = i8(u32(x[15]) * u32(y[15]));
+        return wasm_v128_load(r);
+    }
+    static CC_FORCE_INLINE type min(type a, type b) { return wasm_i8x16_min(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return wasm_i8x16_max(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_i8x16_eq(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_i8x16_ne(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_i8x16_lt(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return wasm_i8x16_le(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return wasm_i8x16_gt(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return wasm_i8x16_ge(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
+    static CC_FORCE_INLINE i8 reduce_add(type a)
+    {
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = add(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = add(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        t = add(t, wasm_i8x16_shuffle(t, t, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0));
+        return wasm_i8x16_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE i8 reduce_min(type a)
+    {
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = min(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = min(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        t = min(t, wasm_i8x16_shuffle(t, t, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0));
+        return wasm_i8x16_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE i8 reduce_max(type a)
+    {
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = max(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        t = max(t, wasm_i8x16_shuffle(t, t, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0));
+        return wasm_i8x16_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type neg(type a) { return wasm_i8x16_neg(a); }
+    static CC_FORCE_INLINE type abs(type a) { return wasm_i8x16_abs(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return wasm_i8x16_shl(a, u32(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return wasm_i8x16_shr(a, u32(n)); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i16, cimd::simd128, 128>
+{
+    using type = v128_t;
+    using mr = mreg<16, simd128, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type broadcast(i16 x) { return wasm_i16x8_splat(x); }
+    static CC_FORCE_INLINE type zero() { return wasm_i32x4_splat(0); }
+    static CC_FORCE_INLINE type iota(i16 start)
+    {
+        return wasm_i16x8_add(wasm_i16x8_splat(start), wasm_i16x8_make(0, 1, 2, 3, 4, 5, 6, 7));
+    }
+    static CC_FORCE_INLINE type load(i16 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE type load_aligned(i16 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE void store(i16* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE void store_aligned(i16* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return wasm_i16x8_add(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return wasm_i16x8_sub(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return wasm_i16x8_mul(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return wasm_i16x8_min(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return wasm_i16x8_max(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_i16x8_eq(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_i16x8_ne(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_i16x8_lt(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return wasm_i16x8_le(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return wasm_i16x8_gt(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return wasm_i16x8_ge(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
+    static CC_FORCE_INLINE i16 reduce_add(type a)
+    {
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = add(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = add(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        return wasm_i16x8_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE i16 reduce_min(type a)
+    {
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = min(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = min(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        return wasm_i16x8_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE i16 reduce_max(type a)
+    {
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = max(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        return wasm_i16x8_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type neg(type a) { return wasm_i16x8_neg(a); }
+    static CC_FORCE_INLINE type abs(type a) { return wasm_i16x8_abs(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return wasm_i16x8_shl(a, u32(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return wasm_i16x8_shr(a, u32(n)); }
 };
 
 template <>
@@ -105,7 +414,7 @@ struct cimd::impl::reg<cimd::i32, cimd::simd128, 128>
     static CC_FORCE_INLINE type mul(type a, type b) { return wasm_i32x4_mul(a, b); }
     static CC_FORCE_INLINE type min(type a, type b) { return wasm_i32x4_min(a, b); }
     static CC_FORCE_INLINE type max(type a, type b) { return wasm_i32x4_max(a, b); }
-    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return wasm_i32x4_add(wasm_i32x4_mul(a, b), c); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
     static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_i32x4_eq(a, b); }
     static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_i32x4_ne(a, b); }
     static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_i32x4_lt(a, b); }
@@ -115,20 +424,23 @@ struct cimd::impl::reg<cimd::i32, cimd::simd128, 128>
     static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
     static CC_FORCE_INLINE i32 reduce_add(type a)
     {
-        v128_t t = add(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = add(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = add(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_i32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE i32 reduce_min(type a)
     {
-        v128_t t = min(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = min(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = min(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_i32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE i32 reduce_max(type a)
     {
-        v128_t t = max(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = max(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_i32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE type neg(type a) { return wasm_i32x4_neg(a); }
@@ -137,7 +449,230 @@ struct cimd::impl::reg<cimd::i32, cimd::simd128, 128>
     static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return wasm_i32x4_shl(a, u32(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return wasm_i32x4_shr(a, u32(n)); }
     static CC_FORCE_INLINE v128_t to_f32(type a) { return wasm_f32x4_convert_i32x4(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::i64, cimd::simd128, 128>
+{
+    using type = v128_t;
+    using mr = mreg<64, simd128, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 2;
+
+    static CC_FORCE_INLINE type broadcast(i64 x) { return wasm_i64x2_splat(x); }
+    static CC_FORCE_INLINE type zero() { return wasm_i32x4_splat(0); }
+    static CC_FORCE_INLINE type iota(i64 start)
+    {
+        return wasm_i64x2_add(wasm_i64x2_splat(start), wasm_i64x2_make(0, 1));
+    }
+    static CC_FORCE_INLINE type load(i64 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE type load_aligned(i64 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE void store(i64* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE void store_aligned(i64* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return wasm_i64x2_add(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return wasm_i64x2_sub(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return wasm_i64x2_mul(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return wasm_v128_bitselect(b, a, lt(b, a)); }
+    static CC_FORCE_INLINE type max(type a, type b) { return wasm_v128_bitselect(b, a, lt(a, b)); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_i64x2_eq(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_i64x2_ne(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_i64x2_lt(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return wasm_i64x2_le(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return wasm_i64x2_gt(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return wasm_i64x2_ge(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
+    static CC_FORCE_INLINE i64 reduce_add(type a)
+    {
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_i64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE i64 reduce_min(type a)
+    {
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_i64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE i64 reduce_max(type a)
+    {
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_i64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type neg(type a) { return wasm_i64x2_neg(a); }
+    static CC_FORCE_INLINE type abs(type a) { return wasm_i64x2_abs(a); }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return wasm_i64x2_shl(a, u32(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return wasm_i64x2_shr(a, u32(n)); }
+    static CC_FORCE_INLINE v128_t to_f64(type a)
+    {
+        i64 x[2];
+        f64 r[2];
+        wasm_v128_store(x, a);
+        r[0] = f64(x[0]);
+        r[1] = f64(x[1]);
+        return wasm_v128_load(r);
+    }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u8, cimd::simd128, 128>
+{
+    using type = v128_t;
+    using mr = mreg<8, simd128, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 16;
+
+    static CC_FORCE_INLINE type broadcast(u8 x) { return wasm_u8x16_splat(x); }
+    static CC_FORCE_INLINE type zero() { return wasm_i32x4_splat(0); }
+    static CC_FORCE_INLINE type iota(u8 start)
+    {
+        return wasm_i8x16_add(wasm_u8x16_splat(start),
+                              wasm_u8x16_make(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+    }
+    static CC_FORCE_INLINE type load(u8 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE type load_aligned(u8 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE void store(u8* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE void store_aligned(u8* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return wasm_i8x16_add(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return wasm_i8x16_sub(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b)
+    {
+        u8 x[16], y[16];
+        u8 r[16];
+        wasm_v128_store(x, a);
+        wasm_v128_store(y, b);
+        r[0] = u8(u32(x[0]) * u32(y[0]));
+        r[1] = u8(u32(x[1]) * u32(y[1]));
+        r[2] = u8(u32(x[2]) * u32(y[2]));
+        r[3] = u8(u32(x[3]) * u32(y[3]));
+        r[4] = u8(u32(x[4]) * u32(y[4]));
+        r[5] = u8(u32(x[5]) * u32(y[5]));
+        r[6] = u8(u32(x[6]) * u32(y[6]));
+        r[7] = u8(u32(x[7]) * u32(y[7]));
+        r[8] = u8(u32(x[8]) * u32(y[8]));
+        r[9] = u8(u32(x[9]) * u32(y[9]));
+        r[10] = u8(u32(x[10]) * u32(y[10]));
+        r[11] = u8(u32(x[11]) * u32(y[11]));
+        r[12] = u8(u32(x[12]) * u32(y[12]));
+        r[13] = u8(u32(x[13]) * u32(y[13]));
+        r[14] = u8(u32(x[14]) * u32(y[14]));
+        r[15] = u8(u32(x[15]) * u32(y[15]));
+        return wasm_v128_load(r);
+    }
+    static CC_FORCE_INLINE type min(type a, type b) { return wasm_u8x16_min(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return wasm_u8x16_max(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_i8x16_eq(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_i8x16_ne(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_u8x16_lt(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return wasm_u8x16_le(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return wasm_u8x16_gt(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return wasm_u8x16_ge(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
+    static CC_FORCE_INLINE u8 reduce_add(type a)
+    {
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = add(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = add(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        t = add(t, wasm_i8x16_shuffle(t, t, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0));
+        return wasm_u8x16_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE u8 reduce_min(type a)
+    {
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = min(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = min(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        t = min(t, wasm_i8x16_shuffle(t, t, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0));
+        return wasm_u8x16_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE u8 reduce_max(type a)
+    {
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = max(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        t = max(t, wasm_i8x16_shuffle(t, t, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0));
+        return wasm_u8x16_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return wasm_i8x16_shl(a, u32(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return wasm_u8x16_shr(a, u32(n)); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u16, cimd::simd128, 128>
+{
+    using type = v128_t;
+    using mr = mreg<16, simd128, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 8;
+
+    static CC_FORCE_INLINE type broadcast(u16 x) { return wasm_u16x8_splat(x); }
+    static CC_FORCE_INLINE type zero() { return wasm_i32x4_splat(0); }
+    static CC_FORCE_INLINE type iota(u16 start)
+    {
+        return wasm_i16x8_add(wasm_u16x8_splat(start), wasm_u16x8_make(0, 1, 2, 3, 4, 5, 6, 7));
+    }
+    static CC_FORCE_INLINE type load(u16 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE type load_aligned(u16 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE void store(u16* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE void store_aligned(u16* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return wasm_i16x8_add(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return wasm_i16x8_sub(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return wasm_i16x8_mul(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return wasm_u16x8_min(a, b); }
+    static CC_FORCE_INLINE type max(type a, type b) { return wasm_u16x8_max(a, b); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_i16x8_eq(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_i16x8_ne(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_u16x8_lt(a, b); }
+    static CC_FORCE_INLINE mtype le(type a, type b) { return wasm_u16x8_le(a, b); }
+    static CC_FORCE_INLINE mtype gt(type a, type b) { return wasm_u16x8_gt(a, b); }
+    static CC_FORCE_INLINE mtype ge(type a, type b) { return wasm_u16x8_ge(a, b); }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
+    static CC_FORCE_INLINE u16 reduce_add(type a)
+    {
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = add(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = add(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        return wasm_u16x8_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE u16 reduce_min(type a)
+    {
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = min(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = min(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        return wasm_u16x8_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE u16 reduce_max(type a)
+    {
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
+        t = max(t, wasm_i8x16_shuffle(t, t, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1));
+        return wasm_u16x8_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return wasm_i16x8_shl(a, u32(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return wasm_u16x8_shr(a, u32(n)); }
 };
 
 template <>
@@ -163,7 +698,7 @@ struct cimd::impl::reg<cimd::u32, cimd::simd128, 128>
     static CC_FORCE_INLINE type mul(type a, type b) { return wasm_i32x4_mul(a, b); }
     static CC_FORCE_INLINE type min(type a, type b) { return wasm_u32x4_min(a, b); }
     static CC_FORCE_INLINE type max(type a, type b) { return wasm_u32x4_max(a, b); }
-    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return wasm_i32x4_add(wasm_i32x4_mul(a, b), c); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
     static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_i32x4_eq(a, b); }
     static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_i32x4_ne(a, b); }
     static CC_FORCE_INLINE mtype lt(type a, type b) { return wasm_u32x4_lt(a, b); }
@@ -173,27 +708,114 @@ struct cimd::impl::reg<cimd::u32, cimd::simd128, 128>
     static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
     static CC_FORCE_INLINE u32 reduce_add(type a)
     {
-        v128_t t = add(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = add(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = add(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_u32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE u32 reduce_min(type a)
     {
-        v128_t t = min(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = min(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = min(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_u32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE u32 reduce_max(type a)
     {
-        v128_t t = max(a, wasm_i32x4_shuffle(a, a, 2, 3, 0, 1));
-        t = max(t, wasm_i32x4_shuffle(t, t, 1, 0, 3, 2));
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        t = max(t, wasm_i8x16_shuffle(t, t, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3));
         return wasm_u32x4_extract_lane(t, 0);
     }
     static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
     static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
     static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
     static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return wasm_i32x4_shl(a, u32(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return wasm_u32x4_shr(a, u32(n)); }
     static CC_FORCE_INLINE v128_t to_f32(type a) { return wasm_f32x4_convert_u32x4(a); }
+};
+
+template <>
+struct cimd::impl::reg<cimd::u64, cimd::simd128, 128>
+{
+    using type = v128_t;
+    using mr = mreg<64, simd128, 128>;
+    using mtype = mr::type;
+    static constexpr int lanes = 2;
+
+    static CC_FORCE_INLINE type broadcast(u64 x) { return wasm_u64x2_splat(x); }
+    static CC_FORCE_INLINE type zero() { return wasm_i32x4_splat(0); }
+    static CC_FORCE_INLINE type iota(u64 start)
+    {
+        return wasm_i64x2_add(wasm_u64x2_splat(start), wasm_u64x2_make(0, 1));
+    }
+    static CC_FORCE_INLINE type load(u64 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE type load_aligned(u64 const* p) { return wasm_v128_load(p); }
+    static CC_FORCE_INLINE void store(u64* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE void store_aligned(u64* p, type a) { wasm_v128_store(p, a); }
+    static CC_FORCE_INLINE type add(type a, type b) { return wasm_i64x2_add(a, b); }
+    static CC_FORCE_INLINE type sub(type a, type b) { return wasm_i64x2_sub(a, b); }
+    static CC_FORCE_INLINE type mul(type a, type b) { return wasm_i64x2_mul(a, b); }
+    static CC_FORCE_INLINE type min(type a, type b) { return wasm_v128_bitselect(b, a, lt(b, a)); }
+    static CC_FORCE_INLINE type max(type a, type b) { return wasm_v128_bitselect(b, a, lt(a, b)); }
+    static CC_FORCE_INLINE type mul_add(type a, type b, type c) { return add(mul(a, b), c); }
+    static CC_FORCE_INLINE mtype eq(type a, type b) { return wasm_i64x2_eq(a, b); }
+    static CC_FORCE_INLINE mtype ne(type a, type b) { return wasm_i64x2_ne(a, b); }
+    static CC_FORCE_INLINE mtype lt(type a, type b)
+    {
+        v128_t const f = wasm_i64x2_splat(i64(0x8000000000000000ull));
+        return wasm_i64x2_lt(wasm_v128_xor(a, f), wasm_v128_xor(b, f));
+    }
+    static CC_FORCE_INLINE mtype le(type a, type b)
+    {
+        v128_t const f = wasm_i64x2_splat(i64(0x8000000000000000ull));
+        return wasm_i64x2_le(wasm_v128_xor(a, f), wasm_v128_xor(b, f));
+    }
+    static CC_FORCE_INLINE mtype gt(type a, type b)
+    {
+        v128_t const f = wasm_i64x2_splat(i64(0x8000000000000000ull));
+        return wasm_i64x2_gt(wasm_v128_xor(a, f), wasm_v128_xor(b, f));
+    }
+    static CC_FORCE_INLINE mtype ge(type a, type b)
+    {
+        v128_t const f = wasm_i64x2_splat(i64(0x8000000000000000ull));
+        return wasm_i64x2_ge(wasm_v128_xor(a, f), wasm_v128_xor(b, f));
+    }
+    static CC_FORCE_INLINE type select(mtype m, type a, type b) { return wasm_v128_bitselect(a, b, m); }
+    static CC_FORCE_INLINE u64 reduce_add(type a)
+    {
+        v128_t t = a;
+        t = add(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_u64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE u64 reduce_min(type a)
+    {
+        v128_t t = a;
+        t = min(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_u64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE u64 reduce_max(type a)
+    {
+        v128_t t = a;
+        t = max(t, wasm_i8x16_shuffle(t, t, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7));
+        return wasm_u64x2_extract_lane(t, 0);
+    }
+    static CC_FORCE_INLINE type bit_and(type a, type b) { return wasm_v128_and(a, b); }
+    static CC_FORCE_INLINE type bit_or(type a, type b) { return wasm_v128_or(a, b); }
+    static CC_FORCE_INLINE type bit_xor(type a, type b) { return wasm_v128_xor(a, b); }
+    static CC_FORCE_INLINE type bit_not(type a) { return wasm_v128_not(a); }
+    static CC_FORCE_INLINE type shl(type a, int n) { return wasm_i64x2_shl(a, u32(n)); }
+    static CC_FORCE_INLINE type shr(type a, int n) { return wasm_u64x2_shr(a, u32(n)); }
+    static CC_FORCE_INLINE v128_t to_f64(type a)
+    {
+        u64 x[2];
+        f64 r[2];
+        wasm_v128_store(x, a);
+        r[0] = f64(x[0]);
+        r[1] = f64(x[1]);
+        return wasm_v128_load(r);
+    }
 };
 
 // NOLINTEND

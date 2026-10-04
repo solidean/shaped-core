@@ -9,6 +9,952 @@
 
 // NOLINTBEGIN
 
+/// A mask over 8-bit lanes, in 1 mask register of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 8 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 1)
+struct cimd::mask<8, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<8, K, impl::lane_reg_bits<8, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 1;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[1];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 8)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 8-bit lanes, in 2 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 8 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 2)
+struct cimd::mask<8, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<8, K, impl::lane_reg_bits<8, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 2;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[2];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 8)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 8-bit lanes, in 4 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 8 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 4)
+struct cimd::mask<8, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<8, K, impl::lane_reg_bits<8, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 4;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[4];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_and(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_and(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_or(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_or(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_xor(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_xor(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        m._r[2] = reg_t::bit_not(_r[2]);
+        m._r[3] = reg_t::bit_not(_r[3]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[2])) << (2 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[3])) << (3 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        m._r[2] = reg_t::from_bits(u64(b) >> (2 * reg_t::lanes));
+        m._r[3] = reg_t::from_bits(u64(b) >> (3 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        x0 = reg_t::bit_or(x0, x2);
+        x1 = reg_t::bit_or(x1, x3);
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        x0 = reg_t::bit_and(x0, x2);
+        x1 = reg_t::bit_and(x1, x3);
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 8)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        v._r[2] = simd<T, N, K>::reg_t::select(_r[2], a._r[2], b._r[2]);
+        v._r[3] = simd<T, N, K>::reg_t::select(_r[3], a._r[3], b._r[3]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 8-bit lanes, in 8 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 8 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<8, N, K> == 8)
+struct cimd::mask<8, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<8, K, impl::lane_reg_bits<8, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 8;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[8];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_and(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_and(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_and(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_and(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_and(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_and(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_or(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_or(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_or(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_or(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_or(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_or(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_xor(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_xor(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_xor(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_xor(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_xor(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_xor(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        m._r[2] = reg_t::bit_not(_r[2]);
+        m._r[3] = reg_t::bit_not(_r[3]);
+        m._r[4] = reg_t::bit_not(_r[4]);
+        m._r[5] = reg_t::bit_not(_r[5]);
+        m._r[6] = reg_t::bit_not(_r[6]);
+        m._r[7] = reg_t::bit_not(_r[7]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[2])) << (2 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[3])) << (3 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[4])) << (4 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[5])) << (5 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[6])) << (6 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[7])) << (7 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        m._r[2] = reg_t::from_bits(u64(b) >> (2 * reg_t::lanes));
+        m._r[3] = reg_t::from_bits(u64(b) >> (3 * reg_t::lanes));
+        m._r[4] = reg_t::from_bits(u64(b) >> (4 * reg_t::lanes));
+        m._r[5] = reg_t::from_bits(u64(b) >> (5 * reg_t::lanes));
+        m._r[6] = reg_t::from_bits(u64(b) >> (6 * reg_t::lanes));
+        m._r[7] = reg_t::from_bits(u64(b) >> (7 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        auto x4 = _r[4];
+        auto x5 = _r[5];
+        auto x6 = _r[6];
+        auto x7 = _r[7];
+        x0 = reg_t::bit_or(x0, x4);
+        x1 = reg_t::bit_or(x1, x5);
+        x2 = reg_t::bit_or(x2, x6);
+        x3 = reg_t::bit_or(x3, x7);
+        x0 = reg_t::bit_or(x0, x2);
+        x1 = reg_t::bit_or(x1, x3);
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        auto x4 = _r[4];
+        auto x5 = _r[5];
+        auto x6 = _r[6];
+        auto x7 = _r[7];
+        x0 = reg_t::bit_and(x0, x4);
+        x1 = reg_t::bit_and(x1, x5);
+        x2 = reg_t::bit_and(x2, x6);
+        x3 = reg_t::bit_and(x3, x7);
+        x0 = reg_t::bit_and(x0, x2);
+        x1 = reg_t::bit_and(x1, x3);
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 8)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        v._r[2] = simd<T, N, K>::reg_t::select(_r[2], a._r[2], b._r[2]);
+        v._r[3] = simd<T, N, K>::reg_t::select(_r[3], a._r[3], b._r[3]);
+        v._r[4] = simd<T, N, K>::reg_t::select(_r[4], a._r[4], b._r[4]);
+        v._r[5] = simd<T, N, K>::reg_t::select(_r[5], a._r[5], b._r[5]);
+        v._r[6] = simd<T, N, K>::reg_t::select(_r[6], a._r[6], b._r[6]);
+        v._r[7] = simd<T, N, K>::reg_t::select(_r[7], a._r[7], b._r[7]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 16-bit lanes, in 1 mask register of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 16 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 1)
+struct cimd::mask<16, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<16, K, impl::lane_reg_bits<16, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 1;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[1];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 16)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 16-bit lanes, in 2 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 16 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 2)
+struct cimd::mask<16, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<16, K, impl::lane_reg_bits<16, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 2;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[2];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 16)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 16-bit lanes, in 4 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 16 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 4)
+struct cimd::mask<16, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<16, K, impl::lane_reg_bits<16, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 4;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[4];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_and(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_and(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_or(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_or(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_xor(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_xor(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        m._r[2] = reg_t::bit_not(_r[2]);
+        m._r[3] = reg_t::bit_not(_r[3]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[2])) << (2 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[3])) << (3 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        m._r[2] = reg_t::from_bits(u64(b) >> (2 * reg_t::lanes));
+        m._r[3] = reg_t::from_bits(u64(b) >> (3 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        x0 = reg_t::bit_or(x0, x2);
+        x1 = reg_t::bit_or(x1, x3);
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        x0 = reg_t::bit_and(x0, x2);
+        x1 = reg_t::bit_and(x1, x3);
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 16)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        v._r[2] = simd<T, N, K>::reg_t::select(_r[2], a._r[2], b._r[2]);
+        v._r[3] = simd<T, N, K>::reg_t::select(_r[3], a._r[3], b._r[3]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 16-bit lanes, in 8 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 16 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<16, N, K> == 8)
+struct cimd::mask<16, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<16, K, impl::lane_reg_bits<16, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 8;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[8];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_and(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_and(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_and(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_and(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_and(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_and(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_or(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_or(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_or(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_or(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_or(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_or(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_xor(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_xor(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_xor(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_xor(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_xor(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_xor(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        m._r[2] = reg_t::bit_not(_r[2]);
+        m._r[3] = reg_t::bit_not(_r[3]);
+        m._r[4] = reg_t::bit_not(_r[4]);
+        m._r[5] = reg_t::bit_not(_r[5]);
+        m._r[6] = reg_t::bit_not(_r[6]);
+        m._r[7] = reg_t::bit_not(_r[7]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[2])) << (2 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[3])) << (3 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[4])) << (4 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[5])) << (5 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[6])) << (6 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[7])) << (7 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        m._r[2] = reg_t::from_bits(u64(b) >> (2 * reg_t::lanes));
+        m._r[3] = reg_t::from_bits(u64(b) >> (3 * reg_t::lanes));
+        m._r[4] = reg_t::from_bits(u64(b) >> (4 * reg_t::lanes));
+        m._r[5] = reg_t::from_bits(u64(b) >> (5 * reg_t::lanes));
+        m._r[6] = reg_t::from_bits(u64(b) >> (6 * reg_t::lanes));
+        m._r[7] = reg_t::from_bits(u64(b) >> (7 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        auto x4 = _r[4];
+        auto x5 = _r[5];
+        auto x6 = _r[6];
+        auto x7 = _r[7];
+        x0 = reg_t::bit_or(x0, x4);
+        x1 = reg_t::bit_or(x1, x5);
+        x2 = reg_t::bit_or(x2, x6);
+        x3 = reg_t::bit_or(x3, x7);
+        x0 = reg_t::bit_or(x0, x2);
+        x1 = reg_t::bit_or(x1, x3);
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        auto x4 = _r[4];
+        auto x5 = _r[5];
+        auto x6 = _r[6];
+        auto x7 = _r[7];
+        x0 = reg_t::bit_and(x0, x4);
+        x1 = reg_t::bit_and(x1, x5);
+        x2 = reg_t::bit_and(x2, x6);
+        x3 = reg_t::bit_and(x3, x7);
+        x0 = reg_t::bit_and(x0, x2);
+        x1 = reg_t::bit_and(x1, x3);
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 16)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        v._r[2] = simd<T, N, K>::reg_t::select(_r[2], a._r[2], b._r[2]);
+        v._r[3] = simd<T, N, K>::reg_t::select(_r[3], a._r[3], b._r[3]);
+        v._r[4] = simd<T, N, K>::reg_t::select(_r[4], a._r[4], b._r[4]);
+        v._r[5] = simd<T, N, K>::reg_t::select(_r[5], a._r[5], b._r[5]);
+        v._r[6] = simd<T, N, K>::reg_t::select(_r[6], a._r[6], b._r[6]);
+        v._r[7] = simd<T, N, K>::reg_t::select(_r[7], a._r[7], b._r[7]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
 /// A mask over 32-bit lanes, in 1 mask register of whichever kernel K is.
 template <int N, class K>
     requires(N > 0 && (N & (N - 1)) == 0 && N * 32 >= 128
@@ -60,8 +1006,9 @@ struct cimd::mask<32, N, K>
     }
     static CC_FORCE_INLINE mask from_bits(bits_t b)
     {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
         mask m;
-        m._r[0] = reg_t::from_bits(u32(b >> (0)));
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
         return m;
     }
     /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
@@ -152,9 +1099,10 @@ struct cimd::mask<32, N, K>
     }
     static CC_FORCE_INLINE mask from_bits(bits_t b)
     {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
         mask m;
-        m._r[0] = reg_t::from_bits(u32(b >> (0)));
-        m._r[1] = reg_t::from_bits(u32(b >> (1 * reg_t::lanes)));
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
         return m;
     }
     /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
@@ -260,11 +1208,12 @@ struct cimd::mask<32, N, K>
     }
     static CC_FORCE_INLINE mask from_bits(bits_t b)
     {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
         mask m;
-        m._r[0] = reg_t::from_bits(u32(b >> (0)));
-        m._r[1] = reg_t::from_bits(u32(b >> (1 * reg_t::lanes)));
-        m._r[2] = reg_t::from_bits(u32(b >> (2 * reg_t::lanes)));
-        m._r[3] = reg_t::from_bits(u32(b >> (3 * reg_t::lanes)));
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        m._r[2] = reg_t::from_bits(u64(b) >> (2 * reg_t::lanes));
+        m._r[3] = reg_t::from_bits(u64(b) >> (3 * reg_t::lanes));
         return m;
     }
     /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
@@ -400,15 +1349,16 @@ struct cimd::mask<32, N, K>
     }
     static CC_FORCE_INLINE mask from_bits(bits_t b)
     {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
         mask m;
-        m._r[0] = reg_t::from_bits(u32(b >> (0)));
-        m._r[1] = reg_t::from_bits(u32(b >> (1 * reg_t::lanes)));
-        m._r[2] = reg_t::from_bits(u32(b >> (2 * reg_t::lanes)));
-        m._r[3] = reg_t::from_bits(u32(b >> (3 * reg_t::lanes)));
-        m._r[4] = reg_t::from_bits(u32(b >> (4 * reg_t::lanes)));
-        m._r[5] = reg_t::from_bits(u32(b >> (5 * reg_t::lanes)));
-        m._r[6] = reg_t::from_bits(u32(b >> (6 * reg_t::lanes)));
-        m._r[7] = reg_t::from_bits(u32(b >> (7 * reg_t::lanes)));
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        m._r[2] = reg_t::from_bits(u64(b) >> (2 * reg_t::lanes));
+        m._r[3] = reg_t::from_bits(u64(b) >> (3 * reg_t::lanes));
+        m._r[4] = reg_t::from_bits(u64(b) >> (4 * reg_t::lanes));
+        m._r[5] = reg_t::from_bits(u64(b) >> (5 * reg_t::lanes));
+        m._r[6] = reg_t::from_bits(u64(b) >> (6 * reg_t::lanes));
+        m._r[7] = reg_t::from_bits(u64(b) >> (7 * reg_t::lanes));
         return m;
     }
     /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
@@ -455,6 +1405,479 @@ struct cimd::mask<32, N, K>
     /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
     template <class T>
         requires(sizeof(T) * 8 == 32)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        v._r[2] = simd<T, N, K>::reg_t::select(_r[2], a._r[2], b._r[2]);
+        v._r[3] = simd<T, N, K>::reg_t::select(_r[3], a._r[3], b._r[3]);
+        v._r[4] = simd<T, N, K>::reg_t::select(_r[4], a._r[4], b._r[4]);
+        v._r[5] = simd<T, N, K>::reg_t::select(_r[5], a._r[5], b._r[5]);
+        v._r[6] = simd<T, N, K>::reg_t::select(_r[6], a._r[6], b._r[6]);
+        v._r[7] = simd<T, N, K>::reg_t::select(_r[7], a._r[7], b._r[7]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 64-bit lanes, in 1 mask register of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 64 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 1)
+struct cimd::mask<64, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<64, K, impl::lane_reg_bits<64, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 1;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[1];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 64)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 64-bit lanes, in 2 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 64 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 2)
+struct cimd::mask<64, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<64, K, impl::lane_reg_bits<64, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 2;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[2];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 64)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 64-bit lanes, in 4 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 64 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 4)
+struct cimd::mask<64, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<64, K, impl::lane_reg_bits<64, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 4;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[4];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_and(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_and(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_or(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_or(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_xor(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_xor(_r[3], b._r[3]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        m._r[2] = reg_t::bit_not(_r[2]);
+        m._r[3] = reg_t::bit_not(_r[3]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[2])) << (2 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[3])) << (3 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        m._r[2] = reg_t::from_bits(u64(b) >> (2 * reg_t::lanes));
+        m._r[3] = reg_t::from_bits(u64(b) >> (3 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        x0 = reg_t::bit_or(x0, x2);
+        x1 = reg_t::bit_or(x1, x3);
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        x0 = reg_t::bit_and(x0, x2);
+        x1 = reg_t::bit_and(x1, x3);
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 64)
+    CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
+    {
+        simd<T, N, K> v;
+        v._r[0] = simd<T, N, K>::reg_t::select(_r[0], a._r[0], b._r[0]);
+        v._r[1] = simd<T, N, K>::reg_t::select(_r[1], a._r[1], b._r[1]);
+        v._r[2] = simd<T, N, K>::reg_t::select(_r[2], a._r[2], b._r[2]);
+        v._r[3] = simd<T, N, K>::reg_t::select(_r[3], a._r[3], b._r[3]);
+        return v;
+    }
+
+    CC_FORCE_INLINE friend mask operator&(mask a, mask b) { return a.bit_and(b); }
+    CC_FORCE_INLINE mask& operator&=(mask b) { return *this = bit_and(b); }
+    CC_FORCE_INLINE friend mask operator|(mask a, mask b) { return a.bit_or(b); }
+    CC_FORCE_INLINE mask& operator|=(mask b) { return *this = bit_or(b); }
+    CC_FORCE_INLINE friend mask operator^(mask a, mask b) { return a.bit_xor(b); }
+    CC_FORCE_INLINE mask& operator^=(mask b) { return *this = bit_xor(b); }
+    CC_FORCE_INLINE friend mask operator~(mask a) { return a.bit_not(); }
+};
+
+/// A mask over 64-bit lanes, in 8 mask registers of whichever kernel K is.
+template <int N, class K>
+    requires(N > 0 && (N & (N - 1)) == 0 && N * 64 >= 128
+             && cimd::is_available<K> && cimd::impl::lane_reg_count<64, N, K> == 8)
+struct cimd::mask<64, N, K>
+{
+    using kernel_t = K;
+    using reg_t = impl::mreg<64, K, impl::lane_reg_bits<64, N, K>>;
+    using bits_t = std::conditional_t<(N > 32), u64, u32>;
+
+    static constexpr int lanes = N;
+    static constexpr int registers = 8;
+    static constexpr bool generated = true;
+    static constexpr bool is_loop_free = true;
+
+    typename reg_t::type _r[8];
+
+    CC_FORCE_INLINE mask bit_and(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_and(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_and(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_and(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_and(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_and(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_and(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_and(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_and(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_or(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_or(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_or(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_or(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_or(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_or(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_or(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_or(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_or(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_xor(mask b) const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_xor(_r[0], b._r[0]);
+        m._r[1] = reg_t::bit_xor(_r[1], b._r[1]);
+        m._r[2] = reg_t::bit_xor(_r[2], b._r[2]);
+        m._r[3] = reg_t::bit_xor(_r[3], b._r[3]);
+        m._r[4] = reg_t::bit_xor(_r[4], b._r[4]);
+        m._r[5] = reg_t::bit_xor(_r[5], b._r[5]);
+        m._r[6] = reg_t::bit_xor(_r[6], b._r[6]);
+        m._r[7] = reg_t::bit_xor(_r[7], b._r[7]);
+        return m;
+    }
+    CC_FORCE_INLINE mask bit_not() const
+    {
+        mask m;
+        m._r[0] = reg_t::bit_not(_r[0]);
+        m._r[1] = reg_t::bit_not(_r[1]);
+        m._r[2] = reg_t::bit_not(_r[2]);
+        m._r[3] = reg_t::bit_not(_r[3]);
+        m._r[4] = reg_t::bit_not(_r[4]);
+        m._r[5] = reg_t::bit_not(_r[5]);
+        m._r[6] = reg_t::bit_not(_r[6]);
+        m._r[7] = reg_t::bit_not(_r[7]);
+        return m;
+    }
+
+    /// Bit i is lane i; there is no bits() beyond 64 lanes.
+    CC_FORCE_INLINE bits_t bits() const
+    {
+        static_assert(N <= 64, "cimd::mask::bits(): more than 64 lanes do not fit one integer");
+        bits_t b = bits_t(reg_t::bits(_r[0]));
+        b |= bits_t(reg_t::bits(_r[1])) << (1 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[2])) << (2 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[3])) << (3 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[4])) << (4 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[5])) << (5 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[6])) << (6 * reg_t::lanes);
+        b |= bits_t(reg_t::bits(_r[7])) << (7 * reg_t::lanes);
+        return b;
+    }
+    static CC_FORCE_INLINE mask from_bits(bits_t b)
+    {
+        static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");
+        mask m;
+        m._r[0] = reg_t::from_bits(u64(b) >> (0));
+        m._r[1] = reg_t::from_bits(u64(b) >> (1 * reg_t::lanes));
+        m._r[2] = reg_t::from_bits(u64(b) >> (2 * reg_t::lanes));
+        m._r[3] = reg_t::from_bits(u64(b) >> (3 * reg_t::lanes));
+        m._r[4] = reg_t::from_bits(u64(b) >> (4 * reg_t::lanes));
+        m._r[5] = reg_t::from_bits(u64(b) >> (5 * reg_t::lanes));
+        m._r[6] = reg_t::from_bits(u64(b) >> (6 * reg_t::lanes));
+        m._r[7] = reg_t::from_bits(u64(b) >> (7 * reg_t::lanes));
+        return m;
+    }
+    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask.
+    CC_FORCE_INLINE bool any() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        auto x4 = _r[4];
+        auto x5 = _r[5];
+        auto x6 = _r[6];
+        auto x7 = _r[7];
+        x0 = reg_t::bit_or(x0, x4);
+        x1 = reg_t::bit_or(x1, x5);
+        x2 = reg_t::bit_or(x2, x6);
+        x3 = reg_t::bit_or(x3, x7);
+        x0 = reg_t::bit_or(x0, x2);
+        x1 = reg_t::bit_or(x1, x3);
+        x0 = reg_t::bit_or(x0, x1);
+        return reg_t::any(x0);
+    }
+    CC_FORCE_INLINE bool all() const
+    {
+        auto x0 = _r[0];
+        auto x1 = _r[1];
+        auto x2 = _r[2];
+        auto x3 = _r[3];
+        auto x4 = _r[4];
+        auto x5 = _r[5];
+        auto x6 = _r[6];
+        auto x7 = _r[7];
+        x0 = reg_t::bit_and(x0, x4);
+        x1 = reg_t::bit_and(x1, x5);
+        x2 = reg_t::bit_and(x2, x6);
+        x3 = reg_t::bit_and(x3, x7);
+        x0 = reg_t::bit_and(x0, x2);
+        x1 = reg_t::bit_and(x1, x3);
+        x0 = reg_t::bit_and(x0, x1);
+        return reg_t::all(x0);
+    }
+    CC_FORCE_INLINE bool none() const { return !any(); }
+
+    /// `a` where the lane is set, `b` where it is not; `b` may be a scalar of exactly the element type.
+    template <class T>
+        requires(sizeof(T) * 8 == 64)
     CC_FORCE_INLINE simd<T, N, K> select(simd<T, N, K> a, std::type_identity_t<simd<T, N, K>> b) const
     {
         simd<T, N, K> v;

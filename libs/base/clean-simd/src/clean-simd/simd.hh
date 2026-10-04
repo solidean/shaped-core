@@ -74,39 +74,7 @@ namespace cimd
 template <class K, class T>
 using native = simd<T, native_lanes<K, T>, K>;
 
-template <class K>
-using f32x4 = simd<f32, 4, K>;
-template <class K>
-using f32x8 = simd<f32, 8, K>;
-template <class K>
-using f32x16 = simd<f32, 16, K>;
-template <class K>
-using i32x4 = simd<i32, 4, K>;
-template <class K>
-using i32x8 = simd<i32, 8, K>;
-template <class K>
-using i32x16 = simd<i32, 16, K>;
-template <class K>
-using u32x4 = simd<u32, 4, K>;
-template <class K>
-using u32x8 = simd<u32, 8, K>;
-template <class K>
-using u32x16 = simd<u32, 16, K>;
-
-template <class K>
-using m32x4 = mask<32, 4, K>;
-template <class K>
-using m32x8 = mask<32, 8, K>;
-template <class K>
-using m32x16 = mask<32, 16, K>;
-
-using f32x4_storage = storage<f32, 4>;
-using f32x8_storage = storage<f32, 8>;
-using f32x16_storage = storage<f32, 16>;
-using i32x4_storage = storage<i32, 4>;
-using i32x8_storage = storage<i32, 8>;
-using i32x16_storage = storage<i32, 16>;
-using u32x4_storage = storage<u32, 4>;
-using u32x8_storage = storage<u32, 8>;
-using u32x16_storage = storage<u32, 16>;
 } // namespace cimd
+
+// f32x8<K>, m32x8<K>, f32x8_storage and the rest, for every element.
+#include <clean-simd/generated/aliases.hh>

@@ -30,7 +30,11 @@ class Elem:
         return self.kind == "signed"
 
 
-ELEMS = [Elem("f32", 32, "float"), Elem("i32", 32, "signed"), Elem("u32", 32, "unsigned")]
+ELEMS = [
+    Elem("f32", 32, "float"), Elem("f64", 64, "float"),
+    Elem("i8", 8, "signed"), Elem("i16", 16, "signed"), Elem("i32", 32, "signed"), Elem("i64", 64, "signed"),
+    Elem("u8", 8, "unsigned"), Elem("u16", 16, "unsigned"), Elem("u32", 32, "unsigned"), Elem("u64", 64, "unsigned"),
+]  # fmt: skip
 ELEM = {e.name: e for e in ELEMS}
 LANE_BITS = sorted({e.bits for e in ELEMS})
 
@@ -99,19 +103,33 @@ SIGNATURES: dict[str, tuple[str, str]] = {
     "reduce_add": ("E", "type a"),
     "reduce_min": ("E", "type a"),
     "reduce_max": ("E", "type a"),
+    "div": ("type", "type a, type b"),
+    "sqrt": ("type", "type a"),
+    "floor": ("type", "type a"),
+    "ceil": ("type", "type a"),
+    "round": ("type", "type a"),
+    "trunc": ("type", "type a"),
+    "copysign": ("type", "type a, type b"),
+    "shl": ("type", "type a, int n"),
+    "shr": ("type", "type a, int n"),
     "to_i32": ("to:i32", "type a"),
     "to_f32": ("to:f32", "type a"),
+    "to_i64": ("to:i64", "type a"),
+    "to_f64": ("to:f64", "type a"),
 }
+
+# The lane-wise conversions between elements of one width: float to integer truncates, integer to float rounds.
+CONVERSIONS = {"f32": ["i32"], "i32": ["f32"], "u32": ["f32"], "f64": ["i64"], "i64": ["f64"], "u64": ["f64"]}
 
 MASK_SIGNATURES: dict[str, tuple[str, str]] = {
     "bit_and": ("type", "type a, type b"),
     "bit_or": ("type", "type a, type b"),
     "bit_xor": ("type", "type a, type b"),
     "bit_not": ("type", "type a"),
-    "bits": ("u32", "type m"),
+    "bits": ("u64", "type m"),
     "any": ("bool", "type m"),
     "all": ("bool", "type m"),
-    "from_bits": ("type", "u32 b"),
+    "from_bits": ("type", "u64 b"),
 }
 
 COMMON_OPS = [
@@ -127,13 +145,16 @@ def ops_of(e: Elem) -> list[str]:
     out = list(COMMON_OPS)
     if e.kind != "unsigned":
         out += ["neg", "abs"]
-    if not e.is_float:
-        out += ["bit_and", "bit_or", "bit_xor", "bit_not"]
-    out += ["to_i32"] if e.is_float else ["to_f32"]
+    if e.is_float:
+        out += ["div", "sqrt", "floor", "ceil", "round", "trunc", "copysign"]
+    else:
+        out += ["bit_and", "bit_or", "bit_xor", "bit_not", "shl", "shr"]
+    out += [f"to_{target}" for target in CONVERSIONS.get(e.name, [])]
     return out
 
 
 # Which operations an operator spells, and how.
-BINARY_OPERATORS = {"add": "+", "sub": "-", "mul": "*", "bit_and": "&", "bit_or": "|", "bit_xor": "^"}
+BINARY_OPERATORS = {"add": "+", "sub": "-", "mul": "*", "div": "/", "bit_and": "&", "bit_or": "|", "bit_xor": "^"}
+SHIFT_OPERATORS = {"shl": "<<", "shr": ">>"}
 UNARY_OPERATORS = {"neg": "-", "bit_not": "~"}
 COMPARE_OPERATORS = {"eq": "==", "ne": "!=", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}

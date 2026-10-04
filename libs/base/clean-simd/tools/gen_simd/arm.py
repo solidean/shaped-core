@@ -6,10 +6,15 @@ constant vector is loaded from an array rather than brace-initialized.
 
 from __future__ import annotations
 
-from .model import SHORT, SINGLE, Elem, Impl
+from .model import CONVERSIONS, ELEM, EMULATED, SHORT, SINGLE, Elem, Impl
 
-_SFX = {"f32": "f32", "i32": "s32", "u32": "u32"}
-_TYPE = {"f32": "float32x4_t", "i32": "int32x4_t", "u32": "uint32x4_t"}
+_SFX = {"f32": "f32", "f64": "f64", "i8": "s8", "i16": "s16", "i32": "s32", "i64": "s64",
+        "u8": "u8", "u16": "u16", "u32": "u32", "u64": "u64"}
+_TYPE = {"f32": "float32x4_t", "f64": "float64x2_t", "i8": "int8x16_t", "i16": "int16x8_t", "i32": "int32x4_t",
+         "i64": "int64x2_t", "u8": "uint8x16_t", "u16": "uint16x8_t", "u32": "uint32x4_t", "u64": "uint64x2_t"}
+_MASK = {8: ("uint8x16_t", "u8"), 16: ("uint16x8_t", "u16"), 32: ("uint32x4_t", "u32"), 64: ("uint64x2_t", "u64")}
+# The shift-count vector for a lane width: vshlq takes a signed count per lane, negative to shift right.
+_COUNT = {8: "s8", 16: "s16", 32: "s32", 64: "s64"}
 
 
 def reg_type(e: Elem, w: int) -> str:
@@ -17,62 +22,124 @@ def reg_type(e: Elem, w: int) -> str:
 
 
 def mask_type(kernel: str, lane_bits: int, w: int) -> str:
-    return "uint32x4_t"
+    return _MASK[lane_bits][0]
 
 
-def _ret(expr: str) -> Impl:
-    return Impl(SINGLE, f"return {expr};")
+def _ret(expr: str, cost: str = SINGLE) -> Impl:
+    return Impl(cost, f"return {expr};")
 
 
 def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     s = _SFX[e.name]
     t = e.name
+    lanes = w // e.bits
+    ms = _MASK[e.bits][1]
     out: dict[str, Impl] = {}
+    wide64 = e.bits == 64 and not e.is_float
+
     out["broadcast"] = _ret(f"vdupq_n_{s}(x)")
     out["zero"] = _ret(f"vdupq_n_{s}({t}(0))")
-    out["iota"] = Impl(SINGLE, f"static constexpr {t} k[4] = {{0, 1, 2, 3}};\n"
+    iota = ", ".join(str(i) for i in range(lanes))
+    out["iota"] = Impl(SINGLE, f"static constexpr {t} k[{lanes}] = {{{iota}}};\n"
                                f"return vaddq_{s}(vdupq_n_{s}(start), vld1q_{s}(k));")
     out["load"] = _ret(f"vld1q_{s}(p)")
     out["load_aligned"] = _ret(f"vld1q_{s}(p)")
     out["store"] = Impl(SINGLE, f"vst1q_{s}(p, a);")
     out["store_aligned"] = Impl(SINGLE, f"vst1q_{s}(p, a);")
-    for name, ins in (("add", "vaddq"), ("sub", "vsubq"), ("mul", "vmulq"), ("min", "vminq"), ("max", "vmaxq")):
-        out[name] = _ret(f"{ins}_{s}(a, b)")
+    out["add"] = _ret(f"vaddq_{s}(a, b)")
+    out["sub"] = _ret(f"vsubq_{s}(a, b)")
+
+    if wide64:
+        # No 64-bit multiply: the low halves' full product plus the two cross products, shifted into place.
+        out["mul"] = Impl(EMULATED, f"{t} x[2], y[2];\nvst1q_{s}(x, a);\nvst1q_{s}(y, b);\n"
+                                    f"x[0] = {t}(u64(x[0]) * u64(y[0]));\nx[1] = {t}(u64(x[1]) * u64(y[1]));\n"
+                                    f"return vld1q_{s}(x);")
+        out["min"] = Impl(SHORT, f"return vbslq_{s}(vcltq_{s}(b, a), b, a);")
+        out["max"] = Impl(SHORT, f"return vbslq_{s}(vcltq_{s}(a, b), b, a);")
+        out["mul_add"] = Impl(EMULATED, "return add(mul(a, b), c);")
+    else:
+        out["mul"] = _ret(f"vmulq_{s}(a, b)")
+        out["min"] = _ret(f"vminq_{s}(a, b)")
+        out["max"] = _ret(f"vmaxq_{s}(a, b)")
+        out["mul_add"] = _ret(f"vfmaq_{s}(c, a, b)") if e.is_float else _ret(f"vmlaq_{s}(c, a, b)")
+
     if e.kind != "unsigned":
         out["neg"] = _ret(f"vnegq_{s}(a)")
         out["abs"] = _ret(f"vabsq_{s}(a)")
-    out["mul_add"] = _ret(f"vfmaq_{s}(c, a, b)") if e.is_float else _ret(f"vmlaq_{s}(c, a, b)")
-    if not e.is_float:
+
+    if e.is_float:
+        out["div"] = _ret(f"vdivq_{s}(a, b)")
+        out["sqrt"] = _ret(f"vsqrtq_{s}(a)")
+        out["floor"] = _ret(f"vrndmq_{s}(a)")
+        out["ceil"] = _ret(f"vrndpq_{s}(a)")
+        out["round"] = _ret(f"vrndnq_{s}(a)")
+        out["trunc"] = _ret(f"vrndq_{s}(a)")
+        out["copysign"] = _ret(f"vbslq_{s}(vdupq_n_{ms}({ms}(1) << {e.bits - 1}), b, a)")
+    else:
         out["bit_and"] = _ret(f"vandq_{s}(a, b)")
         out["bit_or"] = _ret(f"vorrq_{s}(a, b)")
         out["bit_xor"] = _ret(f"veorq_{s}(a, b)")
-        out["bit_not"] = _ret(f"vmvnq_{s}(a)")
+        out["bit_not"] = (Impl(SINGLE, f"return veorq_{s}(a, vdupq_n_{s}({t}(~0ull)));") if e.bits == 64
+                          else _ret(f"vmvnq_{s}(a)"))
+        c = _COUNT[e.bits]
+        out["shl"] = _ret(f"vshlq_{s}(a, vdupq_n_{c}(i{e.bits}(n)))")
+        out["shr"] = _ret(f"vshlq_{s}(a, vdupq_n_{c}(i{e.bits}(-n)))")
+
     for name, ins in (("eq", "vceqq"), ("lt", "vcltq"), ("le", "vcleq"), ("gt", "vcgtq"), ("ge", "vcgeq")):
         out[name] = _ret(f"{ins}_{s}(a, b)")
-    out["ne"] = Impl(SHORT, f"return vmvnq_u32(vceqq_{s}(a, b));")
+    if e.bits == 64:
+        out["ne"] = Impl(SHORT, f"return veorq_u64(vceqq_{s}(a, b), vdupq_n_u64(~0ull));")
+    else:
+        out["ne"] = Impl(SHORT, f"return vmvnq_{ms}(vceqq_{s}(a, b));")
     out["select"] = _ret(f"vbslq_{s}(m, a, b)")
 
-    # Lanes i and i + 2 first, then the two halves: the tree every kernel reduces in.
-    half = {"f32": "float32x2_t", "i32": "int32x2_t", "u32": "uint32x2_t"}[t]
-    for op, ins in (("add", "add"), ("min", "min"), ("max", "max")):
-        out[f"reduce_{op}"] = Impl(SHORT, f"{half} const h = v{ins}_{s}(vget_low_{s}(a), vget_high_{s}(a));\n"
-                                          f"return vget_lane_{s}(vp{ins}_{s}(h, h), 0);")
-    if e.is_float:
-        out["to_i32"] = _ret("vcvtq_s32_f32(a)")
+    if e.is_float and e.bits == 32:
+        # Lanes i and i + 2 first, then the two halves: the tree every kernel reduces in.
+        for op, ins in (("add", "add"), ("min", "min"), ("max", "max")):
+            out[f"reduce_{op}"] = Impl(SHORT, f"float32x2_t const h = v{ins}_f32(vget_low_f32(a), vget_high_f32(a));\n"
+                                              f"return vget_lane_f32(vp{ins}_f32(h, h), 0);")
+    elif e.bits == 64:
+        for op in ("add", "min", "max"):
+            out[f"reduce_{op}"] = Impl(SHORT, f"return vgetq_lane_{s}({op}(a, vextq_{s}(a, a, 1)), 0);")
     else:
-        out["to_f32"] = _ret(f"vcvtq_f32_{s}(a)")
+        # Integer reductions are exact, so their order is free: the across-vector instructions.
+        out["reduce_add"] = _ret(f"{t}(vaddvq_{s}(a))")
+        out["reduce_min"] = _ret(f"vminvq_{s}(a)")
+        out["reduce_max"] = _ret(f"vmaxvq_{s}(a)")
+
+    for target in CONVERSIONS.get(t, []):
+        out[f"to_{target}"] = _ret(f"vcvtq_{_SFX[target]}_{s}(a)")
     return out
 
 
 def mask_ops(kernel: str, lane_bits: int, w: int) -> dict[str, Impl]:
-    weights = "static constexpr u32 w[4] = {1, 2, 4, 8};\n"
-    return {
-        "bit_and": _ret("vandq_u32(a, b)"),
-        "bit_or": _ret("vorrq_u32(a, b)"),
-        "bit_xor": _ret("veorq_u32(a, b)"),
-        "bit_not": _ret("vmvnq_u32(a)"),
-        "bits": Impl(SHORT, f"{weights}return vaddvq_u32(vandq_u32(m, vld1q_u32(w)));"),
-        "any": _ret("vmaxvq_u32(m) != 0"),
-        "all": _ret("vminvq_u32(m) != 0"),
-        "from_bits": Impl(SHORT, f"{weights}return vtstq_u32(vdupq_n_u32(b), vld1q_u32(w));"),
+    mt, s = _MASK[lane_bits]
+    lanes = w // lane_bits
+    weights = ", ".join(str(1 << (i % 8 if lane_bits == 8 else i)) for i in range(lanes))
+    table = f"static constexpr {s} w[{lanes}] = {{{weights}}};\n"
+    out = {
+        "bit_and": _ret(f"vandq_{s}(a, b)"),
+        "bit_or": _ret(f"vorrq_{s}(a, b)"),
+        "bit_xor": _ret(f"veorq_{s}(a, b)"),
     }
+    if lane_bits == 64:
+        out["bit_not"] = _ret("veorq_u64(a, vdupq_n_u64(~0ull))")
+        out["bits"] = Impl(SHORT, f"{table}return vaddvq_u64(vandq_u64(m, vld1q_u64(w)));")
+        out["any"] = _ret("vmaxvq_u32(vreinterpretq_u32_u64(m)) != 0")
+        out["all"] = _ret("vminvq_u32(vreinterpretq_u32_u64(m)) != 0")
+        out["from_bits"] = Impl(SHORT, f"{table}return vtstq_u64(vdupq_n_u64(b), vld1q_u64(w));")
+    elif lane_bits == 8:
+        out["bit_not"] = _ret("vmvnq_u8(a)")
+        out["bits"] = Impl(SHORT, f"{table}uint8x16_t const x = vandq_u8(m, vld1q_u8(w));\n"
+                                  "return u64(vaddv_u8(vget_low_u8(x))) | (u64(vaddv_u8(vget_high_u8(x))) << 8);")
+        out["any"] = _ret("vmaxvq_u8(m) != 0")
+        out["all"] = _ret("vminvq_u8(m) != 0")
+        out["from_bits"] = Impl(SHORT, f"{table}return vtstq_u8(vcombine_u8(vdup_n_u8(u8(b)), vdup_n_u8(u8(b >> 8))), "
+                                       "vld1q_u8(w));")
+    else:
+        out["bit_not"] = _ret(f"vmvnq_{s}(a)")
+        out["bits"] = Impl(SHORT, f"{table}return vaddvq_{s}(vandq_{s}(m, vld1q_{s}(w)));")
+        out["any"] = _ret(f"vmaxvq_{s}(m) != 0")
+        out["all"] = _ret(f"vminvq_{s}(m) != 0")
+        out["from_bits"] = Impl(SHORT, f"{table}return vtstq_{s}(vdupq_n_{s}({s}(b)), vld1q_{s}(w));")
+    return out

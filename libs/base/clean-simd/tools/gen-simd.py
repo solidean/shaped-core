@@ -32,7 +32,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from gen_simd.emit import COMMAND, emit_fixed, emit_fixed_masks, emit_kernel  # noqa: E402
+from gen_simd.emit import COMMAND, emit_aliases, emit_fixed, emit_fixed_masks, emit_kernel  # noqa: E402
 from gen_simd.model import ELEMS, KERNELS  # noqa: E402
 
 LIB = HERE.parent
@@ -66,6 +66,7 @@ def generate(exe: str) -> dict[Path, str]:
     texts: dict[Path, str] = {}
     for k in KERNELS:
         texts[GENERATED / f"{k.name}.hh"] = emit_kernel(k)
+    texts[GENERATED / "aliases.hh"] = emit_aliases()
     texts[GENERATED / "fixed" / "masks.hh"] = emit_fixed_masks()
     for e in ELEMS:
         texts[GENERATED / "fixed" / f"{e.name}.hh"] = emit_fixed(e)

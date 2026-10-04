@@ -9,8 +9,9 @@ kernel reaches it through `impl::reg<T, K, Bits>`.
 from __future__ import annotations
 
 from . import arm, scalar, wasm, x86
-from .model import (BINARY_OPERATORS, COMPARE_OPERATORS, ELEM, ELEMS, KERNELS, LANE_BITS, MASK_SIGNATURES, REFERENCE,
-                    REGISTER_COUNTS, SHORT, SIGNATURES, SINGLE, UNARY_OPERATORS, Elem, Kernel, ops_of)
+from .model import (BINARY_OPERATORS, COMPARE_OPERATORS, CONVERSIONS, ELEM, ELEMS, KERNELS, LANE_BITS, MASK_SIGNATURES,
+                    REFERENCE, REGISTER_COUNTS, SHIFT_OPERATORS, SHORT, SIGNATURES, SINGLE, UNARY_OPERATORS, Elem, Kernel,
+                    ops_of)
 
 COMMAND = "uv run libs/base/clean-simd/tools/gen-simd.py --write"
 
@@ -107,21 +108,6 @@ _SCALAR_PRELUDE = [
     "    bool v[L];",
     "};",
     "",
-    "namespace cimd::impl",
-    "{",
-    "/// Out of range is unspecified for cimd; this saturates, which keeps the C++ conversion away from its UB.",
-    "CC_FORCE_INLINE i32 to_i32_lane(f32 x)",
-    "{",
-    "    if (!(x == x))",
-    "        return 0;",
-    "    if (x >= 2147483648.f)",
-    "        return 2147483647;",
-    "    if (x < -2147483648.f)",
-    "        return -2147483647 - 1;",
-    "    return i32(x);",
-    "}",
-    "} // namespace cimd::impl",
-    "",
 ]
 
 
@@ -129,7 +115,7 @@ def emit_kernel(k: Kernel) -> str:
     lines = header(f"The {k.name} kernel's register layer: one static function per operation, per element and width.")
     lines += ["#include <clean-simd/impl/intrinsics.hh>", "#include <clean-simd/simd.hh>"]
     if k.name == "scalar":
-        lines += ["", "#include <clean-core/math/bit.hh>"]
+        lines += ["", "#include <clean-core/math/bit.hh>", "", "#include <cmath>"]
     lines += [""]
     if k.guard:
         lines += [f"#if {k.guard}", ""]
@@ -225,14 +211,19 @@ def emit_value(e: Elem, r: int) -> list[str]:
                   "return simd(s);"])
     lines += [""]
 
-    for name in ("add", "sub", "mul", "min", "max", "bit_and", "bit_or", "bit_xor"):
+    for name in ("add", "sub", "mul", "div", "min", "max", "copysign", "bit_and", "bit_or", "bit_xor"):
         if name in ops:
             lines += _fn(f"CC_FORCE_INLINE simd {name}(simd b) const",
                          ["simd v;"] + _each(r, f"v._r[{{i}}] = reg_t::{name}(_r[{{i}}], b._r[{{i}}]);") + ["return v;"])
-    for name in ("neg", "abs", "bit_not"):
+    for name in ("neg", "abs", "sqrt", "floor", "ceil", "round", "trunc", "bit_not"):
         if name in ops:
             lines += _fn(f"CC_FORCE_INLINE simd {name}() const",
                          ["simd v;"] + _each(r, f"v._r[{{i}}] = reg_t::{name}(_r[{{i}}]);") + ["return v;"])
+    for name in ("shl", "shr"):
+        if name in ops:
+            lines += _fn(f"CC_FORCE_INLINE simd {name}(int n) const",
+                         ['CC_ASSERT(0 <= n && n < int(8 * sizeof(element_t)), "shift count out of range");', "simd v;"]
+                         + _each(r, f"v._r[{{i}}] = reg_t::{name}(_r[{{i}}], n);") + ["return v;"])
     lines += ["    /// `*this * b + c`, fused where the kernel has FMA (K::has_native_fma) and rounded twice elsewhere."]
     lines += _fn("CC_FORCE_INLINE simd mul_add(simd b, simd c) const",
                  ["simd v;"] + _each(r, "v._r[{i}] = reg_t::mul_add(_r[{i}], b._r[{i}], c._r[{i}]);") + ["return v;"])
@@ -245,18 +236,20 @@ def emit_value(e: Elem, r: int) -> list[str]:
                      _tree(r, f"reg_t::{op}({{a}}, {{b}})") + [f"return reg_t::reduce_{op}(x0);"])
     lines += [""]
 
-    target = "i32" if e.is_float else "f32"
+    targets = CONVERSIONS.get(t, [])
+    allowed = " || ".join([f"std::is_same_v<U, {t}>"] + [f"std::is_same_v<U, {target}>" for target in targets])
     lines += [
         "    /// Lane-wise conversion to another element of the same width; float to integer truncates, and a value out of",
         "    /// range is unspecified.",
         "    template <class U>",
-        f"        requires(std::is_same_v<U, {t}> || std::is_same_v<U, {target}>)",
+        f"        requires({allowed})",
     ]
-    lines += _fn("CC_FORCE_INLINE simd<U, N, K> convert() const",
-                 [f"if constexpr (std::is_same_v<U, {t}>)", "    return *this;", "else", "{",
-                  "    simd<U, N, K> v;"]
-                 + ["    " + s for s in _each(r, f"v._r[{{i}}] = reg_t::to_{target}(_r[{{i}}]);")]
-                 + ["    return v;", "}"])
+    body = [f"if constexpr (std::is_same_v<U, {t}>)", "{", "    return *this;", "}"]
+    for target in targets:
+        body += [f"else if constexpr (std::is_same_v<U, {target}>)", "{", "    simd<U, N, K> v;"]
+        body += ["    " + line for line in _each(r, f"v._r[{{i}}] = reg_t::to_{target}(_r[{{i}}]);")]
+        body += ["    return v;", "}"]
+    lines += _fn("CC_FORCE_INLINE simd<U, N, K> convert() const", body)
     lines += [""]
 
     # operators: a hidden friend per operation the rule allows, and the member twin always
@@ -267,6 +260,10 @@ def emit_value(e: Elem, r: int) -> list[str]:
     for name, sym in UNARY_OPERATORS.items():
         if name in ops and has_operator(e, name):
             lines += [f"    CC_FORCE_INLINE friend simd operator{sym}(simd a) {{ return a.{name}(); }}"]
+    for name, sym in SHIFT_OPERATORS.items():
+        if name in ops and has_operator(e, name):
+            lines += [f"    CC_FORCE_INLINE friend simd operator{sym}(simd a, int n) {{ return a.{name}(n); }}",
+                      f"    CC_FORCE_INLINE simd& operator{sym}=(int n) {{ return *this = {name}(n); }}"]
     for name, sym in COMPARE_OPERATORS.items():
         if has_operator(e, name):
             lines += [f"    CC_FORCE_INLINE friend mask_t operator{sym}(simd a, simd b) {{ return a.{name}(b); }}"]
@@ -306,7 +303,8 @@ def emit_mask(lane_bits: int, r: int) -> list[str]:
                  + [f"b |= bits_t(reg_t::bits(_r[{i}])) << ({i} * reg_t::lanes);" for i in range(1, r)]
                  + ["return b;"])
     lines += _fn("static CC_FORCE_INLINE mask from_bits(bits_t b)",
-                 ["mask m;"] + _each(r, "m._r[{i}] = reg_t::from_bits(u32(b >> ({o})));") + ["return m;"])
+                 ['static_assert(N <= 64, "cimd::mask::from_bits(): more than 64 lanes do not fit one integer");', "mask m;"]
+                 + _each(r, "m._r[{i}] = reg_t::from_bits(u64(b) >> ({o}));") + ["return m;"])
     lines += ["    /// Whether any lane is set; cheaper than `bits() != 0` on kernels without a movemask."]
     lines += _fn("CC_FORCE_INLINE bool any() const", _tree(r, "reg_t::bit_or({a}, {b})") + ["return reg_t::any(x0);"])
     lines += _fn("CC_FORCE_INLINE bool all() const", _tree(r, "reg_t::bit_and({a}, {b})") + ["return reg_t::all(x0);"])
@@ -347,4 +345,25 @@ def emit_fixed(e: Elem) -> str:
     for r in REGISTER_COUNTS:
         lines += emit_value(e, r)
     lines += ["// NOLINTEND", ""]
+    return "\n".join(lines)
+
+
+def emit_aliases() -> str:
+    """`f32x8<K>`, `m32x8<K>` and `f32x8_storage` for every element at 128, 256 and 512 bits."""
+    lines = header("The named lane types: every element at 128, 256 and 512 bits, and their masks and storage.")
+    lines += ["#include <clean-simd/simd.hh>", "", "namespace cimd", "{"]
+    for e in ELEMS:
+        for bits in (128, 256, 512):
+            n = bits // e.bits
+            lines += ["template <class K>", f"using {e.name}x{n} = simd<{e.name}, {n}, K>;"]
+    for lane_bits in LANE_BITS:
+        for bits in (128, 256, 512):
+            n = bits // lane_bits
+            lines += ["template <class K>", f"using m{lane_bits}x{n} = mask<{lane_bits}, {n}, K>;"]
+    lines += [""]
+    for e in ELEMS:
+        for bits in (128, 256, 512):
+            n = bits // e.bits
+            lines += [f"using {e.name}x{n}_storage = storage<{e.name}, {n}>;"]
+    lines += ["} // namespace cimd", ""]
     return "\n".join(lines)

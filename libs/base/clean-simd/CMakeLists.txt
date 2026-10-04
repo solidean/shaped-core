@@ -29,10 +29,18 @@ target_sources(clean-simd
     src/clean-simd/generated/avx512.hh
     src/clean-simd/generated/neon.hh
     src/clean-simd/generated/simd128.hh
+    src/clean-simd/generated/aliases.hh
     src/clean-simd/generated/fixed/masks.hh
     src/clean-simd/generated/fixed/f32.hh
+    src/clean-simd/generated/fixed/f64.hh
+    src/clean-simd/generated/fixed/i8.hh
+    src/clean-simd/generated/fixed/i16.hh
     src/clean-simd/generated/fixed/i32.hh
+    src/clean-simd/generated/fixed/i64.hh
+    src/clean-simd/generated/fixed/u8.hh
+    src/clean-simd/generated/fixed/u16.hh
     src/clean-simd/generated/fixed/u32.hh
+    src/clean-simd/generated/fixed/u64.hh
 )
 
 target_compile_features(clean-simd PUBLIC cxx_std_23)
