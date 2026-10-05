@@ -551,7 +551,7 @@ auto const mono = sv::font::from_bytes(pinned).value();   // TrueType only; keye
 sv::default_font();                              // the OS's UI font, loaded once; null where there is none
 // resources.drawings: sv::drawing_manager, an lru_pool over atlas pages (512 rows, 4 pages; the LRU page empties)
 // decals live in its one decal_atlas(), since a trace binds one; it empties when full unless drawn from this frame
-// a placement carries its page; a layer's job draws once per page it reaches
+// a placement carries its page; a layer's job draws once per run of placements sharing a page, in their order
 // glyphs reach the GPU as glyph_set(font, g): 64 consecutive glyph ids per set, compiled on first use
 ```
 

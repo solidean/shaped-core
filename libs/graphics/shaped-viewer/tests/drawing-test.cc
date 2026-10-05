@@ -332,6 +332,23 @@ namespace
 }
 } // namespace
 
+TEST("sv::drawing_manager - a set changed after it was placed is placed again")
+{
+    auto manager = sv::drawing_manager();
+    auto set = squares(1, 1);
+    auto const placed = manager.acquire(set);
+
+    // The set's cache slot still names the old placement, which holds no record for the drawing added since.
+    (void)set.add(sv::drawing().add_fill(square(5)));
+    auto const again = manager.acquire(set);
+    CHECK(again != placed);
+    CHECK(manager.record_count(again, 1) > 0);
+
+    // A copy carries the slot, and is the same content, so it lands on the same placement.
+    auto const copy = set;
+    CHECK(manager.acquire(copy) == again);
+}
+
 TEST("sv::drawing_manager - a set that does not fit opens a page, and a full manager empties the one drawn longest ago")
 {
     // pages one row tall, at most two of them; five hundred squares fit one, but two such sets pass its 819 records

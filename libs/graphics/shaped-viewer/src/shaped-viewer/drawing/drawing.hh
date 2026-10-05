@@ -102,11 +102,14 @@ private:
 
 namespace sv::impl
 {
-/// What acquiring a set last produced: the manager it was acquired by, compared and never followed, and the id it got.
-/// A cache, never an identity — a set acquired by a manager that has not seen it gets the id its content hash earns.
+/// What acquiring a set last produced: the manager it was acquired by, compared and never followed, the content it was
+/// acquired with, and the id it got.
+/// A cache, never an identity — a set acquired by a manager that has not seen it, or changed since, gets the id its
+/// content hash earns.
 struct drawing_set_gpu_slot
 {
     drawing_manager const* manager = nullptr;
+    cc::hash128 content;
     drawing_set_id id = drawing_set_id::invalid;
 };
 } // namespace sv::impl

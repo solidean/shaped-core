@@ -93,7 +93,7 @@ ASYNC_INVOCABLE_TEST("sv - a decal paints the traced surface its projector reach
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the path-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const positions = quad_positions();
@@ -280,7 +280,7 @@ ASYNC_INVOCABLE_TEST("sv - a decal coming, changing or going restarts the view's
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const positions = quad_positions();

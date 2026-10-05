@@ -12,16 +12,17 @@ namespace sv
 {
 drawing_set_id drawing_manager::acquire(drawing_set const& set)
 {
-    if (set.cache.manager == this && contains(set.cache.id))
+    // The slot holds for the content it was filled with, so a set that gained a drawing since misses here.
+    auto const hash = set.hash();
+    if (set.cache.manager == this && set.cache.content == hash && contains(set.cache.id))
     {
         (void)get(set.cache.id); // the LRU touch a hash hit would have made
         return set.cache.id;
     }
 
-    auto const hash = set.hash();
     auto const resident = find_by_hash(hash);
     auto const id = resident.has_value() ? resident.value() : _place(hash, set.drawings());
-    set.cache = {.manager = this, .id = id};
+    set.cache = {.manager = this, .content = hash, .id = id};
     return id;
 }
 

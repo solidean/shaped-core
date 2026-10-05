@@ -90,7 +90,7 @@ The pages are the manager's private storage, as a texture's memory is the textur
   Slug's atlas has no free list, so a page is the smallest unit that can be reclaimed without rewriting every band list that points at a moved curve.
 - **A page drawn from this frame is never emptied**, since this frame's placements name its records.
   When every page is in use the manager opens one past the limit, and says so once.
-- **A job draws once per page** its placements reach, each draw from that page's atlas.
+- **A job draws once per run of placements sharing a page**, each draw from that page's atlas, so later drawings stay over earlier ones whichever pages they live in.
 
 ## Text
 
@@ -105,7 +105,7 @@ shaped-core ships none, so captures with it differ between operating systems, an
 
 ## Drawing
 
-Each layer's instances become one **render job**: one draw call, through `sr::slug_routine`'s job form.
+Each layer's instances become one **render job**, through `sr::slug_routine`'s job form: one draw call per run of placements sharing an atlas page.
 A job is a frame per instance and a quad per (instance, shape layer), each quad naming an atlas record and a frame.
 2D and 3D are separate jobs, since their view matrix and depth state differ.
 A job's draw sits in its view target's pass at the layer's place, so a canvas draws over the scene below it and under whatever layer follows.

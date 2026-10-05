@@ -25,8 +25,9 @@ struct page_job
     sr::slug_routine::prepared_job job;
 };
 
-/// Uploads one layer's drawings as Slug jobs, one per atlas page they draw from: a frame per placement, and a quad per
-/// record under it.
+/// Uploads one layer's drawings as Slug jobs, one per run of placements sharing an atlas page: a frame per placement,
+/// and a quad per record under it.
+/// Runs keep the placements' order, so a drawing added later draws over an earlier one whichever pages they live in.
 /// Records copies, so it runs before any pass opens.
 [[nodiscard]] cc::vector<page_job> prepare_drawing_job(sg::command_list& cmd,
                                                        viewer_definition const& def,
@@ -36,41 +37,50 @@ struct page_job
     auto const& placements
         = job.kind == drawing_job_kind::layer ? def[job.view].layers[job.layer].drawings : job.placements;
     auto out = cc::vector<page_job>();
-    for (auto page = u32(0); page < u32(drawings.page_count()); ++page)
+    auto frames = cc::vector<sr::slug_frame>();
+    auto quads = cc::vector<sr::slug_quad>();
+    auto page = u32(0);
+    auto const flush = [&]
     {
-        auto frames = cc::vector<sr::slug_frame>();
-        auto quads = cc::vector<sr::slug_quad>();
-        for (auto const& p : placements)
-        {
-            if (p.record_count == 0 || p.page != page)
-                continue;
-
-            // A 2D position measured from a right or bottom edge points into the view, and is where the block's far edge
-            // sits: the block's anchor counts back from that edge by the distance and by how far the block reaches, and
-            // the placement keeps its offset within the block.
-            auto at = p.at;
-            if (!job.is_3d)
-            {
-                if (p.from == corner::top_right || p.from == corner::bottom_right)
-                    at[0] = job.logical_size[0] - (at[0] - p.offset[0]) - p.reach[0] + p.offset[0];
-                if (p.from == corner::bottom_left || p.from == corner::bottom_right)
-                    at[1] = job.logical_size[1] - (at[1] - p.offset[1]) - p.reach[1] + p.offset[1];
-            }
-
-            auto const frame = u32(frames.size());
-            frames.push_back({.at = at,
-                              .x_axis = p.x_axis,
-                              .y_axis = p.y_axis,
-                              .tint = p.tint,
-                              .visibility = p.visibility,
-                              .probe = p.probe,
-                              .probe_depth = p.probe_depth});
-            for (auto r = p.first_record; r < p.first_record + p.record_count; ++r)
-                quads.push_back({.record = r, .frame = frame});
-        }
         if (!quads.empty())
             out.push_back({.page = page, .job = sr::slug_routine::prepare_job(cmd, drawings.atlas(page), frames, quads)});
+        frames.clear();
+        quads.clear();
+    };
+    for (auto const& p : placements)
+    {
+        if (p.record_count == 0)
+            continue;
+        if (p.page != page)
+        {
+            flush();
+            page = p.page;
+        }
+
+        // A 2D position measured from a right or bottom edge points into the view, and is where the block's far edge
+        // sits: the block's anchor counts back from that edge by the distance and by how far the block reaches, and
+        // the placement keeps its offset within the block.
+        auto at = p.at;
+        if (!job.is_3d)
+        {
+            if (p.from == corner::top_right || p.from == corner::bottom_right)
+                at[0] = job.logical_size[0] - (at[0] - p.offset[0]) - p.reach[0] + p.offset[0];
+            if (p.from == corner::bottom_left || p.from == corner::bottom_right)
+                at[1] = job.logical_size[1] - (at[1] - p.offset[1]) - p.reach[1] + p.offset[1];
+        }
+
+        auto const frame = u32(frames.size());
+        frames.push_back({.at = at,
+                          .x_axis = p.x_axis,
+                          .y_axis = p.y_axis,
+                          .tint = p.tint,
+                          .visibility = p.visibility,
+                          .probe = p.probe,
+                          .probe_depth = p.probe_depth});
+        for (auto r = p.first_record; r < p.first_record + p.record_count; ++r)
+            quads.push_back({.record = r, .frame = frame});
     }
+    flush();
     return out;
 }
 

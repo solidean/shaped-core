@@ -30,7 +30,7 @@ ASYNC_INVOCABLE_TEST("sv - a canvas draws its drawings into the frame, from the 
     auto& ctx = *ctx_h;
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the layout shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the layout shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto red = sv::drawing();
@@ -100,13 +100,96 @@ ASYNC_INVOCABLE_TEST("sv - a canvas draws its drawings into the frame, from the 
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// A later drawing draws over an earlier one even where the earlier one's atlas page comes later: a job draws its
+// placements in the order they were added, one draw per run sharing a page.
+ASYNC_INVOCABLE_TEST("sv - a canvas draws its drawings in the order they were added, across atlas pages",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the layout shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    resources.drawings = sv::drawing_manager(1, 4); // pages one row tall, so two sets of 500 squares need two
+
+    auto const squares = [](f32 seed, tg::vec4f color)
+    {
+        auto set = sv::drawing_set();
+        for (auto i = 0; i < 500; ++i)
+        {
+            auto d = sv::drawing();
+            d.add_fill(square(seed + f32(i)), {.color = color});
+            (void)set.add(d);
+        }
+        return set;
+    };
+    auto const blue_set = squares(1, tg::vec4f(0, 0, 1, 1));
+    auto const red_set = squares(1000, tg::vec4f(1, 0, 0, 1));
+    auto const blue = resources.drawings.acquire(blue_set);
+    auto const red = resources.drawings.acquire(red_set);
+    REQUIRE(resources.drawings.page_of(blue) < resources.drawings.page_of(red));
+
+    auto const place = [&](sv::drawing_set_id set, f32 side)
+    {
+        return sv::drawing_placement{.set = set,
+                                     .page = resources.drawings.page_of(set),
+                                     .first_record = resources.drawings.first_record(set, 0),
+                                     .record_count = resources.drawings.record_count(set, 0),
+                                     .at = tg::pos3f(4, 4, 0),
+                                     .x_axis = tg::vec3f(10 / side, 0, 0),
+                                     .y_axis = tg::vec3f(0, 10 / side, 0)};
+    };
+
+    // The later page's square first, the earlier page's over it.
+    auto const size = tg::vec2i(24, 24);
+    auto v = sv::view_data{};
+    v.id = sv::view_id::from_string("order");
+    v.resolution = size;
+    v.resolution_follows_layout = false;
+    v.layers.push_back({.kind = sv::layer_kind::canvas,
+                        .blend = sv::layer_blend::over,
+                        .drawings = {place(red, 1000), place(blue, 1)}});
+    auto def = sv::viewer_definition{};
+    def.views.push_back(cc::move(v));
+    def.root_view = sv::view_index(0);
+    auto const plan = sv::build_render_plan(def, size, 0, {});
+    REQUIRE(plan.validate());
+
+    auto const output
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                            .width = size[0],
+                                            .height = size[1],
+                                            .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+    auto store = sv::view_store{};
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               resources.advance_to(ctx.current_epoch());
+                                               return sv::viewer_renderer::execute(
+                                                   cmd, def, plan, resources, store,
+                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+                                           }));
+    (void)co_await ctx.idle_completion();
+
+    auto read = ctx.create_command_list();
+    auto const future = read->download.bytes_from_texture(output.raw());
+    ctx.submit_command_list(cc::move(read));
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == isize(size[0]) * size[1] * 4);
+    auto const channel = [&](int x, int y, int c) { return u8(pixels[(isize(y) * size[0] + x) * 4 + c]); };
+    CHECK(channel(9, 9, 2) > 250);
+    CHECK(channel(9, 9, 0) < 5);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // One canvas job whose drawings live in two atlas pages draws both: one draw per page, each from its own atlas.
 ASYNC_INVOCABLE_TEST("sv - a canvas draws drawings from two atlas pages in one job", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the layout shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the layout shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     resources.drawings = sv::drawing_manager(1, 4); // pages one row tall, so two sets of 500 squares need two
@@ -197,7 +280,7 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
     }
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -287,7 +370,7 @@ ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor sho
     }
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     tg::pos3f const quad[] = {tg::pos3f(-1, -1, 0), tg::pos3f(1, -1, 0), tg::pos3f(1, 1, 0),
@@ -394,7 +477,7 @@ ASYNC_INVOCABLE_TEST("sv - canvas text lands inside its laid-out box, from eithe
     auto& ctx = *ctx_h;
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the layout shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the layout shaders");
     auto const* const f = sv::default_font();
     if (f == nullptr)
         SKIP("no system UI font to set text in");
