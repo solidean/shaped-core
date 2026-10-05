@@ -261,9 +261,126 @@ TEST("babel::font - an extension lookup kerns as the lookup it wraps")
 TEST("babel::font - a face with no GPOS kerning reads the legacy kern table")
 {
     auto f = letters_font();
-    f.legacy_kern = {{.left = 2, .right = 1, .value = -40}, {.left = 1, .right = 2, .value = -15}};
+    f.legacy_kern.push_back({.pairs = {{.left = 2, .right = 1, .value = -40}, {.left = 1, .right = 2, .value = -15}}});
     auto const face = kerned(f);
     CHECK(kerning(face, 1, 2) == -15);
     CHECK(kerning(face, 2, 1) == -40);
     CHECK(kerning(face, 1, 1) == 0);
+}
+
+TEST("babel::font - the legacy kern table sums its horizontal subtables, and an override replaces the sum")
+{
+    auto f = letters_font();
+    // a vertical subtable first, which a horizontal query skips
+    f.legacy_kern.push_back({.pairs = {{.left = 1, .right = 2, .value = -500}}, .is_vertical = true});
+    f.legacy_kern.push_back({.pairs = {{.left = 1, .right = 2, .value = -15}}});
+    f.legacy_kern.push_back({.pairs = {{.left = 1, .right = 2, .value = -5}, {.left = 2, .right = 1, .value = -3}}});
+    auto const summed = kerned(f);
+    CHECK(kerning(summed, 1, 2) == -20);
+    CHECK(kerning(summed, 2, 1) == -3);
+
+    // the override holds (1, 2) alone, so (2, 1) keeps its sum
+    f.legacy_kern.push_back({.pairs = {{.left = 1, .right = 2, .value = -9}}, .is_override = true});
+    auto const overridden = kerned(f);
+    CHECK(kerning(overridden, 1, 2) == -9);
+    CHECK(kerning(overridden, 2, 1) == -3);
+}
+
+TEST("babel::font - Apple's version-1 kern table sums its horizontal subtables")
+{
+    auto f = letters_font();
+    f.legacy_kern_apple = true;
+    f.legacy_kern.push_back({.pairs = {{.left = 1, .right = 2, .value = -500}}, .is_vertical = true});
+    f.legacy_kern.push_back({.pairs = {{.left = 1, .right = 2, .value = -15}}});
+    f.legacy_kern.push_back({.pairs = {{.left = 1, .right = 2, .value = -5}, {.left = 2, .right = 3, .value = -3}}});
+    auto const face = kerned(f);
+    CHECK(kerning(face, 1, 2) == -20);
+    CHECK(kerning(face, 2, 3) == -3);
+    CHECK(kerning(face, 2, 1) == 0);
+}
+
+TEST("babel::font - kerning applies one language system's kern features, not every script's")
+{
+    auto f = letters_font();
+    // both lookups cover (1, 2), the first under DFLT and the second under latn: only DFLT's applies
+    f.gpos_pairs = {{.left = 1, .right = 2, .value = -80}};
+    f.gpos_second_lookup = {{.left = 1, .right = 2, .value = -7}};
+    f.gpos_per_script = true;
+    CHECK(kerning(kerned(f), 1, 2) == -80);
+}
+
+TEST("babel::font - a pair lookup a feature other than kern names is not kerning")
+{
+    auto f = letters_font();
+    f.gpos_pairs = {{.left = 1, .right = 2, .value = -80}};
+    f.gpos_liga_lookup = {{.left = 1, .right = 3, .value = -50}, {.left = 1, .right = 2, .value = -50}};
+    auto const face = kerned(f);
+    CHECK(kerning(face, 1, 2) == -80);
+    CHECK(kerning(face, 1, 3) == 0);
+
+    f.gpos_per_script = true;
+    auto const scripted = kerned(f);
+    CHECK(kerning(scripted, 1, 2) == -80);
+    CHECK(kerning(scripted, 1, 3) == 0);
+}
+
+TEST("babel::font - GPOS kerning reads either coverage format, either class format, and the advance alone")
+{
+    auto f = letters_font();
+    f.gpos_pairs = {{.left = 1, .right = 2, .value = -80}, {.left = 2, .right = 1, .value = 30}};
+    f.gpos_classes.push_back({.left = {1, 3}, .right = {3}, .value = -60});
+    auto const check_face = [](babel::font::face const& face)
+    {
+        CHECK(kerning(face, 1, 2) == -80);
+        CHECK(kerning(face, 2, 1) == 30);
+        CHECK(kerning(face, 1, 3) == -60);
+        CHECK(kerning(face, 3, 3) == -60);
+        CHECK(kerning(face, 2, 3) == 0); // inside the class array's span, in class 0
+        CHECK(kerning(face, 3, 2) == 0);
+    };
+
+    SECTION("format 2 coverage")
+    {
+        f.gpos_coverage_ranges = true;
+        check_face(kerned(f));
+    }
+    SECTION("format 1 class definitions")
+    {
+        f.gpos_class_arrays = true;
+        check_face(kerned(f));
+    }
+    SECTION("value records with a placement, and a second glyph's value")
+    {
+        f.gpos_with_placement = true;
+        check_face(kerned(f));
+    }
+}
+
+TEST("babel::font - a GPOS table cut short anywhere still reads, and kerning still answers")
+{
+    auto f = letters_font();
+    while (f.glyphs.size() < 4)
+        f.glyphs.push_back(letter());
+    f.gpos_pairs = {{.left = 1, .right = 2, .value = -80}};
+    f.gpos_classes.push_back({.left = {1, 2}, .right = {3}, .value = -60});
+    f.gpos_second_lookup = {{.left = 1, .right = 2, .value = -7}};
+    f.gpos_liga_lookup = {{.left = 1, .right = 3, .value = -50}};
+    f.gpos_per_script = true;
+    f.gpos_as_extension = true;
+
+    auto const full = babel_test::encode_gpos_of(f).size();
+    for (auto n = isize(0); n < full; ++n)
+    {
+        f.gpos_truncate_to = n;
+        auto const face = babel::font::read(babel_test::build_font(f));
+        REQUIRE(face.has_value());
+        // every answer is a sum of what was readable, never something read past the cut
+        for (auto a = u16(0); a < 4; ++a)
+            for (auto b = u16(0); b < 4; ++b)
+            {
+                auto const k = kerning(face.value(), a, b);
+                auto const plausible = k == 0 || k == -80 || k == -60 || k == -87 || k == -7;
+                CHECK(plausible);
+            }
+    }
 }

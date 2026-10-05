@@ -267,32 +267,91 @@ struct table_directory
     return {};
 }
 
-/// The pair-adjustment subtables of every lookup a `kern` feature of `gpos` names, in lookup order, extensions resolved.
-/// Anything malformed is skipped rather than reported: kerning refines spacing, and a face without it still reads.
-[[nodiscard]] cc::vector<cc::span<byte const>> kern_pair_subtables(cc::span<byte const> gpos, cc::vector<i32>& lookup_of)
+/// The FeatureList indices one language system of `gpos` registers: the script `DFLT`, else `latn`, else the first,
+/// and that script's default LangSys, else its first.
+/// Nullopt when the ScriptList names no script, which is the fallback to every feature.
+[[nodiscard]] cc::optional<cc::vector<u16>> language_system_features(cc::span<byte const> gpos)
 {
-    auto out = cc::vector<cc::span<byte const>>();
+    auto r = be_reader{.bytes = gpos, .pos = 4};
+    auto const scripts = isize(r.read<u16>());
+    auto s = be_reader{.bytes = gpos, .pos = scripts};
+    auto const script_count = s.read<u16>();
+    if (!r.ok || !s.ok || script_count == 0)
+        return {};
+
+    auto script = isize(-1);
+    auto best = 3;
+    for (auto i = 0; i < script_count; ++i)
+    {
+        auto e = be_reader{.bytes = gpos, .pos = scripts + 2 + isize(i) * 6};
+        auto const tag = e.read<u32>();
+        auto const offset = isize(e.read<u16>());
+        if (!e.ok)
+            break;
+        auto const rank = tag == tag_of("DFLT") ? 0 : tag == tag_of("latn") ? 1 : 2;
+        if (rank < best)
+        {
+            best = rank;
+            script = scripts + offset;
+        }
+    }
+    if (script < 0)
+        return {};
+
+    auto out = cc::vector<u16>();
+    auto t = be_reader{.bytes = gpos, .pos = script};
+    auto lang_sys = isize(t.read<u16>());
+    auto const lang_sys_count = t.read<u16>();
+    if (lang_sys == 0 && lang_sys_count > 0)
+    {
+        t.skip(4); // the first LangSysRecord's tag
+        lang_sys = isize(t.read<u16>());
+    }
+    if (!t.ok || lang_sys == 0)
+        return out;
+
+    auto l = be_reader{.bytes = gpos, .pos = script + lang_sys};
+    l.skip(2); // lookupOrderOffset, reserved
+    auto const required = l.read<u16>();
+    auto const count = l.read<u16>();
+    if (l.ok && required != 0xFFFF)
+        out.push_back(required);
+    for (auto i = 0; i < count && l.ok; ++i)
+    {
+        auto const index = l.read<u16>();
+        if (l.ok)
+            out.push_back(index);
+    }
+    return out;
+}
+
+/// Calls `add(subtable, lookup)` for the pair-adjustment subtables of every lookup one language system's `kern`
+/// features name, in lookup order, extensions resolved.
+/// Anything malformed is skipped rather than reported: kerning refines spacing, and a face without it still reads.
+template <class F>
+void for_each_kern_pair_subtable(cc::span<byte const> gpos, F&& add)
+{
     auto r = be_reader{.bytes = gpos, .pos = 6};
     auto const features = isize(r.read<u16>());
     auto const lookups = isize(r.read<u16>());
     if (!r.ok)
-        return out;
+        return;
 
-    // Every lookup a `kern` feature lists, once each and in lookup order, which is the order they apply in.
+    // Every lookup a chosen `kern` feature lists, once each and in lookup order, which is the order they apply in.
     auto r_features = be_reader{.bytes = gpos, .pos = features};
     auto const feature_count = r_features.read<u16>();
     auto r_lookups = be_reader{.bytes = gpos, .pos = lookups};
     auto const lookup_count = r_lookups.read<u16>();
     if (!r_features.ok || !r_lookups.ok)
-        return out;
+        return;
     auto wanted = cc::vector<bool>::create_defaulted(isize(lookup_count));
-    for (auto i = 0; i < feature_count; ++i)
+    auto const take = [&](isize i)
     {
-        auto f = be_reader{.bytes = gpos, .pos = features + 2 + isize(i) * 6};
+        auto f = be_reader{.bytes = gpos, .pos = features + 2 + i * 6};
         auto const tag = f.read<u32>();
         auto const offset = isize(f.read<u16>());
         if (!f.ok || tag != tag_of("kern"))
-            continue;
+            return;
         auto l = be_reader{.bytes = gpos, .pos = features + offset + 2};
         auto const count = l.read<u16>();
         for (auto k = 0; k < count && l.ok; ++k)
@@ -301,7 +360,16 @@ struct table_directory
             if (l.ok && index < lookup_count)
                 wanted[index] = true;
         }
+    };
+    if (auto const chosen = language_system_features(gpos); chosen.has_value())
+    {
+        for (auto const i : chosen.value())
+            if (i < feature_count)
+                take(isize(i));
     }
+    else
+        for (auto i = isize(0); i < feature_count; ++i)
+            take(i);
 
     for (auto i = isize(0); i < lookup_count; ++i)
     {
@@ -333,59 +401,90 @@ struct table_directory
                 sub += offset;
             }
             if (sub >= 0 && sub < gpos.size())
-            {
-                out.push_back(gpos.subspan(sub));
-                lookup_of.push_back(i32(i));
-            }
+                add(gpos.subspan(sub), i32(i));
         }
     }
-    return out;
 }
 
-/// The legacy `kern` table's adjustment for the pair: its first horizontal format-0 subtable, sorted by the pair.
+/// The value of the pair `key` among the `count` format-0 pairs at `at`, sorted by the pair; nullopt when it is not one.
+[[nodiscard]] cc::optional<i32> legacy_pair_value(cc::span<byte const> kern, isize at, isize count, u32 key)
+{
+    auto lo = isize(0);
+    auto hi = count - 1;
+    while (lo <= hi)
+    {
+        auto const mid = (lo + hi) / 2;
+        auto e = be_reader{.bytes = kern, .pos = at + mid * 6};
+        auto const pair = e.read<u32>();
+        auto const value = e.read<i16>();
+        if (!e.ok)
+            return {};
+        if (pair == key)
+            return i32(value);
+        if (pair < key)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+    return {};
+}
+
+/// The legacy `kern` table's adjustment for the pair, summed over its horizontal format-0 subtables.
+/// Version 0 is Microsoft's, where a subtable with the override bit that holds the pair replaces the sum so far.
+/// Version 1 is Apple's: a header of its own, a coverage byte that means something else, and no override.
 [[nodiscard]] i32 legacy_kerning(cc::span<byte const> kern, u16 left, u16 right)
 {
+    auto const key = (u32(left) << 16) | right;
     auto r = be_reader{.bytes = kern};
-    auto const version = r.read<u16>();
-    auto const tables = r.read<u16>();
-    if (!r.ok || version != 0)
+    auto const major = r.read<u16>();
+    auto const is_apple = major == 1;
+    auto tables = isize(0);
+    if (is_apple)
+    {
+        r.skip(2); // the version's low half
+        tables = isize(r.read<u32>());
+    }
+    else
+        tables = isize(r.read<u16>());
+    if (!r.ok || major > 1)
         return 0;
-    auto at = isize(4);
-    for (auto t = 0; t < tables; ++t)
+
+    auto total = 0;
+    auto at = r.pos;
+    for (auto t = isize(0); t < tables; ++t)
     {
         auto h = be_reader{.bytes = kern, .pos = at};
-        h.skip(2); // version
-        auto const length = isize(h.read<u16>());
-        auto const coverage = h.read<u16>();
-        auto const pairs = isize(h.read<u16>());
-        if (!h.ok)
-            return 0;
-        // Horizontal (bit 0), format 0 (high byte), neither minimum nor cross-stream.
-        if ((coverage & 0x0007) == 0x0001 && (coverage >> 8) == 0)
+        auto length = isize(0);
+        auto applies = false;
+        auto is_override = false;
+        if (is_apple)
         {
-            auto const key = (u32(left) << 16) | right;
-            auto lo = isize(0);
-            auto hi = pairs - 1;
-            while (lo <= hi)
-            {
-                auto const mid = (lo + hi) / 2;
-                auto e = be_reader{.bytes = kern, .pos = at + 14 + mid * 6};
-                auto const pair = e.read<u32>();
-                auto const value = e.read<i16>();
-                if (!e.ok)
-                    return 0;
-                if (pair == key)
-                    return value;
-                if (pair < key)
-                    lo = mid + 1;
-                else
-                    hi = mid - 1;
-            }
-            return 0;
+            length = isize(h.read<u32>());
+            auto const coverage = h.read<u8>();
+            auto const format = h.read<u8>();
+            h.skip(2); // tupleIndex
+            // Neither vertical (0x80), cross-stream (0x40) nor a variation (0x20).
+            applies = (coverage & 0xE0) == 0 && format == 0;
         }
+        else
+        {
+            h.skip(2); // version
+            length = isize(h.read<u16>());
+            auto const coverage = h.read<u16>();
+            // Horizontal (bit 0), format 0 (high byte), neither minimum nor cross-stream.
+            applies = (coverage & 0x0007) == 0x0001 && (coverage >> 8) == 0;
+            is_override = (coverage & 0x0008) != 0;
+        }
+        auto const pairs = isize(h.read<u16>());
+        if (!h.ok || length <= 0)
+            break;
+        // The pairs follow nPairs, searchRange, entrySelector and rangeShift.
+        if (applies)
+            if (auto const v = legacy_pair_value(kern, h.pos + 6, pairs, key); v.has_value())
+                total = is_override ? v.value() : total + v.value();
         at += length;
     }
-    return 0;
+    return total;
 }
 
 /// The subtable `cmap` should be read through, best first: full Unicode before the BMP, Windows before Unicode-platform.
@@ -602,7 +701,8 @@ cc::result<face> read(cc::pinned_data<byte const> bytes, i32 face_index)
 
     // Kerning is optional, and a malformed table of it costs the face its kerning rather than the face itself.
     if (auto gpos = dir.find(tag_of("GPOS")); gpos.has_value() && !gpos.value().empty())
-        f._pair_subtables = babel::impl::kern_pair_subtables(gpos.value(), f._pair_lookups);
+        babel::impl::for_each_kern_pair_subtable(gpos.value(), [&](cc::span<byte const> sub, i32 lookup)
+                                                 { f._pair_subtables.push_back({.bytes = sub, .lookup = lookup}); });
     if (auto kern = dir.find(tag_of("kern")); kern.has_value())
         f._kern = kern.value();
 
@@ -651,14 +751,14 @@ i32 face::pair_kerning(glyph_id left, glyph_id right) const
     // Within a lookup the first subtable covering the pair applies; separate lookups each apply, so they sum.
     auto total = 0;
     auto applied = -1;
-    for (auto i = isize(0); i < _pair_subtables.size(); ++i)
+    for (auto const& sub : _pair_subtables)
     {
-        if (_pair_lookups[i] == applied)
+        if (sub.lookup == applied)
             continue;
-        if (auto const v = babel::impl::pair_adjustment(_pair_subtables[i], u16(left), u16(right)); v.has_value())
+        if (auto const v = babel::impl::pair_adjustment(sub.bytes, u16(left), u16(right)); v.has_value())
         {
             total += v.value();
-            applied = _pair_lookups[i];
+            applied = sub.lookup;
         }
     }
     return total;

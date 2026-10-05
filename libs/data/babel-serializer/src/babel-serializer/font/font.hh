@@ -119,7 +119,7 @@ struct babel::font::glyf_outline
 };
 
 /// One face of a font file, holding the file's bytes and its table directory.
-/// Cheap to copy: the bytes are shared.
+/// Copying shares the bytes and copies the kerning index.
 class babel::font::face
 {
 public:
@@ -145,9 +145,11 @@ public:
     ///
     /// A query over the tables as stored, as `glyph_for` is over `cmap`: the pair adjustments of the `GPOS` lookups a
     /// `kern` feature names, both the per-pair and the per-class form, summed over lookups and through extension lookups.
-    /// A face with no such lookups answers from the legacy `kern` table instead.
-    /// The script and language a feature is registered under are not consulted: every `kern` feature's lookups apply.
-    /// A malformed table answers 0 rather than failing, since kerning only refines spacing.
+    /// Only one language system's `kern` features apply: `DFLT`'s, else `latn`'s, else the first script's.
+    /// A face whose script list is empty applies every `kern` feature instead.
+    /// Only the first glyph's X advance is read: no placement, no second glyph's value, no device tables.
+    /// A face with no such lookups answers from the legacy `kern` table, summed over its horizontal subtables.
+    /// A malformed table never fails the query: what cannot be read adds nothing, since kerning only refines spacing.
     [[nodiscard]] i32 pair_kerning(glyph_id left, glyph_id right) const;
 
 private:
@@ -163,10 +165,15 @@ private:
     cc::span<byte const> _hmtx;
     cc::span<byte const> _cmap_subtable;
 
-    // `GPOS` pair-adjustment subtables of the `kern` feature's lookups, extensions resolved, in lookup order; and the
-    // legacy `kern` table, read only when there are none.
-    cc::vector<cc::span<byte const>> _pair_subtables;
-    cc::vector<i32> _pair_lookups; ///< the lookup each of `_pair_subtables` belongs to
+    /// A `GPOS` pair-adjustment subtable of a `kern` feature's lookup, extensions resolved, and the lookup it is in.
+    struct pair_subtable
+    {
+        cc::span<byte const> bytes;
+        i32 lookup = 0;
+    };
+
+    // The pair subtables in lookup order; and the legacy `kern` table, read only when there are none.
+    cc::vector<pair_subtable> _pair_subtables;
     cc::span<byte const> _kern;
     i32 _cmap_format = 0;
     i32 _long_metrics = 0;
