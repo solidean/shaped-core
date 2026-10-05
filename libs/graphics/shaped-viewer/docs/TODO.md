@@ -166,6 +166,8 @@ What is left is narrower than it was:
   A hit samples level 0 through one of module `tracer`'s eighteen static samplers, picked per texture by `sv::sgl_palette_sampler`.
   The palette tells apart the magnification filter and the address mode of each axis, which is everything a level-0 sample can.
   A `mip_lod_bias`, a level clamp, anisotropy and a comparison are dropped, and sv's importers produce none of them.
+  The alternative is a bindless sampler table indexed from the parameter block, which gives exact states and stops samplers forking permutations at all.
+  It costs sampler arrays with non-uniform indexing, which webgpu lacks, so it is worth weighing once hits select mips.
 
 - **A sampled attribute cannot say what it is sampled THROUGH.**
   `resolved_attribute::uv` is one hardcoded field: a `float2` mesh attribute, found by name, and nothing else may play that role.
