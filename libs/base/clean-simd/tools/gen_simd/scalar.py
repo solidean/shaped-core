@@ -83,8 +83,8 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     out["min"] = _lanes(lanes, "b.v[{i}] < a.v[{i}] ? b.v[{i}] : a.v[{i}]")
     out["max"] = _lanes(lanes, "a.v[{i}] < b.v[{i}] ? b.v[{i}] : a.v[{i}]")
     if e.is_float:
-        # MSVC for ARM64 swaps the operands of the float ternary, which returns b on a tie of +0 and -0.
-        # Only there, a select on the bit patterns, which no compiler can reorder.
+        # cl.exe, on x64 and ARM64, swaps the operands of the float ternary once it is inlined here, returning b on a tie of +0 and -0.
+        # For cl.exe alone, a select on the bit patterns, which no compiler can reorder; clang and GCC keep the ternary.
         # libs/base/clean-simd/docs/TODO.md has the open question.
         fb = "u32" if e.bits == 32 else "u64"
 
@@ -94,7 +94,7 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
                     f"(~{m} & cc::bit_cast<{fb}>(a.v[{{i}}]))))")
 
         for name, cond in (("min", "b.v[{i}] < a.v[{i}]"), ("max", "a.v[{i}] < b.v[{i}]")):
-            out[name] = Impl(SINGLE, "#if defined(CC_COMPILER_MSVC) && defined(CC_ARCH_ARM64)\n"
+            out[name] = Impl(SINGLE, "#if defined(CC_COMPILER_MSVC)\n"
                                      f"{_lanes(lanes, pick(cond)).body}\n#else\n{out[name].body}\n#endif")
     if e.is_float:
         out["mul_add"] = _lanes(lanes, "a.v[{i}] * b.v[{i}] + c.v[{i}]")

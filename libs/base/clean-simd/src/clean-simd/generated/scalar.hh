@@ -440,7 +440,7 @@ struct cimd::impl::reg<cimd::f32, cimd::scalar, 128>
     }
     static CC_FORCE_INLINE type min(type a, type b)
     {
-#if defined(CC_COMPILER_MSVC) && defined(CC_ARCH_ARM64)
+#if defined(CC_COMPILER_MSVC)
         type r;
         r.v[0] = cc::bit_cast<f32>(u32(((u32(0) - u32(b.v[0] < a.v[0])) & cc::bit_cast<u32>(b.v[0]))
                                        | (~(u32(0) - u32(b.v[0] < a.v[0])) & cc::bit_cast<u32>(a.v[0]))));
@@ -462,7 +462,7 @@ struct cimd::impl::reg<cimd::f32, cimd::scalar, 128>
     }
     static CC_FORCE_INLINE type max(type a, type b)
     {
-#if defined(CC_COMPILER_MSVC) && defined(CC_ARCH_ARM64)
+#if defined(CC_COMPILER_MSVC)
         type r;
         r.v[0] = cc::bit_cast<f32>(u32(((u32(0) - u32(a.v[0] < b.v[0])) & cc::bit_cast<u32>(b.v[0]))
                                        | (~(u32(0) - u32(a.v[0] < b.v[0])) & cc::bit_cast<u32>(a.v[0]))));
@@ -823,7 +823,7 @@ struct cimd::impl::reg<cimd::f64, cimd::scalar, 128>
     }
     static CC_FORCE_INLINE type min(type a, type b)
     {
-#if defined(CC_COMPILER_MSVC) && defined(CC_ARCH_ARM64)
+#if defined(CC_COMPILER_MSVC)
         type r;
         r.v[0] = cc::bit_cast<f64>(u64(((u64(0) - u64(b.v[0] < a.v[0])) & cc::bit_cast<u64>(b.v[0]))
                                        | (~(u64(0) - u64(b.v[0] < a.v[0])) & cc::bit_cast<u64>(a.v[0]))));
@@ -839,7 +839,7 @@ struct cimd::impl::reg<cimd::f64, cimd::scalar, 128>
     }
     static CC_FORCE_INLINE type max(type a, type b)
     {
-#if defined(CC_COMPILER_MSVC) && defined(CC_ARCH_ARM64)
+#if defined(CC_COMPILER_MSVC)
         type r;
         r.v[0] = cc::bit_cast<f64>(u64(((u64(0) - u64(a.v[0] < b.v[0])) & cc::bit_cast<u64>(b.v[0]))
                                        | (~(u64(0) - u64(a.v[0] < b.v[0])) & cc::bit_cast<u64>(a.v[0]))));
