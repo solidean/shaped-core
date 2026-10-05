@@ -118,6 +118,8 @@ use view
   `half` and its vectors name `shader_f16`, and `short`, `ushort` and their vectors name `shader_int16`.
   An entry point whose flat tree holds a value of such a type needs its feature, and a binding member that holds one is a form CHK-201 judges.
 * **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
+* **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
+  The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
 
 ## Members and constructors
@@ -211,6 +213,8 @@ fun f(x: float) -> float:
 ## Consts
 
 * **CHK-219** A `const` at file scope stands for its value wherever it is named: an `int` or `float` literal, `-` in front of one, an enum case, or another `const`.
+  A `uint` literal with its `u` suffix is one too, which is never negative and fits 32 bits.
+  A written `int`, `uint` or `float` converts an unsuffixed literal by CHK-253, as a `let` of that type does: `const a: uint = 5` is a `uint`.
   Any other value is `unsupported-yet`, and a written type the value does not have is `type-mismatch`.
   A leading dot names a case of the written type, `const f: pixel_format = .rgba8_unorm`, by CHK-152.
 * **CHK-221** A `const` whose value is an enum case names that case as a `case` pattern, so it counts for exhaustiveness as `e.case` does (CHK-159).

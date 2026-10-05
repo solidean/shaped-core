@@ -32,6 +32,10 @@ enum class sgl::check::type_kind : sgl::u8
     /// A `buffer[T]`: an array of `element` a shader indexes, and `mut` where it may be written (the spec's bindings file).
     /// It is a resource rather than a value: it stands in a binding, and nothing loads or copies one.
     buffer,
+    /// `bytes`: raw memory a shader addresses by byte offset, in 32-bit words.
+    /// `mut bytes` where it may write it, which `is_mut` records as it does for a buffer.
+    /// A resource, never a value: builtins take it.
+    bytes,
     /// A sampled texture of one `shape`, whose samples are `element`, or a depth texture where `is_depth`.
     texture,
     /// A storage texture of one `shape` and `format`, which the shader reads, writes or both by its `access`.
@@ -53,11 +57,11 @@ enum class sgl::check::type_kind : sgl::u8
 
 namespace sgl::check
 {
-/// True for a kind that stands in a binding and is never a value: a buffer, a texture, an image or a sampler.
+/// True for a kind that stands in a binding and is never a value: a buffer, bytes, a texture, an image or a sampler.
 [[nodiscard]] constexpr bool is_resource(type_kind k)
 {
-    return k == type_kind::buffer || k == type_kind::texture || k == type_kind::image || k == type_kind::sampler
-        || k == type_kind::acceleration_structure;
+    return k == type_kind::buffer || k == type_kind::bytes || k == type_kind::texture || k == type_kind::image
+        || k == type_kind::sampler || k == type_kind::acceleration_structure;
 }
 } // namespace sgl::check
 
@@ -457,7 +461,10 @@ struct sgl::check::constant_info
     symbol_id symbol = symbol_id::none;
     type_id type = type_id::none;
     constant_kind kind = constant_kind::integer;
+    /// An `integer`'s value; a `uint`'s bits where `is_unsigned`.
     i32 integer = 0;
+    /// An `integer` of type `uint`, written with its suffix: `const mask = 0xff00u`.
+    bool is_unsigned = false;
     f64 real = 0;
     /// A position in the `cases` of `type`, for an `enum_case`.
     i32 case_index = -1;

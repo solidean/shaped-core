@@ -41,6 +41,37 @@ TEST("sgl driver bindings - a test reads the values and buffers its driver binds
     CHECK(float_at(sums, 1) == 5.0f);
 }
 
+TEST("sgl driver bindings - bytes are words a test loads and stores at byte offsets")
+{
+    u32 const words[] = {0x3f800000u, 7u, 8u, 9u};
+    auto out = floats(0.0f, 0.0f);
+    auto const bindings = sgl::check::driver_bindings{
+        .groups = {{.name = "raw",
+                    .members = {{.name = "src", .bytes = bytes_of(words)}, {.name = "dst", .mutable_bytes = out}}}}};
+    auto const source = cc::string("binding raw:\n"
+                                   "    src: bytes\n"
+                                   "    dst: mut bytes\n"
+                                   "test {raw}:\n"
+                                   "    float.from_bits(raw.src.load(0u)) == 1.0\n"
+                                   "    let three = raw.src.load3(4u)\n"
+                                   "    three.x == 7u and three.y == 8u and three.z == 9u\n"
+                                   "    raw.dst.store(0u, uint2(three.z, three.x))\n"
+                                   "    raw.dst.load(4u) == 7u\n");
+    CHECK(driven_failures_of(source, bindings) == "");
+    CHECK(cc::bit_cast<u32>(float_at(out, 0)) == 9u);
+    CHECK(cc::bit_cast<u32>(float_at(out, 1)) == 7u);
+
+    // EVAL-97: a word that straddles two, or one past the end, has no behaviour
+    auto const misaligned = cc::string("binding raw:\n    src: bytes\n    dst: mut bytes\n"
+                                       "@expect(.fail)\n"
+                                       "test {raw}:\n    raw.src.load(2u) == 0u\n");
+    CHECK(driven_failures_of(misaligned, bindings).contains("the byte offset 2 is no multiple of 4"));
+    auto const past = cc::string("binding raw:\n    src: bytes\n    dst: mut bytes\n"
+                                 "@expect(.fail)\n"
+                                 "test {raw}:\n    raw.src.load2(12u).x == 0u\n");
+    CHECK(driven_failures_of(past, bindings).contains("2 words from byte 12 are out of bounds of 16 bytes"));
+}
+
 TEST("sgl driver bindings - what the driver leaves out is zero, and a buffer it leaves out is empty")
 {
     auto source = cc::string(k_inputs);

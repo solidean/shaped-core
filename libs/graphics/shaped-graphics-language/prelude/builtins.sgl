@@ -1629,29 +1629,29 @@
 @builtin @pure fun size(t: texture_1d, level: int = 0) -> int
 @builtin @pure fun level_count(t: texture_1d) -> int
 @builtin fun load(i: image_1d[float], xy: int) -> float
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[float], xy: int, value: float)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float], xy: int, value: float)
 @builtin fun load(i: image_1d[float2], xy: int) -> float2
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[float2], xy: int, value: float2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float2], xy: int, value: float2)
 @builtin fun load(i: image_1d[float3], xy: int) -> float3
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[float3], xy: int, value: float3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float3], xy: int, value: float3)
 @builtin fun load(i: image_1d[float4], xy: int) -> float4
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[float4], xy: int, value: float4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float4], xy: int, value: float4)
 @builtin fun load(i: image_1d[int], xy: int) -> int
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[int], xy: int, value: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int], xy: int, value: int)
 @builtin fun load(i: image_1d[int2], xy: int) -> int2
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[int2], xy: int, value: int2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int2], xy: int, value: int2)
 @builtin fun load(i: image_1d[int3], xy: int) -> int3
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[int3], xy: int, value: int3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int3], xy: int, value: int3)
 @builtin fun load(i: image_1d[int4], xy: int) -> int4
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[int4], xy: int, value: int4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int4], xy: int, value: int4)
 @builtin fun load(i: image_1d[uint], xy: int) -> uint
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[uint], xy: int, value: uint)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint], xy: int, value: uint)
 @builtin fun load(i: image_1d[uint2], xy: int) -> uint2
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[uint2], xy: int, value: uint2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint2], xy: int, value: uint2)
 @builtin fun load(i: image_1d[uint3], xy: int) -> uint3
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[uint3], xy: int, value: uint3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint3], xy: int, value: uint3)
 @builtin fun load(i: image_1d[uint4], xy: int) -> uint4
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d[uint4], xy: int, value: uint4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint4], xy: int, value: uint4)
 @builtin @pure fun size(t: image_1d) -> int
 @builtin @pure fun load(t: texture_1d_array[float], xy: int, level: int = 0, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int) -> float
@@ -1701,29 +1701,29 @@
 @builtin @pure fun layer_count(t: texture_1d_array) -> int
 @builtin @pure fun level_count(t: texture_1d_array) -> int
 @builtin fun load(i: image_1d_array[float], xy: int, .layer: int) -> float
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[float], xy: int, value: float, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float], xy: int, value: float, .layer: int)
 @builtin fun load(i: image_1d_array[float2], xy: int, .layer: int) -> float2
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[float2], xy: int, value: float2, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float2], xy: int, value: float2, .layer: int)
 @builtin fun load(i: image_1d_array[float3], xy: int, .layer: int) -> float3
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[float3], xy: int, value: float3, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float3], xy: int, value: float3, .layer: int)
 @builtin fun load(i: image_1d_array[float4], xy: int, .layer: int) -> float4
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[float4], xy: int, value: float4, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float4], xy: int, value: float4, .layer: int)
 @builtin fun load(i: image_1d_array[int], xy: int, .layer: int) -> int
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[int], xy: int, value: int, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int], xy: int, value: int, .layer: int)
 @builtin fun load(i: image_1d_array[int2], xy: int, .layer: int) -> int2
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[int2], xy: int, value: int2, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int2], xy: int, value: int2, .layer: int)
 @builtin fun load(i: image_1d_array[int3], xy: int, .layer: int) -> int3
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[int3], xy: int, value: int3, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int3], xy: int, value: int3, .layer: int)
 @builtin fun load(i: image_1d_array[int4], xy: int, .layer: int) -> int4
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[int4], xy: int, value: int4, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int4], xy: int, value: int4, .layer: int)
 @builtin fun load(i: image_1d_array[uint], xy: int, .layer: int) -> uint
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[uint], xy: int, value: uint, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint], xy: int, value: uint, .layer: int)
 @builtin fun load(i: image_1d_array[uint2], xy: int, .layer: int) -> uint2
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[uint2], xy: int, value: uint2, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint2], xy: int, value: uint2, .layer: int)
 @builtin fun load(i: image_1d_array[uint3], xy: int, .layer: int) -> uint3
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[uint3], xy: int, value: uint3, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint3], xy: int, value: uint3, .layer: int)
 @builtin fun load(i: image_1d_array[uint4], xy: int, .layer: int) -> uint4
-@builtin @stages(.pixel, .compute) fun store(i: out image_1d_array[uint4], xy: int, value: uint4, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint4], xy: int, value: uint4, .layer: int)
 @builtin @pure fun size(t: image_1d_array) -> int
 @builtin @pure fun layer_count(t: image_1d_array) -> int
 @builtin @pure fun load(t: texture_2d[float], xy: int2, level: int = 0) -> float
@@ -1820,29 +1820,29 @@
 @builtin @pure fun size(t: texture_2d_depth, level: int = 0) -> int2
 @builtin @pure fun level_count(t: texture_2d_depth) -> int
 @builtin fun load(i: image_2d[float], xy: int2) -> float
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[float], xy: int2, value: float)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float], xy: int2, value: float)
 @builtin fun load(i: image_2d[float2], xy: int2) -> float2
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[float2], xy: int2, value: float2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float2], xy: int2, value: float2)
 @builtin fun load(i: image_2d[float3], xy: int2) -> float3
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[float3], xy: int2, value: float3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float3], xy: int2, value: float3)
 @builtin fun load(i: image_2d[float4], xy: int2) -> float4
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[float4], xy: int2, value: float4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float4], xy: int2, value: float4)
 @builtin fun load(i: image_2d[int], xy: int2) -> int
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[int], xy: int2, value: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int], xy: int2, value: int)
 @builtin fun load(i: image_2d[int2], xy: int2) -> int2
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[int2], xy: int2, value: int2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int2], xy: int2, value: int2)
 @builtin fun load(i: image_2d[int3], xy: int2) -> int3
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[int3], xy: int2, value: int3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int3], xy: int2, value: int3)
 @builtin fun load(i: image_2d[int4], xy: int2) -> int4
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[int4], xy: int2, value: int4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int4], xy: int2, value: int4)
 @builtin fun load(i: image_2d[uint], xy: int2) -> uint
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[uint], xy: int2, value: uint)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint], xy: int2, value: uint)
 @builtin fun load(i: image_2d[uint2], xy: int2) -> uint2
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[uint2], xy: int2, value: uint2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint2], xy: int2, value: uint2)
 @builtin fun load(i: image_2d[uint3], xy: int2) -> uint3
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[uint3], xy: int2, value: uint3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint3], xy: int2, value: uint3)
 @builtin fun load(i: image_2d[uint4], xy: int2) -> uint4
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d[uint4], xy: int2, value: uint4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint4], xy: int2, value: uint4)
 @builtin @pure fun size(t: image_2d) -> int2
 @builtin @pure fun load(t: texture_2d_array[float], xy: int2, level: int = 0, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float], coord: float2, smp: sampler, .layer: int) -> float
@@ -1940,29 +1940,29 @@
 @builtin @pure fun layer_count(t: texture_2d_array_depth) -> int
 @builtin @pure fun level_count(t: texture_2d_array_depth) -> int
 @builtin fun load(i: image_2d_array[float], xy: int2, .layer: int) -> float
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[float], xy: int2, value: float, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float], xy: int2, value: float, .layer: int)
 @builtin fun load(i: image_2d_array[float2], xy: int2, .layer: int) -> float2
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[float2], xy: int2, value: float2, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float2], xy: int2, value: float2, .layer: int)
 @builtin fun load(i: image_2d_array[float3], xy: int2, .layer: int) -> float3
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[float3], xy: int2, value: float3, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float3], xy: int2, value: float3, .layer: int)
 @builtin fun load(i: image_2d_array[float4], xy: int2, .layer: int) -> float4
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[float4], xy: int2, value: float4, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float4], xy: int2, value: float4, .layer: int)
 @builtin fun load(i: image_2d_array[int], xy: int2, .layer: int) -> int
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[int], xy: int2, value: int, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int], xy: int2, value: int, .layer: int)
 @builtin fun load(i: image_2d_array[int2], xy: int2, .layer: int) -> int2
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[int2], xy: int2, value: int2, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int2], xy: int2, value: int2, .layer: int)
 @builtin fun load(i: image_2d_array[int3], xy: int2, .layer: int) -> int3
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[int3], xy: int2, value: int3, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int3], xy: int2, value: int3, .layer: int)
 @builtin fun load(i: image_2d_array[int4], xy: int2, .layer: int) -> int4
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[int4], xy: int2, value: int4, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int4], xy: int2, value: int4, .layer: int)
 @builtin fun load(i: image_2d_array[uint], xy: int2, .layer: int) -> uint
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[uint], xy: int2, value: uint, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint], xy: int2, value: uint, .layer: int)
 @builtin fun load(i: image_2d_array[uint2], xy: int2, .layer: int) -> uint2
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[uint2], xy: int2, value: uint2, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint2], xy: int2, value: uint2, .layer: int)
 @builtin fun load(i: image_2d_array[uint3], xy: int2, .layer: int) -> uint3
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[uint3], xy: int2, value: uint3, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint3], xy: int2, value: uint3, .layer: int)
 @builtin fun load(i: image_2d_array[uint4], xy: int2, .layer: int) -> uint4
-@builtin @stages(.pixel, .compute) fun store(i: out image_2d_array[uint4], xy: int2, value: uint4, .layer: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint4], xy: int2, value: uint4, .layer: int)
 @builtin @pure fun size(t: image_2d_array) -> int2
 @builtin @pure fun layer_count(t: image_2d_array) -> int
 @builtin @pure fun load(t: texture_2d_ms[float], xy: int2, .sample: int) -> float
@@ -2060,29 +2060,29 @@
 @builtin @pure fun size(t: texture_3d, level: int = 0) -> int3
 @builtin @pure fun level_count(t: texture_3d) -> int
 @builtin fun load(i: image_3d[float], xy: int3) -> float
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[float], xy: int3, value: float)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float], xy: int3, value: float)
 @builtin fun load(i: image_3d[float2], xy: int3) -> float2
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[float2], xy: int3, value: float2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float2], xy: int3, value: float2)
 @builtin fun load(i: image_3d[float3], xy: int3) -> float3
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[float3], xy: int3, value: float3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float3], xy: int3, value: float3)
 @builtin fun load(i: image_3d[float4], xy: int3) -> float4
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[float4], xy: int3, value: float4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float4], xy: int3, value: float4)
 @builtin fun load(i: image_3d[int], xy: int3) -> int
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[int], xy: int3, value: int)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int], xy: int3, value: int)
 @builtin fun load(i: image_3d[int2], xy: int3) -> int2
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[int2], xy: int3, value: int2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int2], xy: int3, value: int2)
 @builtin fun load(i: image_3d[int3], xy: int3) -> int3
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[int3], xy: int3, value: int3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int3], xy: int3, value: int3)
 @builtin fun load(i: image_3d[int4], xy: int3) -> int4
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[int4], xy: int3, value: int4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int4], xy: int3, value: int4)
 @builtin fun load(i: image_3d[uint], xy: int3) -> uint
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[uint], xy: int3, value: uint)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint], xy: int3, value: uint)
 @builtin fun load(i: image_3d[uint2], xy: int3) -> uint2
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[uint2], xy: int3, value: uint2)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint2], xy: int3, value: uint2)
 @builtin fun load(i: image_3d[uint3], xy: int3) -> uint3
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[uint3], xy: int3, value: uint3)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint3], xy: int3, value: uint3)
 @builtin fun load(i: image_3d[uint4], xy: int3) -> uint4
-@builtin @stages(.pixel, .compute) fun store(i: out image_3d[uint4], xy: int3, value: uint4)
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint4], xy: int3, value: uint4)
 @builtin @pure fun size(t: image_3d) -> int3
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float], coord: float3, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float], coord: float3) -> float
@@ -2198,6 +2198,24 @@
 @builtin @pure fun size(t: texture_cube_array_depth, level: int = 0) -> int2
 @builtin @pure fun layer_count(t: texture_cube_array_depth) -> int
 @builtin @pure fun level_count(t: texture_cube_array_depth) -> int
+
+// raw memory: 32-bit words of `bytes` at a byte offset, which must be a multiple of 4
+/// The word at byte `offset`, a multiple of 4.
+@builtin fun load(b: bytes, offset: uint) -> uint
+/// Stores `value` as the word at byte `offset`, a multiple of 4.
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint)
+/// The 2 words from byte `offset`, a multiple of 4.
+@builtin fun load2(b: bytes, offset: uint) -> uint2
+/// Stores `value` as the 2 words from byte `offset`, a multiple of 4.
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint2)
+/// The 3 words from byte `offset`, a multiple of 4.
+@builtin fun load3(b: bytes, offset: uint) -> uint3
+/// Stores `value` as the 3 words from byte `offset`, a multiple of 4.
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint3)
+/// The 4 words from byte `offset`, a multiple of 4.
+@builtin fun load4(b: bytes, offset: uint) -> uint4
+/// Stores `value` as the 4 words from byte `offset`, a multiple of 4.
+@builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(b: mut bytes, offset: uint, value: uint4)
 
 // A geometry stage's stream, called as its methods: `stream.emit(v)` appends the vertex `v`, which the
 // check pass takes as the stream's own type, and `stream.end_strip()` ends the strip (CHK-303).

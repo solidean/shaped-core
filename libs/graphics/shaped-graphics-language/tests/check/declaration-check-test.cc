@@ -136,6 +136,11 @@ TEST("sgl check - a const is a literal, an enum case or another const, and stand
                       "fun f(x: float) -> float:\n    if n < m or first == e.b => return x * k\n    return x\n")
           == "");
     CHECK(reports_for("const k: int = 1.5\n") == "type-mismatch user:[1.5] expected int, got float\n");
+    // a uint const is written with its suffix, and is neither negative nor wider than 32 bits
+    CHECK(reports_for("const mask: uint = 0xff00u\ntest (0xffffu & mask) == mask\n") == "");
+    CHECK(reports_for("const k = -1u\ntest k == 0u\n").contains("type-mismatch user:[-1u] -1u is no uint"));
+    CHECK(reports_for("const k = 4294967296u\ntest k == 0u\n").contains("4294967296u is no uint"));
+    CHECK(reports_for("const n = 4u\nfun f() -> float[n] => float[n].filled(0.0)\n").contains("int"));
     CHECK(reports_for("const a = b\nconst b = a\n").contains("dependency-cycle"));
     CHECK(reports_for("const k = 1.0\nstruct a:\n    x: k\n")
           == "wrong-kind-of-name user:[k] k is a const, and a type stands here\n");

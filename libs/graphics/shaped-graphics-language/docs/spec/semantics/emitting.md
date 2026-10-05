@@ -256,6 +256,9 @@ binding affine:
     affine.values[id.x] = affine.values[id.x] * affine.scale + affine.bias
 ```
 
+* **EMIT-155** `bytes` is `ByteAddressBuffer` in HLSL and `RWByteAddressBuffer` where it is `mut`, a `var<storage>` array of `u32` in WGSL, and a `device uint*` in MSL.
+  A call is HLSL's `Load`, `Load2` to `Load4` and `Store` to `Store4`, and elsewhere words of the array at the offset over 4, the index of several bound once.
+
 ## Matrices
 
 * **EMIT-42** A matrix is column-major, and a vector stands to its right.

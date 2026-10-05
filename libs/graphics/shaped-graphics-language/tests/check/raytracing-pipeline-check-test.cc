@@ -229,6 +229,37 @@ TEST("sgl check - a callables table holds callables of one parameter, and a call
              "p`\n");
 }
 
+TEST("sgl check - a ray-tracing stage that runs once per ray stores into an image, and a candidate's does not")
+{
+    // the stages a ray runs once each store as compute does: what sv's tracer writes its accumulation and guides from
+    auto const image = cc::string_view("binding target:\n    color: out image_2d[.rgba32_float]\n");
+    auto const stored = cc::string(image)
+                      + "@raygen fun write(@launch_id id: int3){target}:\n"
+                        "    target.color.store(int2(id.x, id.y), float4(1.0, 0.0, 0.0, 1.0))\n"
+                        "@closest_hit fun write_hit(h: triangle_hit, p: mut radiance){target}:\n"
+                        "    target.color.store(int2(0, 0), float4(h.barycentrics.x, 0.0, 0.0, 1.0))\n"
+                        "@miss fun write_miss(p: mut radiance){target}:\n"
+                        "    target.color.store(int2(0, 0), float4(0.0, 0.0, 1.0, 1.0))\n"
+                        "struct operand:\n    x: float\n"
+                        "@callable fun write_call(v: mut operand){target}:\n"
+                        "    target.color.store(int2(0, 0), float4(v.x, 0.0, 0.0, 1.0))\n";
+    CHECK(reports(stored) == "");
+
+    // an any hit and an intersection run any number of times per ray, in any order, so a store there means nothing
+    auto const any_hit
+        = cc::string(image)
+        + "@any_hit fun write_candidate(c: triangle_candidate, p: mut radiance){target} -> hit_decision:\n"
+          "    target.color.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"
+          "    return hit_decision.accept\n";
+    CHECK(reports(any_hit).starts_with("stage-not-allowed"));
+    auto const intersection = cc::string(image)
+                            + "struct box_attributes:\n    u: float\n"
+                              "@intersection fun write_box(b: procedural_box){target} -> report[box_attributes]:\n"
+                              "    target.color.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"
+                              "    return report.none()\n";
+    CHECK(reports(intersection).starts_with("stage-not-allowed"));
+}
+
 TEST("sgl check - a pipeline's setting stands once, and hit_groups is a list of groups")
 {
     auto const path = cc::string("@raytracing pipeline path:\n") + misses;

@@ -3,7 +3,7 @@
 using namespace sgl_test;
 
 // The binding model of libs/graphics/shaped-graphics-language/docs/spec/bindings.md, as far as the compiler carries it.
-// Buffers, textures, images and samplers are built; bytes and separate constant buffers parse and are reported.
+// Buffers, bytes, textures, images and samplers are built; separate constant buffers parse and are reported.
 
 namespace
 {
@@ -45,9 +45,22 @@ TEST("sgl check - what a buffer's element may be")
     CHECK(reports_for(listing("    x: buffer[not_a_type]\n")).contains("unknown-name"));
 }
 
-TEST("sgl check - bytes and a separate constant buffer are not built yet")
+TEST("sgl check - bytes and mut bytes are binding members, loaded and stored a word at a time")
 {
-    CHECK(reports_for(listing("    raw: bytes\n")).contains("unknown-name"));
+    CHECK(reports_for(listing("    raw: bytes\n    out_raw: mut bytes\n", "    let w = work.raw.load4(16u)\n"
+                                                                          "    work.out_raw.store(0u, w.x + "
+                                                                          "work.out_raw.load(4u))\n"))
+          == "");
+    // a buffer of bytes is never only written, and a read-only one takes no store
+    CHECK(reports_for(listing("    raw: out bytes\n")).contains("bytes are never `out`"));
+    CHECK(reports_for(listing("    raw: bytes\n", "    work.raw.store(0u, 1u)\n")).contains("no-matching-overload"));
+    // a byte offset is a uint
+    CHECK(reports_for(listing("    raw: bytes\n", "    let at = 4\n    let w = work.raw.load(at)\n"))
+              .contains("no-matching-overload"));
+}
+
+TEST("sgl check - a separate constant buffer is not built yet")
+{
     CHECK(reports_for(listing("    params: constants[dispatch_params]\n")).contains("type arguments"));
 
     // `mut` says a resource may be written, so it says nothing about a value.

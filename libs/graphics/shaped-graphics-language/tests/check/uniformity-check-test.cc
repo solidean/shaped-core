@@ -301,6 +301,24 @@ TEST("sgl check - an image the shader also stores to differs between threads, na
     CHECK(images("work.many[1].load(int2(0, 0))").contains("is loaded from work.many, which the shader also stores to"));
 }
 
+TEST("sgl check - mut bytes differ between threads, named alone or in a binding array")
+{
+    auto const words = [](cc::string_view load)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding work:\n"
+                                      "    one: mut bytes\n"
+                                      "    many: mut bytes[4]\n"
+                                      "\n"
+                                      "@compute(8, 8) fun cs(@thread_id id: int3){{work}}:\n"
+                                      "    let v = {}\n"
+                                      "    if v > 0u => workgroup_barrier()\n",
+                                      load));
+    };
+    CHECK(words("work.one.load(0u)").contains("is loaded from work.one, which the shader also stores to"));
+    CHECK(words("work.many[1].load(0u)").contains("is loaded from work.many, which the shader also stores to"));
+}
+
 TEST("sgl check - `nonuniform i` stands only as the index into a binding array")
 {
     auto const marked = [](cc::string_view body)

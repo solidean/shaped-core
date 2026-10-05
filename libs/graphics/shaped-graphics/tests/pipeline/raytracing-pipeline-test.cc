@@ -134,6 +134,92 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one
         }
 }
 
+// The same scene through `pictured_path`, whose raygen stores each cell into an image and whose miss marks another:
+// the ray-tracing stages a ray runs once each store into storage images as a compute stage does.
+ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's raygen and miss store into images",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using pictured_t = shaders::raytracing_pipeline_pictured_path_t;
+    auto const desc = co_await shaders::raytracing_pipeline.pictured_path.description(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
+    REQUIRE(pipeline != nullptr);
+
+    auto table_desc = pictured_t::table_description(pipeline);
+    auto const row = pictured_t::add_row(table_desc, pictured_t::hit_groups_t::textured);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+    auto const image_usage = sg::texture_usage::image | sg::texture_usage::copy_src;
+    auto const picture = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float, .width = grid, .height = grid, .usage = image_usage});
+    auto const marks = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float, .width = 1, .height = 1, .usage = image_usage});
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                 sg::accel_build_flag::fast_trace, pictured_t::ray_count);
+    auto const offset = table->offset_of(row);
+    sg::tlas_instance const instances[] = {
+        {.blas = blas, .instance_id = 10, .hit_group_offset = offset},
+        {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20, .hit_group_offset = offset},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+
+    auto const traced = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::traced>(),
+        shaders::traced{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
+    auto const pictured = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::pictured>(),
+        shaders::pictured{.picture = picture.as_image_view<sg::pixel_format::rgba32_float>(),
+                          .marks = marks.as_image_view<sg::pixel_format::rgba32_float>()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *traced);
+    cmd->raytracing.bind_group(1, *pictured);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+    auto const picture_back = cmd->download.bytes_from_texture(picture.raw());
+    auto const marks_back = cmd->download.bytes_from_texture(marks.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const texels = co_await picture_back.bytes();
+    auto const mark = co_await marks_back.bytes();
+    REQUIRE(texels.size() == grid * grid * 16);
+    REQUIRE(mark.size() == 16);
+    auto const channel = [](cc::span<byte const> bytes, isize texel, int c)
+    {
+        auto v = 0.0f;
+        cc::memcpy(&v, bytes.data() + texel * 16 + c * 4, 4);
+        return v;
+    };
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+        {
+            auto const want = expected_at(x, y);
+            auto const at = y * grid + x;
+            auto const where = cc::format("cell ({}, {})", x, y);
+            CHECK(channel(texels, at, 3) == (want.is_hit ? 1.0f : 0.0f)).context(where);
+            if (!want.is_hit)
+                continue;
+            CHECK(tg::abs(channel(texels, at, 0) - want.t) < 1e-4f).context(where);
+            CHECK(tg::abs(channel(texels, at, 1) - want.u) < 1e-4f).context(where);
+            CHECK(tg::abs(channel(texels, at, 2) - want.v) < 1e-4f).context(where);
+        }
+    // the grid's upper half misses everything, so the miss ran, and stored
+    CHECK(channel(mark, 0, 0) == 1.0f);
+}
+
 // The same pipeline's procedural group: one instance, id 30, of a BLAS of two boxes, each holding the unit sphere at its
 // centre, and the primary rays of the grid above.
 // The intersection reports each sphere's normal, which the closest hit writes where a triangle's barycentrics stand.

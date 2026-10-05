@@ -772,7 +772,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         if (coherent != nullptr && type != checked_module::error_type)
         {
             auto const& r = out.at(innermost);
-            if ((r.kind == type_kind::buffer && r.is_mut)
+            if (((r.kind == type_kind::buffer || r.kind == type_kind::bytes) && r.is_mut)
                 || (r.kind == type_kind::image && r.access == access_mode::read_write))
             {
                 judge_feature(file, coherent->name, "a @coherent member", feature::device_coherence);
@@ -780,8 +780,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             }
             else
                 report(diagnostic_kind::wrong_kind_of_name, file, coherent->name,
-                       "only a `mut buffer` or a `mut` image is written by one workgroup for another, so only one can "
-                       "be @coherent");
+                       "only a `mut buffer`, `mut bytes` or a `mut` image is written by one workgroup for another, so "
+                       "only one can be @coherent");
         }
         if (atomic != nullptr && type != checked_module::error_type)
         {
@@ -1144,6 +1144,9 @@ void checker::compile_const(symbol_id id)
         return fail();
     }
 
+    // Resolved once, since every arm below may need it and resolving reports a bad name.
+    auto const written = ast::is_valid(c.type) ? resolve_value_type(file, c.type) : error_type;
+
     // CHK-219: a literal, an enum case or another const, which is all a value known before the program runs is yet.
     auto const& value = ast.at(c.value);
     auto const where = span_of(file, c.value);
@@ -1158,7 +1161,34 @@ void checker::compile_const(symbol_id id)
         literal = ast.at(call->arguments)[0].value;
     }
 
-    if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
+    // CHK-219: a written int, uint or float converts an unsuffixed literal by CHK-253, as a `let` of that type does.
+    auto converted = number_of(file, literal);
+    if (is_negated)
+    {
+        converted.integer = -converted.integer;
+        converted.real = -converted.real;
+    }
+    auto const is_int = written == prelude_type(builtins::k_int);
+    auto const is_uint = written == prelude_type(builtins::k_uint);
+    auto const is_float = written == prelude_type(builtins::k_float);
+    auto const converts = (is_int || is_uint || is_float) && converted.is_number && holds(converted, written);
+
+    if (converts)
+    {
+        if (is_float)
+        {
+            info.kind = constant_kind::real;
+            info.real = converted.is_integer ? f64(converted.integer) : converted.real;
+        }
+        else
+        {
+            info.kind = constant_kind::integer;
+            info.is_unsigned = is_uint;
+            info.integer = is_uint ? i32(u32(converted.integer)) : i32(converted.integer);
+        }
+        info.type = written;
+    }
+    else if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
     {
         auto const text = text_of(file, span_of(file, literal));
         auto const number = classify_number(text);
@@ -1174,16 +1204,34 @@ void checker::compile_const(symbol_id id)
             info.real = is_negated ? -parse_plain_float(text).value() : parse_plain_float(text).value();
             info.type = type_of_builtin(builtins::k_float, file, where);
         }
+        else if (auto const suffixed = number == number_class::suffixed ? split_suffix(text) : cc::nullopt;
+                 suffixed.has_value() && suffixed.value().letter == 'u' && suffixed.value().width == 32)
+        {
+            // a uint is no negative number, and its value must fit 32 bits
+            auto const value = classify_number(suffixed.value().body) == number_class::plain_integer
+                                 ? parse_literal_integer(suffixed.value().body)
+                                 : cc::optional<i64>();
+            if (is_negated || !value.has_value() || value.value() < 0 || value.value() > 4294967295ll)
+            {
+                report(diagnostic_kind::type_mismatch, file, where,
+                       cc::format("{}{} is no uint", is_negated ? "-" : "", text));
+                return fail();
+            }
+            info.kind = constant_kind::integer;
+            info.is_unsigned = true;
+            info.integer = i32(u32(value.value()));
+            info.type = type_of_builtin(builtins::k_uint, file, where);
+        }
         else
         {
-            unsupported(file, where, "a const whose literal is no plain int or float");
+            unsupported(file, where, "a const whose literal is no plain int or float, and no uint");
             return fail();
         }
     }
     else if (auto const* const dot = value.node.try_as<ast::leading_dot>())
     {
         // `const f: pixel_format = .rgba16_float`: the written type is what the leading dot is resolved against
-        auto const declared = ast::is_valid(c.type) ? resolve_value_type(file, c.type) : error_type;
+        auto const declared = written;
         if (declared == error_type)
         {
             // CHK-152: nothing else says which enum the case is of
@@ -1245,7 +1293,7 @@ void checker::compile_const(symbol_id id)
 
     if (ast::is_valid(c.type))
     {
-        auto const declared = resolve_value_type(file, c.type);
+        auto const declared = written;
         if (declared != error_type && declared != info.type)
         {
             tell_apart(report(diagnostic_kind::type_mismatch, file, where,
@@ -1258,9 +1306,9 @@ void checker::compile_const(symbol_id id)
     // CHK-353: an option is a bool, an int or an enum case, and the compile may give it another value of its type
     if (find_attribute(file, d.attributes, "option") != nullptr)
     {
-        if (info.kind == constant_kind::real)
+        if (info.kind == constant_kind::real || info.is_unsigned)
         {
-            unsupported(file, c.name, "an option of float; an option is a bool, an int or an enum case");
+            unsupported(file, c.name, "an option of float or uint; an option is a bool, an int or an enum case");
             return fail();
         }
         // the host would set the named option and not see this one follow it

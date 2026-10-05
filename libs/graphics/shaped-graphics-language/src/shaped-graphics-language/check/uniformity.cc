@@ -216,12 +216,14 @@ struct uniformity_pass
         // what another thread did to it first is what an atomic gives
         if (record->is_atomic && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
-        // an image the shader also stores to may hold what another invocation just stored, whether it is named
-        // directly or as an element of a binding array
+        // an image or bytes the shader also stores to may hold what another invocation just stored, whether it is
+        // named directly or as an element of a binding array
         if (arguments.empty() || result.is)
             return result;
         auto const& t = m.at(e.at(arguments[0]).type);
-        if (t.kind != type_kind::image || t.access != access_mode::read_write)
+        auto const is_stored_to = (t.kind == type_kind::image && t.access == access_mode::read_write)
+                               || (t.kind == type_kind::bytes && t.is_mut);
+        if (!is_stored_to)
             return result;
         auto named = arguments[0];
         if (auto const* const element = e.at(named).node.try_as<flat_element>())

@@ -232,6 +232,12 @@ struct sgl::builtins::function_record
     bool is_atomic = false;
     /// Stores a texel of its first argument, an image, which MSL fences before the same thread reads it (EMIT-151).
     bool is_image_store = false;
+    /// Loads or stores this many 32-bit words of its first argument, `bytes`, at its second, a byte offset; 0 for any
+    /// other builtin.
+    /// The interpreter reads and writes the memory itself rather than evaluate the call (EVAL-97).
+    i32 bytes_words = 0;
+    /// Of those, a store: its third argument is the value written.
+    bool is_bytes_store = false;
     /// Exchanges values between the invocations of a subgroup, so every one of them reaches the call or none does, and
     /// what it gives differs within a workgroup (CHK-377).
     bool is_subgroup_operation = false;

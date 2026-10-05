@@ -68,7 +68,7 @@ TEST("sgl driver - a const that did not check fails what reads it silently, and 
 {
     // CHK-19: a failed symbol is the error type where it is named, and the one diagnostic is its own
     cc::string_view const broken[] = {
-        "const a = nope\n",       "const a: float = 3\n",       "const a = 1 + 2\n",
+        "const a = nope\n",       "const a: int = 1.5\n",       "const a = 1 + 2\n",
         "const a = 2147483648\n", "const a = b\nconst b = a\n",
     };
     for (auto const b : broken)

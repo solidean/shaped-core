@@ -217,7 +217,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `sample_compare(…, reference = r, level = 0.0)` | the same, and every stage | a comparison at level 0, the one level every target compares at |
 | `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
 | `load(xy, level)` | every texture but a cube | one texel, with no sampler; a multisampled one takes `sample = s` instead |
-| `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write |
+| `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write; a store in a pixel, compute, raygen, closest-hit, miss or callable stage |
 | `img[xy]`, `img[xy] = value` | an image | the same `load` and `store`, as a subscript ([CHK-367](semantics/checking.md#bindings)) |
 | `size(level)`, `layer_count()`, `level_count()`, `sample_count()` | textures and images | what the shape has |
 
@@ -225,6 +225,10 @@ An array's layer is always named, `layer = 2`, since it is no coordinate on ever
 An offset, `offset = int2(1, -1)`, is a constant from -8 to 7 on a 2D, 2D array or 3D texture.
 A cube and a multisampled texture take none, and neither does a 1D one, which Metal samples with no offset.
 A gather's component, an offset and a comparison's level are constants, because some target takes each only as written (CHK-280).
+
+A store is refused in a vertex stage, where core WebGPU has no writable storage.
+It is refused in an any hit and an intersection too, which run any number of times per ray and in any order, so what they store has no defined result.
+Every target writes storage images from the other ray-tracing stages, dx12, vulkan and metal alike, and WebGPU has no ray-tracing pipeline to refuse.
 
 **A texture may name the sampler it is sampled with, and a call then leaves it out.**
 `@sampler(name)` on a texture member names a sampler of the same binding, static or dynamic, or a file-scope sampler:
@@ -313,6 +317,33 @@ A binding an entry point lists but never reads still takes its position, because
 **`@inline` constants stand last.**
 They are listed like any other binding and skipped when numbering, since sg addresses them itself.
 An `@inline` binding anywhere but the last position of a list is a normal error, so that reading order matches binding order.
+
+## Bytes
+
+**`bytes` is raw memory a shader reads a 32-bit word at a time, at a byte offset**, and `mut bytes` memory it also writes.
+It is what a buffer is when no one element type fits: vertices whose layout a header describes, a parameter block whose fields a generated shader reads at offsets it computed.
+It is never `out`, for the reason a buffer never is.
+
+```sgl
+binding mesh:
+    params: bytes
+    scratch: mut bytes
+
+    let scale = reinterpret_as_float(mesh.params.load(16u))
+    let corner = mesh.params.load3(32u)
+    mesh.scratch.store(0u, corner)
+```
+
+* `load(offset)`, `load2`, `load3` and `load4` read one to four words, as `uint` to `uint4`; floats come back through `reinterpret_as_float`.
+* `store(offset, value)` writes one to four words, as wide as the `uint` vector it is given; a store takes `mut bytes` alone.
+* The offset is a `uint` and must be a multiple of 4, and every word read or written must lie inside the memory ([EVAL-97](semantics/evaluation.md#errors-of-the-program)).
+* A load of `mut bytes` is divergent, since another invocation may have just written it, as a load of a `mut` image is.
+
+HLSL has it exactly, as `ByteAddressBuffer` and `RWByteAddressBuffer`.
+WGSL and MSL have no raw memory of their own, so there it is an array of `u32` or `uint` indexed by the offset over 4, and a load of several words binds that index once.
+vulkan's HLSL is `ByteAddressBuffer` as well, which DXC lowers to a buffer of words, so SPIR-V reflects a buffer too.
+Those three reflect it as a buffer, and slib accepts that reading of a member SGL states as `bytes`.
+The host binds a byte view of any buffer, `sg::readonly_buffer_view<cc::byte>` or `readwrite_buffer_view<cc::byte>`.
 
 ## Binding arrays
 
@@ -505,7 +536,8 @@ A pin in a source states it, which [CHK-267](semantics/checking.md#entry-points)
 The syntax above is what the AST builds; the check pass is what limits it.
 Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
-* `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar or a vector.
+* `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out as dx12's structured buffers (EMIT-111).
+* `bytes` and `mut bytes`, loaded and stored a word at a time ([Bytes](#bytes)), alone or as a binding array.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)); a texture's is not built.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
@@ -529,7 +561,7 @@ A group's plain members are one constant buffer at the group's slot 0, named aft
 A file-scope sampler stands where sg binds a pipeline layout's static sampler of its index, i ([EMIT-133](semantics/emitting.md#bindings)):
 `register(s<i>, space10)` on dx12, `[[vk::binding(i + 1, 3)]]` on vulkan, `@group(3) @binding(i + 1)` in WGSL, and a `[[sampler(i)]]` parameter in MSL.
 
-`bytes` and `constants[T]` both parse and are then reported.
+`constants[T]` parses and is then reported.
 A struct element type is placed by the storage rule of [the layout rules](semantics/emitting.md#layout).
 That is deliberate.
 The shape is decided, so it is written down here and the AST constructs it.

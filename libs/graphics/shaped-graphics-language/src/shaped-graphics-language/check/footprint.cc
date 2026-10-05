@@ -189,7 +189,11 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                     }
                     else
                     {
-                        auto const& type = m.at(members[member].type);
+                        // a binding array's view is its element's
+                        auto element = members[member].type;
+                        while (m.at(element).kind == type_kind::array)
+                            element = m.at(element).element;
+                        auto const& type = m.at(element);
                         slot.host_name = cc::format("{}.{}", symbol.name, members[member].name);
                         slot.view
                             = type.kind == type_kind::image || type.is_mut ? slot_view::storage : slot_view::read_only;

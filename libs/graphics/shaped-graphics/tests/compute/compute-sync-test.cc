@@ -106,6 +106,97 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
         CHECK(got[i] == (i % 3) * 1000 + i);
 }
 
+ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and picked per thread from an array",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    constexpr auto count = 64;
+    auto const as_bytes = [](sg::buffer<u32> const& b, bool is_written)
+    {
+        auto const raw = is_written ? b.raw()->as_raw_readwrite() : b.raw()->as_raw_readonly();
+        return raw;
+    };
+
+    // A record per thread: its scale as float bits, then three ids.
+    {
+        auto records = cc::vector<u32>();
+        for (auto i = 0; i < count; ++i)
+        {
+            records.push_back(cc::bit_cast<u32>(f32(i) * 0.5f));
+            records.push_back(u32(i));
+            records.push_back(u32(100 + i));
+            records.push_back(u32(200 + i));
+        }
+        auto const pipeline = co_await shaders::bytes.repack.acquire_pipeline(*ctx);
+        auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raw>();
+        auto const in = ctx->persistent.create_buffer_from_data(cc::move(records), sg::buffer_usage::readonly_buffer);
+        auto const out
+            = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count * 4),
+                                                      sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        auto cmd = ctx->create_command_list();
+        auto const group
+            = ctx->transient.create_binding_group(*cmd, layout,
+                                                  shaders::raw{.records = as_bytes(in, false).as_readonly<byte>(),
+                                                               .repacked = as_bytes(out, true).as_readwrite<byte>()});
+        cmd->compute.bind_pipeline(*pipeline);
+        cmd->compute.bind_group(0, *group);
+        cmd->compute.dispatch_threads(count);
+        auto const back = cmd->download.data_from_buffer(out);
+        ctx->submit_command_list(cc::move(cmd));
+
+        auto const got = co_await back.data();
+        REQUIRE(got.size() == isize(count * 4));
+        for (auto i = 0; i < count; ++i)
+        {
+            CHECK(got[i * 4 + 0] == u32(200 + i));
+            CHECK(got[i * 4 + 1] == u32(100 + i));
+            CHECK(got[i * 4 + 2] == u32(i));
+            CHECK(cc::bit_cast<f32>(got[i * 4 + 3]) == f32(i));
+        }
+    }
+
+    // Three blocks, each thread reading its own word of the block its index picks.
+    if (!ctx->supports(sg::feature::binding_arrays))
+        co_return;
+    auto const pipeline = co_await shaders::bytes.pick.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::blocks>();
+    auto const block = [&](u32 k)
+    {
+        auto data = cc::vector<u32>();
+        for (auto i = 0; i < count; ++i)
+            data.push_back(k * 1000 + u32(i));
+        return ctx->persistent.create_buffer_from_data(cc::move(data), sg::buffer_usage::readonly_buffer);
+    };
+    auto const b0 = block(0);
+    auto const b1 = block(1);
+    auto const b2 = block(2);
+    auto const merged = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::blocks{.tables = {as_bytes(b0, false).as_readonly<byte>(), as_bytes(b1, false).as_readonly<byte>(),
+                                   as_bytes(b2, false).as_readonly<byte>()},
+                        .merged = merged.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
+                                                           {.index = 1, .access = sg::access_flag::shader_read},
+                                                           {.index = 2, .access = sg::access_flag::shader_read}};
+    cmd->compute.declare_array_buffer_access("blocks.tables", reads);
+    cmd->compute.dispatch_threads(count);
+    auto const back = cmd->download.data_from_buffer(merged);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(got[i] == u32(i % 3) * 1000 + u32(i));
+}
+
 ASYNC_INVOCABLE_TEST("sg - SGL's quad swap, subgroup sum and uniform load agree with the CPU at any subgroup size",
                      (sg::context_handle const& ctx))
 {

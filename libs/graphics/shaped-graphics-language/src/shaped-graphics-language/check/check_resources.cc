@@ -60,6 +60,8 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
                                          shape.image, k_image_formats[t.format].name);
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
+    case type_kind::bytes:
+        return t.is_mut ? cc::string("mut bytes") : cc::string("bytes");
     case type_kind::acceleration_structure:
         return cc::format("acceleration_structure[.{}]", k_geometry_kinds[t.format]);
     case type_kind::atomic:
@@ -137,6 +139,8 @@ void checker::judge_feature(i32 file, source_span where, cc::string_view form, f
 
 type_id checker::resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text)
 {
+    if (text == "bytes")
+        return resource_type({.kind = type_kind::bytes});
     if (text == "sampler" || text == "comparison_sampler")
         return resource_type({.kind = type_kind::sampler, .is_comparison = text == "comparison_sampler"});
     if (text == "acceleration_structure")
@@ -303,6 +307,18 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
             return checked_module::error_type;
         }
         return buffer_type(t.element, true);
+    }
+    if (t.kind == type_kind::bytes)
+    {
+        if (is_write_only)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   "bytes are never `out`: no target has raw memory the shader only writes");
+            return checked_module::error_type;
+        }
+        auto qualified = t;
+        qualified.is_mut = true;
+        return resource_type(cc::move(qualified));
     }
     if (t.kind == type_kind::image)
     {
@@ -771,6 +787,9 @@ bool checker::takes(type_id parameter, type_id argument) const
     // a bare stream pattern takes every stream of its shape
     if (p.kind == type_kind::stream && a.kind == type_kind::stream)
         return p.count == a.count && (p.element == type_id::none || p.element == a.element);
+    // a pattern that reads bytes takes any, one that writes them only `mut bytes`
+    if (p.kind == type_kind::bytes && a.kind == type_kind::bytes)
+        return !p.is_mut || a.is_mut;
     auto const is_bare = p.element == type_id::none && p.format < 0 && !p.is_depth;
     if (is_bare && p.kind == type_kind::texture)
         return a.kind == type_kind::texture && !a.is_depth && a.shape == p.shape;

@@ -138,6 +138,10 @@ static_assert(
         result.type = sg::binding_type::buffer;
         result.access = access_of(b.access);
         break;
+    case sgl::described_member_kind::bytes:
+        result.type = sg::binding_type::bytes;
+        result.access = access_of(b.access);
+        break;
     case sgl::described_member_kind::texture:
         result.type = sg::binding_type::texture;
         result.texture_dimension = dimension_of(b.texture_dimension);
