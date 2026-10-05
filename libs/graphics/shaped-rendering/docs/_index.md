@@ -18,6 +18,7 @@ The render-routine *framework* lives in shaped-graphics (see [its render-routine
 - [structure](structure.md) — the intended module roadmap with status tags, including windowing.
 - [coding-guidelines](coding-guidelines.md) — sr-specific conventions on top of the repo-wide ones: the SDL quarantine, and why the window API is always present while only its backend is optional.
 - [TODO](TODO.md) — running list of known follow-ups.
+- [lower-library-gaps](lower-library-gaps.md) — what sr hand-rolls because typed-geometry or clean-core does not offer it yet.
 
 ## Conventions
 

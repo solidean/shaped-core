@@ -206,6 +206,7 @@ void gpu_resource_manager::advance_to(sg::epoch e)
     quadrics.begin_frame(e);
     textures.begin_frame(e);
     attributes.begin_frame(e);
+    drawings.begin_frame(e);
     for (auto& t : _tables)
         t.acquired.clear();
     ++_record_stamp;

@@ -3,6 +3,7 @@
 #include <babel-serializer/font/font.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -11,12 +12,8 @@
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-/// A font face's glyphs as Slug shapes, compiled into an atlas of its own the first time each is asked for, and a
-/// one-line layout over them.
-///
-/// The layout is deliberately the least that draws a string: each glyph advances by its own advance width, with no
-/// kerning, no ligatures and no script shaping.
-/// A string with any of those needs the shaping layer that does not exist yet; this is what examples and tests draw with.
+/// A font face's glyphs as Slug shapes, compiled into an atlas of its own the first time each is asked for, and lines
+/// of text set over them through `sr::layout_text`: kerned, with no ligatures and no script shaping.
 class sr::slug_font
 {
 public:
@@ -39,10 +36,11 @@ public:
     /// A glyph that fails is remembered, so asking again returns the same error without compiling it again.
     [[nodiscard]] cc::result<slug_shape_ref> glyph(babel::font::glyph_id g);
 
-    /// Appends one instance per visible glyph of the UTF-8 `text`, the baseline starting at `origin`.
+    /// Appends one instance per visible glyph of the UTF-8 `text`, the first baseline starting at `origin`.
     /// `size` is the em height in object units, and the line runs along `right` with glyphs standing up along `up`.
+    /// A line break starts the next line further along -`up`.
     /// A character the face has no glyph for draws its `.notdef`.
-    void append_line(cc::vector<slug_instance>& out,
+    void append_text(cc::vector<slug_instance>& out,
                      cc::string_view text,
                      tg::pos2f origin,
                      f32 size,
@@ -50,8 +48,8 @@ public:
                      tg::vec2f right = tg::vec2f(1, 0),
                      tg::vec2f up = tg::vec2f(0, 1));
 
-    /// How far `append_line` advances over `text` at `size`.
-    [[nodiscard]] f32 line_width(cc::string_view text, f32 size) const;
+    /// How wide `append_text` sets `text` at `size`: its widest line.
+    [[nodiscard]] f32 text_width(cc::string_view text, f32 size) const;
 
 private:
     babel::font::face _face;
@@ -59,3 +57,11 @@ private:
     cc::map<u16, slug_shape_ref> _glyphs;
     cc::map<u16, cc::string> _failures; ///< why each glyph that did not compile failed
 };
+
+namespace sr
+{
+/// Where a sans-serif TrueType font the operating system ships lives, if any of the usual places holds one.
+/// The first of the places `slug_font::load_system_ui_font` tries that opens, for a caller that wants the file itself.
+/// It may still fail to load, where `load_system_ui_font` would go on to the next.
+[[nodiscard]] cc::optional<cc::string_view> system_ui_font_path();
+} // namespace sr

@@ -1,13 +1,85 @@
 #include <clean-core/common/asserts.hh>
-#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/common/utility.hh>     // cc::move
+#include <shaped-rendering/slug_routine.hh> // sr::pack_rgba8
+#include <shaped-rendering/text_layout.hh>
+#include <shaped-viewer/drawing/annotation.hh>
+#include <shaped-viewer/drawing/drawing.hh>
+#include <shaped-viewer/drawing/font.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/refs.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
+#include <typed-geometry/linalg/cross.hh>   // tg::cross, tg::dual
+#include <typed-geometry/linalg/vec_ops.hh> // tg::dot
 
 namespace sv
 {
+namespace
+{
+/// A placement of drawing `index` of the acquired set `set`, with the scale folded into the axes.
+[[nodiscard]] drawing_placement place_drawing(drawing_manager& drawings,
+                                              drawing_set_id set,
+                                              u32 index,
+                                              tg::pos3f at,
+                                              tg::vec3f x_axis,
+                                              tg::vec3f y_axis,
+                                              f32 scale,
+                                              tg::vec4f tint,
+                                              sv::corner from)
+{
+    return {.set = set,
+            .page = drawings.page_of(set),
+            .first_record = drawings.first_record(set, index),
+            .record_count = drawings.record_count(set, index),
+            .at = at,
+            .x_axis = x_axis * scale,
+            .y_axis = y_axis * scale,
+            .tint = sr::pack_rgba8(tint),
+            .from = from};
+}
+
+[[nodiscard]] drawing_placement place_2d(drawing_manager& drawings, drawing_set_id set, u32 index, instance_2d const& i)
+{
+    auto p = place_drawing(drawings, set, index, tg::pos3f(i.at[0], i.at[1], 0), tg::vec3f(i.x_axis[0], i.x_axis[1], 0),
+                           tg::vec3f(i.y_axis[0], i.y_axis[1], 0), i.scale, i.tint, i.from);
+
+    // How far the placed drawing reaches right of and below `at`: the largest offset any corner of its bounds lands at.
+    auto const b = drawings.bounds(set, index);
+    auto reach = tg::vec2f(0, 0);
+    for (auto const x : {b.min[0], b.max[0]})
+        for (auto const y : {b.min[1], b.max[1]})
+        {
+            auto const o = p.x_axis * x + p.y_axis * y;
+            reach = tg::vec2f(cc::max(reach[0], o[0]), cc::max(reach[1], o[1]));
+        }
+    p.reach = reach;
+    return p;
+}
+
+[[nodiscard]] drawing_placement place_3d(drawing_manager& drawings, drawing_set_id set, u32 index, instance_3d const& i)
+{
+    return place_drawing(drawings, set, index, i.at, i.x_axis, i.y_axis, i.scale, i.tint, sv::corner::top_left);
+}
+
+[[nodiscard]] decal_placement place_decal(drawing_manager& drawings, drawing_set_id set, u32 index, sv::decal const& d)
+{
+    CC_ASSERT(d.depth > 0.0f, "a decal's projection must reach some depth");
+    auto const normal = tg::dual(cross(d.y_axis, d.x_axis));
+    CC_ASSERT(tg::dot(normal, normal) > 0.0f, "a decal's axes must span a plane, which they do not by default");
+    return {.first_record = drawings.first_record(set, index),
+            .record_count = drawings.record_count(set, index),
+            .bounds = drawings.bounds(set, index),
+            .at = d.at,
+            .x_axis = d.x_axis * d.scale,
+            .y_axis = d.y_axis * d.scale,
+            .depth = d.depth,
+            .tint = sr::pack_rgba8(d.tint)};
+}
+
+
+} // namespace
+
 // ---- mesh_ref / light_ref --------------------------------------------------------------------------------
 
 scene_item& mesh_ref::target() const
@@ -198,6 +270,105 @@ void scene_ref::add_arrow(tg::segment3f const& segment, arrow_style const& style
     _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, style);
 }
 
+void scene_ref::add_drawing(drawing_set const& set, drawing_id id, instance_3d const& instance)
+{
+    CC_ASSERT(u32(id) < u32(set.size()), "a drawing_id names a drawing of the set that minted it");
+    auto& drawings = _frame->resources().drawings;
+    target().drawings.push_back(place_3d(drawings, drawings.acquire(set), u32(id), instance));
+}
+
+void scene_ref::add_drawing(drawing const& d, instance_3d const& instance)
+{
+    auto& drawings = _frame->resources().drawings;
+    target().drawings.push_back(place_3d(drawings, drawings.acquire(d), 0, instance));
+}
+
+void scene_ref::add_decal(drawing_set const& set, drawing_id id, sv::decal const& decal)
+{
+    CC_ASSERT(u32(id) < u32(set.size()), "a drawing_id names a drawing of the set that minted it");
+    auto& drawings = _frame->resources().drawings;
+    target().decals.push_back(place_decal(drawings, drawings.acquire_decal(set), u32(id), decal));
+}
+
+void scene_ref::add_decal(drawing const& d, sv::decal const& decal)
+{
+    auto& drawings = _frame->resources().drawings;
+    target().decals.push_back(place_decal(drawings, drawings.acquire_decal(d), 0, decal));
+}
+
+void scene_ref::add_text(cc::string_view text, instance_3d const& instance, text_style const& style)
+{
+    impl::place_text(_frame->resources().drawings, target().drawings, text, style, instance.at,
+                     instance.x_axis * instance.scale, instance.y_axis * instance.scale, instance.tint,
+                     sv::corner::top_left);
+}
+
+void scene_ref::add_annotation(tg::pos3f anchor, cc::string_view text, annotation_style const& style)
+{
+    auto& drawings = _frame->resources().drawings;
+    auto a = annotation_record{.anchor = anchor,
+                               .side = style.side,
+                               .offset = style.offset,
+                               .margin = style.margin,
+                               .occluded = style.occluded,
+                               .leader = style.leader.shape,
+                               .leader_width = style.leader.width,
+                               .leader_color = sr::pack_rgba8(style.leader.color),
+                               .dashes = style.leader.dashes,
+                               .hidden_dashes = style.leader.hidden_dashes,
+                               .marker_radius = style.marker_radius};
+
+    // The text first, inset by the padding, since the box is sized to it.
+    auto text_placements = cc::vector<drawing_placement>();
+    auto const extent = impl::place_text(drawings, text_placements, text, style.text,
+                                         tg::pos3f(style.padding[0], style.padding[1], 0), tg::vec3f(1, 0, 0),
+                                         tg::vec3f(0, 1, 0), tg::vec4f(1, 1, 1, 1), sv::corner::top_left);
+    a.box_size = tg::vec2f(extent[0] + 2.0f * style.padding[0], extent[1] + 2.0f * style.padding[1]);
+
+    // One drawing per box size and look, so an unchanged label reuses its box from the frame before.
+    auto box = drawing();
+    auto const outer = tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(a.box_size[0], a.box_size[1]));
+    box.add_fill(path::rounded_rectangle(outer, style.corner_radius), {.color = style.fill});
+    if (style.border_width > 0.0f && style.border[3] > 0.0f)
+    {
+        auto const inset = style.border_width * 0.5f;
+        auto const inner = tg::aabb2f(outer.min + tg::vec2f(inset, inset), outer.max - tg::vec2f(inset, inset));
+        box.add_stroke(path::rounded_rectangle(inner, cc::max(style.corner_radius - inset, 0.0f)),
+                       {.color = style.border, .width = style.border_width});
+    }
+    a.content.push_back(place_2d(drawings, drawings.acquire(box), 0, {}));
+    for (auto const& t : text_placements)
+        a.content.push_back(t);
+
+    auto const parts = drawings.annotation_parts(style.marker_radius, cc::max(style.leader.width, 1.0f));
+    auto const tint = instance_2d{.tint = style.leader.color};
+    a.disk = place_2d(drawings, parts, 0, tint);
+    a.ring = place_2d(drawings, parts, 1, tint);
+    a.segment = place_2d(drawings, parts, 2, tint);
+    a.dot = place_2d(drawings, parts, 3, tint);
+    target().annotations.push_back(cc::move(a));
+}
+
+// ---- canvas_ref ------------------------------------------------------------------------------------------
+
+layer& canvas_ref::target() const
+{
+    return _frame->_views[u32(_view)].layers[_layer];
+}
+
+void canvas_ref::add_drawing(drawing_set const& set, drawing_id id, instance_2d const& instance)
+{
+    CC_ASSERT(u32(id) < u32(set.size()), "a drawing_id names a drawing of the set that minted it");
+    auto& drawings = _frame->resources().drawings;
+    target().drawings.push_back(place_2d(drawings, drawings.acquire(set), u32(id), instance));
+}
+
+void canvas_ref::add_drawing(drawing const& d, instance_2d const& instance)
+{
+    auto& drawings = _frame->resources().drawings;
+    target().drawings.push_back(place_2d(drawings, drawings.acquire(d), 0, instance));
+}
+
 light_ref scene_ref::add_light(cc::string_view id, sv::light const& light)
 {
     CC_ASSERT(_frame->_open, "cannot author a closed frame");
@@ -302,6 +473,11 @@ void leaf_ref::allow_zoom(bool v)
     target().allow_zoom = v;
 }
 
+void leaf_ref::title(bool v)
+{
+    target().title = v;
+}
+
 // ---- layout_ref ------------------------------------------------------------------------------------------
 
 view_ref layout_ref::add_view(cc::string_view id)
@@ -367,6 +543,21 @@ scene_ref view_ref::add_scene()
     auto& v = target();
     v.layers.push_back({.kind = layer_kind::scene_3d, .blend = layer_blend::replace});
     return scene_ref(_frame, _view, u32(v.layers.size() - 1));
+}
+
+canvas_ref view_ref::add_canvas()
+{
+    auto& v = target();
+    v.layers.push_back({.kind = layer_kind::canvas, .blend = layer_blend::over});
+    return canvas_ref(_frame, _view, u32(v.layers.size() - 1));
+}
+
+void canvas_ref::add_text(cc::string_view text, instance_2d const& instance, text_style const& style)
+{
+    impl::place_text(
+        _frame->resources().drawings, target().drawings, text, style, tg::pos3f(instance.at[0], instance.at[1], 0),
+        tg::vec3f(instance.x_axis[0], instance.x_axis[1], 0) * instance.scale,
+        tg::vec3f(instance.y_axis[0], instance.y_axis[1], 0) * instance.scale, instance.tint, instance.from);
 }
 
 layout_ref view_ref::open_layout(box_style style, grid_params params)

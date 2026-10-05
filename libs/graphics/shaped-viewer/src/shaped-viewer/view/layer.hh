@@ -2,6 +2,9 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <shaped-viewer/drawing/annotation.hh>
+#include <shaped-viewer/drawing/decal.hh>
+#include <shaped-viewer/drawing/instance.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh>
@@ -17,8 +20,8 @@ enum class sv::layer_kind : sv::u8
     /// The path trace; the only kind that accumulates temporally today.
     scene_3d,
 
-    /// 2D drawing — shapes and text — at the same level as a 3D scene.
-    /// Not drawn yet: its API is still to be designed; libs/graphics/shaped-viewer/docs/TODO.md says what is missing.
+    /// 2D drawings, instanced in the view's logical pixels and drawn over the layers below with no depth.
+    /// libs/graphics/shaped-viewer/docs/canvas.md is the design.
     canvas,
 
     /// Dear ImGui, drawn through sr::imgui_routine.
@@ -66,6 +69,19 @@ struct sv::layer
     cc::optional<sv::light> fallback_light = default_fallback_light();
     sv::background background;
     render_settings settings;
+
+    /// scene_3d and canvas: the drawings instanced on this layer, in the order they were added.
+    /// A scene's are 3D, in world units, drawn after its trace; a canvas's are 2D, in the view's logical pixels.
+    cc::vector<drawing_placement> drawings;
+
+    /// scene_3d: labels flat on screen at points of the scene, placed every frame through the view's camera.
+    cc::vector<annotation_record> annotations;
+
+    /// scene_3d: drawings projected onto the traced surfaces, painted at every hit in the order they were added.
+    cc::vector<decal_placement> decals;
+
+    /// scene_3d: whether anything drawn after the trace needs its primary-hit depth.
+    [[nodiscard]] bool needs_primary_depth() const { return !drawings.empty() || !annotations.empty(); }
 
     /// ui: which of the frame's registered draw callbacks fills this layer.
     u32 ui_callback = u32(-1);

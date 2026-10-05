@@ -28,8 +28,11 @@ add_library(shaped-rendering
     src/shaped-rendering/shaders.cc
     src/shaped-rendering/slug_atlas.cc
     src/shaped-rendering/slug_font.cc
+    src/shaped-rendering/text_layout.cc
     src/shaped-rendering/slug_routine.cc
+    src/shaped-rendering/slug_path.cc
     src/shaped-rendering/slug_shape.cc
+    src/shaped-rendering/slug_traced.cc
     src/shaped-rendering/impl/slug_reference.cc
     src/shaped-rendering/impl/imgui_draw_math.cc
     src/shaped-rendering/impl/imgui_input_translation.cc
@@ -65,8 +68,11 @@ target_sources(shaped-rendering
     src/shaped-rendering/shaders.hh
     src/shaped-rendering/slug_atlas.hh
     src/shaped-rendering/slug_font.hh
+    src/shaped-rendering/text_layout.hh
     src/shaped-rendering/slug_routine.hh
+    src/shaped-rendering/slug_path.hh
     src/shaped-rendering/slug_shape.hh
+    src/shaped-rendering/slug_traced.hh
     src/shaped-rendering/impl/slug_reference.hh
 )
 
@@ -328,6 +334,8 @@ if(SC_BUILD_TESTS)
         tests/shader-package-test.cc
         tests/slug-font-test.cc
         tests/slug-module-test.cc
+        tests/slug-path-test.cc
+        tests/text-layout-test.cc
         tests/slug-shape-test.cc
         tests/tza-test.cc
         tests/oidn-tiling-test.cc
@@ -396,8 +404,22 @@ if(SC_BUILD_TESTS)
             tests/raster-box-filter-mipmap-test.cc
             tests/nn-resample-test.cc
             tests/slug-routine-test.cc
+            tests/slug-traced-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
+
+        # The probes the GPU tests trace with, which use sr's modules as any other package would.
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_test_sgl_shaders
+            NAMESPACE  sr_test::sgl_shaders
+            SOURCE_DIR tests/shaders
+            LANGUAGE   sgl
+            MODULE_DIRS ${SR_SGL_MODULE_DIR}
+            SHADERS
+                slug_traced.sgl:*
+                slug_traced_pipeline.sgl:*
+        )
     endif()
 
     # A person looks at this one, through a dx12 window.
@@ -437,7 +459,9 @@ if(SC_BUILD_TESTS)
 
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.
     # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
-    if(WIN32 AND SC_HAS_DXC_COMPILER)
+    # The probes' shader package stages them itself where it exists, and a second staging is a configure error.
+    get_target_property(_sr_test_dxc_staged shaped-rendering-test SC_SHADER_PACKAGE_DXC_STAGED)
+    if(WIN32 AND SC_HAS_DXC_COMPILER AND NOT _sr_test_dxc_staged)
         sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
     endif()
 

@@ -12,7 +12,9 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
+#include <shaped-rendering/fwd.hh>
 #include <shaped-shader-library/raytracing_pipeline.hh> // slib::raytracing_host_parts
+#include <shaped-viewer/drawing/decal.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/scene/background.hh>
@@ -110,6 +112,8 @@ struct sv::pt_trace_desc
     sg::texture_2d guide_hit_distance;
 
     /// The first sample's primary-hit clip depth per pixel (r32_float), at `output`'s extent, or null.
+    /// Set exactly when the frame block's `write_primary_depth` is; what a raster pass after the trace is occluded by.
+    sg::texture_2d primary_depth;
 
     /// One `sv::shaders::tracer::instance_record` per entry of `instances`, in that same order — `traced.instances`, read by a hit's instance id.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
@@ -149,6 +153,16 @@ struct sv::pt_trace_desc
     /// The manager's bindless tables, snapshotted and locked for this recording — bound as the pipeline's second group.
     /// It must outlive the dispatch, which is what `gpu_resource_manager::freeze()`'s scope is for.
     bound_resources const* bindless = nullptr;
+
+    /// The decals every hit is painted with, `frame`'s `decal_count` of them, and the shapes they cover, `traced.decals`
+    /// and `traced.decal_shapes`.
+    /// Null means none, and the routine binds stand-ins.
+    sg::buffer<shaders::tracer::decal_record> decals;
+    sg::buffer<shaders::tracer::decal_shape> decal_shapes;
+
+    /// The atlas those shapes live in, already prepared, bound as `slug.tables`, the pipeline's third group.
+    /// Null means no decals, and the routine binds empty stand-ins.
+    sr::slug_atlas const* decal_atlas = nullptr;
 };
 
 /// The global-illumination path-tracing pass: shaders/tracer_pipeline.sgl, over module `tracer` (shaders/sgl).
@@ -158,10 +172,11 @@ struct sv::pt_trace_desc
 /// of the scene and cannot be settled in `init`.
 /// Pipelines are cached on that set, so a scene whose materials are stable builds one and rebinds it every frame.
 ///
-/// The bindings come in two groups: group 0 is `tracer.traced`, the trace's own (the TLAS, the targets, the frame block, the
-/// instance table, the lights).
+/// The bindings come in three groups: group 0 is `tracer.traced`, the trace's own (the TLAS, the targets, the frame block, the
+/// instance table, the lights, the decals).
 /// Group 1 is the manager's bindless tables, whose layout is `tracer.bindless` itself, so the snapshot binds as it is and sg
 /// resolves its footprint by name.
+/// Group 2 is `slug.tables`, the atlas the decals' shapes live in, which only a closest hit lists.
 ///
 /// Each permutation's `hit_group` is one row of the shader table, a record per ray type.
 /// A caller's `hit_group_offset` counts two records per permutation and is rewritten to that permutation's row.
@@ -210,6 +225,13 @@ private:
     sg::texture_2d _frame_specular_stand_in;
     sg::texture_2d _guide_hit_distance_stand_in;
     sg::texture_2d _guide_motion_stand_in;
+    sg::texture_2d _primary_depth_stand_in;
+
+    /// What a trace without decals binds as the atlas's two tables and the two decal buffers.
+    sg::texture_2d _decal_curves_stand_in;
+    sg::texture_2d _decal_bands_stand_in;
+    sg::buffer<shaders::tracer::decal_record> _decals_stand_in;
+    sg::buffer<shaders::tracer::decal_shape> _decal_shapes_stand_in;
 
     /// One pipeline, built over one ordered set of hit groups, in two steps polled rather than waited on.
     struct pipeline_variant

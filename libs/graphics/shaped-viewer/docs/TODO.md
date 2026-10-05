@@ -61,16 +61,26 @@ What is left is the interaction on top of it, in dependency order:
   caller who wants it re-parented into a specific container has no way to ask.
 - **The UI layer** through `sr::imgui_context` / `sr::imgui_routine`, into the view's own target.
 - **A second window**, which is only an sv-side step: `sr::window_system` already drives N windows from one poll.
-- **The `canvas` layer draws nothing**, and is typed and documented that way on purpose.
-  It is where 2D drawing lives, a layer at the same level as a 3D scene.
-  sr can now draw what it needs: shapes and text from their outlines (`sr::slug_routine`, libs/graphics/shaped-rendering/docs/slug.md).
-  What is missing is the canvas's own API, which is its own design: its coordinate space, who owns fonts and atlases, and how it is retained across frames.
-- **A canvas over a traced scene cannot be occluded by it.**
-  The composited image carries no depth, so a label meant to lie on a face would show through when the face turns away.
-  Occlusion needs the trace to write a primary-hit depth target, which `sr::slug_routine` already tests against when a scope has one.
-- **Shapes on traced geometry are not wired into the tracer yet.**
-  SGL module `slug`'s `coverage` takes the pixel footprint as an argument, so a hit can pass one from its ray cone.
-  The tracer is SGL now, so its hit groups can `use slug`.
+- **A 3D drawing is occluded by the depth of the trace's first sample, reprojected to the pixel center.**
+  The plane taken is the hit triangle's geometric normal's.
+  It is exact where the pixel center lands on the same triangle, and a sub-pixel step off on a neighboring triangle of a curved mesh or on a quadric.
+  A silhouette pixel holds one surface's depth, so a drawing's edge along a silhouette is hard rather than antialiased.
+  That depth is taken again from a jittered sample each accumulation frame, so at a silhouette it flips until the image converges.
+  A 3D drawing's edge shimmers there, and an annotation anchored on a silhouette pixel can toggle between filled and hollow.
+- **Annotations do not avoid each other.**
+  Each is placed on its own, so labels whose anchors are close overlap.
+  Decluttering is greedy in priority order against the previous frame's boxes, which wants the boxes to persist across frames and an identity per annotation.
+- **The drawing atlas reclaims space a page at a time.** A page holding one long-lived set and much that is gone stays whole until it is the least recently drawn from.
+  Packing a page's survivors into a fresh one, or a free list in `sr::slug_atlas`, would reclaim the rest.
+- **Shapes are not traced as geometry of their own yet.**
+  Module `slug` cuts quads down to their shapes with `slug.decide` (libs/graphics/shaped-rendering/docs/slug.md), which is what a label casting a letter-shaped shadow needs.
+  Decals paint surfaces that already exist; what is missing for shapes as geometry is the scene side that places their quads and the rows that trace them.
+- **Every hit tests every decal of its layer.** A projector box is a few dot products to reject, so tens of decals cost little, and thousands would want a structure over the boxes.
+- **A decal's footprint past a bounce is too small.** It is the camera's pixel at the segment's own length, exact for a primary ray.
+  A reflected ray would carry a ray cone, which the tracer does not yet; its jitter antialiases the edges there instead, slowly.
+- **Every decal lives in one atlas**, since a trace binds one `slug.tables`; the frame's decals have to fit its 512 rows together.
+  Binding the atlas pages as an array would lift that, once SGL has arrays of bindings.
+- **Text cannot be a decal yet.** `add_text` places glyph instances, while a decal takes one drawing; a string set into one drawing would close the gap.
 - **A traced layer has no alpha.** The raygen in `tracer_pipeline.sgl` writes none, so a `scene_3d` layer is forced to
   `layer_blend::replace`. Writing coverage into `.a` is what would let a traced layer composite `over` another.
   Until then `view_ref::add_scene` can express two scene layers on one view but only the last is visible.
@@ -495,8 +505,8 @@ What follows is everything else the importer left behind.
   So any assert reached from a viewer frame loses its own message behind an `abort()`, which is what made the empty
   scene layer above expensive to find.
   The viewer's destructor should be able to tear down a viewer whose frame did not complete.
-- **A view's display name is stored and never drawn.** `impl::view_state` keeps it (defaulting to the id up to its `##`) for the title bar a view has no way to draw yet —
-  sr can draw the text now, so this waits on the `canvas` layer the entry above names.
+- **A title strip is cut, never shortened.** A name wider than its leaf loses the glyphs that would run past the strip's edge, with no ellipsis.
+  Its look is fixed too — the default font at 13 logical pixels on a near-black band — until a `title_style` on the leaf is wanted.
 - **`per_edge` attributes need an edge table on `triangle_geometry`.**
   The enumerator exists and `mesh_attribute::create` rejects it; what is missing is the numbering — the edges themselves (each naming its two vertices) plus each triangle's three edge indices.
   That table also decides whether opposite half-edges share one entry, which is the real design question.

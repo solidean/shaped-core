@@ -86,7 +86,11 @@ Shapes and text drawn from their outlines; [slug.md](slug.md) is the design and 
 sr::slug_outline / compile_slug_shape  [done]     outlines of quadratic curves -> Slug's curve and band tables
 sr::slug_atlas                         [done]     caller-owned, append-only; eviction planned
 sr::slug_routine                       [done]     one quad per shape, dilated; depth-tested when the scope has depth
-sr::slug_font                          [done]     glyphs on demand, advance-only layout; shaping planned
+sr::slug_path / stroke_outline         [done]     open and closed paths, and the outline a stroke covers, dashes included
+sr::layout_text                        [done]     kerned text with line breaks, wrapping and alignment
+sr::slug_font                          [done]     glyphs on demand, laid out through sr::layout_text; shaping planned
+slug jobs and records                  [done]     shapes placed many times through frames, records kept beside them
+sr::build_slug_blas                    [done]     shapes as traced quads, cut to their shapes by `slug.decide`
 CFF outlines                           [planned]
 ```
 

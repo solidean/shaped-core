@@ -371,7 +371,7 @@ enum class load_shape
     src += "use material\nuse openpbr\n";
     if (procedural)
         src += "use quadric\n";
-    src += "use tracer\n\n";
+    src += "use slug\nuse tracer\n\n";
 
     // Restated rather than named as `tracer.path_rays`, since a hit group names a set of its own file.
     src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
@@ -430,7 +430,7 @@ enum class load_shape
                "    return tracer.intersect_quadric(b)\n\n";
         cc::format_append(src,
                           "@closest_hit fun sv_closest_hit(h: procedural_hit[tracer.quadric_attributes], p: mut "
-                          "tracer.surface_payload){{tracer.traced, tracer.bindless}}:\n"
+                          "tracer.surface_payload){{tracer.traced, tracer.bindless, slug.tables}}:\n"
                           "    let ctx = tracer.quadric_context(h)\n"
                           "    tracer.shade_quadric(h, mut p, sv_evaluate_material(ctx), {})\n\n",
                           supplied_frame);
@@ -445,7 +445,7 @@ enum class load_shape
 
     cc::format_append(src,
                       "@closest_hit fun sv_closest_hit(h: triangle_hit, p: mut tracer.surface_payload){{tracer.traced, "
-                      "tracer.bindless}}:\n"
+                      "tracer.bindless, slug.tables}}:\n"
                       "    let ctx = tracer.triangle_context(h)\n"
                       "    tracer.shade_triangle(h, mut p, ctx, sv_evaluate_material(ctx), {})\n\n",
                       supplied_frame);

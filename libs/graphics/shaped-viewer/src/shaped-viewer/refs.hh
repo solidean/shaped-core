@@ -4,6 +4,8 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-viewer/drawing/font.hh>
+#include <shaped-viewer/drawing/instance.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/box_style.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
@@ -206,6 +208,77 @@ public:
     /// Sample counts and bounce limits for this layer's trace.
     void settings(render_settings const& s);
 
+    /// Instances drawing `id` of `set` in this scene, in world units — see `sv::instance_3d`.
+    ///
+    /// The set is acquired whole on first use, keyed by its content hash, so placing an unchanged set every frame uploads
+    /// nothing.
+    /// A drawing is drawn after the trace: geometry in front of it hides it, and it casts no shadow and shows in no
+    /// reflection.
+    void add_drawing(drawing_set const& set, drawing_id id, instance_3d const& instance);
+
+    /// The same for a lone drawing, acquired as a one-element set of its own.
+    void add_drawing(drawing const& d, instance_3d const& instance);
+
+    /// Projects drawing `id` of `set` onto this scene's traced surfaces, as part of their material — see `sv::decal`.
+    ///
+    /// Unlike a drawing, a decal is traced: it is lit and shadowed with the surface it lies on, curves with it, and
+    /// shows in reflections.
+    /// Every hit of the trace tests every decal of the layer, so a layer carries tens of them, not thousands.
+    /// The set is acquired into the drawing manager's decal atlas, apart from the same set drawn as an instance.
+    void add_decal(drawing_set const& set, drawing_id id, sv::decal const& decal);
+
+    /// The same for a lone drawing.
+    void add_decal(drawing const& d, sv::decal const& decal);
+
+    /// Sets the UTF-8 `text` in `style` and places it on the plane `instance` spans, its box's top-left at `at`.
+    /// The style's size is in world units here, so a label one tenth of a unit tall is `{.size = 0.1f}`.
+    /// One drawing per glyph, from the font's glyph sets — see `sv::font`.
+    void add_text(cc::string_view text, instance_3d const& instance, text_style const& style = {});
+
+    /// A label flat on screen at the scene point `anchor`: the UTF-8 `text` in a box, a marker on the point, and a
+    /// leader between them, all in logical pixels and drawn over the scene.
+    ///
+    /// The box moves with the anchor every frame, on the side `style.side` names and kept inside the view.
+    /// Whether the anchor is hidden is decided on the GPU by the trace's depth at the anchor, once for the whole label,
+    /// so a label is never cut where it crosses a silhouette; `style.occluded` says what it draws then.
+    /// An anchor behind the camera or outside the view draws nothing.
+    void add_annotation(tg::pos3f anchor, cc::string_view text, annotation_style const& style = {});
+
+private:
+    [[nodiscard]] layer& target() const;
+
+    frame* _frame = nullptr;
+    view_index _view = view_index(0);
+    u32 _layer = 0;
+};
+
+/// A 2D layer of a view — where drawings are instanced in the view's logical pixels, y down.
+///
+/// Nothing occludes what a canvas draws, and later instances draw over earlier ones.
+/// A logical pixel is the window's content scale in texture pixels, so a drawing keeps its physical size on any display.
+class sv::canvas_ref
+{
+public:
+    canvas_ref(frame* f, view_index view, u32 layer) : _frame(f), _view(view), _layer(layer) {}
+
+    /// Instances drawing `id` of `set` — see `sv::instance_2d`.
+    /// The set is acquired whole on first use, keyed by its content hash, so an unchanged set every frame uploads nothing.
+    void add_drawing(drawing_set const& set, drawing_id id, instance_2d const& instance);
+
+    /// The same for a lone drawing, acquired as a one-element set of its own.
+    void add_drawing(drawing const& d, instance_2d const& instance);
+
+    /// Sets the UTF-8 `text` in `style`, its box's top-left at `instance.at` — or, from another corner, its box's far
+    /// edges that far in.
+    /// The style's size is in logical pixels, 14 by default; one drawing per glyph, from the font's glyph sets.
+    void add_text(cc::string_view text, instance_2d const& instance, text_style const& style = {});
+
+    /// The same at `at`, unscaled.
+    void add_text(cc::string_view text, tg::pos2f at, text_style const& style = {})
+    {
+        add_text(text, instance_2d{.at = at}, style);
+    }
+
 private:
     [[nodiscard]] layer& target() const;
 
@@ -232,6 +305,10 @@ public:
     /// first rather than compositing over it (see libs/graphics/shaped-viewer/docs/TODO.md).
     /// Until that lands, calling this twice in a frame is legal but only the last layer is visible.
     [[nodiscard]] scene_ref add_scene();
+
+    /// Appends a 2D canvas layer to this view, drawn over the layers before it.
+    /// Like `add_scene`, every call appends one, so call it once and keep the handle.
+    [[nodiscard]] canvas_ref add_canvas();
 
     /// Fills this view with a layout tree, created on first use.
     /// `rows` stacks its children top to bottom, `columns` side by side; the params overload pins one dimension and
@@ -298,7 +375,7 @@ public:
     ///
     /// It is persistent, like the camera: set once and it survives every later frame that does not set it again.
     /// Setting an empty name restores the default rather than leaving the view nameless.
-    /// Nothing draws it yet — sv has no text renderer — so this is what a title bar will read, not what one does.
+    /// A layout leaf showing this view draws it in its title strip; the window's own view is named by the window.
     void display_name(cc::string_view name);
 
     template <class Arg0, class... Args>
@@ -377,6 +454,9 @@ public:
     /// Whether the key-bound zoom may magnify this leaf.
     void allow_zoom(bool v = true);
 
+    /// Whether a strip above the leaf shows its view's display name; on unless turned off.
+    void title(bool v = true);
+
 private:
     [[nodiscard]] layout_leaf& target() const;
 
@@ -442,6 +522,7 @@ template <class Derived>
 struct sv::view_api
 {
     [[nodiscard]] scene_ref add_scene() { return self().default_view().add_scene(); }
+    [[nodiscard]] canvas_ref add_canvas() { return self().default_view().add_canvas(); }
 
     [[nodiscard]] layout_ref layout_rows(box_style style = {}) { return self().default_view().layout_rows(style); }
     [[nodiscard]] layout_ref layout_columns(box_style style = {})

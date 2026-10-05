@@ -25,11 +25,15 @@ A shape drawn on its own quad has the quad *dilated* by half a pixel after proje
 ```text
 babel::font              babel-serializer  reads a font file into each format's own outline, transforming nothing
 sr::slug_outline         shaped-rendering  closed contours of quadratic curves, in the shape's own units
+sr::slug_path            shaped-rendering  contours that may stay open, and the shapes; what a fill closes and a stroke follows
+sr::stroke_outline       shaped-rendering  a path and a stroke style -> the outline of the area the stroke covers
 sr::compile_slug_shape   shaped-rendering  outline -> curve and band tables, device-free
 sr::slug_atlas           shaped-rendering  caller-owned textures many shapes share, plus a CPU copy of them
-sr::slug_routine         shaped-rendering  draws shape instances from an atlas, one pipeline per (colour, depth) format
+sr::slug_routine         shaped-rendering  draws shape instances from an atlas, one pipeline per (color, depth) format
 module slug              shaped-rendering  the coverage itself, in SGL: any pixel shader that `use`s it may call it
-sr::slug_font            shaped-rendering  a face's glyphs compiled on demand, and a one-line advance-only layout
+sr::slug_font            shaped-rendering  a face's glyphs compiled on demand, and text set over them
+sr::layout_text          shaped-rendering  a string set in a face: kerned advances, line breaks, wrapping, alignment
+sr::build_slug_blas      shaped-rendering  instances as a BLAS of non-opaque quads, which `slug.decide` cuts to their shapes
 ```
 
 **babel reads, and nothing else.**
@@ -61,8 +65,21 @@ A draw's matrix then takes that plane anywhere, so the same instance lies flat o
 `execute` takes a buffer of instances and a range, so text that does not change uploads once and redraws free.
 `prepare` plus `execute` over a span is the convenience on top, in imgui's shape: copies before the rendering scope opens, draws inside it.
 
-**Colour is linear and premultiplied.**
-An instance carries its colour as 8-bit sRGB, the vertex stage linearizes it, and output blends premultiplied — what shaped-viewer's targets hold.
+**A job draws many placements of shapes kept once.**
+The atlas keeps **records** — shape instances in a drawing's own plane — in a third texture, beside the shapes they name.
+A job is a list of **frames**, each a position and two free axes placing that plane in the draw's space, and a list of quads, each naming a record and a frame.
+So one draw covers any mix of shapes under any number of frames, and a shape placed eighty thousand times is uploaded once.
+The vertex stage folds a quad's frame into the draw's matrix rows, then dilates exactly as an instance does; a frame's tint multiplies the record's color.
+Records and frames are textures rather than buffers because a vertex stage may read no storage buffer on WebGPU.
+
+**A frame can be shown or hidden by a probe.**
+It names a point in a depth texture the draw binds, and that point's own depth; the vertex stage reads the texel at each corner, which reads the same texel for all four.
+A frame drawn `if_visible` is dropped where something nearer is there, one drawn `if_hidden` only there, so a pair of frames gives a visible look and a hidden one.
+That is what a label flat on screen wants: its anchor decides for the whole label, which is never cut where it crosses a silhouette.
+Depth is `1 - near / distance`, so comparing `1 - depth` compares near over distance and needs no near plane; the tolerance is a fraction of the distance.
+
+**Color is linear and premultiplied.**
+An instance carries its color as 8-bit sRGB, the vertex stage linearizes it, and output blends premultiplied — what shaped-viewer's targets hold.
 
 **Depth from day one.**
 A scope with a depth target draws depth-tested and never writes depth, so shapes lying on one surface layer in draw order.
@@ -70,6 +87,32 @@ A per-draw bias pulls shapes toward the camera, which is what keeps a label on a
 
 **The fill rule is per shape, and the weight per draw, at runtime.**
 SGL has no preprocessor, and both are a branch after the curve loops, uniform within a shape.
+
+## Strokes
+
+Slug only fills, so a stroke reaches it as the outline of the area it covers, expanded on the CPU by `sr::stroke_outline`.
+The result is an ordinary shape: compiled, placed and drawn like a glyph, in one draw with the fills beside it.
+
+**The outline is a union of small pieces, wound one way.**
+Each segment's body, each join and each cap is its own simple contour, wound the same way as every other, so where pieces overlap their windings add.
+That is why a stroke's outline must be filled nonzero: even-odd would cut a hole wherever two pieces overlap.
+Neighbouring bodies share an edge traversed in opposite directions, so their coverage meets without a seam.
+
+**An offset is a quadratic within a tolerance.**
+The exact offset of a quadratic is not one, so each body's two edges are quadratics through the offset end points, controlled where their end tangents meet.
+A body is halved until both edges stay within the tolerance and it turns at most 30 degrees.
+
+**Where a curve bends tighter than the half-width, disks stand in for the inner edge.**
+There the inner offset folds back over itself and no quadratic follows it.
+The outer half is still a clean offset, and the inner half is covered by disks along the curve, spaced so they cover all but the tolerance between them.
+
+**Dashes cut the path first.**
+`sr::dash_path` splits each contour at arc lengths along it, so every dash is an open contour of exact pieces of the original curves, capped and joined like any other.
+Each contour restarts the pattern.
+On a closed contour, the dash running through its start is one dash, joined there rather than capped twice.
+A zero on length draws its caps alone, which is how round caps make a dotted line.
+
+A stroke's width is in the path's units and scales with the shape, so a hairline that stays one pixel under any zoom is not something it can be.
 
 ## A shape on any surface
 
@@ -90,28 +133,79 @@ sr exports the module, so the host binds one group of `sgl_modules::slug::tables
 Another package reaches the module by naming `SR_SGL_MODULE_DIR` in its `MODULE_DIRS`.
 
 The core takes the pixel footprint as an argument, and an overload takes it from `ddx` and `ddy`, so it must be called in uniform control flow.
-A ray-traced hit has no derivatives, and will pass a footprint from its ray cone instead; shaped-viewer's tracer is SGL now, and only the wiring is left.
+A ray-traced hit has no derivatives, and passes the footprint itself.
+
+## Shapes in a trace
+
+A trace meets a shape two ways, in the same structure as the rest of the scene.
+
+**As geometry, through an any-hit.**
+`sr::build_slug_blas` makes each instance a quad over its em box, two non-opaque triangles on the plane the routine draws it on.
+Module `slug`'s `decide(c, first)` is the any-hit: it reads the candidate's record and accepts the ray where the em point lies inside the shape.
+One function serves both forms of a trace.
+An inline trace, the form a wavefront tracer keeps, calls it from the scene's own decision:
+
+```sgl sketch
+fun any_hit(c: triangle_candidate){slug.tables, slug.shapes, scene} -> hit_decision:
+    let first = scene.first_shapes[c.instance_id]          // the scene's own instance table
+    if first >= 0 => return slug.decide(c, first)
+    return hit_decision.accept                              // or another material's cutout
+
+@compute(8, 8) fun trace_view(@thread_id id: int3){slug.tables, slug.shapes, scene}:
+    let h = scene.world.trace(camera_ray(id), c => any_hit(c))
+```
+
+A ray-tracing pipeline wraps it in an `@any_hit` per payload type, since a stage carries its ray type's payload, and the run's hit group routes slug quads to it:
+
+```sgl sketch
+@any_hit fun slug_surface(c: triangle_candidate, p: mut radiance){slug.tables, slug.shapes, scene} -> hit_decision:
+    return slug.decide(c, scene.first_shapes[c.instance_id])
+
+hit_group slug_label for path_rays:
+    surface = (closest_hit = shade_label, any_hit = slug_surface)
+    occlusion = (any_hit = slug_occlusion)
+```
+
+- **The decision is a point test, `slug.contains`, with a hard edge.**
+  An any-hit can only accept or ignore, so it cannot return a coverage.
+  The rays a pixel casts antialias the edge instead, which is what a tracer does for every other silhouette.
+  It needs no footprint, so a shadow ray or a reflected one meets the same letters as the camera's.
+  It is the coverage's horizontal ray with each crossing counted whole.
+- **The scene keeps where each run's records start**, and hands that index over: Slug claims no instance field.
+  The records are `slug.shapes`, the one buffer `sr::upload_slug_records` uploads, and the atlas is the one bound as `slug.tables`.
+- **Telling a slug quad from other non-opaque geometry is the scene's**: inline a branch before the call, in a pipeline the hit group.
+- The instance culls nothing: a shape's axes may flip its winding, and a label is read from either side.
+- The ray set is the pipeline's, so module `slug` ships the decision and not the `@any_hit` wrappers or a hit group.
+
+**As a decal, at a hit.**
+A surface whose vertices carry an em coordinate is covered at the hit, as a pixel shader covers it.
+Its footprint is the em span to where the neighbouring rays meet the surface's plane: ray differentials, the traced stand-in for `ddx` and `ddy`.
+A primary ray knows its neighbours; a ray past a bounce would carry a ray cone instead, which nothing here does yet.
+
+`graphics/slug-traced` does both: labels and a ring of text casting letter-shaped shadows, and a star on the cube's top face.
 
 ## Using it
 
 ```cpp
 auto font = sr::slug_font::load_system_ui_font().value();          // a TrueType font the OS ships
 auto instances = cc::vector<sr::slug_instance>();
-font.append_line(instances, "hello", tg::pos2f(24, 48), 32.0f, tg::vec4f(1, 1, 1, 1), tg::vec2f(1, 0), tg::vec2f(0, -1));
+font.append_text(instances, "hello", tg::pos2f(24, 48), 32.0f, tg::vec4f(1, 1, 1, 1), tg::vec2f(1, 0), tg::vec2f(0, -1));
 
 auto const prepared = sr::slug_routine::prepare(*cmd, font.atlas(), instances);   // before the scope
 auto pass = cmd->raster.render_to({.color_targets = {target.preserved()}});
 (void)sr::slug_routine::execute(pass, font.atlas(), prepared, {.object_to_clip = pixels_to_clip});
 ```
 
-`graphics/slug-cube` draws labels on a cube's faces, a star from the cube's own shader, and a caption.
-shaped-viewer will reach Slug through its `canvas` layer, which is a design of its own.
+`graphics/slug-cube` draws labels on a cube's faces, a star from the cube's own shader, and a caption; `graphics/slug-traced` traces the same kinds of shapes.
+shaped-viewer reaches Slug through its canvas layer: [canvas.md](../../shaped-viewer/docs/canvas.md).
 
 ## How it is held to the reference
 
 - **The module's own tests** pin its pure helpers — the root code, both root solves, the band wrap, the fill rules — on SGL's interpreter, run by sr's test binary.
 - **A C++ reference** of the whole pixel shader (`impl/slug_reference.hh`) reads the atlas's CPU copy, so compilation is tested with no device.
 - **Readback** compares every pixel the routine draws against that reference, on every backend the tests run.
+- **A traced grid** holds every ray `slug.decide` keeps to the reference's point test, inline and through a pipeline's hit group.
+  A decal's coverage at each hit is held to the reference's coverage.
 
 ## Why not something else
 
@@ -132,13 +226,18 @@ babel::font: TrueType glyf, cmap 4 and 12, hmtx            [done]
 sr: outline, compilation, atlas, CPU reference             [done]
 SGL module slug: coverage, both overloads, exported by sr  [done]
 sr::slug_routine: quads, dilation, depth, both draw forms  [done]
-sr::slug_font: glyphs on demand, one-line layout           [done]
+sr::slug_font: glyphs on demand                            [done]
+sr::layout_text: kerning, lines, wrapping, alignment       [done]
+sr::stroke_outline: joins, caps, dashes, open paths        [done]
 example: graphics/slug-cube                                [done]
+shapes as traced geometry: quads, `slug.decide` any-hit    [done]     inline and in a pipeline's hit group
+shapes on traced geometry: a decal by ray differentials    [done]     example: graphics/slug-traced
 benchmark: runtime fill rule against nonzero-only          [planned]
 babel::font: CFF / CFF2 charstrings, cubics split in sr    [planned]
 atlas eviction                                             [planned]  rewrite band lists that point at moved curves
-shapes on traced geometry                                  [planned]  ray-cone footprint, after the tracer moves to SGL
-viewer depth for labels                                    [planned]  needs a primary-hit depth target from the trace
-shaping and layout                                         [planned]  its own design, with the canvas
-the canvas                                                 [planned]  its own design: shaped-viewer's canvas layer, drawing through slug_routine
+a decal past a bounce                                      [planned]  a ray-cone footprint, once a tracer carries cones
+shaped-viewer's tracer: decals by a projector box          [done]     shaped-viewer's canvas.md
+viewer depth for labels                                    [done]     the trace's primary-hit depth, in shaped-viewer
+shaping: ligatures, marks, reordering scripts              [planned]  its own design
+the canvas                                                 [done]     shaped-viewer's canvas layer, drawing through slug_routine
 ```

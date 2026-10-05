@@ -19,6 +19,8 @@ use slug
     viewport: float2
     depth_bias: float
     weight_boost: int
+    probe_tolerance: float
+    has_probe_depth: int
 
 // `corner` is a corner of the unit square, six of them per quad; everything else is the shape instance.
 @vertex struct slug_vertex:
@@ -44,52 +46,154 @@ fun srgb_to_linear(c: float) -> float:
     if c <= 0.04045 => return c / 12.92
     return pow((c + 0.055) / 1.055, 2.4)
 
-@vertex fun main_vs(v: slug_vertex){slug_draw} -> slug_varyings:
-    let col0 = float2(v.em_to_object.x, v.em_to_object.y)
-    let col1 = float2(v.em_to_object.z, v.em_to_object.w)
+/// Where one dilated quad corner lands: its clip position and the em coordinate that follows it.
+struct placed_corner:
+    clip: float4
+    em: float2
 
-    let em_corner = float2(mix(v.em_bounds.x, v.em_bounds.z, v.corner.x), mix(v.em_bounds.y, v.em_bounds.w, v.corner.y))
-    let p = v.origin + col0 * em_corner.x + col1 * em_corner.y
+/// Places `corner` of a shape whose em space `em_to_object` and `origin` put on a plane, under the rows `r0`..`r3` taking
+/// that plane's (x, y, 0, 1) to clip space, and dilates it half a pixel outward.
+fun place_corner(corner: float2, em_to_object: float4, origin: float2, em_bounds: float4, r0: float4, r1: float4, r2: float4, r3: float4){slug_draw} -> placed_corner:
+    let col0 = float2(em_to_object.x, em_to_object.y)
+    let col1 = float2(em_to_object.z, em_to_object.w)
 
-    // The corner's outward direction in object space: one unit along each placed em axis, signed by the corner.
-    let sx = v.corner.x * 2.0 - 1.0
-    let sy = v.corner.y * 2.0 - 1.0
+    let em_corner = float2(mix(em_bounds.x, em_bounds.z, corner.x), mix(em_bounds.y, em_bounds.w, corner.y))
+    let p = origin + col0 * em_corner.x + col1 * em_corner.y
+
+    // The corner's outward direction on the plane: one unit along each placed em axis, signed by the corner.
+    let sx = corner.x * 2.0 - 1.0
+    let sy = corner.y * 2.0 - 1.0
     let n = normalize(col0) * sx + normalize(col1) * sy
     let nn = normalize(n)
 
     // How far along `n` the corner moves so it lands half a pixel further out after the perspective divide.
-    let m0 = slug_draw.row0
-    let m1 = slug_draw.row1
-    let m3 = slug_draw.row3
-    let s = m3.x * p.x + m3.y * p.y + m3.w
-    let t = m3.x * nn.x + m3.y * nn.y
-    let u = (s * (m0.x * nn.x + m0.y * nn.y) - t * (m0.x * p.x + m0.y * p.y + m0.w)) * slug_draw.viewport.x
-    let w = (s * (m1.x * nn.x + m1.y * nn.y) - t * (m1.x * p.x + m1.y * p.y + m1.w)) * slug_draw.viewport.y
+    let s = r3.x * p.x + r3.y * p.y + r3.w
+    let t = r3.x * nn.x + r3.y * nn.y
+    let u = (s * (r0.x * nn.x + r0.y * nn.y) - t * (r0.x * p.x + r0.y * p.y + r0.w)) * slug_draw.viewport.x
+    let w = (s * (r1.x * nn.x + r1.y * nn.y) - t * (r1.x * p.x + r1.y * p.y + r1.w)) * slug_draw.viewport.y
     let s2 = s * s
     let st = s * t
     let uv = u * u + w * w
     let d = n * (s2 * (st + sqrt(uv)) / (uv - st * st))
     let q = p + d
 
-    // The em coordinate follows the corner: the inverse of the placement maps the object-space push back into em space.
+    // The em coordinate follows the corner: the inverse of the placement maps the push on the plane back into em space.
     let det = col0.x * col1.y - col1.x * col0.y
     let em = float2(em_corner.x + (d.x * col1.y - d.y * col1.x) / det, em_corner.y + (d.y * col0.x - d.x * col0.y) / det)
 
-    let r0 = slug_draw.row0
-    let r1 = slug_draw.row1
-    let r2 = slug_draw.row2
-    let r3 = slug_draw.row3
     let cw = r3.x * q.x + r3.y * q.y + r3.w
     let cz = r2.x * q.x + r2.y * q.y + r2.w - slug_draw.depth_bias * cw
-
-    let a = v.color.w
-    let linear = float4(srgb_to_linear(v.color.x) * a, srgb_to_linear(v.color.y) * a, srgb_to_linear(v.color.z) * a, a)
     return {
-        position = hpos4(r0.x * q.x + r0.y * q.y + r0.w, r1.x * q.x + r1.y * q.y + r1.w, cz, cw)
-        color = linear
+        clip = float4(r0.x * q.x + r0.y * q.y + r0.w, r1.x * q.x + r1.y * q.y + r1.w, cz, cw)
         em = em
+    }
+
+/// An rgba8 color, sRGB-encoded and straight, as linear and premultiplied.
+fun premultiplied_linear(c: float4) -> float4:
+    let a = c.w
+    return float4(srgb_to_linear(c.x) * a, srgb_to_linear(c.y) * a, srgb_to_linear(c.z) * a, a)
+
+@vertex fun main_vs(v: slug_vertex){slug_draw} -> slug_varyings:
+    let c = place_corner(v.corner, v.em_to_object, v.origin, v.em_bounds, slug_draw.row0, slug_draw.row1, slug_draw.row2, slug_draw.row3)
+    return {
+        position = hpos4(c.clip.x, c.clip.y, c.clip.z, c.clip.w)
+        color = premultiplied_linear(v.color)
+        em = c.em
         banding = v.banding
-        glyph = int4((v.glyph.x & 0xffff) as int, (v.glyph.x >> 16) as int, (v.glyph.y & 0xffff) as int, (v.glyph.y >> 16) as int)
+        glyph = slug.glyph_of(v.glyph)
+    }
+
+// ---- jobs: many instances of shapes kept in the atlas's record table ----
+//
+// A job draws quads that each name a shape record and a frame.
+// A record is a shape placed in its drawing's plane, as sr::slug_instance; a frame places that plane in the world, as
+// sr::slug_frame: the plane's (x, y) lands at at + x * x_axis + y * y_axis.
+// Both are textures rather than buffers, since a vertex stage may read no storage buffer on WebGPU.
+
+// The records of sr::slug_atlas, five texels each, this job's frames, three texels each, and the depth frames probe.
+binding slug_job:
+    records: texture_2d[uint4]
+    frames: texture_2d[uint4]
+    @unfilterable probe_depth: texture_2d[float]
+
+@vertex struct slug_job_vertex:
+    corner: float2
+    @per_instance quad: uint2
+
+/// Where texel `k` of item `index` sits, `per_item` texels to an item and as many items to a row as fit in 4096.
+fun table_texel(index: uint, per_item: uint, k: uint) -> int2:
+    let per_row = 4096 / per_item
+    return int2(((index % per_row) * per_item + k) as int, (index / per_row) as int)
+
+fun unpack_rgba8(c: uint) -> float4:
+    return float4((c & 0xff) as float, ((c >> 8) & 0xff) as float, ((c >> 16) & 0xff) as float, (c >> 24) as float) / 255.0
+
+/// Whether a frame whose probe word is `probe`, probing a point at `depth`, is drawn.
+/// The word holds the probe's x and y in 15 bits each, whether it is tested at bit 15, and whether it wants the point
+/// hidden at bit 31.
+/// The point is hidden where the depth texture holds something nearer by more than the tolerance.
+/// With depth `1 - near / distance`, `1 - depth` is near over the distance, so comparing those drops near out.
+fun is_drawn(probe: uint, depth: float){slug_job, slug_draw} -> bool:
+    if (probe & 0x8000) == 0 => return true
+    if slug_draw.has_probe_depth == 0 => return (probe >> 31) == 0
+    let size = slug_job.probe_depth.size()
+    let u = ((probe & 0x7fff) as float) / 32767.0
+    let v = (((probe >> 16) & 0x7fff) as float) / 32767.0
+    let x = clamp((u * (size.x as float)) as int, 0, size.x - 1)
+    let y = clamp((v * (size.y as float)) as int, 0, size.y - 1)
+    let found = slug_job.probe_depth.load(int2(x, y))
+    let visible = 1.0 - found <= (1.0 + slug_draw.probe_tolerance) * (1.0 - depth)
+    let wants_hidden = (probe >> 31) != 0
+    return visible != wants_hidden
+
+/// The row `r` of a view matrix composed with a frame: what it takes the frame's plane (x, y, 0, 1) to.
+fun framed_row(r: float4, at: float3, x_axis: float3, y_axis: float3) -> float4:
+    let rx = float3(r.x, r.y, r.z)
+    return float4(dot(rx, x_axis), dot(rx, y_axis), 0.0, dot(rx, at) + r.w)
+
+// It lists `slug.tables`, which it does not read, so its groups number as main_ps's do: tables, then the job's.
+@vertex fun main_job_vs(v: slug_job_vertex){slug.tables, slug_job, slug_draw} -> slug_varyings:
+    let record = v.quad.x
+    let frame = v.quad.y
+    let em_to_object = float4.from_bits(slug_job.records.load(table_texel(record, 5, 0)))
+    let em_bounds = float4.from_bits(slug_job.records.load(table_texel(record, 5, 1)))
+    let banding = float4.from_bits(slug_job.records.load(table_texel(record, 5, 2)))
+    let packed = slug_job.records.load(table_texel(record, 5, 3))
+    let color = slug_job.records.load(table_texel(record, 5, 4)).x
+
+    let f0 = slug_job.frames.load(table_texel(frame, 3, 0))
+    let f1 = slug_job.frames.load(table_texel(frame, 3, 1))
+    let f2 = slug_job.frames.load(table_texel(frame, 3, 2))
+    let at = float3(float.from_bits(f0.x), float.from_bits(f0.y), float.from_bits(f0.z))
+    let x_axis = float3(float.from_bits(f1.x), float.from_bits(f1.y), float.from_bits(f1.z))
+    let y_axis = float3(float.from_bits(f2.x), float.from_bits(f2.y), float.from_bits(f2.z))
+
+    let r0 = framed_row(slug_draw.row0, at, x_axis, y_axis)
+    let r1 = framed_row(slug_draw.row1, at, x_axis, y_axis)
+    let r2 = framed_row(slug_draw.row2, at, x_axis, y_axis)
+    let r3 = framed_row(slug_draw.row3, at, x_axis, y_axis)
+    let origin = float2(float.from_bits(packed.x), float.from_bits(packed.y))
+    let c = place_corner(v.corner, em_to_object, origin, em_bounds, r0, r1, r2, r3)
+
+    // The frame's tint multiplies the shape's own color, both linear and premultiplied.
+    let shape_color = premultiplied_linear(unpack_rgba8(color))
+    let tint = premultiplied_linear(unpack_rgba8(f1.w))
+
+    // A frame its probe rules out collapses every corner to one point outside the clip volume, so it covers nothing.
+    if not is_drawn(f0.w, float.from_bits(f2.w)):
+        return {
+            position = hpos4(2.0, 2.0, 2.0, 1.0)
+            color = float4(0.0, 0.0, 0.0, 0.0)
+            em = float2(0.0, 0.0)
+            banding = banding
+            glyph = slug.glyph_of(uint2(packed.z, packed.w))
+        }
+    return {
+        position = hpos4(c.clip.x, c.clip.y, c.clip.z, c.clip.w)
+        color = shape_color * tint
+        em = c.em
+        banding = banding
+        glyph = slug.glyph_of(uint2(packed.z, packed.w))
     }
 
 @pixel fun main_ps(p: slug_varyings){slug.tables, slug_draw} -> slug_target:

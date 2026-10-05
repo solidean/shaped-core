@@ -17,6 +17,11 @@ add_library(shaped-viewer
     src/shaped-viewer/scene/background.cc
     src/shaped-viewer/scene/quadric.cc
     src/shaped-viewer/scene/quadric_set.cc
+    src/shaped-viewer/drawing/annotation.cc
+    src/shaped-viewer/drawing/decal.cc
+    src/shaped-viewer/drawing/drawing.cc
+    src/shaped-viewer/drawing/drawing_manager.cc
+    src/shaped-viewer/drawing/font.cc
     src/shaped-viewer/material/material_type.cc
     src/shaped-viewer/material/material.cc
     src/shaped-viewer/material/material_library.cc
@@ -41,6 +46,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/pathtrace_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
+    src/shaped-viewer/rendering/depth_fill_routine.cc
     src/shaped-viewer/rendering/view_renderer.cc
     src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
@@ -76,6 +82,11 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/triangle_geometry.hh
     src/shaped-viewer/scene/resident_mesh.hh
     src/shaped-viewer/scene/mesh.hh
+    src/shaped-viewer/drawing/annotation.hh
+    src/shaped-viewer/drawing/drawing.hh
+    src/shaped-viewer/drawing/drawing_manager.hh
+    src/shaped-viewer/drawing/instance.hh
+    src/shaped-viewer/drawing/font.hh
     src/shaped-viewer/asset/uri_resolver.hh
     src/shaped-viewer/asset/asset_data.hh
     src/shaped-viewer/asset/asset.hh
@@ -113,6 +124,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/rendering/pathtrace_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
+    src/shaped-viewer/rendering/depth_fill_routine.hh
     src/shaped-viewer/rendering/view_renderer.hh
     src/shaped-viewer/rendering/viewer_renderer.hh
     src/shaped-viewer/rendering/shaders.hh
@@ -162,11 +174,12 @@ sc_add_shader_package(
     NAMESPACE   sv::shaders
     SOURCE_DIR  shaders
     LANGUAGE    sgl
-    MODULE_DIRS shaders/sgl
+    MODULE_DIRS shaders/sgl ${SR_SGL_MODULE_DIR}
     SHADERS
         module:tracer
         tracer_pipeline.sgl:*
         layout.sgl:*
+        depth_fill.sgl:*
 )
 
 # The examples corpus: the viewer as a caller actually reaches for it.
@@ -191,6 +204,8 @@ if(SC_BUILD_TESTS)
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc
+        tests/drawing-test.cc
+        tests/decal-test.cc
         tests/view-convergence-test.cc
         tests/bindless-tables-test.cc
         tests/material-resolution-test.cc
@@ -228,10 +243,12 @@ if(SC_BUILD_TESTS)
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
+            tests/drawing-render-test.cc
             tests/layout-routine-test.cc
             tests/gpu-resource-manager-test.cc
             tests/quadric-manager-test.cc
             tests/quadric-trace-test.cc
+            tests/decal-trace-test.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
             tests/immediate-viewer-window-manual-test.cc
@@ -255,7 +272,7 @@ if(SC_BUILD_TESTS)
             NAMESPACE   sv_test::shaders
             SOURCE_DIR  tests/shaders
             LANGUAGE    sgl
-            MODULE_DIRS shaders/sgl
+            MODULE_DIRS shaders/sgl ${SR_SGL_MODULE_DIR}
             SHADERS
                 bsdf_probe.sgl:*
                 camera_probe.sgl:*

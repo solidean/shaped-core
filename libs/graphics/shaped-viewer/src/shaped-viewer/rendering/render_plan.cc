@@ -1,6 +1,8 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/utility.hh> // cc::clamp, cc::max, cc::min, cc::move
+#include <shaped-viewer/drawing/annotation.hh>
 #include <shaped-viewer/rendering/render_plan.hh>
+#include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/view_data.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::round
@@ -9,7 +11,38 @@ namespace sv
 {
 namespace
 {
+/// Logical pixels, y down from the top-left, to clip space, for a target `resolution` texels wide and tall.
+[[nodiscard]] tg::mat4f logical_pixels_to_clip(tg::vec2i resolution, f32 content_scale)
+{
+    auto m = tg::mat4f::identity;
+    m[0, 0] = 2.0f * content_scale / f32(resolution[0]);
+    m[3, 0] = -1.0f;
+    m[1, 1] = -2.0f * content_scale / f32(resolution[1]);
+    m[3, 1] = 1.0f;
+    m[2, 2] = 0.0f;
+    return m;
+}
+
+/// World to clip space through `cam`, at the aspect the trace of a `resolution` view uses — so a drawing lands on the
+/// pixels its scene does.
+[[nodiscard]] tg::mat4f world_to_clip(camera cam, tg::vec2i resolution)
+{
+    cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1] > 0 ? resolution[1] : 1);
+    auto const m = matrices_of(camera_record_of(cam), f32(cam.projection.near_plane));
+    return m.view_to_clip * m.world_to_view;
+}
+
 constexpr tg::aabb2f full_uv = tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1));
+
+/// A title strip's band, flat and opaque, a shade off black.
+constexpr tg::vec4f title_color = tg::vec4f(0.1f, 0.11f, 0.13f, 1.0f);
+
+/// `view` widened to take in its leaf's title strip above it.
+[[nodiscard]] tg::aabb2i with_title(tg::aabb2i view, tg::aabb2i title)
+{
+    return tg::aabb2i(tg::pos2i(cc::min(view.min[0], title.min[0]), cc::min(view.min[1], title.min[1])),
+                      tg::pos2i(cc::max(view.max[0], title.max[0]), cc::max(view.max[1], title.max[1])));
+}
 
 /// What `emit` returns for a subtree it refused: an index into `render_plan::targets` that names none.
 constexpr u32 invalid_target = u32(-1);
@@ -181,9 +214,9 @@ struct builder
             if (l.kind != layer_kind::layout)
                 continue;
 
-            auto const solution
-                = resolve_layout(def.nodes, l.root_node,
-                                 tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(resolution[index][0], resolution[index][1])));
+            auto const solution = resolve_layout(
+                def.nodes, l.root_node,
+                tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(resolution[index][0], resolution[index][1])), title_texels());
             for (auto const& item : solution.items)
             {
                 if (item.kind != resolved_item::item_kind::leaf)
@@ -251,25 +284,31 @@ struct builder
                 // A layer with no geometry renders nothing, so it gets no trace and no draw sampling one.
                 // Emitting them anyway hands the renderer a dispatch with nothing to bind, which it asserts on —
                 // and `add_scene().add_light(...)` before any mesh exists is ordinary authoring, not an error.
-                if (!is_traceable(l))
-                    break;
-
-                auto const trace = u32(plan.traces.size());
-                plan.traces.push_back(
-                    {.id = v.id, .view = view, .layer = u8(layer_index), .resolution = res, .refresh = refreshes});
-                local.push_back({.kind = draw_kind::view,
-                                 .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
-                                 .primary = {.kind = draw_source_kind::trace, .index = trace, .uv = full_uv},
-                                 .blend = l.blend,
-                                 .opacity = l.opacity});
+                // Its drawings still draw: they need the camera, not the trace.
+                auto trace = u32(-1);
+                if (is_traceable(l))
+                {
+                    trace = u32(plan.traces.size());
+                    plan.traces.push_back(
+                        {.id = v.id, .view = view, .layer = u8(layer_index), .resolution = res, .refresh = refreshes});
+                    local.push_back({.kind = draw_kind::view,
+                                     .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
+                                     .primary = {.kind = draw_source_kind::trace, .index = trace, .uv = full_uv},
+                                     .blend = l.blend,
+                                     .opacity = l.opacity});
+                }
+                emit_drawings(view, layer_index, l, res, trace, local);
+                emit_annotations(view, layer_index, l, res, trace, local);
                 break;
             }
             case layer_kind::layout:
                 emit_layout(view, l, res, map, depth, local);
                 break;
             case layer_kind::canvas:
+                emit_drawings(view, layer_index, l, res, u32(-1), local);
+                break;
             case layer_kind::ui:
-                // Neither draws yet; see libs/graphics/shaped-viewer/docs/TODO.md for what each still needs.
+                // Not drawn yet; see libs/graphics/shaped-viewer/docs/TODO.md for what it still needs.
                 break;
             }
         }
@@ -288,6 +327,72 @@ struct builder
         return target;
     }
 
+    /// Appends one job for `l`'s drawings, if it has any, and the draw that places it in the target's pass.
+    /// A scene's are 3D, through the view's camera; a canvas's are 2D, in the view's logical pixels.
+    void emit_drawings(view_index view,
+                       u32 layer_index,
+                       layer const& l,
+                       tg::vec2i res,
+                       u32 trace,
+                       cc::vector<layout_draw>& local)
+    {
+        if (l.drawings.empty() || res[0] <= 0 || res[1] <= 0)
+            return;
+
+        auto const is_3d = l.kind == layer_kind::scene_3d;
+        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto const job = u32(plan.drawing_jobs.size());
+        plan.drawing_jobs.push_back(
+            {.view = view,
+             .layer = layer_index,
+             .is_3d = is_3d,
+             .object_to_clip = is_3d ? world_to_clip(def[view].camera, res) : logical_pixels_to_clip(res, scale),
+             .logical_size = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale),
+             .trace = trace});
+        local.push_back({.kind = draw_kind::drawings,
+                         .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
+                         .blend = layer_blend::over,
+                         .opacity = l.opacity,
+                         .job = job});
+    }
+
+    /// Appends one 2D job for a scene layer's annotations, if any land in view this frame, after its drawings.
+    /// The anchors are projected through the view's camera here; which are hidden, the GPU decides.
+    void emit_annotations(view_index view,
+                          u32 layer_index,
+                          layer const& l,
+                          tg::vec2i res,
+                          u32 trace,
+                          cc::vector<layout_draw>& local)
+    {
+        if (l.annotations.empty() || res[0] <= 0 || res[1] <= 0)
+            return;
+
+        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto const logical = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale);
+        auto const camera = world_to_clip(def[view].camera, res);
+        auto placements = cc::vector<drawing_placement>();
+        for (auto const& a : l.annotations)
+            impl::place_annotation(a, camera, logical, placements);
+        if (placements.empty())
+            return;
+
+        auto const job = u32(plan.drawing_jobs.size());
+        plan.drawing_jobs.push_back({.view = view,
+                                     .layer = layer_index,
+                                     .is_3d = false,
+                                     .object_to_clip = logical_pixels_to_clip(res, scale),
+                                     .logical_size = logical,
+                                     .trace = trace,
+                                     .kind = drawing_job_kind::annotations,
+                                     .placements = cc::move(placements)});
+        local.push_back({.kind = draw_kind::drawings,
+                         .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
+                         .blend = layer_blend::over,
+                         .opacity = l.opacity,
+                         .job = job});
+    }
+
     void emit_layout(view_index view,
                      layer const& l,
                      tg::vec2i res,
@@ -295,8 +400,10 @@ struct builder
                      int depth,
                      cc::vector<layout_draw>& local)
     {
-        auto const solution
-            = resolve_layout(def.nodes, l.root_node, tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])));
+        auto const solution = resolve_layout(def.nodes, l.root_node,
+                                             tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])), title_texels());
+        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto titles = cc::vector<drawing_placement>();
 
         for (auto const& item : solution.items)
         {
@@ -311,6 +418,24 @@ struct builder
             auto const& leaf = def.nodes[item.node].leaf;
             if (leaf.views.empty())
                 continue;
+
+            // The strip: a flat band, and the name over it, cut where it would run past the strip's right edge.
+            auto const has_title = item.title.max[0] > item.title.min[0] && item.title.max[1] > item.title.min[1];
+            if (has_title)
+            {
+                local.push_back(
+                    {.kind = draw_kind::background, .dst_rect = item.title, .color = title_color, .node = item.node});
+                auto const origin = tg::vec3f(f32(item.title.min[0]) / scale, f32(item.title.min[1]) / scale, 0);
+                // A glyph is at most an em wide, and its `at` already holds the name's indent from the strip's left.
+                auto const width = f32(rect_w(item.title)) / scale;
+                for (auto p : leaf.title_text)
+                {
+                    if (p.at[0] + title_text_size > width)
+                        continue;
+                    p.at = p.at + origin;
+                    titles.push_back(p);
+                }
+            }
 
             // Everything the sources below push belongs *inside* this leaf, which is what the parent links record.
             auto const first_inner = u32(plan.hit_regions.size());
@@ -369,19 +494,42 @@ struct builder
             // between two differently-placed leaves makes its interior ambiguous, which only a z-ordered pick can settle.
             auto const child_map = compose(map, first_fit, first_res);
             auto const me = u32(plan.hit_regions.size());
-            plan.hit_regions.push_back({.view = leaf.views[0],
-                                        .id = def[leaf.views[0]].id,
-                                        .node = item.node,
-                                        .window_rect = map_rect(map, first_fit.dst),
-                                        .scale = child_map.scale,
-                                        .offset = child_map.offset,
-                                        .order = order++});
+            plan.hit_regions.push_back(
+                {.view = leaf.views[0],
+                 .id = def[leaf.views[0]].id,
+                 .node = item.node,
+                 .window_rect = map_rect(map, first_fit.dst),
+                 .scale = child_map.scale,
+                 .offset = child_map.offset,
+                 .leaf_rect = map_rect(map, has_title ? with_title(first_fit.dst, item.title) : first_fit.dst),
+                 .order = order++});
 
             // Only the regions still unclaimed are this leaf's *direct* children; a deeper leaf already took its own.
             for (auto i = first_inner; i < me; ++i)
                 if (plan.hit_regions[i].parent == invalid_hit_region)
                     plan.hit_regions[i].parent = me;
         }
+
+        // Every title of this layout in one 2D job, drawn after the views below them.
+        if (titles.empty())
+            return;
+        auto const job = u32(plan.drawing_jobs.size());
+        plan.drawing_jobs.push_back({.view = view,
+                                     .object_to_clip = logical_pixels_to_clip(res, scale),
+                                     .logical_size = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale),
+                                     .kind = drawing_job_kind::titles,
+                                     .placements = cc::move(titles)});
+        local.push_back({.kind = draw_kind::drawings,
+                         .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
+                         .blend = layer_blend::over,
+                         .opacity = l.opacity,
+                         .job = job});
+    }
+
+    /// A title strip's height in the targets' texels, at the definition's content scale.
+    [[nodiscard]] int title_texels() const
+    {
+        return int(tg::round(title_strip_height * (def.content_scale > 0.0f ? def.content_scale : 1.0f)));
     }
 };
 } // namespace
@@ -472,6 +620,14 @@ bool render_plan::validate() const
 
         for (auto const& d : draws_of(t))
         {
+            // A drawings draw samples no target; what it must name is a job.
+            if (d.kind == draw_kind::drawings)
+            {
+                if (isize(d.job) >= drawing_jobs.size())
+                    return false;
+                continue;
+            }
+
             // The whole point of the post-order append: a source is finished before anything samples it.
             if (d.primary.kind == draw_source_kind::target && d.primary.index >= t)
                 return false;

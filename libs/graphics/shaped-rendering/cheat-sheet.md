@@ -287,6 +287,12 @@ auto o = sr::slug_outline();                   // closed contours of quadratics,
 o.move_to(p); o.line_to(p); o.quad_to(c, p); o.cubic_to(c0, c1, p, tolerance); o.close();
 o.fill_rule = sr::slug_fill_rule::even_odd;    // nonzero by default
 sr::slug_outline::rectangle(box);  sr::slug_outline_of(face, glyph);   // -> result: a TrueType glyph, composites resolved
+auto p = sr::slug_path();                       // contours that may stay OPEN; chainable move_to/line_to/quad_to/cubic_to
+p.move_to(a).line_to(b).arc_to(center, tg::angle_f::make_from_degree(90), tolerance).close();
+sr::slug_path::circle(c, r);  rounded_rectangle(box, r);  ellipse(c, radii);  polygon(pts);  polyline(pts);   // 1/4096 of size
+p.to_outline(sr::slug_fill_rule::nonzero);      // -> slug_outline: a FILL closes every contour with a line
+sr::stroke_outline(p, {.width = 2, .join = sr::stroke_join::round, .cap = sr::stroke_cap::round, .dashes = {6, 4}}, tolerance);
+// -> slug_outline of overlapping pieces wound one way: fill it NONZERO; width in path units, so it scales with the shape
 o.is_closed();                                 // every contour back at its start; compile_slug_shape ASSERTS it
 auto const shape = sr::compile_slug_shape(o);  // device-free curve + band tables, rounded to half floats before banding
 
@@ -300,21 +306,41 @@ auto const inst = sr::make_slug_instance(ref, origin, x_axis, y_axis, srgb_rgba)
 auto const prepared = sr::slug_routine::prepare(cmd, atlas, instances);           // atlas.prepare + instance upload
 (void)sr::slug_routine::execute(scope, atlas, prepared, {.object_to_clip = m, .depth_bias = 0, .weight_boost = false});
 (void)sr::slug_routine::execute(scope, atlas, retained_buffer, first, count, view);  // instances the caller keeps
+auto const first = atlas.add_records(records).value();                             // instances kept IN the atlas, for jobs
+auto const job = sr::slug_routine::prepare_job(cmd, atlas, frames, quads);         // slug_frame {at, x_axis, y_axis, tint}; slug_quad {record, frame}
+// a frame may probe: {.visibility = sr::slug_visibility::if_visible / if_hidden, .probe = uv, .probe_depth = 1 - near / d}
+(void)sr::slug_routine::execute(scope, atlas, job, {.object_to_clip = m, .probe_depth = r32_float_depth});   // none: all visible
+(void)sr::slug_routine::execute(scope, atlas, job, view);                          // every quad, one draw: record placed by its frame
 // execute ASSERTS the atlas has no pending upload: a glyph added after prepare would otherwise draw nothing
 sr::slug_routine::prewarm(ctx, {.color = f, .depth = sg::pixel_format::undefined});  // one pipeline per format pair
 
 auto font = sr::slug_font::load_system_ui_font().value();   // or slug_font::load(path); owns its own atlas
-font.append_line(out, "text", origin, size, color, right = {1, 0}, up = {0, 1});      // advance-only: no kerning
-font.line_width("text", size);  font.atlas();  font.glyph(g);
+font.append_text(out, "text", origin, size, color, right = {1, 0}, up = {0, 1});      // kerned; "\n" starts a line along -up
+#include <shaped-rendering/text_layout.hh>
+auto const l = sr::layout_text(face, "two\nlines", {.size = 14, .line_height = 1.2f, .max_width = 0, .align = sr::text_align::left});
+l.glyphs; l.box; l.scale;                     // laid_out_glyph {glyph, origin}: baseline origins, y DOWN from the box top; glyph outlines are y UP
+font.text_width("text", size);  font.atlas();  font.glyph(g);
+
+#include <shaped-rendering/slug_traced.hh>     // shapes as ray-traced geometry
+auto const records = sr::upload_slug_records(cmd, atlas, instances);   // buffer<sgl_modules::slug::shape_instance>; prepares atlas
+auto const blas = sr::build_slug_blas(cmd, instances.subspan({.offset = first, .size = count}));   // two NON-OPAQUE triangles per instance
+sg::tlas_instance{.blas = blas, .instance_id = scene_id, .cull_mode = sg::instance_cull_mode::none};   // the SCENE maps scene_id -> first
 ```
 
-- **Output is linear and premultiplied**, blended premultiplied; an instance's colour is 8-bit sRGB, straight alpha.
+- **Output is linear and premultiplied**, blended premultiplied; an instance's color is 8-bit sRGB, straight alpha.
 - **A scope with depth tests and never writes it**; `depth_bias` keeps a shape on a surface in front of it.
 - **The routine's pipelines name slug_quads.sgl's target set**: open the scope with a plain `rendering_info`, not another shader's generated target.
 - **Any pixel shader can cover a shape**: `use slug`, list `{slug.tables}` and call `slug.coverage(em, banding, glyph, weight_boost)`.
   It takes its footprint from `ddx` / `ddy`, so call it in uniform control flow; the other overload takes `em_per_pixel`.
   The host binds `sgl_modules::slug::tables` (`<sgl_modules/slug.hh>`) from the atlas; another package lists `SR_SGL_MODULE_DIR` in its `MODULE_DIRS`.
+- **A trace meets shapes through one any-hit**, `slug.decide(c, first)`: list `{slug.tables, slug.shapes}`, and `first` is the run's first record.
+  Inline, the scene's decision branches to it: `world.trace(r, c => scene_any_hit(c))`, a lambda since a module function cannot be handed over by name yet.
+  In a pipeline, an `@any_hit` per payload type wraps it and the run's hit group routes slug quads there; the ray set is the pipeline's, so slug ships no wrapper.
+  It is a point test with a hard edge, so the rays a pixel casts antialias it.
+  `slug.shape_of(first, primitive_index)` is a hit's or a candidate's record.
+- **A traced decal** passes `slug.coverage` its footprint: the em span to where neighbouring rays meet the surface's plane (`graphics/slug-traced`).
 - `impl::slug_reference_coverage(atlas, instance, em, em_per_pixel, weight_boost)` is the pixel shader on the CPU, for tests.
+  `impl::slug_reference_contains(atlas, instance, em)` is `slug.contains`, the point test.
 
 ## Box-filter mipmap routine
 

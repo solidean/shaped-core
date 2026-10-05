@@ -9,5 +9,6 @@ Start at the [readme](../readme.md) for what it is, and the [cheat sheet](../che
 
 * [design.md](design.md) — the architecture and the reasoning: the disposability invariant, the actor that owns the
   connection, singleflight, the data model, the eviction policy, and what each of them rules out.
+* [TODO.md](TODO.md) — what is known to be missing or wrong.
 
 The repo-wide conventions this library follows are [docs/coding-guidelines.md](../../../../docs/coding-guidelines.md).

@@ -2,6 +2,7 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-rendering/impl/slug_geometry.hh>
 #include <shaped-rendering/slug_shape.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/half_float.hh>
@@ -24,15 +25,8 @@ constexpr isize max_curves_per_run = 4095;
 /// Depth alone does not bound a composite: components that each repeat the level below grow exponentially with it.
 constexpr isize max_glyph_work = 65536;
 
-[[nodiscard]] tg::pos2f midpoint(tg::pos2f a, tg::pos2f b)
-{
-    return tg::pos2f((a[0] + b[0]) * 0.5f, (a[1] + b[1]) * 0.5f);
-}
-
-[[nodiscard]] tg::pos2f lerp(tg::pos2f a, tg::pos2f b, f32 t)
-{
-    return tg::pos2f(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
-}
+using impl::lerp;
+using impl::midpoint;
 
 struct glyf_point
 {

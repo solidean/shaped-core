@@ -783,3 +783,41 @@ TEST("sv - a scene layer with no geometry plans no trace")
     // The view is still reachable and still gets its own target — it renders, it just renders empty.
     CHECK(plan.reachable.size() == 2); // the view and the root
 }
+
+TEST("sv - a titled leaf's strip is a band and a 2D text job, and its hit region keeps the strip")
+{
+    auto def = sv::viewer_definition{};
+    def.content_scale = 2.0f;
+    auto const scene = add_traced_view(def, "scene");
+    def.root_view = add_layout_view(def, "root");
+    auto proto = sv::layout_leaf{};
+    proto.title_text.push_back(sv::drawing_placement{.record_count = 1, .at = tg::pos3f(8, 3, 0)});
+    (void)add_leaf(def, layout_root_of(def, def.root_view), scene, proto);
+
+    auto const plan = sv::build_render_plan(def, tg::vec2i(200, 100), 0, {});
+    REQUIRE(plan.validate());
+
+    // the strip is 22 logical pixels, so 44 texels at a content scale of 2
+    REQUIRE(plan.hit_regions.size() == 1);
+    CHECK(plan.hit_regions[0].window_rect == rect_of(0, 44, 200, 100));
+    CHECK(plan.hit_regions[0].leaf_rect == rect_of(0, 0, 200, 100));
+
+    REQUIRE(plan.drawing_jobs.size() == 1);
+    auto const& job = plan.drawing_jobs[0];
+    CHECK(job.kind == sv::drawing_job_kind::titles);
+    CHECK(!job.is_3d);
+    REQUIRE(job.placements.size() == 1);
+    CHECK(job.placements[0].at == tg::pos3f(8, 3, 0)); // the strip starts at the target's top-left
+
+    // in the root's target: the band, the view, then the titles over both
+    auto const draws = plan.draws_of(u32(plan.targets.size() - 1));
+    auto band = false;
+    auto text = false;
+    for (auto const& d : draws)
+    {
+        band = band || (d.kind == sv::draw_kind::background && d.dst_rect == rect_of(0, 0, 200, 44));
+        text = text || d.kind == sv::draw_kind::drawings;
+    }
+    CHECK(band);
+    CHECK(text);
+}

@@ -9,6 +9,7 @@
 #include <shaped-viewer/view/layer.hh>
 #include <shaped-viewer/view/post_process.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
+#include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
@@ -22,6 +23,7 @@ enum class sv::draw_kind : sv::u8
     border,     ///< one band of a node's border ring, in a flat color
     view,       ///< one view's texture across a rect
     wipe,       ///< two views split along an axis — the leaf's post-process
+    drawings,   ///< one layer's drawings, through one `render_plan::drawing_jobs` entry
 };
 
 /// Whether a draw samples a finished target or a trace's own accumulation texture.
@@ -90,6 +92,54 @@ struct sv::layout_draw
 
     /// The layout node this came from; `invalid_node` for a draw a layer emitted directly.
     layout_node_id node = invalid_node;
+
+    /// drawings only: which of `render_plan::drawing_jobs` this draws.
+    u32 job = 0;
+};
+
+/// Where a drawing job's placements come from.
+enum class sv::drawing_job_kind : sv::u8
+{
+    /// A canvas or scene layer's own `drawings`, read through `view` and `layer`.
+    layer,
+
+    /// A scene layer's annotations, placed on screen for this frame and probing the trace's depth.
+    annotations,
+
+    /// A layout's title strips, in its target's logical pixels.
+    titles,
+};
+
+/// One layer's drawings, drawn as one Slug job in its target's pass at the layer's place.
+///
+/// The instances stay on the layer, which the renderer reads through `view` and `layer`; the plan carries what the
+/// layer cannot know on its own — the view's size, and the matrix its drawings are seen through.
+struct sv::plan_drawing_job
+{
+    view_index view = view_index(0);
+    u32 layer = 0;
+
+    /// 3D: world units through the view's camera, tested against the trace's depth once it has one.
+    /// 2D: the view's logical pixels, with no depth.
+    bool is_3d = false;
+
+    /// 2D: logical pixels to clip space; 3D: world to clip space.
+    tg::mat4f object_to_clip = tg::mat4f::identity;
+
+    /// 2D: the view's size in logical pixels, which a placement's `from` corner measures against.
+    tg::vec2f logical_size = tg::vec2f(0, 0);
+
+    /// 3D: the trace of the same layer, into `render_plan::traces`, whose primary-hit depth the drawings are tested
+    /// against; `u32(-1)` for a layer with no geometry to trace, whose drawings then draw untested.
+    /// Annotations: the trace whose depth their probes read.
+    u32 trace = u32(-1);
+
+    drawing_job_kind kind = drawing_job_kind::layer;
+
+    /// Annotations and titles: the placements themselves, which no layer holds.
+    /// An annotation's place depends on the camera, a title's on the layout; both are 2D and drawn untested, and an
+    /// annotation's parts are shown or hidden by their probe of its anchor.
+    cc::vector<drawing_placement> placements;
 };
 
 /// One texture the frame writes: a view's composite target, or the frame's output.
@@ -158,6 +208,10 @@ struct sv::hit_region
     tg::vec2f scale = tg::vec2f(1, 1);
     tg::vec2f offset = tg::vec2f(0, 0);
 
+    /// `window_rect` together with the leaf's title strip: what a pane lifted by a drag keeps, so it does not lose the
+    /// strip's height on every lift.
+    tg::aabb2i leaf_rect = {};
+
     /// The region this one sits inside, or `invalid_hit_region` at the top level.
     /// An index into `render_plan::hit_regions`, not a layout node — a region is per *reference*, so two of them can
     /// share one node.
@@ -224,6 +278,9 @@ struct sv::render_plan
     cc::vector<layout_draw> draws;
     cc::vector<u32> target_first_draw;
     cc::vector<u32> target_draw_count;
+
+    /// Every layer's drawings, one job per layer that has any; a `drawings` draw names one by index.
+    cc::vector<plan_drawing_job> drawing_jobs;
 
     cc::vector<hit_region> hit_regions;
     cc::vector<plan_diagnostic> diagnostics;

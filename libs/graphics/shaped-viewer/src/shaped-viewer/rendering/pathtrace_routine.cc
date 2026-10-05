@@ -7,7 +7,9 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <sgl_modules/slug.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/slug_atlas.hh>
 #include <shaped-shader-library/raytracing_pipeline.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -89,6 +91,19 @@ cc::shared_async<cc::unit> pathtrace_routine::init_once(sg::routine_init_scope s
     _frame_specular_stand_in = stand_in(sg::pixel_format::rgba16_float);
     _guide_hit_distance_stand_in = stand_in(sg::pixel_format::rg32_float);
     _guide_motion_stand_in = stand_in(sg::pixel_format::rg32_float);
+    _primary_depth_stand_in = stand_in(sg::pixel_format::r32_float);
+
+    // Never read, since a trace without decals counts none, but every binding of a group must be filled.
+    auto const table_stand_in = [&](sg::pixel_format format)
+    {
+        return ctx.persistent.create_texture_2d(
+            {.format = format, .width = 1, .height = 1, .usage = sg::texture_usage::texture});
+    };
+    _decal_curves_stand_in = table_stand_in(sg::pixel_format::rgba16_float);
+    _decal_bands_stand_in = table_stand_in(sg::pixel_format::rg16_uint);
+    _decals_stand_in = ctx.persistent.create_buffer<shaders::tracer::decal_record>(1, sg::buffer_usage::readonly_buffer);
+    _decal_shapes_stand_in
+        = ctx.persistent.create_buffer<shaders::tracer::decal_shape>(1, sg::buffer_usage::readonly_buffer);
     co_return;
 }
 
@@ -155,6 +170,7 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
             auto layouts = cc::small_vector<sg::binding_group_layout_handle, sg::max_binding_groups>();
             layouts.push_back(ctx.cached.acquire_binding_group_layout<tracer::traced>());
             layouts.push_back(d.bindless->layout());
+            layouts.push_back(ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>());
             auto description = *described;
             description.layout = ctx.cached.acquire_pipeline_layout({.groups = cc::move(layouts)});
             resident->pending_description = {};
@@ -277,7 +293,8 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
                   && matches_extent(d.guide_albedo, d.output) && matches_extent(d.guide_specular_albedo, d.output)
                   && matches_extent(d.guide_roughness, d.output) && matches_extent(d.frame_output, d.output)
                   && matches_extent(d.guide_motion, d.output) && matches_extent(d.frame_diffuse, d.output)
-                  && matches_extent(d.frame_specular, d.output) && matches_extent(d.guide_hit_distance, d.output),
+                  && matches_extent(d.frame_specular, d.output) && matches_extent(d.guide_hit_distance, d.output)
+                  && matches_extent(d.primary_depth, d.output),
               "pathtrace_routine: every target the trace writes beside the accumulator matches its extent");
     CC_ASSERT(!d.hit_groups.empty(), "pathtrace_routine: a trace needs at least one hit group to shade with");
 
@@ -327,11 +344,25 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
             .guide_hit_distance
             = image_or<sg::pixel_format::rg32_float>(d.guide_hit_distance, self->_guide_hit_distance_stand_in),
             .lights = lights.as_readonly_buffer(),
+            .primary_depth = image_or<sg::pixel_format::r32_float>(d.primary_depth, self->_primary_depth_stand_in),
+            .decals = (d.decals.raw() != nullptr ? d.decals : self->_decals_stand_in).as_readonly_buffer(),
+            .decal_shapes
+            = (d.decal_shapes.raw() != nullptr ? d.decal_shapes : self->_decal_shapes_stand_in).as_readonly_buffer(),
         });
+
+    // An atlas nothing was placed in has no textures yet, so the stand-ins serve it as they serve no atlas at all.
+    auto const has_atlas = d.decal_atlas != nullptr && d.decal_atlas->curve_texture().raw() != nullptr
+                        && d.decal_atlas->band_texture().raw() != nullptr;
+    auto const tables = ctx.transient.create_binding_group(
+        cmd, ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>(),
+        sgl_modules::slug::tables{
+            .curves = (has_atlas ? d.decal_atlas->curve_texture() : self->_decal_curves_stand_in).as_texture_view(),
+            .bands = (has_atlas ? d.decal_atlas->band_texture() : self->_decal_bands_stand_in).as_texture_view()});
 
     cmd.raytracing.bind_pipeline(*variant->pipeline);
     cmd.raytracing.bind_group(0, *group);
     cmd.raytracing.bind_group(bindless_group, *d.bindless->group());
+    cmd.raytracing.bind_group(2, *tables);
 
     // An array the code indexes and nobody declared is logged and barriered whole, so every table is declared.
     d.bindless->declare_raytracing_access(cmd);

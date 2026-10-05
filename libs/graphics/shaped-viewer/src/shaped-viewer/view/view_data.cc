@@ -49,6 +49,10 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         // moving a couple of thousand frames in — right where an uncapped estimate is still converging.
         out.push_back({.id = temporal_id::accumulation(u8(i)), .format = sg::pixel_format::rgba32_float});
 
+        // Only what a raster pass after the trace is occluded by, so only for a layer with drawings or annotations.
+        if (v.layers[i].needs_primary_depth())
+            out.push_back({.id = temporal_id::primary_depth(u8(i)), .format = sg::pixel_format::r32_float});
+
         if (v.layers[i].settings.reconstruct.denoiser == sr::denoise_method::none)
             continue;
 

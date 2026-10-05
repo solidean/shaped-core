@@ -419,3 +419,29 @@ TEST("sv - an empty tree resolves to nothing")
     CHECK(sv::resolve_layout(tree, sv::layout_node_id(0), rect_of(0, 0, 100, 100)).items.empty());
     CHECK(sv::resolve_layout(tree, sv::invalid_node, rect_of(0, 0, 100, 100)).items.empty());
 }
+
+TEST("sv - a leaf with title text gives the top of its rect to the strip, and only then")
+{
+    auto tree = sv::layout_tree{};
+    auto const root = tree.add_container(sv::invalid_node, {}, {.rows = 1});
+    auto titled = sv::layout_leaf{};
+    titled.views.push_back(sv::view_index(0));
+    titled.title_text.push_back(sv::drawing_placement{.record_count = 1});
+    (void)tree.add_leaf(root, titled);
+    auto untitled = sv::layout_leaf{};
+    untitled.views.push_back(sv::view_index(1));
+    (void)tree.add_leaf(root, untitled);
+
+    auto const leaves = leaves_of(sv::resolve_layout(tree, root, rect_of(0, 0, 200, 100), 22));
+    REQUIRE(leaves.size() == 2);
+    CHECK(leaves[0].title == rect_of(0, 0, 100, 22));
+    CHECK(leaves[0].rect == rect_of(0, 22, 100, 100));
+    // the leaf with no text keeps all of its rect: the `title` flag alone reserves nothing
+    CHECK(leaves[1].rect == rect_of(100, 0, 200, 100));
+    CHECK(leaves[1].title == tg::aabb2i());
+
+    // a leaf no taller than the strip keeps its rect rather than vanish under it
+    auto const short_leaves = leaves_of(sv::resolve_layout(tree, root, rect_of(0, 0, 200, 22), 22));
+    CHECK(short_leaves[0].rect == rect_of(0, 0, 100, 22));
+    CHECK(short_leaves[0].title == tg::aabb2i());
+}

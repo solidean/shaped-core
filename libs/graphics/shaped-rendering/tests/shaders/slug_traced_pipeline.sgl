@@ -1,0 +1,64 @@
+// sr::build_slug_blas' quads through a ray-tracing pipeline, read back by slug-traced-test.cc: the same grid of rays as
+// slug_traced.sgl, with the quads' hit group carrying `slug.decide` as its any-hit, wrapped once per payload type.
+// Each pixel traces both ray types along the same ray: a surface ray that reports what it met, and an occlusion ray that
+// only asks whether anything is there, the shadow ray's shape.
+require raytracing_pipeline
+use slug
+
+binding pipeline_probe:
+    world: acceleration_structure[.triangles]
+    width: int
+    firsts: buffer[int]
+    hits: mut buffer[float4]
+
+struct surface_payload:
+    is_hit: int
+    primitive: int
+    t: float
+
+struct occlusion_payload:
+    is_open: bool
+
+rays slug_rays:
+    surface: surface_payload
+    occlusion: occlusion_payload
+
+@raygen fun primary(@launch_id id: int3){slug.tables, slug.shapes, pipeline_probe}:
+    let r = ray(origin = pos3((id.x as float) + 0.5, (id.y as float) + 0.5, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    let mut p = surface_payload(0, 0, 0.0)
+    trace(pipeline_probe.world, r, slug_rays.surface, mut p)
+    let mut o = occlusion_payload(false)
+    let flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit
+    trace(pipeline_probe.world, r, slug_rays.occlusion, mut o, flags = flags)
+    let mut blocked = 0.0
+    if not o.is_open => blocked = 1.0
+    pipeline_probe.hits[id.x + id.y * pipeline_probe.width] = float4(p.is_hit as float, p.primitive as float, p.t, blocked)
+
+@miss fun sky(p: mut surface_payload):
+    p.is_hit = 0
+
+@miss fun open_sky(o: mut occlusion_payload):
+    o.is_open = true
+
+@closest_hit fun met(h: triangle_hit, p: mut surface_payload):
+    p.is_hit = 1
+    p.primitive = h.primitive_index
+    p.t = h.t
+
+// The any-hit is module slug's for both ray types; the wrappers only carry each ray type's payload.
+@any_hit fun cut_surface(c: triangle_candidate, p: mut surface_payload){slug.tables, slug.shapes, pipeline_probe} -> hit_decision:
+    return slug.decide(c, pipeline_probe.firsts[c.instance_id])
+
+@any_hit fun cut_occlusion(c: triangle_candidate, o: mut occlusion_payload){slug.tables, slug.shapes, pipeline_probe} -> hit_decision:
+    return slug.decide(c, pipeline_probe.firsts[c.instance_id])
+
+hit_group slug_quads for slug_rays:
+    surface = (closest_hit = met, any_hit = cut_surface)
+    occlusion = (any_hit = cut_occlusion)
+
+@raytracing pipeline slug_path:
+    rays = slug_rays
+    raygen = primary
+    miss.surface = sky
+    miss.occlusion = open_sky
+    hit_groups = (slug_quads)

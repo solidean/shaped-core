@@ -70,7 +70,7 @@ Bigger design intent lives in [structure.md](structure.md).
     The charstrings decode to path commands in babel, and the cubics split into quadratics in sr (`slug_outline::cubic_to`).
   - The runtime fill rule and weight boost were chosen over a pipeline per variant, on the condition that they cost nothing measurable.
     The benchmark against a nonzero-only shader that settles it is not written yet.
-  - `sr::slug_font` lays a line out by advance widths alone: no kerning, no ligatures, no shaping, which needs a design of its own.
+  - `sr::layout_text` kerns, breaks and wraps lines, but does no shaping: no ligatures, no mark positioning, no reordering, which needs a design of its own.
   - `sr::slug_font::load_system_ui_font` reads a font the operating system ships, because shaped-core vendors none.
   - The routine's pipelines carry slug_quads.sgl's target set, so a scope opened with another shader's generated target refuses them.
 - Get imgui off stb.

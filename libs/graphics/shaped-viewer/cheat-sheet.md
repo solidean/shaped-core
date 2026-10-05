@@ -24,14 +24,14 @@ Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see
 ## Per-frame description — what to render
 
 ```cpp
-sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; def[i] -> view_data& } — a whole frame, as two flat pools
+sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 content_scale; def[i] -> view_data& } — a whole frame, as two flat pools
 sv::view_data                    // { view_id id; vec2i resolution; bool resolution_follows_layout; camera; vector<layer> layers; refresh_policy refresh; vector<temporal_input>; }
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
-sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; }
+sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; vector<drawing_placement> drawings; vector<annotation_record> annotations; vector<decal_placement> decals; }
 sv::layer_kind                   // layout | scene_3d | canvas | ui — composited in order, each over the ones before it
                                  //   a `layout` layer renders a whole tree INTO this view's texture; that is the recursion in the model
-                                 //   canvas (2D) draws nothing until its API is designed; ui is not wired yet
+                                 //   canvas holds 2D drawings (view_ref::add_canvas); ui is not wired yet
 sv::layer_blend                  // replace | over (premultiplied) — scene_3d is forced to replace until the raygen writes alpha
 sv::primary_scene_3d(v) / sv::ensure_scene_3d(v)  // -> layer const* / layer& — the view's first traced layer, appended on demand
 sv::refresh_policy               // { float rate; } — fraction of the loop's rate: 1 every frame, 0.5 every second, 0 only on invalidation
@@ -101,7 +101,7 @@ sv::box_insets                   // { int left, top, right, bottom; } — constr
                                  //   ::all(v) / ::symmetric(horizontal, vertical) are the named spellings of the first two
 sv::relative_placement           // { pos2f position; vec2f size; vec2i position_offset, size_offset; } — fraction of the parent's content box, plus pixels
                                  //   a `relative` node is OUT OF FLOW: siblings tile as if it were absent, and it draws in front
-sv::layout_leaf                  // { vector<view_index> views; vector<post_process> post_processes; fit_mode fit; sampler_mode sampler; bool allow_zoom; float zoom; pos2f zoom_center; }
+sv::layout_leaf                  // { vector<view_index> views; vector<post_process> post_processes; fit_mode fit; sampler_mode sampler; bool allow_zoom; float zoom; pos2f zoom_center; bool title; vector<drawing_placement> title_text; }
 sv::fit_mode                     // stretch | native                    (todo: fill, contain, crop)
 sv::sampler_mode                 // nearest | linear                    (nearest + zoom is a pixel-exact readout)
 sv::post_process                 // { post_process_kind kind; float split; bool horizontal; int separator_width; vec4f separator_color; } — none | wipe
@@ -524,6 +524,37 @@ See [docs/quadrics.md](docs/quadrics.md) for the design.
 `examples/quadric-arrows.cc` is the arrow API, and the difference the sizing overload makes across a row of them.
 `examples/mesh-structure.cc` is it in practice; `examples/mesh-structure-dense.cc` is the same code at 40,962 primitives in one batch.
 
+## Drawings — 2D vector content, built once and instanced ([docs/canvas.md](docs/canvas.md))
+```cpp
+#include <shaped-viewer/drawing/drawing.hh>     // + drawing/instance.hh
+auto d = sv::drawing();                          // ordered filled layers, its own units, y DOWN, no device
+d.add_fill(path, {.color = srgb_rgba, .rule = sr::slug_fill_rule::nonzero});   // sv::path = sr::slug_path; a fill closes it
+d.add_stroke(sv::path::polyline(pts), {.color = c, .width = 2, .cap = sr::stroke_cap::round, .dashes = {6, 4}});
+d.add_drawing(badge, {.at = tg::pos2f(8, 8), .scale = 24, .tint = c});   // a COPY of badge's layers under a frame_2d
+auto set = sv::drawing_set();                    // the value you keep, like sv::mesh; hashed whole, acquired whole
+auto const arrow = set.add(d);                   // sv::drawing_id, its index in the set
+scene.add_drawing(set, arrow, {.at = p, .x_axis = e, .y_axis = n, .scale = 1, .tint = c});   // 3D, world units; drawn AFTER the trace
+scene.add_decal(set, logo, {.at = p, .x_axis = r, .y_axis = down, .scale = 2, .depth = 0.5f});   // TRACED: paints base color at hits
+// projected along y_axis × x_axis (away from its reader) to `depth` each side; only the side facing the projector, any winding
+auto canvas = f.add_canvas();                    // appends a 2D layer each call — keep the handle
+canvas.add_drawing(set, arrow, {.at = tg::pos2f(16, 16), .scale = 48, .from = sv::corner::bottom_right});   // logical pixels
+canvas.add_drawing(d, {...});                    // a lone drawing: an implicit one-element set
+// point (x, y) lands at at + scale * (x * x_axis + y * y_axis); the axes are FREE (stretch, shear)
+// from a right/bottom corner, `at` is where the drawing's FAR edge sits in from that edge
+canvas.add_text("fps 144", tg::pos2f(16, 16), {.size = 14, .color = c});   // logical px; + an instance_2d overload (corners, axes)
+scene.add_text("+X", {.at = p, .x_axis = r, .y_axis = down}, {.size = 0.1f});  // world units: SET the size
+scene.add_annotation(p, "inlet", {.side = sv::annotation_side::automatic, .offset = {32, 28},
+                                  .leader = {.shape = sv::leader_shape::elbow}, .occluded = sv::annotation_occluded::hidden_line});
+// a label flat on screen at world point p, logical px; placed every frame; hidden by the GPU at the anchor's pixel
+// occluded: hidden_line (box stays, marker hollow, leader dashed) | hide | show (e.g. a center of mass inside the part)
+auto const mono = sv::font::from_bytes(pinned).value();   // TrueType only; keyed by the file's hash
+sv::default_font();                              // the OS's UI font, loaded once; null where there is none
+// resources.drawings: sv::drawing_manager, an lru_pool over atlas pages (512 rows, 4 pages; the LRU page empties)
+// decals live in its one decal_atlas(), since a trace binds one; it empties when full unless drawn from this frame
+// a placement carries its page; a layer's job draws once per run of placements sharing a page, in their order
+// glyphs reach the GPU as glyph_set(font, g): 64 consecutive glyph ids per set, compiled on first use
+```
+
 ## Asset loading — a file into `sv::mesh`
 
 babel reads the formats; sv turns a parsed document into things a view can draw.
@@ -667,7 +698,8 @@ The managers ride on `sv::impl::lru_pool<Id, Record>`, the reusable id-pool.
 It mints ids, tracks each record's byte size and last-used epoch, and evicts on the idle timeout or the byte budget, least-recently-used first.
 It never evicts this frame's working set; `advance_to` in its header states that rule exactly.
 It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
-A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
+The mesh and texture managers never hash anything themselves, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
+The drawing manager does: `acquire(set)` hashes the set, and `scene_ref::add_annotation` builds and hashes its box every frame.
 
 ### Bindless tables — declared by module `tracer`, owned by the manager
 
@@ -914,7 +946,8 @@ layout.relative(placement, style)-> layout_ref                 // out of flow, d
 layout.style(box_style)
 
 // on a leaf / a scene
-leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.sampler(m);  leaf.allow_zoom(b)
+leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.sampler(m);  leaf.allow_zoom(b);  leaf.title(false)
+// every leaf shows its view's display_name in a 22-logical-px strip above it unless title(false); the strip is cut from its rect
 scene.add_mesh(sv::mesh)    -> mesh_ref                   // geometry, attributes and textures upload here, keyed by the mesh's own hashes
 scene.add_mesh(sv::resident_mesh)         -> mesh_ref                   // already resources: nothing to look up
 scene.add_light("id", sv::light) -> light_ref               // the id is hashed under the id stack, like a view's; one id twice in a layer ASSERTS

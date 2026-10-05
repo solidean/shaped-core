@@ -1,0 +1,23 @@
+// Fills a depth target from the trace's primary-hit depth, so raster drawn after the trace is occluded by it.
+// Paired with sv::depth_fill_routine, which draws 3 vertices and no vertex buffer.
+//
+// The source is read texel for texel, since it is the target's own size, and already holds clip-space depth: `traced.primary_depth`.
+
+binding depth_fill_source:
+    source: texture_2d[float]
+
+struct depth_fill_varyings:
+    @position position: hpos4
+
+@pixel struct depth_fill_target:
+    @depth depth: float
+
+// Vertices 0, 1 and 2 land at (0,0), (2,0) and (0,2): one triangle covering the target.
+@vertex fun main_vs(@vertex_index vertex: int) -> depth_fill_varyings:
+    let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+
+@pixel fun main_ps(p: depth_fill_varyings){depth_fill_source} -> depth_fill_target:
+    let texel = int2(p.position.x as int, p.position.y as int)
+    return { depth = depth_fill_source.source.load(texel) }

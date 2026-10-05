@@ -4,13 +4,14 @@
 #include <clean-core/container/span.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-/// One shape to draw: which shape, where its em space lands on the object's xy plane, and its colour.
+/// One shape to draw: which shape, where its em space lands on the object's xy plane, and its color.
 /// 68 bytes, read once per quad by the vertex stage; build one with `sr::make_slug_instance`.
 struct sr::slug_instance
 {
@@ -31,6 +32,52 @@ struct sr::slug_instance
     u32 color = 0xffffffff;
 };
 
+/// Whether a frame's shapes draw, by what its probe finds in the draw's depth texture.
+enum class sr::slug_visibility : sr::u8
+{
+    /// Drawn whatever the depth holds; the probe is not read.
+    always,
+
+    /// Drawn only where nothing in the depth texture lies in front of the probe.
+    if_visible,
+
+    /// Drawn only where something does: the other half of a pair that shows one look or the other.
+    if_hidden,
+};
+
+/// Where a job places a plane of shapes: the plane's (x, y) lands at `at + x * x_axis + y * y_axis`, in whatever space
+/// the draw's `object_to_clip` starts from — pixels for a 2D overlay, the world for a scene.
+/// The axes are free: their lengths and angle stretch and shear the plane.
+///
+/// A frame can be shown or hidden as a whole by one depth test at its probe, made by the vertex stage at each corner
+/// against the same texel, so the four agree.
+/// That is what an annotation flat on screen wants: hidden when the point it marks is, never cut in half where it
+/// crosses a silhouette.
+struct sr::slug_frame
+{
+    tg::pos3f at;
+    tg::vec3f x_axis = tg::vec3f(1, 0, 0);
+    tg::vec3f y_axis = tg::vec3f(0, 1, 0);
+
+    /// rgba8, sRGB-encoded, straight alpha, red in the low byte; multiplies the color of every shape under this frame.
+    u32 tint = 0xffffffff;
+
+    slug_visibility visibility = slug_visibility::always;
+
+    /// Where the probe reads the draw's `slug_view::probe_depth`, in [0, 1] across it with y down, kept to 1/32767.
+    tg::vec2f probe = tg::vec2f(0, 0);
+
+    /// The probed point's own depth, as `1 - near / distance`: what the depth texture holds where it is in front.
+    f32 probe_depth = 0.0f;
+};
+
+/// One quad of a job: the atlas record it draws, under which of the job's frames.
+struct sr::slug_quad
+{
+    u32 record = 0;
+    u32 frame = 0;
+};
+
 /// What one draw needs beyond its instances.
 struct sr::slug_view
 {
@@ -43,9 +90,17 @@ struct sr::slug_view
 
     /// Takes the square root of coverage, which makes thin shapes optically heavier.
     bool weight_boost = false;
+
+    /// What a job's probing frames test against: an r32_float texture of `1 - near / distance`, 1 where nothing is.
+    /// Without one every probe counts as visible, so `if_visible` frames draw and `if_hidden` ones do not.
+    sg::texture_2d probe_depth;
+
+    /// How much nearer than the probe, as a fraction of its distance, the depth must be to hide it.
+    /// A point lying on a surface then stays visible, though the depth there is the surface's own.
+    f32 probe_tolerance = 0.01f;
 };
 
-/// The routine's parameter: the scope's colour format, and its depth format or undefined for none.
+/// The routine's parameter: the scope's color format, and its depth format or undefined for none.
 struct sr::slug_pipeline_key
 {
     sg::pixel_format color = sg::pixel_format::undefined;
@@ -61,9 +116,16 @@ struct sr::slug_pipeline_key
 ///     auto pass = cmd->raster.render_to({.color_targets = {rt.preserved()}});
 ///     (void)sr::slug_routine::execute(pass, atlas, prepared, {.object_to_clip = mvp});
 ///
+/// A **job** is the instanced form: shapes kept once as the atlas's records, placed many times by frames.
+/// Each quad names a record and a frame, so one draw covers any mix of shapes under any number of frames:
+///
+///     auto const first = atlas.add_records(arrow_layers).value();                 // once
+///     auto const job = sr::slug_routine::prepare_job(*cmd, atlas, frames, quads); // before the scope
+///     (void)sr::slug_routine::execute(pass, atlas, job, {.object_to_clip = world_to_clip});
+///
 /// Output is linear and premultiplied, blended premultiplied over the target.
 /// A scope with a depth target draws depth-tested without writing depth, so shapes on a surface layer in draw order.
-/// One pipeline per (colour, depth) format pair, built in the background: execute declines until it is ready.
+/// One pipeline per (color, depth) format pair and draw form, built in the background: execute declines until it is ready.
 class sr::slug_routine : public sg::render_routine<slug_routine, slug_pipeline_key>
 {
 public:
@@ -73,6 +135,32 @@ public:
         sg::command_list const* command_list = nullptr;
         sg::buffer<slug_instance> instances;
     };
+
+    /// A job's frames and quads uploaded for one recording, on the list `prepare_job` was given.
+    struct prepared_job
+    {
+        sg::command_list const* command_list = nullptr;
+        sg::texture_2d frames;
+        sg::buffer<slug_quad> quads;
+    };
+
+    /// Texels one frame takes in a job's frame texture, and how many frames a row of it holds.
+    static constexpr int texels_per_frame = 3;
+    static constexpr int frames_per_row = 4096 / texels_per_frame;
+
+    /// Uploads `atlas`'s pending shapes and records, and this job's frames and quads; call it before the scope opens.
+    /// Every quad must name a record of `atlas` and a frame of `frames`.
+    [[nodiscard]] static prepared_job prepare_job(sg::command_list& cmd,
+                                                  slug_atlas& atlas,
+                                                  cc::span<slug_frame const> frames,
+                                                  cc::span<slug_quad const> quads);
+
+    /// Draws what `prepare_job` uploaded into an open scope on the same list.
+    /// `view.object_to_clip` takes the frames' space to clip space.
+    [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope,
+                                                     slug_atlas const& atlas,
+                                                     prepared_job const& job,
+                                                     slug_view const& view);
 
     /// Uploads `atlas`'s pending shapes and this frame's instances; call it before the rendering scope opens.
     [[nodiscard]] static prepared_shapes prepare(sg::command_list& cmd,
@@ -99,16 +187,21 @@ protected:
 
 private:
     sg::binding_group_layout_handle _group_layout;
+    sg::binding_group_layout_handle _job_group_layout;
     sg::async_raster_pipeline _pipeline;
+    sg::async_raster_pipeline _job_pipeline;
 
     /// The six corners of the unit square every quad is drawn from, two triangles.
     sg::buffer<tg::vec2f> _corners;
+
+    /// Bound when a job's view has no probe depth of its own, so the group is complete; never read.
+    sg::texture_2d _no_probe_depth;
 };
 
 namespace sr
 {
 /// An instance drawing `shape` with its outline's origin at `origin`, one outline unit along x on `x_axis` and along y on
-/// `y_axis` — all in object space.
+/// `y_axis` — all in object space, or in a drawing's plane for a record a job's frames place.
 /// `shape` must be drawable: an empty shape — a space — has no instance, so the caller skips it.
 /// `srgb_color` is straight-alpha, sRGB-encoded, in [0, 1].
 [[nodiscard]] slug_instance make_slug_instance(slug_shape_ref const& shape,

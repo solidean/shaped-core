@@ -131,6 +131,7 @@ One-liner per library:
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
   Hosts **Slug**: shapes and text drawn on the GPU from their outlines — `sr::slug_routine` over a caller-owned `sr::slug_atlas`, depth-tested where the scope has depth.
   Its coverage is SGL module `slug`, which sr exports, so any pixel shader that `use`s it can draw a shape on a surface — [docs/slug.md](libs/graphics/shaped-rendering/docs/slug.md).
+  A trace meets shapes too: `sr::build_slug_blas` makes them quads in the scene's own structure, and `slug.decide` is the any-hit that cuts them, inline or in a hit group.
   Hosts **reconstruction**: `sr::reconstruct_routine` denoises, then upscales with AMD FSR 3.1 on any GPU.
   AMD's host code is driven through sg — [docs/reconstruction.md](libs/graphics/shaped-rendering/docs/reconstruction.md) is the design.
   sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.
@@ -161,6 +162,8 @@ One-liner per library:
   **A material type is an SGL fragment** (`sv::material_type::shader`), generated into one hit group per permutation.
   **`sv::asset_loader` reads glTF, OBJ and STL into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
   A mesh exists in two forms: `sv::mesh` is what a caller holds — pinned payloads plus the resources minted for them, with `is_ready` — and `sv::resident_mesh` is that mesh as ids alone.
+  **Drawings are Slug shapes**: flat on a canvas, over a scene, as annotations — and as decals, which the tracer paints into the surfaces they are projected onto.
+  [docs/canvas.md](libs/graphics/shaped-viewer/docs/canvas.md) is the design.
   [docs/asset-loading.md](libs/graphics/shaped-viewer/docs/asset-loading.md) is the design and the phasing.
 
 Supporting directories:

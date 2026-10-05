@@ -129,6 +129,14 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(13) << kind_shift) | u64(layer);
 }
 
+/// The clip-space depth of a traced layer's first primary hit per pixel, which the layer's 3D drawings are occluded by
+/// and its annotations probe.
+/// Declared only for a layer that holds either, and rewritten every frame the layer traces rather than averaged.
+[[nodiscard]] constexpr u64 primary_depth(u8 layer)
+{
+    return (u64(14) << kind_shift) | u64(layer);
+}
+
 /// Whether `id` is an accumulation slot, whatever layer it belongs to.
 ///
 /// For a caller folding over every traced layer of a view rather than naming one.
