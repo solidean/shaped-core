@@ -17,11 +17,6 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-[[nodiscard]] f64 cross(f64 ax, f64 ay, f64 bx, f64 by)
-{
-    return ax * by - ay * bx;
-}
-
 /// The winding number of `outline` around `p`, from the crossings of a ray toward +x.
 [[nodiscard]] int winding(sr::slug_outline const& outline, tg::pos2f p)
 {
@@ -209,9 +204,9 @@ TEST("sr::stroke_outline - a round-joined, round-capped polyline covers what lie
 
 TEST("sr::stroke_outline - a curve bending tighter than the half-width still covers exactly its reach")
 {
-    // a hairpin: the curvature at its apex is far tighter than the half-width, so its inner offset folds over
     auto path = sr::slug_path();
     path.move_to(tg::pos2f(0, 0)).quad_to(tg::pos2f(100, 50), tg::pos2f(0, 100));
+    // a hairpin: the curvature at its apex is far tighter than the half-width, so its inner offset folds over
     auto hairpin = sr::slug_path();
     hairpin.move_to(tg::pos2f(20, 50)).quad_to(tg::pos2f(80, 52), tg::pos2f(20, 54));
 

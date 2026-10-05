@@ -1,4 +1,6 @@
+#include <clean-core/common/asserts.hh>
 #include <clean-core/common/utility.hh>
+#include <shaped-rendering/impl/slug_geometry.hh>
 #include <shaped-rendering/slug_path.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/constants.hh>
@@ -14,26 +16,14 @@ constexpr f32 shape_tolerance = 1.0f / 4096.0f;
 /// How often the stroker may halve a quadratic, which bounds the pieces one curve becomes at 2^16.
 constexpr int max_split_depth = 16;
 
-[[nodiscard]] f32 cross(tg::vec2f a, tg::vec2f b)
-{
-    return a[0] * b[1] - a[1] * b[0];
-}
-
-/// `v` turned a quarter from +x toward +y.
-[[nodiscard]] tg::vec2f left_of(tg::vec2f v)
-{
-    return tg::vec2f(-v[1], v[0]);
-}
+using impl::cross;
+using impl::left_of;
+using impl::midpoint;
 
 [[nodiscard]] tg::vec2f direction_of(f32 radians)
 {
     auto const a = tg::angle_f::make_from_radians(radians);
     return tg::vec2f(tg::cos(a), tg::sin(a));
-}
-
-[[nodiscard]] tg::pos2f midpoint(tg::pos2f a, tg::pos2f b)
-{
-    return a + (b - a) * 0.5f;
 }
 
 [[nodiscard]] tg::pos2f point_at(slug_curve const& c, f32 t)
@@ -329,7 +319,8 @@ private:
     {
         auto const cos_turn = tg::dot(in, out);
         auto const turn = tg::atan2(cross(in, out), cos_turn).radians();
-        if (tg::abs(turn) < 1e-4f)
+        // the gap a join would fill is about half a width times the turn wide
+        if (_half * tg::abs(turn) < _tolerance)
             return;
 
         // turning toward +y bends about a center on the left, so the gap to fill opens on the right
@@ -466,6 +457,7 @@ slug_path& slug_path::arc_to(tg::pos2f center, tg::angle_f sweep, f32 tolerance)
 
     // A quadratic through both ends of an arc of half-angle h, controlled where their tangents meet, strays furthest at
     // its middle, by r (1 - cos h)^2 / (2 cos h), about r h^4 / 8; pieces are at most an eighth of a turn.
+    CC_ASSERT(tg::abs(total) <= 64.0f * 2.0f * tg::pi<f32>, "an arc sweeps at most 64 full turns");
     auto const half_angle = cc::min(tg::pow(8.0f * cc::max(tolerance, 1e-7f) / radius, 0.25f), tg::pi<f32> / 8.0f);
     auto const pieces = cc::clamp(int(tg::ceil(tg::abs(total) / (2.0f * half_angle))), 1, 4096);
     auto const start = tg::atan2(from[1], from[0]).radians();

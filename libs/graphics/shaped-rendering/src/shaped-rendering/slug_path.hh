@@ -43,7 +43,8 @@ struct sr::slug_path
     slug_path& cubic_to(tg::pos2f c0, tg::pos2f c1, tg::pos2f p, f32 tolerance);
 
     /// A circular arc around `center`, from where the path is, turning by `sweep`: positive turns from +x toward +y.
-    /// Quadratics stay within `tolerance` of the circle; any sweep is allowed, a full turn and more included.
+    /// `sweep` must be at most 64 full turns either way; a full turn and more draws the circle again.
+    /// Quadratics stay within `tolerance` of the circle while the arc needs at most 4096 of them, and stray further past that.
     slug_path& arc_to(tg::pos2f center, tg::angle_f sweep, f32 tolerance);
 
     /// Ends the open contour with a line back to its start, if it does not end there already, and marks it closed.
