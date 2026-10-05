@@ -759,6 +759,9 @@ A fix that touched several sibling kernels is summarised as if each had shown th
 A comment said a ray, line, segment, triangle or quad parallel to a plane "used to hit at infinity".
 Only the ray and line did; a segment's range and a triangle's barycentrics rejected the infinite parameter.
 **A number that spans commits names every commit it spans.**
+**A CI result is a claim about the commit it ran on.**
+A `land-changes` draft said the arm64 legs "ran and passed", so NEON had now run; they had run on the head before any review commit, and none of the fourteen had been pushed.
+Name the sha a CI run read, and say which of the review's changes it has not seen yet.
 **Read the diff of each commit while writing its bullet, and name every hunk a reader will see.**
 A sort comparator, a `nan` spelling or a nested-test case left out of the comment is a hunk the author cannot account for.
 
