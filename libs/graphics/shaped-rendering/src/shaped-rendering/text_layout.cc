@@ -49,7 +49,8 @@ void set_paragraph(babel::font::face const& face, cc::span<char32_t const> text,
         // A glyph that would cross the limit after a space on this line wraps the line at that space, taking the word
         // started since then along.
         // Only a space after ink is a break: a paragraph's leading spaces leave nothing for the line to end with.
-        if (max_units > 0 && !is_space && break_glyph >= 0 && break_width > 0 && current.width + kern + advance > max_units)
+        if (max_units > 0 && !is_space && break_glyph >= 0 && break_width > 0
+            && current.width + kern + advance > max_units)
         {
             auto next = line();
             auto const shift = break_glyph < current.glyphs.size() ? current.glyphs[break_glyph].x : current.width;

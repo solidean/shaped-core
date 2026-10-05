@@ -129,8 +129,10 @@ ASYNC_INVOCABLE_TEST("sv - a decal paints the traced surface its projector reach
         shapes.push_back(sv::impl::decal_shape_of(atlas.record(placement.first_record)));
         sv::shaders::tracer::decal_record const decals[] = {sv::impl::decal_record_of(placement, 0)};
 
-        auto fc
-            = sv::shaders::tracer::frame_constants{.camera = sv::camera_record_of(camera), .samples_per_pixel = 8, .max_bounces = 2, .rng_seed = 1};
+        auto fc = sv::shaders::tracer::frame_constants{.camera = sv::camera_record_of(camera),
+                                                       .samples_per_pixel = 8,
+                                                       .max_bounces = 2,
+                                                       .rng_seed = 1};
         fc.decal_count = 1;
         fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(image_size);
 
@@ -158,8 +160,8 @@ ASYNC_INVOCABLE_TEST("sv - a decal paints the traced surface its projector reach
                  .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
             auto const instance_table
                 = ctx.transient.create_buffer_from_data(*cmd, records, sg::buffer_usage::readonly_buffer);
-            auto const decal_buffer = ctx.transient.create_buffer_from_data(*cmd, cc::span<sv::shaders::tracer::decal_record const>(decals),
-                                                                            sg::buffer_usage::readonly_buffer);
+            auto const decal_buffer = ctx.transient.create_buffer_from_data(
+                *cmd, cc::span<sv::shaders::tracer::decal_record const>(decals), sg::buffer_usage::readonly_buffer);
             auto const shape_buffer = ctx.transient.create_buffer_from_data(
                 *cmd, cc::span<sv::shaders::tracer::decal_shape const>(shapes), sg::buffer_usage::readonly_buffer);
 

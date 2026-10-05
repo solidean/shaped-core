@@ -146,9 +146,8 @@ ASYNC_INVOCABLE_TEST("sv - a canvas draws its drawings in the order they were ad
     v.id = sv::view_id::from_string("order");
     v.resolution = size;
     v.resolution_follows_layout = false;
-    v.layers.push_back({.kind = sv::layer_kind::canvas,
-                        .blend = sv::layer_blend::over,
-                        .drawings = {place(red, 1000), place(blue, 1)}});
+    v.layers.push_back(
+        {.kind = sv::layer_kind::canvas, .blend = sv::layer_blend::over, .drawings = {place(red, 1000), place(blue, 1)}});
     auto def = sv::viewer_definition{};
     def.views.push_back(cc::move(v));
     def.root_view = sv::view_index(0);

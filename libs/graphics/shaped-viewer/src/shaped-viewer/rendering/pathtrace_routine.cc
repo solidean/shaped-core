@@ -102,7 +102,8 @@ cc::shared_async<cc::unit> pathtrace_routine::init_once(sg::routine_init_scope s
     _decal_curves_stand_in = table_stand_in(sg::pixel_format::rgba16_float);
     _decal_bands_stand_in = table_stand_in(sg::pixel_format::rg16_uint);
     _decals_stand_in = ctx.persistent.create_buffer<shaders::tracer::decal_record>(1, sg::buffer_usage::readonly_buffer);
-    _decal_shapes_stand_in = ctx.persistent.create_buffer<shaders::tracer::decal_shape>(1, sg::buffer_usage::readonly_buffer);
+    _decal_shapes_stand_in
+        = ctx.persistent.create_buffer<shaders::tracer::decal_shape>(1, sg::buffer_usage::readonly_buffer);
     co_return;
 }
 
@@ -344,10 +345,9 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
             = image_or<sg::pixel_format::rg32_float>(d.guide_hit_distance, self->_guide_hit_distance_stand_in),
             .lights = lights.as_readonly_buffer(),
             .primary_depth = image_or<sg::pixel_format::r32_float>(d.primary_depth, self->_primary_depth_stand_in),
-            .decals = (d.decals.raw() != nullptr ? d.decals : self->_decals_stand_in)
-                          .as_readonly_buffer(),
-            .decal_shapes = (d.decal_shapes.raw() != nullptr ? d.decal_shapes : self->_decal_shapes_stand_in)
-                                .as_readonly_buffer(),
+            .decals = (d.decals.raw() != nullptr ? d.decals : self->_decals_stand_in).as_readonly_buffer(),
+            .decal_shapes
+            = (d.decal_shapes.raw() != nullptr ? d.decal_shapes : self->_decal_shapes_stand_in).as_readonly_buffer(),
         });
 
     // An atlas nothing was placed in has no textures yet, so the stand-ins serve it as they serve no atlas at all.

@@ -349,8 +349,10 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
         h, cc::make_hash_of_bytes(cc::span<shaders::tracer::light_record const>(lights.records).as_bytes()));
 
     // Every byte of both is written too, pads included.
-    h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<shaders::tracer::decal_record const>(decals.decals).as_bytes()));
-    h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<shaders::tracer::decal_shape const>(decals.shapes).as_bytes()));
+    h = cc::combine_hash(
+        h, cc::make_hash_of_bytes(cc::span<shaders::tracer::decal_record const>(decals.decals).as_bytes()));
+    h = cc::combine_hash(
+        h, cc::make_hash_of_bytes(cc::span<shaders::tracer::decal_shape const>(decals.shapes).as_bytes()));
     h = cc::combine_hash(h, cc::make_hash(resolution[0], resolution[1], shader_generation));
 
     // tlas_instance holds a handle and an optional, so its padding is not hashable — take the fields the build reads.
