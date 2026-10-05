@@ -311,6 +311,85 @@ namespace
     return tg::vec3f(float(i), -0.3f * float(i), 2.0f + 0.01f * float(i));
 }
 
+[[nodiscard]] tg::vec2f f2_element(u32 i)
+{
+    return tg::vec2f(float(i) * 0.1f, 1.0f - float(i) * 0.07f);
+}
+
+/// The rotation stream at element `i`: unit, every third one negated.
+[[nodiscard]] tg::vec4f f4_element(u32 i)
+{
+    auto const sign = i % 3 == 1 ? -1.0f : 1.0f;
+    return tg::normalize(tg::vec4f(0.02f * float(i), 0.1f, -0.03f * float(i), 1.0f)) * sign;
+}
+
+/// `quadric.roots_of` in double: the surface's roots along the ray, re-expressed about its closest approach.
+struct reference_roots
+{
+    int count = 0;
+    f64 t0 = 0;
+    f64 t1 = 0;
+    tg::vec3d shifted_origin = {};
+    f64 t_closest = 0;
+
+    /// Whether float and double agree on which equation this is: a quadratic term and a discriminant both clear of zero.
+    /// A ray along a cone's generator has a quadratic term zero in double and a speck in float, so the two solve
+    /// different equations there, and only the hit they reach agrees.
+    bool is_well_conditioned = true;
+};
+
+[[nodiscard]] reference_roots roots_reference(sv::quadric3 const& q, tg::vec3f o_in, tg::vec3f d_in)
+{
+    auto const o0 = tg::vec3d(o_in[0], o_in[1], o_in[2]);
+    auto const d = tg::vec3d(d_in[0], d_in[1], d_in[2]);
+    auto const a_mul = [&](tg::vec3d v)
+    {
+        return tg::vec3d(q.diag[0] * v[0] + q.off_diag[0] * v[1] + q.off_diag[1] * v[2],
+                         q.off_diag[0] * v[0] + q.diag[1] * v[1] + q.off_diag[2] * v[2],
+                         q.off_diag[1] * v[0] + q.off_diag[2] * v[1] + q.diag[2] * v[2]);
+    };
+    auto const b = tg::vec3d(q.linear[0], q.linear[1], q.linear[2]);
+    auto const evaluate = [&](tg::vec3d p) { return tg::dot(p, a_mul(p)) + 2.0 * tg::dot(b, p) + f64(q.constant); };
+
+    auto const qa = tg::dot(d, a_mul(d));
+    auto const a_scale = tg::abs(f64(q.diag[0])) + tg::abs(f64(q.diag[1])) + tg::abs(f64(q.diag[2]))
+                       + tg::abs(f64(q.off_diag[0])) + tg::abs(f64(q.off_diag[1])) + tg::abs(f64(q.off_diag[2]));
+    if (tg::abs(qa) < 1e-5 * a_scale)
+        return {.is_well_conditioned = false};
+    if (qa == 0.0)
+    {
+        auto const qb = 2.0 * (tg::dot(d, a_mul(o0)) + tg::dot(b, d));
+        if (qb == 0.0)
+            return {.shifted_origin = o0};
+        return {.count = 1, .t0 = -evaluate(o0) / qb, .shifted_origin = o0};
+    }
+
+    auto const t_closest = -2.0 * (tg::dot(d, a_mul(o0)) + tg::dot(b, d)) / (2.0 * qa);
+    auto const o = o0 + d * t_closest;
+    auto const qb = 2.0 * (tg::dot(d, a_mul(o)) + tg::dot(b, d));
+    auto const qc = evaluate(o);
+    auto const disc = qb * qb - 4.0 * qa * qc;
+    auto const scale = qb * qb + tg::abs(4.0 * qa * qc);
+    auto const is_well_conditioned = tg::abs(disc) > 1e-4 * scale;
+    if (disc < 0.0)
+        return {.shifted_origin = o, .t_closest = t_closest, .is_well_conditioned = is_well_conditioned};
+    auto const root = tg::sqrt(disc);
+    auto const s = qb >= 0.0 ? -0.5 * (qb + root) : -0.5 * (qb - root);
+    auto const r0 = s / qa;
+    auto const r1 = s == 0.0 ? r0 : qc / s;
+    return {.count = 2,
+            .t0 = cc::min(r0, r1) + t_closest,
+            .t1 = cc::max(r0, r1) + t_closest,
+            .shifted_origin = o,
+            .t_closest = t_closest,
+            .is_well_conditioned = is_well_conditioned};
+}
+
+[[nodiscard]] bool near_d(f64 a, f64 b, f64 eps)
+{
+    return tg::abs(a - b) <= eps * cc::max(1.0, tg::abs(b));
+}
+
 [[nodiscard]] bool near(f32 a, f32 b, f32 eps = 1e-5f)
 {
     return tg::abs(a - b) <= eps * cc::max(1.0f, tg::abs(b));
@@ -326,7 +405,7 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     auto const memory = make_memory();
     auto const cases = make_cases();
@@ -351,7 +430,45 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
             ++hits;
             CHECK(tg::abs(gpu_t - reference.value().t) <= 1e-4f * cc::max(1.0f, reference.value().t))
                 .context(cc::format("case {}: t is {} on the GPU and {} on the CPU", i, gpu_t, reference.value().t));
+
+            // The outward unit normal at the hit, the one the CPU reference reports.
+            auto const gpu_n = tg::vec3f(results[i * results_per_case][1], results[i * results_per_case][2],
+                                         results[i * results_per_case][3]);
+            auto const alignment = tg::dot(gpu_n, reference.value().normal);
+            CHECK(near(gpu_n.length(), 1.0f, 1e-4f))
+                .context(cc::format("case {}: the normal has length {}", i, gpu_n.length()));
+            CHECK(alignment > 1.0f - 1e-3f).context(cc::format("case {}: the normal is off the CPU's by {}", i, alignment));
         }
+
+        // The surface's own roots, solved about the closest approach as the probe solves them.
+        auto const& prim = primitives[c.quadric];
+        auto const rel = c.origin - tg::vec3f(prim.origin[0], prim.origin[1], prim.origin[2]);
+        auto const roots = roots_reference(prim.surface, rel, c.dir);
+        auto const* const r = &results[i * results_per_case];
+        if (roots.is_well_conditioned)
+        {
+            CHECK(r[1][1] == float(roots.count))
+                .context(cc::format("case {}: {} roots, the CPU {}", i, r[1][1], roots.count));
+            if (roots.count >= 1)
+                CHECK(near_d(r[1][2], roots.t0, 1e-4))
+                    .context(cc::format("case {}: t0 is {}, the CPU {}", i, r[1][2], roots.t0));
+            if (roots.count == 2)
+                CHECK(near_d(r[1][3], roots.t1, 1e-4))
+                    .context(cc::format("case {}: t1 is {}, the CPU {}", i, r[1][3], roots.t1));
+        }
+        if (roots.is_well_conditioned)
+        {
+            CHECK(near_d(r[2][3], roots.t_closest, 1e-4))
+                .context(cc::format("case {}: t_closest is {}, the CPU {}", i, r[2][3], roots.t_closest));
+            for (auto lane = 0; lane < 3; ++lane)
+                CHECK(tg::abs(f64(r[2][lane]) - roots.shifted_origin[lane])
+                      <= 1e-4 * cc::max(1.0, tg::abs(roots.t_closest)))
+                    .context(cc::format("case {}: the shifted origin's {} is {}, the CPU {}", i, lane, r[2][lane],
+                                        roots.shifted_origin[lane]));
+        }
+
+        // A quadric's context names its primitive and the instance's parameter offset, 64 in the probe.
+        CHECK(r[7][3] == float(c.quadric + 64)).context(cc::format("case {}: the quadric context reads {}", i, r[7][3]));
     }
     CHECK(hits >= isize(cases.size()) / 3).context(cc::format("only {} of {} rays hit", hits, cases.size()));
 
@@ -383,6 +500,31 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
         for (auto lane = 0; lane < 3; ++lane)
             CHECK(near(r[3][lane], f3[lane], 1e-4f))
                 .context(cc::format("case {}: f3[{}] is {}, the CPU blend {}", i, lane, r[3][lane], f3[lane]));
+
+        // f4 blends per vertex as the others do, and reads zeros through the second descriptor block.
+        auto f4 = tg::vec4f(0, 0, 0, 0);
+        for (auto k = 0; k < 3; ++k)
+            f4 = f4 + (c.desc_offset == 0 ? f4_element(corner[k]) : tg::vec4f(0, 0, 0, 0)) * w[k];
+        for (auto lane = 0; lane < 4; ++lane)
+            CHECK(near(r[4][lane], f4[lane], 1e-4f))
+                .context(cc::format("case {}: f4[{}] is {}, the CPU blend {}", i, lane, r[4][lane], f4[lane]));
+
+        // f2 is per corner: its elements are the triangle's own three, primitive * 3 + k, whatever the indices say.
+        auto f2 = tg::vec2f(0, 0);
+        for (auto k = 0; k < 3; ++k)
+            f2 = f2 + f2_element(c.primitive * 3 + u32(k)) * w[k];
+        for (auto lane = 0; lane < 2; ++lane)
+            CHECK(near(r[7][lane], f2[lane], 1e-4f))
+                .context(cc::format("case {}: f2[{}] is {}, the CPU blend {}", i, lane, r[7][lane], f2[lane]));
+
+        // A rotation stream of zeros holds no rotation, which reads as the identity.
+        if (c.desc_offset != 0)
+        {
+            auto const is_identity = r[5][0] == 0.0f && r[5][1] == 0.0f && r[5][2] == 0.0f && r[5][3] == 1.0f;
+            CHECK(is_identity)
+                .context(cc::format("case {}: the zero rotation falls back to ({}, {}, {}, {})", i, r[5][0], r[5][1],
+                                    r[5][2], r[5][3]));
+        }
 
         // The rotation blend aligns the corners into one hemisphere before it sums, so a blend of unit quaternions stays a
         // rotation even where every third one is stored negated.

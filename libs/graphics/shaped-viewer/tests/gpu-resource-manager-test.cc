@@ -335,7 +335,7 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // this needs the shared library and a compiler, not just a device.
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the mipmap shader");
+        SKIP("no SGL compiler that reaches DXIL to build the mipmap shader");
 
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
@@ -381,7 +381,7 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // this needs the shared library and a compiler, not just a device.
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the mipmap shader");
+        SKIP("no SGL compiler that reaches DXIL to build the mipmap shader");
 
     // The microstutter guard: several textures landing at once must not record every chain in one frame.
     // 16x16 is 5 levels, so 4 dispatches each — a budget of 5 admits exactly one per epoch.

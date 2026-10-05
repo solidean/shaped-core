@@ -31,7 +31,7 @@ namespace
 static_assert(sizeof(sv_test::shaders::probe_light) == sizeof(sv::shaders::tracer::light_record),
               "probe_light in tests/shaders/pt_support_probe.sgl must match sv::shaders::tracer::light_record");
 
-constexpr isize results_per_item = 8;
+constexpr isize results_per_item = 9;
 constexpr float pi = 3.14159265358979323846f;
 
 /// The tracer's PCG step, on the CPU, which the GPU must reproduce to the bit.
@@ -146,7 +146,7 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     auto const& entry = sv_test::shaders::pt_support_probe.pt_support_measure;
     auto const compiled_shader = entry->acquire(ctx);
@@ -260,6 +260,16 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
             CHECK(near(w[4][1], 5.0f, 1e-5f)).context(where("at the distance it was aimed from"));
             CHECK(near(w[4][2], 1.0f, 1e-6f)).context(where("head on"));
             CHECK(near(w[4][3], select_pdf * 25.0f / l.area, 1e-5f)).context(where("the rect's solid-angle density"));
+
+            // From behind, only a two-sided light is met, and its back face reads head on like its front.
+            if ((l.flags & sv::light_flag_two_sided) != 0)
+            {
+                CHECK(w[8][0] == 1.0f).context(where("a two-sided rect is met from behind"));
+                CHECK(near(w[8][1], 5.0f, 1e-5f)).context(where("at the distance it was aimed from"));
+                CHECK(near(w[8][2], 1.0f, 1e-6f)).context(where("its back face head on"));
+            }
+            else
+                CHECK(w[8][0] == 0.0f).context(where("a one-sided rect is not met from behind"));
         }
         if (clearly_out)
         {

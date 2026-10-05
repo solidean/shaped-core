@@ -444,7 +444,7 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     auto const surfaces = surfaces_under_test();
 
@@ -647,7 +647,7 @@ ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are rea
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     // One case per (surface, guide), so a surface's three guides come back from one dispatch.
     auto const guide_of = [&](probe_surface const& s, probe_mode mode)
@@ -737,7 +737,7 @@ ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what the
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     // A white Lambertian with its specular layer off: everything it reflects is diffuse, and being lossless it
     // reflects all of it.

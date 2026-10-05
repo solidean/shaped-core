@@ -79,7 +79,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the quadric shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -97,8 +97,6 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
 
     // The neutral quadric permutation: one hard-coded gray surface, which is all a first trace needs.
     auto const& permutation = resources.shaders.acquire_quadric_fallback();
-
-    // What makes its hit group PROCEDURAL, and the one thing a triangle permutation never is.
     REQUIRE(permutation.kind == sv::geometry_kind::quadrics);
 
     // Driven and checked here rather than left to the trace loop below: a hit group that does not compile makes the trace
@@ -108,6 +106,11 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
         FAIL(cc::format("quadric hit group: {}\n--- source ---\n{}",
                         permutation.hit_group->try_error()->underlying().to_string(), permutation.source));
     REQUIRE(permutation.hit_group->try_value() != nullptr);
+
+    // What makes the compiled group PROCEDURAL, and the one thing a triangle group never carries: an intersection shader,
+    // in the record of every ray type, since the intersection is the whole row's.
+    for (auto const& e : *permutation.hit_group->try_value())
+        CHECK(e.intersection.has_value());
 
     auto instances = cc::vector<sg::tlas_instance>();
     instances.push_back(sg::tlas_instance{.blas = record->blas, .instance_id = 0, .hit_group_offset = 0});
@@ -259,7 +262,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute 
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the quadric shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -311,7 +314,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the quadric shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -331,7 +334,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
     CHECK(item.mesh == sv::mesh_id::invalid); // the arm a quadric item does NOT use
     CHECK(resources.contains_instance(item.instance));
 
-    // The permutation the resolution yielded is the quadric spelling, so its hit group carries an intersection shader.
+    // The permutation the resolution yielded is the quadric spelling, so its compiled hit group carries an intersection
+    // shader in the record of every ray type.
     auto const* const permutation = resources.shaders.find(item.shader_key);
     REQUIRE(permutation != nullptr);
     CHECK(permutation->kind == sv::geometry_kind::quadrics);
@@ -340,6 +344,9 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
     if (permutation->hit_group->has_error())
         FAIL(cc::format("quadric hit group: {}\n--- source ---\n{}",
                         permutation->hit_group->try_error()->underlying().to_string(), permutation->source));
+    REQUIRE(permutation->hit_group->try_value() != nullptr);
+    for (auto const& e : *permutation->hit_group->try_value())
+        CHECK(e.intersection.has_value());
 
     // Placing the same set again is the same everything: the slot short-circuits, and the content hashes behind it agree.
     auto const again = resources.acquire_scene_item(set);
@@ -412,7 +419,7 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the quadric shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -703,7 +710,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the quadric shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 

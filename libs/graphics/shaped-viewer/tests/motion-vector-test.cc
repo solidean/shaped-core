@@ -121,7 +121,7 @@ ASYNC_INVOCABLE_TEST("sv - a camera projects its own primary ray back to the pix
 {
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     auto const dim = tg::vec2f(256, 256);
     auto const cam = sv::camera_record_of(base_camera());
@@ -157,7 +157,7 @@ ASYNC_INVOCABLE_TEST("sv - motion vectors follow the camera, and the sky ignores
 {
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     auto const dim = tg::vec2f(256, 256);
     auto const center = tg::vec2f(128, 128);
@@ -236,7 +236,7 @@ ASYNC_INVOCABLE_TEST("sv - a point behind the previous camera reprojects off the
 {
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     auto const dim = tg::vec2f(256, 256);
 

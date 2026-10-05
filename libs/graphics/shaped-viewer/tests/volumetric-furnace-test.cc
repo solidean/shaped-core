@@ -271,7 +271,7 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the path-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     auto const environment = tg::vec3f(0.5f, 0.5f, 0.5f);
 

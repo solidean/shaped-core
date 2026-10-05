@@ -527,7 +527,7 @@ struct image_difference
     if (!supported)
         return cc::string_view("device reports no ray-tracing pipelines");
     if (!sv_test::shared_env().has_compiler)
-        return cc::string_view("no DXC compiler to build the path-tracing shaders");
+        return cc::string_view("no SGL compiler that reaches DXIL to build the path-tracing shaders");
     return {};
 }
 

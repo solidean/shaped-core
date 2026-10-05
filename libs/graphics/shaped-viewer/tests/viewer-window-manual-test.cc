@@ -53,7 +53,7 @@ ASYNC_TEST("sv - viewer window (manual)", nx::config::manual, main_thread)
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the ray-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the ray-tracing shaders");
 
     auto sc_r = ctx.try_create_swapchain(
         {.window = win->native_window(), .buffer_count = 3, .format = sg::pixel_format::bgra8_unorm});

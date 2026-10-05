@@ -26,7 +26,7 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -213,7 +213,7 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -339,7 +339,7 @@ ASYNC_INVOCABLE_TEST("sv - a camera cut waits for a traced frame and drops the t
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);

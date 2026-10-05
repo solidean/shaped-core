@@ -42,7 +42,7 @@ ASYNC_INVOCABLE_TEST("sv - the layout routine builds its shaders and layouts", (
     // would pass while proving nothing.
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     // Prewarm names the format, because the routine is one instance per target format — and this is the case that
     // makes that worth it: an application that knows its swapchain format can have the pipelines built before the
@@ -63,7 +63,7 @@ ASYNC_INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe 
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto const output_size = tg::vec2i(128, 64);
     auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
@@ -142,7 +142,7 @@ ASYNC_INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad vie
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto const output = ctx.persistent.create_texture_2d(
         {.format = sg::pixel_format::bgra8_unorm, .width = 32, .height = 32, .usage = sg::texture_usage::render_target});
@@ -226,7 +226,7 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     if (!env.has_compiler)
     {
         ctx.drop_command_list(cc::move(cmd));
-        SKIP("no DXC compiler to build layout.sgl");
+        SKIP("no SGL compiler that reaches DXIL to build layout.sgl");
     }
 
     auto const vs = sv::shaders::layout.main_vs->acquire(ctx);

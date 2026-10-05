@@ -56,8 +56,13 @@ cc::shared_async<cc::unit> require_compiled(sg::context* ctx, sv::material_permu
         FAIL(cc::format("{}\n--- source ---\n{}", e->underlying().to_string(), p->source));
 
     // One hit shader per ray type of the tracer's ray set: the surface ray's and the shadow ray's.
-    REQUIRE(p->hit_group->try_value() != nullptr);
-    CHECK(p->hit_group->try_value()->size() == 2);
+    // The surface record shades, and both carry the cutout any-hit exactly when the material can cut out.
+    auto const* const group = p->hit_group->try_value();
+    REQUIRE(group != nullptr);
+    REQUIRE(group->size() == 2);
+    CHECK((*group)[0].closest_hit.has_value());
+    for (auto const& e : *group)
+        CHECK(e.any_hit.has_value() == p->can_cut_out);
     co_return;
 }
 
@@ -72,7 +77,7 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - the fallback stands in for a p
                      (sg::context_handle const& ctx_h))
 {
     if (cannot_compile())
-        SKIP("no DXC compiler to build the generated hit groups");
+        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
 
     auto cache = sv::material_shader_cache::create(ctx_h.get());
 
@@ -123,7 +128,7 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - two materials of one permutati
                      (sg::context_handle const& ctx_h))
 {
     if (cannot_compile())
-        SKIP("no DXC compiler to build the generated hit groups");
+        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
 
     auto lib = sv::material_library::create();
     sv::register_builtin_material_types(lib);
@@ -173,7 +178,7 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - every builtin type compiles as
                      (sg::context_handle const& ctx_h))
 {
     if (cannot_compile())
-        SKIP("no DXC compiler to build the generated hit groups");
+        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
 
     auto lib = sv::material_library::create();
     sv::register_builtin_material_types(lib);

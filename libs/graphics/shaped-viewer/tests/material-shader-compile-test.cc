@@ -83,7 +83,7 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
 TEST("sv - every builtin material type compiles as a hit group, on triangles and on quadrics")
 {
     if (!sv_test::shared_env().has_compiler)
-        return;
+        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
 
     auto materials = sv::material_library::create();
     sv::register_builtin_material_types(materials);
@@ -102,7 +102,7 @@ TEST("sv - every builtin material type compiles as a hit group, on triangles and
 TEST("sv - a hit group compiles at every attribute frequency, sampled, swizzled and cut out")
 {
     if (!sv_test::shared_env().has_compiler)
-        return;
+        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
 
     auto materials = sv::material_library::create();
     sv::register_builtin_material_types(materials);
@@ -158,7 +158,7 @@ TEST("sv - a hit group compiles at every attribute frequency, sampled, swizzled 
 TEST("sv - a hit group compiles at every attribute frequency of the pbr type")
 {
     if (!sv_test::shared_env().has_compiler)
-        return;
+        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
 
     auto materials = sv::material_library::create();
     sv::register_builtin_material_types(materials);

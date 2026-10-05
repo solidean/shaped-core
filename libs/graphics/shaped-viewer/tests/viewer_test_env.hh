@@ -77,7 +77,7 @@ namespace sv_test
 {
 
 /// The one shader library for this test binary — sv's own, reached through the same hook a viewer uses.
-/// `has_compiler` is false when DXC is not installed — a caller SKIPs, since nothing will compile.
+/// `has_compiler` says whether SGL reaches DXIL here, which needs DXC — a caller SKIPs without it, since nothing compiles.
 ///
 /// Built by `sv::impl::acquire_default_shader_library`, so a test compiles through exactly what a viewer compiles through rather
 /// than through a second library assembled to look like it.
@@ -88,7 +88,7 @@ inline env const& shared_env()
         auto lib = sv::acquire_shader_library();
         CC_ASSERT(lib.has_value(), "the default shader library must come up for the GPU tests");
         return env{.lib = lib.value(),
-                   .has_compiler = lib.value()->can_compile(slib::shader_language::hlsl, sg::shader_format::dxil)};
+                   .has_compiler = lib.value()->can_compile(slib::shader_language::sgl, sg::shader_format::dxil)};
     }();
     return e;
 }

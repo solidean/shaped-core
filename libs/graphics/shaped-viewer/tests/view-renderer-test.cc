@@ -24,7 +24,7 @@ ASYNC_INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_ha
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     // Build the scene through the managers (this is where the BLAS is built).
     auto const cloud = sv_test::make_triangle_cloud(64);
@@ -90,7 +90,7 @@ ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto const box = sv_test::make_cornell_box();
     auto const welded = sv_test::weld_triangle_list(box.positions);

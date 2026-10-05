@@ -96,7 +96,15 @@ fun probe_direction(u: float3) -> float3:
     let visible = if scene.light_visible_to_camera(l) => 1.0 else 0.0
     let w7 = float4(shadows, visible, pt.roulette_after as float, pt.scatter_cap as float)
 
-    let base = id.x * 8
+    // the same ray from behind: from 5 below the rect's plane along its normal, onto its back face
+    let behind = l.position - l.normal * 5.0 + l.u * ((u1 - 0.5) * 4.0) + l.v * ((u2 - 0.5) * 4.0)
+    let mut t_back = -1.0
+    let mut cos_back = -1.0
+    let hits_back = pt.rect_intersect(l, behind, l.normal, mut t_back, mut cos_back)
+    let landed_back = if hits_back => 1.0 else 0.0
+    let w8 = float4(landed_back, t_back, cos_back, 0.0)
+
+    let base = id.x * 9
     pt_support_io.results[base] = w0
     pt_support_io.results[base + 1] = w1
     pt_support_io.results[base + 2] = w2
@@ -105,3 +113,4 @@ fun probe_direction(u: float3) -> float3:
     pt_support_io.results[base + 5] = w5
     pt_support_io.results[base + 6] = w6
     pt_support_io.results[base + 7] = w7
+    pt_support_io.results[base + 8] = w8
