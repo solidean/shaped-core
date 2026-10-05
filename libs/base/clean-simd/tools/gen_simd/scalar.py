@@ -80,8 +80,21 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     out["add"] = _lanes(lanes, arith("+"))
     out["sub"] = _lanes(lanes, arith("-"))
     out["mul"] = _lanes(lanes, arith("*"))
-    out["min"] = _lanes(lanes, "b.v[{i}] < a.v[{i}] ? b.v[{i}] : a.v[{i}]")
-    out["max"] = _lanes(lanes, "a.v[{i}] < b.v[{i}] ? b.v[{i}] : a.v[{i}]")
+    if e.is_float:
+        # A select on the bit patterns, not a float ternary: MSVC for ARM64 swaps the operands of `b < a ? b : a`,
+        # which returns b on a tie of +0 and -0.
+        fb = "u32" if e.bits == 32 else "u64"
+
+        def pick(cond: str) -> str:
+            m = f"({fb}(0) - {fb}({cond}))"
+            return (f"cc::bit_cast<{t}>({fb}(({m} & cc::bit_cast<{fb}>(b.v[{{i}}])) | "
+                    f"(~{m} & cc::bit_cast<{fb}>(a.v[{{i}}]))))")
+
+        out["min"] = _lanes(lanes, pick("b.v[{i}] < a.v[{i}]"))
+        out["max"] = _lanes(lanes, pick("a.v[{i}] < b.v[{i}]"))
+    else:
+        out["min"] = _lanes(lanes, "b.v[{i}] < a.v[{i}] ? b.v[{i}] : a.v[{i}]")
+        out["max"] = _lanes(lanes, "a.v[{i}] < b.v[{i}] ? b.v[{i}] : a.v[{i}]")
     if e.is_float:
         out["mul_add"] = _lanes(lanes, "a.v[{i}] * b.v[{i}] + c.v[{i}]")
     else:

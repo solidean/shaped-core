@@ -441,19 +441,27 @@ struct cimd::impl::reg<cimd::f32, cimd::scalar, 128>
     static CC_FORCE_INLINE type min(type a, type b)
     {
         type r;
-        r.v[0] = b.v[0] < a.v[0] ? b.v[0] : a.v[0];
-        r.v[1] = b.v[1] < a.v[1] ? b.v[1] : a.v[1];
-        r.v[2] = b.v[2] < a.v[2] ? b.v[2] : a.v[2];
-        r.v[3] = b.v[3] < a.v[3] ? b.v[3] : a.v[3];
+        r.v[0] = cc::bit_cast<f32>(u32(((u32(0) - u32(b.v[0] < a.v[0])) & cc::bit_cast<u32>(b.v[0]))
+                                       | (~(u32(0) - u32(b.v[0] < a.v[0])) & cc::bit_cast<u32>(a.v[0]))));
+        r.v[1] = cc::bit_cast<f32>(u32(((u32(0) - u32(b.v[1] < a.v[1])) & cc::bit_cast<u32>(b.v[1]))
+                                       | (~(u32(0) - u32(b.v[1] < a.v[1])) & cc::bit_cast<u32>(a.v[1]))));
+        r.v[2] = cc::bit_cast<f32>(u32(((u32(0) - u32(b.v[2] < a.v[2])) & cc::bit_cast<u32>(b.v[2]))
+                                       | (~(u32(0) - u32(b.v[2] < a.v[2])) & cc::bit_cast<u32>(a.v[2]))));
+        r.v[3] = cc::bit_cast<f32>(u32(((u32(0) - u32(b.v[3] < a.v[3])) & cc::bit_cast<u32>(b.v[3]))
+                                       | (~(u32(0) - u32(b.v[3] < a.v[3])) & cc::bit_cast<u32>(a.v[3]))));
         return r;
     }
     static CC_FORCE_INLINE type max(type a, type b)
     {
         type r;
-        r.v[0] = a.v[0] < b.v[0] ? b.v[0] : a.v[0];
-        r.v[1] = a.v[1] < b.v[1] ? b.v[1] : a.v[1];
-        r.v[2] = a.v[2] < b.v[2] ? b.v[2] : a.v[2];
-        r.v[3] = a.v[3] < b.v[3] ? b.v[3] : a.v[3];
+        r.v[0] = cc::bit_cast<f32>(u32(((u32(0) - u32(a.v[0] < b.v[0])) & cc::bit_cast<u32>(b.v[0]))
+                                       | (~(u32(0) - u32(a.v[0] < b.v[0])) & cc::bit_cast<u32>(a.v[0]))));
+        r.v[1] = cc::bit_cast<f32>(u32(((u32(0) - u32(a.v[1] < b.v[1])) & cc::bit_cast<u32>(b.v[1]))
+                                       | (~(u32(0) - u32(a.v[1] < b.v[1])) & cc::bit_cast<u32>(a.v[1]))));
+        r.v[2] = cc::bit_cast<f32>(u32(((u32(0) - u32(a.v[2] < b.v[2])) & cc::bit_cast<u32>(b.v[2]))
+                                       | (~(u32(0) - u32(a.v[2] < b.v[2])) & cc::bit_cast<u32>(a.v[2]))));
+        r.v[3] = cc::bit_cast<f32>(u32(((u32(0) - u32(a.v[3] < b.v[3])) & cc::bit_cast<u32>(b.v[3]))
+                                       | (~(u32(0) - u32(a.v[3] < b.v[3])) & cc::bit_cast<u32>(a.v[3]))));
         return r;
     }
     static CC_FORCE_INLINE type mul_add(type a, type b, type c)
@@ -798,15 +806,19 @@ struct cimd::impl::reg<cimd::f64, cimd::scalar, 128>
     static CC_FORCE_INLINE type min(type a, type b)
     {
         type r;
-        r.v[0] = b.v[0] < a.v[0] ? b.v[0] : a.v[0];
-        r.v[1] = b.v[1] < a.v[1] ? b.v[1] : a.v[1];
+        r.v[0] = cc::bit_cast<f64>(u64(((u64(0) - u64(b.v[0] < a.v[0])) & cc::bit_cast<u64>(b.v[0]))
+                                       | (~(u64(0) - u64(b.v[0] < a.v[0])) & cc::bit_cast<u64>(a.v[0]))));
+        r.v[1] = cc::bit_cast<f64>(u64(((u64(0) - u64(b.v[1] < a.v[1])) & cc::bit_cast<u64>(b.v[1]))
+                                       | (~(u64(0) - u64(b.v[1] < a.v[1])) & cc::bit_cast<u64>(a.v[1]))));
         return r;
     }
     static CC_FORCE_INLINE type max(type a, type b)
     {
         type r;
-        r.v[0] = a.v[0] < b.v[0] ? b.v[0] : a.v[0];
-        r.v[1] = a.v[1] < b.v[1] ? b.v[1] : a.v[1];
+        r.v[0] = cc::bit_cast<f64>(u64(((u64(0) - u64(a.v[0] < b.v[0])) & cc::bit_cast<u64>(b.v[0]))
+                                       | (~(u64(0) - u64(a.v[0] < b.v[0])) & cc::bit_cast<u64>(a.v[0]))));
+        r.v[1] = cc::bit_cast<f64>(u64(((u64(0) - u64(a.v[1] < b.v[1])) & cc::bit_cast<u64>(b.v[1]))
+                                       | (~(u64(0) - u64(a.v[1] < b.v[1])) & cc::bit_cast<u64>(a.v[1]))));
         return r;
     }
     static CC_FORCE_INLINE type mul_add(type a, type b, type c)
