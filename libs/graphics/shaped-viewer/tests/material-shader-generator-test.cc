@@ -11,7 +11,7 @@ using namespace cc::primitive_defines;
 
 // CPU-only tests for the material shader generator.
 // No GPU and no compiler: what is checked here is the SGL TEXT and the parameter layout, which is what decides whether two materials share a permutation.
-// That a generated hit group actually compiles is a separate, GPU-gated test.
+// That a generated hit group actually compiles is a separate, DXC-gated test.
 
 namespace
 {

@@ -331,7 +331,7 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     _upload_parameters(cmd, r);
 
     // A pending batch is traced as the placeholder CUBE through the triangle fallback, so its record has to name the
-    // cube's positions — exactly as the mesh overload below does, and for the same reason: `PtClosestHit` reads the hit
+    // cube's positions — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
     // triangle's three corners back out of `inst.vertices` to recompute the geometric normal.
     // The batch's own primitive buffer would be wrong there twice over, since it holds nothing yet AND is not positions.
     //

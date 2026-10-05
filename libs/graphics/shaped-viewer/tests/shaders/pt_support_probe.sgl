@@ -26,7 +26,7 @@ binding pt_support_io:
     /// The lights, which item `i` reads as `lights[i % light_count]`.
     lights: buffer[probe_light]
 
-    /// The 16 SH coefficients of the environment, as `sv::background_gpu` lays them out: the binding the tracer will declare.
+    /// The 16 SH coefficients of the environment, as `sv::background_gpu` lays them out, as `tracer.traced.background` declares it.
     sh: buffer[float4]
 
     /// Eight per item, in the order `pt_support_measure` writes them.

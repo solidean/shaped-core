@@ -5,7 +5,6 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/platform/environment.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>

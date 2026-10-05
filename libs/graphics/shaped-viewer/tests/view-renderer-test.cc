@@ -73,7 +73,7 @@ ASYNC_INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_ha
     CHECK(traced.height() == size[1]); // sized from the view, not from any target
 }
 
-// The same frame, driven from indexed geometry: an indexed BLAS build plus the closest-hit's Vertices[Indices[..]] lookup.
+// The same frame, driven from indexed geometry: an indexed BLAS build plus the closest hit reading its corners through the index buffer.
 // A Cornell box is the payload because its quads genuinely share vertices, so welding actually shrinks the vertex buffer.
 // The index buffer is then not the identity sequence the non-indexed path would synthesize.
 ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (sg::context_handle const& ctx_h))

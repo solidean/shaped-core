@@ -246,14 +246,14 @@ That one is silent, unlike an attribute bound at a frequency the geometry cannot
 
 ```text
 for each of the up to four roots — two of the surface quadric, two of the clipper:
-    skip it unless t is in [RayTMin, RayTMax]
+    skip it unless t is in [t_min, t_current]
     skip it unless it lies inside the OTHER quadric
     keep it if it is nearer than the best so far
 report the best, with the gradient of whichever quadric it landed on
 ```
 
 The clipper's two roots are only considered when the emit bit is set, so an open tube solves one quadratic and a capped one two.
-Still one `ReportHit` and no sorting.
+Still one `report` and no sorting.
 
 **Taking the nearest survivor rather than the first root is load-bearing for ordinary geometry**, not only for interior views.
 A slab-clipped cylinder is an open tube with nothing closing its ends.
@@ -261,7 +261,7 @@ Seen near end-on — which is what every edge pointing at the camera does — th
 The far root is the inside of the opposite wall, and is genuinely visible.
 Dropping the hit there would make an open cylinder disappear at exactly the view where it is most common.
 
-The same second test covers a ray whose origin is inside the primitive, whose near root is behind `RayTMin`.
+The same second test covers a ray whose origin is inside the primitive, whose near root is behind `t_min`.
 
 **AABBs are computed on the CPU**, by the factory that turns a tg object into a record, and stored in the batch's AABB buffer.
 Nothing recomputes one on the GPU and nothing should: an intersection shader cannot read the acceleration structure's own boxes, so a box the shader needed would have to be duplicated into the record.
@@ -300,7 +300,7 @@ Each step is meant to be landable and testable on its own.
    The CPU factories, their AABBs, and `sv::intersect` as the reference the shader is written against.
 2. **`sv::quadric_set` and its content hash** — landed, with `sv::resident_quadric_set` as the id-only form.
 3. **`quadric_manager`** — landed, beside `mesh_manager` and draining through `gpu_resource_manager`.
-4. **The intersection shader and the quadric epilogue** — landed.
+4. **The intersection shader and the quadric closest hit** — landed.
    Module `quadric` (shaders/sgl/quadric_runtime.sgl) adds the quadric decode and solve beside module `material` rather than forking it.
    The shading tail both geometry kinds share is `tracer.shade` (shaders/sgl/tracer_shade.sgl), so a hit is located per kind and shaded once.
    A quadric permutation's hit group carries the intersection on BOTH of its records — the shadow one too, since a shadow ray traverses the same procedural BLAS.

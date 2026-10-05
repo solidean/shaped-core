@@ -253,7 +253,7 @@ public:
 
     /// The GPU record for one scene item: where its material parameters live, and where its geometry does.
     ///
-    /// A view uploads one of these per item and the closest-hit reaches everything it needs from `InstanceID()`, rather than
+    /// A view uploads one of these per item and the closest-hit reaches everything it needs from the instance index, rather than
     /// the trace binding one mesh's buffers globally.
     /// Both ids must be resident.
     ///
@@ -268,7 +268,7 @@ public:
     /// The same for a quadric batch.
     ///
     /// `vertices` names the batch's PRIMITIVE buffer rather than a position buffer, which is what the intersection shader reads
-    /// by `PrimitiveIndex()`; the field means "the geometry buffer this instance reads" either way.
+    /// by the primitive index; the field means "the geometry buffer this instance reads" either way.
     /// `indices` is the stand-in, since a quadric indexes nothing — the field still has to name something the bound snapshot
     /// covers.
     [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,

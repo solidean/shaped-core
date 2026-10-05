@@ -33,7 +33,8 @@ namespace
 using namespace cc::primitive_defines;
 
 /// `probe_surface` from tests/shaders/bsdf_probe.sgl, which is `openpbr.surface` lane for lane — keep the three in lockstep.
-/// The `probe_echo` check below is what holds them there: it reads three fields back through the GPU's own decode.
+/// The `probe_echo` check below holds this mirror to `probe_surface` alone: the echo reads it before the probe splats it into
+/// `openpbr.surface` positionally, so that splat's field order is held by hand.
 struct probe_surface
 {
     float base_weight = 1.0f;

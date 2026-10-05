@@ -23,7 +23,7 @@ using namespace cc::primitive_defines;
 //
 // Everything below this was CPU values and GPU buffers nothing had ever traced.
 // What this pins is that the whole chain lines up — the primitive record the CPU packs is the one the intersection shader
-// decodes, the AABBs the BLAS was built from actually bound the surface, and the hit reaches `pt_shade` with a usable normal.
+// decodes, the AABBs the BLAS was built from actually bound the surface, and the hit reaches `tracer.shade` with a usable normal.
 //
 // The check is the SILHOUETTE rather than the routine's outcome, and that is the point.
 // A trace that dispatches and hits nothing returns `executed` exactly as one that draws the sphere does, so asserting on the

@@ -128,7 +128,7 @@ A cone is stored as the scale and offset of glTF's falloff, which an unshaped li
 The flatten groups them by path with `pt_light_table` — a counting sort over the walk it does anyway — and the frame block carries the count and each path's offset and length.
 A loop over one path's run, like the bounce ray testing every area light, then runs in one branch.
 
-Next-event estimation picks one light uniformly, and the `1/N` of that pick is inside `pt_light_pdf`.
+Next-event estimation picks one light uniformly, and the `1/N` of that pick is inside `pt.light_pdf`, and `pt.disc_pdf` for a sun.
 That density is the one thing both estimators share, since the next-event sample and the bounce ray reaching a light weight against each other.
 A density they disagree about makes the image wrong rather than noisy.
 With exactly one light no pick is drawn, so a one-light scene keeps the sample sequence it always had.

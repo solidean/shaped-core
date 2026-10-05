@@ -11,11 +11,10 @@ using namespace cc::primitive_defines;
 
 // Headless end-to-end path trace.
 // It builds a simple Cornell box through the managers, integrates one small view with global illumination, and drives it to completion.
-// Beyond the flat direct-lit raytraced-view test, this exercises the whole GI path.
 // The path-tracing shaders compile through slib, the ray-tracing pipeline and shader table build, the TLAS is built, and the raygen bounces rays with NEE toward the ceiling light.
 //
-// No pixel readback: this asserts the pipeline runs rather than inspecting the image (same philosophy as the
-// raytraced-view test). Reaching the end without an assert/exception means every GPU stage succeeded.
+// No pixel readback: this asserts the pipeline runs rather than inspecting the image.
+// Reaching the end without an assert or an exception means every GPU stage succeeded.
 ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;

@@ -228,7 +228,7 @@ binding bindless:
     /// Raw buffers: vertices, indices, attributes and parameter blocks, which a hit reads through `scene.instance`.
     buffers: bytes[4096]
 
-/// One path segment, in and out — `PtPayload`, 38 lanes.
+/// One path segment, in and out.
 ///
 /// The closest hit does the shading, so the payload carries the segment's RESULT rather than its surface.
 /// `rng`, the medium and `channel` round-trip: the caller writes what the current segment travels in, and the hit what the continuation will.

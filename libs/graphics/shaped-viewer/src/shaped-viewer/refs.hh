@@ -115,7 +115,8 @@ public:
     ///
     /// The geometry, the attributes and the textures are uploaded here, keyed by the content hashes the mesh already
     /// carries — so calling this every frame with an unchanged mesh uploads nothing and stays O(1).
-    /// The material reads the mesh's attributes of its signature's names, and one the mesh lacks takes its declared default.
+    /// Each attribute of the material's signature resolves through the material and the mesh, the finer source winning,
+    /// and its declared default applies only where neither supplies one.
     mesh_ref add_mesh(sv::mesh const& mesh);
 
     /// The same for a mesh already made of resources — nothing to look up, since its ids are minted.

@@ -18,7 +18,7 @@ rays path_rays:
     surface: tracer.surface_payload
     occlusion: tracer.shadow_payload
 
-/// One sample's path, walked until it escapes, runs out of bounces or is absorbed — what `PathTraceRayGen` does per sample.
+/// One sample's path, walked until it escapes, runs out of bounces or is absorbed — what `path_trace` does per sample.
 @raygen fun path_trace(@launch_id id: int3, @launch_size size: int3){tracer.traced, tracer.bindless}:
     let f = tracer.traced.frame[0]
     let px = uint2(id.x as uint, id.y as uint)

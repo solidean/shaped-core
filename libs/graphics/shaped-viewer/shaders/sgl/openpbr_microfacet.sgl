@@ -14,7 +14,6 @@
 // The transmissive and subsurface bases share the specular interface and differ only in what lies beyond it.
 // A dispersive crossing collapses the path onto one wavelength rather than bending three at once.
 //
-// The two run side by side until the path tracer has moved over, and the BSDF probe holds them to the same numbers.
 // This file holds the primitives the lobes are built from; openpbr_closure.sgl and openpbr_evaluate.sgl hold the closure.
 module openpbr
 

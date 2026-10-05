@@ -187,7 +187,7 @@ private:
 /// Two buffers rather than one, because the hardware and the shader want different things.
 /// `aabbs` is the acceleration structure's build input and nothing reads it afterwards — an intersection shader cannot reach the
 /// boxes the BLAS was built from.
-/// `primitives` is what the intersection shader reads by `PrimitiveIndex()`, through the bindless table.
+/// `primitives` is what the intersection shader reads by the primitive index, through the bindless table.
 ///
 /// The BLAS is built once, when the batch settles, exactly as a mesh's is: a scene item then references the batch and only the
 /// (cheap) TLAS is rebuilt per frame.
@@ -197,7 +197,7 @@ struct sv::quadric_set_record
     /// While `pending` there is no BLAS to trace, so the batch is drawn as the shared placeholder box scaled onto `bounds`.
     residency state = residency::pending;
 
-    /// the intersection shader's own data, read by `PrimitiveIndex()`
+    /// the intersection shader's own data, read by the primitive index
     sg::buffer<quadric_gpu> primitives;
 
     /// the BLAS build input, one box per primitive; its layout is `D3D12_RAYTRACING_AABB`, which `tg::aabb3f` already is

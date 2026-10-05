@@ -26,7 +26,7 @@ constexpr auto geometry_usage
 // A quadric batch splits what a mesh keeps in one kind of buffer, so the two usages are narrower than geometry_usage.
 // The boxes are build input only — no shader reads them, because an intersection shader cannot reach the boxes its own
 // acceleration structure was built from.
-// The primitives are the opposite: read through the bindless table by PrimitiveIndex(), and never seen by the hardware.
+// The primitives are the opposite: read through the bindless table by the primitive index, and never seen by the hardware.
 constexpr auto quadric_aabb_usage = sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst;
 constexpr auto quadric_primitive_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 } // namespace
@@ -524,7 +524,7 @@ void texture_manager::wait_for_settled(cc::vector<texture_id>& newly_resident)
 
 namespace
 {
-// readonly_buffer so a shader reads it as a ByteAddressBuffer through the bindless table; copy_dst for the upload.
+// readonly_buffer so a shader reads it as a `bytes` element through the bindless table; copy_dst for the upload.
 constexpr auto bindless_bytes_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 } // namespace
 

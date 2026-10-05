@@ -58,8 +58,7 @@ struct sv::triangle_data
 /// Geometry as an indexed triangle list: 3 consecutive indices per triangle, each naming a position.
 /// `indices.size()` must be a multiple of 3, and every index must be < `positions.size()`.
 ///
-/// Triangle order — and with it `PrimitiveIndex()`, which is what a material set is indexed by — follows the
-/// index buffer, not the position buffer.
+/// Triangle order — and with it the primitive index a hit reports — follows the index buffer, not the position buffer.
 struct sv::indexed_triangle_data
 {
     cc::pinned_data<tg::pos3f const> positions;

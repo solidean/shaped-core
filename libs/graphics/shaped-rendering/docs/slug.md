@@ -90,7 +90,7 @@ sr exports the module, so the host binds one group of `sgl_modules::slug::tables
 Another package reaches the module by naming `SR_SGL_MODULE_DIR` in its `MODULE_DIRS`.
 
 The core takes the pixel footprint as an argument, and an overload takes it from `ddx` and `ddy`, so it must be called in uniform control flow.
-A ray-traced hit has no derivatives, and will pass a footprint from its ray cone instead; that waits for shaped-viewer's tracer to move to SGL.
+A ray-traced hit has no derivatives, and will pass a footprint from its ray cone instead; shaped-viewer's tracer is SGL now, and only the wiring is left.
 
 ## Using it
 

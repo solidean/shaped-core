@@ -750,7 +750,7 @@ sv::pt_trace_desc                                    // the trace's targets and 
                                                      //   lights         — every light, grouped by path (pt_light_table::records); NULL means none, and light_count must be 0
                                                      //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
                                                      //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
-                                                     //   the guide and split targets are typed: rgba16_float / r32_float / rg32_float as sv allocates them
+                                                     //   the guide and split targets are typed: rgba16_float / r32_float / r16_float / rg32_float as sv allocates them
 sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block
 sv::pt_light_table::grouped(span<light_record>)         // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
 table.describe_in(fc)                                // writes light_count + the per-path table into the frame block, so the two cannot disagree

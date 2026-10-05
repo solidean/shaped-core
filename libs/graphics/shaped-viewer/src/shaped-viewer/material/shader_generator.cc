@@ -504,7 +504,7 @@ cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_opt
 cc::string_view sgl_type_of(attribute_format format)
 {
     if (!format.is_scalar() && !format.is_vector())
-        return {}; // a matrix has no settled ByteAddressBuffer layout here yet
+        return {}; // a matrix has no settled raw-buffer layout here yet
 
     auto const scalar = [&]() -> cc::string_view
     {

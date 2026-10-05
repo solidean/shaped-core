@@ -98,7 +98,7 @@ What is left is the interaction on top of it, in dependency order:
   The plan and `trace` are already per `(view, layer)`.
 - **A path runs to completion inside one dispatch**, which is what makes a frame cost the DEEPEST path in it rather than
   the average one.
-  `PathTraceRayGen` loops `samples_per_pixel` times over `max_bounces` and a pixel is not done until its whole path is, so
+  `path_trace` loops `samples_per_pixel` times over `max_bounces` and a pixel is not done until its whole path is, so
   a scene with one deep corner pays for that corner everywhere — and it is the same property that makes a heavy dispatch
   trip a driver watchdog rather than merely run slowly.
   The wavefront answer is one dispatch per bounce, with the path's live state persisted between them rather than held in
@@ -214,7 +214,7 @@ What is left is narrower than it was:
 ## Known issue: the inline readback path fastfails on Windows on ARM
 
 `openpbr-bsdf-test` and `volumetric-furnace-test` are skipped there, under `CC_ARCH_ARM64 && _WIN32`.
-They are the only two tests in sv that use `cmd.download`.
+The skip applies to every sv test that reads back through `cmd.download`, the probes and the furnace among them.
 [structure.md](structure.md) had already noted that path was never exercised here, so this is the first time sv has asked for an inline readback at all.
 
 **What happens.**
@@ -259,14 +259,14 @@ importance-samples the continuation — so what is left is coverage of the model
   The hit rotates the authored frame by the object-to-world matrix and renormalizes, which is exact for a rigid or uniformly scaled
   placement and wrong for anything else — the tangent wants the matrix itself while the normal wants the inverse transpose,
   so the two cannot both come out of one rotation of one frame.
-  The GEOMETRIC normal is not affected: both hit shaders take it through `WorldToObject3x4` in the row-vector form, which is
+  The GEOMETRIC normal is not affected: both hit shaders take it through `h.normal_to_world`, which is
   the inverse transpose, and `quadric-gallery` places a batch under a non-uniform scale on purpose.
   What is left is the authored frame alone, and it needs the frame decomposed rather than rotated.
 - **Nothing produces a frame but the sphere example.**
   `openpbr-spheres` emits an analytic one per vertex.
   A glTF import would carry `TANGENT` and a handedness in its `w`, and a mesh with uvs but no tangents wants them derived
   rather than defaulted — neither exists.
-- **A normal map is still untested.** `geometry_normal` is applied through `sv::perturb_frame` now, so it has somewhere to land,
+- **A normal map is still untested.** `geometry_normal` is applied through `openpbr.perturb_frame` now, so it has somewhere to land,
   but no material in the tree binds it to a texture.
   The same is true of `geometry_coat_normal`, which lands through the authored frame beside it.
 - **The parameter set is complete.**
@@ -290,7 +290,7 @@ importance-samples the continuation — so what is left is coverage of the model
 - **A scattering walk ends by Russian roulette now**, after 16 events, on the throughput's largest channel.
   Because `q` is the throughput itself the walk is self-normalizing: a survivor returns to about 1 and the per-event
   survival probability settles at the medium's albedo, so the expected length is `1 / (1 - albedo)`.
-  `pt_scatter_cap` is 4096 and is the guard behind it, for an albedo of exactly 1 that never rolls a losing draw.
+  `pt.scatter_cap` is 4096 and is the guard behind it, for an albedo of exactly 1 that never rolls a losing draw.
   What this bought is measured, and it is **cost rather than correctness**: the same subsurface capture runs in about 8-12
   seconds against 35 for the old 256-event cap, while allowing a walk sixteen times longer.
   The bias the old cap carried is real in principle and was not observable — a lossless furnace at optical depth 36 passes
@@ -361,7 +361,7 @@ importance-samples the continuation — so what is left is coverage of the model
   normal, so it follows the same uv layout the base does and cannot point its own way.
   It is `geometry_tangent`'s mechanism a second time over, and nothing needs it yet.
 - **A cutout is stochastic and its draw does not come from the path's own stream.**
-  `tracer.cutout` hashes the pixel, the frame seed and the primitive instead, because an any-hit writing the path's random state
+  `tracer.cutout` hashes the pixel, the frame seed, the primitive and the instance instead, because an any-hit writing the path's random state
   would have to be granted access to it — and every ray would then carry a stream whose length depends on how many
   alpha-tested triangles it happened to graze.
   Independent draws per bounce are what it costs, which accumulation hides and a single-sample preview would not.

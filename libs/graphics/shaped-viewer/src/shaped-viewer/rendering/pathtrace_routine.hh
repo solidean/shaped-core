@@ -141,7 +141,7 @@ struct sv::pt_trace_desc
     /// **A substitution has to keep the hit group's kind**, and that is a correctness requirement rather than tidiness:
     /// a procedural BLAS must be traced by a group carrying an intersection shader, so standing a quadric permutation
     /// in with the triangle fallback reports no hits at all and the batch silently disappears until its compile lands.
-    /// Which of the two a permutation wants is read off `material_permutation::intersection`.
+    /// Which of the two a permutation wants is read off `material_permutation::kind`.
     ///
     /// Null is the same all-or-nothing behavior `fallback` describes, for quadric permutations alone.
     material_permutation const* quadric_fallback = nullptr;
