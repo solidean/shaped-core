@@ -1144,6 +1144,9 @@ void checker::compile_const(symbol_id id)
         return fail();
     }
 
+    // Resolved once, since every arm below may need it and resolving reports a bad name.
+    auto const written = ast::is_valid(c.type) ? resolve_value_type(file, c.type) : error_type;
+
     // CHK-219: a literal, an enum case or another const, which is all a value known before the program runs is yet.
     auto const& value = ast.at(c.value);
     auto const where = span_of(file, c.value);
@@ -1158,7 +1161,34 @@ void checker::compile_const(symbol_id id)
         literal = ast.at(call->arguments)[0].value;
     }
 
-    if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
+    // CHK-219: a written int, uint or float converts an unsuffixed literal by CHK-253, as a `let` of that type does.
+    auto converted = number_of(file, literal);
+    if (is_negated)
+    {
+        converted.integer = -converted.integer;
+        converted.real = -converted.real;
+    }
+    auto const is_int = written == prelude_type(builtins::k_int);
+    auto const is_uint = written == prelude_type(builtins::k_uint);
+    auto const is_float = written == prelude_type(builtins::k_float);
+    auto const converts = (is_int || is_uint || is_float) && converted.is_number && holds(converted, written);
+
+    if (converts)
+    {
+        if (is_float)
+        {
+            info.kind = constant_kind::real;
+            info.real = converted.is_integer ? f64(converted.integer) : converted.real;
+        }
+        else
+        {
+            info.kind = constant_kind::integer;
+            info.is_unsigned = is_uint;
+            info.integer = is_uint ? i32(u32(converted.integer)) : i32(converted.integer);
+        }
+        info.type = written;
+    }
+    else if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
     {
         auto const text = text_of(file, span_of(file, literal));
         auto const number = classify_number(text);
@@ -1201,7 +1231,7 @@ void checker::compile_const(symbol_id id)
     else if (auto const* const dot = value.node.try_as<ast::leading_dot>())
     {
         // `const f: pixel_format = .rgba16_float`: the written type is what the leading dot is resolved against
-        auto const declared = ast::is_valid(c.type) ? resolve_value_type(file, c.type) : error_type;
+        auto const declared = written;
         if (declared == error_type)
         {
             // CHK-152: nothing else says which enum the case is of
@@ -1263,7 +1293,7 @@ void checker::compile_const(symbol_id id)
 
     if (ast::is_valid(c.type))
     {
-        auto const declared = resolve_value_type(file, c.type);
+        auto const declared = written;
         if (declared != error_type && declared != info.type)
         {
             tell_apart(report(diagnostic_kind::type_mismatch, file, where,

@@ -19,6 +19,15 @@ test scale < 0.0
 test mask == 65280u and (mask >> 8u) == 255u
 test all_bits == 0xffffffffu and all_bits + 1u == 0u
 
+// a written int, uint or float types an unsuffixed literal, as a `let` of that type does
+const five: uint = 5
+const widest: uint = 0xffffffff
+const one: float = 1
+
+test five == 5u
+test widest == 4294967295u
+test one == 1.0
+
 fun weight(m: mode) -> float:
     return case m:
         .low => 0.25
