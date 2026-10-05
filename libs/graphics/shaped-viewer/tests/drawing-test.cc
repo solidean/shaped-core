@@ -349,6 +349,28 @@ TEST("sv::drawing_manager - a set changed after it was placed is placed again")
     CHECK(manager.acquire(copy) == again);
 }
 
+TEST("sv::drawing_manager - a layer too large for any atlas is skipped, and its drawing draws without it")
+{
+    // A polygon of thousands of edges, whose band lists take more than one 4096-texel row.
+    auto ring = cc::vector<tg::pos2f>();
+    for (auto i = 0; i < 6000; ++i)
+    {
+        auto const a = 6.2831853f * f32(i) / 6000.0f;
+        auto const r = i % 2 == 0 ? 100.0f : 99.0f;
+        ring.push_back(
+            tg::pos2f(r * tg::cos(tg::angle_f::make_from_radians(a)), r * tg::sin(tg::angle_f::make_from_radians(a))));
+    }
+    REQUIRE(sr::compile_slug_shape(sv::path::polygon(ring).to_outline()).band_texel_count() > sr::slug_atlas::width);
+
+    auto d = sv::drawing();
+    d.add_fill(sv::path::polygon(ring)).add_fill(square(1));
+
+    auto manager = sv::drawing_manager();
+    nx::expect_warning("a drawing's layer is skipped: *", nx::exactly(1));
+    auto const id = manager.acquire(d);
+    CHECK(manager.record_count(id, 0) == 1);
+}
+
 TEST("sv::drawing_manager - a set that does not fit opens a page, and a full manager empties the one drawn longest ago")
 {
     // pages one row tall, at most two of them; five hundred squares fit one, but two such sets pass its 819 records

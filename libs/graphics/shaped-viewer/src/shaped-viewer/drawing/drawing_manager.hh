@@ -8,6 +8,7 @@
 #include <typed-geometry/geometry/primitives/aabb.hh>
 
 /// One acquired drawing set: the atlas page it lives in, and where each of its drawings' records sits there.
+/// A layer too large for any atlas is skipped, so its drawing draws without it.
 /// A drawing whose records did not fit has a count of 0, and draws nothing.
 struct sv::drawing_set_record
 {
@@ -17,6 +18,9 @@ struct sv::drawing_set_record
 
     /// Each drawing's extent in its own units, from its outlines' points; empty for a drawing with nothing in it.
     cc::vector<tg::aabb2f> bounds;
+
+    /// Whether the set found room; a decal set that found the decal atlas full of this frame's decals did not.
+    bool placed = true;
 };
 
 /// Hands out `drawing_set_id`s and owns the Slug atlas pages every acquired set's shapes and records live in.
@@ -78,7 +82,7 @@ public:
     /// The id for `set` placed in the decal atlas rather than a page, keyed apart from the same set drawn as an instance.
     /// **Every decal lives in one atlas**, since a trace binds one: when a set does not fit it, the atlas is emptied
     /// and its sets placed again as they are next acquired, unless a decal drew from it this frame.
-    /// Then the set draws nothing, and the manager says so once.
+    /// Then the set draws nothing this frame, and is placed again on a later one once the atlas can be emptied for it.
     [[nodiscard]] drawing_set_id acquire_decal(drawing_set const& set);
 
     /// The same for a lone drawing.
@@ -101,6 +105,7 @@ private:
     [[nodiscard]] page& _page(u32 index) { return index == decal_page ? _decals : _pages[isize(index)]; }
 
     [[nodiscard]] drawing_set_id _place(cc::hash128 hash, cc::span<drawing const> drawings);
+    [[nodiscard]] drawing_set_id _acquire_decal(cc::hash128 hash, cc::span<drawing const> drawings);
     [[nodiscard]] drawing_set_id _place_decal(cc::hash128 hash, cc::span<drawing const> drawings);
 
     /// A record of `count` drawings that draw nothing, for a set that fits nowhere.

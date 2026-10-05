@@ -4,11 +4,30 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/string/string.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
+
+/// Why `slug_atlas::add` could not place a shape.
+enum class sr::slug_atlas_failure : sr::u8
+{
+    /// This atlas has no room left; another, or this one emptied, may.
+    full,
+
+    /// The shape's band data takes more than one row, which no atlas can hold.
+    shape_too_large,
+};
+
+struct sr::slug_atlas_error
+{
+    slug_atlas_failure failure = slug_atlas_failure::full;
+
+    /// What went wrong, for a log line; never parse it.
+    cc::string detail;
+};
 
 /// Where an atlas placed a shape, and everything an instance needs to draw it.
 struct sr::slug_shape_ref
@@ -78,8 +97,9 @@ public:
 
     /// Places `shape`, on the CPU only; the textures see it after the next `prepare`.
     /// An empty shape places nothing and returns a ref that is not drawable.
-    /// Fails when the atlas is full, or a shape's band data does not fit one row.
-    [[nodiscard]] cc::result<slug_shape_ref> add(slug_compiled_shape const& shape);
+    /// Fails `full` when this atlas has no room left, and `shape_too_large` when the shape's band data does not fit one
+    /// row, which no atlas can hold.
+    [[nodiscard]] cc::result<slug_shape_ref, slug_atlas_error> add(slug_compiled_shape const& shape);
 
     /// Keeps `records` as consecutive records, on the CPU only, and returns the index of the first.
     /// Every record must name a shape of this atlas; a job's quad names a record by its index.

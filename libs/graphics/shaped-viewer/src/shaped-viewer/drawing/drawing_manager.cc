@@ -41,16 +41,26 @@ drawing_set_id drawing_manager::acquire_decal(drawing_set const& set)
 {
     auto const hash
         = impl::combine_digests(set.hash(), cc::hash128::create(cc::span<byte const>(), impl::decal_hash_seed));
-    auto const resident = find_by_hash(hash);
-    return resident.has_value() ? resident.value() : _place_decal(hash, set.drawings());
+    return _acquire_decal(hash, set.drawings());
 }
 
 drawing_set_id drawing_manager::acquire_decal(drawing const& d)
 {
     u64 const key[] = {impl::drawing_set_hash_seed, impl::decal_hash_seed};
     auto const hash = impl::combine_digests(d.hash(), cc::hash128::create(cc::span<u64 const>(key).as_bytes(), 0));
-    auto const resident = find_by_hash(hash);
-    return resident.has_value() ? resident.value() : _place_decal(hash, cc::span<drawing const>(&d, 1));
+    return _acquire_decal(hash, cc::span<drawing const>(&d, 1));
+}
+
+drawing_set_id drawing_manager::_acquire_decal(cc::hash128 hash, cc::span<drawing const> drawings)
+{
+    if (auto const resident = find_by_hash(hash); resident.has_value())
+    {
+        // A set that found the atlas full of an earlier frame's decals tries again once the atlas can be emptied for it.
+        if (get(resident.value()).placed || _decals.last_used == _epoch)
+            return resident.value();
+        (void)evict(resident.value());
+    }
+    return _place_decal(hash, drawings);
 }
 
 u32 drawing_manager::first_record(drawing_set_id id, u32 index)
@@ -159,6 +169,12 @@ bool drawing_manager::_try_place(page& p, cc::span<drawing const> drawings, draw
         for (auto const& l : d.layers())
         {
             auto const shape = p.atlas.add(sr::compile_slug_shape(l.outline));
+            if (shape.has_error() && shape.error().failure == sr::slug_atlas_failure::shape_too_large)
+            {
+                // No page could hold it, so its drawing draws without it rather than its whole set going blank.
+                CC_LOG_WARNING("a drawing's layer is skipped: {}", shape.error().detail);
+                continue;
+            }
             if (shape.has_error())
                 return false;
             if (!shape.value().is_drawable)
@@ -260,6 +276,7 @@ drawing_set_id drawing_manager::_place_decal(cc::hash128 hash, cc::span<drawing 
             CC_LOG_WARNING("the decal atlas is full of this frame's decals, so a decal draws nothing");
         _warned_decals_full = true;
         record = _empty_record(drawings.size());
+        record.placed = false;
         bytes = 0;
     }
 

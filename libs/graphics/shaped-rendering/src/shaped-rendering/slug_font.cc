@@ -68,7 +68,7 @@ cc::result<slug_shape_ref> slug_font::glyph(babel::font::glyph_id g)
     auto placed = _atlas.add(compile_slug_shape(outline.value()));
     if (placed.has_error())
     {
-        _failures[u16(g)] = placed.error().to_string();
+        _failures[u16(g)] = placed.error().detail;
         return cc::error(_failures[u16(g)]);
     }
     _glyphs[u16(g)] = placed.value();

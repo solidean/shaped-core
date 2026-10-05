@@ -114,5 +114,10 @@ TEST("sv::drawing_manager - a full decal atlas starts over, unless a decal drew 
         CHECK(manager.contains(a));
         CHECK(manager.record_count(b, 0) == 0);
         CHECK(manager.record_count(a, 0) == 1);
+
+        // The next frame has not drawn from the atlas, so the set that lost gets it, rather than its empty record.
+        manager.begin_frame(sg::epoch(2));
+        auto const b_again = manager.acquire_decal(b_set);
+        CHECK(manager.record_count(b_again, 0) == 1);
     }
 }

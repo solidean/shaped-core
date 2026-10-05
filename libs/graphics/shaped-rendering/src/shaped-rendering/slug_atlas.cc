@@ -90,7 +90,7 @@ slug_atlas::slug_atlas(int row_limit) : _row_limit(cc::clamp(row_limit, 1, max_r
 {
 }
 
-cc::result<slug_shape_ref> slug_atlas::add(slug_compiled_shape const& shape)
+cc::result<slug_shape_ref, slug_atlas_error> slug_atlas::add(slug_compiled_shape const& shape)
 {
     auto ref = slug_shape_ref{.banding = shape.banding,
                               .em_bounds = shape.em_bounds,
@@ -101,8 +101,10 @@ cc::result<slug_shape_ref> slug_atlas::add(slug_compiled_shape const& shape)
 
     auto const header = shape.horizontal_bands.size() + shape.vertical_bands.size();
     if (shape.band_texel_count() > width)
-        return cc::error(cc::format("a shape's band data takes {} texels, more than one {}-texel row",
-                                    shape.band_texel_count(), width));
+        return cc::error(slug_atlas_error{.failure = slug_atlas_failure::shape_too_large,
+                                          .detail = cc::format("a shape's band data takes {} texels, more than one "
+                                                               "{}-texel row",
+                                                               shape.band_texel_count(), width)});
 
     // Where every curve texel lands: each run on one row, so a curve's second texel is always beside its first.
     auto curve_cursor = _curve_cursor;
@@ -121,7 +123,8 @@ cc::result<slug_shape_ref> slug_atlas::add(slug_compiled_shape const& shape)
     auto const block = reserve_run(band_cursor, int(shape.band_texel_count()));
 
     if (curve_cursor[1] >= _row_limit || band_cursor[1] >= _row_limit)
-        return cc::error("the slug atlas is full");
+        return cc::error(
+            slug_atlas_error{.failure = slug_atlas_failure::full, .detail = cc::string("the slug atlas is full")});
 
     grow_rows(_curve_texels, _curve_rows, curve_cursor[1] + 1);
     grow_rows(_band_texels, _band_rows, band_cursor[1] + 1);
