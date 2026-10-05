@@ -24,11 +24,11 @@ Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see
 ## Per-frame description — what to render
 
 ```cpp
-sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; def[i] -> view_data& } — a whole frame, as two flat pools
+sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 content_scale; def[i] -> view_data& } — a whole frame, as two flat pools
 sv::view_data                    // { view_id id; vec2i resolution; bool resolution_follows_layout; camera; vector<layer> layers; refresh_policy refresh; vector<temporal_input>; }
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
-sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; }
+sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; vector<drawing_placement> drawings; vector<annotation_record> annotations; vector<decal_placement> decals; }
 sv::layer_kind                   // layout | scene_3d | canvas | ui — composited in order, each over the ones before it
                                  //   a `layout` layer renders a whole tree INTO this view's texture; that is the recursion in the model
                                  //   canvas holds 2D drawings (view_ref::add_canvas); ui is not wired yet
@@ -698,7 +698,8 @@ The managers ride on `sv::impl::lru_pool<Id, Record>`, the reusable id-pool.
 It mints ids, tracks each record's byte size and last-used epoch, and evicts on the idle timeout or the byte budget, least-recently-used first.
 It never evicts this frame's working set; `advance_to` in its header states that rule exactly.
 It is content-addressed: records go in under the caller-supplied `cc::hash128`, so `acquire` is O(1) and never re-uploads content it already holds.
-A manager never hashes anything itself, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
+The mesh and texture managers never hash anything themselves, so hash load stays where the caller schedules it and never lands inside a per-frame acquire.
+The drawing manager does: `acquire(set)` hashes the set, and `scene_ref::add_annotation` builds and hashes its box every frame.
 
 ### Bindless tables — declared by module `tracer`, owned by the manager
 

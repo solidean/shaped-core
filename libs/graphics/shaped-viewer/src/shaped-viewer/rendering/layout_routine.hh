@@ -69,7 +69,6 @@ protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    /// How many pipelines one instance holds: every draw_kind, blended and not.
     /// The kinds this routine draws: every `draw_kind` before `drawings`.
     static constexpr int k_draw_kinds = 4;
 

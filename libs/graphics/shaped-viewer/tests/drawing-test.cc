@@ -140,12 +140,13 @@ TEST("sv::drawing_manager - a set is placed once, and a lone drawing is its own 
     (void)copy.add(logo);
     CHECK(manager.acquire(copy) == id);
 
-    // a lone drawing is keyed apart from a set holding only it
+    // a lone drawing is the set holding only it, so the two share one placement
     auto only = sv::drawing_set();
     (void)only.add(arrow);
     auto const lone = manager.acquire(arrow);
-    CHECK(lone != manager.acquire(only));
+    CHECK(lone == manager.acquire(only));
     CHECK(manager.acquire(arrow) == lone);
+    CHECK(lone != id);
 }
 
 namespace

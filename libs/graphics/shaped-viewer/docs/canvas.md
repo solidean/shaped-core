@@ -90,11 +90,14 @@ The pages are the manager's private storage, as a texture's memory is the textur
   Slug's atlas has no free list, so a page is the smallest unit that can be reclaimed without rewriting every band list that points at a moved curve.
 - **A page drawn from this frame is never emptied**, since this frame's placements name its records.
   When every page is in use the manager opens one past the limit, and says so once.
+  A page opened past the limit is never closed again, so a frame that needed one keeps its memory for the manager's lifetime.
 - **A job draws once per run of placements sharing a page**, each draw from that page's atlas, so later drawings stay over earlier ones whichever pages they live in.
 
 ## Text
 
 Text is drawings: a font's glyphs reach the GPU as drawing sets of a fixed 64 consecutive glyph ids, compiled the first time a string needs one.
+64 trades compiles against waste: a script's letters sit in a few runs of ids, so a Latin string costs one or two sets.
+A CJK font then compiles only the runs its strings touch, rather than its tens of thousands of glyphs.
 A string is then one glyph instance per visible glyph.
 `canvas_ref::add_text` and `scene_ref::add_text` lay the string out through `sr::layout_text`: kerned, broken at line breaks, wrapped and aligned.
 They place it like any instance: on a canvas in logical pixels from any corner, in a scene on a plane.

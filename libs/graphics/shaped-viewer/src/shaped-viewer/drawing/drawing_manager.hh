@@ -38,7 +38,8 @@ class sv::drawing_manager : public impl::lru_pool<drawing_set_id, drawing_set_re
 {
 public:
     /// Rows each page's textures may grow to, and pages kept before the least recently used one is emptied.
-    /// At the defaults a page holds about 2 million curve texels, and four of them take about 64 MB of textures.
+    /// A full page is 4096 x `page_rows` texels each of curves (8 bytes), bands (4) and records (16): about 56 MiB at the
+    /// defaults, so about 224 MiB for four, plus the decal atlas and the CPU copy every atlas keeps.
     explicit drawing_manager(int page_rows = 512, isize max_pages = 4);
 
     /// Starts frame `e`: pages drawn from before it become candidates to empty again.
@@ -47,7 +48,7 @@ public:
     /// The id for `set`, resident from a prior acquire (O(1) through the set's cache slot), or freshly placed.
     [[nodiscard]] drawing_set_id acquire(drawing_set const& set);
 
-    /// The id for a lone drawing, as a one-element set keyed by the drawing's own hash.
+    /// The id for a lone drawing: the same as for a one-element set holding it, whose records it would have.
     [[nodiscard]] drawing_set_id acquire(drawing const& d);
 
     /// The record range of drawing `index` of the set `id` names, which must be resident.

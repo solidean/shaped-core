@@ -10,6 +10,17 @@
 
 namespace sv
 {
+namespace
+{
+/// What `drawing_set::hash` gives a set holding `d` alone.
+/// A lone drawing is keyed as that set, so the two share one placement: their records would be identical.
+[[nodiscard]] cc::hash128 lone_set_hash(drawing const& d)
+{
+    auto const digest = d.hash();
+    return cc::hash128::create(cc::span<cc::hash128 const>(&digest, 1).as_bytes(), impl::drawing_set_hash_seed);
+}
+} // namespace
+
 drawing_set_id drawing_manager::acquire(drawing_set const& set)
 {
     // The slot holds for the content it was filled with, so a set that gained a drawing since misses here.
@@ -28,9 +39,7 @@ drawing_set_id drawing_manager::acquire(drawing_set const& set)
 
 drawing_set_id drawing_manager::acquire(drawing const& d)
 {
-    // Seeded apart from a real set's key, so a lone drawing and a set holding only it never alias by accident.
-    auto const hash
-        = impl::combine_digests(d.hash(), cc::hash128::create(cc::span<byte const>(), impl::drawing_set_hash_seed));
+    auto const hash = lone_set_hash(d);
     auto const resident = find_by_hash(hash);
     if (resident.has_value())
         return resident.value();
@@ -46,8 +55,8 @@ drawing_set_id drawing_manager::acquire_decal(drawing_set const& set)
 
 drawing_set_id drawing_manager::acquire_decal(drawing const& d)
 {
-    u64 const key[] = {impl::drawing_set_hash_seed, impl::decal_hash_seed};
-    auto const hash = impl::combine_digests(d.hash(), cc::hash128::create(cc::span<u64 const>(key).as_bytes(), 0));
+    auto const hash
+        = impl::combine_digests(lone_set_hash(d), cc::hash128::create(cc::span<byte const>(), impl::decal_hash_seed));
     return _acquire_decal(hash, cc::span<drawing const>(&d, 1));
 }
 

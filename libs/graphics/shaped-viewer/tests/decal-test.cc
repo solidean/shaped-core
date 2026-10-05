@@ -80,11 +80,12 @@ TEST("sv::drawing_manager - a decal lives in the decal atlas, keyed apart from t
     CHECK(manager.record_count(decal, 2) == 1);
     CHECK(manager.decal_atlas().record_count() == 3);
 
-    // A lone drawing and a one-element set holding it are different keys here too.
+    // A lone drawing is the one-element set holding it here too, and neither is the drawing's placement in a page.
     auto const& d = set.drawings()[0];
     auto only = sv::drawing_set();
     (void)only.add(d);
-    CHECK(manager.acquire_decal(d) != manager.acquire_decal(only));
+    CHECK(manager.acquire_decal(d) == manager.acquire_decal(only));
+    CHECK(manager.acquire_decal(d) != manager.acquire(d));
 }
 
 TEST("sv::drawing_manager - a full decal atlas starts over, unless a decal drew from it this frame")

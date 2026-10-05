@@ -426,10 +426,11 @@ struct builder
                 local.push_back(
                     {.kind = draw_kind::background, .dst_rect = item.title, .color = title_color, .node = item.node});
                 auto const origin = tg::vec3f(f32(item.title.min[0]) / scale, f32(item.title.min[1]) / scale, 0);
-                auto const room = f32(rect_w(item.title)) / scale - title_text_size;
+                // A glyph is at most an em wide, and its `at` already holds the name's indent from the strip's left.
+                auto const width = f32(rect_w(item.title)) / scale;
                 for (auto p : leaf.title_text)
                 {
-                    if (p.offset[0] > room)
+                    if (p.at[0] + title_text_size > width)
                         continue;
                     p.at = p.at + origin;
                     titles.push_back(p);

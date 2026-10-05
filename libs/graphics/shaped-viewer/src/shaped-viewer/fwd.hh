@@ -336,8 +336,6 @@ enum class sv::mesh_id : sv::u32
     invalid = u32(-1)
 };
 
-/// Names one uploaded quadric batch — the primitives, their AABBs, and the procedural BLAS over them.
-/// Minted by the quadric manager, keyed on the set's own content hash.
 /// A drawing's index in the `drawing_set` that minted it.
 enum class sv::drawing_id : sv::u32
 {
@@ -351,6 +349,8 @@ enum class sv::drawing_set_id : sv::u32
     invalid = u32(-1)
 };
 
+/// Names one uploaded quadric batch — the primitives, their AABBs, and the procedural BLAS over them.
+/// Minted by the quadric manager, keyed on the set's own content hash.
 enum class sv::quadric_set_id : sv::u32
 {
     invalid = u32(-1)

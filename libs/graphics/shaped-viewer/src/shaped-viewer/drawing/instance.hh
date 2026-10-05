@@ -56,15 +56,16 @@ struct sv::instance_3d
 /// lit, shadowed and reflected with it, whichever way its mesh is wound.
 /// A surface met at a grazing angle fades out instead of smearing the drawing along it.
 /// The axes should be orthogonal, since the projection runs along their cross product.
+/// The axes start at zero, which is no plane, since a plane in 3D has to be said.
 struct sv::decal
 {
     tg::pos3f at = tg::pos3f(0, 0, 0);
-    tg::vec3f x_axis = tg::vec3f(1, 0, 0);
-    tg::vec3f y_axis = tg::vec3f(0, 1, 0);
+    tg::vec3f x_axis = tg::vec3f(0, 0, 0);
+    tg::vec3f y_axis = tg::vec3f(0, 0, 0);
     f32 scale = 1.0f;
 
     /// How far the projection reaches either side of the plane, in world units; must be > 0.
-    f32 depth = 0.0f;
+    f32 depth = 1.0f;
 
     /// Multiplies the drawing's own colors; straight alpha, sRGB-encoded, in [0, 1].
     tg::vec4f tint = tg::vec4f(1, 1, 1, 1);

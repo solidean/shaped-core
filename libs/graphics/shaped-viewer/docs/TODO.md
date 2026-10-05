@@ -62,8 +62,11 @@ What is left is the interaction on top of it, in dependency order:
 - **The UI layer** through `sr::imgui_context` / `sr::imgui_routine`, into the view's own target.
 - **A second window**, which is only an sv-side step: `sr::window_system` already drives N windows from one poll.
 - **A 3D drawing is occluded by the depth of the trace's first sample, reprojected to the pixel center.**
-  Exact on flat faces; on a curved or normal-mapped one the plane taken is the shading normal's, a sub-pixel step off the surface.
+  The plane taken is the hit triangle's geometric normal's.
+  It is exact where the pixel center lands on the same triangle, and a sub-pixel step off on a neighboring triangle of a curved mesh or on a quadric.
   A silhouette pixel holds one surface's depth, so a drawing's edge along a silhouette is hard rather than antialiased.
+  That depth is taken again from a jittered sample each accumulation frame, so at a silhouette it flips until the image converges.
+  A 3D drawing's edge shimmers there, and an annotation anchored on a silhouette pixel can toggle between filled and hollow.
 - **Annotations do not avoid each other.**
   Each is placed on its own, so labels whose anchors are close overlap.
   Decluttering is greedy in priority order against the previous frame's boxes, which wants the boxes to persist across frames and an identity per annotation.

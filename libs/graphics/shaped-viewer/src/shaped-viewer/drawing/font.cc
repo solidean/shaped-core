@@ -38,11 +38,19 @@ font const* default_font()
         }
         auto adapter = cc::file_read_stream_adapter::open(path.value());
         if (adapter.has_error())
+        {
+            CC_LOG_WARNING("the system UI font {} did not open ({}), so text drawn in the default font draws nothing",
+                           path.value(), adapter.error().to_string());
             return {};
+        }
         auto stream = adapter.value().stream();
         auto bytes = stream.read_all();
         if (bytes.has_error())
+        {
+            CC_LOG_WARNING("the system UI font {} did not read ({}), so text drawn in the default font draws nothing",
+                           path.value(), bytes.error().to_string());
             return {};
+        }
         auto f = font::from_bytes(cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(bytes).value())));
         if (f.has_error())
         {
