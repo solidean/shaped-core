@@ -120,6 +120,8 @@ struct sr::stroke_style
     /// Alternating on and off lengths, starting with on; an odd count repeats once to make it even.
     /// Empty, all zero or any negative draws a solid line.
     /// Each contour restarts the pattern, and every dash is capped like an open contour.
+    /// On a closed contour, a dash running through its start is one dash, joined there.
+    /// A zero on length draws that dash's caps alone: a dot under round caps, a square under square, nothing under butt.
     cc::vector<f32> dashes;
 
     /// How far into the pattern each contour starts.

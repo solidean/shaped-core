@@ -324,6 +324,30 @@ TEST("sr::dash_path - dashes start the pattern per contour, at the offset, and r
     CHECK(contour_count(sr::dash_path(line, {.dashes = {0, 0}})) == 1);
     CHECK(contour_count(sr::dash_path(line, {.dashes = {4, -1}})) == 1);
 
+    SECTION("a closed contour's dash through its start is one dash, joined rather than capped")
+    {
+        auto const square = sr::slug_path::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(50, 50)));
+        auto const style = sr::stroke_style{.width = 10.0f, .dashes = {10, 5}};
+        CHECK(winding(sr::stroke_outline(square, style, 0.01f), tg::pos2f(-4.5f, -4.5f)) != 0);
+    }
+
+    SECTION("a zero-length dash draws its caps alone")
+    {
+        tg::pos2f const short_points[] = {tg::pos2f(0, 0), tg::pos2f(20, 0)};
+        auto const short_line = sr::slug_path::polyline(short_points);
+        auto const round
+            = sr::stroke_outline(short_line, {.width = 2.0f, .cap = sr::stroke_cap::round, .dashes = {0, 4}}, 0.01f);
+        for (auto const x : {0.0f, 4.0f, 8.0f, 12.0f, 16.0f, 20.0f})
+        {
+            CHECK(winding(round, tg::pos2f(x, 0.5f)) != 0);
+            CHECK(winding(round, tg::pos2f(x + 2.0f, 0.0f)) == 0);
+        }
+        auto const butt = sr::stroke_outline(short_line, {.width = 2.0f, .dashes = {0, 4}}, 0.01f);
+        // a butt dot is a sliver a thousandth of the width long, so beside it is empty where a round cap is not
+        CHECK(winding(round, tg::pos2f(8.5f, 0.5f)) != 0);
+        CHECK(winding(butt, tg::pos2f(8.5f, 0.5f)) == 0);
+    }
+
     SECTION("along a curve, the dashes hold their share of its length")
     {
         auto const circle = sr::slug_path::circle(tg::pos2f(0, 0), 50.0f);

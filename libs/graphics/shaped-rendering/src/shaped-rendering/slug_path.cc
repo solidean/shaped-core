@@ -623,9 +623,12 @@ slug_path dash_path(slug_path const& path, stroke_style const& style)
     if (total <= 0.0f)
         return path;
 
+    // A zero-length dash is a segment this short along the tangent, which the stroke then draws as its two caps alone.
+    auto const dot_length = 1e-3f * style.width;
+
     auto out = slug_path();
     for_each_contour(path,
-                     [&](cc::span<slug_curve const> run, bool)
+                     [&](cc::span<slug_curve const> run, bool closed)
                      {
                          // where in the pattern the contour starts
                          auto phase = style.dash_offset - total * tg::floor(style.dash_offset / total);
@@ -636,12 +639,33 @@ slug_path dash_path(slug_path const& path, stroke_style const& style)
                              index = (index + 1) % pattern.size();
                          }
                          auto remaining = pattern[index] - phase;
-                         auto drawing = false;
 
+                         // The contour's dashes are kept until it ends, so a closed one can join its last dash to its first.
+                         auto dashes = cc::vector<cc::vector<slug_curve>>();
+                         auto drawing = false;
+                         auto first_starts_at_start = false;
+                         auto travelled = 0.0f;
+                         auto const add_dot = [&](slug_curve const& c, f32 t)
+                         {
+                             // A control point on an end point stops the curve there, so its chord gives the direction.
+                             auto const at_t = velocity_at(c, t);
+                             auto const v = at_t.length() > 0.0f ? at_t : c.p3 - c.p1;
+                             auto const speed = v.length();
+                             if (speed <= 0.0f)
+                                 return;
+                             auto const half = v * (0.5f * dot_length / speed);
+                             auto const p = point_at(c, t);
+                             auto dot = cc::vector<slug_curve>();
+                             dot.push_back({.p1 = p - half, .p2 = p, .p3 = p + half});
+                             dashes.push_back(cc::move(dot));
+                         };
+
+                         auto last = static_cast<slug_curve const*>(nullptr);
                          for (auto const& c : run)
                          {
                              if (is_point(c))
                                  continue;
+                             last = &c;
                              auto const length = length_of(c, 0.0f, 1.0f);
                              auto at = 0.0f;
                              while (at < length)
@@ -649,13 +673,18 @@ slug_path dash_path(slug_path const& path, stroke_style const& style)
                                  auto const step = cc::min(remaining, length - at);
                                  if (index % 2 == 0 && step > 0.0f)
                                  {
-                                     auto const piece
-                                         = sub_curve(c, parameter_at(c, at, length), parameter_at(c, at + step, length));
                                      if (!drawing)
-                                         out.move_to(piece.p1);
+                                     {
+                                         if (travelled + at == 0.0f)
+                                             first_starts_at_start = dashes.empty();
+                                         dashes.emplace_back();
+                                     }
                                      drawing = true;
-                                     out.quad_to(piece.p2, piece.p3);
+                                     dashes.back().push_back(
+                                         sub_curve(c, parameter_at(c, at, length), parameter_at(c, at + step, length)));
                                  }
+                                 else if (index % 2 == 0)
+                                     add_dot(c, parameter_at(c, at, length));
                                  at += step;
                                  remaining -= step;
                                  if (remaining <= 0.0f)
@@ -665,6 +694,26 @@ slug_path dash_path(slug_path const& path, stroke_style const& style)
                                      remaining = pattern[index];
                                  }
                              }
+                             travelled += length;
+                         }
+
+                         // A zero-length dash due exactly at an open contour's end; a closed one placed it at its start already.
+                         if (last != nullptr && !closed && index % 2 == 0 && remaining <= 0.0f)
+                             add_dot(*last, 1.0f);
+
+                         // On a closed contour, a dash running through its start is one dash, joined there rather than capped twice.
+                         if (closed && drawing && first_starts_at_start && dashes.size() > 1)
+                         {
+                             for (auto const& c : dashes[0])
+                                 dashes.back().push_back(c);
+                             dashes.remove_at(0);
+                         }
+
+                         for (auto const& d : dashes)
+                         {
+                             out.move_to(d[0].p1);
+                             for (auto const& c : d)
+                                 out.quad_to(c.p2, c.p3);
                          }
                      });
     return out;

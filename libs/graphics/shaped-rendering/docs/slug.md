@@ -109,6 +109,8 @@ The outer half is still a clean offset, and the inner half is covered by disks a
 **Dashes cut the path first.**
 `sr::dash_path` splits each contour at arc lengths along it, so every dash is an open contour of exact pieces of the original curves, capped and joined like any other.
 Each contour restarts the pattern.
+On a closed contour, the dash running through its start is one dash, joined there rather than capped twice.
+A zero on length draws its caps alone, which is how round caps make a dotted line.
 
 A stroke's width is in the path's units and scales with the shape, so a hairline that stays one pixel under any zoom is not something it can be.
 
