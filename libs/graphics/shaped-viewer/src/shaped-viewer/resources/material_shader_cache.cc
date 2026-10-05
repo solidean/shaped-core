@@ -94,15 +94,17 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                        r.type->name);
 
     // Left cold: the tracer starts it the first time a trace names this permutation.
+    auto label = cc::format("<material '{}'{}>", r.type->name, procedural ? " quadric" : "");
     auto lib = acquire_shader_library();
     auto hit_group = cc::shared_async<cc::vector<sg::hit_shader>>();
-    if (_context == nullptr || lib.has_error())
-        hit_group = failed_hit_group(
-            cc::format("shaped-viewer: no context and shader library to compile material '{}' through", r.type->name));
+    if (_context == nullptr)
+        hit_group = failed_hit_group(cc::format("no context to compile material '{}' through", r.type->name));
+    else if (lib.has_error())
+        hit_group = failed_hit_group(cc::format("no shader library to compile material '{}' through: {}", r.type->name,
+                                                lib.error().to_string()));
     else
         hit_group = slib::compile_hit_group(_context, lib.value(), &sv::shaders::tracer_pipeline_path_t::definition(),
-                                            generated.source, "sv_material",
-                                            cc::format("<material '{}'{}>", r.type->name, procedural ? " quadric" : ""));
+                                            generated.source, "sv_material", label);
 
     auto entry = _by_key.entry(key);
     return entry.get_or_emplace(material_permutation{.key = generated.key,
@@ -110,6 +112,7 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                                                      .kind = kind,
                                                      .can_cut_out = !procedural && generated.can_cut_out,
                                                      .hit_group = cc::move(hit_group),
-                                                     .source = cc::move(generated.source)});
+                                                     .source = cc::move(generated.source),
+                                                     .label = cc::move(label)});
 }
 } // namespace sv

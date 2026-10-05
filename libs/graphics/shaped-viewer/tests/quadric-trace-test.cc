@@ -723,10 +723,11 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
     auto const resolved = sv::resolve_material(type, material, resident);
     auto const* const own = &resources.shaders.acquire_quadric(resolved);
 
-    // The premise: it settles without a value, so the trace has to substitute.
+    // The premise: it settles without a value, so the trace has to substitute, and says so once.
     co_await cc::async_settled(own->hit_group);
     REQUIRE(own->hit_group->has_error());
     REQUIRE(own->hit_group->try_value() == nullptr);
+    nx::expect_error("the hit group of <material 'sv_test_uncompilable' quadric> did not compile*", nx::exactly(1));
 
     // The stand-in the trace would pick, and the one thing that makes it usable here: it is procedural.
     auto const& stand_in = resources.shaders.acquire_quadric_fallback();

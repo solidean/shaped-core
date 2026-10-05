@@ -224,6 +224,10 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     co_await cc::async_settled(permutation->hit_group);
     REQUIRE(permutation->hit_group->has_error());
 
+    // The trace says why the mesh shades as the stand-in, naming the material and the compiler's own message.
+    // Once, however many frames trace it: the routine remembers that it said so.
+    nx::expect_error("the hit group of <material 'sv_test_broken'> did not compile*not_a_function*", nx::exactly(1));
+
     // With nothing to stand in for it the trace is a no-op — the old all-or-nothing behavior, still what a caller
     // supplying no fallback gets.
     // One frame is enough for a decline, and it must stay a decline however long anything else takes.

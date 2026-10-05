@@ -42,6 +42,12 @@ struct sv::material_permutation
 
     /// kept for diagnostics: a compile error names a line in this text, and nothing else can reproduce it
     cc::string source;
+
+    /// What a compile error calls this permutation: the material type's name, and whether it is the quadric form.
+    cc::string label;
+
+    /// Whether the routine has logged this hit group's compile error, which it does once rather than every frame.
+    mutable bool is_failure_reported = false;
 };
 
 /// Generates and compiles one hit group per material permutation, deduplicated on `material_shader_key`.

@@ -40,7 +40,13 @@ enum class group_state
     if (node->try_value() != nullptr)
         return group_state::ready;
     if (node->is_ready())
+    {
+        if (!p->is_failure_reported)
+            CC_LOG_ERROR("the hit group of {} did not compile, so its geometry shades as the stand-in: {}", p->label,
+                         node->try_error()->underlying().to_string());
+        p->is_failure_reported = true;
         return group_state::failed;
+    }
     (void)ctx.backlog.start(node);
     return group_state::pending;
 }
