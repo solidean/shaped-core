@@ -88,7 +88,7 @@ namespace
 [[nodiscard]] f32 distance_to_path(tg::pos2f p, sr::slug_path const& path)
 {
     auto best = 3.0e38f;
-    for (auto const& c : path.curves)
+    for (auto const& c : path.curves())
     {
         auto const points = sampled(c);
         for (auto i = isize(1); i < points.size(); ++i)
@@ -132,9 +132,16 @@ void check_region(sr::slug_outline const& outline, tg::aabb2f box, f32 step, f32
 
 [[nodiscard]] isize contour_count(sr::slug_path const& p)
 {
-    return p.contours.size();
+    return p.contours().size();
 }
 } // namespace
+
+TEST("sr::slug_path - a segment drawn on from a circle starts where the circle does")
+{
+    auto p = sr::slug_path::circle(tg::pos2f(100, 100), 50);
+    p.line_to(tg::pos2f(200, 100));
+    CHECK(p.curves().back().p1 == tg::pos2f(150, 100));
+}
 
 TEST("sr::slug_path - contours stay open until closed, and a fill closes them")
 {
@@ -145,10 +152,10 @@ TEST("sr::slug_path - contours stay open until closed, and a fill closes them")
     p.move_to(tg::pos2f(50, 50)).move_to(tg::pos2f(60, 60));
 
     REQUIRE(contour_count(p) == 2);
-    CHECK(!p.contours[0].closed);
-    CHECK(p.contours[0].end == 2);
-    CHECK(p.contours[1].closed);
-    CHECK(p.contours[1].end == 5);
+    CHECK(!p.contours()[0].closed);
+    CHECK(p.contours()[0].end == 2);
+    CHECK(p.contours()[1].closed);
+    CHECK(p.contours()[1].end == 5);
 
     auto const filled = p.to_outline();
     CHECK(filled.is_closed());
@@ -161,7 +168,7 @@ TEST("sr::slug_path - contours stay open until closed, and a fill closes them")
         auto q = sr::slug_path();
         q.move_to(tg::pos2f(0, 0)).line_to(tg::pos2f(1, 0)).close().line_to(tg::pos2f(0, 1));
         REQUIRE(contour_count(q) == 2);
-        CHECK(q.curves.back().p1 == tg::pos2f(0, 0));
+        CHECK(q.curves().back().p1 == tg::pos2f(0, 0));
     }
 }
 
@@ -170,9 +177,9 @@ TEST("sr::slug_path - a circle and a rounded rectangle stay within 1/4096 of the
     auto const r = 100.0f;
     auto const circle = sr::slug_path::circle(tg::pos2f(5, -3), r);
     REQUIRE(contour_count(circle) == 1);
-    CHECK(circle.contours[0].closed);
-    CHECK(circle.curves.back().p3 == circle.curves.front().p1);
-    for (auto const& c : circle.curves)
+    CHECK(circle.contours()[0].closed);
+    CHECK(circle.curves().back().p3 == circle.curves().front().p1);
+    for (auto const& c : circle.curves())
         for (auto const& p : sampled(c, 16))
             CHECK(tg::abs((p - tg::pos2f(5, -3)).length() - r) <= 2.0f * r / 4096.0f);
 
@@ -272,9 +279,9 @@ TEST("sr::dash_path - dashes start the pattern per contour, at the offset, and r
     {
         auto out = cc::vector<tg::vec2f>();
         auto first = i32(0);
-        for (auto const& c : p.contours)
+        for (auto const& c : p.contours())
         {
-            out.push_back(tg::vec2f(p.curves[first].p1[0], p.curves[c.end - 1].p3[0]));
+            out.push_back(tg::vec2f(p.curves()[first].p1[0], p.curves()[c.end - 1].p3[0]));
             first = c.end;
         }
         return out;
@@ -301,7 +308,7 @@ TEST("sr::dash_path - dashes start the pattern per contour, at the offset, and r
         = {tg::vec2f(0, 10), tg::vec2f(20, 30), tg::vec2f(40, 50), tg::vec2f(60, 70), tg::vec2f(80, 90)};
     CHECK(near(starts(sr::dash_path(line, {.dashes = {10}})), odd));
 
-    for (auto const& c : sr::dash_path(line, {.dashes = {10, 5}}).contours)
+    for (auto const& c : sr::dash_path(line, {.dashes = {10, 5}}).contours())
         CHECK(!c.closed);
 
     // a pattern that cannot dash draws solid
@@ -313,7 +320,7 @@ TEST("sr::dash_path - dashes start the pattern per contour, at the offset, and r
         auto const circle = sr::slug_path::circle(tg::pos2f(0, 0), 50.0f);
         auto const dashed = sr::dash_path(circle, {.dashes = {6, 4}});
         auto total = 0.0f;
-        for (auto const& c : dashed.curves)
+        for (auto const& c : dashed.curves())
         {
             auto const points = sampled(c, 64);
             for (auto i = isize(1); i < points.size(); ++i)

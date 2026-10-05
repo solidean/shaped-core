@@ -398,10 +398,10 @@ template <class F>
 void for_each_contour(slug_path const& path, F&& f)
 {
     auto first = i32(0);
-    for (auto const& contour : path.contours)
+    for (auto const& contour : path.contours())
     {
         if (contour.end > first)
-            f(cc::span<slug_curve const>(path.curves).subspan({.start = first, .end = contour.end}), contour.closed);
+            f(path.curves().subspan({.start = first, .end = contour.end}), contour.closed);
         first = contour.end;
     }
 }
@@ -420,12 +420,12 @@ void slug_path::push(slug_curve const& c)
 {
     if (!_open)
     {
-        contours.push_back({.end = i32(curves.size()), .closed = false});
+        _contours.push_back({.end = i32(_curves.size()), .closed = false});
         _start = _cursor;
         _open = true;
     }
-    curves.push_back(c);
-    contours.back().end = i32(curves.size());
+    _curves.push_back(c);
+    _contours.back().end = i32(_curves.size());
     _cursor = c.p3;
 }
 
@@ -487,7 +487,7 @@ slug_path& slug_path::close()
         return *this;
     if (_cursor != _start)
         push({.p1 = _cursor, .p2 = _start, .p3 = _start});
-    contours.back().closed = true;
+    _contours.back().closed = true;
     _cursor = _start;
     _open = false;
     return *this;
@@ -495,11 +495,11 @@ slug_path& slug_path::close()
 
 tg::aabb2f slug_path::bounds() const
 {
-    if (curves.empty())
+    if (_curves.empty())
         return tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(0, 0));
-    auto lo = curves[0].p1;
-    auto hi = curves[0].p1;
-    for (auto const& c : curves)
+    auto lo = _curves[0].p1;
+    auto hi = _curves[0].p1;
+    for (auto const& c : _curves)
         for (auto const p : {c.p1, c.p2, c.p3})
         {
             lo = tg::pos2f(cc::min(lo[0], p[0]), cc::min(lo[1], p[1]));
@@ -577,8 +577,12 @@ slug_path slug_path::ellipse(tg::pos2f center, tg::vec2f radii)
         .arc_to(tg::pos2f(0, 0), tg::angle_f::make_from_radians(2.0f * tg::pi<f32>), 2.0f * shape_tolerance)
         .close();
     auto const map = [&](tg::pos2f p) { return center + tg::vec2f(p[0] * radii[0], p[1] * radii[1]); };
-    for (auto& c : unit.curves)
+    for (auto& c : unit._curves)
         c = {.p1 = map(c.p1), .p2 = map(c.p2), .p3 = map(c.p3)};
+
+    // The path continues from where the circle starts and ends, in the caller's units rather than the unit circle's.
+    unit._start = map(unit._start);
+    unit._cursor = map(unit._cursor);
     return unit;
 }
 

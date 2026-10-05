@@ -26,8 +26,10 @@ struct sr::slug_contour
 /// A closed contour's last curve ends where its first started; an open one's need not.
 struct sr::slug_path
 {
-    cc::vector<slug_curve> curves;
-    cc::vector<slug_contour> contours;
+    /// The curves in order, and the contours over them; the builder below is their only writer, so the cursor always
+    /// stands where the last curve ended.
+    [[nodiscard]] cc::span<slug_curve const> curves() const { return _curves; }
+    [[nodiscard]] cc::span<slug_contour const> contours() const { return _contours; }
 
     /// Moves to `p` without drawing, leaving any contour still open as it is; the next curve starts a contour there.
     slug_path& move_to(tg::pos2f p);
@@ -48,7 +50,7 @@ struct sr::slug_path
     /// With no curve drawn since the last move or close, it does nothing.
     slug_path& close();
 
-    [[nodiscard]] bool is_empty() const { return curves.empty(); }
+    [[nodiscard]] bool is_empty() const { return _curves.empty(); }
 
     /// Every curve's points, control points included, so the box holds the path but may be larger than it.
     /// An empty path's box is empty at (0, 0).
@@ -75,10 +77,13 @@ private:
     /// Appends `c`, starting a contour at the cursor when none is open.
     void push(slug_curve const& c);
 
+    cc::vector<slug_curve> _curves;
+    cc::vector<slug_contour> _contours;
+
     tg::pos2f _start = tg::pos2f(0, 0);
     tg::pos2f _cursor = tg::pos2f(0, 0);
 
-    /// Whether the last contour in `contours` still takes curves.
+    /// Whether the last contour in `_contours` still takes curves.
     bool _open = false;
 };
 
