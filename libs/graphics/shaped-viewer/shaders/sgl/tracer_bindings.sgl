@@ -13,7 +13,7 @@ require raytracing_pipeline
 // So the three below restate `scene.camera`, `scene.light` and `scene.instance` field for field, and a reader converts with `scene.light(..record)`.
 // TEMPORARY: a module whose structs another module's binding places should generate them, which is slib's host-code generator to grow.
 
-/// `scene.camera` as the frame constants carry it — mirrors `sv::camera_gpu`, 64 bytes.
+/// `scene.camera` as the frame constants carry it, 64 bytes; the host fills it through `sv::camera_record_of`.
 struct camera_record:
     position: float3
     pad0: float
@@ -24,7 +24,7 @@ struct camera_record:
     up_scaled: float3
     pad3: float
 
-/// `scene.light` as `traced.lights` holds it — mirrors `sv::light_gpu`, 96 bytes.
+/// `scene.light` as `traced.lights` holds it, 96 bytes; the host fills it through `sv::light_record_of`.
 struct light_record:
     position: float3
     path: uint
@@ -40,7 +40,7 @@ struct light_record:
     link_mask: uint
     pad0: float2
 
-/// `scene.instance` as `traced.instances` holds it — mirrors `sv::instance_gpu`, 32 bytes.
+/// `scene.instance` as `traced.instances` holds it, 32 bytes; the host fills it through `gpu_resource_manager::describe_instance`.
 struct instance_record:
     param_buffer: uint
     param_offset: uint
@@ -50,7 +50,7 @@ struct instance_record:
     link_mask: uint
     padding: uint2
 
-/// The per-frame constants, mirroring `sv::pt_frame_constants_gpu` (rendering/pathtrace_routine.hh) byte for byte, 256 bytes.
+/// The per-frame constants, 256 bytes; the host starts from `sv::default_frame_constants` (rendering/pathtrace_routine.hh).
 ///
 /// A buffer's single element rather than a constant block, which `sv::pt_trace_desc::frame` is created as.
 /// Placed as a buffer element is (EMIT-111): tightly, every value aligned to 4, which is why every pad of the C++ struct is named here.
@@ -101,10 +101,10 @@ binding traced:
     /// The view's accumulator: the running mean of every sample this estimate has drawn, read back and blended into at the dispatch's own pixel.
     output: mut image_2d[.rgba32_float]
 
-    /// One element, `sv::pt_frame_constants_gpu`.
+    /// One element, the frame constants.
     frame: buffer[frame_constants]
 
-    /// The per-item table, indexed by a hit's instance id — mirrors `sv::instance_gpu`.
+    /// The per-item table, indexed by a hit's instance id.
     instances: buffer[instance_record]
 
     /// The environment's 16 SH coefficients, `sv::background_gpu` byte for byte.

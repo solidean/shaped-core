@@ -27,8 +27,8 @@ namespace
 /// Mirrors `camera_probe_case` in tests/shaders/camera_probe.sgl lane-for-lane.
 struct camera_probe_case
 {
-    sv::camera_gpu cam;
-    sv::camera_gpu prev;
+    sv::shaders::tracer::camera_record cam;
+    sv::shaders::tracer::camera_record prev;
 
     tg::vec2f pixel;
     tg::vec2f dim;
@@ -124,7 +124,7 @@ ASYNC_INVOCABLE_TEST("sv - a camera projects its own primary ray back to the pix
         SKIP("no DXC compiler to build the probe shader");
 
     auto const dim = tg::vec2f(256, 256);
-    auto const cam = sv::camera_gpu::from(base_camera());
+    auto const cam = sv::camera_record_of(base_camera());
 
     auto const pixels = cc::vector<tg::vec2f>{
         tg::vec2f(128, 128), // center
@@ -188,16 +188,16 @@ ASYNC_INVOCABLE_TEST("sv - motion vectors follow the camera, and the sky ignores
     cases.resize_to_defaulted(c_count);
     for (auto& c : cases)
     {
-        c.cam = sv::camera_gpu::from(still);
+        c.cam = sv::camera_record_of(still);
         c.pixel = center;
         c.dim = dim;
         c.world = world;
     }
-    cases[c_unchanged].prev = sv::camera_gpu::from(still);
-    cases[c_translated].prev = sv::camera_gpu::from(stepped);
-    cases[c_translated_sky].prev = sv::camera_gpu::from(stepped);
+    cases[c_unchanged].prev = sv::camera_record_of(still);
+    cases[c_translated].prev = sv::camera_record_of(stepped);
+    cases[c_translated_sky].prev = sv::camera_record_of(stepped);
     cases[c_translated_sky].at_infinity = 1;
-    cases[c_turned_sky].prev = sv::camera_gpu::from(turned);
+    cases[c_turned_sky].prev = sv::camera_record_of(turned);
     cases[c_turned_sky].at_infinity = 1;
 
     auto const r = co_await run_probe(ctx, cases);
@@ -244,8 +244,8 @@ ASYNC_INVOCABLE_TEST("sv - a point behind the previous camera reprojects off the
     auto behind = base_camera();
     behind.position = tg::pos3d(0, 0, 5);
 
-    auto const cases = cc::vector<camera_probe_case>{{.cam = sv::camera_gpu::from(base_camera()),
-                                                      .prev = sv::camera_gpu::from(behind),
+    auto const cases = cc::vector<camera_probe_case>{{.cam = sv::camera_record_of(base_camera()),
+                                                      .prev = sv::camera_record_of(behind),
                                                       .pixel = tg::vec2f(128, 128),
                                                       .dim = dim,
                                                       .world = tg::vec3f(0, 0, 0)}};
@@ -264,7 +264,7 @@ TEST("sv - a camera's matrices describe the frustum its rays sweep")
     // world-to-view passes; a level one has no roll to lose; and a 1:1 image cancels a misplaced aspect ratio.
     auto camera = sv::camera::looking_at(tg::pos3d(3.0, 2.0, -4.0), tg::pos3d(0.5, -0.3, 1.0), tg::vec3d(0.2, 0.9, 0.1));
     camera.projection.aspect_ratio = 16.0 / 9.0;
-    auto const cam = sv::camera_gpu::from(camera);
+    auto const cam = sv::camera_record_of(camera);
 
     auto const near_plane = 0.25f;
     auto const m = sv::matrices_of(cam, near_plane);

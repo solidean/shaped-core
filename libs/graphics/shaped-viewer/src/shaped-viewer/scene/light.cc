@@ -282,12 +282,23 @@ light default_fallback_light()
 
 // ---- GPU layout ------------------------------------------------------------------------------------------
 
-light_gpu light_gpu::from(light const& l)
+shaders::tracer::light_record light_record_of(light const& l)
 {
     assert_valid(l);
 
-    auto out = light_gpu{};
-    out.path = u32(l.path());
+    auto out = shaders::tracer::light_record{.position = {},
+                                             .path = u32(l.path()),
+                                             .u = {},
+                                             .area = 0,
+                                             .v = {},
+                                             .flags = 0,
+                                             .emission = {},
+                                             .cone_scale = 0,
+                                             .normal = {},
+                                             .cone_offset = 1,
+                                             .one_minus_cos_angular_radius = 0,
+                                             .link_mask = ~0u,
+                                             .pad0 = {}};
 
     auto const origin = l.placement.transform(tg::pos3f::zero);
     out.position = tg::vec3f(origin[0], origin[1], origin[2]);
@@ -330,7 +341,7 @@ light_gpu light_gpu::from(light const& l)
         out.normal = tg::dual(tg::cross(out.u, out.v)).normalized();
         out.area = l.area();
         if (l.emission.face == light_face::both)
-            out.flags |= flag_two_sided;
+            out.flags |= light_flag_two_sided;
 
         // One nit is one unit of the tracer's radiance, so the others convert to it through the emitting area.
         // A Lambertian face of area A and radiance L emits pi * A * L lumens, and L * A candela along its normal.
@@ -369,9 +380,9 @@ light_gpu light_gpu::from(light const& l)
     }
 
     if (l.emission.visible_to_camera)
-        out.flags |= flag_visible_to_camera;
+        out.flags |= light_flag_visible_to_camera;
     if (!l.emission.casts_shadows)
-        out.flags |= flag_casts_no_shadow;
+        out.flags |= light_flag_casts_no_shadow;
 
     out.emission = l.emission.color * (intensity * tg::pow(2.0f, l.emission.exposure));
     return out;

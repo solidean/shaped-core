@@ -7,42 +7,6 @@
 #include <shaped-viewer/material/shader_generator.hh> // material_slot_kind, which a slot carries
 #include <typed-geometry/linalg/vec.hh>
 
-/// One scene item as a hit reads it, indexed by its instance id — mirrors `scene.instance` (shaders/sgl/scene_items.sgl) and `tracer.instance_record`.
-///
-/// Everything a hit needs to shade is reached from here: the material's parameter block, and the geometry the hit is on.
-/// Nothing the path tracer binds is per-mesh any more except the table itself, so a view may hold any number of meshes with any
-/// number of materials between them.
-///
-/// Every field but `is_indexed` is a bindless index acquired **this epoch**, by the same call that fills this record.
-/// The table is rebuilt each frame and so are the indices in it, which is what keeps `bound_resources`'s access declaration
-/// complete: nothing a hit reads reached the GPU without going through an acquire.
-///
-/// `param_offset` exists so several parameter blocks may share one buffer.
-/// They do not yet — one block is one buffer — but the shader already reads through it, so packing them later changes no contract.
-struct sv::instance_gpu
-{
-    u32 param_buffer = 0; ///< index into gBindlessBuffers of the buffer holding this instance's material parameters
-    u32 param_offset = 0; ///< byte offset of that block
-
-    u32 vertices = 0; ///< index into gBindlessBuffers of the mesh's positions
-    u32 indices = 0;  ///< the same for its indices; meaningless unless `is_indexed`
-
-    /// Whether `indices` is live.
-    /// Per instance rather than per frame, which is the point: geometry layout is a property of the mesh, and it rode in the frame constants only because the trace bound one mesh.
-    u32 is_indexed = 0;
-
-    /// RESERVED for light linking, and read by nothing yet: a light will affect this instance when the two masks share
-    /// a bit — see `sv::light_gpu::link_mask`. All ones is "every light", which is what every instance sees today.
-    u32 link_mask = ~0u;
-
-    u32 _padding[2] = {};
-};
-
-namespace sv
-{
-static_assert(sizeof(instance_gpu) == 32, "instance_gpu must match scene.instance in shaders/sgl/scene_items.sgl");
-} // namespace sv
-
 /// One resolved parameter slot, as much of it as outlives the resolution it came from.
 ///
 /// A parameter block is rebuilt every epoch, because every index in it is that epoch's, so what a `scene_item` carries between

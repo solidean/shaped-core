@@ -1,30 +1,12 @@
 #pragma once
 
+#include <sgl_modules/tracer.hh> // sv::shaders::tracer::camera_record
 #include <shaped-viewer/fwd.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/angle.hh>
-
-/// GPU-side pinhole camera constants, matching `scene.camera` (shaders/sgl/scene_camera.sgl) and `tracer.camera_record`.
-///
-/// Each `float3` sits in its own 16-byte lane, the trailing pad scalars named on both sides.
-/// `right_scaled` / `up_scaled` carry the aspect and field-of-view scaling pre-baked, so the raygen just forms `forward + right_scaled * ndc.x - up_scaled * ndc.y`.
-struct sv::camera_gpu
-{
-    tg::vec3f position;
-    f32 _pad0 = 0;
-    tg::vec3f forward;
-    f32 _pad1 = 0;
-    tg::vec3f right_scaled; // right * aspect * tan(fov_y / 2)
-    f32 _pad2 = 0;
-    tg::vec3f up_scaled; // true_up * tan(fov_y / 2)
-    f32 _pad3 = 0;
-
-    /// Bakes the pinhole basis from a camera; the aspect ratio is taken from `cam.projection.aspect_ratio`.
-    [[nodiscard]] static camera_gpu from(camera const& cam);
-};
 
 /// A camera's two matrices, in `tg`'s convention — column-major, and a vector is a column.
 ///
@@ -38,13 +20,19 @@ struct sv::camera_matrices
 
 namespace sv
 {
+/// `cam`'s pinhole basis as the tracer reads it, module `tracer`'s `camera_record`, its pads zero.
+/// `right_scaled` and `up_scaled` carry the aspect and the field of view baked in, `right * aspect * tan(fov_y / 2)` and
+/// `up * tan(fov_y / 2)`, so the raygen forms `forward + right_scaled * ndc.x - up_scaled * ndc.y`.
+/// The aspect ratio is taken from `cam.projection.aspect_ratio`.
+[[nodiscard]] shaders::tracer::camera_record camera_record_of(camera const& cam);
+
 /// The matrices `cam`'s pinhole basis amounts to, with an infinite far plane.
 ///
 /// Derived from the SAME basis `camera_ray_offset` and `camera_project` form their rays from, so all three describe
 /// one pinhole: `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's
 /// diagonal, and `forward` is its third view axis.
 /// A camera whose basis is degenerate — a zero `right_scaled` or `forward` — yields identities rather than NaNs.
-[[nodiscard]] camera_matrices matrices_of(camera_gpu const& cam, f32 near_plane);
+[[nodiscard]] camera_matrices matrices_of(shaders::tracer::camera_record const& cam, f32 near_plane);
 } // namespace sv
 
 /// A perspective projection: vertical field of view, aspect ratio (width / height), and near plane.
@@ -72,7 +60,7 @@ struct sv::camera_basis
 /// `orientation` is a unit quaternion mapping the base frame to the camera frame — it sends +x to right,
 /// +y to up, +z to forward (left-handed, forward points into the scene, matching the raygen). Build one from
 /// a look-at with `look_rotation` / `look_at`; the default frames the origin from `position`. The GPU basis is
-/// baked by `camera_gpu::from`, taking the aspect ratio from `projection`.
+/// baked by `shaders::tracer::camera_record::from`, taking the aspect ratio from `projection`.
 struct sv::camera
 {
     tg::pos3d position = tg::pos3d(2.2, 1.8, -3.2);

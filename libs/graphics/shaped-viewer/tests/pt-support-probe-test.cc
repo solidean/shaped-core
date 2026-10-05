@@ -24,12 +24,12 @@ using namespace cc::primitive_defines;
 // environment is the SH sum it is written as.
 // `tests/shaders/pt_support_probe.sgl` writes eight float4s per item, in the order the checks below read them.
 //
-// The lights travel as `sv::light_gpu` itself, so this is also where `scene.light`'s layout meets the C++ struct.
+// The lights travel as `sv::shaders::tracer::light_record` itself, so this is also where `scene.light`'s layout meets the C++ struct.
 
 namespace
 {
-static_assert(sizeof(sv_test::shaders::probe_light) == sizeof(sv::light_gpu),
-              "probe_light in tests/shaders/pt_support_probe.sgl must match sv::light_gpu");
+static_assert(sizeof(sv_test::shaders::probe_light) == sizeof(sv::shaders::tracer::light_record),
+              "probe_light in tests/shaders/pt_support_probe.sgl must match sv::shaders::tracer::light_record");
 
 constexpr isize results_per_item = 8;
 constexpr float pi = 3.14159265358979323846f;
@@ -101,9 +101,9 @@ bool near(tg::vec3f a, tg::vec3f b, float tolerance)
 }
 
 /// Two rect lights over the unit square's double: one one-sided and plain, one two-sided, visible, shadowless and shaped.
-cc::vector<sv::light_gpu> make_lights()
+cc::vector<sv::shaders::tracer::light_record> make_lights()
 {
-    auto lights = cc::vector<sv::light_gpu>();
+    auto lights = cc::vector<sv::shaders::tracer::light_record>();
     lights.push_back({.position = tg::vec3f(0, 0, 0),
                       .path = 1,
                       .u = tg::vec3f(1, 0, 0),
@@ -111,19 +111,21 @@ cc::vector<sv::light_gpu> make_lights()
                       .v = tg::vec3f(0, 1, 0),
                       .emission = tg::vec3f(1, 2, 3),
                       .normal = tg::vec3f(0, 0, 1),
-                      .one_minus_cos_angular_radius = 0.01f});
+                      .cone_offset = 1,
+                      .one_minus_cos_angular_radius = 0.01f,
+                      .link_mask = ~0u});
     lights.push_back({.position = tg::vec3f(2, -1, 3),
                       .path = 1,
                       .u = tg::vec3f(0, 1, 0),
                       .area = 4.0f,
                       .v = tg::vec3f(0, 0, 1),
-                      .flags = sv::light_gpu::flag_two_sided | sv::light_gpu::flag_visible_to_camera
-                             | sv::light_gpu::flag_casts_no_shadow,
+                      .flags = sv::light_flag_two_sided | sv::light_flag_visible_to_camera | sv::light_flag_casts_no_shadow,
                       .emission = tg::vec3f(4, 4, 4),
                       .cone_scale = 2.0f,
                       .normal = tg::vec3f(1, 0, 0),
                       .cone_offset = -0.5f,
-                      .one_minus_cos_angular_radius = 1e-4f});
+                      .one_minus_cos_angular_radius = 1e-4f,
+                      .link_mask = ~0u});
     return lights;
 }
 
@@ -166,9 +168,9 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
 
     auto cmd = ctx.create_command_list();
 
-    auto const light_buffer = ctx.transient.create_buffer<sv::light_gpu>(
+    auto const light_buffer = ctx.transient.create_buffer<sv::shaders::tracer::light_record>(
         lights.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    cmd->upload.data_to_buffer(light_buffer, cc::span<sv::light_gpu const>(lights));
+    cmd->upload.data_to_buffer(light_buffer, cc::span<sv::shaders::tracer::light_record const>(lights));
     auto const sh_buffer = ctx.transient.create_buffer<tg::vec4f>(
         sh.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd->upload.data_to_buffer(sh_buffer, cc::span<tg::vec4f const>(sh));
@@ -275,8 +277,8 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
         auto const cone_a = cc::clamp(u1 * l.cone_scale + l.cone_offset, 0.0f, 1.0f);
         CHECK(near(w[6][3], cone_a * cone_a, 1e-6f)).context(where("the cone falloff"));
 
-        auto const shadows = (l.flags & sv::light_gpu::flag_casts_no_shadow) == 0;
-        auto const visible = (l.flags & sv::light_gpu::flag_visible_to_camera) != 0;
+        auto const shadows = (l.flags & sv::light_flag_casts_no_shadow) == 0;
+        auto const visible = (l.flags & sv::light_flag_visible_to_camera) != 0;
         CHECK(w[7][0] == (shadows ? 1.0f : 0.0f)).context(where("light_casts_shadows reads the flag through the layout"));
         CHECK(w[7][1] == (visible ? 1.0f : 0.0f)).context(where("light_visible_to_camera reads the flag through the layout"));
         CHECK(w[7][2] == 16.0f).context(where("roulette_after"));

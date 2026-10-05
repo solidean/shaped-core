@@ -5,6 +5,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <sgl_modules/tracer.hh> // sv::shaders::tracer::instance_record
 #include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-viewer/fwd.hh>
@@ -260,7 +261,9 @@ public:
     /// traces with it and before `freeze()` — every index it returns is minted here.
     /// The buffer it is uploaded into is the record's own and persistent, which is what lets an unchanged working set leave
     /// the staging group clean and its snapshot cached.
-    [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance);
+    [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,
+                                                                     mesh_id mesh,
+                                                                     instance_id instance);
 
     /// The same for a quadric batch.
     ///
@@ -268,7 +271,9 @@ public:
     /// by `PrimitiveIndex()`; the field means "the geometry buffer this instance reads" either way.
     /// `indices` is the stand-in, since a quadric indexes nothing — the field still has to name something the bound snapshot
     /// covers.
-    [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, quadric_set_id set, instance_id instance);
+    [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,
+                                                                     quadric_set_id set,
+                                                                     instance_id instance);
 
     /// Whether every attribute `instance`'s parameter block reads has landed.
     ///

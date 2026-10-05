@@ -32,6 +32,7 @@ enum class group_state
 /// The state of `p`'s hit group, starting its compile if nobody has yet.
 /// The cache hands the node back cold, so polling alone would watch one that never starts.
 /// Started on the context's backlog, since nothing awaits it: `sv::background_work` is what a caller ending a run awaits.
+/// A compile that failed is logged once, since the stand-in that replaces it says nothing of why.
 [[nodiscard]] group_state state_of(sg::context& ctx, material_permutation const* p)
 {
     auto const& node = p->hit_group;
@@ -198,12 +199,21 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     return nullptr;
 }
 
-pt_light_table pt_light_table::grouped(cc::span<light_gpu const> lights)
+shaders::tracer::frame_constants default_frame_constants()
+{
+    auto fc = shaders::tracer::frame_constants{};
+    fc.samples_per_pixel = 16;
+    fc.max_bounces = 5;
+    fc.rng_seed = 1;
+    return fc;
+}
+
+pt_light_table pt_light_table::grouped(cc::span<shaders::tracer::light_record const> lights)
 {
     auto out = pt_light_table{};
     for (auto const& l : lights)
     {
-        CC_ASSERT(l.path < 4, "a light_gpu names a path the frame block has no slot for");
+        CC_ASSERT(l.path < 4, "a light record names a path the frame block has no slot for");
         ++out.path_count[l.path];
     }
 
@@ -211,14 +221,14 @@ pt_light_table pt_light_table::grouped(cc::span<light_gpu const> lights)
         out.path_offset[i] = out.path_offset[i - 1] + out.path_count[i - 1];
 
     // A counting sort: each light lands at its path's next free slot, so each run keeps the order it was given in.
-    out.records = cc::vector<light_gpu>::create_defaulted(lights.size());
+    out.records = cc::vector<shaders::tracer::light_record>::create_defaulted(lights.size());
     auto next = cc::fixed_array<u32, 4>{out.path_offset[0], out.path_offset[1], out.path_offset[2], out.path_offset[3]};
     for (auto const& l : lights)
         out.records[next[l.path]++] = l;
     return out;
 }
 
-void pt_light_table::describe_in(pt_frame_constants_gpu& fc) const
+void pt_light_table::describe_in(shaders::tracer::frame_constants& fc) const
 {
     fc.light_count = u32(records.size());
     for (auto i = 0; i < 4; ++i)
@@ -291,9 +301,9 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     auto lights = d.lights;
     if (lights.raw() == nullptr)
     {
-        lights
-            = ctx.transient.create_buffer<light_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(lights, light_gpu{});
+        lights = ctx.transient.create_buffer<shaders::tracer::light_record>(
+            1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+        cmd.upload.pod_to_buffer(lights, shaders::tracer::light_record{});
     }
 
     auto const group = ctx.transient.create_binding_group(
@@ -301,8 +311,8 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
         tracer::traced{
             .world = tlas->as_view(),
             .output = d.output.as_image_view<sg::pixel_format::rgba32_float>(),
-            .frame = d.frame.reinterpret_as<tracer::frame_constants>().as_readonly_buffer(),
-            .instances = d.instance_table.reinterpret_as<tracer::instance_record>().as_readonly_buffer(),
+            .frame = d.frame.as_readonly_buffer(),
+            .instances = d.instance_table.as_readonly_buffer(),
             .background = d.background.reinterpret_as<tg::vec4f>().as_readonly_buffer(),
             .guide_normal = image_or<sg::pixel_format::rgba16_float>(d.guide_normal, self->_guide_normal_stand_in),
             .guide_depth = image_or<sg::pixel_format::r32_float>(d.guide_depth, self->_guide_depth_stand_in),
@@ -316,7 +326,7 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
             .frame_specular = image_or<sg::pixel_format::rgba16_float>(d.frame_specular, self->_frame_specular_stand_in),
             .guide_hit_distance
             = image_or<sg::pixel_format::rg32_float>(d.guide_hit_distance, self->_guide_hit_distance_stand_in),
-            .lights = lights.reinterpret_as<tracer::light_record>().as_readonly_buffer(),
+            .lights = lights.as_readonly_buffer(),
         });
 
     cmd.raytracing.bind_pipeline(*variant->pipeline);

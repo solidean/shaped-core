@@ -11,13 +11,13 @@ const light_path_area = 1u
 const light_path_distant_point = 2u
 const light_path_distant_disc = 3u
 
-// Bits of `light.flags` — mirrors `sv::light_gpu::flag_*`; 0 is the default for each.
+// Bits of `light.flags`, which `sv::light_flag_*` restates, since slib generates no const; 0 is the default for each.
 // Written as their values, `1 << 0` to `1 << 2`, since a `const` holds a literal.
 const light_flag_two_sided = 1u
 const light_flag_visible_to_camera = 2u
 const light_flag_casts_no_shadow = 4u
 
-/// One light, tagged by `path` — mirrors `sv::light_gpu` (scene/light.hh), 96 bytes.
+/// One light, tagged by `path` — `tracer.light_record`, which `sv::light_record_of` fills (scene/light.hh), 96 bytes.
 ///
 /// Keep the two in lockstep: this is a byte layout, not a description of one.
 /// Units are resolved on the CPU, so `emission` is one canonical quantity per path.
@@ -65,7 +65,7 @@ fun light_cone(l: light, cos_axis: float) -> float:
 
 // ---- Scene items ----------------------------------------------------------------------------------------------------
 
-/// One scene item, as a closest-hit reads it by its instance id — mirrors `sv::instance_gpu` (resources/instance_data.hh), 32 bytes.
+/// One scene item, as a closest-hit reads it by its instance id — `tracer.instance_record`, which `gpu_resource_manager::describe_instance` fills, 32 bytes.
 ///
 /// Keep the two in lockstep: this is a byte layout, not a description of one.
 struct instance:

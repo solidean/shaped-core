@@ -67,7 +67,7 @@ enum class sv::residency : sv::u8
 /// Indexed and non-indexed geometry stay distinct all the way down.
 /// An `indexed_triangle_data` acquire uploads the caller's index buffer and builds an indexed BLAS, while a `triangle_data` acquire uploads nothing extra and builds a non-indexed one.
 /// `is_indexed` is what a shader branches on.
-/// It reaches the path tracer's closest-hit per instance, through `instance_gpu::is_indexed` and the hit's instance id.
+/// It reaches the path tracer's closest-hit per instance, through `shaders::tracer::instance_record::is_indexed` and the hit's instance id.
 /// It is also the only thing that makes `indices` meaningful.
 struct sv::mesh_record
 {

@@ -6,7 +6,7 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/rendering/pathtrace_routine.hh> // pt_light_table, pt_frame_constants_gpu
+#include <shaped-viewer/rendering/pathtrace_routine.hh> // pt_light_table, default_frame_constants
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh>
@@ -460,14 +460,14 @@ TEST("sv - camera aims at the target")
     auto cam = sv::camera{.position = tg::pos3d(0, 0, -5)};
     cam.projection.aspect_ratio = 800.0 / 600.0;
 
-    auto const c = sv::camera_gpu::from(cam);
+    auto const c = sv::camera_record_of(cam);
     // Looking from -z toward the origin, forward is +z.
     CHECK(c.forward[2] > 0.99f);
     CHECK(c.position == tg::vec3f(0, 0, -5));
 
     // look_at reproduces the same aim explicitly.
     cam.look_at(tg::pos3d::zero);
-    CHECK(sv::camera_gpu::from(cam).forward[2] > 0.99f);
+    CHECK(sv::camera_record_of(cam).forward[2] > 0.99f);
 }
 
 TEST("sv - camera factories aim at the target")
@@ -476,7 +476,7 @@ TEST("sv - camera factories aim at the target")
     {
         auto const cam = sv::camera::looking_at(tg::pos3d(0, 0, -5), tg::pos3d::zero);
         CHECK(cam.position == tg::pos3d(0, 0, -5));
-        CHECK(sv::camera_gpu::from(cam).forward[2] > 0.99f); // from -z toward the origin -> forward +z
+        CHECK(sv::camera_record_of(cam).forward[2] > 0.99f); // from -z toward the origin -> forward +z
     }
 
     SECTION("orbiting at azimuth=elevation=0 sits at target - distance*z, looking inward")
@@ -484,7 +484,7 @@ TEST("sv - camera factories aim at the target")
         auto const cam = sv::camera::orbiting(tg::pos3d(1, 2, 3), 5.0, tg::angle_d::make_from_degree(0),
                                               tg::angle_d::make_from_degree(0));
         CHECK(cam.position == tg::pos3d(1, 2, -2));
-        CHECK(sv::camera_gpu::from(cam).forward[2] > 0.99f);
+        CHECK(sv::camera_record_of(cam).forward[2] > 0.99f);
     }
 
     SECTION("orbit elevation lifts the eye and preserves the distance")
@@ -662,7 +662,7 @@ TEST("sv - a light's unit, face and cone are checked against its path")
     auto bypassed = sv::light::sun(tg::vec3f(0, -1, 0));
     bypassed.emission.unit = sv::light_unit::candela;
     CHECK(!sv::light_problem(bypassed).empty());
-    CHECK_ASSERTS(sv::light_gpu::from(bypassed));
+    CHECK_ASSERTS(sv::light_record_of(bypassed));
 }
 
 TEST("sv - two equal lights compare equal, and any difference is seen")
@@ -679,13 +679,13 @@ TEST("sv - two equal lights compare equal, and any difference is seen")
     CHECK(sv::light::point(tg::pos3f(0, 3, 0)) != sv::light::spot(tg::pos3f(0, 3, 0), tg::vec3f(0, -1, 0), tg::angle_f()));
 }
 
-TEST("sv - light_gpu::from lays out the rect and its emitting face")
+TEST("sv - light_record_of lays out the rect and its emitting face")
 {
-    static_assert(sizeof(sv::light_gpu)
+    static_assert(sizeof(sv::shaders::tracer::light_record)
                   == 96); // six 16-byte lanes, as tracer.light_record in shaders/sgl/tracer_bindings.sgl
 
     auto const light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.5f)).nits(12);
-    auto const g = sv::light_gpu::from(light);
+    auto const g = sv::light_record_of(light);
 
     CHECK(g.path == u32(sv::light_path::area));
     CHECK(near(g.position, tg::vec3f(0, 3, 0)));
@@ -703,22 +703,22 @@ TEST("sv - light_gpu::from lays out the rect and its emitting face")
     {
         auto back = light;
         back.face(sv::light_face::back);
-        CHECK(near(sv::light_gpu::from(back).normal, tg::vec3f(0, 1, 0)));
+        CHECK(near(sv::light_record_of(back).normal, tg::vec3f(0, 1, 0)));
     }
 
     SECTION("every unit converts to the same radiance through the rect's area")
     {
         // A = 4 * 0.75 * 0.5 = 1.5: 12 nits is 18 cd along the normal and pi * 1.5 * 12 lm from one face.
         auto l = light;
-        CHECK(near(sv::light_gpu::from(l.candela(18)).emission, tg::vec3f(12, 12, 12)));
-        CHECK(near(sv::light_gpu::from(l.lumens(tg::pi<f32> * 1.5f * 12)).emission, tg::vec3f(12, 12, 12)));
+        CHECK(near(sv::light_record_of(l.candela(18)).emission, tg::vec3f(12, 12, 12)));
+        CHECK(near(sv::light_record_of(l.lumens(tg::pi<f32> * 1.5f * 12)).emission, tg::vec3f(12, 12, 12)));
     }
 
     SECTION("exposure is stops on top, and color only tints")
     {
         auto l = light;
         l.exposure(1).color(tg::vec3f(1, 0.5f, 0));
-        CHECK(near(sv::light_gpu::from(l).emission, tg::vec3f(24, 12, 0)));
+        CHECK(near(sv::light_record_of(l).emission, tg::vec3f(24, 12, 0)));
     }
 
     SECTION("a uniform scale in the placement grows the area a flux is spread over")
@@ -733,9 +733,9 @@ TEST("sv - the light table groups by path and keeps each run in the order it was
 {
     // Tagged by path, told apart by position.x so the order can be read back.
     auto const record = [](sv::light_path path, float tag)
-    { return sv::light_gpu{.position = tg::vec3f(tag, 0, 0), .path = u32(path)}; };
+    { return sv::shaders::tracer::light_record{.position = tg::vec3f(tag, 0, 0), .path = u32(path)}; };
 
-    auto const given = cc::vector<sv::light_gpu>{
+    auto const given = cc::vector<sv::shaders::tracer::light_record>{
         record(sv::light_path::area, 0), record(sv::light_path::distant_disc, 1), record(sv::light_path::point, 2),
         record(sv::light_path::area, 3), record(sv::light_path::point, 4)};
     auto const table = sv::pt_light_table::grouped(given);
@@ -757,7 +757,7 @@ TEST("sv - the light table groups by path and keeps each run in the order it was
 
     SECTION("the frame block receives the same table")
     {
-        auto fc = sv::pt_frame_constants_gpu{};
+        auto fc = sv::default_frame_constants();
         table.describe_in(fc);
         CHECK(fc.light_count == 5);
         for (auto i = 0; i < 4; ++i)
@@ -770,7 +770,7 @@ TEST("sv - the light table groups by path and keeps each run in the order it was
     SECTION("no lights is an empty table, which the frame block reads as lit by the environment alone")
     {
         auto const empty = sv::pt_light_table::grouped({});
-        auto fc = sv::pt_frame_constants_gpu{};
+        auto fc = sv::default_frame_constants();
         empty.describe_in(fc);
         CHECK(empty.records.empty());
         CHECK(fc.light_count == 0);
@@ -785,29 +785,30 @@ TEST("sv - equal lights lay out to identical bytes, and any change is seen in th
     auto const make
         = [] { return sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 0.5f)).nits(12); };
 
-    auto const a = sv::light_gpu::from(make());
-    auto const b = sv::light_gpu::from(make());
-    auto const bytes = [](sv::light_gpu const& g) { return cc::span<sv::light_gpu const>(&g, 1).as_bytes(); };
+    auto const a = sv::light_record_of(make());
+    auto const b = sv::light_record_of(make());
+    auto const bytes = [](sv::shaders::tracer::light_record const& g)
+    { return cc::span<sv::shaders::tracer::light_record const>(&g, 1).as_bytes(); };
 
     CHECK(cc::make_hash_of_bytes(bytes(a)) == cc::make_hash_of_bytes(bytes(b)));
 
     auto dimmer = make();
     dimmer.nits(11);
-    CHECK(cc::make_hash_of_bytes(bytes(sv::light_gpu::from(dimmer))) != cc::make_hash_of_bytes(bytes(a)));
+    CHECK(cc::make_hash_of_bytes(bytes(sv::light_record_of(dimmer))) != cc::make_hash_of_bytes(bytes(a)));
 
     auto flipped = make();
     flipped.face(sv::light_face::back);
-    CHECK(cc::make_hash_of_bytes(bytes(sv::light_gpu::from(flipped))) != cc::make_hash_of_bytes(bytes(a)));
+    CHECK(cc::make_hash_of_bytes(bytes(sv::light_record_of(flipped))) != cc::make_hash_of_bytes(bytes(a)));
 }
 
-TEST("sv - light_gpu::from converts every path to the quantity its estimator reads")
+TEST("sv - light_record_of converts every path to the quantity its estimator reads")
 {
     using namespace tg::literals;
     auto const down = tg::vec3f(0, -1, 0);
 
     SECTION("a point is an intensity; a flux spreads over the whole sphere")
     {
-        auto const candela = sv::light_gpu::from(sv::light::point(tg::pos3f(1, 2, 3)).candela(800));
+        auto const candela = sv::light_record_of(sv::light::point(tg::pos3f(1, 2, 3)).candela(800));
         CHECK(candela.path == u32(sv::light_path::point));
         CHECK(near(candela.position, tg::vec3f(1, 2, 3)));
         CHECK(near(candela.emission, tg::vec3f(800, 800, 800)));
@@ -816,13 +817,13 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
         CHECK(candela.cone_scale == 0.0f);
         CHECK(candela.cone_offset == 1.0f);
 
-        auto const lumen = sv::light_gpu::from(sv::light::point(tg::pos3f(0, 0, 0)).lumens(4.0f * tg::pi<f32> * 100));
+        auto const lumen = sv::light_record_of(sv::light::point(tg::pos3f(0, 0, 0)).lumens(4.0f * tg::pi<f32> * 100));
         CHECK(near(lumen.emission, tg::vec3f(100, 100, 100)));
     }
 
     SECTION("a spot's cone is glTF's falloff, full inside the inner angle and zero past the outer")
     {
-        auto const g = sv::light_gpu::from(sv::light::spot(tg::pos3f(0, 3, 0), down, 30_deg_f, 20_deg_f).candela(1));
+        auto const g = sv::light_record_of(sv::light::spot(tg::pos3f(0, 3, 0), down, 30_deg_f, 20_deg_f).candela(1));
         CHECK(near(g.normal, down));
 
         auto const falloff = [&](tg::angle_f a)
@@ -839,7 +840,7 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
 
     SECTION("a directional light is an irradiance along the direction it travels")
     {
-        auto const g = sv::light_gpu::from(sv::light::directional(down).lux(5));
+        auto const g = sv::light_record_of(sv::light::directional(down).lux(5));
         CHECK(g.path == u32(sv::light_path::distant_point));
         CHECK(near(g.normal, down));
         CHECK(near(g.emission, tg::vec3f(5, 5, 5)));
@@ -847,7 +848,7 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
 
     SECTION("a sun is a disc of radiance that delivers its illuminance to a surface facing it")
     {
-        auto const g = sv::light_gpu::from(sv::light::sun(down, 2_deg_f).lux(10));
+        auto const g = sv::light_record_of(sv::light::sun(down, 2_deg_f).lux(10));
         CHECK(g.path == u32(sv::light_path::distant_disc));
         CHECK(tg::abs(g.one_minus_cos_angular_radius - 1.5230484e-4f) < 1e-9f); // 1 - cos(1 deg), taken in double
 
@@ -859,7 +860,7 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
         // divided by, even for a disc far smaller than the sun — where a stored cosine would round most of it away.
         for (auto const diameter : {0.53f, 0.1f, 0.02f})
         {
-            auto const small = sv::light_gpu::from(sv::light::sun(down, tg::angle_f::make_from_degree(diameter)).lux(10));
+            auto const small = sv::light_record_of(sv::light::sun(down, tg::angle_f::make_from_degree(diameter)).lux(10));
             auto const omc = small.one_minus_cos_angular_radius;
             auto const delivered = tg::pi<f32> * omc * (2.0f - omc) * small.emission[0];
             CHECK(tg::abs(delivered - 10.0f) < 1e-3f * 10.0f);
@@ -874,17 +875,17 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
         auto both = rect();
         both.face(sv::light_face::both).lumens(tg::pi<f32> * 2.0f * 12);
 
-        CHECK(sv::light_gpu::from(one).flags == 0u);
-        CHECK((sv::light_gpu::from(both).flags & sv::light_gpu::flag_two_sided) != 0u);
-        CHECK(near(sv::light_gpu::from(one).emission, tg::vec3f(12, 12, 12)));
-        CHECK(near(sv::light_gpu::from(both).emission, tg::vec3f(6, 6, 6)));
+        CHECK(sv::light_record_of(one).flags == 0u);
+        CHECK((sv::light_record_of(both).flags & sv::light_flag_two_sided) != 0u);
+        CHECK(near(sv::light_record_of(one).emission, tg::vec3f(12, 12, 12)));
+        CHECK(near(sv::light_record_of(both).emission, tg::vec3f(6, 6, 6)));
     }
 
     SECTION("a spread is a hard-edged cone about the rect's face")
     {
         auto l = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1));
         l.spread(20_deg_f);
-        auto const g = sv::light_gpu::from(l);
+        auto const g = sv::light_record_of(l);
         auto const falloff = [&](tg::angle_f a)
         {
             auto const x = cc::clamp(tg::cos(a) * g.cone_scale + g.cone_offset, 0.0f, 1.0f);
@@ -898,7 +899,7 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
     // Clamped too wide, the ramp's slope is capped and a narrow cone never reaches full intensity on its own axis.
     SECTION("a narrow cone still reaches full intensity on its axis")
     {
-        auto const on_axis = [](sv::light_gpu const& g)
+        auto const on_axis = [](sv::shaders::tracer::light_record const& g)
         {
             auto const x = cc::clamp(g.cone_scale + g.cone_offset, 0.0f, 1.0f); // cos = 1
             return x * x;
@@ -906,10 +907,10 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
 
         auto tight = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1));
         tight.spread(1_deg_f);
-        CHECK(on_axis(sv::light_gpu::from(tight)) == 1.0f);
+        CHECK(on_axis(sv::light_record_of(tight)) == 1.0f);
 
         // Inner defaults to 0, so the ramp meets 1 exactly on the axis, up to rounding.
-        CHECK(on_axis(sv::light_gpu::from(sv::light::spot(tg::pos3f(0, 3, 0), down, 2_deg_f).candela(1))) > 0.999f);
+        CHECK(on_axis(sv::light_record_of(sv::light::spot(tg::pos3f(0, 3, 0), down, 2_deg_f).candela(1))) > 0.999f);
     }
 }
 
@@ -934,7 +935,7 @@ TEST("sv - daylight's sky carries no sun, so the pair counts it once")
     // The sun is a light, high in the sky and travelling down.
     CHECK(day.sun.path() == sv::light_path::distant_disc);
     CHECK(sv::light_problem(day.sun).empty());
-    CHECK(sv::light_gpu::from(day.sun).normal[1] < 0.0f);
+    CHECK(sv::light_record_of(day.sun).normal[1] < 0.0f);
 }
 
 TEST("sv - a light's camera visibility and shadowing reach its GPU record, with 0 as the default")
@@ -942,16 +943,16 @@ TEST("sv - a light's camera visibility and shadowing reach its GPU record, with 
     auto const rect = [] { return sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1)); };
 
     // An ordinary light sets neither bit, so a zeroed record behaves as one.
-    auto const plain = sv::light_gpu::from(rect());
-    CHECK((plain.flags & sv::light_gpu::flag_visible_to_camera) == 0u);
-    CHECK((plain.flags & sv::light_gpu::flag_casts_no_shadow) == 0u);
+    auto const plain = sv::light_record_of(rect());
+    CHECK((plain.flags & sv::light_flag_visible_to_camera) == 0u);
+    CHECK((plain.flags & sv::light_flag_casts_no_shadow) == 0u);
     CHECK(plain.link_mask == ~0u); // reserved, and "every instance" meanwhile
 
     auto seen = rect();
     seen.visible_to_camera().casts_shadows(false);
-    auto const g = sv::light_gpu::from(seen);
-    CHECK((g.flags & sv::light_gpu::flag_visible_to_camera) != 0u);
-    CHECK((g.flags & sv::light_gpu::flag_casts_no_shadow) != 0u);
+    auto const g = sv::light_record_of(seen);
+    CHECK((g.flags & sv::light_flag_visible_to_camera) != 0u);
+    CHECK((g.flags & sv::light_flag_casts_no_shadow) != 0u);
 
     // A sun has an extent and may be seen; a point or a parallel light has none, and asserts.
     auto sun = sv::light::sun(tg::vec3f(0, -1, 0));

@@ -16,76 +16,24 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/scene/background.hh>
-#include <shaped-viewer/scene/light.hh> // light_gpu
-#include <shaped-viewer/view/camera.hh> // camera_gpu
+#include <shaped-viewer/scene/light.hh>
+#include <shaped-viewer/view/camera.hh>
 #include <typed-geometry/linalg/pos.hh>
 
-/// The per-view constant block the path tracer reads as `traced.frame`, module `tracer`'s `frame_constants`
-/// (shaders/sgl/tracer_bindings.sgl), which mirrors it byte for byte — keep them in lockstep.
+namespace sv
+{
+/// The frame block a trace starts from, module `tracer`'s `frame_constants`: 16 samples a pixel, 5 bounces, seed 1, and
+/// every flag, count and pad zero.
 ///
 /// The camera, the sample controls, and the table that indexes `pt_trace_desc::lights`: how many there are, and where each
 /// path's run starts in a buffer grouped by path.
 /// `pt_light_table::describe_in` is what fills that table, so it cannot disagree with the buffer it describes.
-/// Laid out as 16-byte lanes, every pad named on both sides, which is why the table is two `uint4`s rather than arrays.
-struct sv::pt_frame_constants_gpu
-{
-    camera_gpu camera;
+/// `accum_frame` is how many frames the target's running mean already holds: 0 overwrites the target, anything above it
+/// blends in place at 1 / (accum_frame + 1), and nothing caps it, so the caller restarts it whenever the image stopped
+/// describing what this frame renders.
+[[nodiscard]] shaders::tracer::frame_constants default_frame_constants();
 
-    i32 samples_per_pixel = 16; // primary rays integrated per pixel, accumulated in the one dispatch
-    i32 max_bounces = 5;        // path length: primary hit + this many diffuse bounces
-    u32 seed = 1;               // per-frame RNG seed; vary it to decorrelate accumulated frames
-
-    /// How many frames the target's running mean already holds, which is this frame's weight: 1 / (accum_frame + 1).
-    ///
-    /// 0 overwrites the target, anything above it blends in place, and nothing caps it — the estimate is exact and
-    /// converges as long as it is left alone.
-    /// The caller restarts it by sending 0, which it does whenever the image the target holds stopped describing
-    /// what this frame renders — the scene, the camera or the shaders having moved.
-    u32 accum_frame = 0;
-
-    /// How many lights `pt_trace_desc::lights` holds; 0 lights the scene by the environment alone.
-    u32 light_count = 0;
-    u32 _pad0[3] = {};
-
-    /// Where each `light_path`'s run starts in the grouped buffer, and how long it is, indexed by the path.
-    u32 path_offset[4] = {};
-    u32 path_count[4] = {};
-
-    /// Whether the raygen writes the denoiser guides — nonzero exactly when `pt_trace_desc` carries guide textures.
-    u32 write_guides = 0;
-
-    /// How many frames the guide textures already average; the same 0-overwrites rule as `accum_frame`, on a count of
-    /// its own.
-    u32 guide_frame = 0;
-
-    /// Whether the raygen writes this frame's own samples and the motion vectors, for a temporal denoiser — nonzero
-    /// exactly when `pt_trace_desc` carries `frame_output` and `guide_motion`.
-    u32 write_temporal = 0;
-
-    /// Whether the raygen writes the specular guides — nonzero exactly when `pt_trace_desc` carries
-    /// `guide_specular_albedo` and `guide_roughness`.
-    /// Its own flag rather than riding on `write_guides`, because only some denoise members read them.
-    u32 write_specular_guides = 0;
-
-    /// Whether the raygen writes the split-signal targets — nonzero exactly when `pt_trace_desc` carries
-    /// `frame_diffuse`, `frame_specular` and `guide_hit_distance`.
-    u32 write_split = 0;
-    u32 _split_pad[3] = {};
-
-    /// The camera this layer's previous frame was traced from, which the motion vectors reproject into.
-    /// The current camera when there was none, which reads as no motion.
-    camera_gpu previous_camera = {};
-
-    // Padded to 256 bytes, the size the module's struct states.
-    f32 _reserved[8] = {};
-};
-
-namespace sv
-{
-
-static_assert(sizeof(pt_frame_constants_gpu) == 256, "pt_frame_constants_gpu mirrors tracer.frame_constants, 256 bytes");
 static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table has one slot per light_path");
-
 } // namespace sv
 
 /// The lights one trace samples, grouped by path — what `pt_trace_desc::lights` holds and the frame block's table indexes.
@@ -99,21 +47,21 @@ static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table 
 struct sv::pt_light_table
 {
     /// grouped by path in `light_path` order, each run keeping the order the lights were given in
-    cc::vector<light_gpu> records;
+    cc::vector<shaders::tracer::light_record> records;
     u32 path_offset[4] = {};
     u32 path_count[4] = {};
 
-    [[nodiscard]] static pt_light_table grouped(cc::span<light_gpu const> lights);
+    [[nodiscard]] static pt_light_table grouped(cc::span<shaders::tracer::light_record const> lights);
 
     /// Writes the count and the per-path table into `fc`.
-    void describe_in(pt_frame_constants_gpu& fc) const;
+    void describe_in(shaders::tracer::frame_constants& fc) const;
 };
 
 /// Everything one view's path trace binds.
 struct sv::pt_trace_desc
 {
     /// One element, the camera, the sample controls and the light table; read as a storage buffer, so `readonly_buffer` usage.
-    sg::buffer<pt_frame_constants_gpu> frame;
+    sg::buffer<shaders::tracer::frame_constants> frame;
 
     /// The SH environment probe the miss reads; read as a storage buffer, so `readonly_buffer` usage.
     sg::buffer<background_gpu> background;
@@ -163,15 +111,15 @@ struct sv::pt_trace_desc
 
     /// The first sample's primary-hit clip depth per pixel (r32_float), at `output`'s extent, or null.
 
-    /// One `sv::instance_gpu` per entry of `instances`, in that same order — `traced.instances`, read by a hit's instance id.
+    /// One `sv::shaders::tracer::instance_record` per entry of `instances`, in that same order — `traced.instances`, read by a hit's instance id.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
-    sg::buffer<instance_gpu> instance_table;
+    sg::buffer<shaders::tracer::instance_record> instance_table;
 
     /// Every light the trace samples, grouped by path as `pt_light_table` groups them — `traced.lights`.
     ///
     /// Null means no lights at all, and then the frame block's `light_count` must be 0.
     /// The routine binds a zeroed stand-in for it, since a binding cannot be empty.
-    sg::buffer<light_gpu> lights;
+    sg::buffer<shaders::tracer::light_record> lights;
 
     /// The permutations this trace's instances shade with, one hit group each, in hit-group index order.
     ///

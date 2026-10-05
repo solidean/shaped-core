@@ -5,7 +5,7 @@
 use pt
 use scene
 
-/// `scene.light` as the host uploads it, field for field: `sv::light_gpu`, which the test static_asserts against this struct's mirror.
+/// `scene.light` as the host uploads it, field for field: `tracer.light_record`, which the test static_asserts against this struct's mirror.
 /// A struct of its own because a buffer element naming a module's struct has no C++ mirror yet.
 struct probe_light:
     position: float3

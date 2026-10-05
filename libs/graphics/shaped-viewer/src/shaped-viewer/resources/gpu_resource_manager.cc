@@ -319,7 +319,9 @@ void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_re
     }
 }
 
-instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, quadric_set_id set, instance_id instance)
+shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
+                                                                         quadric_set_id set,
+                                                                         instance_id instance)
 {
     auto const& q = quadrics.get(set);
 
@@ -348,10 +350,14 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, quad
             .param_offset = 0,
             .vertices = u32(acquire_buffer(vertices)),
             .indices = u32(acquire_buffer(stand_in)),
-            .is_indexed = 0u};
+            .is_indexed = 0u,
+            .link_mask = ~0u,
+            .padding = {}};
 }
 
-instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance)
+shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
+                                                                         mesh_id mesh,
+                                                                         instance_id instance)
 {
     auto const& m = meshes.get(mesh);
 
@@ -372,7 +378,9 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
                 .param_offset = 0,
                 .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
                 .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-                .is_indexed = (!pending && m.is_indexed) ? 1u : 0u};
+                .is_indexed = (!pending && m.is_indexed) ? 1u : 0u,
+                .link_mask = ~0u,
+                .padding = {}};
 
     _upload_parameters(cmd, r);
 
@@ -382,7 +390,9 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
             .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
             .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-            .is_indexed = m.is_indexed ? 1u : 0u};
+            .is_indexed = m.is_indexed ? 1u : 0u,
+            .link_mask = ~0u,
+            .padding = {}};
 }
 
 bool gpu_resource_manager::attributes_resident(instance_id instance)

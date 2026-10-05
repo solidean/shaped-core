@@ -357,13 +357,13 @@ void report_unbuilt(cc::span<sv::material_permutation const* const> permutations
 /// Parameters by value, as a coroutine's must be.
 cc::shared_async<cc::vector<tg::vec4f>> trace_once(sg::context* ctx, sv::gpu_resource_manager* resources, case_scene scene)
 {
-    auto fc = sv::pt_frame_constants_gpu{};
-    fc.camera = sv::camera_gpu::from(scene.camera);
+    auto fc = sv::default_frame_constants();
+    fc.camera = sv::camera_record_of(scene.camera);
     fc.previous_camera = fc.camera;
     scene.lights.describe_in(fc);
     fc.samples_per_pixel = samples_per_pixel;
     fc.max_bounces = max_bounces;
-    fc.seed = 7u;
+    fc.rng_seed = 7u;
 
     auto const* const fallback = &resources->shaders.acquire_fallback();
     auto const* const quadric_fallback = scene.has_quadrics ? &resources->shaders.acquire_quadric_fallback() : nullptr;
@@ -387,7 +387,7 @@ cc::shared_async<cc::vector<tg::vec4f>> trace_once(sg::context* ctx, sv::gpu_res
         (void)ctx->routines.tick();
 
         auto cmd = ctx->create_command_list();
-        auto records = cc::vector<sv::instance_gpu>();
+        auto records = cc::vector<sv::shaders::tracer::instance_record>();
         for (auto const& item : scene.items)
             records.push_back(item.kind == sv::scene_item_kind::quadric_set
                                   ? resources->describe_instance(*cmd, item.quadrics, item.instance)

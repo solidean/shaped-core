@@ -142,6 +142,7 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
   So the pipeline file and each generated hit group restate `path_rays` over the module's payloads, which slib holds to the same names, sizes and shapes.
 - **Module `scene`'s structs are restated as `tracer.*_record`.**
   A module exports only the structs its own bindings place, and `scene` declares no binding, so `tracer`'s buffers of them would have no C++ type.
+- **A module's consts reach no C++.** slib generates a module's structs and not its consts, so `scene.light_flag_*` is restated as `sv::light_flag_*` (scene/light.hh) by hand.
 - **The bindless budgets are the module's, not a config.**
   `binding bindless` in shaders/sgl/tracer_bindings.sgl is the one declaration, and the manager lays its group out from it, so a table's size is an edit to that file.
   A per-viewer budget would need the module to take its counts as options, which SGL's `require` and option machinery does not reach for binding arrays yet.

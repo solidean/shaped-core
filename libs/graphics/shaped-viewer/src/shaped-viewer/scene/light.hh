@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/variant.hh>
+#include <sgl_modules/tracer.hh> // sv::shaders::tracer::light_record
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/stable_id.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -172,7 +173,7 @@ struct sv::light_emission
 /// **Factories are the only way to build one**, and each leaves it valid: the path and its payload agree, and the unit
 /// is one the path accepts.
 /// The setters assert rather than allow an invalid pair.
-/// `placement`, `emission` and `shaping` are public, so a direct write can still make a light invalid; `light_gpu::from`
+/// `placement`, `emission` and `shaping` are public, so a direct write can still make a light invalid; `light_record_of`
 /// asserts `light_problem`, so no invalid light reaches the renderer whichever way it was built.
 ///
 /// `placement` may move, turn and uniformly scale a light but never shear it, which is what keeps every light one its
@@ -272,7 +273,7 @@ namespace sv
 /// What is wrong with `l`, or empty when nothing is: a unit its path does not accept, a cone on a distant light, a face
 /// on anything but an area light, a negative intensity or color, an exposure outside +-128 stops, a light with no extent made
 /// visible to the camera.
-/// The setters, `scene_ref::add_light` and `light_gpu::from` assert on it; exposed so a caller holding a light from
+/// The setters, `scene_ref::add_light` and `light_record_of` assert on it; exposed so a caller holding a light from
 /// elsewhere can check.
 [[nodiscard]] cc::string_view light_problem(light const& l);
 
@@ -288,10 +289,21 @@ struct sv::scene_light
     sv::light light;
 };
 
-/// One light as the path tracer reads it — mirrors `scene.light` (shaders/sgl/scene_items.sgl) and `tracer.light_record`, so keep the three in lockstep.
+namespace sv
+{
+/// Bits of a light record's `flags`, each chosen so that 0 is the default — a zeroed record is an ordinary, shadowing,
+/// unseen light.
+/// They restate SGL's `scene.light_flag_*` (shaders/sgl/scene_items.sgl), since slib generates a module's structs and not
+/// its consts.
+inline constexpr u32 light_flag_two_sided = 1u << 0;
+inline constexpr u32 light_flag_visible_to_camera = 1u << 1;
+inline constexpr u32 light_flag_casts_no_shadow = 1u << 2;
+
+/// `l` as the path tracer reads it, module `tracer`'s `light_record`, its intensity converted to the canonical quantity of
+/// its path, and every byte written, pads included, since the trace hash covers these bytes.
 ///
 /// Tagged by `path` rather than typed per kind, which is what lets the trace hold every light in one buffer.
-/// Units are resolved before this, so the shader never sees one, and `emission` means one canonical quantity per path:
+/// Units are resolved here, so the shader never sees one, and `emission` means one canonical quantity per path:
 ///
 ///   point          intensity — irradiance at distance d along the axis is emission / d^2
 ///   area           radiance of each emitting face
@@ -304,42 +316,7 @@ struct sv::scene_light
 ///
 /// The cone is stored as the scale and offset of glTF's falloff, `saturate(cos * cone_scale + cone_offset)^2`, so an
 /// unshaped light is scale 0 and offset 1 and needs no branch.
-///
-/// Every byte is written, pads included, since the trace hash covers these bytes and equal lights must hash equal.
-struct sv::light_gpu
-{
-    /// Bits of `flags`, each chosen so that 0 is the default — a zeroed record is an ordinary, shadowing, unseen light.
-    static constexpr u32 flag_two_sided = 1u << 0;
-    static constexpr u32 flag_visible_to_camera = 1u << 1;
-    static constexpr u32 flag_casts_no_shadow = 1u << 2;
-
-    tg::vec3f position = {}; ///< point: the source; area: the rect's center; distant: unused
-    u32 path = 0;            ///< a `light_path`
-    tg::vec3f u = {};        ///< area: world half-extent spanning the rect's first axis
-    f32 area = 0;            ///< area: the world area of one face
-    tg::vec3f v = {};        ///< area: world half-extent spanning the rect's second axis
-    u32 flags = 0;           ///< `flag_*` bits
-    tg::vec3f emission = {}; ///< the canonical quantity above, per path
-    f32 cone_scale = 0;      ///< glTF's falloff scale; 0 for an unshaped light
-    /// the placement's -Z: a rect's front face, a spot's axis, the direction a distant light travels
-    tg::vec3f normal = {};
-    f32 cone_offset = 1; ///< glTF's falloff offset; 1 for an unshaped light
-
-    /// distant_disc: `1 - cos` of the disc's angular radius.
-    /// Stored rather than the cosine, since a cosine near 1 rounds away most of a small disc's solid angle.
-    f32 one_minus_cos_angular_radius = 0;
-
-    /// RESERVED for light linking, and read by nothing yet: a light will affect an instance when the two masks share a bit.
-    /// All ones is "everything", which is what every light does today.
-    u32 link_mask = ~0u;
-    f32 _pad0[2] = {};
-
-    /// Lays `l` out for the tracer, its intensity converted to the canonical quantity of its path.
-    /// A `back` face flips the normal rather than setting a flag, so only `both` needs one.
-    [[nodiscard]] static light_gpu from(light const& l);
-};
-
-namespace sv
-{
-static_assert(sizeof(light_gpu) == 96, "light_gpu must match scene.light in shaders/sgl/scene_items.sgl");
+/// `link_mask` is all ones, every instance, until light linking reads it.
+/// A `back` face flips the normal rather than setting a flag, so only `both` needs one.
+[[nodiscard]] shaders::tracer::light_record light_record_of(light const& l);
 } // namespace sv

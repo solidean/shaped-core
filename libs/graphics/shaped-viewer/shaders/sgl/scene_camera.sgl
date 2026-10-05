@@ -3,7 +3,7 @@
 // The camera probe (tests/shaders/camera_probe.sgl) holds the projection to what the primary ray inverts.
 module scene
 
-/// Pinhole camera basis (see `sv::camera_gpu::from`), mirroring `sv::camera_gpu` lane for lane.
+/// Pinhole camera basis, as `sv::camera_record_of` fills `tracer.camera_record`, lane for lane.
 ///
 /// Each `float3` is followed by a pad scalar, so it fills one 16-byte row of a constant block and the same 16 bytes of a buffer's element.
 /// The pads are named rather than left to the layout, since this is a byte layout the host writes, not a description of one.

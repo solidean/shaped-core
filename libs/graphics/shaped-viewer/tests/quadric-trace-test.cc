@@ -124,16 +124,20 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
         // batch names the primitive buffer rather than a position buffer.
         auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
 
-        auto records = cc::vector<sv::instance_gpu>();
+        auto records = cc::vector<sv::shaders::tracer::instance_record>();
         records.push_back({.param_buffer = primitives, // the fallback reads no parameter block, so any valid index serves
                            .param_offset = 0,
                            .vertices = primitives,
                            .indices = primitives,
-                           .is_indexed = 0});
+                           .is_indexed = 0,
+                           .link_mask = ~0u});
 
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd,
-            sv::pt_frame_constants_gpu{.camera = sv::camera_gpu::from(camera), .samples_per_pixel = 8, .max_bounces = 2},
+            sv::shaders::tracer::frame_constants{.camera = sv::camera_record_of(camera),
+                                                 .samples_per_pixel = 8,
+                                                 .max_bounces = 2,
+                                                 .rng_seed = 1},
             sg::buffer_usage::readonly_buffer);
 
         // A uniform environment, so the background is a known constant and anything darker than it was HIT.
@@ -495,19 +499,27 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
     auto camera = sv::camera::looking_at(tg::pos3d(0, 0.9, 5.0), tg::pos3d(0, 0, 0));
     camera.projection.aspect_ratio = 1.0;
 
-    auto const gpu_camera = sv::camera_gpu::from(camera);
+    auto const gpu_camera = sv::camera_record_of(camera);
 
     auto const trace = [&](sg::command_list& cmd, sg::data_future<tg::vec4f>& readback)
     {
         auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
 
-        auto records = cc::vector<sv::instance_gpu>();
-        records.push_back(
-            {.param_buffer = primitives, .param_offset = 0, .vertices = primitives, .indices = primitives, .is_indexed = 0});
+        auto records = cc::vector<sv::shaders::tracer::instance_record>();
+        records.push_back({.param_buffer = primitives,
+                           .param_offset = 0,
+                           .vertices = primitives,
+                           .indices = primitives,
+                           .is_indexed = 0,
+                           .link_mask = ~0u});
 
-        auto const frame = ctx.transient.create_buffer_from_pod(
-            cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 4, .max_bounces = 1},
-            sg::buffer_usage::readonly_buffer);
+        auto const frame
+            = ctx.transient.create_buffer_from_pod(cmd,
+                                                   sv::shaders::tracer::frame_constants{.camera = gpu_camera,
+                                                                                        .samples_per_pixel = 4,
+                                                                                        .max_bounces = 1,
+                                                                                        .rng_seed = 1},
+                                                   sg::buffer_usage::readonly_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
@@ -745,19 +757,27 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
 
     auto camera = sv::camera::looking_at(tg::pos3d(0, 0, 4.0), tg::pos3d(0, 0, 0));
     camera.projection.aspect_ratio = 1.0;
-    auto const gpu_camera = sv::camera_gpu::from(camera);
+    auto const gpu_camera = sv::camera_record_of(camera);
 
     auto const trace = [&](sg::command_list& cmd, sg::data_future<tg::vec4f>& readback)
     {
         auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
 
-        auto records = cc::vector<sv::instance_gpu>();
-        records.push_back(
-            {.param_buffer = primitives, .param_offset = 0, .vertices = primitives, .indices = primitives, .is_indexed = 0});
+        auto records = cc::vector<sv::shaders::tracer::instance_record>();
+        records.push_back({.param_buffer = primitives,
+                           .param_offset = 0,
+                           .vertices = primitives,
+                           .indices = primitives,
+                           .is_indexed = 0,
+                           .link_mask = ~0u});
 
-        auto const frame = ctx.transient.create_buffer_from_pod(
-            cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 2, .max_bounces = 1},
-            sg::buffer_usage::readonly_buffer);
+        auto const frame
+            = ctx.transient.create_buffer_from_pod(cmd,
+                                                   sv::shaders::tracer::frame_constants{.camera = gpu_camera,
+                                                                                        .samples_per_pixel = 2,
+                                                                                        .max_bounces = 1,
+                                                                                        .rng_seed = 1},
+                                                   sg::buffer_usage::readonly_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),

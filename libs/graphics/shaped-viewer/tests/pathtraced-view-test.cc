@@ -73,14 +73,14 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
 
     // Frame constants: camera + the same light rectangle the geometry emits from + modest sample controls
     // (kept small so the trace stays cheap on the WARP software device).
-    auto fc = sv::pt_frame_constants_gpu{};
-    fc.camera = sv::camera_gpu::from(cam);
+    auto fc = sv::default_frame_constants();
+    fc.camera = sv::camera_record_of(cam);
     // the box light is an axis-aligned XZ rect, emitting straight down
     auto const lights = sv_test::light_table_of(box.light);
     lights.describe_in(fc);
     fc.samples_per_pixel = 16;
     fc.max_bounces = 5;
-    fc.seed = 1u;
+    fc.rng_seed = 1u;
 
     // A closed Cornell box lets no ray escape, so the environment probe stays dark; still bind it (the miss
     // reads it). Zero coefficients = black background.
@@ -88,7 +88,7 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
 
     // Built on the list that traces with it: every bindless index it names is minted here, for this epoch.
     // Declared out here because the checks below read it back.
-    auto records = cc::vector<sv::instance_gpu>();
+    auto records = cc::vector<sv::shaders::tracer::instance_record>();
 
     // The routine degrades to a no-op when its shaders do not build, so without this every CPU-side check below
     // still passes against a target nothing ever wrote.
@@ -191,11 +191,12 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     // serves a one-shot check and a driven one.
     auto const trace = [&](sg::command_list& cmd, sv::material_permutation const* fallback)
     {
-        auto records = cc::vector<sv::instance_gpu>();
+        auto records = cc::vector<sv::shaders::tracer::instance_record>();
         records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
         auto const frame = ctx.transient.create_buffer_from_pod(
-            cmd, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1}, sg::buffer_usage::readonly_buffer);
+            cmd, sv::shaders::tracer::frame_constants{.samples_per_pixel = 1, .max_bounces = 1, .rng_seed = 1},
+            sg::buffer_usage::readonly_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(sv::background{}),
                                                                      sg::buffer_usage::readonly_buffer);
@@ -297,14 +298,14 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material samples through the p
     auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
     cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
 
-    auto fc = sv::pt_frame_constants_gpu{};
-    fc.camera = sv::camera_gpu::from(cam);
+    auto fc = sv::default_frame_constants();
+    fc.camera = sv::camera_record_of(cam);
     // the box light is an axis-aligned XZ rect, emitting straight down
     auto const lights = sv_test::light_table_of(box.light);
     lights.describe_in(fc);
     fc.samples_per_pixel = 4;
     fc.max_bounces = 3;
-    fc.seed = 1u;
+    fc.rng_seed = 1u;
 
     // PERSISTENT rather than transient: the loop below advances an epoch per frame, which expires a transient one.
     auto const target
@@ -323,7 +324,7 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material samples through the p
         ctx,
         [&](sg::command_list& cmd)
         {
-            auto records = cc::vector<sv::instance_gpu>();
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
             auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer);
@@ -392,13 +393,13 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
     auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
     cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
 
-    auto fc = sv::pt_frame_constants_gpu{};
-    fc.camera = sv::camera_gpu::from(cam);
+    auto fc = sv::default_frame_constants();
+    fc.camera = sv::camera_record_of(cam);
     auto const lights = sv_test::light_table_of(box.light);
     lights.describe_in(fc);
     fc.samples_per_pixel = 4;
     fc.max_bounces = 4;
-    fc.seed = 1u;
+    fc.rng_seed = 1u;
     fc.write_temporal = 1;
     fc.write_split = 1;
 
@@ -419,7 +420,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
     auto const hit_distance = make(sg::pixel_format::rg32_float);
     auto const accumulator = make(sg::pixel_format::rgba32_float);
 
-    auto records = cc::vector<sv::instance_gpu>();
+    auto records = cc::vector<sv::shaders::tracer::instance_record>();
     REQUIRE(sv_test::frames_until_executed(
         ctx,
         [&](sg::command_list& cmd)
@@ -427,7 +428,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
             records.clear();
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-            auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
+            auto const frame = ctx.transient.create_buffer<sv::shaders::tracer::frame_constants>(
                 1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
             cmd.upload.pod_to_buffer(frame, fc);
 
@@ -435,7 +436,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
                 1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
             cmd.upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
 
-            auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+            auto const instance_table = ctx.transient.create_buffer<sv::shaders::tracer::instance_record>(
                 records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
             cmd.upload.data_to_buffer(instance_table, records);
             auto const light_buffer = sv_test::upload_lights(cmd, lights);
@@ -581,12 +582,12 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
         auto cmd = ctx->create_command_list();
         for (auto const& lights : tables)
         {
-            auto fc = sv::pt_frame_constants_gpu{};
-            fc.camera = sv::camera_gpu::from(scene.camera);
+            auto fc = sv::default_frame_constants();
+            fc.camera = sv::camera_record_of(scene.camera);
             lights.describe_in(fc);
             fc.samples_per_pixel = scene.samples_per_pixel;
             fc.max_bounces = scene.max_bounces;
-            fc.seed = 1u;
+            fc.rng_seed = 1u;
 
             auto const frame = ctx->transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::readonly_buffer);
 
@@ -599,14 +600,14 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
                  .height = scene.size,
                  .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 
-            auto records = cc::vector<sv::instance_gpu>();
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
             records.push_back(resources->describe_instance(*cmd, scene.item.mesh, scene.item.instance));
             auto const instance_table
                 = ctx->transient.create_buffer_from_data(*cmd, records, sg::buffer_usage::readonly_buffer);
 
             // A table with no lights binds nothing, which is the routine's own stand-in path.
-            auto const light_buffer
-                = lights.records.empty() ? sg::buffer<sv::light_gpu>() : sv_test::upload_lights(*cmd, lights);
+            auto const light_buffer = lights.records.empty() ? sg::buffer<sv::shaders::tracer::light_record>()
+                                                             : sv_test::upload_lights(*cmd, lights);
 
             auto const bindless = resources->freeze();
             auto const outcome = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
@@ -675,9 +676,9 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
 /// The table of exactly `lights`.
 [[nodiscard]] sv::pt_light_table table_of(cc::span<sv::light const> lights)
 {
-    auto records = cc::vector<sv::light_gpu>();
+    auto records = cc::vector<sv::shaders::tracer::light_record>();
     for (auto const& l : lights)
-        records.push_back(sv::light_gpu::from(l));
+        records.push_back(sv::light_record_of(l));
     return sv::pt_light_table::grouped(records);
 }
 

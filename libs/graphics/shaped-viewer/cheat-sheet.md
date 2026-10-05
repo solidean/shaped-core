@@ -49,7 +49,7 @@ sv::camera::orbiting(target, distance, azimuth, elevation)  // -> camera orbitin
 sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at target (static); cam.look_at(target, up=+y) sets it from position
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
-sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
+sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
@@ -67,10 +67,10 @@ l.visible_to_camera(bool = true) / .casts_shadows(bool)   // seen by the camera:
 l.path() -> light_path           // point | area | distant_point | distant_disc — the integrator's branches, not a list of shapes
 l.placement                      // tg::similarity_transform3f; a light points along its -Z (a spot's axis, a rect's front, a sun's travel)
 l.emission                       // light_emission { color, intensity, unit, exposure, face, visible_to_camera, casts_shadows } — a plain aggregate, so designated initializers work
-sv::light_problem(l)             // -> string_view, empty when valid; what the setters, add_light and light_gpu::from assert on — so a direct field write is caught before the GPU
+sv::light_problem(l)             // -> string_view, empty when valid; what the setters, add_light and light_record_of assert on — so a direct field write is caught before the GPU
 sv::light_unit                   // candela | lux | nit | lumen; ONE NIT IS ONE UNIT OF TRACER RADIANCE, the same as OpenPBR emission_luminance
 sv::scene_light                  // { light_id id; light light; } — one light as a layer holds it
-sv::light_gpu::from(light)       // -> light_gpu, 96 bytes, tagged by path; emission is point intensity / rect radiance / parallel irradiance / sun radiance; the cone is glTF's scale + offset
+sv::light_record_of(light)       // -> shaders::tracer::light_record, 96 bytes, tagged by path; emission is point intensity / rect radiance / parallel irradiance / sun radiance; the cone is glTF's scale + offset
 sv::background                   // { vec3f sh[16]; } — order-3 RGB SH environment a missed ray sees (the flat and pt misses both reconstruct radiance from it)
 sv::background::uniform(radiance)              // -> background — the same radiance in every direction (band 0 alone)
 sv::background::gradient(zenith, nadir)        // -> background — vertical (+y) gradient, exact: zenith straight up, nadir straight down, their average on the horizon
@@ -168,10 +168,10 @@ m.create_mesh(sv::mesh)                // -> resident_mesh const&, INTO the mesh
 m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
 m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_mesh followed by the resolution above
-m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a hit reads by its instance id
+m.describe_instance(cmd, mesh_id, instance_id)  // -> shaders::tracer::instance_record, the per-item record a hit reads by its instance id
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
 m.attributes_resident(instance_id)              // -> bool; until true the item shades through the fallback, binding no still-streaming attribute
-sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv::instance
+sv::shaders::tracer::instance_record   // { param_buffer, param_offset, vertices, indices, is_indexed, link_mask, padding } — generated from scene.instance, 32 bytes
 ```
 
 A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv::attribute_desc`
@@ -179,8 +179,8 @@ A block holds, at the offsets `material_parameter_layout` names: a constant inli
 
 Gotchas:
 
-- **`gpu_resource_manager::create` requires `textures_2d` and `buffers`** in the bindless config, whatever else it declares.
-  A sampled texture is acquired into the first; geometry, attributes and parameter blocks into the second.
+- **The bindless tables are module `tracer`'s binding `bindless`**, so their sizes are changed there and nowhere else.
+  A sampled texture is acquired into `textures_2d`; geometry, attributes and parameter blocks into `buffers`.
 - **Every index in a block is THIS EPOCH's**, never a pinned one — which is why a block is rebuilt per frame rather than cached across frames.
   That is what makes the access declaration correct by construction: nothing a hit reads reached the GPU without an acquire.
 - **`describe_instance` must be called on the list that traces with it, and before `freeze()`** — it is where those indices are minted.
@@ -191,7 +191,7 @@ Gotchas:
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
 - **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
-- **`instance_gpu` is a byte layout**, not a description of one — keep it in lockstep with `scene.instance` in `shaders/sgl/scene_items.sgl`.
+- **The instance, light, camera and frame records are generated from module `tracer`**, so there is no C++ copy to keep in lockstep; fill them field by field, since they have no defaults.
 
 ## Materials — a type, an instance, and the frequency chain
 
@@ -744,15 +744,15 @@ sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // outp
 sv::pathtrace_routine::execute(cmd, pt_trace_desc)   // builds the TLAS + dispatches shaders/tracer_pipeline.sgl into the image target; declines until its hit groups, description and pipeline land
 sv::pathtrace_routine::is_ready(cmd)                 // -> whether the LAST execute dispatched; false before the first one
 sv::pt_trace_desc                                    // the trace's targets and constants, plus:
-                                                     //   instance_table — one sv::instance_gpu per TLAS instance, in that order
+                                                     //   instance_table — one instance record per TLAS instance, in that order
                                                      //   hit_groups     — the permutations; tlas_instance::hit_group_offset is 2 * index, rewritten to that permutation's row
                                                      //                    one not compiled yet is substituted by fallback / quadric_fallback, by its kind
                                                      //   lights         — every light, grouped by path (pt_light_table::records); NULL means none, and light_count must be 0
                                                      //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
                                                      //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
                                                      //   the guide and split targets are typed: rgba16_float / r32_float / rg32_float as sv allocates them
-sv::pt_frame_constants_gpu                           // { camera_gpu camera; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; u32 light_count; u32 path_offset[4], path_count[4]; } — 256 bytes
-sv::pt_light_table::grouped(span<light_gpu>)         // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
+sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block
+sv::pt_light_table::grouped(span<light_record>)         // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
 table.describe_in(fc)                                // writes light_count + the per-path table into the frame block, so the two cannot disagree
 
 sv::shader_package()                                 // the one SGL package: tracer + module tracer, layout and depth fill; sv's default library adds it
@@ -762,7 +762,7 @@ sv::shader_package()                                 // the one SGL package: tra
 Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
 What a caller supplies is a view.
-The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `traced.lights`, and writes its table into `pt_frame_constants_gpu`.
+The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `traced.lights`, and writes its table into the frame constants.
 Every path is traced; a point or a parallel light is a delta and has next-event estimation alone (docs/lights.md).
 The pick probability `1/N` is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced whatever N is.
 A layer with no lights falls back to `layer::fallback_light` — `sv::default_fallback_light()`, a sun — which `scene.fallback_light(cc::nullopt)` turns off.
@@ -786,7 +786,7 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **A split-signal member adds three more**: `temporal_id::frame_diffuse`, `frame_specular` and `hit_distance_guide`, all three or none.
   The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
   Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them, and only on the frames it runs.
-- **`sv::matrices_of(camera_gpu, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
+- **`sv::matrices_of(camera_record, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
   sv rasterizes nothing, so these exist for a denoiser that reprojects in world space; `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
   `reconstruct_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
   The per-frame offset a temporal upscaler reconstructs from is the other kind, and sv has none.
@@ -1033,7 +1033,7 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
 - **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
-  `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's hit through `instance_gpu::is_indexed`, per instance.
+  `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's hit through the instance record's `is_indexed`, per instance.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.
   Seed with `initial_camera` / `initial_orbit` / `initial_fps` instead for a view that should converge.

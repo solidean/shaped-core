@@ -49,7 +49,7 @@ struct temporal_slot
 
     /// The camera this slot's layer was last traced from, held only by a `temporal_id::motion_guide` slot.
     /// The next frame's motion vectors reproject into it.
-    camera_gpu last_camera = {};
+    shaders::tracer::camera_record last_camera = {};
     bool has_last_camera = false;
 };
 
