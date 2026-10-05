@@ -13,11 +13,13 @@ struct pen_glyph
     i64 x = 0;
 };
 
-/// A line's glyphs and the advance it ends at, in font units.
+/// A line's glyphs, the advance it ends at, and where its last glyph that is not a space ends, in font units.
+/// The second is what the line is aligned and measured by, so trailing spaces neither push it off its edge nor widen it.
 struct line
 {
     cc::vector<pen_glyph> glyphs;
     i64 width = 0;
+    i64 ink_width = 0;
 };
 
 [[nodiscard]] babel::font::glyph_id glyph_of(babel::font::face const& face, char32_t c)
@@ -32,8 +34,8 @@ void set_paragraph(babel::font::face const& face, cc::span<char32_t const> text,
     auto current = line();
     auto previous = cc::optional<babel::font::glyph_id>();
 
-    // Where the last space of the current line was, so a wrap can cut there: the glyph index after it, and the width
-    // the line had before it.
+    // Where the last space of the current line was, so a wrap can cut there: the glyph index after it, and the line's
+    // ink before it.
     auto break_glyph = isize(-1);
     auto break_width = i64(0);
 
@@ -42,19 +44,22 @@ void set_paragraph(babel::font::face const& face, cc::span<char32_t const> text,
         auto const g = glyph_of(face, c);
         auto kern = previous.has_value() ? i64(face.pair_kerning(previous.value(), g)) : 0;
         auto const advance = i64(face.horizontal(g).advance);
-        auto const is_space = c == U' ' || c == U'	';
+        auto const is_space = c == U' ' || c == U'\t';
 
         // A glyph that would cross the limit after a space on this line wraps the line at that space, taking the word
         // started since then along.
-        if (max_units > 0 && !is_space && break_glyph >= 0 && current.width + kern + advance > max_units)
+        // Only a space after ink is a break: a paragraph's leading spaces leave nothing for the line to end with.
+        if (max_units > 0 && !is_space && break_glyph >= 0 && break_width > 0 && current.width + kern + advance > max_units)
         {
             auto next = line();
             auto const shift = break_glyph < current.glyphs.size() ? current.glyphs[break_glyph].x : current.width;
             for (auto i = break_glyph; i < current.glyphs.size(); ++i)
                 next.glyphs.push_back({.glyph = current.glyphs[i].glyph, .x = current.glyphs[i].x - shift});
             next.width = current.width - shift;
+            next.ink_width = cc::max(i64(0), current.ink_width - shift);
             current.glyphs.resize_to_defaulted(break_glyph);
             current.width = break_width;
+            current.ink_width = break_width;
             out.push_back(cc::move(current));
             current = cc::move(next);
             break_glyph = -1;
@@ -68,7 +73,7 @@ void set_paragraph(babel::font::face const& face, cc::span<char32_t const> text,
         {
             // The space stays on the line it ends; what follows it starts the next one if the line wraps there.
             current.glyphs.push_back({.glyph = g, .x = current.width + kern});
-            break_width = current.width;
+            break_width = current.ink_width;
             current.width += kern + advance;
             break_glyph = current.glyphs.size();
             previous = g;
@@ -77,6 +82,7 @@ void set_paragraph(babel::font::face const& face, cc::span<char32_t const> text,
 
         current.glyphs.push_back({.glyph = g, .x = current.width + kern});
         current.width += kern + advance;
+        current.ink_width = current.width;
         previous = g;
     }
     out.push_back(cc::move(current));
@@ -85,6 +91,9 @@ void set_paragraph(babel::font::face const& face, cc::span<char32_t const> text,
 
 text_layout layout_text(babel::font::face const& face, cc::string_view text, text_style const& style)
 {
+    if (style.size <= 0.0f)
+        return {};
+
     auto const& m = face.metrics();
     auto const scale = style.size / f32(face.units_per_em());
     auto const max_units = style.max_width > 0.0f ? i64(style.max_width / scale) : i64(0);
@@ -107,7 +116,7 @@ text_layout layout_text(babel::font::face const& face, cc::string_view text, tex
 
     auto widest = i64(0);
     for (auto const& l : lines)
-        widest = cc::max(widest, l.width);
+        widest = cc::max(widest, l.ink_width);
     auto const box_width = style.max_width > 0.0f ? style.max_width : f32(widest) * scale;
 
     auto const ascender = f32(m.ascender) * scale;
@@ -119,7 +128,7 @@ text_layout layout_text(babel::font::face const& face, cc::string_view text, tex
     for (auto li = isize(0); li < lines.size(); ++li)
     {
         auto const& l = lines[li];
-        auto const slack = box_width - f32(l.width) * scale;
+        auto const slack = box_width - f32(l.ink_width) * scale;
         auto const indent = style.align == text_align::center ? slack * 0.5f
                           : style.align == text_align::right  ? slack
                                                               : 0.0f;

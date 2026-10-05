@@ -49,6 +49,28 @@ TEST("sr::layout_text - glyphs advance along the first baseline, one ascender be
     CHECK(l.box.max == tg::pos2f(1200, 1000)); // ascender down to the descender
 }
 
+TEST("sr::layout_text - a wrapped line is aligned by its ink, not by the spaces it ends with")
+{
+    // "AB  " is 1700 wide with its spaces and 1200 without; flush right, the second B ends at the box's edge.
+    auto const l = sr::layout_text(plain(), "AB  AB", {.size = 1000, .max_width = 1500, .align = sr::text_align::right});
+    CHECK(l.line_count == 2);
+    REQUIRE(l.glyphs.size() == 6);
+    CHECK(origin_of(l, 1)[0] + 600.0f == 1500.0f);
+}
+
+TEST("sr::layout_text - a paragraph's leading spaces are no place to wrap")
+{
+    auto const l = sr::layout_text(plain(), " ABC", {.size = 1000, .max_width = 1000});
+    CHECK(l.line_count == 1);
+}
+
+TEST("sr::layout_text - a size of zero lays out nothing")
+{
+    auto const l = sr::layout_text(plain(), "AB", {.size = 0});
+    CHECK(l.glyphs.empty());
+    CHECK(l.line_count == 0);
+}
+
 TEST("sr::layout_text - size scales every distance")
 {
     auto const l = sr::layout_text(plain(), "AB", {.size = 10});
