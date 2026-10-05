@@ -76,6 +76,9 @@ void fold_type(cc::byte_stream_builder& b, checked_module const& m, type_id type
         b.add_bool(t.is_mut);
         fold_type(b, m, t.element);
         return;
+    case type_kind::bytes:
+        b.add_bool(t.is_mut);
+        return;
     case type_kind::enumeration:
         b.add_string(m.name_of(type));
         for (auto const& c : m.at(t.cases))
@@ -91,7 +94,6 @@ void fold_type(cc::byte_stream_builder& b, checked_module const& m, type_id type
         else
             fold_members(b, m, m.at(t.members));
         return;
-    case type_kind::bytes:
     case type_kind::texture:
     case type_kind::image:
     case type_kind::sampler:

@@ -143,7 +143,7 @@ public:
         case type_kind::buffer:
             return cc::format("{}device {}*", t.is_mut ? "" : "const ", type_text(p, *this, t.element));
         case type_kind::bytes:
-            return t.access == check::access_mode::read_write ? "device uint*" : "const device uint*";
+            return t.is_mut ? "device uint*" : "const device uint*";
         case type_kind::texture:
             if (t.is_depth)
                 return cc::format("{}<float>", k_depth_names[isize(t.shape)]);

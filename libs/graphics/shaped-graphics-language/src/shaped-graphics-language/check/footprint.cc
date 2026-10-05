@@ -195,11 +195,8 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                             element = m.at(element).element;
                         auto const& type = m.at(element);
                         slot.host_name = cc::format("{}.{}", symbol.name, members[member].name);
-                        auto const is_writable_bytes
-                            = type.kind == type_kind::bytes && type.access == access_mode::read_write;
-                        slot.view = type.kind == type_kind::image || type.is_mut || is_writable_bytes
-                                      ? slot_view::storage
-                                      : slot_view::read_only;
+                        slot.view
+                            = type.kind == type_kind::image || type.is_mut ? slot_view::storage : slot_view::read_only;
                     }
                     ordered.push_back(cc::move(slot));
                 }

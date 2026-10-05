@@ -221,7 +221,9 @@ struct uniformity_pass
         if (arguments.empty() || result.is)
             return result;
         auto const& t = m.at(e.at(arguments[0]).type);
-        if ((t.kind != type_kind::image && t.kind != type_kind::bytes) || t.access != access_mode::read_write)
+        auto const is_stored_to = (t.kind == type_kind::image && t.access == access_mode::read_write)
+                               || (t.kind == type_kind::bytes && t.is_mut);
+        if (!is_stored_to)
             return result;
         auto named = arguments[0];
         if (auto const* const element = e.at(named).node.try_as<flat_element>())

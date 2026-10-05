@@ -73,7 +73,7 @@ TEST("sgl emit - an array of bytes is indexed nonuniform like any binding array"
     CHECK(hlsl.contains("tables_raw[NonUniformResourceIndex(i)].Load(0u)"));
 }
 
-TEST("sgl emit - a store of bytes writes them, and a load of mut bytes diverges")
+TEST("sgl emit - a store of bytes writes them")
 {
     // the footprint: what reads bytes reads them, and what stores them writes the storage view
     constexpr auto pinned = "binding work:\n"

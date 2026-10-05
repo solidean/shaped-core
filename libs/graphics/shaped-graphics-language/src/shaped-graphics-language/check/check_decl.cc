@@ -772,8 +772,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         if (coherent != nullptr && type != checked_module::error_type)
         {
             auto const& r = out.at(innermost);
-            if ((r.kind == type_kind::buffer && r.is_mut)
-                || ((r.kind == type_kind::image || r.kind == type_kind::bytes) && r.access == access_mode::read_write))
+            if (((r.kind == type_kind::buffer || r.kind == type_kind::bytes) && r.is_mut)
+                || (r.kind == type_kind::image && r.access == access_mode::read_write))
             {
                 judge_feature(file, coherent->name, "a @coherent member", feature::device_coherence);
                 is_coherent = true;

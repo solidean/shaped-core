@@ -61,7 +61,7 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
     case type_kind::bytes:
-        return cc::format("{}bytes", access_prefix(t.access));
+        return t.is_mut ? cc::string("mut bytes") : cc::string("bytes");
     case type_kind::acceleration_structure:
         return cc::format("acceleration_structure[.{}]", k_geometry_kinds[t.format]);
     case type_kind::atomic:
@@ -317,7 +317,7 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
             return checked_module::error_type;
         }
         auto qualified = t;
-        qualified.access = access_mode::read_write;
+        qualified.is_mut = true;
         return resource_type(cc::move(qualified));
     }
     if (t.kind == type_kind::image)
@@ -789,7 +789,7 @@ bool checker::takes(type_id parameter, type_id argument) const
         return p.count == a.count && (p.element == type_id::none || p.element == a.element);
     // a pattern that reads bytes takes any, one that writes them only `mut bytes`
     if (p.kind == type_kind::bytes && a.kind == type_kind::bytes)
-        return p.access == access_mode::read || a.access == access_mode::read_write;
+        return !p.is_mut || a.is_mut;
     auto const is_bare = p.element == type_id::none && p.format < 0 && !p.is_depth;
     if (is_bare && p.kind == type_kind::texture)
         return a.kind == type_kind::texture && !a.is_depth && a.shape == p.shape;

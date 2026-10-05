@@ -32,8 +32,9 @@ enum class sgl::check::type_kind : sgl::u8
     /// A `buffer[T]`: an array of `element` a shader indexes, and `mut` where it may be written (the spec's bindings file).
     /// It is a resource rather than a value: it stands in a binding, and nothing loads or copies one.
     buffer,
-    /// `bytes`: raw memory a shader addresses by byte offset, in 32-bit words, and `mut bytes` where it may write it;
-    /// its `access` is `read` or `read_write`. A resource, never a value: builtins take it.
+    /// `bytes`: raw memory a shader addresses by byte offset, in 32-bit words.
+    /// `mut bytes` where it may write it, which `is_mut` records as it does for a buffer.
+    /// A resource, never a value: builtins take it.
     bytes,
     /// A sampled texture of one `shape`, whose samples are `element`, or a depth texture where `is_depth`.
     texture,
