@@ -172,8 +172,6 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
         let u = pt.rand(mut rng)
         channel = min((u * 3.0) as uint, 2u)
 
-    let b = openpbr.bsdf_prepare(surface, exiting, channel)
-
     // The shading frame, in three steps: the authored one if there is one, faced toward the ray, then the normal map on top.
     let mut f = openpbr.make_frame(n)
     if has_authored:
@@ -190,11 +188,12 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
     // The anisotropy direction, applied AFTER the normal map, because it is a rotation about the shading normal the normal map decided.
     if surface.geometry_tangent != float3(1.0, 0.0, 0.0) => f = openpbr.rotate_frame_to_tangent(f, surface.geometry_tangent)
 
-    // The coat's normal, re-expressed in the frame the closure works in.
-    // It lands AFTER `bsdf_prepare` read the surface, so the closure still sees the authored one.
+    // The coat's normal, re-expressed in the frame the closure works in, before the closure reads it.
     if surface.geometry_coat_normal != float3(0.0, 0.0, 1.0):
         let coat_world = normalize(openpbr.to_world(authored_frame, normalize(surface.geometry_coat_normal)))
         surface.geometry_coat_normal = normalize(openpbr.to_local(f, coat_world))
+
+    let b = openpbr.bsdf_prepare(surface, exiting, channel)
 
     let wo_local = openpbr.to_local(f, v)
     let p = ray_origin + ray_dir * hit_t
