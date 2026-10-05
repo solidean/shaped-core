@@ -148,7 +148,7 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
   A per-viewer budget would need the module to take its counts as options, which SGL's `require` and option machinery does not reach for binding arrays yet.
 - **dx12 and vulkan agree to rounding rather than to the bit.**
   DXC compiles without `-Gis` and each driver compiles DXIL or SPIR-V its own way, so fast-math reassociates terms differently, the quadric root solve above all.
-  `cross-backend-trace-test.cc` holds the two to 64 units in the last place; measured, the worst case is about 30.
+  `cross-backend-trace-test.cc` holds the two to 1e-4 relative, against measured differences of at most 7.5e-6.
 - **The path tracer is traced on dx12 and vulkan alone.**
   The viewer's default context and the examples are dx12's; metal has the ray-tracing pipeline the tracer needs and has never run it.
 

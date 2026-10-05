@@ -482,10 +482,15 @@ cc::shared_async<cc::vector<tg::vec4f>> image_of(sg::context* ctx, trace_case c)
 
 /// How far one SGL source traced on two APIs may stray apart, relative to a channel's value.
 /// The drivers compile DXIL and SPIR-V each their own way, and DXC compiles without `-Gis`, so terms reassociate apart.
-/// Measured at 21 units in the last place on quadrics, whose root solve carries a difference into the hit point.
-constexpr float k_across_api_tolerance = 64.0f * 1.1920929e-7f;
+/// Measured at most 3.5e-6 on an RTX 5070 Laptop and 7.5e-6 on an RTX 3080 Ti Laptop; a value that diverged differs by
+/// orders of magnitude more, so the bound has room for another GPU's rounding and still catches that.
+constexpr float k_across_api_tolerance = 1e-4f;
+
+/// The smallest value a difference is measured relative to.
+constexpr float k_relative_floor = 1e-3f;
 
 /// The largest difference of any channel between two images of one scene, relative to its value, and how many pixels differ.
+/// A channel's value is floored at `k_relative_floor`, near these scenes' own scale, so a near-black pixel cannot set the bound.
 struct image_difference
 {
     float max_abs = 0.0f;
@@ -504,7 +509,7 @@ struct image_difference
             auto const delta = tg::abs(a[i][c] - b[i][c]);
             d.max_abs = delta > d.max_abs ? delta : d.max_abs;
             auto const magnitude = tg::abs(a[i][c]);
-            auto const relative = delta == 0.0f ? 0.0f : delta / (magnitude > 1e-30f ? magnitude : 1e-30f);
+            auto const relative = delta / (magnitude > k_relative_floor ? magnitude : k_relative_floor);
             d.max_relative = relative > d.max_relative ? relative : d.max_relative;
             differs = differs || a[i][c] != b[i][c];
         }
@@ -534,9 +539,10 @@ constexpr trace_case all_cases[] = {trace_case::pbr,
                                     trace_case::unlit,
                                     trace_case::quadrics};
 
-/// One triangle spelling and the quadrics, the two kinds of hit group; every spelling only under --thorough.
+/// One case per shape of hit group the generator emits: an opaque triangle, a cutout triangle with its any-hits, and a
+/// procedural one; every spelling only under --thorough.
 /// A debug build compiles each spelling's hit groups through an unoptimized SGL front end, which is what this narrows.
-constexpr trace_case default_cases[] = {trace_case::pbr, trace_case::quadrics};
+constexpr trace_case default_cases[] = {trace_case::pbr, trace_case::cutout, trace_case::quadrics};
 
 [[nodiscard]] cc::span<trace_case const> cases_to_trace()
 {
