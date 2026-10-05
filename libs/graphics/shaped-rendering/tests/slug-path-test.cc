@@ -225,6 +225,15 @@ TEST("sr::stroke_outline - a curve bending tighter than the half-width still cov
     }
 }
 
+TEST("sr::stroke_outline - a curve that goes out and comes back strokes both ways")
+{
+    auto path = sr::slug_path();
+    path.move_to(tg::pos2f(0, 0)).quad_to(tg::pos2f(10, 0), tg::pos2f(0, 0));
+    auto const outline = sr::stroke_outline(path, {.width = 1.0f}, 0.01f);
+    CHECK(winding(outline, tg::pos2f(4, 0)) != 0);
+    CHECK(winding(outline, tg::pos2f(4, 2)) == 0);
+}
+
 TEST("sr::stroke_outline - joins and caps shape the corners and ends")
 {
     // a right angle from (0, 0) to (50, 0) to (50, 50), stroked 10 wide: its outer corner is near (55, -5)

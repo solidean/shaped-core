@@ -78,6 +78,9 @@ constexpr int max_split_depth = 16;
     if (c.p2 == c.p1 || c.p2 == c.p3)
         return true;
     auto const along = c.p3 - c.p1;
+    // A curve that returns to where it started goes out and back, which no line does.
+    if (tg::dot(along, along) == 0.0f)
+        return false;
     auto const off = c.p2 - c.p1;
     auto const area = cross(off, along);
     return tg::abs(area) <= 1e-6f * tg::dot(along, along) && tg::dot(off, along) >= 0.0f
