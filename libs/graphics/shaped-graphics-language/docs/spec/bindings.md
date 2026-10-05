@@ -341,7 +341,8 @@ binding mesh:
 
 HLSL has it exactly, as `ByteAddressBuffer` and `RWByteAddressBuffer`.
 WGSL and MSL have no raw memory of their own, so there it is an array of `u32` or `uint` indexed by the offset over 4, and a load of several words binds that index once.
-SPIR-V, WGSL and MSL therefore reflect it as a buffer, and slib accepts that reading of a member SGL states as `bytes`.
+vulkan's HLSL is `ByteAddressBuffer` as well, which DXC lowers to a buffer of words, so SPIR-V reflects a buffer too.
+Those three reflect it as a buffer, and slib accepts that reading of a member SGL states as `bytes`.
 The host binds a byte view of any buffer, `sg::readonly_buffer_view<cc::byte>` or `readwrite_buffer_view<cc::byte>`.
 
 ## Binding arrays

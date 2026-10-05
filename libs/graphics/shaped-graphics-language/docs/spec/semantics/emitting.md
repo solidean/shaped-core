@@ -256,6 +256,9 @@ binding affine:
     affine.values[id.x] = affine.values[id.x] * affine.scale + affine.bias
 ```
 
+* **EMIT-155** `bytes` is `ByteAddressBuffer` in HLSL and `RWByteAddressBuffer` where it is `mut`, a `var<storage>` array of `u32` in WGSL, and a `device uint*` in MSL.
+  A call is HLSL's `Load`, `Load2` to `Load4` and `Store` to `Store4`, and elsewhere words of the array at the offset over 4, the index of several bound once.
+
 ## Matrices
 
 * **EMIT-42** A matrix is column-major, and a vector stands to its right.
@@ -536,6 +539,3 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 * How a vertex input's dx12 semantic is chosen once a member wants one that is not its name.
 * How a splatted value reads once a target can take the vector whole ([checking](checking.md#open)).
 * Whether the reserved words of a target hold every function of that target, or only the ones a builtin is written as.
-
-* **EMIT-155** `bytes` is `ByteAddressBuffer` in HLSL and `RWByteAddressBuffer` where it is `mut`, a `var<storage>` array of `u32` in WGSL, and a `device uint*` in MSL.
-  A call is HLSL's `Load`, `Load2` to `Load4` and `Store` to `Store4`, and elsewhere words of the array at the offset over 4, the index of several bound once.

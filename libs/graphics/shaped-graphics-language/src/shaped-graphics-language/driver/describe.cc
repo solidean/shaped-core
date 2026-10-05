@@ -112,7 +112,7 @@ described_binding_member describe_resource(check::checked_module const& m,
     case check::type_kind::bytes:
         result.kind = described_member_kind::bytes;
         result.type = cc::string(m.name_of(member.type));
-        result.access = cc::string(access_name(t.access));
+        result.access = cc::string(t.is_mut ? "read_write" : "read");
         break;
     case check::type_kind::sampler:
         result.kind = described_member_kind::sampler;
@@ -232,8 +232,7 @@ described_option describe_option(check::checked_module const& m, check::symbol_i
 {
     auto const& s = m.at(id);
     auto const& c = m.constants[s.info];
-    auto value = c.kind == check::constant_kind::integer && c.is_unsigned ? cc::format("{}u", u32(c.integer))
-               : c.kind == check::constant_kind::integer                  ? cc::format("{}", c.integer)
+    auto value = c.kind == check::constant_kind::integer ? cc::format("{}", c.integer)
                : m.name_of(c.type) == "bool" ? cc::string(m.at(m.at(c.type).cases)[c.case_index].name)
                                              : cc::format(".{}", m.at(m.at(c.type).cases)[c.case_index].name);
     return {.name = host_name_of(m, id), .type = cc::string(m.name_of(c.type)), .value = cc::move(value)};
