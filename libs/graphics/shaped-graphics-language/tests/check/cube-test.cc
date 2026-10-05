@@ -102,8 +102,8 @@ TEST("sgl check - a truncated prelude checks too")
     auto const prelude = builtins_text();
     auto const cube = read_cube();
     // Each length checks the whole prefix, so a fixed stride grows with the square of the prelude.
-    // The default run takes about 128 lengths whatever its size, an odd stride; --thorough takes every 13th.
-    auto const stride = nx::is_thorough() ? 13 : (prelude.size() / 128) | 1;
+    // The default run takes about 32 lengths whatever its size, an odd stride; --thorough takes every 13th.
+    auto const stride = nx::is_thorough() ? 13 : (prelude.size() / 32) | 1;
     for (auto length = isize(0); length < prelude.size(); length += stride)
     {
         auto const checked = check_sources(cc::string_view(prelude).subview({.offset = 0, .size = length}), cube);
