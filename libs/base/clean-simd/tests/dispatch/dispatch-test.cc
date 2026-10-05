@@ -1,5 +1,6 @@
 #include "battery.hh"
 
+#include <clean-core/error/optional.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <nexus/test.hh>
@@ -12,6 +13,46 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+using battery_fn = void (*)(battery_io&);
+
+// The ten entries, one per element type in battery_index order, run one after another into one battery_io.
+struct battery_entry
+{
+    battery_fn (*dispatch)();
+    cimd::kernel_id (*kernel)();
+};
+
+#define BATTERY_ENTRY(T)                                                                                      \
+    battery_entry                                                                                             \
+    {                                                                                                         \
+        [] { return CIMD_DISPATCH(cimd_battery_##T); }, [] { return CIMD_DISPATCH_KERNEL(cimd_battery_##T); } \
+    }
+
+battery_entry const battery_entries[]
+    = {BATTERY_ENTRY(f32), BATTERY_ENTRY(f64), BATTERY_ENTRY(i8),  BATTERY_ENTRY(i16), BATTERY_ENTRY(i32),
+       BATTERY_ENTRY(i64), BATTERY_ENTRY(u8),  BATTERY_ENTRY(u16), BATTERY_ENTRY(u32), BATTERY_ENTRY(u64)};
+
+#undef BATTERY_ENTRY
+
+// The kernel every entry's CIMD_DISPATCH_KERNEL names, or nothing where two disagree.
+cc::optional<cimd::kernel_id> battery_kernel()
+{
+    auto const id = battery_entries[0].kernel();
+    for (auto const& e : battery_entries)
+        if (e.kernel() != id)
+            return cc::nullopt;
+    return id;
+}
+
+void run_battery(battery_io& io)
+{
+    io.n = 0;
+    io.napprox = 0;
+    io.nestimate = 0;
+    for (auto const& e : battery_entries)
+        e.dispatch()(io);
+}
+
 template <class T>
 void fill_floats(battery_io& io, cc::random& rng)
 {
@@ -40,7 +81,7 @@ cc::unique_ptr<battery_io> run_on(cimd::kernel_id id, battery_io const& inputs)
 {
     auto io = cc::make_unique<battery_io>(inputs);
     cimd::scoped_forced_kernel const forced(id);
-    CIMD_DISPATCH(cimd_battery)(*io);
+    run_battery(*io);
     return io;
 }
 
@@ -52,10 +93,15 @@ void compare_with_scalar(cimd::kernel_id id)
     auto const got = run_on(id, *inputs);
     auto const kn = cimd::kernel_name(id);
 
-    REQUIRE(reference->ran == cimd::kernel_id::scalar);
-    REQUIRE(got->ran == id);
-    // Ten element types at four widths, a few dozen results each — 60680 bytes when written: less means some were skipped.
-    REQUIRE(reference->n >= 60680);
+    // Ten element types, a few dozen results each, at four widths or at one: fewer bytes means some were skipped.
+    REQUIRE(reference->n >= (CIMD_EXHAUSTIVE_TESTS ? 79880 : 12638)).dump("bytes", reference->n);
+    for (auto t = 0; t < 10; ++t)
+    {
+        REQUIRE(reference->ran[t] == cimd::kernel_id::scalar).dump("entry", t);
+        REQUIRE(got->ran[t] == id).dump("entry", t);
+        REQUIRE(got->written[t] > 0).dump("entry", t);
+        REQUIRE(got->written[t] == reference->written[t]).dump("entry", t);
+    }
     REQUIRE(got->n == reference->n);
     REQUIRE(got->napprox == reference->napprox);
     REQUIRE(got->nestimate == reference->nestimate);
@@ -93,7 +139,9 @@ void dispatch_kernel_test(cimd::kernel_id id)
         SKIP(cc::format("no {} on this CPU", cimd::kernel_name(id)));
     {
         cimd::scoped_forced_kernel const forced(id);
-        if (CIMD_DISPATCH_KERNEL(cimd_battery) != id)
+        auto const kernel = battery_kernel();
+        REQUIRE(kernel.has_value());
+        if (kernel.value() != id)
             SKIP(cc::format("{} is not compiled into this build", cimd::kernel_name(id)));
     }
     compare_with_scalar(id);
@@ -110,31 +158,32 @@ TEST("cimd dispatch - the best kernel this CPU runs is the one picked")
         if (!cimd::cpu_supports(id))
             continue;
         cimd::scoped_forced_kernel const forced(id);
-        if (CIMD_DISPATCH_KERNEL(cimd_battery) == id)
+        if (battery_kernel() == id)
             expected = id;
     }
 
     auto rng = nx::test_random();
     auto const inputs = random_io(rng);
     auto io = cc::make_unique<battery_io>(*inputs);
-    REQUIRE(CIMD_DISPATCH_KERNEL(cimd_battery) == expected).context(cimd::kernel_name(expected));
-    CIMD_DISPATCH(cimd_battery)(*io);
-    CHECK(io->ran == expected).context(cimd::kernel_name(expected));
+    REQUIRE(battery_kernel() == expected).context(cimd::kernel_name(expected));
+    run_battery(*io);
+    for (auto const ran : io->ran)
+        CHECK(ran == expected).context(cimd::kernel_name(expected));
 }
 
 TEST("cimd dispatch - a scoped force restores the one around it")
 {
-    auto const best = CIMD_DISPATCH_KERNEL(cimd_battery);
+    auto const best = CIMD_DISPATCH_KERNEL(cimd_battery_f32);
     {
         cimd::scoped_forced_kernel const outer(cimd::kernel_id::scalar);
-        CHECK(CIMD_DISPATCH_KERNEL(cimd_battery) == cimd::kernel_id::scalar);
+        CHECK(CIMD_DISPATCH_KERNEL(cimd_battery_f32) == cimd::kernel_id::scalar);
         {
             cimd::scoped_forced_kernel const inner(best);
-            CHECK(CIMD_DISPATCH_KERNEL(cimd_battery) == best);
+            CHECK(CIMD_DISPATCH_KERNEL(cimd_battery_f32) == best);
         }
-        CHECK(CIMD_DISPATCH_KERNEL(cimd_battery) == cimd::kernel_id::scalar);
+        CHECK(CIMD_DISPATCH_KERNEL(cimd_battery_f32) == cimd::kernel_id::scalar);
     }
-    CHECK(CIMD_DISPATCH_KERNEL(cimd_battery) == best);
+    CHECK(CIMD_DISPATCH_KERNEL(cimd_battery_f32) == best);
 }
 
 TEST("cimd dispatch - a kernel the CPU cannot run is never forced")
@@ -145,7 +194,8 @@ TEST("cimd dispatch - a kernel the CPU cannot run is never forced")
                           cimd::kernel_id::neon, cimd::kernel_id::simd128})
     {
         auto const got = run_on(id, *inputs);
-        CHECK(cimd::cpu_supports(got->ran)).context(cimd::kernel_name(id));
+        for (auto const ran : got->ran)
+            CHECK(cimd::cpu_supports(ran)).context(cimd::kernel_name(id));
     }
 }
 

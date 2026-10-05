@@ -10,6 +10,12 @@
 // compared by a floor TU against the scalar kernel's run.
 // Dispatched, so it compiles in the kernel TUs: it includes clean-simd and cc::bit_cast, which the scalar kernel's
 // header includes already, and every helper is a template.
+// One dispatched entry per element type, so each is a TU of its own and they build side by side.
+
+// The kernel TUs see the test target's definitions; a build where they do not is caught here rather than run narrower.
+#if !defined(CIMD_EXHAUSTIVE_TESTS)
+#error "battery.hh: CIMD_EXHAUSTIVE_TESTS must be 0 or 1 (SC_SIMD_EXHAUSTIVE_TESTS in CMake)"
+#endif
 
 /// Where an element type's inputs sit in battery_io::in.
 template <class T>
@@ -40,7 +46,9 @@ constexpr int battery_index()
 
 struct battery_io
 {
-    cimd::kernel_id ran = cimd::kernel_id::scalar;
+    // Per element type, in battery_index order: the kernel its entry ran, and how many bytes of `out` it wrote.
+    cimd::kernel_id ran[10] = {};
+    int written[10] = {};
 
     // Per element type, three inputs of 1024 bits each — the widest type every kernel holds in eight registers.
     // Floats here are finite and within ±1000.
@@ -257,33 +265,46 @@ void battery_element(battery_io& io)
     }
 }
 
+/// One element type, appended to `io`: at 128, 256, 512 and 1024 bits where CIMD_EXHAUSTIVE_TESTS, else at 256 bits —
+/// one AVX2 register, and two on every 128-bit kernel.
 template <class K, class T>
 void battery_type(battery_io& io)
 {
     constexpr int lanes128 = 16 / int(sizeof(T));
-    battery_element<K, T, lanes128>(io);
-    battery_element<K, T, lanes128 * 2>(io);
-    battery_element<K, T, lanes128 * 4>(io);
-    battery_element<K, T, lanes128 * 8>(io);
+    auto const first = io.n;
+    io.ran[battery_index<T>()] = K::id;
+    if constexpr (CIMD_EXHAUSTIVE_TESTS)
+    {
+        battery_element<K, T, lanes128>(io);
+        battery_element<K, T, lanes128 * 2>(io);
+        battery_element<K, T, lanes128 * 4>(io);
+        battery_element<K, T, lanes128 * 8>(io);
+    }
+    else
+    {
+        battery_element<K, T, lanes128 * 2>(io);
+    }
+    io.written[battery_index<T>()] = io.n - first;
 }
 
-template <class K>
-void battery(battery_io& io)
-{
-    io.ran = K::id;
-    io.n = 0;
-    io.napprox = 0;
-    io.nestimate = 0;
-    battery_type<K, cimd::f32>(io);
-    battery_type<K, cimd::f64>(io);
-    battery_type<K, cimd::i8>(io);
-    battery_type<K, cimd::i16>(io);
-    battery_type<K, cimd::i32>(io);
-    battery_type<K, cimd::i64>(io);
-    battery_type<K, cimd::u8>(io);
-    battery_type<K, cimd::u16>(io);
-    battery_type<K, cimd::u32>(io);
-    battery_type<K, cimd::u64>(io);
-}
+// battery_f32<K> … battery_u64<K>, each its own dispatched entry cimd_battery_f32 … cimd_battery_u64.
+#define CIMD_BATTERY_ENTRY(T)         \
+    template <class K>                \
+    void battery_##T(battery_io& io)  \
+    {                                 \
+        battery_type<K, cimd::T>(io); \
+    }                                 \
+    CIMD_DISPATCH_DECLARE(cimd_battery_##T, battery_##T)
 
-CIMD_DISPATCH_DECLARE(cimd_battery, battery);
+CIMD_BATTERY_ENTRY(f32);
+CIMD_BATTERY_ENTRY(f64);
+CIMD_BATTERY_ENTRY(i8);
+CIMD_BATTERY_ENTRY(i16);
+CIMD_BATTERY_ENTRY(i32);
+CIMD_BATTERY_ENTRY(i64);
+CIMD_BATTERY_ENTRY(u8);
+CIMD_BATTERY_ENTRY(u16);
+CIMD_BATTERY_ENTRY(u32);
+CIMD_BATTERY_ENTRY(u64);
+
+#undef CIMD_BATTERY_ENTRY

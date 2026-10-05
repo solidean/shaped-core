@@ -94,6 +94,11 @@ option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and pr
 # Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug-nopch presets.
 option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-case assumptions at runtime" OFF)
 
+# Test clean-simd at every lane width it generates flat, rather than at one 256-bit type per element.
+# Every width is every kernel instantiated four times over, which is most of clean-simd-test's compile time.
+# Only the test binary sees it, so unlike the checks above it is no ODR hazard; the debug-nopch presets turn it on.
+option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one per element type" OFF)
+
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
 #

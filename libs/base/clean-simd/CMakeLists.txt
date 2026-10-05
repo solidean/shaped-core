@@ -61,13 +61,27 @@ if(SC_BUILD_TESTS)
     add_executable(clean-simd-test
         tests/main.cc
         tests/simd-test.cc
+        tests/float-test.cc
+        tests/integer-test.cc
         tests/dispatch/dispatch-test.cc
         tests/bvh/bvh-test.cc
     )
     sc_nexus_binary(clean-simd-test KINDS tests)
     target_link_libraries(clean-simd-test PRIVATE clean-simd clean-simd-bvh-fixture nexus)
     target_include_directories(clean-simd-test PRIVATE tests/dispatch)
-    cimd_dispatch(clean-simd-test NAME cimd_battery HEADER tests/dispatch/battery.hh FUNCTION battery)
+
+    # The root CMakeLists declares SC_SIMD_EXHAUSTIVE_TESTS; this is only the fallback for a consumer that adds
+    # clean-simd alone.
+    if(NOT DEFINED SC_SIMD_EXHAUSTIVE_TESTS)
+        set(SC_SIMD_EXHAUSTIVE_TESTS OFF)
+    endif()
+    # The dispatched kernel TUs inherit the target's definitions, so the battery sees it too.
+    target_compile_definitions(clean-simd-test PRIVATE CIMD_EXHAUSTIVE_TESTS=$<BOOL:${SC_SIMD_EXHAUSTIVE_TESTS}>)
+
+    # One entry per element type, so the battery is ten small TUs per kernel that build side by side.
+    foreach(_t f32 f64 i8 i16 i32 i64 u8 u16 u32 u64)
+        cimd_dispatch(clean-simd-test NAME cimd_battery_${_t} HEADER tests/dispatch/battery.hh FUNCTION battery_${_t})
+    endforeach()
     cimd_check_link_map(clean-simd-test)
     sc_add_nexus_web_runner(clean-simd-test)
 endif()

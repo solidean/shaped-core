@@ -232,6 +232,16 @@ nexus fails a passing test that logs an undeclared warning, so in a test it is a
 
 Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on by the same `debug-nopch` presets.
 
+## Exhaustive SIMD tests (`SC_SIMD_EXHAUSTIVE_TESTS`)
+
+`SC_SIMD_EXHAUSTIVE_TESTS` (default `OFF`) runs clean-simd's tests at every lane width rather than one; it reaches `clean-simd-test` as `CIMD_EXHAUSTIVE_TESTS`, 0 or 1.
+Off, each element type is tested at 256 bits — one AVX2 register, two on every 128-bit kernel — on every kernel.
+On, at 128, 256, 512 and 1024 bits, which instantiates every kernel four times over and is most of the test binary's compile time.
+The targeted tests — rounding, signed zeros, the edge lanes, permute, the looped shapes — run in both modes.
+
+Only the test binary sees it, and the dispatched battery's kernel TUs through it, so it is no ODR hazard and may differ between targets.
+The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg and CI still build and run the full set.
+
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
 `SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
