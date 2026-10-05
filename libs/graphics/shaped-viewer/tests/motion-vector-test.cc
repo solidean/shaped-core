@@ -201,29 +201,28 @@ ASYNC_INVOCABLE_TEST("sv - motion vectors follow the camera, and the sky ignores
     cases[c_turned_sky].at_infinity = 1;
 
     auto const r = co_await run_probe(ctx, cases);
-    auto const where = cc::string_view("camera");
 
     // A camera that did not move reprojects every pixel onto itself, so the guide is exactly zero.
     // Exactly, rather than nearly: the denoiser reads a non-zero vector on a still frame as motion, and a still frame
     // is when its history is worth the most.
     CHECK(tg::abs(r[c_unchanged].motion[0]) < 0.01f)
-        .context(cc::format("a still camera moved by {}", where, r[c_unchanged].motion[0]));
+        .context(cc::format("a still camera moved by {}", r[c_unchanged].motion[0]));
     CHECK(tg::abs(r[c_unchanged].motion[1]) < 0.01f)
-        .context(cc::format("a still camera moved by {}", where, r[c_unchanged].motion[1]));
+        .context(cc::format("a still camera moved by {}", r[c_unchanged].motion[1]));
 
     // The previous camera stood to the RIGHT of this one, so the point sat further left on its image, and this
     // frame's pixel minus that one is positive.
     // The sign is the half of a motion vector that is easy to get backwards and impossible to see.
-    CHECK(r[c_translated].motion[0] > 1.0f).context(cc::format("a sideways step gave {}", where, r[c_translated].motion[0]));
-    CHECK(tg::abs(r[c_translated].motion[1]) < 0.01f).context(where); // the step was horizontal, so nothing moved vertically
+    CHECK(r[c_translated].motion[0] > 1.0f).context(cc::format("a sideways step gave {}", r[c_translated].motion[0]));
+    CHECK(tg::abs(r[c_translated].motion[1]) < 0.01f); // the step was horizontal, so nothing moved vertically
 
     // Parallax is the whole difference between the two: the sky is infinitely far away, so a step does not move it.
     CHECK(tg::abs(r[c_translated_sky].motion[0]) < 0.01f)
-        .context(cc::format("the sky moved by {} under a pure translation", where, r[c_translated_sky].motion[0]));
+        .context(cc::format("the sky moved by {} under a pure translation", r[c_translated_sky].motion[0]));
 
     // ...and a turn does, which is what makes the case above a measurement rather than a stuck zero.
     CHECK(tg::abs(r[c_turned_sky].motion[0]) > 1.0f)
-        .context(cc::format("the sky moved by {} under a turn", where, r[c_turned_sky].motion[0]));
+        .context(cc::format("the sky moved by {} under a turn", r[c_turned_sky].motion[0]));
 }
 
 // A hit that was BEHIND the previous camera has no pixel to come from, and the guide has to say so rather than
@@ -257,6 +256,15 @@ ASYNC_INVOCABLE_TEST("sv - a point behind the previous camera reprojects off the
     CHECK(r[0].motion[0] > dim[0]).context(cc::format("a point behind the camera reprojected to {}", r[0].motion[0]));
 }
 
+// The matrices `sv::matrices_of` hands a denoiser, against the frustum the raygen actually traces.
+//
+// sv rasterizes nothing, so these two matrices have no other use and nothing else would notice them being wrong.
+// A denoiser reprojecting through a transposed or mis-scaled projection ghosts rather than fails, which is the same
+// failure mode the probe above exists for.
+//
+// Checked as properties of the frustum rather than by recomputing the formula: `forward`, `right_scaled` and
+// `up_scaled` ARE the frustum's axes — a point one `right_scaled` off the axis sits exactly on its right edge — so a
+// folded aspect ratio, a swapped axis or a flipped sign each move one of these numbers and none of them survives.
 TEST("sv - a camera's matrices describe the frustum its rays sweep")
 {
     // Off every axis, with a rolled-up vector, and not square.
