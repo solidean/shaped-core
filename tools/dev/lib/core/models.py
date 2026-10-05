@@ -164,3 +164,7 @@ class TestSummary:
     serial_s: float | None = None
     serial_group: str | None = None
     serial_group_s: float | None = None
+
+    # Each skipped test as (name, reason), read off its <skipped message="…"/>.
+    # A skip passes, so this is the only way a summary can tell a test that never ran from one that did.
+    skip_reasons: tuple[tuple[str, str], ...] = ()

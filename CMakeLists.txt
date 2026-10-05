@@ -94,6 +94,11 @@ option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and pr
 # Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug-nopch presets.
 option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-case assumptions at runtime" OFF)
 
+# Test clean-simd at every lane width it generates flat, rather than at one 256-bit type per element.
+# Every width is every kernel instantiated four times over, which is most of clean-simd-test's compile time.
+# Only the test binary sees it, so unlike the checks above it is no ODR hazard; the debug-nopch presets turn it on.
+option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one per element type" OFF)
+
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
 #
@@ -109,14 +114,34 @@ if (SC_FRAME_POINTERS)
     endif()
 endif()
 
-# Target CPU is x86-64. Only the instruction-tracer tool and its Zydis decoder ask — both are x86-64 by
-# construction, not by omission — so this is a plain variable rather than a cached option: it describes the
-# target, it is not a choice. Must precede add_subdirectory(extern), which gates the zydis build on it.
+# Target CPU is x86-64.
+# tools/cmake/Simd.cmake asks, to decide the x86-64 floor and clean-simd's dispatched kernels.
+# So do the instruction-tracer tool and its Zydis decoder, which are x86-64 by construction rather than by omission.
+# A plain variable rather than a cached option: it describes the target, it is not a choice.
+# Must precede add_subdirectory(extern), which gates the zydis build on it.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Mm][Dd]64|[Xx]86_64)$")
     set(SC_ARCH_X64 ON)
 else()
     set(SC_ARCH_X64 OFF)
 endif()
+
+# The x86-64 feature level the whole build may assume: v1 (SSE2), v2 (SSE4.2, POPCNT), v3 (AVX2, FMA, F16C, BMI) or
+# v4 (AVX-512 F/BW/CD/DQ/VL). A floor, not a ceiling — a binary built at v3 faults on the first AVX2 instruction of a
+# v2 machine, wherever that instruction is. Anything above it is clean-simd's dispatched kernels, never this switch.
+# v3 by default: every mainstream desktop x86 since Haswell (2013) and Zen 1 (2017) has it.
+# Android x86_64 defaults to v2, the most its ABI guarantees. Applied by tools/cmake/Simd.cmake; see docs/platforms.md.
+if(ANDROID)
+    set(_sc_x64_level_default v2)
+else()
+    set(_sc_x64_level_default v3)
+endif()
+set(SC_X64_LEVEL "${_sc_x64_level_default}" CACHE STRING "x86-64 feature level every function may assume: v1, v2, v3 or v4")
+set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v3 v4)
+
+# The clean-simd kernels compiled for runtime dispatch on top of that floor: `auto` (every x86-64 kernel above it, up
+# to avx512), a list such as `avx2;avx512`, or empty for none. Only kernels above the floor belong here — the ones at or
+# below it are instantiated in the dispatching target itself. See libs/base/clean-simd/src/clean-simd/dispatch.hh.
+set(SC_SIMD_KERNELS "auto" CACHE STRING "clean-simd kernels above SC_X64_LEVEL compiled for dispatch: auto, a list, or empty")
 
 # Repo-wide build configuration helpers live in tools/cmake/.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
@@ -127,6 +152,8 @@ include(Coverage)     # SC_COVERAGE  — LLVM source-based test coverage
 include(Sanitizers)   # SANITIZE     — ASan/UBSan wiring (clang only)
 include(PGO)          # SC_PGO_*     — IR-based profile-guided optimization (clang only)
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
+include(Simd)         # SC_X64_LEVEL — the x86-64 feature level every function may assume
+include(FloatingPoint) # no floating-point contraction, on every compiler
 
 # Per-target precompiled headers.
 # Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();
@@ -212,6 +239,10 @@ add_subdirectory(libs/base/typed-geometry)
 # would otherwise pay, and a library that can be left out expresses "absent on this platform" with a target instead
 # of a maze of stubs.
 add_subdirectory(libs/base/clean-net)
+
+# clean-simd (cimd): fixed-width SIMD lane types templated on a kernel, over clean-core alone.
+# Above clean-core so its generated headers and intrinsics includes are paid only by what uses SIMD.
+add_subdirectory(libs/base/clean-simd)
 
 # data stack: babel-data + babel-serializer (both namespace babel) for the format codecs, then versioned-document (vdoc) -> versioned-document-file,
 # plus blob-cache (bcache) beside them.

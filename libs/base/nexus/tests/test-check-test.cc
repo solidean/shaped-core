@@ -5,6 +5,7 @@
 #include <clean-core/string/to_debug_string.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
+#include <nexus/tests/export/junit.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
@@ -590,6 +591,55 @@ TEST("check - SKIP aborts test execution", no_scheduler)
     CHECK(executed == false);
     CHECK(exec.count_total_checks() == 1);
     CHECK(exec.count_failed_tests() == 0);
+}
+
+TEST("check - a SKIP keeps its reason, so the summary and JUnit can name it", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("skips with a reason", {}, [] { SKIP("no AVX-512 on this CPU"); });
+    reg.add_declaration("skips bare", {}, [] { SKIP(); });
+    reg.add_declaration("runs", {}, [] { CHECK(true); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    CHECK(exec.count_failed_tests() == 0);
+
+    auto const skipped = exec.skipped_tests();
+    REQUIRE(skipped.size() == 2);
+    auto saw_reason = false;
+    auto saw_bare = false;
+    for (auto const& s : skipped)
+    {
+        saw_reason |= s.name == "skips with a reason" && s.reason == "no AVX-512 on this CPU";
+        saw_bare |= s.name == "skips bare" && s.reason == "skipped";
+    }
+    CHECK(saw_reason);
+    CHECK(saw_bare);
+
+    auto const xml = nx::write_junit_xml("suite", exec, {}, {});
+    CHECK(xml.contains("skipped=\"2\""));
+    CHECK(xml.contains("<skipped message=\"no AVX-512 on this CPU\"/>"));
+}
+
+TEST("check - a test that fails and then skips is failed, not skipped", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("fails then skips", {},
+                        []
+                        {
+                            CHECK(false);
+                            SKIP("gave up");
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    CHECK(exec.count_failed_tests() == 1);
+    CHECK(exec.skipped_tests().empty());
+
+    auto const xml = nx::write_junit_xml("suite", exec, {}, {});
+    CHECK(xml.contains("skipped=\"0\""));
+    CHECK(xml.contains("<failure"));
+    CHECK(!xml.contains("<skipped"));
 }
 
 TEST("check - complex expression with multiple operators", no_scheduler)

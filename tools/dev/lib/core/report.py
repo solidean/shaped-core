@@ -190,15 +190,41 @@ def summarize_tests(records: list[dict], presets: list[Preset], root: Path, *, t
     failed = sum(1 for r in records if r["returncode"] != 0)
     tests = sum(r["junit"]["tests"] for r in records if r["junit"])
     checks = sum(r["junit"]["assertions"] for r in records if r["junit"])
+    skipped = sum(r["junit"].get("skipped", 0) for r in records if r["junit"])
     stats = f"{tests} tests, {checks} checks"
     if failed:
         ui.write_line(
             console.red(f"\n{failed} of {len(records)} test run(s) failed ({stats}) in {fmt_dur(total_s)}"))
         ui.write_line(console.red(f"tests failed - {test_diag_hint(presets, root)}"))
+        _print_skips(records, skipped)
         return False
     ui.write_line(
         console.green(f"\nAll {len(records)} test run(s) passed: {stats} in {fmt_dur(total_s)}."))
+    _print_skips(records, skipped)
     return True
+
+
+# How many test names a skip reason lists before it counts the rest.
+_SKIP_NAMES_SHOWN = 3
+
+
+def _print_skips(records: list[dict], skipped: int) -> None:
+    """The skipped tests, grouped by reason across every binary, so a test that never ran cannot pass as one that did.
+
+    A skip is a pass to every counter above, and "runs only under --thorough" alone can account for hundreds, which is
+    why each reason is one line with a few names rather than a list.
+    """
+    if skipped == 0:
+        return
+    by_reason: dict[str, list[str]] = {}
+    for r in records:
+        for name, reason in (r["junit"] or {}).get("skip_reasons", []):
+            by_reason.setdefault(reason or "skipped", []).append(f"{r['name']}: {name}")
+    ui.write_line(console.yellow(f"{skipped} test(s) skipped:"))
+    for reason, names in by_reason.items():
+        shown = ", ".join(names[:_SKIP_NAMES_SHOWN])
+        more = f", and {len(names) - _SKIP_NAMES_SHOWN} more" if len(names) > _SKIP_NAMES_SHOWN else ""
+        ui.write_line(console.yellow(f"  {reason} ({len(names)}): {shown}{more}"))
 
 
 def summarize_check_timing(

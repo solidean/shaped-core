@@ -553,6 +553,8 @@ li.verdict.v-verdict { color: var(--text-dim); }
 .annot.ref-new { text-decoration-color: var(--good); }
 .annot.ref-old { text-decoration-color: var(--warn); font-style: italic; }
 .annot.ref-bad { text-decoration: underline wavy var(--bad); }
+code.ref-foreign { font-style: italic; opacity: 0.8; }
+code.ref-foreign::after { content: " ↗"; font-style: normal; opacity: 0.6; }
 
 a.annot { color: inherit; }
 a.annot:hover { color: var(--accent); }

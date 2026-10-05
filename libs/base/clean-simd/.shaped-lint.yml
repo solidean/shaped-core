@@ -1,0 +1,17 @@
+# clean-simd's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# Every instruction set's intrinsics header is included in exactly one place, so a TU pays for the one its flags allow.
+
+rules:
+  - kind: allow-include
+    value: [<immintrin.h>, <arm_neon.h>, <wasm_simd128.h>]
+    reason: the intrinsics every kernel's generated register layer is written in, each included only where its flags allow
+    files: src/clean-simd/impl/intrinsics.hh
+
+  - kind: allow-include
+    value: <cmath>
+    reason: std::sqrt, which the scalar kernel needs correctly rounded, as every SIMD unit's square root is
+    files: src/clean-simd/generated/scalar.hh

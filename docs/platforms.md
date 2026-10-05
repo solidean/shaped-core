@@ -127,6 +127,40 @@ Windows is unaffected either way, since it never used the chain.
 So `OFF` means "this build does not capture stacks on clang or GCC" — which is a real choice for a shipping target that wants the register back, and never a free one.
 Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to nothing on arm64, where macOS mandates the chain anyway.
 
+## x86-64 feature level (`SC_X64_LEVEL`)
+
+`SC_X64_LEVEL` (default `v3`) is the x86-64 feature level every function in the build may assume: `v1` (SSE2), `v2` (SSE4.2, POPCNT), `v3` (AVX2, FMA, F16C, BMI) or `v4` (AVX-512 F/BW/CD/DQ/VL).
+It reaches the compiler as `-march=x86-64-vN`, as `/clang:-march=…` under clang-cl, or as MSVC's `/arch:` spelling, and as `CC_X64_LEVEL=N`.
+The define exists because cl.exe reports `__AVX2__` but none of the SSE levels, so a header cannot recover `v2` from the predefined macros alone.
+It is a no-op on targets that are not x86-64.
+
+**It is a floor, not a ceiling.**
+The compiler spends the flag in every function it emits, `cc` and user loops included: at `v4` a plain AABB loop compiles to AVX-512 scatters with k-register masks.
+So a binary built at a level faults on the first instruction a weaker CPU lacks, wherever that is.
+Using more than the floor where the CPU has it is clean-simd's dispatched kernels, which compile only their own TUs above it — never this switch.
+
+`v3` by default: every mainstream desktop x86 since Haswell (2013) and Zen 1 (2017) has it.
+Android x86_64 defaults to `v2`, the most its ABI guarantees.
+cl.exe builds `v4` as `/arch:AVX2`, because its AVX-512 code for AVX2-shaped source moves every vector compare into a k-register and back and comes out slower.
+
+Whole-build, never per-target, like `SC_THREADS`: an inline function compiled at two levels is an ODR violation the linker resolves by keeping whichever copy it saw first.
+
+## WebAssembly SIMD (`SC_WASM_SIMD`)
+
+`SC_WASM_SIMD` (default `ON`) builds wasm with SIMD128 (`-msimd128`), which clean-simd's `simd128` kernel is written in.
+Every current engine runs it — Chrome and Firefox since 2021, Safari since 16.4, and the Node the emsdk carries.
+`OFF` builds the scalar kernel instead, for an engine that predates it.
+
+## Floating-point contraction is off
+
+**shaped-core does not support floating-point contraction, the same way it does not support fast-math.**
+No option turns it on: `tools/cmake/FloatingPoint.cmake` passes `-ffp-contract=off` to clang and GCC, and `/clang:-ffp-contract=off` under clang-cl.
+MSVC needs nothing, since `/fp:precise` does not contract unless `/fp:contract` is given.
+
+Contraction lets a compiler fuse `a * b + c` into one FMA wherever the target has one, which moves the result's last bit.
+At their defaults clang contracts within an expression, GCC across statements and MSVC not at all, so the same source gave different bits per toolchain and per `SC_X64_LEVEL`.
+Fusion is written where it is wanted — clean-simd's `mul_add`, or `std::fma` — and nowhere else.
+
 ## Threading (`SC_THREADS`)
 
 `SC_THREADS` (default `ON`) is the repo-wide threading knob; it reaches C++ as clean-core's `CC_HAS_THREADS`, 0 or 1.
@@ -197,6 +231,16 @@ A warning rather than an assert, because a test that feeds a special case on pur
 nexus fails a passing test that logs an undeclared warning, so in a test it is a failure unless declared with `nx::expect_warning`; in an application it is a log line.
 
 Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on by the same `debug-nopch` presets.
+
+## Exhaustive SIMD tests (`SC_SIMD_EXHAUSTIVE_TESTS`)
+
+`SC_SIMD_EXHAUSTIVE_TESTS` (default `OFF`) runs clean-simd's tests at every lane width rather than one; it reaches `clean-simd-test` as `CIMD_EXHAUSTIVE_TESTS`, 0 or 1.
+Off, each element type is tested at 256 bits — one AVX2 register, two on every 128-bit kernel — on every kernel.
+On, at 128, 256, 512 and 1024 bits, which instantiates every kernel four times over and is most of the test binary's compile time.
+The targeted tests — rounding, signed zeros, the edge lanes, permute, the looped shapes — run in both modes.
+
+Only the test binary sees it, and the dispatched battery's kernel TUs through it, so it is no ODR hazard and may differ between targets.
+The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg and CI still build and run the full set.
 
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 

@@ -57,6 +57,41 @@ cc::result<cc::unit> write_report_file(cc::string_view path, cc::string_view con
     return cc::unit{};
 }
 
+// Prints the skipped tests grouped by reason, a few names per reason, so a skip that should have run stands out.
+// "runs only under --thorough" alone can account for hundreds, which is why each group is capped rather than listed.
+void print_skipped(cc::span<nx::skipped_test const> skipped)
+{
+    constexpr auto names_per_reason = 3;
+    auto reasons = cc::vector<cc::string_view>();
+    for (auto const& s : skipped)
+    {
+        auto seen = false;
+        for (auto const r : reasons)
+            seen |= r == s.reason;
+        if (!seen)
+            reasons.push_back(s.reason);
+    }
+    for (auto const reason : reasons)
+    {
+        auto count = 0;
+        for (auto const& s : skipped)
+            count += s.reason == reason ? 1 : 0;
+        cc::println("  skipped ({}): {}", count, reason);
+        auto shown = 0;
+        for (auto const& s : skipped)
+        {
+            if (s.reason != reason)
+                continue;
+            if (shown++ == names_per_reason)
+            {
+                cc::println("    … and {} more", count - names_per_reason);
+                break;
+            }
+            cc::println("    {}", s.name);
+        }
+    }
+}
+
 // Prints failing tests to stderr, recursing into invoked (nested) executions.
 // `prefix` is the parent's accumulated addressable path — invocation group plus name segments — so a failing instance shows its full "driver / group / test" location.
 void print_failing(nx::test_execution const& exec, cc::string const& prefix)
@@ -384,8 +419,17 @@ int report_run(nx::test_schedule_config const& config,
     if (is_entry_run)
         return execution.executions.empty() ? 0 : execution.executions[0].exit_code.value_or(0);
 
-    // All tests passed
-    cc::println("All {} tests passed ({} checks)", total_tests, total_checks);
+    // All tests passed — a skip among them is named, by reason, so a test that never ran cannot pass for one that did.
+    auto const skipped = execution.skipped_tests();
+    if (skipped.empty())
+    {
+        cc::println("All {} tests passed ({} checks)", total_tests, total_checks);
+    }
+    else
+    {
+        cc::println("All {} tests passed ({} checks), {} skipped", total_tests, total_checks, skipped.size());
+        print_skipped(skipped);
+    }
     if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
         cc::println("{}", described);
     return 0;

@@ -32,6 +32,7 @@ One-liner per library:
   **Every library has a recording domain and logs its diagnostics** — a library never prints, and never writes its own `[lib]` prefix.
   Also home to the **system queries** (`platform/system_info.hh` and its neighbours) — what machine this is, how loaded it is, and what this process is consuming.
   Three concepts kept apart: a description cannot change, a snapshot is true now, a sampler is a rate.
+  `cc::get_cpu_features()` is the allocation-free description runtime dispatch asks: AVX2, AVX-512, the x86-64 levels.
   [docs/systems/system-info.md](libs/base/clean-core/docs/systems/system-info.md) is the map; GPU load and VRAM live in `sg`, since no OS reports them.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, PGO benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
@@ -55,6 +56,13 @@ One-liner per library:
   `cnet::http_level` is the capability ladder a caller checks once; the transport answers `is_supported()` instead.
   Nothing here requires blocking to obtain a result, and the reactor is driven through `cc::thread_pump_all()` like every other unthreaded system in the repo.
   Early stage — see its [docs/structure.md](libs/base/clean-net/docs/structure.md) roadmap and support matrix.
+* **`libs/base/clean-simd`** — SIMD lane types: `cimd::f32x8<K>`, templated on the kernel `K` (`scalar`, `sse2`, `sse42`, `avx2`, `avx512`, `neon`, `simd128`).
+  **Production code stays templated on `K`**, so one binary can dispatch between kernels; `cimd::local` is the explicit spelling for code that runs where it was built.
+  One layout on every kernel (`cimd::storage<T, N>` is what a data structure holds), and opaque masks so AVX-512 keeps them in k-registers.
+  An operator exists only where AVX2, NEON and SIMD128 each need ≤ 3 instructions; every one has a named member twin.
+  The types are committed codegen from `tools/gen-simd.py`.
+  Namespace `cimd`. Depends on clean-core.
+  [docs/design.md](libs/base/clean-simd/docs/design.md) has the decisions; early stage.
 * **`libs/data/babel-data`** — the externals-free base of babel: a base64 codec, a JSON reader and writer, and a block-level markdown reader (`data/`).
   Namespace `babel`. Depends on clean-core and nothing else, which is the library's whole contract.
   It also declares `namespace babel` itself — the vocabulary aliases and the fallback recording domain — so `fwd.hh` layers rather than forks.
@@ -269,6 +277,12 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   **OFF is refused on Apple targets**: metal takes command-buffer completion on a dispatch queue Apple owns, which the flag cannot remove, so that build would not be single-threaded.
   The refusal is keyed on the target, so a Mac building the `emscripten-*` presets still gets the unthreaded mode — and there is no macOS `singlethreaded-*` preset.
   See [docs/platforms.md](docs/platforms.md#threading-sc_threads).
+* `SC_X64_LEVEL` (default `v3`; `v2` on Android) is the x86-64 feature level **every** function may assume → `-march=x86-64-vN` / `/arch:` and `CC_X64_LEVEL`.
+  A floor, not a ceiling: anything above it is clean-simd's dispatched kernels, never this switch.
+  `SC_WASM_SIMD` (default ON) is the wasm counterpart, `-msimd128`.
+  See [docs/platforms.md](docs/platforms.md#x86-64-feature-level-sc_x64_level).
+* **Floating-point contraction is off on every compiler, and there is no switch for it** — like fast-math, shaped-core does not support it.
+  Write `mul_add` or `std::fma` where a fused result is wanted; see [docs/platforms.md](docs/platforms.md#floating-point-contraction-is-off).
 * `SC_MIMALLOC` (default ON) picks what backs `cc::default_memory_resource` → clean-core's `CC_HAS_MIMALLOC`.
   OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
@@ -276,6 +290,8 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
   Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
+* `SC_SIMD_EXHAUSTIVE_TESTS` (default OFF) tests clean-simd at every lane width instead of one 256-bit type per element → `CIMD_EXHAUSTIVE_TESTS`; the `debug-nopch` presets turn it on.
+  See [docs/platforms.md](docs/platforms.md#exhaustive-simd-tests-sc_simd_exhaustive_tests).
 * `SC_CHECK_GEOMETRY_SPECIAL_CASES` (default OFF) logs each special case a typed-geometry query assumes away — collinear lines, a ray in a triangle's plane → `TG_CHECK_SPECIAL_CASES`.
   The `debug-nopch` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
   See [docs/platforms.md](docs/platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases).

@@ -186,6 +186,13 @@ Already in assignment form.
 struct S { int x = 0; };
 ```
 
+An `operator<` defined in place is a function body, whatever precedes it.
+Its `<` is the operator's name, not the start of template arguments, which once swallowed the parameter list.
+
+```cpp ~[default-init-assignment]
+struct S { CC_FORCE_INLINE friend mask_t operator<(S a, S b) { return a.lt(b); } };
+```
+
 A constructor's mem-initializer list is not a declaration.
 
 ```cpp ~[default-init-assignment]

@@ -61,6 +61,7 @@ struct cc::cpu_core_class
     cc::optional<i64> base_clock_hz;
     cc::optional<i64> boost_clock_hz;
 
+    /// ascending by level
     cc::vector<cc::cpu_cache_level> caches;
 };
 

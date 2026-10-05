@@ -20,6 +20,7 @@ struct test_execution;
 struct test_schedule_execution;
 struct test_serial_time;
 struct test_run_resources;
+struct skipped_test;
 } // namespace nx
 
 // Forward declaration for impl namespace
@@ -134,6 +135,10 @@ struct nx::test_execution
     cc::vector<test_execution> nested;
     cc::string invocation_group;
 
+    // Why the body ended at a SKIP, or empty when it did not; "skipped" when the SKIP gave no reason.
+    // A skip still passes, so this is the only trace of it a summary or a JUnit file can show.
+    cc::string skip_reason;
+
     // What a COMMAND's body returned; empty for anything that is not a command, or a command that never returned.
     cc::optional<int> exit_code;
 
@@ -178,8 +183,19 @@ struct nx::test_schedule_execution
     [[nodiscard]] int count_total_checks() const;
     [[nodiscard]] int count_failed_checks() const;
 
+    /// Every test that ended at a SKIP, dispatched children included, as its addressable name and its reason.
+    /// A test that failed before it skipped is failed, not skipped, and is not listed.
+    [[nodiscard]] cc::vector<skipped_test> skipped_tests() const;
+
     /// The floor of this run that no scheduling could have overlapped, read off where each top-level test sat and what it held.
     [[nodiscard]] test_serial_time serial_time() const;
+};
+
+/// A test that passed by skipping, and why.
+struct nx::skipped_test
+{
+    cc::string name;
+    cc::string reason;
 };
 
 /// How much of a run was serial by declaration rather than by accident — what no --jobs could have shortened.

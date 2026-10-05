@@ -212,6 +212,10 @@ struct nx::impl::test_context
     // Per pass: cleared before each body runs.
     cc::atomic<bool> aborted_by_check_throw = {false};
 
+    // Why a SKIP ended the body; the first one wins, since a skip from either path ends the test.
+    // Behind a mutex because an async body may skip on any worker.
+    cc::mutex<cc::string> skip_reason;
+
     // The exclusion locks of the phase this test runs in, which an async invocation takes a child's tags from.
     // Null outside a phase that has them: a directly driven phase runs its bodies one at a time, so nothing contends.
     phase_locks* locks = nullptr;
@@ -619,6 +623,7 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
     bool const require_checks = ctx.execution->instance.declaration->test_config.bucket == config::test_bucket::normal
                              && ctx.execution->nested.empty();
     ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
+    ctx.execution->skip_reason = ctx.skip_reason.lock([](cc::string& r) { return cc::move(r); });
 
     ctx.is_finished.store(true, cc::memory_order_release);
     if (ctx.in_flight_slot >= 0)
@@ -833,6 +838,26 @@ cc::string render_expanded(impl::check_result const& r)
     return expanded;
 }
 
+/// Records why a SKIP ended the test, read off the note `SKIP("…")` attaches; a bare SKIP() has no reason to give.
+void record_skip_reason(test_context& ctx, impl::check_result const& result)
+{
+    auto reason = cc::string("skipped");
+    for (auto const& line : result.extra_lines)
+    {
+        if (line.starts_with("note: ") && line != "note: test succeeded")
+        {
+            reason = cc::string(line.subview({.start = 6, .end = line.size()}));
+            break;
+        }
+    }
+    ctx.skip_reason.lock(
+        [&](cc::string& r)
+        {
+            if (r.empty())
+                r = cc::move(reason);
+        });
+}
+
 /// Tally a check that did not come from `ctx`'s own test body, and decide whether it may abort by throwing.
 ///
 /// The counters are the easy half.
@@ -882,7 +907,10 @@ void report_off_thread_check_result(test_context& ctx, impl::check_result result
     // Marked BEFORE the throw: the node's error it becomes is how the abort reaches the test's root, and finish_async_pass reads this to tell it apart from a real failure.
     ctx.aborted_by_check_throw.store(true, cc::memory_order_release);
     if (is_skip)
+    {
+        record_skip_reason(ctx, result);
         throw test_skipped{};
+    }
     throw test_require_failed{};
 }
 
@@ -1890,9 +1918,12 @@ void nx::impl::report_check_result(check_result result)
     // Increment executed checks
     ++ctx.executed_checks;
 
-    // If this is a SKIP, throw to abort test execution (counts as success)
+    // If this is a SKIP, throw to abort test execution (counts as success, and keeps its reason for the summary)
     if (result.op == cmp_op::skip)
+    {
+        record_skip_reason(ctx, result);
         throw test_skipped{};
+    }
 
     // If the check failed, record it
     if (!result.passed)
@@ -1990,6 +2021,26 @@ int nx::test_schedule_execution::count_total_tests() const
     for (auto const& exec : executions)
         total += total_tests_of(exec);
     return total;
+}
+
+cc::vector<nx::skipped_test> nx::test_schedule_execution::skipped_tests() const
+{
+    auto out = cc::vector<nx::skipped_test>();
+    auto const collect = [&](auto const& self, nx::test_execution const& exec, cc::string_view prefix) -> void
+    {
+        auto name = cc::string(prefix);
+        if (!exec.invocation_group.empty())
+            name += exec.invocation_group + " / ";
+        if (exec.instance.declaration != nullptr)
+            name += exec.instance.declaration->name;
+        if (!exec.skip_reason.empty() && !exec.root.is_considered_failing)
+            out.push_back({.name = name, .reason = exec.skip_reason});
+        for (auto const& child : exec.nested)
+            self(self, child, name + " / ");
+    };
+    for (auto const& exec : executions)
+        collect(collect, exec, "");
+    return out;
 }
 
 int nx::test_schedule_execution::count_failed_tests() const

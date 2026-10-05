@@ -289,6 +289,7 @@ Name it with `title` as usual, and hand it over the same way.
    An ask that was already answered cannot be superseded; that is what `follows:` is for.
 
    `append` stamps the round, parses the merged result before writing, and refuses a malformed block with a line number.
+   It also refuses what `validate` would, such as an `addresses:` naming neither a comment nor an ask answered with a remark.
    Nothing above is rewritten, which is what keeps a finalized answer immutable.
    Never edit an entry file by hand while a server is reading it.
 

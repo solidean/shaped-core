@@ -182,6 +182,14 @@ Outstanding is computed from those references the way an undischarged change is,
 `validate` refuses to let a round be handed back while a comment from a finalized round has no `addresses:` anywhere.
 A block that declines to act satisfies it, because the obligation is to answer rather than to comply.
 
+**A remark is addressable the same way.**
+The text typed under an ask is a remark, and `addresses:` may name that ask once its answer is finalized, so a later round replies to the remark beside the asks it replies to.
+An ask answered by a pick alone left no remark, and naming it is refused like naming a comment the entry does not have.
+A remark is no obligation, unlike a comment: the ask it sits under is the tracked question, and its answer has already been handed over.
+
+`append` runs the same checks on the merged entry, so an `addresses:` that `validate` would refuse never lands.
+The obligation is the one check it leaves out, since an append answering one comment of two must still land.
+
 Comments live in `answers/<entry>.json`, which the server owns, and are tentative until the round is finalized.
 
 ## Priced bullets
@@ -288,6 +296,18 @@ A fence holds more of what needs this than a span does, because every line of it
 Narrowing what counts as a reference would trade a loud false positive for a silent one.
 The loud one costs the author a `raw:`; the silent one is a typo'd path staying plain text, which is the failure the strictness exists to prevent.
 
+## `foreign:` — a path in another checkout
+
+A review of a port names the files it ports from, and those live in a repository this index has never seen.
+`raw:` would hide that they are paths at all, and `planned:` makes it worse: a bare foreign name resolves nowhere, so it is drawn as a file the design will create.
+
+```markdown
+Ported from `foreign:C:/work/ember/src/simd/cpu_info.cc`.
+```
+
+`foreign:` is skipped by every provider exactly as `raw:` is, so it is never resolved, planned, missing or ambiguous.
+The page draws it as an external path rather than as plain code, and the prefix is dropped from what the reader sees and from text that leaves the page.
+
 ## Glossary blocks
 
 `glossary: true` on a `prose` block says its bold leads are terms.
@@ -356,6 +376,10 @@ One entry can therefore carry five questions discharging five different change s
 - `discharges:` lists the change ids this question accounts for.
   `validate` refuses one naming none, and a `## changes` heading naming none, with the line.
   Both are what a script writes when the command feeding it ids failed, and coverage would silently count nothing for them.
+- **Showing a change is not discharging it.**
+  `validate` warns about an id a `## changes` heading shows that none of the entry's asks discharges, naming the entry and the ids.
+  The entry otherwise reads as covering a change that coverage still counts as open.
+  It is a warning rather than an error, since another entry may discharge the change on purpose.
 - `follows:` names the earlier ask this is a follow-up to.
 - Option lines are `- radio:`, `- check:` or `- rank:`; a trailing `(recommended)` is recognised and shown as a badge.
 - **An option label is markdown**, rendered the way a `prose` block is, and its references resolve like any other.

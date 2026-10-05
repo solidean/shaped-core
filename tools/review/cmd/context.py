@@ -220,6 +220,65 @@ class Context:
                     out.append((entry.slug, comment))
         return out
 
+    def addressable(self, answers: review.AnswerFile) -> tuple[list[str], list[str]]:
+        """(comment ids, ask names whose finalized answer carried a remark): what an `addresses:` may name.
+
+        A remark is the text typed under an ask, and a later round replies to it the way it replies to a comment.
+        An orphaned answer counts too, since re-answering an ask moves the earlier remark there without unsaying it.
+        """
+        comments = sorted(answers.comments)
+        remarks = {a.name for a in answers.answers.values() if not a.tentative and a.text.strip()}
+        remarks.update(key.split("@")[0] for key, a in answers.orphans.items() if not a.tentative and a.text.strip())
+        return comments, sorted(remarks)
+
+    def addresses_problems(self, paths: review.ReviewPaths, cfg: review.ReviewConfig,
+                           entries: list[review.Entry]) -> list[str]:
+        """Every `addresses:` naming neither a comment of its entry nor an ask of it that was answered with a remark.
+
+        Such a reference satisfies nothing and misleads whoever reads the thread.
+        A finalized round cannot be edited, so only the round still being written is held to it.
+        """
+        problems: list[str] = []
+        for entry in entries:
+            comments, remarks = self.addressable(self.answers(paths, entry))
+            known = set(comments) | set(remarks)
+            for block in entry.blocks:
+                if block.round and block.round <= cfg.watermark:
+                    continue
+                for target in block.addresses:
+                    if target in known:
+                        continue
+                    has = ", ".join(comments + remarks) if known else "none"
+                    problems.append(
+                        f"{entry.slug}:{block.line}: block {block.block_name!r} addresses {target!r}, which is no comment "
+                        f"of this entry and no ask of it answered with a remark — it has: {has}"
+                    )
+        return problems
+
+    def entry_problems(self, paths: review.ReviewPaths, cfg: review.ReviewConfig,
+                       entries: list[review.Entry]) -> list[str]:
+        """Everything `validate` refuses in these entries' own text, which `append` refuses before it writes.
+
+        The one refusal left out is a comment still owed an answer: that is the review's state rather than a fault in
+        the text, and an append answering one comment of two must still land.
+        """
+        problems: list[str] = []
+        if cfg.has_changeset:
+            problems.extend(self.check_references(paths, entries))
+
+        # A file reference the tool cannot resolve renders as plain text, which is indistinguishable from one nobody
+        # meant as a reference — so the check goes looking rather than waiting to be tripped over.
+        problems.extend(self.reference_problems(paths, entries))
+
+        # A paragraph in a glossary block that is not a term is a term nobody finds out is missing,
+        # which is the whole reason the block is marked rather than scraped.
+        problems.extend(review.glossary_problems(entries))
+
+        for entry in entries:
+            problems.extend(f"{entry.slug}:{line}: {problem}" for line, problem in review.empty_references(entry))
+        problems.extend(self.addresses_problems(paths, cfg, entries))
+        return problems
+
     def discharged(self, entries: list[review.Entry]) -> set[str]:
         """Every change id an ask discharges, across the whole review."""
         out: set[str] = set()

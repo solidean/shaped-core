@@ -1,5 +1,6 @@
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
 #include <clean-core/common/utility.hh>
+#include <clean-core/platform/impl/cpuid.hh>
 #include <clean-core/platform/impl/text_file.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/platform/system_info.hh>
@@ -8,7 +9,6 @@
 #if defined(CC_OS_WINDOWS)
 
 #include <clean-core/platform/win32_sanitized.hh>
-#include <intrin.h> // __cpuid, for the hypervisor bit
 
 #elif defined(CC_OS_MACOS) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
 
@@ -18,10 +18,6 @@
 
 #include <sched.h>
 #include <unistd.h>
-
-#if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
-#include <cpuid.h>
-#endif
 
 #endif
 
@@ -35,17 +31,7 @@ namespace
 /// Leaf 1, ECX bit 31 — the bit every hypervisor is expected to set and any of them may hide.
 bool has_hypervisor_bit()
 {
-    u32 regs[4] = {};
-#if defined(CC_OS_WINDOWS)
-    int out[4] = {};
-    __cpuid(out, 1);
-    for (auto i = 0; i < 4; ++i)
-        regs[i] = u32(out[i]);
-#else
-    if (__get_cpuid(1, &regs[0], &regs[1], &regs[2], &regs[3]) == 0)
-        return false;
-#endif
-    return (regs[2] & (1u << 31)) != 0;
+    return (cc::impl::cpuid(1).ecx & (1u << 31)) != 0;
 }
 #else
 bool has_hypervisor_bit()

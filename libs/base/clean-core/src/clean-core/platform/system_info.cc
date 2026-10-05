@@ -1,6 +1,7 @@
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/platform/impl/cpuid.hh>
 #include <clean-core/platform/impl/text_file.hh>
 #include <clean-core/platform/system_info.hh>
 #include <clean-core/string/format.hh>
@@ -10,7 +11,6 @@
 
 #include <clean-core/platform/win32_sanitized.hh>
 #include <clean-core/string/conversion.hh> // utf16_to_utf8
-#include <intrin.h>                        // __cpuid, for the brand string no Win32 call reports
 
 #elif defined(CC_OS_MACOS) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
 
@@ -27,10 +27,6 @@
 #include <unistd.h>
 
 #include <cstdlib>
-
-#if defined(CC_ARCH_X64) || defined(CC_ARCH_X86)
-#include <cpuid.h> // __get_cpuid, for the brand string /proc/cpuinfo omits on some kernels
-#endif
 
 #elif defined(CC_OS_EMSCRIPTEN)
 
@@ -67,28 +63,14 @@ constexpr cc::string_view architecture_name()
 /// Empty where the CPU does not implement the extended leaves, which nothing since roughly 2005 does not.
 cc::string x86_brand_string()
 {
-    u32 regs[4] = {};
-    auto const cpuid = [&regs](u32 leaf)
-    {
-#if defined(CC_OS_WINDOWS)
-        int out[4] = {};
-        __cpuid(out, int(leaf));
-        for (auto i = 0; i < 4; ++i)
-            regs[i] = u32(out[i]);
-        return true;
-#else
-        return __get_cpuid(leaf, &regs[0], &regs[1], &regs[2], &regs[3]) != 0;
-#endif
-    };
-
-    if (!cpuid(0x80000000u) || regs[0] < 0x80000004u)
+    if (cc::impl::cpuid(0x80000000u).eax < 0x80000004u)
         return {};
 
     char brand[49] = {};
     for (u32 leaf = 0; leaf < 3; ++leaf)
     {
-        if (!cpuid(0x80000002u + leaf))
-            return {};
+        auto const r = cc::impl::cpuid(0x80000002u + leaf);
+        u32 const regs[4] = {r.eax, r.ebx, r.ecx, r.edx};
         for (auto i = 0; i < 4; ++i)
             for (auto b = 0; b < 4; ++b)
                 brand[leaf * 16 + u32(i) * 4 + u32(b)] = char((regs[i] >> (b * 8)) & 0xFF);
@@ -99,19 +81,10 @@ cc::string x86_brand_string()
 
 cc::string x86_vendor_string()
 {
-    u32 regs[4] = {};
-#if defined(CC_OS_WINDOWS)
-    int out[4] = {};
-    __cpuid(out, 0);
-    for (auto i = 0; i < 4; ++i)
-        regs[i] = u32(out[i]);
-#else
-    if (__get_cpuid(0, &regs[0], &regs[1], &regs[2], &regs[3]) == 0)
-        return {};
-#endif
+    auto const r = cc::impl::cpuid(0);
 
     char vendor[13] = {};
-    u32 const order[3] = {regs[1], regs[3], regs[2]}; // ebx, edx, ecx is the order the vendor string is spelled in
+    u32 const order[3] = {r.ebx, r.edx, r.ecx}; // the order the vendor string is spelled in
     for (auto i = 0; i < 3; ++i)
         for (auto b = 0; b < 4; ++b)
             vendor[u32(i) * 4 + u32(b)] = char((order[i] >> (b * 8)) & 0xFF);
@@ -262,6 +235,12 @@ void fill_topology(cc::system_info& info)
         auto name = cc::string();
         if (classes.size() > 1)
             name = i == 0 ? cc::string("performance") : cc::string("efficiency");
+
+        // Ascending level, which the record order does not give: the loop above appends each distinct cache as Windows happens to list it.
+        auto& caches = classes[i].caches;
+        for (isize a = 1; a < caches.size(); ++a)
+            for (isize b = a; b > 0 && caches[b].level < caches[b - 1].level; --b)
+                cc::swap(caches[b], caches[b - 1]);
 
         info.core_classes.push_back({.name = cc::move(name),
                                      .physical_cores = classes[i].physical,

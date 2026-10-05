@@ -39,7 +39,11 @@ void emit_testcase(cc::string& out, cc::string const& suite, nx::test_execution 
     out.appendf("    <testcase classname=\"{}\" name=\"{}\" time=\"{}\"", suite, xml_escape(name),
                 exec.root.duration_seconds);
 
-    if (!exec.root.is_considered_failing)
+    if (!exec.root.is_considered_failing && !exec.skip_reason.empty())
+    {
+        out.appendf(">\n      <skipped message=\"{}\"/>\n    </testcase>\n", xml_escape(exec.skip_reason));
+    }
+    else if (!exec.root.is_considered_failing)
     {
         out += "/>\n";
     }
@@ -93,6 +97,7 @@ cc::string nx::write_junit_xml(cc::string_view suite_name,
     int const total_tests = execution.count_total_tests();
     int const failed_tests = execution.count_failed_tests();
     int const total_checks = execution.count_total_checks();
+    auto const skipped_tests = execution.skipped_tests().size();
 
     double total_time = 0.0;
     for (auto const& exec : execution.executions)
@@ -106,8 +111,8 @@ cc::string nx::write_junit_xml(cc::string_view suite_name,
     // but is widely understood; the dev.py runner reads it to report check counts.
     auto emit_suite_attrs = [&](cc::string& os)
     {
-        os.appendf("name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"0\" skipped=\"0\" assertions=\"{}\" time=\"{}\"",
-                   suite, total_tests, failed_tests, total_checks, total_time);
+        os.appendf("name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"0\" skipped=\"{}\" assertions=\"{}\" time=\"{}\"",
+                   suite, total_tests, failed_tests, skipped_tests, total_checks, total_time);
         os.appendf(" serial_time=\"{:.4f}\" serial_alone_time=\"{:.4f}\" serial_group=\"{}\" "
                    "serial_group_time=\"{:.4f}\"",
                    serial.total_s(), serial.alone_s, serial_group, serial.largest_group_s);

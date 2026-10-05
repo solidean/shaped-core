@@ -1779,6 +1779,22 @@ def test_a_planned_folder_never_shadows_a_real_file(root: Path) -> None:
     assert by_text["src/stages/08_ring_ir/compile.rs"].css == "ref", by_text
 
 
+def test_a_foreign_path_is_never_claimed_by_the_plan_nor_resolved(root: Path) -> None:
+    """A port names files in the checkout it ports from, and `planned:` would otherwise draw a bare one as new.
+
+    `foreign:` says the path lives in another checkout: it is never resolved, so it is never a problem,
+    and the page draws it as external, with the prefix dropped and the provider walk skipping it.
+    """
+    blocks = "## prose\n\nPorted from `foreign:cpu_info.cc` and `foreign:C:/work/ember/src/x86.rs:12`.\n"
+    assert not _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
+
+    html = render_markdown("From `foreign:C:/work/ember/src/x86.rs`.")
+    assert '<code class="raw ref-foreign" title="outside this repository">C:/work/ember/src/x86.rs</code>' in html, html
+
+    from tools.review.lib.render.markdown import strip_raw
+    assert strip_raw("From `foreign:a/b.cc`.") == "From `a/b.cc`.", strip_raw("From `foreign:a/b.cc`.")
+
+
 def test_a_path_outside_the_planned_folder_is_still_a_problem(root: Path) -> None:
     """The plan excuses one folder, so a typo'd path elsewhere keeps failing, and so does a bare folder name."""
     blocks = "## prose\n\nSee `src/stages/11_nope/framing.rs` and `wire/`.\n"
@@ -2531,6 +2547,26 @@ def test_an_empty_changes_heading_or_discharges_is_refused(root: Path) -> None:
     assert "040-fine" not in out, out
 
 
+def test_shown_changes_no_ask_discharges_are_warned_about(root: Path) -> None:
+    """A `## changes` block shows its ids, and only an ask's `discharges:` accounts for them.
+
+    An entry showing a change it never discharges reads as covering it while coverage counts it as open.
+    It is a warning rather than an error, since another entry may discharge the change on purpose.
+    """
+    front = "---\nid: {n}\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhat, and the options.\n\n"
+    ask = "## ask  which\n{line}\n\nWhich way?\n\n- radio: this\n"
+    run = design_review(root, {
+        "010-partial": front.format(n="010") + "## changes  X-1 X-2 X-3\nshow: collapsed\n\n"
+        + ask.format(line="discharges: X-2"),
+        "020-whole": front.format(n="020") + "## changes  X-1 X-2\nshow: collapsed\n\n"
+        + ask.format(line="discharges: X-2 X-1"),
+    })
+    code, out = run("validate", "d")
+    assert code == 0, f"an undischarged shown change is a warning, not an error: {out}"
+    assert "warning: 010-partial:11: `## changes` shows X-1 X-3, which none of this entry's asks discharges" in out, out
+    assert "020-whole" not in out, out
+
+
 def test_a_stray_carriage_return_does_not_end_a_line(root: Path) -> None:
     """`ids=$(review changes --ids | tr '\\n' ' ')` keeps the `\\r` of a CRLF tool's last line, mid-line.
 
@@ -2560,6 +2596,61 @@ def test_an_addresses_naming_no_comment_of_its_entry_is_refused(root: Path) -> N
     run = design_review(root, {"010-x": entry})
     code, out = run("validate", "d")
     assert code != 0 and "addresses 'c1', which is no comment of this entry" in out and "none" in out, out
+
+
+def test_append_refuses_what_validate_would(root: Path) -> None:
+    """`append` checks the merged entry the way `validate` does, so nothing it writes is refused a moment later.
+
+    Found when three appended blocks named an ask in `addresses:` on an entry with no comments, and only `validate` objected.
+    """
+    entry = "---\nid: 010\ntitle: t\ngroup: topics\n---\n\n## prose\n\nA point.\n"
+    run = design_review(root, {"010-x": entry})
+    addition = root / "reply.md"
+    addition.write_text("## prose\naddresses: rounding-sign\n\nReplying to nothing.\n", encoding="utf-8")
+    code, out = run("append", "d", "010", "--file", str(addition))
+    assert code != 0 and "would not validate" in out and "addresses 'rounding-sign'" in out, out
+    written = root / "repo" / ".tmp" / "reviews" / "d" / "entries" / "010-x.md"
+    assert written.read_text(encoding="utf-8") == entry, "a refused append must write nothing"
+
+
+def test_addresses_may_name_an_ask_whose_answer_left_a_remark(root: Path) -> None:
+    """The text typed under an ask is a remark, and a later round replies to it the way it replies to a comment.
+
+    An ask answered by a pick alone left no remark, so naming it still replies to nothing.
+    A remark is no obligation, unlike a comment: the ask it sits under is the tracked question, and its answer was handed over.
+    """
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.serve.app import ReviewApp
+    from tools.review.lib.serve.watch import Watcher
+
+    entry = ("---\nid: 010\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhich way, and the options.\n\n"
+             "## ask  which\n\nWhich way?\n\n- radio: this\n- radio: that\n\n"
+             "## ask  picked\n\nAnd this?\n\n- radio: yes\n")
+    run = design_review(root, {"010-x": entry})
+    paths = ReviewPaths(root / "repo" / ".tmp" / "reviews" / "d")
+    app = ReviewApp(root / "repo", paths, Watcher(paths))
+    next_round = app.config().next_round
+    status, _ = app.save_answer({"entry": "010-x", "ask": "which", "selected": ["this"], "text": "but mind the sign",
+                                 "round": next_round})
+    assert status == 200
+    status, _ = app.save_answer({"entry": "010-x", "ask": "picked", "selected": ["yes"], "text": "", "round": next_round})
+    assert status == 200
+    code, out = run("delta", "d", "--finalize")
+    assert code == 0, out
+
+    code, out = run("validate", "d")
+    assert code == 0, f"an unreplied remark must not block a round the way a comment does: {out}"
+
+    reply = root / "reply.md"
+    reply.write_text("## prose\naddresses: which\n\nThe sign is handled.\n", encoding="utf-8")
+    code, out = run("append", "d", "010", "--file", str(reply))
+    assert code == 0, out
+    code, out = run("validate", "d")
+    assert code == 0, out
+
+    reply.write_text("## prose\naddresses: picked\n\nReplying to a pick.\n", encoding="utf-8")
+    code, out = run("append", "d", "010", "--file", str(reply))
+    assert code != 0 and "addresses 'picked'" in out and "it has: which" in out, out
 
 
 def test_validate_checks_only_the_entries_it_is_given(root: Path) -> None:

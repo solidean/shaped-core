@@ -343,6 +343,14 @@ struct parser_impl
                 pos = after;
                 continue;
             }
+            // `operator<` names an operator: the `<` is part of the name, and skipping it as template arguments would
+            // swallow the parameter list and leave the body looking like a brace initializer.
+            if (t.is_punct("<") && prev_top_index >= 0 && tk(prev_top_index).is_keyword("operator"))
+            {
+                prev_top_index = pos;
+                ++pos;
+                continue;
+            }
             if (t.is_punct("<"))
             {
                 auto const after = skip_angles(pos);

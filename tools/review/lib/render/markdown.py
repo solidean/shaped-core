@@ -122,10 +122,17 @@ _MD.add_render_rule("fence", _fence)
 #
 # So the escape is per span and explicit.
 # The prefix is dropped from what the reader sees, and the `raw` class is what the page's walk skips.
+#
+# `foreign:` is the same escape with a meaning: a path in another checkout, such as the source of a port.
+# It is never resolved, so it can never be planned, missing or ambiguous here, and the page draws it as external.
+# A design with `planned:` set would otherwise claim a bare foreign name as a file it will create.
 def _code_inline(self, tokens, index, options, env):
     content = tokens[index].content
     if content.startswith("raw:"):
         return f'<code class="raw">{escape(content[len("raw:"):])}</code>'
+    if content.startswith("foreign:"):
+        return (f'<code class="raw ref-foreign" title="outside this repository">'
+                f'{escape(content[len("foreign:"):])}</code>')
     return f"<code>{escape(content)}</code>"
 
 
@@ -148,13 +155,13 @@ def _link_open(self, tokens, index, options, env):
 _MD.add_render_rule("link_open", _link_open)
 
 
-_RAW_SPAN = re.compile(r"(`+)raw:")
+_RAW_SPAN = re.compile(r"(`+)(?:raw|foreign):")
 _RAW_LINK = re.compile(r"\]\(raw:")
 _RAW_FENCE = re.compile(r"^([ \t]*(?:```|~~~)[`~]*)[ \t]*raw(?::[ \t]*|(?=[ \t]*$))", re.MULTILINE)
 
 
 def strip_raw(text: str) -> str:
-    """Entry prose with every `raw:` escape dropped, for text that leaves the page.
+    """Entry prose with every `raw:` and `foreign:` escape dropped, for text that leaves the page.
 
     The escape only tells the annotation pass to keep its hands off, so a draft, a summary or a posted comment
     would otherwise carry it to a reader who never sees it rendered.
