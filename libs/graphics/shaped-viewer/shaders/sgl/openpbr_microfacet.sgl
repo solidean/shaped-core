@@ -1,0 +1,328 @@
+// The OpenPBR Surface BSDF: the layered model `surface` describes, prepared into lobes and then evaluated or sampled.
+//
+// The layer stack, top to bottom, is fuzz over coat over the base.
+// The base is the metal BSDF mixed against a dielectric specular layer over a diffuse substrate.
+// Coupling between two adjacent layers is the Fresnel reflectance of the upper one: what it does not reflect is what reaches what lies below, and it attenuates again on the way out.
+//
+// Everything here works in a LOCAL frame whose +z is the shading normal, so no lobe sees a world direction.
+// `wo` points back along the incoming ray and `wi` toward the next path vertex; both are unit and leave the surface.
+//
+// Where this deviates from the specification it says so at the lobe.
+// The fuzz is a Conty-Estevez sheen rather than the specified Zeltner microflake.
+// The coat tints what passes through it once rather than absorbing along the true refracted path length.
+// GGX energy compensation uses an analytic fit rather than a tabulated directional albedo.
+// The transmissive and subsurface bases share the specular interface and differ only in what lies beyond it.
+// A dispersive crossing collapses the path onto one wavelength rather than bending three at once.
+//
+// This file holds the primitives the lobes are built from; openpbr_closure.sgl and openpbr_evaluate.sgl hold the closure.
+module openpbr
+
+const pi = 3.14159265358979323846
+
+// A perfectly smooth lobe is a delta the estimator cannot sample, so this floor is load-bearing rather than cosmetic.
+const min_alpha = 1e-3
+
+// ---- Microfacet primitives (GGX / Trowbridge-Reitz, anisotropic) ----------------------------------------------------
+//
+// Every one of these takes `alpha` as a float2: the roughness along the frame's tangent and along its bitangent.
+// An isotropic lobe is the special case where the two are equal, so nothing needs a second code path.
+// The local frame's tangent is what the two axes are measured against.
+// That is why an anisotropic surface needs a frame that follows its uv layout rather than the arbitrary one `make_frame` invents.
+
+/// The normal distribution at half-vector `h`, which must lie in the upper hemisphere of the local frame.
+fun ggx_d(h: float3, alpha: float2) -> float:
+    let v = float3(h.x / alpha.x, h.y / alpha.y, h.z)
+    let t = dot(v, v)
+    return 1.0 / max(pi * alpha.x * alpha.y * t * t, 1e-9)
+
+/// Smith's lambda for GGX: the ratio of masked to visible area for a direction.
+fun ggx_lambda(w: float3, alpha: float2) -> float:
+    let c2 = w.z * w.z
+    let t2 = (alpha.x * alpha.x * w.x * w.x + alpha.y * alpha.y * w.y * w.y) / max(c2, 1e-9)
+    return 0.5 * (sqrt(1.0 + t2) - 1.0)
+
+/// Height-correlated Smith masking-shadowing for the pair, which is the term `ggx_d` is meant to be paired with.
+fun ggx_g2(wo: float3, wi: float3, alpha: float2) -> float:
+    return 1.0 / (1.0 + ggx_lambda(wo, alpha) + ggx_lambda(wi, alpha))
+
+/// Masking for one direction alone, which is what the visible-normal pdf is normalized by.
+fun ggx_g1(w: float3, alpha: float2) -> float:
+    return 1.0 / (1.0 + ggx_lambda(w, alpha))
+
+/// A half-vector drawn from the distribution of VISIBLE normals (Heitz 2018), which is what keeps a sampled weight bounded.
+/// `wo` must lie in the upper hemisphere.
+fun ggx_sample_vndf(wo: float3, alpha: float2, u: float2) -> float3:
+    // Stretch the view direction into the configuration the routine is derived in.
+    let vh = normalize(float3(alpha.x * wo.x, alpha.y * wo.y, wo.z))
+
+    // An orthonormal basis around vh, staying finite when vh is near +z.
+    let len2 = vh.x * vh.x + vh.y * vh.y
+    let t1 = if len2 > 0.0 => float3(-vh.y, vh.x, 0.0) * inverse_sqrt(len2) else float3(1.0, 0.0, 0.0)
+    let t2 = cross(vh, t1)
+
+    // A point on the projected disc, its lower half compressed onto the visible part of the hemisphere.
+    let r = sqrt(u.x)
+    let phi = 2.0 * pi * u.y
+    let p1 = r * cos(phi)
+    let disc_p2 = r * sin(phi)
+    let s = 0.5 * (1.0 + vh.z)
+    let p2 = (1.0 - s) * sqrt(max(0.0, 1.0 - p1 * p1)) + s * disc_p2
+
+    let nh = p1 * t1 + p2 * t2 + sqrt(max(0.0, 1.0 - p1 * p1 - p2 * p2)) * vh
+    return normalize(float3(alpha.x * nh.x, alpha.y * nh.y, max(1e-6, nh.z)))
+
+/// The solid-angle pdf of a direction produced by reflecting about a `ggx_sample_vndf` half-vector.
+fun ggx_pdf(wo: float3, wi: float3, alpha: float2) -> float:
+    if wo.z <= 0.0 or wi.z <= 0.0 => return 0.0
+
+    let h = normalize(wo + wi)
+    let d_vis = ggx_g1(wo, alpha) * ggx_d(h, alpha) * max(0.0, dot(wo, h)) / max(wo.z, 1e-9)
+    return d_vis / (4.0 * max(dot(wo, h), 1e-9))
+
+/// The half-vector a REFRACTION through relative index `eta` happened about, oriented into the upper hemisphere.
+///
+/// `wo` leaves the surface on the +z side and `wi` on the -z side.
+/// `eta` is the index on `wi`'s side over the index on `wo`'s, so it inverts when the path crosses back out.
+/// Each direction is weighted by the index of the side it is ON (Walter 2007), which is what makes the microfacet normal the one Snell's law would have bent about.
+fun refraction_half_vector(wo: float3, wi: float3, eta: float) -> float3:
+    let h = -normalize(wo + eta * wi)
+    let upper = if h.z < 0.0 => -h else h
+    return upper
+
+/// The Jacobian taking a half-vector density to a refracted-direction density, which is what turns the visible-normal distribution into a pdf over `wi`.
+fun refraction_jacobian(wo: float3, wi: float3, h: float3, eta: float) -> float:
+    let dot_o = dot(wo, h)
+    let dot_i = dot(wi, h)
+    let denom = dot_o + eta * dot_i
+    return eta * eta * abs(dot_i) / max(denom * denom, 1e-9)
+
+/// The solid-angle pdf of a direction produced by refracting about a `ggx_sample_vndf` half-vector.
+fun ggx_refraction_pdf(wo: float3, wi: float3, alpha: float2, eta: float) -> float:
+    if wo.z <= 0.0 or wi.z >= 0.0 => return 0.0
+
+    let h = refraction_half_vector(wo, wi, eta)
+    let dot_o = dot(wo, h)
+    if dot_o <= 0.0 => return 0.0
+
+    let d_vis = ggx_g1(wo, alpha) * ggx_d(h, alpha) * dot_o / max(wo.z, 1e-9)
+    return d_vis * refraction_jacobian(wo, wi, h, eta)
+
+/// The isotropic roughness an anisotropic lobe reflects about as much as, for the fits that have no anisotropic form.
+///
+/// The directional-albedo fit below is isotropic and there is no anisotropic version of it, so the layer coupling and the energy compensation both reduce through here.
+/// The geometric mean keeps `alpha.x * alpha.y` — the lobe's solid angle — rather than its width along either axis.
+/// So a stretched highlight couples like the round one covering the same area.
+fun alpha_iso(alpha: float2) -> float:
+    return sqrt(max(alpha.x * alpha.y, 1e-12))
+
+/// `v` reflected about the unit normal `n`, as the textbook `reflect` on plain vectors.
+/// The prelude's `reflect` takes directions, and the closure works in plain `float3`s.
+fun reflect_about(v: float3, n: float3) -> float3 => reflect(vec3(..v), vec3(..n)).xyz
+
+/// `v` bent through a surface of unit normal `n` by the ratio of indices `eta`, as the textbook `refract` on plain vectors.
+/// It is zero where the bend has no solution and the interface reflects entirely.
+fun refract_through(v: float3, n: float3, eta: float) -> float3 => refract(vec3(..v), vec3(..n), eta).xyz
+
+// ---- Fresnel --------------------------------------------------------------------------------------------------------
+
+/// Schlick's approximation from a normal-incidence reflectance.
+fun fresnel_schlick(mu: float, f0: float3) -> float3:
+    let t = pow(saturate(1.0 - mu), 5.0)
+    return f0 + (float3(1.0) - f0) * t
+
+/// The exact unpolarized dielectric reflectance for relative IOR `ior`, total internal reflection included.
+fun fresnel_dielectric(mu: float, ior: float) -> float:
+    let c = saturate(mu)
+    let s2 = (1.0 - c * c) / (ior * ior)
+    // past the critical angle nothing is transmitted
+    if s2 >= 1.0 => return 1.0
+
+    let ct = sqrt(1.0 - s2)
+    let rs = (c - ior * ct) / (c + ior * ct)
+    let rp = (ior * c - ct) / (ior * c + ct)
+    return 0.5 * (rs * rs + rp * rp)
+
+/// The conductor Fresnel OpenPBR specifies: Schlick through `f0`, pulled down off-normal.
+/// The reflectance at 82 degrees comes out as `tint` times what Schlick alone would give there.
+///
+/// That dip is what separates a real metal from a Schlick one: gold and copper darken toward grazing rather than washing out to white.
+fun fresnel_f82(mu: float, f0: float3, tint: float3) -> float3:
+    // cos(82 degrees), where the tint is defined
+    let mu_bar = 1.0 / 7.0
+
+    let f_bar = fresnel_schlick(mu_bar, f0)
+    let a = f_bar * (float3(1.0) - tint) / (mu_bar * pow(1.0 - mu_bar, 6.0))
+    return max(float3(0.0), fresnel_schlick(mu, f0) - a * mu * pow(saturate(1.0 - mu), 6.0))
+
+/// The directional albedo of a Schlick-Fresnel GGX lobe, as the split-sum scale and bias (Lazarov's analytic fit).
+/// The lobe's albedo is `f0 * result.x + result.y`, which is what both the layer coupling and the energy compensation need.
+fun ggx_albedo_split(mu: float, alpha: float) -> float2:
+    let c0 = float4(-1.0, -0.0275, -0.572, 0.022)
+    let c1 = float4(1.0, 0.0425, 1.04, -0.04)
+
+    let r = alpha * c0 + c1
+    let a004 = min(r.x * r.x, exp2(-9.28 * saturate(mu))) * r.x + r.y
+    return float2(a004 * -1.04 + r.z, a004 * 1.04 + r.w)
+
+/// What a GGX lobe with normal-incidence reflectance `f0` reflects in total from direction `mu`.
+fun ggx_albedo(mu: float, alpha: float2, f0: float3) -> float3:
+    let ab = ggx_albedo_split(mu, alpha_iso(alpha))
+    return f0 * ab.x + ab.y
+
+/// The multiple-scattering energy a single-scattering GGX lobe is missing, as a factor to multiply it by (Turquin 2019).
+/// It is 1 for a smooth surface and grows with roughness, which is the loss it exists to put back.
+fun ggx_energy_compensation(mu: float, alpha: float2, f0: float3) -> float3:
+    let ab = ggx_albedo_split(mu, alpha_iso(alpha))
+    // the white-furnace albedo of the lobe, which is what the loss is measured against
+    let e_ss = ab.x + ab.y
+    return float3(1.0) + f0 * (1.0 / max(e_ss, 1e-3) - 1.0)
+
+// ---- Thin film ------------------------------------------------------------------------------------------------------
+//
+// A film thin enough that the light reflected off its top and off its bottom still interfere.
+// That is what makes a soap bubble or an oxide layer colored: the two paths differ by an optical distance, so each wavelength is reinforced or cancelled by a different amount.
+//
+// This evaluates that interference at THREE wavelengths, one per output channel, rather than integrating it over the spectrum.
+// Belcour and Barla's spectral formulation is the full answer and the deviation here.
+// With three samples a thin film shows its first interference order faithfully, and its higher orders alias into colors the spectrum would have averaged away.
+// So a film past roughly a micron drifts from what it should be.
+
+/// The wavelengths in nanometers a channel stands for, shared by the thin film and by dispersion.
+/// Three samples is what an RGB pipeline has to say about a spectrum, and both features are limited by it the same way.
+fun channel_wavelengths() -> float3 => float3(620.0, 550.0, 450.0)
+
+/// The wavelength in nanometers channel `channel` stands for, which must be 0, 1 or 2.
+fun channel_wavelength(channel: uint) -> float:
+    let w = channel_wavelengths()
+    let picked = if channel == 0 => w.x else if channel == 1 => w.y else w.z
+    return picked
+
+/// The wavelengths in nanometers the film is evaluated at, one per channel.
+fun thin_film_wavelengths() -> float3 => channel_wavelengths()
+
+/// The index of refraction at one wavelength, from the index at the sodium D line and an Abbe number.
+///
+/// Cauchy's two-term relation, with the B coefficient solved so the spread between the F and C lines is exactly what the Abbe number states.
+/// That is what makes `transmission_dispersion_abbe_number` mean the thing opticians print on a glass.
+/// `scale` multiplies that spread, so 0 collapses every wavelength back onto the base index and 2 doubles the fan.
+///
+/// Smaller Abbe numbers disperse MORE, which is the opposite of how the parameter reads.
+fun dispersive_ior(base_ior: float, abbe: float, scale: float, wavelength: float) -> float:
+    if scale <= 0.0 or abbe <= 0.0 => return base_ior
+
+    // the sodium D line, where `base_ior` is defined
+    let lambda_d = 587.6
+    let lambda_f = 486.1
+    let lambda_c = 656.3
+
+    let inv_f2 = 1.0 / (lambda_f * lambda_f)
+    let inv_c2 = 1.0 / (lambda_c * lambda_c)
+
+    let b = scale * (base_ior - 1.0) / (abbe * (inv_f2 - inv_c2))
+    let a = base_ior - b / (lambda_d * lambda_d)
+
+    return max(1.0 + 1e-3, a + b / max(wavelength * wavelength, 1e-6))
+
+/// The SIGNED amplitude reflectances at one interface, s and p polarization, for a real relative index `eta`.
+///
+/// The sign is what carries the half-wave phase shift, and the sign is the whole effect.
+/// It decides whether the two paths add or cancel at a given thickness, which is where the color comes from.
+/// A magnitude-only Fresnel would produce a film that brightens and dims without ever changing hue.
+fun fresnel_amplitude(cos_i: float, eta: float3, r_s: mut float3, r_p: mut float3):
+    let s2 = (1.0 - cos_i * cos_i) / max(eta * eta, float3(1e-6))
+    let cos_t = sqrt(max(float3(0.0), 1.0 - s2))
+
+    r_s = (cos_i - eta * cos_t) / max(abs(cos_i + eta * cos_t), float3(1e-6))
+    r_p = (eta * cos_i - cos_t) / max(abs(eta * cos_i + cos_t), float3(1e-6))
+
+    // Past the critical angle everything is reflected.
+    // The phase this drops is what the three-wavelength sampling cannot represent anyway.
+    let total = s2 >= float3(1.0)
+    r_s = select(total, float3(1.0), r_s)
+    r_p = select(total, float3(1.0), r_p)
+
+/// The Airy summation over the film's internal reflections, for one polarization.
+fun airy_reflectance(r1: float3, r2: float3, phase: float3) -> float3:
+    let c = cos(phase)
+    let num = r1 * r1 + r2 * r2 + 2.0 * r1 * r2 * c
+    let den = 1.0 + r1 * r1 * r2 * r2 + 2.0 * r1 * r2 * c
+    return saturate(num / max(den, float3(1e-6)))
+
+/// What a film of `thickness` nanometers and index `film_ior` reflects, sitting on a base whose own reflectance is `f0`.
+///
+/// The base enters as an equivalent REAL index rather than a complex one, so a metal's absorption does not shift the phase it reflects with.
+/// That costs the slight hue rotation a real conductor's substrate adds, and keeps the model to one closed form for metal and dielectric alike.
+fun thin_film_reflectance(mu: float, f0: float3, film_ior: float, thickness: float) -> float3:
+    let eta_film = max(1.0 + 1e-3, film_ior)
+
+    // The angle inside the film, which sets both the second interface's incidence and the optical path length.
+    let s2 = (1.0 - mu * mu) / (eta_film * eta_film)
+    if s2 >= 1.0 => return float3(1.0)
+    let cos_film = sqrt(1.0 - s2)
+
+    let mut r01_s = float3(0.0)
+    let mut r01_p = float3(0.0)
+    fresnel_amplitude(mu, float3(eta_film, eta_film, eta_film), mut r01_s, mut r01_p)
+
+    // The base as the index that would reflect `f0` at normal incidence, relative to the film it sits under.
+    let root = clamp(sqrt(saturate(f0)), float3(0.0), float3(0.99))
+    let eta_base = ((1.0 + root) / (1.0 - root)) / eta_film
+
+    let mut r12_s = float3(0.0)
+    let mut r12_p = float3(0.0)
+    fresnel_amplitude(cos_film, eta_base, mut r12_s, mut r12_p)
+
+    // Twice the film's optical thickness along the refracted path, in radians per wavelength.
+    let phase = (4.0 * pi * eta_film * max(0.0, thickness) * cos_film) / thin_film_wavelengths()
+
+    return 0.5 * (airy_reflectance(r01_s, r12_s, phase) + airy_reflectance(r01_p, r12_p, phase))
+
+// ---- Diffuse --------------------------------------------------------------------------------------------------------
+
+/// Oren-Nayar's qualitative model, reducing to Lambert at roughness 0 — which is OpenPBR's `base_diffuse_roughness` default.
+fun oren_nayar(wo: float3, wi: float3, roughness: float) -> float:
+    if roughness <= 0.0 => return 1.0
+
+    let s2 = roughness * roughness
+    let a = 1.0 - 0.5 * s2 / (s2 + 0.33)
+    let b = 0.45 * s2 / (s2 + 0.09)
+
+    // The azimuthal term without trigonometry: the two tangential components, normalized against each other.
+    let to = wo.xy
+    let ti = wi.xy
+    let lo = length(to)
+    let li = length(ti)
+    let cos_phi = if lo > 1e-6 and li > 1e-6 => dot(to, ti) / (lo * li) else 0.0
+
+    // sin(alpha) * tan(beta) over the larger and the smaller of the two angles, read off the same tangential lengths.
+    let sin_alpha = max(lo, li)
+    let tan_beta = min(lo, li) / max(max(wo.z, wi.z), 1e-6)
+
+    return a + b * max(0.0, cos_phi) * sin_alpha * tan_beta
+
+/// A cosine-weighted direction about +z, whose pdf is `wi.z / pi`.
+fun sample_cosine_local(u: float2) -> float3:
+    let r = sqrt(u.x)
+    let phi = 2.0 * pi * u.y
+    return float3(r * cos(phi), r * sin(phi), sqrt(max(0.0, 1.0 - u.x)))
+
+// ---- Fuzz (sheen) ---------------------------------------------------------------------------------------------------
+
+/// The Conty-Estevez "Charlie" sheen distribution: an inverted lobe peaking at grazing incidence.
+///
+/// The specification names Zeltner's microflake sheen, which conserves energy by construction and needs its own albedo table.
+/// This is the compact stand-in, and the deliberate deviation named at the top of this file.
+fun sheen_d(h: float3, alpha: float) -> float:
+    let inv_a = 1.0 / max(alpha, min_alpha)
+    let c2 = saturate(h.z * h.z)
+    let s2 = 1.0 - c2
+    return (2.0 + inv_a) * pow(max(s2, 1e-6), inv_a * 0.5) / (2.0 * pi)
+
+/// Ashikhmin's visibility term, which is what the Charlie distribution is normally paired with.
+fun sheen_v(wo: float3, wi: float3) -> float:
+    return 1.0 / max(4.0 * (wo.z + wi.z - wo.z * wi.z), 1e-6)
+
+/// Roughly what the sheen lobe reflects in total, so the layer below can take what is left.
+/// A coarse fit rather than a tabulated albedo: it vanishes at normal incidence and rises toward grazing, which is the shape the coupling depends on.
+fun sheen_albedo(mu: float, alpha: float) -> float:
+    return 0.5 * alpha * pow(saturate(1.0 - mu), 3.0)

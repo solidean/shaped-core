@@ -24,7 +24,7 @@ ASYNC_INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_ha
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     // Build the scene through the managers (this is where the BLAS is built).
     auto const cloud = sv_test::make_triangle_cloud(64);
@@ -45,7 +45,7 @@ ASYNC_INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_ha
     v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)}; // default orientation frames the origin
     sv::ensure_scene_3d(v).items.push_back(item);
     // An overhead rect facing down (cross(+x, +z) is -y).
-    // Exercises the light -> light_gpu derivation the view_renderer does.
+    // Exercises the light -> light record derivation the view_renderer does.
     sv::ensure_scene_3d(v).lights.push_back(
         {.id = sv::light_id::from_string("key"),
          .light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(18.0f)});
@@ -73,7 +73,7 @@ ASYNC_INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_ha
     CHECK(traced.height() == size[1]); // sized from the view, not from any target
 }
 
-// The same frame, driven from indexed geometry: an indexed BLAS build plus the closest-hit's Vertices[Indices[..]] lookup.
+// The same frame, driven from indexed geometry: an indexed BLAS build plus the closest hit reading its corners through the index buffer.
 // A Cornell box is the payload because its quads genuinely share vertices, so welding actually shrinks the vertex buffer.
 // The index buffer is then not the identity sequence the non-indexed path would synthesize.
 ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (sg::context_handle const& ctx_h))
@@ -90,7 +90,7 @@ ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
 
     auto const box = sv_test::make_cornell_box();
     auto const welded = sv_test::weld_triangle_list(box.positions);

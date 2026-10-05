@@ -184,7 +184,7 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the path-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     auto sc_r = ctx.try_create_swapchain(
         {.window = win->native_window(), .buffer_count = 3, .format = sg::pixel_format::bgra8_unorm});
@@ -263,27 +263,27 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
         controller.apply(cam);
         cam.projection.aspect_ratio = double(size[0]) / double(size[1] > 0 ? size[1] : 1);
 
-        auto fc = sv::pt_frame_constants_gpu{};
-        fc.camera = sv::camera_gpu::from(cam);
+        auto fc = sv::default_frame_constants();
+        fc.camera = sv::camera_record_of(cam);
         // the box light is an axis-aligned XZ rect, emitting straight down
         auto const lights = sv_test::light_table_of(box.light);
         lights.describe_in(fc);
         fc.samples_per_pixel = 2; // low per-frame count — accumulation does the heavy lifting when still
         fc.max_bounces = 5;
         fc.accum_frame = accum;
-        fc.seed = accum + 1;
+        fc.rng_seed = accum + 1;
 
         // Trace this frame's samples into the persistent target (blending in place when accum_frame > 0).
         {
             auto trace_cmd = ctx.create_command_list();
-            auto const frame = ctx.transient.create_buffer_from_pod(*trace_cmd, fc, sg::buffer_usage::constants_buffer);
+            auto const frame = ctx.transient.create_buffer_from_pod(*trace_cmd, fc, sg::buffer_usage::readonly_buffer);
 
             // Closed Cornell box: no ray escapes, so the environment probe stays dark — bind an all-zero one.
             auto const background = ctx.transient.create_buffer_from_pod(
-                *trace_cmd, sv::background_gpu::from(sv::background{}), sg::buffer_usage::constants_buffer);
+                *trace_cmd, sv::background_gpu::from(sv::background{}), sg::buffer_usage::readonly_buffer);
 
             // Rebuilt every frame, on the list that traces with it: a record holds this epoch's bindless indices.
-            auto records = cc::vector<sv::instance_gpu>();
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
             records.push_back(resources.describe_instance(*trace_cmd, item.mesh, item.instance));
 
             auto const instance_table

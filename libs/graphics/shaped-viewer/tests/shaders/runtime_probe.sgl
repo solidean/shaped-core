@@ -1,0 +1,80 @@
+// A probe over modules `material` and `quadric`, so a test can hold the runtimes to CPU references.
+//
+// runtime-probe-test.cc says what the cases cover.
+use material
+use quadric
+use scene
+
+/// One ray against one quadric record, and one triangle's attributes — mirrors `runtime_probe_case` in runtime-probe-test.cc lane for lane.
+struct runtime_probe_case:
+    /// the ray, in the quadric set's space
+    origin: float3
+    /// which record of `quadrics`
+    quadric: uint
+    dir: float3
+    t_min: float
+    t_max: float
+    /// the triangle whose corners and attributes are read
+    primitive: uint
+    /// whether `indices` holds its corners
+    is_indexed: uint
+    /// where in `attributes` the attribute descriptors start
+    desc_offset: uint
+    /// the two barycentrics a hit attribute carries
+    bary: float2
+    pad: uint2
+
+binding runtime_probe_io:
+    cases: buffer[runtime_probe_case]
+
+    /// `sv::quadric_gpu` records, as a batch's primitive buffer holds them.
+    quadrics: bytes
+
+    /// Four attribute descriptors from `desc_offset` — a float, a float2, a float3 and a float4 one, the last a rotation — and the elements they point at.
+    attributes: bytes
+
+    indices: bytes
+
+    /// Eight per case, in the order `runtime_measure` writes them.
+    results: mut buffer[float4]
+
+    /// How many elements `cases` holds, since SGL reads no buffer's length.
+    count: uint
+
+@compute(64) fun runtime_measure(@thread_id id: int3){runtime_probe_io}:
+    let item = id.x as uint
+    if item >= runtime_probe_io.count => return
+
+    let c = runtime_probe_io.cases[id.x]
+
+    let prim = quadric.load_primitive(runtime_probe_io.quadrics, c.quadric)
+    let hit = quadric.intersect(prim, c.origin, c.dir, c.t_min, c.t_max)
+    let roots = quadric.roots_of(prim.surface, c.origin - prim.origin, c.dir)
+
+    let inst = scene.instance(7, 64, 0, 0, c.is_indexed, 0xffffffff, uint2(0, 0))
+
+    let ctx = material.make_context(inst, runtime_probe_io.indices, c.primitive, c.bary)
+    let qctx = quadric.make_context(inst, c.quadric)
+
+    let d1 = material.load_attribute_desc(runtime_probe_io.attributes, c.desc_offset)
+    let d2 = material.load_attribute_desc(runtime_probe_io.attributes, c.desc_offset + 12)
+    let d3 = material.load_attribute_desc(runtime_probe_io.attributes, c.desc_offset + 24)
+    let d4 = material.load_attribute_desc(runtime_probe_io.attributes, c.desc_offset + 36)
+
+    // Per vertex through the triangle's corners, and per corner through `corner_elements`, as a generated material reads them.
+    let f1 = material.interpolate_f1(runtime_probe_io.attributes, d1, ctx.corner, ctx.barycentrics)
+    let f2 = material.interpolate_f2(runtime_probe_io.attributes, d2, material.corner_elements(ctx), ctx.barycentrics)
+    let f3 = material.interpolate_f3(runtime_probe_io.attributes, d3, ctx.corner, ctx.barycentrics)
+    let f4 = material.interpolate_f4(runtime_probe_io.attributes, d4, ctx.corner, ctx.barycentrics)
+    let rotation = material.interpolate_rotation(runtime_probe_io.attributes, d4, ctx.corner, ctx.barycentrics)
+
+    let base = id.x * 8
+    let valid = if hit.valid => 1.0 else 0.0
+    runtime_probe_io.results[base] = float4(hit.t, hit.normal.x, hit.normal.y, hit.normal.z)
+    runtime_probe_io.results[base + 1] = float4(valid, roots.count as float, roots.t0, roots.t1)
+    runtime_probe_io.results[base + 2] = float4(roots.shifted_origin.x, roots.shifted_origin.y, roots.shifted_origin.z, roots.t_closest)
+    runtime_probe_io.results[base + 3] = float4(f3.x, f3.y, f3.z, f1)
+    runtime_probe_io.results[base + 4] = f4
+    runtime_probe_io.results[base + 5] = rotation
+    runtime_probe_io.results[base + 6] = float4(ctx.corner.x as float, ctx.corner.y as float, ctx.corner.z as float, ctx.barycentrics.x)
+    runtime_probe_io.results[base + 7] = float4(f2.x, f2.y, ctx.barycentrics.z, (qctx.primitive + qctx.param_offset) as float)

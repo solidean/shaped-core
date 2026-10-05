@@ -21,23 +21,6 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// `table` at `count`, plus the two tables the manager requires whatever else is configured.
-/// A sampled texture is acquired into textures_2d, and geometry, attributes and parameter blocks into buffers, so a config
-/// omitting either has nothing to build — see gpu_resource_manager::create.
-[[nodiscard]] sv::bindless_config only(sv::bindless_table table, u32 count)
-{
-    auto tables = cc::vector<sv::bindless_table_budget>{{.table = sv::bindless_table::textures_2d, .count = 2},
-                                                        {.table = sv::bindless_table::buffers, .count = 2}};
-    for (auto& t : tables)
-        if (t.table == table)
-        {
-            t.count = count;
-            return {.tables = cc::move(tables)};
-        }
-    tables.push_back({.table = table, .count = count});
-    return {.tables = cc::move(tables)};
-}
-
 /// This epoch's bindless element for `id`'s texture — what a parameter block naming it would carry.
 [[nodiscard]] u32 element_of(sv::gpu_resource_manager& m, sv::texture_id id)
 {
@@ -74,17 +57,15 @@ ASYNC_INVOCABLE_TEST("sv - the resource manager's epoch tick is idempotent", (sg
     co_await ctx.idle_completion();
 }
 
-ASYNC_INVOCABLE_TEST("sv - the resource manager declares only its configured tables", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the resource manager declares every table at the tracer's size",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = only(sv::bindless_table::textures_2d, 4)});
-    CHECK(m.has_table(sv::bindless_table::textures_2d));
-    CHECK(m.table_capacity(sv::bindless_table::textures_2d) == 4);
-
-    CHECK(!m.has_table(sv::bindless_table::textures_cube));
-    CHECK(m.table_capacity(sv::bindless_table::textures_cube) == 0);
-    CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_cube, make_texture(ctx).as_texture_view()));
+    // The layout is module tracer's, so the group a trace binds is the one its pipeline was compiled against.
+    auto m = sv::gpu_resource_manager::create(ctx);
+    for (auto i = u32(0); i < u32(sv::bindless_table::count_); ++i)
+        CHECK(m.table_capacity(sv::bindless_table(i)) == sv::capacity_of(sv::bindless_table(i)));
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -131,7 +112,7 @@ ASYNC_INVOCABLE_TEST("sv - two freezes in one epoch keep the first's indices", (
     // The multi-window invariant: window A records against its snapshot, then window B acquires more in the same epoch.
     // B's mints must not disturb what A already handed the GPU, which is what sg's "reclaim only what was NOT
     // acquired this epoch" rule buys.
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = only(sv::bindless_table::textures_2d, 4)});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto const a = make_texture(ctx);
@@ -177,7 +158,7 @@ ASYNC_INVOCABLE_TEST("sv - a pinned texture is declared and outlives its epoch",
 
     // What a material buffer will hold: an index that stays true across epochs, so the buffer can be uploaded
     // once and cached by content hash rather than re-uploaded whenever the tables move.
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = only(sv::bindless_table::textures_2d, 4)});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto const tex = make_texture(ctx);
@@ -354,7 +335,7 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // this needs the shared library and a compiler, not just a device.
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the mipmap shader");
+        SKIP("no SGL compiler that reaches DXIL to build the mipmap shader");
 
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
@@ -400,7 +381,7 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // this needs the shared library and a compiler, not just a device.
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the mipmap shader");
+        SKIP("no SGL compiler that reaches DXIL to build the mipmap shader");
 
     // The microstutter guard: several textures landing at once must not record every chain in one frame.
     // 16x16 is 5 levels, so 4 dispatches each — a budget of 5 admits exactly one per epoch.
@@ -473,13 +454,6 @@ ASYNC_INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", 
 
 namespace
 {
-/// Both tables the material path pins into, at a size a test can exhaust nothing of.
-[[nodiscard]] sv::bindless_config material_tables()
-{
-    return {.tables = cc::vector<sv::bindless_table_budget>{{.table = sv::bindless_table::textures_2d, .count = 16},
-                                                            {.table = sv::bindless_table::buffers, .count = 16}}};
-}
-
 [[nodiscard]] sv::mesh_attribute scalar_attribute(cc::string name, sv::attribute_frequency f, f32 a, f32 b, f32 c)
 {
     return sv::mesh_attribute::create(cc::move(name), f, cc::vector<f32>{a, b, c});
@@ -500,7 +474,7 @@ ASYNC_INVOCABLE_TEST("sv - an attribute is uploaded once and content-keyed", (sg
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto const normals = scalar_attribute("roughness", sv::attribute_frequency::per_vertex, 0.1f, 0.2f, 0.3f);
@@ -537,7 +511,7 @@ ASYNC_INVOCABLE_TEST("sv - a parameter block is filled at the offsets the genera
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto lib = sv::material_library::create();
@@ -616,7 +590,7 @@ ASYNC_INVOCABLE_TEST("sv - an instance record names its own geometry and paramet
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto lib = sv::material_library::create();
@@ -679,7 +653,7 @@ ASYNC_INVOCABLE_TEST("sv - an imported asset uploads and resolves like any other
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     // The PROCESS-WIDE library, because that is the one `acquire_scene_item` resolves a mesh's material through — a
@@ -732,13 +706,6 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
     CHECK(item.mesh == mesh.geometry);
     CHECK(item.instance != sv::instance_id::invalid);
 
-    // Resolving started a permutation compile; a compile left undriven is async work still holding this test's context
-    // when it ends, which nexus reports as a failure of the test itself.
-    if (auto const* const permutation = m.shaders.find(item.shader_key); permutation != nullptr)
-        for (auto const* const node : {&permutation->shader, &permutation->any_hit, &permutation->shadow_any_hit})
-            if (*node != nullptr)
-                co_await cc::async_settled(*node);
-
     ctx.advance_epoch();
     co_await ctx.idle_completion();
 }
@@ -748,7 +715,7 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto const first = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
@@ -787,10 +754,6 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
         auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
         CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.placeholder_vertices().raw()->as_raw_readonly())));
 
-        // Resolving started a permutation compile; one left undriven is async work still holding this test's context.
-        if (auto const* const p = m.shaders.find(item.shader_key); p != nullptr)
-            co_await cc::async_settled(p->shader);
-
         ctx.submit_command_list(cc::move(cmd));
     }
 
@@ -812,9 +775,6 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
         auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
         CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(a.geometry).vertices.raw()->as_raw_readonly())));
 
-        if (auto const* const p = m.shaders.find(item.shader_key); p != nullptr)
-            co_await cc::async_settled(p->shader);
-
         ctx.submit_command_list(cc::move(cmd));
     }
 
@@ -827,7 +787,7 @@ ASYNC_INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seede
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto lib = sv::material_library::create();
@@ -918,7 +878,7 @@ ASYNC_INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and 
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
@@ -970,7 +930,7 @@ ASYNC_INVOCABLE_TEST("sv::mesh - an evicted payload is re-acquired rather than n
 {
     auto& ctx = *ctx_h;
 
-    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
     auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};

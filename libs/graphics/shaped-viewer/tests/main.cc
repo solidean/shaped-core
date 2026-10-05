@@ -9,7 +9,7 @@
 int main(int argc, char** argv)
 {
 #if SV_TEST_HAS_PROBE_SHADERS
-    // The BSDF probe's package joins the one shader library as it is created, before any test can compile through it.
+    // The probes' package joins the one shader library as it is created, before any test can compile through it.
     // `add_package` is not safe beside a concurrent acquire, and the tests sharing that library run in parallel.
     sv::set_acquire_shader_library(
         []

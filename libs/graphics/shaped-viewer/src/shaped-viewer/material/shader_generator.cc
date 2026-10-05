@@ -6,7 +6,6 @@
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/material/impl/material_hash.hh>
 #include <shaped-viewer/material/material_type.hh>
-#include <shaped-viewer/resources/bindless_tables.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 
@@ -14,7 +13,7 @@ namespace sv
 {
 namespace
 {
-constexpr i32 slot_alignment = 4;         ///< ByteAddressBuffer loads are 4-byte granular, so every slot starts on 4
+constexpr i32 slot_alignment = 4;         ///< raw buffer loads are 4-byte granular, so every slot starts on 4
 constexpr i32 attribute_desc_size = 12;   ///< sv::attribute_desc: buffer, offset, stride
 constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the bias
 
@@ -23,7 +22,7 @@ constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the 
     return (value + alignment - 1) / alignment * alignment;
 }
 
-/// The `sv::interpolate_*` / `sv::load_element_*` suffix for a component count.
+/// The `material.interpolate_*` / `material.load_element_*` suffix for a component count.
 [[nodiscard]] cc::string_view load_suffix(int components)
 {
     switch (components)
@@ -57,71 +56,6 @@ constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the 
     }
 }
 
-/// The `.rgba` letter one selector names, or empty for a constant one, which no letter swizzle can spell.
-[[nodiscard]] cc::string_view channel_letter(texture_channel c)
-{
-    switch (c)
-    {
-    case texture_channel::r:
-        return "r";
-    case texture_channel::g:
-        return "g";
-    case texture_channel::b:
-        return "b";
-    case texture_channel::a:
-        return "a";
-    case texture_channel::zero:
-    case texture_channel::one:
-        return {};
-    }
-    return {};
-}
-
-/// What one component of the attribute reads out of the texel.
-[[nodiscard]] cc::string component_expression(texture_channel c)
-{
-    if (c == texture_channel::zero)
-        return "0.0";
-    if (c == texture_channel::one)
-        return "1.0";
-    return cc::format("texel.{}", channel_letter(c));
-}
-
-/// The expression filling an attribute of `format` from the `float4` named `texel`.
-///
-/// A swizzle whose every READ selector names a channel stays a letter swizzle — `texel.rgb`, or `texel` itself when all four
-/// are taken straight through — which is what a texture written for its own attribute generates.
-/// A `zero` or `one` selector cannot be spelled that way, so those widen through the declaration's own type instead.
-/// Either form narrows or widens to `component_count()`, so a 4-channel texture serving a scalar attribute reads one channel.
-[[nodiscard]] cc::string texel_expression(channel_swizzle const& z, attribute_format format)
-{
-    auto const components = format.component_count();
-
-    auto letters = cc::string();
-    for (auto i = 0; i < components; ++i)
-    {
-        auto const letter = channel_letter(z.components[i]);
-        if (letter.empty())
-        {
-            letters.clear();
-            break;
-        }
-        letters += letter;
-    }
-
-    if (!letters.empty())
-        return components == 4 && z.is_identity(4) ? cc::string("texel") : cc::format("texel.{}", letters);
-
-    auto args = cc::string();
-    for (auto i = 0; i < components; ++i)
-    {
-        if (i > 0)
-            args += ", ";
-        args += component_expression(z.components[i]);
-    }
-    return cc::format("{}({})", hlsl_type_of(format), args);
-}
-
 /// How a frequency is read: one element, or three blended across a triangle.
 enum class load_shape
 {
@@ -142,88 +76,12 @@ enum class load_shape
     }
 }
 
-/// The expression naming the element index (or indices) a frequency reads.
-///
-/// `per_triangle` is `ctx.primitive` whichever geometry numbered it, which is what makes one generated body serve a mesh and a
-/// quadric batch alike.
-[[nodiscard]] cc::string element_expression(attribute_frequency f)
-{
-    switch (f)
-    {
-    case attribute_frequency::per_vertex:
-        return "ctx.corner";
-    case attribute_frequency::per_corner:
-        return "sv::corner_elements(ctx)";
-    case attribute_frequency::per_triangle:
-        return "ctx.primitive";
-    default:
-        CC_UNREACHABLE("a mesh attribute a material reads is per_vertex, per_corner or per_triangle");
-    }
-}
-
-/// The bindless buffer expression for a descriptor, non-uniform because the index varies per instance.
-[[nodiscard]] cc::string buffer_expression(cc::string_view desc)
-{
-    return cc::format("{}[NonUniformResourceIndex({}.buffer)]", name_of(bindless_table::buffers), desc);
-}
-
-/// Every distinct sampler this permutation samples with, in first-use order.
-/// Distinct rather than one per attribute: two attributes sampled the same way share a `SamplerState`, and the sampler set is part
-/// of the permutation, so this is stable for a given key.
-[[nodiscard]] cc::vector<sg::sampler> distinct_samplers(resolved_material const& r)
-{
-    auto samplers = cc::vector<sg::sampler>();
-    for (auto const& a : r.attributes)
-    {
-        if (a.sample == nullptr)
-            continue;
-        auto found = false;
-        for (auto const& s : samplers)
-            if (s == a.sample->sampler)
-                found = true;
-        if (!found)
-            samplers.push_back(a.sample->sampler);
-    }
-    return samplers;
-}
-
-[[nodiscard]] i32 index_of_sampler(cc::span<sg::sampler const> samplers, sg::sampler const& s)
-{
-    for (auto i = 0; i < samplers.size(); ++i)
-        if (samplers[i] == s)
-            return i32(i);
-    CC_UNREACHABLE("every sampler in the permutation was collected");
-}
-
 [[nodiscard]] bool samples_texture(resolved_material const& r)
 {
     for (auto const& a : r.attributes)
         if (a.sample != nullptr)
             return true;
     return false;
-}
-
-/// Whether any attribute reaches a buffer — a mesh attribute, a uv set, or the parameter block itself.
-/// The parameter block always does, so this is true whenever the signature is non-empty.
-[[nodiscard]] bool reads_buffers(resolved_material const& r)
-{
-    return !r.attributes.empty();
-}
-
-/// Whether the generated source must declare the buffer table.
-/// An epilogue counts even when no attribute reads a buffer: `pt_material_hit.hlsli` reads the mesh's positions through the table unconditionally,
-/// so an attribute-less type would otherwise generate a shader that does not compile.
-[[nodiscard]] bool declares_buffers(resolved_material const& r, material_shader_options const& opts)
-{
-    return reads_buffers(r) || !opts.epilogue_include.empty();
-}
-
-[[nodiscard]] u32 count_of(bindless_config const& cfg, bindless_table table)
-{
-    for (auto const& b : cfg.tables)
-        if (b.table == table)
-            return b.count;
-    return 0;
 }
 
 /// The parameter block: one slot per thing the shader has to be told at run time, in signature order.
@@ -286,33 +144,367 @@ enum class load_shape
             return s;
     CC_UNREACHABLE("the layout has a slot for every attribute it was built from");
 }
+
+/// The `xyzw` letter one selector names, or empty for a constant one: SGL's swizzle letters are the field names.
+[[nodiscard]] cc::string_view channel_letter(texture_channel c)
+{
+    switch (c)
+    {
+    case texture_channel::r:
+        return "x";
+    case texture_channel::g:
+        return "y";
+    case texture_channel::b:
+        return "z";
+    case texture_channel::a:
+        return "w";
+    case texture_channel::zero:
+    case texture_channel::one:
+        return {};
+    }
+    return {};
+}
+
+/// The float vector type of `components` lanes.
+[[nodiscard]] cc::string_view float_type(int components)
+{
+    switch (components)
+    {
+    case 1:
+        return "float";
+    case 2:
+        return "float2";
+    case 3:
+        return "float3";
+    default:
+        return "float4";
+    }
+}
+
+/// `value`, a float expression of `format`'s lane count, converted to `format` where that is an integer type.
+[[nodiscard]] cc::string as_format(cc::string value, attribute_format format)
+{
+    if (format.scalar == scalar_type::f32)
+        return value;
+    return cc::format("({}) as {}", value, sgl_type_of(format));
+}
+
+/// The float expression filling an attribute of `format` from the `float4` named `texel`.
+///
+/// A swizzle whose every read selector names a channel stays a letter swizzle — `texel.xyz`, or `texel` itself when all four
+/// are taken straight through — which is what a texture written for its own attribute generates.
+/// A `zero` or `one` selector cannot be spelled that way, so those widen through a constructor instead.
+/// Either form narrows or widens to `component_count()`, so a 4-channel texture serving a scalar attribute reads one channel.
+[[nodiscard]] cc::string texel_expression(channel_swizzle const& z, attribute_format format)
+{
+    auto const components = format.component_count();
+
+    auto letters = cc::string();
+    for (auto i = 0; i < components; ++i)
+    {
+        auto const letter = channel_letter(z.components[i]);
+        if (letter.empty())
+        {
+            letters.clear();
+            break;
+        }
+        letters += letter;
+    }
+
+    if (!letters.empty())
+        return components == 4 && z.is_identity(4) ? cc::string("texel") : cc::format("texel.{}", letters);
+
+    auto const component = [&](texture_channel c) -> cc::string
+    {
+        if (c == texture_channel::zero)
+            return "0.0";
+        if (c == texture_channel::one)
+            return "1.0";
+        return cc::format("texel.{}", channel_letter(c));
+    };
+    if (components == 1)
+        return component(z.components[0]);
+
+    auto args = cc::string();
+    for (auto i = 0; i < components; ++i)
+    {
+        if (i > 0)
+            args += ", ";
+        args += component(z.components[i]);
+    }
+    return cc::format("{}({})", float_type(components), args);
+}
+
+/// The element index (or indices) a frequency reads.
+///
+/// `per_triangle` is `ctx.primitive` whichever geometry numbered it, which is what makes one generated body serve a mesh and a
+/// quadric batch alike.
+[[nodiscard]] cc::string_view element_expression(attribute_frequency f)
+{
+    switch (f)
+    {
+    case attribute_frequency::per_vertex:
+        return "ctx.corner";
+    case attribute_frequency::per_corner:
+        return "material.corner_elements(ctx)";
+    case attribute_frequency::per_triangle:
+        return "ctx.primitive";
+    default:
+        CC_UNREACHABLE("a mesh attribute a material reads is per_vertex, per_corner or per_triangle");
+    }
+}
+
+/// The load of mesh attribute `binding` through the descriptor named `desc`, as a float expression of `components` lanes.
+/// It reads the buffer through a local `<desc>_buffer`, since only a name may stand as a non-uniform index.
+[[nodiscard]] cc::string mesh_load(mesh_attribute_binding const& binding, cc::string_view desc, int components, bool rotates)
+{
+    auto const buffer = cc::format("tracer.bindless.buffers[nonuniform {}_buffer]", desc);
+    if (shape_of(binding.frequency) == load_shape::flat)
+        return cc::format("material.load_element_{}({}, {}, {})", load_suffix(components), buffer, desc,
+                          element_expression(binding.frequency));
+    // A rotation blends as one: the three corners are aligned into a common hemisphere before they are summed.
+    auto const blend = rotates ? cc::string("rotation") : cc::string(load_suffix(components));
+    return cc::format("material.interpolate_{}({}, {}, {}, ctx.barycentrics)", blend, buffer, desc,
+                      element_expression(binding.frequency));
+}
+
+/// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
+[[nodiscard]] cc::string attribute_function(resolved_material const& r, material_parameter_layout const& layout, i32 index)
+{
+    auto const& a = r.attributes[index];
+    auto const components = a.format.component_count();
+    auto const samples = a.frequency == material_frequency::material_texture
+                      || a.frequency == material_frequency::mesh_texture_binding;
+
+    auto out = cc::string();
+    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{{}}} -> {}:\n", a.name,
+                      samples ? "tracer.traced, tracer.bindless" : "tracer.bindless", sgl_type_of(a.format));
+    out += "    let block = ctx.param_buffer as int\n";
+
+    switch (a.frequency)
+    {
+    case material_frequency::material_type:
+    case material_frequency::material:
+    case material_frequency::mesh_instance:
+    {
+        // A constant is read out of the parameter block whatever it is worth, which is why gold and copper share this source.
+        auto const& s = slot_for(layout, index, material_slot_kind::constant);
+        auto const load = components == 1 ? cc::string("load") : cc::format("load{}", components);
+        auto const raw
+            = cc::format("tracer.bindless.buffers[nonuniform block].{}(ctx.param_offset + {}u)", load, s.offset);
+        auto value = raw;
+        if (a.format.scalar == scalar_type::f32)
+            value = cc::format("reinterpret_as_float({})", raw);
+        else if (a.format.scalar == scalar_type::i32)
+            value = cc::format("reinterpret_as_int({})", raw);
+        cc::format_append(out, "    return {}\n", value);
+        break;
+    }
+
+    case material_frequency::mesh_attribute:
+    {
+        auto const& s = slot_for(layout, index, material_slot_kind::attribute_descriptor);
+        cc::format_append(out,
+                          "    let desc = material.load_attribute_desc(tracer.bindless.buffers[nonuniform block], "
+                          "ctx.param_offset + {}u)\n",
+                          s.offset);
+        out += "    let desc_buffer = desc.buffer as int\n";
+        auto const rotates = a.interpolation == attribute_interpolation::rotation;
+        cc::format_append(out, "    return {}\n",
+                          as_format(mesh_load(*a.attribute, "desc", components, rotates), a.format));
+        break;
+    }
+
+    case material_frequency::material_texture:
+    case material_frequency::mesh_texture_binding:
+    {
+        auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
+        auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
+        cc::format_append(out,
+                          "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[nonuniform block], "
+                          "ctx.param_offset + {}u)\n",
+                          uv_slot.offset);
+        out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
+        // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
+        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false));
+        cc::format_append(
+            out, "    let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + {}u) as int\n",
+            tex.offset);
+        // An explicit level, since a hit has no derivatives; the texel is named because a constant selector reads it twice.
+        cc::format_append(
+            out, "    let texel = tracer.bindless.{}[nonuniform image].sample(uv, tracer.traced.{}, level = 0.0)\n",
+            "textures_2d", sgl_palette_sampler(a.sample->sampler));
+
+        auto value = texel_expression(a.sample->swizzle, a.format);
+
+        // The scale and the bias are parameters rather than literals, so a material changing only its normal scale re-uses this source.
+        if (!a.sample->transform.is_identity(components))
+        {
+            auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
+            auto const lanes = component_swizzle(components);
+            cc::format_append(out,
+                              "    let scale = reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4("
+                              "ctx.param_offset + {}u))\n"
+                              "    let bias = reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4("
+                              "ctx.param_offset + {}u))\n",
+                              tf.offset, tf.offset + 16);
+            value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
+        }
+        cc::format_append(out, "    return {}\n", as_format(cc::move(value), a.format));
+        break;
+    }
+    }
+    return out;
+}
+
+/// The hit group of one permutation; `generate_material_shader`'s header says what it holds.
+[[nodiscard]] cc::string generate_hit_group(resolved_material const& r,
+                                            material_parameter_layout const& layout,
+                                            geometry_kind kind,
+                                            bool can_cut_out)
+{
+    auto const procedural = kind == geometry_kind::quadrics;
+
+    auto src = cc::string();
+    cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
+    src += "require raytracing_pipeline\n\n";
+    src += "use material\nuse openpbr\n";
+    if (procedural)
+        src += "use quadric\n";
+    src += "use tracer\n\n";
+
+    // Restated rather than named as `tracer.path_rays`, since a hit group names a set of its own file.
+    src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
+
+    // Whether anything actually supplied each attribute, as a compile-time constant per permutation.
+    //
+    // A default is not a value somebody chose, and for some attributes those two must not shade the same way: an unsupplied
+    // tangent frame has to fall back to the geometric one rather than to the identity rotation, which points at object-space
+    // +z and is a frame belonging to no surface.
+    // The resolution knows the difference and the fragment does not, so it is spelled here — for every attribute rather than
+    // for the ones that happen to care, which keeps this a property of the generator rather than a list of names in it.
+    for (auto const& a : r.attributes)
+        cc::format_append(src, "const sv_supplied_{} = {}\n", a.name,
+                          a.frequency == material_frequency::material_type ? "false" : "true");
+    if (!r.attributes.empty())
+        src += "\n";
+
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        src += attribute_function(r, layout, i32(i));
+        src += "\n";
+    }
+
+    auto const samples = samples_texture(r);
+    cc::format_append(src, "fun sv_evaluate_material(ctx: material.shading_context){{{}}} -> openpbr.surface:\n",
+                      samples ? "tracer.traced, tracer.bindless" : "tracer.bindless");
+    for (auto const& a : r.attributes)
+        cc::format_append(src, "    let {} = sv_attribute_{}(ctx)\n", a.name, a.name);
+    src += "    let mut surface = openpbr.default_surface()\n";
+    cc::format_append(src, "\n    // --- {} ---\n", r.type->name);
+    auto line_start = isize(0);
+    auto const& fragment = r.type->shader;
+    while (line_start < fragment.size())
+    {
+        auto line_end = line_start;
+        while (line_end < fragment.size() && fragment[line_end] != '\n')
+            ++line_end;
+        auto const line = cc::string_view(fragment).subview(cc::start_end{.start = line_start, .end = line_end});
+        if (!line.empty())
+            cc::format_append(src, "    {}", line);
+        src += "\n";
+        line_start = line_end + 1;
+    }
+    src += "    return surface\n\n";
+
+    // The tangent frame is the one supplied attribute the shading itself asks after, and a type that declares none supplies none.
+    auto supplied_frame = cc::string("false");
+    for (auto const& a : r.attributes)
+        if (a.name == "tangent_frame")
+            supplied_frame = "sv_supplied_tangent_frame";
+
+    if (procedural)
+    {
+        src += "@intersection fun sv_intersection(b: procedural_box){tracer.traced, tracer.bindless} -> "
+               "report[tracer.quadric_attributes]:\n"
+               "    return tracer.intersect_quadric(b)\n\n";
+        cc::format_append(src,
+                          "@closest_hit fun sv_closest_hit(h: procedural_hit[tracer.quadric_attributes], p: mut "
+                          "tracer.surface_payload){{tracer.traced, tracer.bindless}}:\n"
+                          "    let ctx = tracer.quadric_context(h)\n"
+                          "    tracer.shade_quadric(h, mut p, sv_evaluate_material(ctx), {})\n\n",
+                          supplied_frame);
+        // The intersection is the whole row's, so a shadow ray meets the batch it traverses.
+        src += "hit_group sv_material for path_rays:\n"
+               "    geometry = .procedural\n"
+               "    intersection = sv_intersection\n"
+               "    surface = (closest_hit = sv_closest_hit)\n"
+               "    occlusion = ()\n";
+        return src;
+    }
+
+    cc::format_append(src,
+                      "@closest_hit fun sv_closest_hit(h: triangle_hit, p: mut tracer.surface_payload){{tracer.traced, "
+                      "tracer.bindless}}:\n"
+                      "    let ctx = tracer.triangle_context(h)\n"
+                      "    tracer.shade_triangle(h, mut p, ctx, sv_evaluate_material(ctx), {})\n\n",
+                      supplied_frame);
+
+    if (!can_cut_out)
+    {
+        src += "hit_group sv_material for path_rays:\n"
+               "    surface = (closest_hit = sv_closest_hit)\n"
+               "    occlusion = ()\n";
+        return src;
+    }
+
+    // The cutout test twice, since an any hit takes the payload of the one ray type its record serves.
+    src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload, @launch_id id: "
+           "int3){tracer.traced, "
+           "tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, id, sv_evaluate_material(tracer.candidate_context(c)).geometry_opacity)\n\n";
+    src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload, @launch_id id: "
+           "int3){tracer.traced, "
+           "tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, id, sv_evaluate_material(tracer.candidate_context(c)).geometry_opacity)\n\n";
+    src += "hit_group sv_material for path_rays:\n"
+           "    surface = (closest_hit = sv_closest_hit, any_hit = sv_any_hit)\n"
+           "    occlusion = (any_hit = sv_shadow_any_hit)\n";
+    return src;
+}
 } // namespace
+
+cc::string sgl_palette_sampler(sg::sampler const& s)
+{
+    auto const address = [](sg::sampler_address_mode m) -> cc::string_view
+    {
+        switch (m)
+        {
+        case sg::sampler_address_mode::repeat:
+            return "repeat";
+        case sg::sampler_address_mode::mirror_repeat:
+            return "mirror";
+        case sg::sampler_address_mode::clamp_edge:
+            return "clamp";
+        }
+        return "repeat";
+    };
+    auto const filter = s.mag_filter == sg::sampler_filter::nearest ? cc::string_view("nearest") : "linear";
+    return cc::format("palette_{}_{}_{}", filter, address(s.address_u), address(s.address_v));
+}
 
 cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_options const& opts)
 {
-    auto const defaults = bindless_config();
-    auto const& bindless = opts.bindless != nullptr ? *opts.bindless : defaults;
-
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_pod(permutation_key);
-    b.add_string(opts.entry_point);
-    b.add_string(opts.runtime_include);
-    b.add_string(opts.epilogue_include);
-
-    // Each table's own enumerator alongside its count, so omitting a table and declaring it empty stay distinct.
-    b.add_pod(i64(bindless.tables.size()));
-    for (auto const& t : bindless.tables)
-    {
-        b.add_pod(t.table);
-        b.add_pod(t.count);
-    }
+    b.add_pod(opts.kind);
     return cc::hash128::create(b.written_bytes(), impl::material_permutation_hash_seed);
 }
 
-cc::string_view hlsl_type_of(attribute_format format)
+cc::string_view sgl_type_of(attribute_format format)
 {
     if (!format.is_scalar() && !format.is_vector())
-        return {}; // a matrix has no settled ByteAddressBuffer layout here yet
+        return {}; // a matrix has no settled raw-buffer layout here yet
 
     auto const scalar = [&]() -> cc::string_view
     {
@@ -351,187 +543,10 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     CC_ASSERT(r.type != nullptr, "a resolved material names its type");
 
     for (auto const& a : r.attributes)
-        CC_ASSERT(!hlsl_type_of(a.format).empty(), "a material attribute must be a scalar or vector of f32 / i32 / "
-                                                   "u32");
+        CC_ASSERT(!sgl_type_of(a.format).empty(), "a material attribute must be a scalar or vector of f32 / i32 / "
+                                                  "u32");
 
-    auto const defaults = bindless_config();
-    auto const& bindless = opts.bindless != nullptr ? *opts.bindless : defaults;
-
-    auto const layout = build_layout(r);
-    auto samplers = distinct_samplers(r);
-
-    auto src = cc::string();
-    cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
-    cc::format_append(src, "#include \"{}\"\n\n", opts.runtime_include);
-
-    // EVERY budgeted table, whether this material touches it or not, and no address on any of them.
-    //
-    // The whole set rather than a subset, because the pass numbers a group by declaration order and an array
-    // consumes one index per element: a permutation declaring two of the eight would put gBindlessTextures2D at
-    // t0 where the layout -- built from the same text, with all eight -- put it at t96.
-    // The shader would read the wrong descriptors and nothing would say so, which is Q8's own failure.
-    //
-    // Declaring one it never references costs nothing: an unreferenced declaration reaches no bytecode, and the
-    // trace filters every table out of its merged reflection by name in any case.
-    cc::format_append(src, "{}\n", bindless_declarations(bindless));
-    // The permutation's samplers are a group of its own, so nothing here writes an address.
-    //
-    // They used to be hand-numbered `s{i}` in space 0, which only worked because pt_common.hlsli declared no
-    // sampler -- a coupling between two files that nothing enforced.
-    // `using namespace` keeps the sample expressions below unqualified, as they were when the names were global.
-    if (!samplers.empty())
-    {
-        cc::format_append(src, "\n#pragma sc group {}\n", sv::material_sampler_group);
-        cc::format_append(src, "namespace {}\n{{\n", sv::material_sampler_namespace);
-        for (auto i = 0; i < samplers.size(); ++i)
-            cc::format_append(src, "    SamplerState sv_sampler_{};\n", i);
-        cc::format_append(src, "}}\nusing namespace {};\n\n", sv::material_sampler_namespace);
-    }
-
-    // Whether anything actually supplied each attribute, as a compile-time constant per permutation.
-    //
-    // A default is not a value somebody chose, and for some attributes those two must not shade the same way: an unsupplied
-    // tangent frame has to fall back to the geometric one rather than to the identity rotation, which points at object-space
-    // +z and is a frame belonging to no surface.
-    // The resolution knows the difference and the fragment does not, so it is spelled here — for every attribute rather than
-    // for the ones that happen to care, which keeps this a property of the generator rather than a list of names in it.
-    for (auto const& a : r.attributes)
-        cc::format_append(src, "#define SV_ATTR_SUPPLIED_{} {}\n", a.name,
-                          a.frequency == material_frequency::material_type ? 0 : 1);
-
-    cc::format_append(src, "\nsv::surface {}(sv::shading_context ctx)\n{{\n", opts.entry_point);
-    cc::format_append(src, "    sv::surface surface = sv::default_surface();\n");
-
-    // Every attribute is declared in the entry function's own scope and filled from the block below it.
-    //
-    // The block is what the material fragment's scope is protected by: the parameter buffer, an attribute's descriptor and a
-    // sampled uv are all born and dead inside it, so the only names the fragment can collide with are its own attributes,
-    // `surface` and `ctx`.
-    // A zero initializer is what lets the value escape the block it is loaded in, and every attribute is a scalar or vector,
-    // so the scalar broadcast covers all of them.
-    for (auto const& a : r.attributes)
-        cc::format_append(src, "    {} {} = 0;\n", hlsl_type_of(a.format), a.name);
-
-    if (reads_buffers(r))
-    {
-        cc::format_append(
-            src, "\n    {{\n        ByteAddressBuffer params = {}[NonUniformResourceIndex(ctx.param_buffer)];\n",
-            name_of(bindless_table::buffers));
-
-        for (auto i = 0; i < r.attributes.size(); ++i)
-        {
-            auto const& a = r.attributes[i];
-            auto const components = a.format.component_count();
-
-            switch (a.frequency)
-            {
-            case material_frequency::material_type:
-            case material_frequency::material:
-            case material_frequency::mesh_instance:
-            {
-                // A constant is read out of the parameter block whatever it is worth, which is why gold and copper share this
-                // source.
-                auto const& s = slot_for(layout, i32(i), material_slot_kind::constant);
-                auto const load = components == 1 ? cc::string("Load") : cc::format("Load{}", components);
-                auto const raw = cc::format("params.{}(ctx.param_offset + {})", load, s.offset);
-                cc::format_append(src, "\n        {} = {};\n", a.name,
-                                  a.format.scalar == scalar_type::f32 ? cc::format("asfloat({})", raw) : raw);
-                break;
-            }
-
-            case material_frequency::mesh_attribute:
-            {
-                auto const& s = slot_for(layout, i32(i), material_slot_kind::attribute_descriptor);
-                cc::format_append(src,
-                                  "\n        {{\n"
-                                  "            sv::attribute_desc desc = sv::load_attribute_desc(params, "
-                                  "ctx.param_offset "
-                                  "+ {});\n",
-                                  s.offset);
-                auto const buffer = buffer_expression("desc");
-                auto const rotates = a.interpolation == attribute_interpolation::rotation;
-                auto const blend = rotates ? cc::string("rotation") : cc::string(load_suffix(components));
-
-                switch (shape_of(a.attribute->frequency))
-                {
-                case load_shape::barycentric:
-                    // A rotation blends as one: the three corners are aligned into a common hemisphere before they are summed.
-                    cc::format_append(src, "            {} = sv::interpolate_{}({}, desc, {}, ctx.barycentrics);\n",
-                                      a.name, blend, buffer, element_expression(a.attribute->frequency));
-                    break;
-
-                case load_shape::flat:
-                    // One element for the whole primitive, so there is nothing to blend and the mode means nothing.
-                    cc::format_append(src, "            {} = sv::load_element_{}({}, desc, {});\n", a.name,
-                                      load_suffix(components), buffer, element_expression(a.attribute->frequency));
-                    break;
-                }
-                src += "        }\n";
-                break;
-            }
-
-            case material_frequency::material_texture:
-            case material_frequency::mesh_texture_binding:
-            {
-                auto const& tex = slot_for(layout, i32(i), material_slot_kind::texture_index);
-                auto const& uv_slot = slot_for(layout, i32(i), material_slot_kind::attribute_descriptor);
-                cc::format_append(src,
-                                  "\n        {{\n"
-                                  "            sv::attribute_desc uv_desc = sv::load_attribute_desc(params, "
-                                  "ctx.param_offset + {});\n",
-                                  uv_slot.offset);
-
-                auto const uv_buffer = buffer_expression("uv_desc");
-                // A uv is only ever a triangle attribute — `find_uv_attribute` refuses a quadric — so the two shapes here are
-                // the barycentric one and the flat one.
-                if (shape_of(a.uv->frequency) == load_shape::barycentric)
-                    cc::format_append(
-                        src, "            float2 uv = sv::interpolate_f2({}, uv_desc, {}, ctx.barycentrics);\n",
-                        uv_buffer, element_expression(a.uv->frequency));
-                else
-                    cc::format_append(src, "            float2 uv = sv::load_element_f2({}, uv_desc, {});\n", uv_buffer,
-                                      element_expression(a.uv->frequency));
-
-                cc::format_append(src, "            uint tex = params.Load(ctx.param_offset + {});\n", tex.offset);
-                // SampleLevel rather than Sample: there are no derivatives in a ray tracing hit shader, so the mip has to be
-                // named.
-                // The texel is named before it is read, because a swizzle carrying a constant selector reads it more than once.
-                cc::format_append(src,
-                                  "            float4 texel = {}[NonUniformResourceIndex(tex)]"
-                                  ".SampleLevel(sv_sampler_{}, uv, 0);\n",
-                                  name_of(bindless_table::textures_2d), index_of_sampler(samplers, a.sample->sampler));
-
-                auto value = texel_expression(a.sample->swizzle, a.format);
-
-                // The scale and the bias are parameters rather than literals, so a material that only changes its normal
-                // scale re-uses this exact source.
-                if (!a.sample->transform.is_identity(components))
-                {
-                    auto const& tf = slot_for(layout, i32(i), material_slot_kind::sample_transform);
-                    auto const lanes = component_swizzle(components);
-                    cc::format_append(src,
-                                      "            float4 sv_scale = asfloat(params.Load4(ctx.param_offset + {}));\n"
-                                      "            float4 sv_bias = asfloat(params.Load4(ctx.param_offset + {}));\n",
-                                      tf.offset, tf.offset + 16);
-                    value = cc::format("{}({} * sv_scale.{} + sv_bias.{})", hlsl_type_of(a.format), value, lanes, lanes);
-                }
-
-                cc::format_append(src, "            {} = {};\n        }}\n", a.name, value);
-                break;
-            }
-            }
-        }
-
-        src += "    }\n";
-    }
-
-    cc::format_append(src, "\n    // --- {} ---\n", r.type->name);
-    src += r.type->shader;
-    cc::format_append(src, "\n    return surface;\n}}\n");
-
-    // After the entry function, so whatever it holds may call it.
-    if (!opts.epilogue_include.empty())
-        cc::format_append(src, "\n#include \"{}\"\n", opts.epilogue_include);
+    auto layout = build_layout(r);
 
     // Whether THIS permutation can reject an intersection, which is narrower than whether its type could.
     //
@@ -551,9 +566,9 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
         return false;
     }();
 
-    return {.source = cc::move(src),
+    auto source = generate_hit_group(r, layout, opts.kind, can_cut_out);
+    return {.source = cc::move(source),
             .layout = cc::move(layout),
-            .samplers = cc::move(samplers),
             .can_cut_out = can_cut_out,
             .key = material_shader_key(r.permutation_key, opts)};
 }

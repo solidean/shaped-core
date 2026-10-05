@@ -4,86 +4,36 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
-#include <shaped-graphics/binding/compiled_shader.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh> // sg::tlas_instance
+#include <shaped-graphics/raytracing/raytracing_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
+#include <shaped-shader-library/raytracing_pipeline.hh> // slib::raytracing_host_parts
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/scene/background.hh>
-#include <shaped-viewer/scene/light.hh> // light_gpu
-#include <shaped-viewer/view/camera.hh> // camera_gpu
+#include <shaped-viewer/scene/light.hh>
+#include <shaped-viewer/view/camera.hh>
 #include <typed-geometry/linalg/pos.hh>
 
-/// The per-view constant block the path tracer reads at b0 (the FrameConstants struct in shaders/pt_common.hlsli).
-/// Mirrors it lane-for-lane — keep them in lockstep.
+namespace sv
+{
+/// The frame block a trace starts from, module `tracer`'s `frame_constants`: 16 samples a pixel, 5 bounces, seed 1, and
+/// every flag, count and pad zero.
 ///
 /// The camera, the sample controls, and the table that indexes `pt_trace_desc::lights`: how many there are, and where each
 /// path's run starts in a buffer grouped by path.
 /// `pt_light_table::describe_in` is what fills that table, so it cannot disagree with the buffer it describes.
-/// Laid out as 16-byte lanes to match HLSL cbuffer packing, which is why the table is two `uint4`s rather than arrays.
-struct sv::pt_frame_constants_gpu
-{
-    camera_gpu camera;
+/// `accum_frame` is how many frames the target's running mean already holds: 0 overwrites the target, anything above it
+/// blends in place at 1 / (accum_frame + 1), and nothing caps it, so the caller restarts it whenever the image stopped
+/// describing what this frame renders.
+[[nodiscard]] shaders::tracer::frame_constants default_frame_constants();
 
-    i32 samples_per_pixel = 16; // primary rays integrated per pixel, accumulated in the one dispatch
-    i32 max_bounces = 5;        // path length: primary hit + this many diffuse bounces
-    u32 seed = 1;               // per-frame RNG seed; vary it to decorrelate accumulated frames
-
-    /// How many frames the target's running mean already holds, which is this frame's weight: 1 / (accum_frame + 1).
-    ///
-    /// 0 overwrites the target, anything above it blends in place, and nothing caps it — the estimate is exact and
-    /// converges as long as it is left alone.
-    /// The caller restarts it by sending 0, which it does whenever the image the target holds stopped describing
-    /// what this frame renders — the scene, the camera or the shaders having moved.
-    u32 accum_frame = 0;
-
-    /// How many lights `pt_trace_desc::lights` holds; 0 lights the scene by the environment alone.
-    u32 light_count = 0;
-    u32 _pad0[3] = {};
-
-    /// Where each `light_path`'s run starts in the grouped buffer, and how long it is, indexed by the path.
-    u32 path_offset[4] = {};
-    u32 path_count[4] = {};
-
-    /// Whether the raygen writes the denoiser guides — nonzero exactly when `pt_trace_desc` carries guide textures.
-    u32 write_guides = 0;
-
-    /// How many frames the guide textures already average; the same 0-overwrites rule as `accum_frame`, on a count of
-    /// its own.
-    u32 guide_frame = 0;
-
-    /// Whether the raygen writes this frame's own samples and the motion vectors, for a temporal denoiser — nonzero
-    /// exactly when `pt_trace_desc` carries `frame_output` and `guide_motion`.
-    u32 write_temporal = 0;
-
-    /// Whether the raygen writes the specular guides — nonzero exactly when `pt_trace_desc` carries
-    /// `guide_specular_albedo` and `guide_roughness`.
-    /// Its own flag rather than riding on `write_guides`, because only some denoise members read them.
-    u32 write_specular_guides = 0;
-
-    /// Whether the raygen writes the split-signal targets — nonzero exactly when `pt_trace_desc` carries
-    /// `frame_diffuse`, `frame_specular` and `guide_hit_distance`.
-    u32 write_split = 0;
-    u32 _split_pad[3] = {};
-
-    /// The camera this layer's previous frame was traced from, which the motion vectors reproject into.
-    /// The current camera when there was none, which reads as no motion.
-    camera_gpu previous_camera = {};
-
-    // Pad the block to a full 256-byte CBV range (see frame_constants.hh).
-    f32 _reserved[8] = {};
-};
-
-namespace sv
-{
-
-static_assert(sizeof(pt_frame_constants_gpu) == 256, "pt_frame_constants_gpu must be a full 256-byte CBV block");
 static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table has one slot per light_path");
-
 } // namespace sv
 
 /// The lights one trace samples, grouped by path — what `pt_trace_desc::lights` holds and the frame block's table indexes.
@@ -97,22 +47,25 @@ static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table 
 struct sv::pt_light_table
 {
     /// grouped by path in `light_path` order, each run keeping the order the lights were given in
-    cc::vector<light_gpu> records;
+    cc::vector<shaders::tracer::light_record> records;
     u32 path_offset[4] = {};
     u32 path_count[4] = {};
 
-    [[nodiscard]] static pt_light_table grouped(cc::span<light_gpu const> lights);
+    [[nodiscard]] static pt_light_table grouped(cc::span<shaders::tracer::light_record const> lights);
 
     /// Writes the count and the per-path table into `fc`.
-    void describe_in(pt_frame_constants_gpu& fc) const;
+    void describe_in(shaders::tracer::frame_constants& fc) const;
 };
 
 /// Everything one view's path trace binds.
-/// Mirrors trace_desc, but the frame block is a pt_frame_constants_gpu — it carries the sample controls and the light table the integrator needs.
 struct sv::pt_trace_desc
 {
-    sg::buffer<pt_frame_constants_gpu> frame;    // the FrameConstants cbuffer (camera + sample controls + light table)
-    sg::buffer<background_gpu> background;       // the Background cbuffer (SH environment probe) the miss reads
+    /// One element, the camera, the sample controls and the light table; read as a storage buffer, so `readonly_buffer` usage.
+    sg::buffer<shaders::tracer::frame_constants> frame;
+
+    /// The SH environment probe the miss reads; read as a storage buffer, so `readonly_buffer` usage.
+    sg::buffer<background_gpu> background;
+
     cc::span<sg::tlas_instance const> instances; // one per scene item; the TLAS is (re)built from these
 
     /// The accumulator the raygen blends into: read back and rewritten at the dispatch's own pixel.
@@ -156,15 +109,17 @@ struct sv::pt_trace_desc
     sg::texture_2d frame_specular;
     sg::texture_2d guide_hit_distance;
 
-    /// One `sv::instance_gpu` per entry of `instances`, in that same order — the closest-hit's `Instances`, read by `InstanceID()`.
-    /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
-    sg::buffer<instance_gpu> instance_table;
+    /// The first sample's primary-hit clip depth per pixel (r32_float), at `output`'s extent, or null.
 
-    /// Every light the trace samples, grouped by path as `pt_light_table` groups them — the shaders' `Lights`.
+    /// One `sv::shaders::tracer::instance_record` per entry of `instances`, in that same order — `traced.instances`, read by a hit's instance id.
+    /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
+    sg::buffer<shaders::tracer::instance_record> instance_table;
+
+    /// Every light the trace samples, grouped by path as `pt_light_table` groups them — `traced.lights`.
     ///
     /// Null means no lights at all, and then the frame block's `light_count` must be 0.
     /// The routine binds a zeroed stand-in for it, since a binding cannot be empty.
-    sg::buffer<light_gpu> lights;
+    sg::buffer<shaders::tracer::light_record> lights;
 
     /// The permutations this trace's instances shade with, one hit group each, in hit-group index order.
     ///
@@ -186,7 +141,7 @@ struct sv::pt_trace_desc
     /// **A substitution has to keep the hit group's kind**, and that is a correctness requirement rather than tidiness:
     /// a procedural BLAS must be traced by a group carrying an intersection shader, so standing a quadric permutation
     /// in with the triangle fallback reports no hits at all and the batch silently disappears until its compile lands.
-    /// Which of the two a permutation wants is read off `material_permutation::intersection`.
+    /// Which of the two a permutation wants is read off `material_permutation::kind`.
     ///
     /// Null is the same all-or-nothing behavior `fallback` describes, for quadric permutations alone.
     material_permutation const* quadric_fallback = nullptr;
@@ -196,24 +151,28 @@ struct sv::pt_trace_desc
     bound_resources const* bindless = nullptr;
 };
 
-/// The global-illumination path-tracing pass.
+/// The global-illumination path-tracing pass: shaders/tracer_pipeline.sgl, over module `tracer` (shaders/sgl).
 ///
-/// A render routine, structured exactly like pbr_raytrace_routine.
-/// It owns the slib-acquired raygen and miss shaders, and one DXR pipeline per **set of material permutations** a trace binds.
-/// The closest-hit is generated per material rather than authored, so which shaders a pipeline is built from is a property of the scene and cannot be settled in `init`.
-/// What can, and is, are the three shaders every pipeline shares.
+/// A render routine owning one ray-tracing pipeline per **ordered set of material permutations** a trace binds.
+/// The hit groups are generated per material rather than authored, so which shaders a pipeline is built from is a property
+/// of the scene and cannot be settled in `init`.
 /// Pipelines are cached on that set, so a scene whose materials are stable builds one and rebinds it every frame.
 ///
-/// The bindings come in two groups, and that split is the reflection's rather than a convenience:
-/// group 0 is the trace's own (the TLAS, the targets, the constants, the instance table, the lights).
-/// Group 1 is the manager's bindless tables, which sv owns as a schema and no shader gets to redeclare.
-/// Where the tracer shades a surface is the generated hit group; how it integrates is `shaders/pathtrace.hlsl`, which is shared.
-/// The raygen bounces each ray diffusely and estimates direct light at every hit by next-event estimation toward two sources: one light, picked uniformly from the trace's, and the SH environment.
+/// The bindings come in two groups: group 0 is `tracer.traced`, the trace's own (the TLAS, the targets, the frame block, the
+/// instance table, the lights).
+/// Group 1 is the manager's bindless tables, whose layout is `tracer.bindless` itself, so the snapshot binds as it is and sg
+/// resolves its footprint by name.
+///
+/// Each permutation's `hit_group` is one row of the shader table, a record per ray type.
+/// A caller's `hit_group_offset` counts two records per permutation and is rewritten to that permutation's row.
+/// A permutation whose hit group has not compiled is substituted by `fallback` or `quadric_fallback`, by its kind.
+///
+/// The raygen bounces each ray and estimates direct light at every hit by next-event estimation toward two sources: one light,
+/// picked uniformly from the trace's, and the SH environment.
 /// **Both are gathered by balance-heuristic multiple importance sampling** against the BSDF-sampled bounce ray.
-/// The environment pairs with that ray escaping, a light with it crossing that light, which is analytic and so is intersected rather than traced.
-/// Lights are analytic and occlude nothing, so the bounce ray counts every light it crosses before the surface, each against its own density.
-/// The light half is what keeps a near-smooth surface usable.
-/// Light sampling alone has to carry the whole GGX peak there — a huge value at a tiny probability, which is a firefly per few thousand samples rather than a converging estimate.
+/// The environment pairs with that ray escaping, a light with it crossing that light, which is analytic and so is intersected
+/// rather than traced.
+/// The light half is what keeps a near-smooth surface usable: light sampling alone has to carry the whole GGX peak there.
 /// `samples_per_pixel` paths per pixel accumulate in one dispatch.
 /// `execute` may build a pipeline, so it takes the exclusive acquire — two traces on one context serialize on this routine.
 class sv::pathtrace_routine : public sg::render_routine<pathtrace_routine>
@@ -224,8 +183,8 @@ public:
     /// **Fallible, and for a reason the other routines do not share.**
     /// Its pipelines are keyed on the ordered set of hit groups a trace names, which is scene data: unbounded, and
     /// discovered on the frame path when a material combination is first used.
-    /// That key cannot be a routine parameter, so the permutations stay a map, and this declines and leaves the target
-    /// untouched until the one this trace needs has been built.
+    /// So this declines, leaving the target untouched, while a hit group, the pipeline's description or the pipeline itself
+    /// is still building, and after either failed.
     ///
     /// Declining is what a caller must look at rather than infer.
     /// Degrading silently is right for a live reload and wrong for a test, where a broken shader would otherwise leave
@@ -236,11 +195,11 @@ protected:
     /// Creates the guide stand-ins, which outlive every shader reload.
     cc::shared_async<cc::unit> init_once(sg::routine_init_scope scope) override;
 
+    /// Drops every pipeline, which a reload makes stale.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    /// What the guide bindings hold when a trace writes no guides: every binding of the group must be filled, and the
-    /// raygen never writes them while the flag that governs each is clear.
+    /// What a target the trace writes nothing to is bound to, since every binding of the group must be filled.
     sg::texture_2d _guide_normal_stand_in;
     sg::texture_2d _guide_depth_stand_in;
     sg::texture_2d _guide_albedo_stand_in;
@@ -252,51 +211,32 @@ private:
     sg::texture_2d _guide_hit_distance_stand_in;
     sg::texture_2d _guide_motion_stand_in;
 
-    /// One pipeline, built over one ordered set of hit groups.
-    ///
-    /// `group_layout` covers the trace's own bindings alone: the manager's tables are the second group and are
-    /// deliberately not merged into it, so a generated shader redeclaring them cannot change sv's schema.
-    /// The pipeline layout is not among these — the pipeline holds it, which is what keeps the root signature alive.
+    /// One pipeline, built over one ordered set of hit groups, in two steps polled rather than waited on.
     struct pipeline_variant
     {
-        sg::binding_group_layout_handle group_layout;
-        sg::raytracing_pipeline_handle pipeline;
-        sg::raytracing_shader_table_handle table;
-        sg::raygen_index raygen = {};
+        /// The hit groups the host hands the pipeline, in the desc's order, which the table's rows follow.
+        slib::raytracing_host_parts host;
+
+        /// slib's description over `host`, while it is still being stated.
+        cc::shared_async<sg::raytracing_pipeline_description> pending_description;
 
         /// The state object while it is still being built.
-        /// Held rather than waited on: this permutation is discovered on the frame path, and a build there is the one
-        /// thing that must not stall — so the frames until it lands trace without it.
         sg::async_raytracing_pipeline pending;
 
-        /// Set when this permutation cannot be built: a shader that will not compile, or a state object that refused.
-        /// Remembered rather than retried every frame, since the same inputs fail the same way until a reload.
-        bool failed = false;
+        sg::raytracing_pipeline_handle pipeline;
+        sg::raytracing_shader_table_handle table;
 
-        /// What the shader table is built from, kept until the pipeline it indexes into exists.
-        /// These are positions in the pipeline description rather than objects, so holding them costs nothing.
-        sg::raygen_shader_handle pending_raygen = {};
-        sg::miss_shader_handle pending_miss = {};
-        sg::miss_shader_handle pending_shadow_miss = {};
-        cc::vector<sg::hit_shader_handle> pending_hits;
+        /// What an instance's `hit_group_offset` becomes, per hit group: the first record of its row.
+        cc::vector<u32> row_offsets;
+
+        /// Set when the description or the state object refused, which the same inputs repeat until a reload.
+        bool failed = false;
     };
 
-    /// Builds the shader table for a variant whose pipeline has just landed.
-    static void _finish_variant(sg::context& ctx, pipeline_variant& variant);
-
-    /// The variant for `d`'s hit groups, or null while it is still being built or after it failed.
-    ///
-    /// Never waits.
-    /// A permutation is discovered when a frame first uses that material set, which is on the frame path — so this
-    /// starts the work and reports what is ready, and the trace happens a frame or two later.
+    /// The variant for `d`'s hit groups, or null while it is building and after it failed; never waits.
     [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx, pt_trace_desc const& d);
 
-    // Re-acquired by init on every reload, which is also when every variant built from the old ones is dropped.
-    sg::async_compiled_shader _raygen_shader;
-    sg::async_compiled_shader _miss_shader;
-    sg::async_compiled_shader _shadow_miss_shader;
-
-    /// Keyed on the hit-group set in order, together with the layout the second group is bound through.
+    /// Keyed on the substituted hit groups in order; dropped by every reload.
     /// A map rather than a vector for the references: a variant is held across the dispatch that follows its build.
     cc::map<cc::hash128, pipeline_variant> _variants;
 };

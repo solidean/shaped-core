@@ -13,13 +13,20 @@
 /// The type is what declares the contract — a mesh's attributes and textures mean nothing until a type names them — and the
 /// material is what fills it in.
 ///
-/// `shader` is an HLSL **fragment**, not a compilable shader.
-/// It carries no bindings and, normally, no sampling code: it reads each signature attribute as an already-initialized local of
-/// the type `attribute_format` maps to, and assigns the surface output.
-/// Everything around it — the bindless declarations, the parameter block, one initializer per attribute — is generated per
-/// permutation, which is what lets every material that samples no texture share one compiled shader.
+/// `shader` is an SGL **fragment**, not a compilable shader.
+/// It carries no bindings and, normally, no sampling code: it reads each signature attribute as an already-initialized,
+/// immutable local of the type `attribute_format` maps to, and assigns the fields of `surface`, the one `let mut` there.
+/// Its statements are written unindented, and the generator indents them into the material function's body.
+/// Everything around it — the bindless loads, the parameter block, one local per attribute — is generated per permutation,
+/// which is what lets every material that samples no texture share one compiled hit group.
 ///
-/// `hash` is the content key over name, signature and shader together.
+/// A minimal type, which reads one color and is lit like plaster:
+///
+///     material_type::create("plaster", {material_signature_entry::of("tint", tg::vec3f(0.9f, 0.9f, 0.85f))},
+///                           "surface.base_color = saturate(tint)\n"
+///                           "surface.specular_roughness = 0.8\n");
+///
+/// `hash` is the content key over name, signature, fragment and opacity attribute together.
 /// Two types built from equal inputs hash equal, so a library registering the same type twice keeps one.
 struct sv::material_type
 {
@@ -29,6 +36,7 @@ struct sv::material_type
     /// every attribute this type reads, in the order a generated shader declares them
     cc::vector<material_signature_entry> signature;
 
+    /// the SGL fragment, run inside the generated material function
     cc::string shader;
 
     /// Which declared attribute this type's fragment writes `surface.geometry_opacity` from, or empty for a type that

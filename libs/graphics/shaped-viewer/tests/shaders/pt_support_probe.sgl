@@ -1,0 +1,116 @@
+// A probe that calls every helper of modules `pt` and `scene` the camera probe does not, so each is compiled, run and measured.
+//
+// These are held to properties a test can check exactly — a unit direction, a weight pair summing to one, a ray landing where it was aimed.
+// pt-support-probe-test.cc says what each lane must hold.
+use pt
+use scene
+
+/// `scene.light` as the host uploads it, field for field: `tracer.light_record`, which the test static_asserts against this struct's mirror.
+/// A struct of its own because a buffer element naming a module's struct has no C++ mirror yet.
+struct probe_light:
+    position: float3
+    path: uint
+    u: float3
+    area: float
+    v: float3
+    flags: uint
+    emission: float3
+    cone_scale: float
+    normal: float3
+    cone_offset: float
+    one_minus_cos_angular_radius: float
+    link_mask: uint
+    pad0: float2
+
+binding pt_support_io:
+    /// The lights, which item `i` reads as `lights[i % light_count]`.
+    lights: buffer[probe_light]
+
+    /// The 16 SH coefficients of the environment, as `sv::background_gpu` lays them out, as `tracer.traced.background` declares it.
+    sh: buffer[float4]
+
+    /// Eight per item, in the order `pt_support_measure` writes them.
+    results: mut buffer[float4]
+
+    item_count: uint
+    light_count: uint
+
+/// A unit direction from three uniforms, kept away from zero length.
+fun probe_direction(u: float3) -> float3:
+    return normalize(u - 0.5 + float3(0.0, 0.0, 1e-3))
+
+@compute(64) fun pt_support_measure(@thread_id id: int3){pt_support_io}:
+    let item = id.x as uint
+    if item >= pt_support_io.item_count => return
+
+    let l = scene.light(..pt_support_io.lights[(item % max(pt_support_io.light_count, 1)) as int])
+
+    let mut sh = float4[16].filled(float4(0.0, 0.0, 0.0, 0.0))
+    for k in 0 ..< 16:
+        sh[k] = pt_support_io.sh[k]
+
+    let mut rng = pt.hash(item * 9781 + 1)
+    let u1 = pt.rand(mut rng)
+    let u2 = pt.rand(mut rng)
+    let u3 = pt.rand(mut rng)
+    let u4 = pt.rand(mut rng)
+    let u5 = pt.rand(mut rng)
+    let n = probe_direction(float3(u1, u2, u3))
+
+    // x: a uniform, y: the two MIS weights of one pair summed, z: the environment pdf, w: the selection pdf over the lights
+    let weights = pt.mis_weight(u1, u2) + pt.mis_weight(u2, u1)
+    let w0 = float4(u1, weights, pt.env_pdf(), pt.light_select_pdf(pt_support_io.light_count))
+
+    // a cosine-weighted direction about `n`, and whether it is finite
+    let cosine = pt.sample_cosine_hemisphere(n, u4, u5)
+    let finite = if pt.is_finite(cosine) => 1.0 else 0.0
+    let w1 = float4(cosine.x, cosine.y, cosine.z, finite)
+
+    // a Henyey-Greenstein direction about `n`, and the phase function's value along it
+    let g = u3 * 1.8 - 0.9
+    let hg = pt.sample_hg(n, g, u4, u5)
+    let w2 = float4(hg.x, hg.y, hg.z, pt.hg_phase(dot(n, hg), g))
+
+    // a direction inside the light's disc, and whether `in_disc` agrees it is inside
+    let toward = -l.normal
+    let cone = pt.sample_cone(toward, l.one_minus_cos_angular_radius, u4, u5)
+    let inside = if pt.in_disc(l, cone) => 1.0 else 0.0
+    let w3 = float4(cone.x, cone.y, cone.z, inside)
+
+    // a ray straight down onto the rect, from a point 5 above its plane: whether and where it lands, and the density there
+    let origin = l.position + l.normal * 5.0 + l.u * ((u1 - 0.5) * 4.0) + l.v * ((u2 - 0.5) * 4.0)
+    let mut t_hit = -1.0
+    let mut cos_light = -1.0
+    let hits = pt.rect_intersect(l, origin, toward, mut t_hit, mut cos_light)
+    let landed = if hits => 1.0 else 0.0
+    let w4 = float4(landed, t_hit, cos_light, pt.light_pdf(l, pt_support_io.light_count, t_hit * t_hit, cos_light))
+
+    let radiance = scene.background_radiance(sh, n)
+    let w5 = float4(radiance.x, radiance.y, radiance.z, pt.disc_pdf(l, pt_support_io.light_count))
+
+    let irradiance = scene.background_irradiance(sh, n)
+    let w6 = float4(irradiance.x, irradiance.y, irradiance.z, scene.light_cone(l, u1))
+
+    // the flags and the walk limits, as numbers
+    let shadows = if scene.light_casts_shadows(l) => 1.0 else 0.0
+    let visible = if scene.light_visible_to_camera(l) => 1.0 else 0.0
+    let w7 = float4(shadows, visible, pt.roulette_after as float, pt.scatter_cap as float)
+
+    // the same ray from behind: from 5 below the rect's plane along its normal, onto its back face
+    let behind = l.position - l.normal * 5.0 + l.u * ((u1 - 0.5) * 4.0) + l.v * ((u2 - 0.5) * 4.0)
+    let mut t_back = -1.0
+    let mut cos_back = -1.0
+    let hits_back = pt.rect_intersect(l, behind, l.normal, mut t_back, mut cos_back)
+    let landed_back = if hits_back => 1.0 else 0.0
+    let w8 = float4(landed_back, t_back, cos_back, 0.0)
+
+    let base = id.x * 9
+    pt_support_io.results[base] = w0
+    pt_support_io.results[base + 1] = w1
+    pt_support_io.results[base + 2] = w2
+    pt_support_io.results[base + 3] = w3
+    pt_support_io.results[base + 4] = w4
+    pt_support_io.results[base + 5] = w5
+    pt_support_io.results[base + 6] = w6
+    pt_support_io.results[base + 7] = w7
+    pt_support_io.results[base + 8] = w8

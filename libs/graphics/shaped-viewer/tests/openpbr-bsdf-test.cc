@@ -12,10 +12,10 @@
 #include <sv_test_shaders.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
-// What the OpenPBR closure in shaders/openpbr.hlsli actually RETURNS, measured rather than assumed.
+// What the OpenPBR closure of module `openpbr` (shaders/sgl) actually RETURNS, measured rather than assumed.
 //
 // Every other GPU test in this library asserts that something ran.
-// These assert on the numbers that came back, through `shaders/bsdf_probe.hlsl`, over estimators whose expected value is
+// These assert on the numbers that came back, through `tests/shaders/bsdf_probe.sgl`, over estimators whose expected value is
 // known in closed form — so a tolerance here is a statement about a named approximation and nothing else:
 //
 //   - the directional albedo, which must not exceed 1 and must REACH 1 for a surface that absorbs nothing,
@@ -24,7 +24,7 @@
 //   - which interior a sampled direction entered against the side it went to, which must agree exactly — the assertion a
 //     reflective lobe leaking a below-horizon direction cannot hide from,
 //   - the transmitted lobe's channel ratios, which are its colour and nothing else,
-//   - and a layout echo pinning `probe_surface` against the `sv::surface` the GPU decodes.
+//   - and a layout echo pinning `probe_surface` against the surface the GPU decodes.
 //
 // A lobe added to the closure belongs in `surfaces_under_test` below, and is then held to all of them at once.
 
@@ -32,8 +32,9 @@ namespace
 {
 using namespace cc::primitive_defines;
 
-/// `sv::surface` from shaders/openpbr.hlsli, lane-for-lane — keep the two in lockstep.
-/// The `probe_echo` check below is what holds them there: it reads three fields back through the GPU's own decode.
+/// `probe_surface` from tests/shaders/bsdf_probe.sgl, which is `openpbr.surface` lane for lane — keep the three in lockstep.
+/// The `probe_echo` check below holds this mirror to `probe_surface` alone: the echo reads it before the probe splats it into
+/// `openpbr.surface` positionally, so that splat's field order is held by hand.
 struct probe_surface
 {
     float base_weight = 1.0f;
@@ -88,9 +89,9 @@ struct probe_surface
     float geometry_handedness = 1.0f;
 };
 
-static_assert(sizeof(probe_surface) == 69 * 4, "probe_surface must match sv::surface in shaders/openpbr.hlsli");
+static_assert(sizeof(probe_surface) == 69 * 4, "probe_surface must match probe_surface in tests/shaders/bsdf_probe.sgl");
 
-/// Which estimator a case runs — mirrors the `probe_*` constants in shaders/bsdf_probe.hlsl.
+/// Which estimator a case runs — mirrors the `probe_*` constants in tests/shaders/bsdf_probe.sgl.
 enum class probe_mode : u32
 {
     albedo = 0,
@@ -106,7 +107,7 @@ enum class probe_mode : u32
     albedo_specular = 10,
 };
 
-/// `sv::probe_case` from shaders/bsdf_probe.hlsl, lane-for-lane.
+/// `probe_case` from tests/shaders/bsdf_probe.sgl, lane-for-lane.
 struct probe_case
 {
     tg::vec3f wo = tg::vec3f(0, 0, 1);
@@ -126,7 +127,7 @@ struct probe_case
     float pad4 = 0.0f;
 };
 
-static_assert(sizeof(probe_case) == 320, "probe_case must match sv::probe_case in shaders/bsdf_probe.hlsl");
+static_assert(sizeof(probe_case) == 320, "probe_case must match probe_case in tests/shaders/bsdf_probe.sgl");
 
 /// How many work items share one case, and how many samples each draws.
 ///
@@ -151,23 +152,27 @@ struct probe_result
     float samples = 0.0f;
 };
 
-/// Dispatches `cases` and returns one mean per case.
+static_assert(sizeof(sv_test::shaders::probe_case) == sizeof(probe_case),
+              "probe_case must match probe_case in tests/shaders/bsdf_probe.sgl");
+
+/// Dispatches `cases` through the probe and returns one mean per case.
 ///
 /// Everything is built inline rather than behind a routine: nothing a viewer runs dispatches this shader, so a routine
 /// would put test-only machinery in the library.
 cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc::span<probe_case const> cases)
 {
-    auto const shader = sv_test::shaders::bsdf_probe.compute.BsdfProbe->acquire(ctx);
-    co_await cc::async_settled(shader);
-    if (shader->has_error())
-        FAIL(cc::format("the BSDF probe shader did not compile:\n{}", shader->try_error()->underlying().to_string()));
+    auto const& entry = sv_test::shaders::bsdf_probe.measure;
+    auto const compiled_shader = entry->acquire(ctx);
+    co_await cc::async_settled(compiled_shader);
+    if (compiled_shader->has_error())
+        FAIL(cc::format("the BSDF probe shader did not compile:\n{}",
+                        compiled_shader->try_error()->underlying().to_string()));
 
-    auto const* const compiled = shader->try_value();
+    auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // the probe shader must build; without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::probe_bindings>();
-    auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
-    auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::probe>();
+    auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
 
@@ -180,13 +185,15 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
     auto const result_buffer = ctx.transient.create_buffer<tg::vec4f>(
         item_count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
+    cmd->compute.bind_pipeline(*built);
+    // SGL reads no buffer's length, so the probe is told both counts.
     auto const group = ctx.transient.create_binding_group(
         *cmd, group_layout,
-        sv_test::shaders::probe_bindings{.Cases = case_buffer.as_readonly_buffer(),
-                                         .Results = result_buffer.as_readwrite_buffer()});
-
-    cmd->compute.bind_pipeline(*built);
-    cmd->compute.bind<sv_test::shaders::probe_bindings>(*group);
+        sv_test::shaders::probe{.cases = case_buffer.reinterpret_as<sv_test::shaders::probe_case>().as_readonly_buffer(),
+                                .results = result_buffer.as_readwrite_buffer(),
+                                .item_count = u32(item_count),
+                                .case_count = u32(cases.size())});
+    cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(item_count);
 
     auto readback = cmd->download.data_from_buffer(result_buffer);
@@ -438,7 +445,7 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     auto const surfaces = surfaces_under_test();
 
@@ -629,7 +636,7 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
 // A wrong guide does not make an image wrong, it makes a denoised image subtly worse — texture averaged away, or a
 // mirror blurred like a matte surface — which is exactly the failure no rendered comparison catches.
 //
-// `pt_guides.hlsli` holds them apart from the path tracer's bindings so this probe can call the real functions.
+// Module `openpbr`'s guides (shaders/sgl/openpbr_guides.sgl) hold them apart from the path tracer's bindings so this probe can call the real functions.
 ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are read from",
                      (sg::context_handle const& ctx_h))
 {
@@ -641,7 +648,7 @@ ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are rea
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     // One case per (surface, guide), so a surface's three guides come back from one dispatch.
     auto const guide_of = [&](probe_surface const& s, probe_mode mode)
@@ -731,7 +738,7 @@ ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what the
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no DXC compiler to build the probe shader");
+        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
     // A white Lambertian with its specular layer off: everything it reflects is diffuse, and being lossless it
     // reflects all of it.

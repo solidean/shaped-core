@@ -6,7 +6,7 @@ namespace sv
 {
 namespace
 {
-// The real-SH basis normalizations, the same numbers shaders/background.hlsli evaluates.
+// The real-SH basis normalizations, the same numbers `scene.background_radiance` (shaders/sgl/scene_items.sgl) evaluates.
 // A factory that wants radiance `c` along a basis function stores `c / k`, because the miss multiplies the coefficient back by `k`.
 constexpr f32 k_y00 = 0.2820948f; // Y(0,0), the constant term
 constexpr f32 k_y1 = 0.4886025f;  // Y(1,-1)/y, Y(1,0)/z, Y(1,1)/x

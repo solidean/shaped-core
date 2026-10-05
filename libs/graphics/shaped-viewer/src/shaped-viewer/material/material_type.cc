@@ -8,7 +8,7 @@ namespace sv
 {
 namespace
 {
-/// Whether `name` is a plain C identifier — the only shape `shader_generator` can paste into HLSL as a local.
+/// Whether `name` is a plain C identifier — the only shape `shader_generator` can paste into SGL as a local.
 [[nodiscard]] bool is_identifier(cc::string_view name)
 {
     if (name.empty())
@@ -43,6 +43,7 @@ namespace
 }
 
 /// Everything else HLSL will not let a local be called.
+/// Stricter than SGL needs, since SGL mints every target name itself, and kept because it covers SGL's control-flow keywords too.
 /// Object types are in here rather than in `is_builtin_type` because they take no dimension suffix.
 [[nodiscard]] bool is_keyword(cc::string_view name)
 {
@@ -157,6 +158,20 @@ namespace
             return true;
     return false;
 }
+
+/// What SGL will not let a local be called, beyond what `is_keyword` refuses already.
+/// The modules a generated hit group uses are in here too, since a local of one's name would hide it from the lines after.
+[[nodiscard]] bool is_sgl_reserved(cc::string_view name)
+{
+    constexpr cc::string_view reserved[]
+        = {"and",  "as",  "assert",   "binding",  "callables", "fun",   "hit_group", "let",     "loop",  "module",
+           "mut",  "not", "notation", "or",       "pipeline",  "print", "rays",      "require", "self",  "test",
+           "type", "use", "yield",    "material", "openpbr",   "pt",    "quadric",   "scene",   "tracer"};
+    for (auto const r : reserved)
+        if (name == r)
+            return true;
+    return false;
+}
 } // namespace
 
 material_type material_type::create(cc::string name,
@@ -197,7 +212,7 @@ material_type material_type::create(cc::string name,
                       || d.format == attribute_format::of_vector(scalar_type::f32, 4),
                   "an attribute interpolated as a rotation must be a 4-component f32 — a quaternion in xyzw order");
 
-    // A name is pasted into generated HLSL as a local, and a material type's own fragment is written against it — so a name
+    // A name is pasted into the generated SGL as a local, and a material type's own fragment is written against it — so a name
     // the generator cannot emit is rejected rather than sanitized, since mangling it would silently break that fragment.
     for (auto const& d : type.signature)
     {
@@ -207,10 +222,11 @@ material_type material_type::create(cc::string name,
         CC_ASSERT(!is_builtin_type(d.name) && !is_keyword(d.name),
                   "a material attribute may not be named after an HLSL "
                   "keyword or builtin type");
+        CC_ASSERT(!is_sgl_reserved(d.name), "a material attribute may not be named after an SGL keyword or a module "
+                                            "a generated hit group uses");
         CC_ASSERT(!cc::string_view(d.name).starts_with("sv_"),
-                  "the sv_ prefix belongs to the generator (sv_sampler_*, and "
-                  "the entry function itself); a declared attribute may not "
-                  "use it");
+                  "the sv_ prefix belongs to the generator (sv_attribute_*, sv_supplied_* and the "
+                  "material function itself); a declared attribute may not use it");
         CC_ASSERT(d.name != "surface" && d.name != "ctx", "'surface' and 'ctx' are the entry function's own locals");
     }
 

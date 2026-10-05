@@ -1,0 +1,79 @@
+// The shading frame: the local coordinates every lobe of the closure works in, and how a hit builds them.
+module openpbr
+
+/// The local frame a lobe is evaluated in: three world-space axes whose `n` is the shading normal.
+struct frame:
+    t: float3
+    b: float3
+    n: float3
+
+/// An orthonormal frame around `n`, with an arbitrary but stable tangent.
+///
+/// The fallback for a surface that supplies no tangent frame, and the tangent it invents follows nothing.
+/// So an anisotropic highlight on such a surface points somewhere arbitrary but consistent, and a normal map applied through it does not follow the uv layout.
+/// Both want `frame_from_quaternion` and a mesh that carries the frame.
+fun make_frame(n: float3) -> frame:
+    let f_n = normalize(n)
+    let up = if abs(f_n.z) < 0.999 => float3(0.0, 0.0, 1.0) else float3(1.0, 0.0, 0.0)
+    let f_t = normalize(cross(up, f_n))
+    return frame(f_t, cross(f_n, f_t), f_n)
+
+/// A world direction in the frame's local coordinates.
+fun to_local(f: frame, w: float3) -> float3:
+    return float3(dot(w, f.t), dot(w, f.b), dot(w, f.n))
+
+/// A local direction back in world space.
+fun to_world(f: frame, w: float3) -> float3:
+    return w.x * f.t + w.y * f.b + w.z * f.n
+
+/// `v` rotated by the unit quaternion `q`, in xyzw order.
+fun quat_rotate(q: float4, v: float3) -> float3:
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
+
+/// The frame a tangent-frame quaternion describes, with `handedness` mirroring the bitangent.
+///
+/// The quaternion carries the rotation alone.
+/// A mirrored uv island is a REFLECTION and no rotation expresses one, which is why handedness has to arrive beside it rather than inside it.
+fun frame_from_quaternion(q: float4, handedness: float) -> frame:
+    let mirror = if handedness < 0.0 => -1.0 else 1.0
+    let f_t = quat_rotate(q, float3(1.0, 0.0, 0.0))
+    let f_b = quat_rotate(q, float3(0.0, 1.0, 0.0)) * mirror
+    let f_n = quat_rotate(q, float3(0.0, 0.0, 1.0))
+    return frame(f_t, f_b, f_n)
+
+/// The same frame with its normal reversed, for a surface hit from behind.
+///
+/// Exactly one tangent flips with it.
+/// Reversing the normal alone would leave `t x b` pointing away from `n`, turning the frame left-handed and mirroring every anisotropic and normal-mapped result on backfaces.
+fun flip_frame(f: frame) -> frame:
+    return frame(f.t, -f.b, -f.n)
+
+/// `f` spun about its own normal so its tangent points along the tangent-space direction `t_tangent`.
+///
+/// This is what `geometry_tangent` asks for, and it is the only thing that gives an anisotropic highlight a direction.
+/// The two roughness axes are measured against the frame's tangent, so rotating the frame rotates the highlight.
+/// A direction with nothing left in the tangent plane — one that came out parallel to the normal — leaves the frame alone rather than picking an arbitrary replacement.
+fun rotate_frame_to_tangent(f: frame, t_tangent: float3) -> frame:
+    let t = t_tangent.x * f.t + t_tangent.y * f.b
+    let len = length(t)
+    if len < 1e-6 => return f
+
+    let rt = t / len
+    let keep = if dot(cross(f.n, rt), f.b) < 0.0 => -1.0 else 1.0
+    return frame(rt, cross(f.n, rt) * keep, f.n)
+
+/// `f` reoriented so its normal is the tangent-space direction `n_tangent`, which is what a normal map supplies.
+///
+/// The tangent is carried across rather than rebuilt, so the frame keeps following the uv layout.
+/// That is the whole reason for having a tangent frame instead of a bare normal.
+fun perturb_frame(f: frame, n_tangent: float3) -> frame:
+    let n = normalize(to_world(f, normalize(n_tangent)))
+
+    // Gram-Schmidt the old tangent against the new normal; a tangent that ended up parallel to it leaves the frame alone.
+    let t = f.t - n * dot(n, f.t)
+    let len = length(t)
+    if len < 1e-6 => return make_frame(n)
+
+    let rt = t / len
+    let keep = if dot(cross(n, rt), f.b) < 0.0 => -1.0 else 1.0
+    return frame(rt, cross(n, rt) * keep, n)

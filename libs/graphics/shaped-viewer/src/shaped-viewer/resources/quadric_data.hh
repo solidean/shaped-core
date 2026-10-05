@@ -8,9 +8,9 @@
 #include <shaped-viewer/scene/quadric_set.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 
-/// One quadric primitive as the intersection shader reads it, by `PrimitiveIndex()`.
+/// One quadric primitive as the intersection shader reads it, by the primitive index.
 ///
-/// Keep this and the HLSL `sv::quadric` in lockstep: it is a byte layout, not a description of one.
+/// Keep this and `quadric.load_primitive` (shaders/sgl/quadric_runtime.sgl) in lockstep: it is a byte layout, not a description of one.
 ///
 /// It is the CPU `sv::quadric_primitive` MINUS its box, because the two travel to the GPU in different buffers.
 /// The boxes are the procedural BLAS's own build input and are never read by a shader — an intersection shader cannot reach the
@@ -32,7 +32,7 @@ struct sv::quadric_gpu
 
 namespace sv
 {
-static_assert(sizeof(quadric_gpu) == 96, "quadric_gpu must match sv::quadric in the quadric shader runtime");
+static_assert(sizeof(quadric_gpu) == 96, "quadric_gpu must match quadric.primitive");
 } // namespace sv
 
 /// What a caller hands the quadric manager: the primitives, plus the content hash that identifies them.

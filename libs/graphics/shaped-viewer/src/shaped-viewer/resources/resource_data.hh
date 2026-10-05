@@ -9,7 +9,6 @@
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/content_hash.hh>
-#include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -59,8 +58,7 @@ struct sv::triangle_data
 /// Geometry as an indexed triangle list: 3 consecutive indices per triangle, each naming a position.
 /// `indices.size()` must be a multiple of 3, and every index must be < `positions.size()`.
 ///
-/// Triangle order — and with it `PrimitiveIndex()`, which is what a material set is indexed by — follows the
-/// index buffer, not the position buffer.
+/// Triangle order — and with it the primitive index a hit reports — follows the index buffer, not the position buffer.
 struct sv::indexed_triangle_data
 {
     cc::pinned_data<tg::pos3f const> positions;
@@ -132,22 +130,5 @@ struct sv::texture_data
                 .width = width,
                 .height = height,
                 .mip_count = mip_count};
-    }
-};
-
-/// One PBR material per triangle, indexed by `PrimitiveIndex()` in the closest-hit — so the count must match
-/// the triangle count of the mesh it is drawn with.
-struct sv::material_data
-{
-    cc::pinned_data<pbr_material const> materials;
-    cc::hash128 hash;
-
-    /// Pins `materials` and hashes their bytes.
-    template <class Materials>
-    [[nodiscard]] static material_data create(Materials&& materials)
-    {
-        cc::pinned_data<pbr_material const> pinned = cc::make_pinned_data(cc::forward<Materials>(materials));
-        auto const hash = cc::hash128::create(pinned.span().as_bytes(), impl::material_hash_seed);
-        return {.materials = cc::move(pinned), .hash = hash};
     }
 };

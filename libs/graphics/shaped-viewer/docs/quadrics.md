@@ -5,7 +5,7 @@
 **`examples/quadric-gallery.cc` is what the representation reaches; `examples/mesh-structure.cc` is it in practice, and `examples/mesh-structure-dense.cc` is it at mesh scale.**
 **The [cheat sheet](../cheat-sheet.md) is the API.**
 
-Analytic quadric surfaces as a second kind of scene item, traced by a custom DXR intersection shader over a procedural (AABB) BLAS.
+Analytic quadric surfaces as a second kind of scene item, traced by a custom intersection shader over a procedural (AABB) BLAS.
 sv draws exactly one kind of thing today — a triangle mesh, placed by a transform, shaded by a generated material permutation — and this is the second.
 
 The motivating workload is technical rendering of a mesh's **structure** rather than its surface.
@@ -17,7 +17,7 @@ Most of what this needs already exists and none of it was built for this.
 `sg::blas_aabbs` and `build_blas` over AABBs are the geometry half, and `sg::hit_shader::intersection` picking the procedural hit-group type is the pipeline half.
 Nothing in sv has ever used it.
 `sv::scene_item_kind` was written with a second kind in mind and says so.
-And `generate_material_shader` keys its compile on the runtime and epilogue includes as well as on the material.
+And `generate_material_shader` keys its compile on the geometry kind as well as on the material.
 So a second geometry kind is a second *spelling* of a material a caller already has, rather than a second material system.
 
 ## What a primitive is
@@ -93,7 +93,7 @@ It is deliberately not in the first version.
 
 **One procedural BLAS and one TLAS instance per batch.**
 The batch's AABB buffer holds one box per primitive, and its primitive buffer holds one record per primitive.
-The intersection shader reads `PrimitiveIndex()` into that buffer through the bindless table, exactly as a closest-hit today reads `InstanceID()` into the instance table.
+The intersection shader reads the hit's primitive index into that buffer through the bindless table, exactly as a closest hit reads its instance id into the instance table.
 
 The alternative, one TLAS instance per primitive over a shared unit BLAS, does not survive the target scale.
 sv rebuilds its TLAS every frame, because refit is not implemented in sg yet.
@@ -112,10 +112,9 @@ It differs in one way, and deliberately: `quadric_data` BORROWS its span rather 
 The authored form cannot be uploaded as it stands — it splits into a primitive buffer and a box buffer — so the acquire builds new arrays anyway, and only on a miss.
 
 **One material per batch**, so a multi-material set is several batches.
-One BLAS can hold several geometries and DXR can select a hit group per geometry.
-But that selection is multiplied by `MultiplierForGeometryContributionToHitGroupIndex`, which sv passes as **0** in both of its TraceRay calls.
-Raising it would change hit-record indexing for every mesh in every trace, since the multiplier is a property of the ray rather than of the instance.
-That is a repo-wide change to save a TLAS instance that costs 64 bytes.
+One BLAS can hold several geometries, and SGL's ray set makes each geometry its own row of hit records.
+Using that would make `pathtrace_routine`'s one row per permutation a row per (permutation, geometry), for every mesh in every trace.
+That is a change to the whole table layout to save a TLAS instance that costs 64 bytes.
 
 ## Authoring
 
@@ -159,8 +158,8 @@ There is no polyline overload; a polyline is a loop at the call site.
 ## Materials
 
 **A quadric permutation is a second spelling of the same generator.**
-It is called with a quadric runtime include and a quadric epilogue include, in place of `material_runtime.hlsli` and `pt_material_hit.hlsli`.
-`material_shader_key` already hashes those includes alongside the permutation key, so `material_shader_cache` holds both spellings of one material side by side with nothing new added to it.
+It is called with `geometry_kind::quadrics`, which joins module `quadric` and makes the hit group procedural: `tracer.intersect_quadric` as its intersection, `tracer.shade_quadric` as its closest hit.
+`material_shader_key` hashes the kind alongside the permutation key, so `material_shader_cache` holds both spellings of one material side by side.
 The consequence is that a material placed on both a mesh and a quadric set compiles twice.
 That is the price of the alternative being a divergent branch on geometry kind, inside the hottest shader in the renderer.
 
@@ -174,19 +173,19 @@ enum class sv::attribute_frequency : sv::u8
     per_instance, // both — one value for the whole placement
     per_vertex,   // mesh only
     per_corner,   // mesh only
-    per_triangle, // both — one value per element of the primitive stream, indexed by PrimitiveIndex()
+    per_triangle, // both — one value per element of the primitive stream, indexed by the hit's primitive index
     per_edge,     // mesh only, and reserved
 };
 ```
 
 **That is what lets one material definition generate one shader body for both geometries.**
 `per_triangle` means "one value per element of the geometry's own primitive stream" — a triangle for a mesh, a quadric for a
-batch — so the generated load is the identical line of HLSL either way.
+batch — so the generated load is the identical line of SGL either way.
 The name is the mesh's and the meaning is the index; renaming it was considered and dropped, because a geometry-neutral name
 would read as a category containing `per_vertex` and `per_edge` rather than as a peer of them.
 
-So the two geometries differ in the **preamble** alone: `make_context` builds a triangle's shading context from its corners and
-barycentrics, `make_quadric_context` builds a quadric's from `PrimitiveIndex()`, and everything the material fragment reads is
+So the two geometries differ in the **preamble** alone: `material.make_context` builds a triangle's shading context from its corners and
+barycentrics, `quadric.make_context` builds a quadric's from its primitive index, and everything the material fragment reads is
 the same afterwards.
 
 A frequency the geometry cannot number loses to the next-coarsest rank, exactly as a format mismatch already did.
@@ -247,14 +246,14 @@ That one is silent, unlike an attribute bound at a frequency the geometry cannot
 
 ```text
 for each of the up to four roots — two of the surface quadric, two of the clipper:
-    skip it unless t is in [RayTMin, RayTMax]
+    skip it unless t is in [t_min, t_current]
     skip it unless it lies inside the OTHER quadric
     keep it if it is nearer than the best so far
 report the best, with the gradient of whichever quadric it landed on
 ```
 
 The clipper's two roots are only considered when the emit bit is set, so an open tube solves one quadratic and a capped one two.
-Still one `ReportHit` and no sorting.
+Still one `report` and no sorting.
 
 **Taking the nearest survivor rather than the first root is load-bearing for ordinary geometry**, not only for interior views.
 A slab-clipped cylinder is an open tube with nothing closing its ends.
@@ -262,7 +261,7 @@ Seen near end-on — which is what every edge pointing at the camera does — th
 The far root is the inside of the opposite wall, and is genuinely visible.
 Dropping the hit there would make an open cylinder disappear at exactly the view where it is most common.
 
-The same second test covers a ray whose origin is inside the primitive, whose near root is behind `RayTMin`.
+The same second test covers a ray whose origin is inside the primitive, whose near root is behind `t_min`.
 
 **AABBs are computed on the CPU**, by the factory that turns a tg object into a record, and stored in the batch's AABB buffer.
 Nothing recomputes one on the GPU and nothing should: an intersection shader cannot read the acceleration structure's own boxes, so a box the shader needed would have to be duplicated into the record.
@@ -281,7 +280,7 @@ tg's own TODO wants a `quadric` for a different reason: it is what a `sphere` or
 That entry stands on its own schedule rather than being absorbed into a renderer feature.
 
 There is no ray-primitive query either.
-The math has to exist in HLSL because that is where it runs.
+The math has to exist in the shader because that is where it runs.
 And tg's query layer is explicitly gated behind its representations settling — see [typed-geometry's structure](../../../base/typed-geometry/docs/structure.md).
 A CPU reference implementation for testing lives beside sv's test.
 
@@ -290,7 +289,7 @@ A CPU reference implementation for testing lives beside sv's test.
 Not designed here, and no decision above was made in anticipation of one.
 
 A quadric rasterizes as a coarse proxy with the same quadratic solved per pixel and the true depth written, and that works identically whatever the record holds.
-The one thing recorded as intent is that **the primitive buffer stays a plain bindless byte-address buffer whose indexing assumes no ray-tracing stage**, which the batching decision already produces.
+The one thing recorded as intent is that **the primitive buffer stays a plain bindless byte buffer whose indexing assumes no ray-tracing stage**, which the batching decision already produces.
 Depth semantics — conservative depth costs the early-z rejection that is the raster path's main saving — are not decidable before a raster path exists.
 
 ## Phasing
@@ -301,12 +300,10 @@ Each step is meant to be landable and testable on its own.
    The CPU factories, their AABBs, and `sv::intersect` as the reference the shader is written against.
 2. **`sv::quadric_set` and its content hash** — landed, with `sv::resident_quadric_set` as the id-only form.
 3. **`quadric_manager`** — landed, beside `mesh_manager` and draining through `gpu_resource_manager`.
-4. **The intersection shader and the quadric epilogue** — landed.
-   `quadric_runtime.hlsli` adds the quadric decode and solve to `material_runtime.hlsli` rather than forking it, and
-   `pt_quadric_hit.hlsli` is the epilogue.
-   The shading tail both geometry kinds share moved into `pt_shade.hlsli`, so a hit is located per kind and shaded once.
-   `material_permutation` gained an `intersection` shader, and `pathtrace_routine` puts it on BOTH of a permutation's
-   records — the shadow one too, since a shadow ray traverses the same procedural BLAS.
+4. **The intersection shader and the quadric closest hit** — landed.
+   Module `quadric` (shaders/sgl/quadric_runtime.sgl) adds the quadric decode and solve beside module `material` rather than forking it.
+   The shading tail both geometry kinds share is `tracer.shade` (shaders/sgl/tracer_shade.sgl), so a hit is located per kind and shaded once.
+   A quadric permutation's hit group carries the intersection on BOTH of its records — the shadow one too, since a shadow ray traverses the same procedural BLAS.
 5. **The material fork** — landed.
    There is ONE frequency set and no quadric-only frequency: resolution runs against a `geometry_view` that says which kind the
    geometry is, `sv::serves` says which frequencies that kind can number, and one it cannot loses to the coarser rank like any

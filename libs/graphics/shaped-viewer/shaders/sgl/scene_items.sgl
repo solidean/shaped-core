@@ -1,0 +1,161 @@
+// What the path tracer reads about the scene it traces: one light, one scene item, and the environment a missed ray sees.
+//
+// `light` and `instance` are byte layouts the host writes, placed as a buffer's element is (EMIT-111): tightly, every value aligned to 4.
+module scene
+
+// ---- Lights ---------------------------------------------------------------------------------------------------------
+
+// The path a light takes through the integrator — mirrors `sv::light_path` (scene/light.hh), whose values these are.
+const light_path_point = 0u
+const light_path_area = 1u
+const light_path_distant_point = 2u
+const light_path_distant_disc = 3u
+
+// Bits of `light.flags`, which `sv::light_flag_*` restates, since slib generates no const; 0 is the default for each.
+// Written as their values, `1 << 0` to `1 << 2`, since a `const` holds a literal.
+const light_flag_two_sided = 1u
+const light_flag_visible_to_camera = 2u
+const light_flag_casts_no_shadow = 4u
+
+/// One light, tagged by `path` — `tracer.light_record`, which `sv::light_record_of` fills (scene/light.hh), 96 bytes.
+///
+/// Keep the two in lockstep: this is a byte layout, not a description of one.
+/// Units are resolved on the CPU, so `emission` is one canonical quantity per path.
+/// That is a point's intensity, an area's radiance per face, a distant point's irradiance, a disc's radiance.
+struct light:
+    /// point: the source; area: the rect's center
+    position: float3
+    /// a `light_path_*` value
+    path: uint
+    /// area: world half-extent spanning the rect's first axis
+    u: float3
+    /// area: the world area of one face
+    area: float
+    /// area: world half-extent spanning the rect's second axis
+    v: float3
+    /// `light_flag_*` bits
+    flags: uint
+    /// the canonical quantity of the path
+    emission: float3
+    cone_scale: float
+    /// the light's -Z: a rect's front face, a spot's axis, the direction a distant light travels
+    normal: float3
+    cone_offset: float
+    /// distant_disc: 1 - cos of the disc's angular radius, precise for a small disc
+    one_minus_cos_angular_radius: float
+    /// RESERVED for light linking, read by nothing yet
+    link_mask: uint
+    pad0: float2
+
+/// Whether geometry between `l` and a surface blocks it.
+fun light_casts_shadows(l: light) -> bool:
+    return (l.flags & light_flag_casts_no_shadow) == 0
+
+/// Whether a camera ray reaching `l` sees it.
+fun light_visible_to_camera(l: light) -> bool:
+    return (l.flags & light_flag_visible_to_camera) != 0
+
+/// How much of a light survives its cone along a direction making cosine `cos_axis` with the light's axis.
+///
+/// glTF's falloff, `saturate(cos * scale + offset)^2`, which an unshaped light turns into a constant 1.
+/// Both estimators call this, so the density they share and the emission they weight agree on what the cone removed.
+fun light_cone(l: light, cos_axis: float) -> float:
+    let a = saturate(cos_axis * l.cone_scale + l.cone_offset)
+    return a * a
+
+// ---- Scene items ----------------------------------------------------------------------------------------------------
+
+/// One scene item, as a closest-hit reads it by its instance id — `tracer.instance_record`, which `gpu_resource_manager::describe_instance` fills, 32 bytes.
+///
+/// Keep the two in lockstep: this is a byte layout, not a description of one.
+struct instance:
+    param_buffer: uint
+    param_offset: uint
+    vertices: uint
+    indices: uint
+    is_indexed: uint
+    /// RESERVED for light linking, read by nothing yet
+    link_mask: uint
+    padding: uint2
+
+// ---- The environment ------------------------------------------------------------------------------------------------
+//
+// The view's environment probe: an order-3 real spherical-harmonics radiance function, 16 RGB coefficients, mirroring `sv::background_gpu`.
+// Each coefficient is a `float4` whose `xyz` is radiance and whose `w` is unused, and index 0 is the constant (DC) term.
+//
+// The coefficients are a PARAMETER, `sh: float4[16]`, because a binding belongs to one group and several pipelines evaluate them.
+// SGL places no array in a constant block yet, so the tracer declares a `buffer[float4]` of 16 elements, which is `sv::background_gpu` byte for byte.
+// A caller copies it into the array before it calls these; every call is inlined, so the copy costs what an array argument would.
+
+/// Radiance L(d) = sum_i sh[i] * Y_i(d) from the standard real-SH basis up to order 3.
+/// `d` must be a unit direction.
+/// Negative lobes are clamped away, since radiance cannot go below zero.
+fun background_radiance(sh: float4[16], d: float3) -> float3:
+    let x = d.x
+    let y = d.y
+    let z = d.z
+
+    // Real-SH basis Y_i(d), band by band (l = 0..3): the constants fold in the Condon-Shortley phase.
+    let mut y_basis = float[16].filled(0.0)
+    y_basis[0] = 0.282095
+
+    y_basis[1] = 0.488603 * y
+    y_basis[2] = 0.488603 * z
+    y_basis[3] = 0.488603 * x
+
+    y_basis[4] = 1.092548 * x * y
+    y_basis[5] = 1.092548 * y * z
+    y_basis[6] = 0.315392 * (3.0 * z * z - 1.0)
+    y_basis[7] = 1.092548 * x * z
+    y_basis[8] = 0.546274 * (x * x - y * y)
+
+    y_basis[9] = 0.590044 * y * (3.0 * x * x - y * y)
+    y_basis[10] = 2.890611 * x * y * z
+    y_basis[11] = 0.457046 * y * (5.0 * z * z - 1.0)
+    y_basis[12] = 0.373176 * z * (5.0 * z * z - 3.0)
+    y_basis[13] = 0.457046 * x * (5.0 * z * z - 1.0)
+    y_basis[14] = 1.445306 * z * (x * x - y * y)
+    y_basis[15] = 0.590044 * x * (x * x - 3.0 * y * y)
+
+    let mut radiance = float3(0.0, 0.0, 0.0)
+    for i in 0 ..< 16:
+        radiance += sh[i].xyz * y_basis[i]
+
+    return max(radiance, float3(0.0, 0.0, 0.0))
+
+/// Diffuse irradiance E(n) from the SH environment, via the clamped-cosine convolution.
+/// That is Ramamoorthi and Hanrahan, "An Efficient Representation for Irradiance Environment Maps", 2001.
+/// Only bands 0..2 contribute, since the cosine kernel's band-3 term vanishes.
+/// For the Lambertian exitance, multiply by albedo and divide by pi.
+fun background_irradiance(sh: float4[16], n: float3) -> float3:
+    // Convolution constants: the clamped-cosine SH coefficients folded with the basis normalization.
+    let c1 = 0.429043
+    let c2 = 0.511664
+    let c3 = 0.743125
+    let c4 = 0.886227
+    let c5 = 0.247708
+
+    let l00 = sh[0].xyz
+    // y
+    let l1m1 = sh[1].xyz
+    // z
+    let l10 = sh[2].xyz
+    // x
+    let l11 = sh[3].xyz
+    // x*y
+    let l2m2 = sh[4].xyz
+    // y*z
+    let l2m1 = sh[5].xyz
+    // 3z^2 - 1
+    let l20 = sh[6].xyz
+    // x*z
+    let l21 = sh[7].xyz
+    // x^2 - y^2
+    let l22 = sh[8].xyz
+
+    let x = n.x
+    let y = n.y
+    let z = n.z
+
+    // band 0, band 1, then band 2
+    return c4 * l00 + 2.0 * c2 * (l11 * x + l1m1 * y + l10 * z) + c1 * l22 * (x * x - y * y) + c3 * l20 * (z * z) - c5 * l20 + 2.0 * c1 * (l2m2 * x * y + l21 * x * z + l2m1 * y * z)

@@ -141,16 +141,13 @@ void bound_resources::declare_raytracing_access(sg::command_list& cmd) const
 cc::span<u32 const> bound_resources::elements(bindless_table table) const
 {
     CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
-    auto const* const e = _manager->_array_of(table);
-    if (e == nullptr)
-        return {};
-    return _manager->_tables[_manager->_slot_of[u32(table)]].acquired;
+    CC_ASSERT(table < bindless_table::count_, "not a bindless table");
+    return _manager->_tables[u32(table)].acquired;
 }
 
 gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
                                            mesh_manager meshes,
                                            quadric_manager quadrics,
-                                           material_manager materials,
                                            texture_manager textures,
                                            attribute_manager attributes,
                                            material_shader_cache shaders,
@@ -160,7 +157,6 @@ gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
                                            work_budget work_budget)
   : meshes(cc::move(meshes)),
     quadrics(cc::move(quadrics)),
-    materials(cc::move(materials)),
     textures(cc::move(textures)),
     attributes(cc::move(attributes)),
     shaders(cc::move(shaders)),
@@ -170,60 +166,32 @@ gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
     _work_budget(work_budget),
     _ctx(&ctx)
 {
-    for (auto& s : _slot_of)
-        s = -1;
-    for (auto i = isize(0); i < _tables.size(); ++i)
-        _slot_of[u32(_tables[i].table)] = i32(i);
 }
 
 gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource_manager_config const& cfg)
 {
-    auto const bindings = make_bindless_bindings(cfg.bindless);
-    auto group = ctx.persistent.create_staging_binding_group(ctx.cached.acquire_binding_group_layout(bindings));
+    // The tracer's own layout, so the group a trace binds fits its pipeline and sg resolves its footprint by name.
+    auto group
+        = ctx.persistent.create_staging_binding_group(ctx.cached.acquire_binding_group_layout(bindless_bindings()));
 
     // One array per binding, owned here: an array cannot refuse an acquire on behalf of its siblings, so nothing
     // else may hold one over a binding of this group.
     auto tables = cc::vector<table_entry>();
-    tables.reserve(bindings.size());
-    for (auto const& b : cfg.bindless.tables)
+    tables.reserve(isize(bindless_table::count_));
+    for (auto i = u32(0); i < u32(bindless_table::count_); ++i)
     {
-        if (b.count == 0)
-            continue;
-
         // for_binding clears the array, which is also what tells the group this binding was set — so the
         // "every binding set before the first snapshot" rule is satisfied by wiring alone.
-        auto array = sg::bindless_array::for_binding(ctx, group, name_of(b.table));
+        auto const table = bindless_table(i);
+        auto array = sg::bindless_array::for_binding(ctx, group, name_of(table));
         auto recorded_in = cc::vector<u64>::create_defaulted(isize(array.capacity()));
-        tables.push_back({.table = b.table, .array = cc::move(array), .recorded_in = cc::move(recorded_in)});
+        tables.push_back({.table = table, .array = cc::move(array), .recorded_in = cc::move(recorded_in)});
     }
 
-    CC_ASSERT(_find_table(tables, bindless_table::textures_2d) != nullptr, "the textures_2d table must be declared — a "
-                                                                           "sampled texture is acquired into it");
-    CC_ASSERT(_find_table(tables, bindless_table::buffers) != nullptr, "the buffers table must be declared — geometry, "
-                                                                       "attributes and parameter blocks are acquired "
-                                                                       "into it");
-
-    // The first accepted format is the context's own preference, and a permutation is keyed by its source rather than
-    // by its format — so a cache producing anything else would be compiling for a device that cannot take it.
-    CC_ASSERT(!ctx.accepted_shader_formats().empty(), "a context accepts at least one shader format");
-    auto const format = ctx.accepted_shader_formats().front();
-
-    return gpu_resource_manager(
-        ctx, mesh_manager::create(ctx, cfg.meshes), quadric_manager::create(ctx, cfg.quadrics),
-        material_manager::create(ctx, cfg.materials), texture_manager::create(ctx, cfg.textures),
-        attribute_manager::create(ctx, cfg.attributes),
-        material_shader_cache::create(
-            format, {.epilogue_include = material_shader_cache::hit_epilogue_include, .bindless = &cfg.bindless}),
-        cc::move(group), cc::move(tables), cfg.textures_policy, cfg.work);
-}
-
-gpu_resource_manager::table_entry const* gpu_resource_manager::_find_table(cc::span<table_entry const> tables,
-                                                                           bindless_table table)
-{
-    for (auto const& t : tables)
-        if (t.table == table)
-            return &t;
-    return nullptr;
+    return gpu_resource_manager(ctx, mesh_manager::create(ctx, cfg.meshes), quadric_manager::create(ctx, cfg.quadrics),
+                                texture_manager::create(ctx, cfg.textures),
+                                attribute_manager::create(ctx, cfg.attributes), material_shader_cache::create(&ctx),
+                                cc::move(group), cc::move(tables), cfg.textures_policy, cfg.work);
 }
 
 void gpu_resource_manager::advance_to(sg::epoch e)
@@ -236,7 +204,6 @@ void gpu_resource_manager::advance_to(sg::epoch e)
 
     meshes.begin_frame(e);
     quadrics.begin_frame(e);
-    materials.begin_frame(e);
     textures.begin_frame(e);
     attributes.begin_frame(e);
     for (auto& t : _tables)
@@ -352,7 +319,9 @@ void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_re
     }
 }
 
-instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, quadric_set_id set, instance_id instance)
+shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
+                                                                         quadric_set_id set,
+                                                                         instance_id instance)
 {
     auto const& q = quadrics.get(set);
 
@@ -362,7 +331,7 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, quad
     _upload_parameters(cmd, r);
 
     // A pending batch is traced as the placeholder CUBE through the triangle fallback, so its record has to name the
-    // cube's positions — exactly as the mesh overload below does, and for the same reason: `PtClosestHit` reads the hit
+    // cube's positions — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
     // triangle's three corners back out of `inst.vertices` to recompute the geometric normal.
     // The batch's own primitive buffer would be wrong there twice over, since it holds nothing yet AND is not positions.
     //
@@ -381,10 +350,14 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, quad
             .param_offset = 0,
             .vertices = u32(acquire_buffer(vertices)),
             .indices = u32(acquire_buffer(stand_in)),
-            .is_indexed = 0u};
+            .is_indexed = 0u,
+            .link_mask = ~0u,
+            .padding = {}};
 }
 
-instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance)
+shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
+                                                                         mesh_id mesh,
+                                                                         instance_id instance)
 {
     auto const& m = meshes.get(mesh);
 
@@ -405,7 +378,9 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
                 .param_offset = 0,
                 .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
                 .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-                .is_indexed = (!pending && m.is_indexed) ? 1u : 0u};
+                .is_indexed = (!pending && m.is_indexed) ? 1u : 0u,
+                .link_mask = ~0u,
+                .padding = {}};
 
     _upload_parameters(cmd, r);
 
@@ -415,7 +390,9 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
             .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
             .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-            .is_indexed = m.is_indexed ? 1u : 0u};
+            .is_indexed = m.is_indexed ? 1u : 0u,
+            .link_mask = ~0u,
+            .padding = {}};
 }
 
 bool gpu_resource_manager::attributes_resident(instance_id instance)
@@ -831,7 +808,8 @@ sg::bindless_element_handle gpu_resource_manager::pin_buffer(sg::raw_view const&
 sg::bindless_index gpu_resource_manager::_acquire(bindless_table table, sg::raw_view const& view)
 {
     CC_ASSERT(!_locked, "no acquires while frozen — the bound snapshot could not contain the mint");
-    auto& t = _tables[_declared_slot_of(table)];
+    CC_ASSERT(table < bindless_table::count_, "not a bindless table");
+    auto& t = _tables[u32(table)];
     auto const index = t.array.transient.acquire(view);
     _record(t, u32(index));
     return index;
@@ -839,21 +817,14 @@ sg::bindless_index gpu_resource_manager::_acquire(bindless_table table, sg::raw_
 
 sg::bindless_element_handle gpu_resource_manager::_pin(bindless_table table, sg::raw_view const& view)
 {
-    auto& t = _tables[_declared_slot_of(table)];
+    CC_ASSERT(table < bindless_table::count_, "not a bindless table");
+    auto& t = _tables[u32(table)];
     auto handle = t.array.persistent.acquire(view);
 
     // A pinned element is resident for as long as the handle lives, so it belongs in every access declaration
     // this epoch — a dispatch reading it through a material buffer never went through acquire.
     _record(t, handle->index());
     return handle;
-}
-
-i32 gpu_resource_manager::_declared_slot_of(bindless_table table) const
-{
-    CC_ASSERT(table < bindless_table::count_, "not a bindless table");
-    auto const slot = _slot_of[u32(table)];
-    CC_ASSERT(slot >= 0, "that bindless table was not declared (its budget is 0)");
-    return slot;
 }
 
 void gpu_resource_manager::_record(table_entry& t, u32 index)
@@ -1051,28 +1022,20 @@ sg::binding_group_layout_handle const& gpu_resource_manager::bindless_layout() c
     return _group->layout();
 }
 
-bool gpu_resource_manager::has_table(bindless_table table) const
-{
-    return _array_of(table) != nullptr;
-}
-
 u32 gpu_resource_manager::table_capacity(bindless_table table) const
 {
-    auto const* const a = _array_of(table);
-    return a == nullptr ? 0 : a->capacity();
+    return _array_of(table)->capacity();
 }
 
 sg::bindless_array* gpu_resource_manager::_array_of(bindless_table table)
 {
     CC_ASSERT(table < bindless_table::count_, "not a bindless table");
-    auto const slot = _slot_of[u32(table)];
-    return slot < 0 ? nullptr : &_tables[slot].array;
+    return &_tables[u32(table)].array;
 }
 
 sg::bindless_array const* gpu_resource_manager::_array_of(bindless_table table) const
 {
     CC_ASSERT(table < bindless_table::count_, "not a bindless table");
-    auto const slot = _slot_of[u32(table)];
-    return slot < 0 ? nullptr : &_tables[slot].array;
+    return &_tables[u32(table)].array;
 }
 } // namespace sv

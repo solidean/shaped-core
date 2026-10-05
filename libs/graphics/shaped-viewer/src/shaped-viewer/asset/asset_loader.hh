@@ -47,7 +47,7 @@ enum class sv::frame_generation : sv::u8
 ///
 /// The renderer wants a tangent FRAME rather than a normal: `tangent_frame` is a rotation taking tangent space to object
 /// space, plus the mirror bit no rotation carries.
-/// That is half the memory of a normal plus a tangent as vectors, and `SV_ATTR_SUPPLIED_tangent_frame` is what makes an
+/// That is half the memory of a normal plus a tangent as vectors, and `sv_supplied_tangent_frame` is what makes an
 /// unsupplied one fall back to the geometric frame rather than to the identity rotation.
 struct sv::tangent_frame_options
 {

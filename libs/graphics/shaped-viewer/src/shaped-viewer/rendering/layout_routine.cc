@@ -9,7 +9,7 @@ namespace sv
 {
 namespace
 {
-/// The inline-constants block layout.hlsl declares, byte for byte.
+/// The inline-constants block layout.sgl declares, with the defaults a draw starts from, which the generated mirror lacks.
 struct layout_constants_gpu
 {
     tg::vec4f uv_scale_bias_0 = tg::vec4f(1, 1, 0, 0);
@@ -19,21 +19,19 @@ struct layout_constants_gpu
     tg::vec4f separator_color = tg::vec4f(1, 1, 1, 1);
 };
 
-// "byte for byte" is now checkable: layout.hlsl's block reaches C++ as a generated mirror, so a field moved in
-// the shader is a compile error here rather than a wrong sample.
-// This struct stays because it carries the defaults a draw starts from, which a mirror does not.
+// A field moved in the shader is a compile error here rather than a wrong sample.
 static_assert(sizeof(layout_constants_gpu) == sizeof(sv::shaders::layout_constants),
-              "the layout constants are not the size layout.hlsl's block states");
+              "the layout constants are not the size layout.sgl's block states");
 static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_0) == offsetof(layout_constants_gpu, uv_scale_bias_0),
-              "uv_scale_bias_0 moved in layout.hlsl");
+              "uv_scale_bias_0 moved in layout.sgl");
 static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_1) == offsetof(layout_constants_gpu, uv_scale_bias_1),
-              "uv_scale_bias_1 moved in layout.hlsl");
+              "uv_scale_bias_1 moved in layout.sgl");
 static_assert(offsetof(sv::shaders::layout_constants, tint) == offsetof(layout_constants_gpu, tint),
-              "tint moved in layout.hlsl");
+              "tint moved in layout.sgl");
 static_assert(offsetof(sv::shaders::layout_constants, wipe) == offsetof(layout_constants_gpu, wipe),
-              "wipe moved in layout.hlsl");
+              "wipe moved in layout.sgl");
 static_assert(offsetof(sv::shaders::layout_constants, separator_color) == offsetof(layout_constants_gpu, separator_color),
-              "separator_color moved in layout.hlsl");
+              "separator_color moved in layout.sgl");
 
 /// A uv rect as the shader wants it: a scale and a bias applied to the covering triangle's [0,1] corner.
 [[nodiscard]] tg::vec4f uv_scale_bias(tg::aabb2f const& uv)
@@ -70,10 +68,10 @@ cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    auto const vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
-    auto const border_ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
-    auto const view_ps = sv::shaders::layout.fragment.view_ps->acquire(ctx);
-    auto const wipe_ps = sv::shaders::layout.fragment.wipe_ps->acquire(ctx);
+    auto const vs = sv::shaders::layout.main_vs->acquire(ctx);
+    auto const border_ps = sv::shaders::layout.border_ps->acquire(ctx);
+    auto const view_ps = sv::shaders::layout.view_ps->acquire(ctx);
+    auto const wipe_ps = sv::shaders::layout.wipe_ps->acquire(ctx);
 
     // All four are in flight from their acquire, so settling them one after another costs no concurrency.
     co_await cc::async_settled(vs);
@@ -98,29 +96,10 @@ cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
         co_return;
     }
 
-    // The group is what layout.hlsl declared, so it serves every kind whatever a stage happens to reference:
+    // The group is what layout.sgl declared, so it serves every kind whatever a stage happens to reference:
     // a one-source draw simply binds its primary twice.
-    // Nothing has to reason about which stage to reflect either — the constants block is not a group member.
-    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::layout_bindings>();
-
-    auto const* const constants_binding = [&]() -> sg::binding const*
-    {
-        for (auto const& b : compiled_vs->bindings)
-            if (b.type == sg::binding_type::constants_buffer)
-                return &b;
-        return nullptr;
-    }();
-    // A vertex stage that reflects no constants block cannot be driven, but this is a shader problem like any other:
-    // report it as a failed init rather than taking the process down on the default preset.
-    if (constants_binding == nullptr)
-    {
-        _group_layout = nullptr;
-        fail_init();
-        co_return;
-    }
-
-    auto const pipeline_layout
-        = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}, .inline_constants = *constants_binding});
+    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::layout_sources>();
+    auto const pipeline_layout = ctx.cached.acquire_pipeline_layout<shaders::layout_sources, shaders::layout_constants>();
 
     // Every pipeline this format needs, built here rather than on demand: a draw happens inside the caller's open
     // rendering scope, and that is where nothing may wait.
@@ -150,7 +129,7 @@ cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
                 .layout = pipeline_layout,
                 .vertex_shader = *compiled_vs,
                 .fragment_shader = fragment_shader,
-                .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
+                .topology = sg::primitive_topology::triangle_list, // no vertex input — the vertex index
                 .rasterization = {.cull = sg::cull_mode::none},
                 .color_targets = {target},
             });
@@ -225,9 +204,9 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
                 continue;
             group = ctx.transient.create_binding_group(
                 cmd, self->_group_layout,
-                shaders::layout_bindings{.source_0 = textures.targets[0].as_texture_view(),
-                                         .source_1 = textures.targets[0].as_texture_view(),
-                                         .source_sampler = {}});
+                shaders::layout_sources{.source_0 = textures.targets[0].as_texture_view(),
+                                        .source_1 = textures.targets[0].as_texture_view(),
+                                        .source_sampler = {}});
         }
         else
         {
@@ -249,20 +228,20 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
             group = ctx.transient.create_binding_group(
                 cmd, self->_group_layout,
-                shaders::layout_bindings{.source_0 = primary->as_texture_view(),
-                                         .source_1 = secondary->as_texture_view(),
-                                         .source_sampler = {.min_filter = filter,
-                                                            .mag_filter = filter,
-                                                            .mip_filter = sg::sampler_filter::nearest,
-                                                            .address_u = sg::sampler_address_mode::clamp_edge,
-                                                            .address_v = sg::sampler_address_mode::clamp_edge}});
+                shaders::layout_sources{.source_0 = primary->as_texture_view(),
+                                        .source_1 = secondary->as_texture_view(),
+                                        .source_sampler = {.min_filter = filter,
+                                                           .mag_filter = filter,
+                                                           .mip_filter = sg::sampler_filter::nearest,
+                                                           .address_u = sg::sampler_address_mode::clamp_edge,
+                                                           .address_v = sg::sampler_address_mode::clamp_edge}});
         }
 
         scope.set_viewport(
             {.offset = tg::pos2f(f32(d.dst_rect.min[0]), f32(d.dst_rect.min[1])), .size = tg::vec2f(f32(w), f32(h))});
         scope.set_scissor(d.dst_rect);
         scope.bind_pipeline(*pipeline);
-        scope.bind<shaders::layout_bindings>(*group);
+        scope.bind_group(0, *group);
         scope.set_inline_constants(cc::span<layout_constants_gpu const>(&constants, 1).as_bytes(), {});
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }

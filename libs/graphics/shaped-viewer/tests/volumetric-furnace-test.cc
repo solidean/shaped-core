@@ -138,7 +138,7 @@ image_stats trace_furnace(sg::context& ctx,
          .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 
     // A declined frame integrated nothing, so it must not count as one of the `frames` being accumulated: a trace
-    // declines until its DXR state object lands, which is built asynchronously.
+    // declines until its ray-tracing state object lands, which is built asynchronously.
     // Same workaround as sv_test::frames_until_executed, spelled inline because this loop owns its frame index.
     auto const loop_start = cc::current_time_steady_secs();
     for (auto f = 0; f < frames;)
@@ -146,8 +146,8 @@ image_stats trace_furnace(sg::context& ctx,
         // What brings the routine up; nothing else does, and this loop is the frame loop.
         (void)ctx.routines.tick();
 
-        auto fc = sv::pt_frame_constants_gpu{};
-        fc.camera = sv::camera_gpu::from(cam);
+        auto fc = sv::default_frame_constants();
+        fc.camera = sv::camera_record_of(cam);
 
         // No light at all: `light_count` stays 0 and no light buffer is bound, so the environment is the only source.
         // That is what makes "the image equals the environment" the whole statement rather than half of one.
@@ -160,18 +160,18 @@ image_stats trace_furnace(sg::context& ctx,
         // watchdog on a slow device — which arrives as a lost device rather than as a slow test.
         fc.samples_per_pixel = 8;
         fc.max_bounces = 12;
-        fc.seed = u32(f) + 1u;
+        fc.rng_seed = u32(f) + 1u;
         fc.accum_frame = u32(f);
 
         auto cmd = ctx.create_command_list();
 
-        auto records = cc::vector<sv::instance_gpu>();
+        auto records = cc::vector<sv::shaders::tracer::instance_record>();
         records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
 
-        auto const frame = ctx.transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::constants_buffer);
+        auto const frame = ctx.transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::readonly_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(
-            *cmd, sv::background_gpu::from(sv::background::uniform(environment)), sg::buffer_usage::constants_buffer);
+            *cmd, sv::background_gpu::from(sv::background::uniform(environment)), sg::buffer_usage::readonly_buffer);
 
         auto const instance_table
             = ctx.transient.create_buffer_from_data(*cmd, records, sg::buffer_usage::readonly_buffer);
@@ -271,7 +271,7 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the path-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     auto const environment = tg::vec3f(0.5f, 0.5f, 0.5f);
 

@@ -32,7 +32,7 @@ ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (s
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the path-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     auto const size = tg::vec2i(160, 120); // small: WARP traces every pixel in software
     auto v_r = sv::viewer::try_create(ctx, "sv-test/headless", {.width = size[0], .height = size[1], .headless = true});
@@ -107,7 +107,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop",
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the path-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     // The OS scratch directory, not the working directory: a test must not leave a file in whatever tree it ran from.
     auto const path = cc::format("{}/sv-capture-test.jpg", cc::temp_directory_path());
@@ -208,7 +208,7 @@ INVOCABLE_TEST("sv - a capture nothing registered fails without writing", (sg::c
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the path-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     auto const path = cc::format("{}/sv-capture-missing.jpg", cc::temp_directory_path());
     cc::remove_file(path); // a leftover from an earlier run would make the check below vacuous
@@ -268,7 +268,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the path-tracing shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     auto const path = cc::format("{}/sv-capture-timeout.jpg", cc::temp_directory_path());
     auto const partial = sv::impl::partial_capture_path(path);
@@ -341,7 +341,7 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     auto& ctx = *ctx_h;
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no DXC compiler to build the viewer's shaders");
+        SKIP("no SGL compiler that reaches DXIL to build the viewer's shaders");
 
     auto v_r = sv::viewer::try_create(ctx, "sv-test/light-ids", {.width = 32, .height = 32, .headless = true});
     REQUIRE(v_r.has_value());

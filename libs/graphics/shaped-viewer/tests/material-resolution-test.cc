@@ -46,7 +46,7 @@ constexpr auto uv_format = sv::attribute_format::of_vector(sv::scalar_type::f32,
 {
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f, final_default));
-    return sv::material_type::create("test", cc::move(signature), "surface.specular_roughness = roughness;");
+    return sv::material_type::create("test", cc::move(signature), "surface.specular_roughness = roughness\n");
 }
 
 [[nodiscard]] sv::texture_sample_source make_sample(sv::texture_id id, cc::string uv = "uv")
@@ -73,7 +73,7 @@ TEST("sv::material_type - a name the generator cannot emit is rejected")
         return sv::material_type::create("test", cc::move(signature), "");
     };
 
-    // The name is pasted into generated HLSL as a local, and the type's own fragment is written against it — so a name that
+    // The name is pasted into the generated SGL as a local, and the type's own fragment is written against it — so a name that
     // would not parse, or would collide, is refused rather than mangled.
     CHECK_ASSERTS(one("has space"));
     CHECK_ASSERTS(one("has-hyphen"));
@@ -323,6 +323,32 @@ TEST("sv::resolve_material - a channel swizzle is shape, but only as far as it i
     tail.components[2] = sv::texture_channel::zero;
     tail.components[3] = sv::texture_channel::one;
     CHECK(sampled_with(tail).permutation_key == sampled_with(sv::channel_swizzle()).permutation_key);
+}
+
+TEST("sv::resolve_material - a sampler forks the permutation only as far as its palette sampler differs")
+{
+    auto const type = make_type();
+    auto const bare = sv::material::create("bare", sv::material_type_id(0), {});
+
+    auto const sampled_with = [&](sg::sampler sampler)
+    {
+        auto mesh = make_mesh();
+        mesh.attributes.push_back(make_uvs("uv"));
+        auto source = make_sample(sv::texture_id(9));
+        source.sampler = sampler;
+        mesh.textures.push_back({.name = "roughness", .source = cc::move(source)});
+        return sv::resolve_material(type, bare, mesh);
+    };
+
+    // A hit samples level 0, where only the magnification filter and the address modes decide, so those are what name a
+    // palette sampler; two states the palette cannot tell apart generate one source and so are one permutation.
+    auto const plain = sampled_with({});
+    auto const other_mip
+        = sampled_with({.min_filter = sg::sampler_filter::nearest, .mip_filter = sg::sampler_filter::nearest});
+    CHECK(other_mip.permutation_key == plain.permutation_key);
+
+    auto const clamped = sampled_with({.address_u = sg::sampler_address_mode::clamp_edge});
+    CHECK(clamped.permutation_key != plain.permutation_key);
 }
 
 TEST("sv::resolve_material - a sample transform is a VALUE, unlike the swizzle beside it")

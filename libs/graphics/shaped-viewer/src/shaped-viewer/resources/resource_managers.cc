@@ -26,7 +26,7 @@ constexpr auto geometry_usage
 // A quadric batch splits what a mesh keeps in one kind of buffer, so the two usages are narrower than geometry_usage.
 // The boxes are build input only — no shader reads them, because an intersection shader cannot reach the boxes its own
 // acceleration structure was built from.
-// The primitives are the opposite: read through the bindless table by PrimitiveIndex(), and never seen by the hardware.
+// The primitives are the opposite: read through the bindless table by the primitive index, and never seen by the hardware.
 constexpr auto quadric_aabb_usage = sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst;
 constexpr auto quadric_primitive_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 } // namespace
@@ -375,38 +375,6 @@ void quadric_manager::wait_for_settled()
     _ctx.submit_command_list(cc::move(cmd));
 }
 
-material_manager material_manager::create(sg::context& ctx, manager_config const& cfg)
-{
-    auto manager = material_manager(ctx);
-    manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
-    return manager;
-}
-
-material_set_id material_manager::acquire(material_data const& materials)
-{
-    if (auto const id = find_by_hash(materials.hash); id.has_value())
-        return id.value();
-
-    auto const mats = materials.materials.span();
-    CC_ASSERT(!mats.empty(), "material_manager::acquire needs at least one material");
-
-    auto gpu = cc::vector<pbr_material_gpu>();
-    gpu.reserve(mats.size());
-    for (auto const& m : mats)
-        gpu.push_back(pbr_material_gpu::from(m));
-
-    auto buffer = _ctx.persistent.create_buffer<pbr_material_gpu>(
-        mats.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-
-    auto up = _ctx.create_command_list();
-    up->upload.data_to_buffer(buffer, gpu);
-    _ctx.submit_command_list(cc::move(up));
-
-    auto const size_in_bytes = buffer.size_in_bytes();
-    return insert(materials.hash, {.state = residency::complete, .materials = cc::move(buffer), .count = mats.size()},
-                  size_in_bytes);
-}
-
 texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg)
 {
     auto m = texture_manager(ctx);
@@ -556,7 +524,7 @@ void texture_manager::wait_for_settled(cc::vector<texture_id>& newly_resident)
 
 namespace
 {
-// readonly_buffer so a shader reads it as a ByteAddressBuffer through the bindless table; copy_dst for the upload.
+// readonly_buffer so a shader reads it as a `bytes` element through the bindless table; copy_dst for the upload.
 constexpr auto bindless_bytes_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 } // namespace
 

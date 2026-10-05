@@ -49,7 +49,7 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
     }
 }
 
-/// One view resolved to what the path tracer binds: a TLAS instance and an `instance_gpu` per item, over the set of
+/// One view resolved to what the path tracer binds: a TLAS instance and an `shaders::tracer::instance_record` per item, over the set of
 /// permutations those items shade with.
 ///
 /// Two index relations, which together are the shape of the trace:
@@ -57,7 +57,7 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
 struct resolved_view
 {
     cc::vector<sg::tlas_instance> instances;
-    cc::vector<instance_gpu> records;
+    cc::vector<shaders::tracer::instance_record> records;
 
     /// the parameter block each item shades with, parallel to `records` — its CONTENT identity, for the trace hash
     cc::vector<instance_id> parameter_blocks;
@@ -159,13 +159,13 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         CC_ASSERT(mesh != nullptr, "scene_item references an unknown mesh_id");
         CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
 
-        // The TLAS instance's own id is the row of the instance table this item occupies, which is what `InstanceID()` reads.
-        // The opaque override is what makes an any-hit reachable at all: a BLAS is built opaque, and DXR then behaves as
-        // if the hit group carried no any-hit whatever the pipeline attached.
+        // The TLAS instance's own id is the row of the instance table this item occupies, which is what a hit's instance id reads.
+        // The opaque override is what makes an any-hit reachable at all: a BLAS is built opaque, and the trace then behaves
+        // as if the hit group carried no any-hit whatever the pipeline attached.
         // Per instance rather than per BLAS, because "can this cut out" is a property of the MATERIAL — the same mesh
         // under an opaque material and a cutout one would otherwise need two acceleration structures.
-        // Two records per permutation — the primary one and the shadow one — so the offset is the permutation's index
-        // doubled, and `pt_occluded` reaches the second by adding 1 at the trace.
+        // Two records per permutation — the surface one and the shadow one — so the offset is the permutation's index
+        // doubled, which `pathtrace_routine` rewrites to that permutation's row of its table.
         // A mesh whose geometry has not landed keeps its place in the scene as a box, so a load reads as an asset
         // sharpening rather than as objects popping into existence one at a time.
         // One that declared no bounds is skipped instead: there is no honest extent to draw it at, and an invented one
@@ -201,9 +201,9 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 }
 
 /// The instance table `r` describes, uploaded for this recording.
-[[nodiscard]] sg::buffer<instance_gpu> upload_instances(sg::command_list& cmd, resolved_view const& r)
+[[nodiscard]] sg::buffer<shaders::tracer::instance_record> upload_instances(sg::command_list& cmd, resolved_view const& r)
 {
-    auto const buffer = cmd.context().transient.create_buffer<instance_gpu>(
+    auto const buffer = cmd.context().transient.create_buffer<shaders::tracer::instance_record>(
         r.records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.data_to_buffer(buffer, r.records);
     return buffer;
@@ -213,41 +213,41 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 /// none — so a layer nobody lit is still visible, unless its fallback was turned off.
 [[nodiscard]] pt_light_table traced_lights(layer const& l)
 {
-    auto records = cc::vector<light_gpu>();
+    auto records = cc::vector<shaders::tracer::light_record>();
     for (auto const& sl : l.lights)
-        records.push_back(light_gpu::from(sl.light));
+        records.push_back(light_record_of(sl.light));
 
     if (records.empty() && l.fallback_light.has_value())
-        records.push_back(light_gpu::from(l.fallback_light.value()));
+        records.push_back(light_record_of(l.fallback_light.value()));
 
     return pt_light_table::grouped(records);
 }
 
 /// The table `lights` holds, uploaded for this recording.
 /// Null for no lights, which the routine binds a stand-in for, since a buffer cannot be empty.
-[[nodiscard]] sg::buffer<light_gpu> upload_lights(sg::command_list& cmd, pt_light_table const& lights)
+[[nodiscard]] sg::buffer<shaders::tracer::light_record> upload_lights(sg::command_list& cmd, pt_light_table const& lights)
 {
     if (lights.records.empty())
         return {};
 
-    auto const buffer = cmd.context().transient.create_buffer<light_gpu>(
+    auto const buffer = cmd.context().transient.create_buffer<shaders::tracer::light_record>(
         lights.records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.data_to_buffer(buffer, lights.records);
     return buffer;
 }
 
-pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
-                                                   layer const& l,
-                                                   pt_light_table const& lights,
-                                                   tg::vec2i resolution)
+shaders::tracer::frame_constants make_frame_constants(view_data const& v,
+                                                      layer const& l,
+                                                      pt_light_table const& lights,
+                                                      tg::vec2i resolution)
 {
-    auto fc = pt_frame_constants_gpu{};
+    auto fc = default_frame_constants();
     // The projection carries the aspect ratio.
     // It comes from the resolution the frame settled on rather than the view's own field, since a layout-following
     // view is sized by the rect it landed in.
     auto cam = v.camera;
     cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1] > 0 ? resolution[1] : 1);
-    fc.camera = camera_gpu::from(cam);
+    fc.camera = camera_record_of(cam);
 
     lights.describe_in(fc);
 
@@ -277,7 +277,7 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
 /// drawn through the same eye, so the mean it converges to is the image this frame is asking for and no other.
 /// Moving the eye therefore restarts it, and that is the trade — no reprojection to salvage the old samples, and in
 /// exchange no smearing, no per-pixel rejection heuristic, and an uncapped mean that converges to ground truth.
-[[nodiscard]] u64 trace_hash(pt_frame_constants_gpu fc,
+[[nodiscard]] u64 trace_hash(shaders::tracer::frame_constants fc,
                              background_gpu const& bg,
                              pt_light_table const& lights,
                              resolved_view const& r,
@@ -285,14 +285,15 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
                              u64 shader_generation)
 {
     // The two fields that legitimately differ every frame; hashing either would restart the estimator forever.
-    fc.seed = 0;
+    fc.rng_seed = 0;
     fc.accum_frame = 0;
 
-    auto h = cc::make_hash_of_bytes(cc::span<pt_frame_constants_gpu const>(&fc, 1).as_bytes());
+    auto h = cc::make_hash_of_bytes(cc::span<shaders::tracer::frame_constants const>(&fc, 1).as_bytes());
     h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<background_gpu const>(&bg, 1).as_bytes()));
 
-    // Every byte of a light_gpu is written, pads included, so equal lights hash equal and any change is seen.
-    h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<light_gpu const>(lights.records).as_bytes()));
+    // Every byte of a shaders::tracer::light_record is written, pads included, so equal lights hash equal and any change is seen.
+    h = cc::combine_hash(
+        h, cc::make_hash_of_bytes(cc::span<shaders::tracer::light_record const>(lights.records).as_bytes()));
     h = cc::combine_hash(h, cc::make_hash(resolution[0], resolution[1], shader_generation));
 
     // tlas_instance holds a handle and an optional, so its padding is not hashable — take the fields the build reads.
@@ -313,7 +314,8 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
     {
         auto anonymized = rec;
         anonymized.param_buffer = 0;
-        h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<instance_gpu const>(&anonymized, 1).as_bytes()));
+        h = cc::combine_hash(
+            h, cc::make_hash_of_bytes(cc::span<shaders::tracer::instance_record const>(&anonymized, 1).as_bytes()));
     }
     for (auto const block : r.parameter_blocks)
         h = cc::combine_hash(h, cc::make_hash(u32(block)));
@@ -516,7 +518,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.
     auto const lights = traced_lights(l);
-    auto fc = make_pt_frame_constants_gpu(v, l, lights, tr.resolution);
+    auto fc = make_frame_constants(v, l, lights, tr.resolution);
     auto const bg = background_gpu::from(l.background);
     auto const hash = trace_hash(fc, bg, lights, resolved, tr.resolution, self->_shader_generation);
 
@@ -556,7 +558,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
     // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot->accum_frame;
-    fc.seed = slot->accum_frame + 1;
+    fc.rng_seed = slot->accum_frame + 1;
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
     // temporal ones only when the layer may denoise temporally.
@@ -645,12 +647,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_split = has_split ? 1 : 0;
     }
 
-    auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
-        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+    auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
+        1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(frame, fc);
 
-    auto const background = ctx.transient.create_buffer<background_gpu>(
-        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+    auto const background
+        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(background, bg);
 
     auto const instance_table = upload_instances(cmd, resolved);
@@ -716,7 +718,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         // A denoiser still compiling declines the frame, as a tracer still compiling does: a capture that saved it
         // would hold the raw mean where the caller asked for a denoised image.
         // The trace itself landed, so the accumulation above stands.
-        // Built from the same `camera_gpu` the motion guide was, so the matrices and the vectors describe one
+        // Built from the same `shaders::tracer::camera_record` the motion guide was, so the matrices and the vectors describe one
         // camera; a first frame has no previous one and reads as a camera that did not move.
         auto const near_plane = f32(v.camera.projection.near_plane);
         auto const cameras = denoise_cameras{
@@ -913,7 +915,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const resolved = resolve_scene(cmd, *scene, resources);
 
     auto const lights = traced_lights(*scene);
-    auto fc = make_pt_frame_constants_gpu(v, *scene, lights, v.resolution);
+    auto fc = make_frame_constants(v, *scene, lights, v.resolution);
     auto const bg = background_gpu::from(scene->background);
     auto const hash = trace_hash(fc, bg, lights, resolved, v.resolution, shader_generation);
 
@@ -943,16 +945,16 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
     // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot.accum_frame;
-    fc.seed = slot.accum_frame + 1;
+    fc.rng_seed = slot.accum_frame + 1;
 
-    auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
-        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+    auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
+        1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(frame, fc);
 
     // The view's SH environment probe, packed into its GPU lane layout.
     // The miss reconstructs the radiance an escaped ray sees from it.
-    auto const background = ctx.transient.create_buffer<background_gpu>(
-        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
+    auto const background
+        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(background, bg);
 
     auto const instance_table = upload_instances(cmd, resolved);

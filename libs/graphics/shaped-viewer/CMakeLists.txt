@@ -6,9 +6,9 @@ project(shaped-viewer LANGUAGES CXX)
 # path-traced into its own texture by the view_renderer routine and placed into a window by viewer_renderer.
 #
 # The library API is present on every platform (the vocabulary, managers, routines and renderer all compile
-# cross-platform); actual rendering needs a ray-tracing-capable backend, which today means dx12 + DXR on
-# Windows (vulkan RT is stubbed upstream). Where that is missing, a routine simply acquires no shader and
-# draws nothing — the same graceful path a broken shader edit takes.
+# cross-platform), and every shader is SGL, so it compiles for whichever backend a context runs.
+# Tracing needs a backend with ray-tracing pipelines: dx12 and vulkan, where sv's tests run it.
+# Where that is missing, a routine simply acquires no shader and draws nothing — the same graceful path a broken shader edit takes.
 add_library(shaped-viewer
     src/shaped-viewer/shaped-viewer.cc
     src/shaped-viewer/context.cc
@@ -38,7 +38,6 @@ add_library(shaped-viewer
     src/shaped-viewer/resources/resource_managers.cc
     src/shaped-viewer/resources/bindless_tables.cc
     src/shaped-viewer/resources/gpu_resource_manager.cc
-    src/shaped-viewer/rendering/raytrace_routine.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
@@ -72,7 +71,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/context.hh
     src/shaped-viewer/shader_library.hh
     src/shaped-viewer/stable_id.hh
-    src/shaped-viewer/scene/pbr_material.hh
     src/shaped-viewer/scene/light.hh
     src/shaped-viewer/scene/background.hh
     src/shaped-viewer/scene/triangle_geometry.hh
@@ -112,8 +110,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/resources/bindless_tables.hh
     src/shaped-viewer/resources/gpu_resource_manager.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
-    src/shaped-viewer/rendering/frame_constants.hh
-    src/shaped-viewer/rendering/raytrace_routine.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
@@ -154,31 +150,23 @@ target_compile_options(shaped-viewer
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# sv's own shader package: the ray-tracing shaders (raygen / miss / closest-hit).
-# The fullscreen blit lives in shaped-rendering (sr::blit_routine, sr_shaders).
+# sv's shader package: the path tracer (tracer_pipeline.sgl over module `tracer`, shaders/sgl) and the two raster passes.
+# Module `tracer` is exported because a material's hit group, generated and compiled at run time, lists its bindings and traces its rays.
+# The fullscreen blit lives in shaped-rendering (sr::blit_routine).
 # Must be declared here, in the CMakeLists that defines the target — the generated sources are added as
 # PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped. Deliberately not gated on a compiler:
 # generation emits C++ descriptors and embeds the sources; compilation happens at runtime through slib.
 sc_add_shader_package(
-    TARGET     shaped-viewer
-    NAME       sv_shaders
-    NAMESPACE  sv::shaders
-    SOURCE_DIR shaders
-    LANGUAGE   hlsl
+    TARGET      shaped-viewer
+    NAME        sv_shaders
+    NAMESPACE   sv::shaders
+    SOURCE_DIR  shaders
+    LANGUAGE    sgl
+    MODULE_DIRS shaders/sgl
     SHADERS
-        raygen.hlsl:raygen:RayGen
-        shading.hlsl:miss:Miss
-        shading.hlsl:closest_hit:ClosestHit
-        layout.hlsl:vertex:main_vs
-        layout.hlsl:fragment:border_ps
-        layout.hlsl:fragment:view_ps
-        layout.hlsl:fragment:wipe_ps
-        layout.hlsl:binding:layout_bindings
-        layout.hlsl:constants:constants
-        pathtrace.hlsl:raygen:PathTraceRayGen
-        pt_hit.hlsl:miss:PtMiss
-        pt_hit.hlsl:miss:PtShadowMiss
-        common.hlsli:binding:flat_bindings
+        module:tracer
+        tracer_pipeline.sgl:*
+        layout.sgl:*
 )
 
 # The examples corpus: the viewer as a caller actually reaches for it.
@@ -210,7 +198,6 @@ if(SC_BUILD_TESTS)
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
         tests/asset-loading-test.cc
-        tests/shader-package-test.cc
     )
     sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
@@ -229,12 +216,14 @@ if(SC_BUILD_TESTS)
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
         target_sources(shaped-viewer-test PRIVATE
             tests/dx12-entry.cc
-            tests/raytraced-view-test.cc
             tests/headless-viewer-test.cc
             tests/denoise-view-test.cc
             tests/pathtraced-view-test.cc
             tests/openpbr-bsdf-test.cc
             tests/motion-vector-test.cc
+            tests/runtime-probe-test.cc
+            tests/pt-support-probe-test.cc
+            tests/cross-backend-trace-test.cc
             tests/volumetric-furnace-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
@@ -250,21 +239,28 @@ if(SC_BUILD_TESTS)
         )
         target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-dx12)
 
-        # The probes: compute shaders over shaders/openpbr.hlsli and shaders/camera.hlsli, so a test can measure what the
-        # closure returns and where the camera projects.
+        # The cross-backend trace test brings up a vulkan context of its own, which sv's other GPU tests do not run on.
+        if(TARGET shaped-graphics-vulkan)
+            target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-vulkan)
+            target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_VULKAN=1)
+        endif()
+
+        # The probes: compute shaders over the tracer's modules in shaders/sgl, so a test can measure what the closure returns,
+        # where the camera projects, where a ray meets a quadric and what the path tracer's helpers promise.
         # Their own package rather than entries in sv_shaders, because nothing a viewer runs dispatches them — and a package
-        # is per target, so the two mount side by side over the same source directory.
+        # is per target, so the two mount the same module directory side by side.
         sc_add_shader_package(
-            TARGET     shaped-viewer-test
-            NAME       sv_test_shaders
-            NAMESPACE  sv_test::shaders
-            SOURCE_DIR shaders
-            LANGUAGE   hlsl
+            TARGET      shaped-viewer-test
+            NAME        sv_test_shaders
+            NAMESPACE   sv_test::shaders
+            SOURCE_DIR  tests/shaders
+            LANGUAGE    sgl
+            MODULE_DIRS shaders/sgl
             SHADERS
-                bsdf_probe.hlsl:compute:BsdfProbe
-                bsdf_probe.hlsl:binding:probe_bindings
-                camera_probe.hlsl:compute:CameraProbe
-                camera_probe.hlsl:binding:camera_probe_bindings
+                bsdf_probe.sgl:*
+                camera_probe.sgl:*
+                runtime_probe.sgl:*
+                pt_support_probe.sgl:*
         )
         target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
 

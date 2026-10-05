@@ -1,0 +1,172 @@
+// The path tracer's pure helpers: its random numbers, its multiple-importance weights, its light densities and its direction samplers.
+//
+// The bindings, the payloads and the frame constants live in module `tracer`, since those belong to the pipeline rather than to a helper.
+// So where the raygen reads `frame.light_count`, a function here takes `light_count` from its caller.
+module pt
+
+use scene
+
+const pi = 3.14159265358979323846
+
+// How many scattering events a walk takes before Russian roulette starts ending it.
+//
+// Not from the first event: killing a short walk adds variance to paths that would have finished on their own, and the walks this exists for are the long ones.
+// Sixteen is well past what a thin or moderately dense interior needs.
+const roulette_after = 16
+
+// The hard ceiling on one walk, which the roulette should reach only for a medium that absorbs nothing at all.
+// A guard against a dispatch that never ends rather than a quality control.
+const scatter_cap = 4096
+
+/// The pdf of the environment sampler a closest-hit estimates with: one uniform-hemisphere direction.
+/// The raygen needs the same number to weight a bounce ray that escaped, so it lives here rather than in either of them.
+/// A function rather than a `const`, since a `const` holds a literal and this is a folded expression.
+fun env_pdf() -> float:
+    return 1.0 / (2.0 * pi)
+
+/// The balance heuristic over two strategies, which is what keeps the sum of the two unbiased.
+fun mis_weight(pdf_this: float, pdf_other: float) -> float:
+    return pdf_this / max(pdf_this + pdf_other, 1e-9)
+
+// A light's two estimators — the closest-hit's next-event sample and the raygen's continuation ray reaching it — balance against each other.
+// So both must form the light's density from `light_pdf`.
+// A density the two disagree about is not a weighting error that shows up as noise: the two weights stop summing to one and the estimate is simply wrong.
+
+/// The probability of next-event estimation choosing any one light: uniform over the `light_count` lights the trace holds.
+fun light_select_pdf(light_count: uint) -> float:
+    return 1.0 / (max(light_count, 1) as float)
+
+/// The solid-angle density of next-event estimation reaching `l` along a direction.
+/// `dist2` is the squared distance to the point reached and `cos_light` the cosine at the light's own face.
+///
+/// The light's choice is part of it: uniform area sampling, reprojected onto the sphere of directions, times the probability of having picked this light at all.
+fun light_pdf(l: scene.light, light_count: uint, dist2: float, cos_light: float) -> float:
+    return light_select_pdf(light_count) * dist2 / max(l.area * cos_light, 1e-9)
+
+/// The solid-angle density of next-event estimation reaching a distant disc along a direction inside it.
+/// That is uniform over the cone the disc subtends, times the probability of having picked this light.
+fun disc_pdf(l: scene.light, light_count: uint) -> float:
+    let solid_angle = 2.0 * pi * l.one_minus_cos_angular_radius
+    return light_select_pdf(light_count) / max(solid_angle, 1e-20)
+
+/// Whether the unit `dir` falls inside a distant disc.
+///
+/// Compared as 1 - cos, which for unit vectors is half the squared distance between them, rather than as a dot product.
+/// A dot product rounds to within a few ulps of 1, which is the whole width of a small disc.
+fun in_disc(l: scene.light, dir: float3) -> bool:
+    // dir - toward, since the light travels along `normal`
+    let off = dir + l.normal
+    return 0.5 * dot(off, off) <= l.one_minus_cos_angular_radius
+
+/// Where a ray crosses a rect light, if it does at all.
+///
+/// `t_hit` is the distance along a UNIT `dir` and `cos_light` the cosine at the face it reaches.
+/// False leaves both zeroed, and means the ray misses the rect, runs parallel to its plane, or arrives at a face that does not emit.
+///
+/// The rect spans center +/- u +/- v, and u and v need not be perpendicular, only non-parallel.
+/// So the in-plane coordinates come from the reciprocal basis rather than from two dot products.
+fun rect_intersect(l: scene.light, origin: float3, dir: float3, t_hit: mut float, cos_light: mut float) -> bool:
+    t_hit = 0.0
+    cos_light = 0.0
+
+    let denom = dot(dir, l.normal)
+    let two_sided = (l.flags & scene.light_flag_two_sided) != 0
+    // parallel to the plane, or arriving at a face the light does not emit from
+    let faces_away = if two_sided => abs(denom) <= 1e-9 else denom >= -1e-9
+    if faces_away => return false
+
+    // behind the ray, or inside the origin's own offset
+    let t = dot(l.position - origin, l.normal) / denom
+    if t <= 1e-3 => return false
+
+    // d = s*u + t*v with both in [-1, 1]; cross(d, v) = s*cross(u, v) and cross(u, d) = t*cross(u, v).
+    // That inverts the pair exactly for any non-parallel u and v.
+    let d = origin + dir * t - l.position
+    let n_uv = cross(l.u, l.v)
+    let inv = 1.0 / max(dot(n_uv, n_uv), 1e-18)
+    let s_uv = dot(cross(d, l.v), n_uv) * inv
+    let t_uv = dot(cross(l.u, d), n_uv) * inv
+    if abs(s_uv) > 1.0 or abs(t_uv) > 1.0 => return false
+
+    t_hit = t
+    cos_light = abs(denom)
+    return true
+
+/// Whether every component of `v` is an ordinary finite number.
+///
+/// Written as a magnitude comparison rather than `isnan` / `isinf` on purpose: a NaN compares false against everything, so this rejects one either way.
+/// It also survives the relaxed float math a compiler may assume, where the intrinsics can fold to a constant false.
+fun is_finite(v: float3) -> bool:
+    return all(abs(v) < float3(1e30, 1e30, 1e30))
+
+// ---- Random numbers -------------------------------------------------------------------------------------------------
+
+/// A hashed per-lane RNG (PCG-style): `hash` seeds a stream once per pixel and sample, and `rand` pulls uniforms in [0, 1) from it.
+fun hash(x: uint) -> uint:
+    let s = x * 747796405 + 2891336453
+    let w = ((s >> ((s >> 28) + 4)) ^ s) * 277803737
+    return (w >> 22) ^ w
+
+/// The next uniform in [0, 1) from the stream `state`, which it advances.
+fun rand(state: mut uint) -> float:
+    state = state * 747796405 + 2891336453
+    let w = ((state >> ((state >> 28) + 4)) ^ state) * 277803737
+    return (((w >> 22) ^ w) as float) * (1.0 / 4294967296.0)
+
+// ---- Scattering and sampling ----------------------------------------------------------------------------------------
+
+/// The Henyey-Greenstein phase function at cosine `mu` between the incoming and outgoing directions.
+/// Normalized over the sphere, so it doubles as its own pdf.
+/// `g` is forward at +1 and back at -1; 0 is isotropic and reduces this to 1 / (4 pi).
+fun hg_phase(mu: float, g: float) -> float:
+    let g2 = g * g
+    let d = 1.0 + g2 - 2.0 * g * mu
+    return (1.0 - g2) / max(4.0 * pi * d * sqrt(max(d, 1e-9)), 1e-9)
+
+/// A direction drawn from the Henyey-Greenstein phase function around `w`.
+/// Its pdf is `hg_phase` at the cosine between them, so a scattering event needs no separate weight.
+fun sample_hg(w: float3, g: float, u1: float, u2: float) -> float3:
+    let mut mu = 0.0
+    if abs(g) < 1e-3:
+        // isotropic: the cosine is uniform
+        mu = 1.0 - 2.0 * u1
+    else:
+        let t = (1.0 - g * g) / (1.0 - g + 2.0 * g * u1)
+        mu = (1.0 + g * g - t * t) / (2.0 * g)
+
+    let sin_theta = sqrt(max(0.0, 1.0 - mu * mu))
+    let phi = 2.0 * pi * u2
+
+    // A basis around w, avoiding the degenerate up when w is near +/-z.
+    let up = if abs(w.z) < 0.999 => float3(0.0, 0.0, 1.0) else float3(1.0, 0.0, 0.0)
+    let t1 = normalize(cross(up, w))
+    let t2 = cross(w, t1)
+
+    return normalize(t1 * (sin_theta * cos(phi)) + t2 * (sin_theta * sin(phi)) + w * mu)
+
+/// A direction drawn uniformly from the cone around the unit `w` whose half-angle has `1 - cos` of `one_minus_cos_max` (pdf = 1 / solid angle).
+/// Taking 1 - cos rather than the cosine keeps a small cone's width, and sin is formed from it for the same reason.
+fun sample_cone(w: float3, one_minus_cos_max: float, u1: float, u2: float) -> float3:
+    let one_minus_cos = u1 * one_minus_cos_max
+    let cos_theta = 1.0 - one_minus_cos
+    let sin_theta = sqrt(max(0.0, one_minus_cos * (2.0 - one_minus_cos)))
+    let phi = 2.0 * pi * u2
+
+    let up = if abs(w.z) < 0.999 => float3(0.0, 0.0, 1.0) else float3(1.0, 0.0, 0.0)
+    let t1 = normalize(cross(up, w))
+    let t2 = cross(w, t1)
+    return normalize(t1 * (sin_theta * cos(phi)) + t2 * (sin_theta * sin(phi)) + w * cos_theta)
+
+/// A cosine-weighted direction in the hemisphere around `n` (pdf = cos(theta) / pi), from two uniforms in [0, 1).
+fun sample_cosine_hemisphere(n: float3, u1: float, u2: float) -> float3:
+    let r = sqrt(u1)
+    let phi = 2.0 * pi * u2
+    let x = r * cos(phi)
+    let y = r * sin(phi)
+    let z = sqrt(max(0.0, 1.0 - u1))
+
+    // an orthonormal basis around n, avoiding the degenerate up when n is near +/-z
+    let up = if abs(n.z) < 0.999 => float3(0.0, 0.0, 1.0) else float3(1.0, 0.0, 0.0)
+    let t = normalize(cross(up, n))
+    let b = cross(n, t)
+    return normalize(t * x + b * y + n * z)

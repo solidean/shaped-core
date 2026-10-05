@@ -28,7 +28,7 @@ camera_basis camera::basis() const
             .forward = orientation * tg::vec3d(0, 0, 1)};
 }
 
-camera_gpu camera_gpu::from(camera const& cam)
+shaders::tracer::camera_record camera_record_of(camera const& cam)
 {
     auto const b = cam.basis();
     auto const t = (cam.projection.vertical_fov * 0.5).tan();
@@ -36,12 +36,16 @@ camera_gpu camera_gpu::from(camera const& cam)
     auto const to_f = [](tg::vec3d const& v) { return tg::vec3f(f32(v[0]), f32(v[1]), f32(v[2])); };
 
     return {.position = tg::vec3f(f32(cam.position[0]), f32(cam.position[1]), f32(cam.position[2])),
+            .pad0 = 0,
             .forward = to_f(b.forward),
+            .pad1 = 0,
             .right_scaled = to_f(b.right * (cam.projection.aspect_ratio * t)),
-            .up_scaled = to_f(b.up * t)};
+            .pad2 = 0,
+            .up_scaled = to_f(b.up * t),
+            .pad3 = 0};
 }
 
-camera_matrices matrices_of(camera_gpu const& cam, f32 near_plane)
+camera_matrices matrices_of(shaders::tracer::camera_record const& cam, f32 near_plane)
 {
     auto const tan_x = cam.right_scaled.length();
     auto const tan_y = cam.up_scaled.length();

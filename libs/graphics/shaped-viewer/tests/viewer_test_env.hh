@@ -20,7 +20,6 @@
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
-#include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/shader_library.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -43,6 +42,7 @@ struct triangle_cloud;
 struct indexed_mesh;
 struct area_light;
 struct cornell_box;
+struct pbr_material;
 } // namespace sv_test
 
 // Shared setup for shaped-viewer's GPU tests (Windows + DXC only).
@@ -56,6 +56,16 @@ using namespace cc::primitive_defines;
 
 } // namespace sv_test
 
+/// A basic metallic-roughness material, one per triangle: the four values of the builtin `pbr` type a test scene sets.
+/// `pbr_face_attributes` turns a list of them into that type's per-triangle attributes.
+struct sv_test::pbr_material
+{
+    tg::vec3f base_color = tg::vec3f(0.8f, 0.8f, 0.8f);
+    f32 metallic = 0.0f;
+    f32 roughness = 0.5f;
+    tg::vec3f emissive = tg::vec3f(0.0f, 0.0f, 0.0f);
+};
+
 struct sv_test::env
 {
     slib::shader_library* lib = nullptr; // intentionally leaked: process-wide, lives for the test binary
@@ -66,7 +76,7 @@ namespace sv_test
 {
 
 /// The one shader library for this test binary — sv's own, reached through the same hook a viewer uses.
-/// `has_compiler` is false when DXC is not installed — a caller SKIPs, since nothing will compile.
+/// `has_compiler` says whether SGL reaches DXIL here, which needs DXC — a caller SKIPs without it, since nothing compiles.
 ///
 /// Built by `sv::impl::acquire_default_shader_library`, so a test compiles through exactly what a viewer compiles through rather
 /// than through a second library assembled to look like it.
@@ -77,7 +87,7 @@ inline env const& shared_env()
         auto lib = sv::acquire_shader_library();
         CC_ASSERT(lib.has_value(), "the default shader library must come up for the GPU tests");
         return env{.lib = lib.value(),
-                   .has_compiler = lib.value()->can_compile(slib::shader_language::hlsl, sg::shader_format::dxil)};
+                   .has_compiler = lib.value()->can_compile(slib::shader_language::sgl, sg::shader_format::dxil)};
     }();
     return e;
 }
@@ -131,7 +141,7 @@ template <class F>
 ///
 /// **The same workaround as tick_until, one level up**, and the one most sv tests need.
 /// A path trace is not usable the moment its routine reports ready: it still needs one compile per material
-/// permutation (or the fallback), and then a DXR state object that is built asynchronously and polled across frames.
+/// permutation (or the fallback), and then a ray-tracing state object that is built asynchronously and polled across frames.
 /// So "record one frame and assert it traced" is asserting that all of that finished within one frame, which is a
 /// statement about the machine.
 ///
@@ -180,8 +190,8 @@ struct sv_test::rng
 
 struct sv_test::triangle_cloud
 {
-    cc::vector<tg::pos3f> positions;        // non-indexed triangle list (3 per triangle)
-    cc::vector<sv::pbr_material> materials; // one per triangle
+    cc::vector<tg::pos3f> positions;             // non-indexed triangle list (3 per triangle)
+    cc::vector<sv_test::pbr_material> materials; // one per triangle
 };
 
 namespace sv_test
@@ -227,7 +237,7 @@ inline sv::material_library& shared_material_library()
 
 /// The per-face values of `materials`, as the four `per_triangle` attributes the builtin `pbr` type declares by name.
 /// One attribute per field, because a `mesh_attribute` carries a scalar or a vector rather than a struct.
-inline cc::vector<sv::mesh_attribute> pbr_face_attributes(cc::span<sv::pbr_material const> materials)
+inline cc::vector<sv::mesh_attribute> pbr_face_attributes(cc::span<sv_test::pbr_material const> materials)
 {
     auto base_color = cc::vector<tg::vec3f>();
     auto metallic = cc::vector<f32>();
@@ -256,7 +266,9 @@ inline cc::vector<sv::mesh_attribute> pbr_face_attributes(cc::span<sv::pbr_mater
 ///
 /// The mesh names the library's unbound `pbr` material, so each of the four attributes above wins over the type's own
 /// default and the generated closest-hit reads them per triangle.
-inline sv::mesh as_mesh(cc::string name, cc::span<tg::pos3f const> positions, cc::span<sv::pbr_material const> materials)
+inline sv::mesh as_mesh(cc::string name,
+                        cc::span<tg::pos3f const> positions,
+                        cc::span<sv_test::pbr_material const> materials)
 {
     return {.name = cc::move(name),
             .geometry = sv::triangle_geometry::create_from_positions(positions),
@@ -301,7 +313,7 @@ inline sv::mesh as_textured_mesh(cc::string name, cc::span<tg::pos3f const> posi
 inline sv::mesh as_indexed_mesh(cc::string name,
                                 cc::span<tg::pos3f const> positions,
                                 cc::span<u32 const> indices,
-                                cc::span<sv::pbr_material const> materials)
+                                cc::span<sv_test::pbr_material const> materials)
 {
     return {.name = cc::move(name),
             .geometry = sv::triangle_geometry::create_from_indexed_triangles(positions, indices),
@@ -359,8 +371,8 @@ struct sv_test::area_light
 /// A Cornell box as a non-indexed triangle list with per-triangle materials, plus its light description.
 struct sv_test::cornell_box
 {
-    cc::vector<tg::pos3f> positions;        // non-indexed triangle list (3 per triangle)
-    cc::vector<sv::pbr_material> materials; // one per triangle
+    cc::vector<tg::pos3f> positions;             // non-indexed triangle list (3 per triangle)
+    cc::vector<sv_test::pbr_material> materials; // one per triangle
     area_light light;
 };
 
@@ -370,18 +382,21 @@ namespace sv_test
 /// Built as the wire record directly, since what these tests pin is the tracer, not the authoring path.
 [[nodiscard]] inline sv::pt_light_table light_table_of(area_light const& l)
 {
-    auto const record = sv::light_gpu{.position = l.center,
-                                      .path = u32(sv::light_path::area),
-                                      .u = tg::vec3f(l.half_x, 0, 0),
-                                      .area = 4.0f * l.half_x * l.half_z,
-                                      .v = tg::vec3f(0, 0, l.half_z),
-                                      .emission = l.emission,
-                                      .normal = tg::vec3f(0, -1, 0)};
-    return sv::pt_light_table::grouped(cc::span<sv::light_gpu const>(&record, 1));
+    auto const record = sv::shaders::tracer::light_record{.position = l.center,
+                                                          .path = u32(sv::light_path::area),
+                                                          .u = tg::vec3f(l.half_x, 0, 0),
+                                                          .area = 4.0f * l.half_x * l.half_z,
+                                                          .v = tg::vec3f(0, 0, l.half_z),
+                                                          .emission = l.emission,
+                                                          .normal = tg::vec3f(0, -1, 0),
+                                                          .cone_offset = 1,
+                                                          .link_mask = ~0u};
+    return sv::pt_light_table::grouped(cc::span<sv::shaders::tracer::light_record const>(&record, 1));
 }
 
 /// The records `lights` holds, uploaded for one recording — what `pt_trace_desc::lights` takes.
-[[nodiscard]] inline sg::buffer<sv::light_gpu> upload_lights(sg::command_list& cmd, sv::pt_light_table const& lights)
+[[nodiscard]] inline sg::buffer<sv::shaders::tracer::light_record> upload_lights(sg::command_list& cmd,
+                                                                                 sv::pt_light_table const& lights)
 {
     return cmd.context().transient.create_buffer_from_data(cmd, lights.records, sg::buffer_usage::readonly_buffer);
 }
@@ -392,7 +407,7 @@ namespace sv_test
 
 /// Appends a quad (a-b-c + a-c-d) carrying material `m` to a Cornell box.
 /// Winding is irrelevant — the closest-hit shades two-sided.
-inline void cb_push_quad(cornell_box& cb, tg::pos3f a, tg::pos3f b, tg::pos3f c, tg::pos3f d, sv::pbr_material const& m)
+inline void cb_push_quad(cornell_box& cb, tg::pos3f a, tg::pos3f b, tg::pos3f c, tg::pos3f d, sv_test::pbr_material const& m)
 {
     cb.positions.push_back(a);
     cb.positions.push_back(b);
@@ -405,7 +420,7 @@ inline void cb_push_quad(cornell_box& cb, tg::pos3f a, tg::pos3f b, tg::pos3f c,
 }
 
 /// Appends an axis-aligned box spanning [lo, hi] (six quads) carrying material `m`.
-inline void cb_push_box(cornell_box& cb, tg::pos3f lo, tg::pos3f hi, sv::pbr_material const& m)
+inline void cb_push_box(cornell_box& cb, tg::pos3f lo, tg::pos3f hi, sv_test::pbr_material const& m)
 {
     auto const x0 = lo[0];
     auto const y0 = lo[1];
@@ -428,25 +443,25 @@ inline void cb_push_box(cornell_box& cb, tg::pos3f lo, tg::pos3f hi, sv::pbr_mat
 /// All geometry is already in world space (identity transform).
 inline cornell_box make_cornell_box()
 {
-    auto const white = sv::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f),
-                                        .metallic = 0.0f,
-                                        .roughness = 1.0f,
-                                        .emissive = tg::vec3f(0, 0, 0)};
-    auto const red = sv::pbr_material{.base_color = tg::vec3f(0.63f, 0.06f, 0.05f),
-                                      .metallic = 0.0f,
-                                      .roughness = 1.0f,
-                                      .emissive = tg::vec3f(0, 0, 0)};
-    auto const green = sv::pbr_material{.base_color = tg::vec3f(0.12f, 0.45f, 0.09f),
-                                        .metallic = 0.0f,
-                                        .roughness = 1.0f,
-                                        .emissive = tg::vec3f(0, 0, 0)};
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f),
+                                             .metallic = 0.0f,
+                                             .roughness = 1.0f,
+                                             .emissive = tg::vec3f(0, 0, 0)};
+    auto const red = sv_test::pbr_material{.base_color = tg::vec3f(0.63f, 0.06f, 0.05f),
+                                           .metallic = 0.0f,
+                                           .roughness = 1.0f,
+                                           .emissive = tg::vec3f(0, 0, 0)};
+    auto const green = sv_test::pbr_material{.base_color = tg::vec3f(0.12f, 0.45f, 0.09f),
+                                             .metallic = 0.0f,
+                                             .roughness = 1.0f,
+                                             .emissive = tg::vec3f(0, 0, 0)};
 
     auto const light_emission = tg::vec3f(15, 15, 15);
     // A pure emitter: no reflection (albedo 0), so a path that lands on it terminates on its emission.
-    auto const lamp = sv::pbr_material{.base_color = tg::vec3f(0, 0, 0),
-                                       .metallic = 0.0f,
-                                       .roughness = 1.0f,
-                                       .emissive = light_emission};
+    auto const lamp = sv_test::pbr_material{.base_color = tg::vec3f(0, 0, 0),
+                                            .metallic = 0.0f,
+                                            .roughness = 1.0f,
+                                            .emissive = light_emission};
 
     auto cb = cornell_box{};
 

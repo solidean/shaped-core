@@ -5,17 +5,17 @@
 
 // The material types every library starts with.
 //
-// Each `shader` is an HLSL FRAGMENT, not a compilable shader: the generated prologue has already declared and initialized one
-// local per signature attribute, and one `sv::surface surface` for it to write.
+// Each `shader` is an SGL FRAGMENT, not a compilable shader: the generated hit group has already bound one immutable local per
+// signature attribute, and one `let mut surface` for it to write.
 // So a fragment reads the attributes by their declared names and assigns `surface`, and knows nothing about where any of it came
 // from — which is what lets one fragment serve a constant, a per-corner attribute and a texture alike.
 //
-// `sv::surface` is OpenPBR's parameter set (shaders/openpbr.hlsli), so every type here writes that one vocabulary and the
-// integrator has a single BSDF to evaluate.
+// `surface` is OpenPBR's parameter set (`openpbr.surface`, shaders/sgl/openpbr_closure.sgl), so every type here writes that one
+// vocabulary and the integrator has a single BSDF to evaluate.
 // `openpbr` exposes it directly; `pbr` and `unlit` are projections onto it, the same way glTF's metallic-roughness maps onto
 // OpenPBR.
 //
-// TEMPORARY: these live as string literals because slib has no named-HLSL-fragment asset kind — a fragment is not a shader, so
+// TEMPORARY: these live as string literals because slib has no named-fragment asset kind — a fragment is not a shader, so
 // `sc_add_shader_package` has nothing to declare it as.
 // Moving them into `shaders/` once it does gets editor support and hot reload; see libs/graphics/shaped-viewer/docs/TODO.md.
 
@@ -24,67 +24,68 @@ namespace sv
 namespace
 {
 // The identity fragment: every attribute is already an OpenPBR parameter, so this only clamps what the BSDF requires.
-constexpr cc::string_view openpbr_shader = R"hlsl(
-    surface.base_weight = saturate(base_weight);
-    surface.base_color = saturate(base_color);
-    surface.base_metalness = saturate(base_metalness);
-    surface.base_diffuse_roughness = saturate(base_diffuse_roughness);
+//
+// A cutout is a step rather than a blend: alpha_cutoff at 0 leaves opacity continuous, and any positive value makes the
+// surface either fully present or fully absent at that threshold.
+// Baking the step into the imported alpha instead fails as soon as mips filter it, which is exactly when a cutout matters.
+//
+// `occlusion` is declared and imported, and deliberately not read here.
+// Baked ambient occlusion in a path tracer is double-counting: the integrator computes that occlusion itself, correctly and
+// per bounce, so applying a baked term on top darkens the surface twice.
+// It is carried anyway because a raster fallback will want it, and an asset that lost its AO map on load cannot get it back.
+constexpr cc::string_view openpbr_shader = R"sgl(
+surface.base_weight = saturate(base_weight)
+surface.base_color = saturate(base_color)
+surface.base_metalness = saturate(base_metalness)
+surface.base_diffuse_roughness = saturate(base_diffuse_roughness)
 
-    surface.specular_weight = max(0.0, specular_weight);
-    surface.specular_color = saturate(specular_color);
-    surface.specular_roughness = saturate(specular_roughness);
-    surface.specular_roughness_anisotropy = saturate(specular_roughness_anisotropy);
-    surface.specular_ior = max(1.0, specular_ior);
+surface.specular_weight = max(0.0, specular_weight)
+surface.specular_color = saturate(specular_color)
+surface.specular_roughness = saturate(specular_roughness)
+surface.specular_roughness_anisotropy = saturate(specular_roughness_anisotropy)
+surface.specular_ior = max(1.0, specular_ior)
 
-    surface.transmission_weight = saturate(transmission_weight);
-    surface.transmission_color = saturate(transmission_color);
-    surface.transmission_depth = max(0.0, transmission_depth);
-    surface.transmission_scatter = max(float3(0, 0, 0), transmission_scatter);
-    surface.transmission_scatter_anisotropy = clamp(transmission_scatter_anisotropy, -1.0, 1.0);
-    surface.transmission_dispersion_scale = max(0.0, transmission_dispersion_scale);
-    surface.transmission_dispersion_abbe_number = max(0.0, transmission_dispersion_abbe_number);
+surface.transmission_weight = saturate(transmission_weight)
+surface.transmission_color = saturate(transmission_color)
+surface.transmission_depth = max(0.0, transmission_depth)
+surface.transmission_scatter = max(float3(0.0), transmission_scatter)
+surface.transmission_scatter_anisotropy = clamp(transmission_scatter_anisotropy, -1.0, 1.0)
+surface.transmission_dispersion_scale = max(0.0, transmission_dispersion_scale)
+surface.transmission_dispersion_abbe_number = max(0.0, transmission_dispersion_abbe_number)
 
-    surface.subsurface_weight = saturate(subsurface_weight);
-    surface.subsurface_color = saturate(subsurface_color);
-    surface.subsurface_radius = saturate(subsurface_radius);
-    surface.subsurface_radius_scale = max(0.0, subsurface_radius_scale);
-    surface.subsurface_scatter_anisotropy = clamp(subsurface_scatter_anisotropy, -1.0, 1.0);
+surface.subsurface_weight = saturate(subsurface_weight)
+surface.subsurface_color = saturate(subsurface_color)
+surface.subsurface_radius = saturate(subsurface_radius)
+surface.subsurface_radius_scale = max(0.0, subsurface_radius_scale)
+surface.subsurface_scatter_anisotropy = clamp(subsurface_scatter_anisotropy, -1.0, 1.0)
 
-    surface.coat_weight = saturate(coat_weight);
-    surface.coat_color = saturate(coat_color);
-    surface.coat_roughness = saturate(coat_roughness);
-    surface.coat_roughness_anisotropy = saturate(coat_roughness_anisotropy);
-    surface.coat_ior = max(1.0, coat_ior);
-    surface.coat_darkening = saturate(coat_darkening);
+surface.coat_weight = saturate(coat_weight)
+surface.coat_color = saturate(coat_color)
+surface.coat_roughness = saturate(coat_roughness)
+surface.coat_roughness_anisotropy = saturate(coat_roughness_anisotropy)
+surface.coat_ior = max(1.0, coat_ior)
+surface.coat_darkening = saturate(coat_darkening)
 
-    surface.fuzz_weight = saturate(fuzz_weight);
-    surface.fuzz_color = saturate(fuzz_color);
-    surface.fuzz_roughness = saturate(fuzz_roughness);
+surface.fuzz_weight = saturate(fuzz_weight)
+surface.fuzz_color = saturate(fuzz_color)
+surface.fuzz_roughness = saturate(fuzz_roughness)
 
-    surface.thin_film_weight = saturate(thin_film_weight);
-    surface.thin_film_thickness = max(0.0, thin_film_thickness);
-    surface.thin_film_ior = max(1.0, thin_film_ior);
+surface.thin_film_weight = saturate(thin_film_weight)
+surface.thin_film_thickness = max(0.0, thin_film_thickness)
+surface.thin_film_ior = max(1.0, thin_film_ior)
 
-    surface.emission_luminance = max(0.0, emission_luminance);
-    surface.emission_color = max(float3(0, 0, 0), emission_color);
+surface.emission_luminance = max(0.0, emission_luminance)
+surface.emission_color = max(float3(0.0), emission_color)
 
-    surface.geometry_thin_walled = thin_walled;
-    surface.geometry_normal = normalize(normal);
-    surface.geometry_coat_normal = normalize(coat_normal);
-    // A cutout is a step rather than a blend: alpha_cutoff at 0 leaves opacity continuous, and any positive value makes the
-    // surface either fully present or fully absent at that threshold.
-    // Baking the step into the imported alpha instead fails as soon as mips filter it, which is exactly when a cutout matters.
-    surface.geometry_opacity = alpha_cutoff > 0.0 ? step(alpha_cutoff, opacity) : saturate(opacity);
+surface.geometry_thin_walled = thin_walled
+surface.geometry_normal = normalize(normal)
+surface.geometry_coat_normal = normalize(coat_normal)
+surface.geometry_opacity = if alpha_cutoff > 0.0 => step(alpha_cutoff, opacity) else saturate(opacity)
 
-    // `occlusion` is declared and imported, and deliberately not read here.
-    // Baked ambient occlusion in a path tracer is double-counting: the integrator computes that occlusion itself, correctly and
-    // per bounce, so applying a baked term on top darkens the surface twice.
-    // It is carried anyway because a raster fallback will want it, and an asset that lost its AO map on load cannot get it back.
-
-    surface.geometry_tangent_frame = tangent_frame;
-    surface.geometry_tangent = tangent;
-    surface.geometry_handedness = tangent_handedness;
-)hlsl";
+surface.geometry_tangent_frame = tangent_frame
+surface.geometry_tangent = tangent
+surface.geometry_handedness = tangent_handedness
+)sgl";
 
 // glTF metallic-roughness, projected onto the OpenPBR surface.
 //
@@ -92,30 +93,30 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
 // `specular_roughness`, and the dielectric keeps OpenPBR's default IOR of 1.5 — which is glTF's 0.04 reflectance.
 // `occlusion` folds into `base_weight` rather than being a parameter of its own, because OpenPBR has no such parameter and a
 // baked occlusion term is a modulation of how much base is there.
-constexpr cc::string_view pbr_shader = R"hlsl(
-    surface.base_weight = saturate(occlusion);
-    surface.base_color = base_color;
-    surface.base_metalness = saturate(metallic);
-    surface.specular_roughness = saturate(roughness);
+constexpr cc::string_view pbr_shader = R"sgl(
+surface.base_weight = saturate(occlusion)
+surface.base_color = base_color
+surface.base_metalness = saturate(metallic)
+surface.specular_roughness = saturate(roughness)
 
-    surface.emission_luminance = 1.0;
-    surface.emission_color = emissive;
+surface.emission_luminance = 1.0
+surface.emission_color = emissive
 
-    surface.geometry_normal = normalize(normal);
-    surface.geometry_tangent_frame = tangent_frame;
-    surface.geometry_handedness = tangent_handedness;
-)hlsl";
+surface.geometry_normal = normalize(normal)
+surface.geometry_tangent_frame = tangent_frame
+surface.geometry_handedness = tangent_handedness
+)sgl";
 
 // Unlit is emission and nothing else: no base and no specular means no bounce reaches it, so the integrator returns `color`.
-constexpr cc::string_view unlit_shader = R"hlsl(
-    surface.base_weight = 0.0;
-    surface.specular_weight = 0.0;
+constexpr cc::string_view unlit_shader = R"sgl(
+surface.base_weight = 0.0
+surface.specular_weight = 0.0
 
-    surface.emission_luminance = 1.0;
-    surface.emission_color = color;
+surface.emission_luminance = 1.0
+surface.emission_color = color
 
-    surface.geometry_opacity = saturate(opacity);
-)hlsl";
+surface.geometry_opacity = saturate(opacity)
+)sgl";
 
 [[nodiscard]] material_type make_openpbr()
 {
@@ -198,7 +199,7 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("tangent", tg::vec3f(1.0f, 0.0f, 0.0f)));
 
     // The tangent frame, as a rotation taking tangent space to object space, plus the handedness no rotation can carry.
-    // Both default to a frame nothing supplied, and the generated `SV_ATTR_SUPPLIED_tangent_frame` is what tells the hit to
+    // Both default to a frame nothing supplied, and the generated `sv_supplied_tangent_frame` is what tells the hit to
     // fall back to the geometric frame rather than trusting the identity.
     signature.push_back(material_signature_entry::of_rotation("tangent_frame", tg::quat_f::make_identity()));
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
@@ -219,7 +220,7 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     signature.push_back(material_signature_entry::of("occlusion", 1.0f));
 
     // The tangent frame, as a rotation taking tangent space to object space, plus the handedness no rotation can carry.
-    // Both default to a frame nothing supplied, and the generated `SV_ATTR_SUPPLIED_tangent_frame` is what tells the hit to
+    // Both default to a frame nothing supplied, and the generated `sv_supplied_tangent_frame` is what tells the hit to
     // fall back to the geometric frame rather than trusting the identity.
     signature.push_back(material_signature_entry::of_rotation("tangent_frame", tg::quat_f::make_identity()));
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));

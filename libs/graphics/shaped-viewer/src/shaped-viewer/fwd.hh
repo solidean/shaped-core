@@ -20,12 +20,10 @@ using namespace cc::primitive_defines;
 struct resource_budget;
 struct manager_config;
 struct mesh_record;
-struct material_record;
 struct texture_record;
 struct attribute_record;
 struct instance_slot;
 struct instance_record;
-struct instance_gpu; // one scene item as a closest-hit reads it, by InstanceID() (resources/instance_data.hh)
 struct quadric_gpu;  // one quadric as the intersection shader reads it, by PrimitiveIndex() (resources/quadric_data.hh)
 struct quadric_data; // what a caller hands the quadric manager
 struct quadric_set_record; // one uploaded batch: two buffers and the procedural BLAS over them
@@ -34,10 +32,8 @@ struct work_budget;        // how much follow-up GPU work one epoch may record
 struct texture_policy;     // what happens to a texture once it has landed
 struct gpu_resource_manager_config;
 
-// The bindless tables sv declares, and their budgets (see resources/bindless_tables.hh)
+// The bindless tables sv declares (see resources/bindless_tables.hh)
 enum class bindless_table : u8;
-struct bindless_table_budget;
-struct bindless_config;
 
 // stable identities across frames (stable_id.hh) — one template, one tag per kind
 template <class Tag>
@@ -50,7 +46,6 @@ using light_id = stable_id<light_id_tag>;
 struct camera;
 struct camera_basis;
 struct perspective_projection;
-struct camera_gpu;
 struct camera_matrices;
 struct orbit_state;
 enum class camera_style;
@@ -59,8 +54,6 @@ class orbit_camera_controller;
 struct fps_state;
 struct fps_camera_controller_config;
 class fps_camera_controller;
-struct pbr_material;
-struct pbr_material_gpu;
 // lights (scene/light.hh) — one record whatever the kind, tagged by the path the tracer takes
 enum class light_path : u8;
 enum class area_shape : u8;
@@ -75,7 +68,6 @@ struct distant_disc_payload;
 struct light_emission;
 class light;
 struct scene_light;
-struct light_gpu;
 struct background;
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
@@ -146,7 +138,7 @@ struct resolved_material;           // a type + material + mesh resolved down th
 enum class material_slot_kind : u8; // what one field of a per-instance parameter block holds
 struct material_slot;
 struct material_parameter_layout; // the parameter block one permutation reads
-struct generated_material_shader; // that permutation as HLSL, plus its layout
+struct generated_material_shader; // that permutation as an SGL hit group, plus its layout
 struct material_shader_options;
 class material_library;
 
@@ -168,17 +160,14 @@ class view_store;
 /// Strongly typed for the reason `layout_node_id` is — a definition and a plan are full of other u32 indices (node,
 /// target, trace, hit region) that a raw view index silently converts into.
 enum class view_index : u32;
-struct frame_constants_gpu;
 
 // resource upload data + ids + managers
 struct triangle_data;
 struct indexed_triangle_data;
-struct material_data;
 struct texture_data;
 // the resource ids are defined at the bottom of this header, since they carry an `invalid` enumerator
 enum class mesh_id : u32;
 enum class quadric_set_id : u32;
-enum class material_set_id : u32;
 enum class material_type_id : u32;
 enum class material_id : u32;
 enum class tlas_id : u32;
@@ -188,7 +177,6 @@ enum class attribute_id : u32;
 enum class instance_id : u32;
 class mesh_manager;
 class quadric_manager;
-class material_manager;
 class texture_manager;
 class attribute_manager;
 // The class-key must match the definition: the Microsoft ABI mangles struct and class differently, so a
@@ -227,11 +215,8 @@ struct layout_pipeline_key;
 } // namespace impl
 
 // rendering
-struct material_permutation; // one permutation generated + compiled (rendering/material_shader_cache.hh)
+struct material_permutation; // one permutation generated + compiled (resources/material_shader_cache.hh)
 class material_shader_cache;
-struct trace_desc;
-class pbr_raytrace_routine;
-struct pt_frame_constants_gpu;
 struct pt_light_table; // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
 class pathtrace_routine;
@@ -321,11 +306,6 @@ enum class sv::mesh_id : sv::u32
 /// Names one uploaded quadric batch — the primitives, their AABBs, and the procedural BLAS over them.
 /// Minted by the quadric manager, keyed on the set's own content hash.
 enum class sv::quadric_set_id : sv::u32
-{
-    invalid = u32(-1)
-};
-
-enum class sv::material_set_id : sv::u32
 {
     invalid = u32(-1)
 };

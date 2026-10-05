@@ -319,8 +319,9 @@ The gaps that are gaps:
 
 - **More than one space in a group.**
   The pass gives group `n` exactly `space<n>`, so a group cannot hold two things that each want a space of their own.
-  Nothing needs one today: sv's eight bindless tables share a group and are laid out end to end, since an array consumes one index per element.
-  That works only because every permutation declares the whole set — a subset would start its first table at `t0` and disagree with the layout.
+  Nothing needs one today.
+  A group of several tables lays them out end to end, since an array consumes one index per element, so every source must declare the whole set.
+  A subset would start its first table at `t0` and disagree with the layout.
   If a table ever has to keep its register range across a partial declaration, this is what it would take, and `sg::binding` already carries `space` per binding.
 
 **A hand-written address is an error**, in any source carrying an attribute.
@@ -585,8 +586,7 @@ backed by a `constexpr` binding table the generator emits, which is what makes t
 A `push_constants`, `payload` or `vertex_input` struct also reaches C++, as a struct with explicit padding rather than as a byte count.
 
 The number was never the interesting part — the layout is, and it is what nobody can check by reading.
-`sv::frame_constants_gpu` is the current state of the art: a hand-written mirror with `_padding0[3]` and `_reserved[44]` placed by hand, and a `static_assert` on the total.
-Its doc comment reads "Keep this in lockstep with common.hlsli".
+The alternative is a hand-written mirror with its padding placed by hand, a `static_assert` on the total, and a comment asking to keep it in lockstep with the shader.
 A generated mirror makes that lockstep mechanical, and `sizeof` becomes true rather than asserted.
 
 Getting it right means emitting HLSL's packing, not C++'s.

@@ -1,0 +1,390 @@
+// The path tracer as an SGL ray-tracing pipeline: the raygen that integrates, the two misses, and the pipeline over them.
+//
+// The hit groups are the host's, `.host`, because a closest hit is generated per material and compiled at run time.
+// The file joins module `tracer` (shaders/sgl), which holds what those hit groups share with it: the bindings, the payloads, the rays and the shading.
+//
+// Every source a sampled ray can reach is gathered by two strategies combined with balance-heuristic multiple importance sampling.
+// They are the hit's own next-event ray, and the BSDF-sampled bounce ray when it reaches the same source.
+// The weight for the second is applied here, because only the caller knows where the bounce went.
+require raytracing_pipeline
+
+use openpbr
+use pt
+use scene
+use tracer
+
+/// The tracer's two rays, restated from module `tracer`, whose shading traces the shadow ray through its own.
+rays path_rays:
+    surface: tracer.surface_payload
+    occlusion: tracer.shadow_payload
+
+/// One sample's path, walked until it escapes, runs out of bounces or is absorbed — what `path_trace` does per sample.
+@raygen fun path_trace(@launch_id id: int3, @launch_size size: int3){tracer.traced, tracer.bindless}:
+    let f = tracer.traced.frame[0]
+    let px = uint2(id.x as uint, id.y as uint)
+    let dim = uint2(size.x as uint, size.y as uint)
+    let px_f = float2(px.x as float, px.y as float)
+    let dim_f = float2(dim.x as float, dim.y as float)
+    let xy = int2(id.x, id.y)
+
+    let mut rng = pt.hash(px.x + px.y * dim.x + f.rng_seed * 9781u)
+
+    let spp = max(1, f.samples_per_pixel)
+    let mut accum = float3(0.0)
+
+    // The denoiser guides, summed over this frame's samples like `accum` is.
+    let mut guide_normal = float3(0.0)
+    let mut guide_depth = 0.0
+    let mut guide_albedo = float3(0.0)
+    let mut guide_specular_albedo = float3(0.0)
+    let mut guide_roughness = 0.0
+
+    // The primary hits' motion, summed over this frame's samples: where each landed on the previous frame's screen.
+    let mut motion = float2(0.0)
+
+    // The specular SHARE of the radiance, and how far the first secondary hit of each kind of path sat.
+    let mut accum_specular = float3(0.0)
+    let mut hit_dist_diffuse = 0.0
+    let mut hit_dist_specular = 0.0
+    let mut hit_dist_diffuse_n = 0.0
+    let mut hit_dist_specular_n = 0.0
+
+    // Paths of each lobe whose first secondary ray ESCAPED, counted apart from the ones that hit.
+    let mut hit_dist_diffuse_escaped = 0.0
+    let mut hit_dist_specular_escaped = 0.0
+
+    for s in 0 ..< spp:
+        // jittered pinhole primary ray
+        let jitter_x = pt.rand(mut rng)
+        let jitter_y = pt.rand(mut rng)
+        let jitter = float2(jitter_x, jitter_y)
+        let cam = scene.camera(..f.camera)
+        let mut origin = cam.position
+        let mut dir = normalize(scene.camera_ray_offset(cam, px_f + jitter, dim_f))
+
+        let mut throughput = float3(1.0)
+        let mut radiance = float3(0.0)
+
+        // Which signal this path belongs to, decided once at the primary hit by the lobe its continuation was drawn from.
+        let mut radiance_specular = float3(0.0)
+        let mut path_is_specular = false
+        // pdf of the direction the last hit sampled, for the escaped-environment MIS
+        let mut prev_pdf = 0.0
+
+        // Whether the vertex this segment left ran next-event estimation, which a surface hit does and a medium scatter does not.
+        let mut prev_did_nee = true
+
+        // What the next segment travels through: vacuum until the path refracts into a solid.
+        let mut medium_sigma_t = float3(0.0)
+        let mut medium_albedo = float3(0.0)
+        let mut medium_g = 0.0
+
+        // Which wavelength this path has been collapsed onto, or 3 while it still carries all three.
+        let mut channel = 3u
+
+        // The first trace of a sample is the primary ray, whose hit the guides describe; a scattering event spends no bounce.
+        let mut primary = true
+
+        // Scattering events do not count against `max_bounces`: Russian roulette ends a long walk, and `pt.scatter_cap` guards it.
+        let mut scatters = 0
+
+        let mut b = 0
+        while b < f.max_bounces:
+            let last_bounce = if b + 1 >= f.max_bounces => 1u else 0u
+            let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
+            let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = 1e4)
+            trace(tracer.traced.world, r, path_rays.surface, mut p)
+
+            // The random state comes back advanced by whatever the hit drew from it.
+            rng = p.rng
+            let next_sigma_t = p.medium_sigma_t
+            let next_albedo = p.medium_albedo
+            let next_g = p.medium_g
+            let next_channel = p.channel
+            let hit_t = p.hit_t
+            let direct_diffuse = p.direct_diffuse
+            let direct_specular = p.direct_specular
+            let lobe = p.lobe
+            let emission = p.emission
+            let weight = p.throughput
+            let next_dir = p.direction
+            let n = p.normal
+            let pdf = p.bsdf_pdf
+            let albedo = p.albedo
+            let specular_albedo = p.specular_albedo
+            let roughness = p.roughness
+
+            if primary:
+                // Linear view depth rather than the distance along the ray, which grows toward the image's edges.
+                // An escaped primary ray leaves both at zero, which is what the denoiser reads as "no surface".
+                if hit_t >= 0.0:
+                    guide_normal += n
+                    guide_depth += hit_t * dot(dir, normalize(cam.forward))
+                    guide_albedo += albedo
+                    guide_specular_albedo += specular_albedo
+                    guide_roughness += roughness
+
+                // An escaped ray reprojects as a point at infinity, so the sky moves with rotation and not with translation.
+                let prev = scene.camera(..f.previous_camera)
+                let offset = if hit_t >= 0.0 => origin + dir * hit_t - prev.position else dir
+                motion += (px_f + jitter) - scene.camera_project(prev, offset, dim_f)
+
+                // The lobe the continuation was drawn from is what this path IS, for the denoiser's purposes.
+                path_is_specular = openpbr.bsdf_lobe_is_specular(lobe)
+                primary = false
+            else if b == 1:
+                // The first SECONDARY hit's distance, which a split-signal denoiser sizes its reprojection from.
+                // An escape is COUNTED rather than summed as zero, since zero is what REBLUR reads as contact.
+                let escaped = hit_t < 0.0
+                let distance = if escaped => 0.0 else hit_t
+                let hit_count = if escaped => 0.0 else 1.0
+                let escape_count = if escaped => 1.0 else 0.0
+                if path_is_specular:
+                    hit_dist_specular += distance
+                    hit_dist_specular_n += hit_count
+                    hit_dist_specular_escaped += escape_count
+                else:
+                    hit_dist_diffuse += distance
+                    hit_dist_diffuse_n += hit_count
+                    hit_dist_diffuse_escaped += escape_count
+
+            let inside = any(medium_sigma_t > float3(0.0))
+            let scattering = inside and any(medium_albedo > float3(0.0))
+
+            if scattering:
+                // A scattering interior is walked rather than crossed: the segment may end at a particle instead of at the surface the trace found.
+                // Distance is drawn against ONE channel's extinction and the estimate is corrected for all three.
+                let u_channel = pt.rand(mut rng)
+                let dc = min((u_channel * 3.0) as uint, 2u)
+                let sigma_pick = max(component_of(medium_sigma_t, dc), 1e-6)
+                let u_distance = pt.rand(mut rng)
+                let t = -log(max(1.0 - u_distance, 1e-9)) / sigma_pick
+
+                let reaches_surface = hit_t >= 0.0 and t >= hit_t
+                let traveled = if reaches_surface => hit_t else t
+
+                let transmittance = exp(-medium_sigma_t * traveled)
+
+                // The pdf of what actually happened, averaged over the channel the distance could have been drawn against.
+                let pdf3 = if reaches_surface => transmittance else medium_sigma_t * transmittance
+                let dist_pdf = (pdf3.x + pdf3.y + pdf3.z) / 3.0
+                if dist_pdf <= 1e-12 => break
+
+                if not reaches_surface:
+                    // A real scattering event: the phase function is its own pdf, so the turn carries no weight beyond the albedo.
+                    throughput *= (transmittance * medium_sigma_t * medium_albedo) / dist_pdf
+
+                    origin = origin + dir * t
+
+                    let u_phase_1 = pt.rand(mut rng)
+                    let u_phase_2 = pt.rand(mut rng)
+                    let scattered = pt.sample_hg(dir, medium_g, u_phase_1, u_phase_2)
+
+                    // The density at the direction ACTUALLY drawn, which a light's other strategy has to be balanced against.
+                    prev_pdf = pt.hg_phase(dot(dir, scattered), medium_g)
+                    prev_did_nee = false
+                    dir = scattered
+
+                    scatters += 1
+                    if not pt.is_finite(throughput) => break
+
+                    // Russian roulette ends a long walk without taking its energy with it.
+                    // `q` is the throughput's largest channel, floored so one draw cannot kill all but a twentieth of the paths.
+                    if scatters > pt.roulette_after:
+                        let q = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.05, 1.0)
+                        let u_roulette = pt.rand(mut rng)
+                        if u_roulette >= q => break
+                        throughput /= q
+
+                    // The guard behind the roulette: an albedo at 1 exactly never rolls a losing draw, and no dispatch may run forever.
+                    if scatters > pt.scatter_cap => break
+
+                    // NOT a bounce: the surface budget is untouched
+                    continue
+
+                throughput *= transmittance / dist_pdf
+            else if inside and hit_t > 0.0:
+                // A purely absorbing interior needs no walk: Beer-Lambert over the whole segment, before anything this hit contributes.
+                throughput *= exp(-medium_sigma_t * hit_t)
+
+            // A ray that escapes while still inside a solid traveled an unbounded distance through it, so nothing survives.
+            // Both light loops are skipped for it and the path ends below, rather than breaking here.
+            let escaped_inside = inside and hit_t < 0.0
+
+            // The BSDF strategy for every rect this segment crosses, and the camera's view of the ones it may see.
+            // Lights are analytic and occlude nothing, so every rect in front of the surface counts, each against its own density.
+            if not escaped_inside:
+                // the `scene.light_path_area` run
+                let begin = f.path_offset.y
+                let end = begin + f.path_count.y
+                for i in (begin as int) ..< (end as int):
+                    let l = scene.light(..tracer.traced.lights[i])
+                    let mut t_light = 0.0
+                    let mut cos_light = 0.0
+                    let crosses = pt.rect_intersect(l, origin, dir, mut t_light, mut cos_light)
+                    if not crosses => continue
+
+                    // `dir` is unit, so the distance along it is the distance to the rect.
+                    let in_front = hit_t < 0.0 or t_light < hit_t
+                    let arriving = l.emission * scene.light_cone(l, cos_light)
+                    if b == 0:
+                        // Seen directly, so it describes no bounce and goes to the diffuse signal.
+                        if in_front and scene.light_visible_to_camera(l) => radiance += throughput * arriving
+                    else if in_front or not scene.light_casts_shadows(l):
+                        let w = if prev_did_nee => pt.mis_weight(prev_pdf, pt.light_pdf(l, f.light_count, t_light * t_light, cos_light)) else 1.0
+                        let c = throughput * arriving * w
+                        radiance += c
+                        if path_is_specular => radiance_specular += c
+
+            if not escaped_inside:
+                // the `scene.light_path_distant_disc` run
+                let begin = f.path_offset.w
+                let end = begin + f.path_count.w
+                for i in (begin as int) ..< (end as int):
+                    let l = scene.light(..tracer.traced.lights[i])
+                    if not pt.in_disc(l, dir) => continue
+
+                    if b == 0:
+                        if hit_t < 0.0 and scene.light_visible_to_camera(l) => radiance += throughput * l.emission
+                    else if hit_t < 0.0 or not scene.light_casts_shadows(l):
+                        let w = if prev_did_nee => pt.mis_weight(prev_pdf, pt.disc_pdf(l, f.light_count)) else 1.0
+                        let c = throughput * l.emission * w
+                        radiance += c
+                        if path_is_specular => radiance_specular += c
+
+            if hit_t < 0.0:
+                if escaped_inside => break
+
+                // Escaped to the SH environment, whose radiance the miss wrote back in `emission`.
+                // The primary ray sees the sky at full weight; a bounce ray is the BSDF strategy of the hit's own environment estimate.
+                let w = if b == 0 => 1.0 else pt.mis_weight(prev_pdf, pt.env_pdf())
+                let c = throughput * emission * w
+                radiance += c
+
+                // The sky seen by the PRIMARY ray belongs to neither lobe, so it goes to the diffuse signal.
+                if path_is_specular and b > 0 => radiance_specular += c
+                break
+
+            // A surface's own emission reaches the camera directly and contributes nothing indirectly.
+            if b == 0 => radiance += throughput * emission
+
+            // What the hit already estimated toward its picked light and the environment, through its own BSDF.
+            radiance += throughput * (direct_diffuse + direct_specular)
+            if b == 0:
+                radiance_specular += throughput * direct_specular
+            else if path_is_specular:
+                radiance_specular += throughput * (direct_diffuse + direct_specular)
+
+            // A closure that sampled nothing — fully absorbed, or a lobe that collapsed — ends the path here.
+            if all(weight <= float3(0.0)) => break
+
+            throughput *= weight
+            prev_pdf = pdf
+            prev_did_nee = true
+
+            // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
+            let side = if dot(next_dir, n) < 0.0 => -1e-3 else 1e-3
+            origin = origin + dir * hit_t + n * side
+            dir = next_dir
+            medium_sigma_t = next_sigma_t
+            medium_albedo = next_albedo
+            medium_g = next_g
+            channel = next_channel
+            b += 1
+
+        // One non-finite path would poison this pixel forever, since the mean is blended in place: dropping it costs one sample.
+        if pt.is_finite(radiance):
+            accum += radiance
+
+            // Clamped to the total, because the two are summed back together downstream.
+            accum_specular += clamp(radiance_specular, float3(0.0), max(radiance, float3(0.0)))
+
+    let spp_f = spp as float
+    let mut color = accum / spp_f
+
+    if f.write_temporal != 0u:
+        tracer.traced.frame_output[xy] = float4(..color, 1.0)
+        tracer.traced.guide_motion[xy] = motion / spp_f
+
+    if f.write_split != 0u:
+        // The specular share was clamped to the total per sample, so the difference is never negative.
+        let specular = accum_specular / spp_f
+        let diffuse = color - specular
+        tracer.traced.frame_specular[xy] = float4(..specular, 1.0)
+        tracer.traced.frame_diffuse[xy] = float4(..diffuse, 1.0)
+
+        // A mean over the paths of each kind: some path hit, every path escaped (the ray's own `t_max`), or no path of this lobe (0).
+        let escaped_distance = 1e4
+        let diffuse_none = if hit_dist_diffuse_escaped > 0.0 => escaped_distance else 0.0
+        let specular_none = if hit_dist_specular_escaped > 0.0 => escaped_distance else 0.0
+        let guide_diffuse = if hit_dist_diffuse_n > 0.0 => hit_dist_diffuse / hit_dist_diffuse_n else diffuse_none
+        let guide_specular = if hit_dist_specular_n > 0.0 => hit_dist_specular / hit_dist_specular_n else specular_none
+        tracer.traced.guide_hit_distance[xy] = float2(guide_diffuse, guide_specular)
+
+    // Progressive accumulation: this frame's estimate folded into the running mean already in the target, every frame at the same weight.
+    if f.accum_frame > 0u:
+        let frames = f.accum_frame as float
+        color = (tracer.traced.output[xy].xyz * frames + color) / (frames + 1.0)
+
+    tracer.traced.output[xy] = float4(..color, 1.0)
+
+    // The guides blend exactly as the color does, but on a count of their own.
+    if f.write_guides != 0u:
+        let mut n_mean = guide_normal / spp_f
+        let mut d_mean = guide_depth / spp_f
+        let mut a_mean = guide_albedo / spp_f
+        if f.guide_frame > 0u:
+            let g = f.guide_frame as float
+            n_mean = (tracer.traced.guide_normal[xy].xyz * g + n_mean) / (g + 1.0)
+            d_mean = (tracer.traced.guide_depth[xy] * g + d_mean) / (g + 1.0)
+            a_mean = (tracer.traced.guide_albedo[xy].xyz * g + a_mean) / (g + 1.0)
+        tracer.traced.guide_normal[xy] = float4(..n_mean, 0.0)
+        tracer.traced.guide_depth[xy] = d_mean
+        tracer.traced.guide_albedo[xy] = float4(..a_mean, 0.0)
+
+        // The specular pair rides the same guide_frame, behind its own flag.
+        if f.write_specular_guides != 0u:
+            let mut s_mean = guide_specular_albedo / spp_f
+            let mut r_mean = guide_roughness / spp_f
+            if f.guide_frame > 0u:
+                let g = f.guide_frame as float
+                s_mean = (tracer.traced.guide_specular_albedo[xy].xyz * g + s_mean) / (g + 1.0)
+                r_mean = (tracer.traced.guide_roughness[xy] * g + r_mean) / (g + 1.0)
+            tracer.traced.guide_specular_albedo[xy] = float4(..s_mean, 0.0)
+            tracer.traced.guide_roughness[xy] = r_mean
+
+/// Component `i` of `v`, for an index known only at run time.
+fun component_of(v: float3, i: uint) -> float:
+    if i == 0u => return v.x
+    if i == 1u => return v.y
+    return v.z
+
+/// The surface ray's miss: the ray escaped to the SH environment, whose radiance rides back in `emission`.
+/// Every field is written so the caller reads them all unconditionally; `hit_t` below 0 signals the escape.
+@miss fun path_miss(p: mut tracer.surface_payload, r: ray){tracer.traced, tracer.bindless}:
+    p.direct_diffuse = float3(0.0)
+    p.direct_specular = float3(0.0)
+    p.emission = scene.background_radiance(tracer.background_sh(), normalize(float3(r.direction.x, r.direction.y, r.direction.z)))
+    p.throughput = float3(0.0)
+    p.direction = float3(0.0)
+    p.normal = float3(0.0)
+    p.albedo = float3(0.0)
+    p.specular_albedo = float3(0.0)
+    p.roughness = 0.0
+    p.lobe = openpbr.bsdf_lobe_diffuse
+    p.bsdf_pdf = 0.0
+    p.hit_t = -1.0
+
+/// The shadow ray's miss: reached only when nothing occluded the ray, so it marks it visible.
+@miss fun shadow_miss(p: mut tracer.shadow_payload){tracer.traced, tracer.bindless}:
+    p.visible = 1.0
+
+/// The tracer: the raygen above, a miss per ray type in the order `path_rays` names them, and the host's hit groups.
+/// Depth 2: the raygen's surface ray, and the shadow rays its closest hits trace for next-event estimation.
+@raytracing pipeline path:
+    rays = path_rays
+    raygen = path_trace
+    miss.surface = path_miss
+    miss.occlusion = shadow_miss
+    hit_groups = (.host)
+    max_recursion_depth = 2

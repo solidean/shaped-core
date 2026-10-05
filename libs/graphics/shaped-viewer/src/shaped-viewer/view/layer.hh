@@ -14,7 +14,7 @@ enum class sv::layer_kind : sv::u8
     /// A nested layout tree, rendered into this view's texture — the recursion in the model.
     layout,
 
-    /// The DXR trace; the only kind that accumulates temporally today.
+    /// The path trace; the only kind that accumulates temporally today.
     scene_3d,
 
     /// 2D drawing — shapes and text — at the same level as a 3D scene.

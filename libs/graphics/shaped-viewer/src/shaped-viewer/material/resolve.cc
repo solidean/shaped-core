@@ -10,6 +10,7 @@
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
+#include <shaped-viewer/material/shader_generator.hh> // sv::sgl_palette_sampler
 #include <shaped-viewer/scene/quadric_set.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 
@@ -272,7 +273,8 @@ resolved_material resolve_material(material_type const& type, material const& ma
             shape.add_string(a.sample->uv_attribute);
             // The uv attribute's own frequency picks its load code, exactly as a directly-sourced attribute's does.
             shape.add_pod(a.uv->frequency);
-            impl::add_sampler(shape, a.sample->sampler);
+            // The generated text names a palette sampler, so that name is the shape; what else the state says is not read.
+            shape.add_string(sgl_palette_sampler(a.sample->sampler));
             // The swizzle is generated code rather than a value, so it belongs in the shape — and only as far as it is read.
             impl::add_swizzle(shape, a.sample->swizzle, a.format.component_count());
 
