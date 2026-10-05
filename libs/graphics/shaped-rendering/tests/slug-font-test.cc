@@ -42,7 +42,7 @@ namespace
     return sr::slug_font(babel::font::read(cc::span<byte const>(bytes)).value());
 }
 
-/// The origin an instance of glyph `g` gets with its pen at x, the way append_line places it at size 1000.
+/// The origin an instance of glyph `g` gets with its pen at x, the way append_text places it at size 1000.
 [[nodiscard]] tg::vec2f origin_of(sr::slug_font& font, u16 g, f32 x)
 {
     auto const ref = font.glyph(babel::font::glyph_id(g)).value();
@@ -51,7 +51,7 @@ namespace
 
 void draw(sr::slug_font& font, cc::vector<sr::slug_instance>& out, cc::string_view text)
 {
-    font.append_line(out, text, tg::pos2f(0, 0), 1000.0f, tg::vec4f(1, 1, 1, 1));
+    font.append_text(out, text, tg::pos2f(0, 0), 1000.0f, tg::vec4f(1, 1, 1, 1));
 }
 } // namespace
 
@@ -64,7 +64,7 @@ TEST("sr::slug_font - each glyph advances by its own advance width")
     CHECK(instances[0].origin == origin_of(font, 1, 0));
     CHECK(instances[1].origin == origin_of(font, 1, 600));
     CHECK(instances[2].origin == origin_of(font, 1, 1200));
-    CHECK(font.line_width("AAA", 1000.0f) == 1800.0f);
+    CHECK(font.text_width("AAA", 1000.0f) == 1800.0f);
 }
 
 TEST("sr::slug_font - a character the face does not map draws .notdef")
@@ -84,7 +84,7 @@ TEST("sr::slug_font - an empty glyph emits no instance and still advances")
     draw(font, instances, "ABA");
     REQUIRE(instances.size() == 2);
     CHECK(instances[1].origin == origin_of(font, 1, 1200));
-    CHECK(font.line_width("ABA", 1000.0f) == 1800.0f);
+    CHECK(font.text_width("ABA", 1000.0f) == 1800.0f);
 }
 
 TEST("sr::slug_font - a malformed sequence draws U+FFFD and loses none of the bytes after it")

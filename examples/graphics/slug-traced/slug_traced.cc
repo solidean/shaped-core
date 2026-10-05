@@ -129,7 +129,7 @@ struct cube_mesh
 
 [[nodiscard]] cube_mesh build_cube(tg::aabb2f star_em)
 {
-    auto const centre = tg::vec2f((star_em.min[0] + star_em.max[0]) * 0.5f, (star_em.min[1] + star_em.max[1]) * 0.5f);
+    auto const center = tg::vec2f((star_em.min[0] + star_em.max[0]) * 0.5f, (star_em.min[1] + star_em.max[1]) * 0.5f);
     auto const half = cc::max(star_em.max[0] - star_em.min[0], star_em.max[1] - star_em.min[1]) * 0.65f;
 
     auto mesh = cube_mesh();
@@ -143,7 +143,7 @@ struct cube_mesh
         {
             auto const c = corners[i];
             mesh.positions.push_back((n + a.right * c[0] + a.up * c[1]) * 0.5f);
-            mesh.em.push_back(centre + c * half);
+            mesh.em.push_back(center + c * half);
         }
     }
     return mesh;
@@ -186,7 +186,7 @@ struct cube_mesh
 /// `text` around a circle of `radius`, reading clockwise from the top, each glyph standing on the circle.
 void append_circle(cc::vector<sr::slug_instance>& out, sr::slug_font& font, cc::string_view text, f32 radius, tg::vec4f color)
 {
-    auto const size = 6.2831853f * radius / font.line_width(text, 1.0f);
+    auto const size = 6.2831853f * radius / font.text_width(text, 1.0f);
     auto const unit = size / f32(font.face().units_per_em());
     auto angle = 1.5707963f;
     for (auto const c : text) // ASCII only, so one byte is one character
@@ -308,17 +308,17 @@ ASYNC_EXAMPLE("graphics/slug-traced")
     auto const begin_run = [&](int face) { runs.push_back({.first = labels.size(), .face = face}); };
     auto const end_run = [&] { runs.back().count = labels.size() - runs.back().first; };
     auto const ink = tg::vec4f(0.98f, 0.97f, 0.92f, 1.0f);
-    auto const centred = [&](cc::string_view text, f32 y, f32 em, tg::vec4f color)
-    { font.append_line(labels, text, tg::pos2f(-font.line_width(text, em) * 0.5f, y), em, color); };
+    auto const centered = [&](cc::string_view text, f32 y, f32 em, tg::vec4f color)
+    { font.append_text(labels, text, tg::pos2f(-font.text_width(text, em) * 0.5f, y), em, color); };
 
     begin_run(1);
-    centred("Slug", 0.02f, 0.30f, ink);
-    centred("traced", -0.20f, 0.14f, tg::vec4f(0.80f, 0.86f, 0.98f, 1));
+    centered("Slug", 0.02f, 0.30f, ink);
+    centered("traced", -0.20f, 0.14f, tg::vec4f(0.80f, 0.86f, 0.98f, 1));
     end_run();
 
     begin_run(3);
-    centred("any-hit", 0.04f, 0.17f, ink);
-    centred("a point test per ray", -0.14f, 0.07f, tg::vec4f(0.98f, 0.86f, 0.60f, 1));
+    centered("any-hit", 0.04f, 0.17f, ink);
+    centered("a point test per ray", -0.14f, 0.07f, tg::vec4f(0.98f, 0.86f, 0.60f, 1));
     end_run();
 
     begin_run(0);
@@ -329,8 +329,8 @@ ASYNC_EXAMPLE("graphics/slug-traced")
     end_run();
 
     begin_run(2);
-    centred("shadows", 0.04f, 0.15f, ink);
-    centred("from the outlines", -0.12f, 0.07f, tg::vec4f(0.70f, 0.95f, 0.85f, 1));
+    centered("shadows", 0.04f, 0.15f, ink);
+    centered("from the outlines", -0.12f, 0.07f, tg::vec4f(0.70f, 0.95f, 0.85f, 1));
     end_run();
 
     begin_run(-1);
@@ -399,6 +399,11 @@ ASYNC_EXAMPLE("graphics/slug-traced")
         swapchain = cc::move(chain.value());
     }
 
+    // The blit samples the image the trace dispatch wrote just before it, so the barrier is found inside the scope, and
+    // vulkan splits the scope for it.
+    // Nothing states a scope's accesses before it opens yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
     sr::blit_routine::prewarm(*ctx, color_format);
     (void)co_await ctx->routines.idle_completion();
 
@@ -456,7 +461,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
             frame.write_to(instances.back().transform);
         }
 
-        // A pinhole camera: forward to the image's centre, right and up to its edges.
+        // A pinhole camera: forward to the image's center, right and up to its edges.
         auto const eye = camera.eye();
         auto const forward = tg::normalize(-eye);
         auto const right = tg::normalize(cross(forward, tg::vec3f(0, 1, 0)));

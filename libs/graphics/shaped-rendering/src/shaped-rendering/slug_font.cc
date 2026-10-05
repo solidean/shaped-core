@@ -24,21 +24,25 @@ cc::result<slug_font> slug_font::load(cc::string_view path, i32 face_index)
     return slug_font(cc::move(face).value());
 }
 
+namespace
+{
+// TrueType-outlined faces only: CFF is not read yet, which rules out most .otf files.
+cc::string_view const system_ui_font_candidates[] = {
+    "C:/Windows/Fonts/segoeui.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+};
+} // namespace
+
 cc::optional<cc::string_view> system_ui_font_path()
 {
-    // TrueType-outlined faces only: CFF is not read yet, which rules out most .otf files.
-    cc::string_view const candidates[] = {
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/Library/Fonts/Arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
-    };
-    for (auto const path : candidates)
+    for (auto const path : system_ui_font_candidates)
         if (cc::file_read_stream_adapter::open(path).has_value())
             return path;
     return {};
@@ -46,10 +50,11 @@ cc::optional<cc::string_view> system_ui_font_path()
 
 cc::result<slug_font> slug_font::load_system_ui_font()
 {
-    auto const path = system_ui_font_path();
-    if (!path.has_value())
-        return cc::error("no TrueType UI font in any of the places this looks");
-    return load(path.value());
+    // A candidate that opens may still not load, so the next one is tried rather than the first one's error returned.
+    for (auto const path : system_ui_font_candidates)
+        if (auto font = load(path); font.has_value())
+            return font;
+    return cc::error("no TrueType UI font that loads in any of the places this looks");
 }
 
 cc::result<slug_shape_ref> slug_font::glyph(babel::font::glyph_id g)
@@ -75,7 +80,7 @@ cc::result<slug_shape_ref> slug_font::glyph(babel::font::glyph_id g)
     return placed.value();
 }
 
-void slug_font::append_line(cc::vector<slug_instance>& out,
+void slug_font::append_text(cc::vector<slug_instance>& out,
                             cc::string_view text,
                             tg::pos2f origin,
                             f32 size,
@@ -108,7 +113,7 @@ void slug_font::append_line(cc::vector<slug_instance>& out,
     }
 }
 
-f32 slug_font::line_width(cc::string_view text, f32 size) const
+f32 slug_font::text_width(cc::string_view text, f32 size) const
 {
     return layout_text(_face, text, {.size = size}).box.max[0];
 }

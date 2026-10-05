@@ -162,6 +162,11 @@ slug_routine::prepared_job slug_routine::prepare_job(sg::command_list& cmd,
     if (quads.empty())
         return job;
     CC_ASSERT(!frames.empty(), "a job's quads name frames, so a job with quads has frames");
+    for (auto const& q : quads)
+    {
+        CC_ASSERT(isize(q.record) < atlas.record_count(), "a quad names a record of the atlas it is drawn from");
+        CC_ASSERT(isize(q.frame) < frames.size(), "a quad names a frame of its job");
+    }
 
     // Three texels a frame, in the order slug_quads.sgl's main_job_vs reads them.
     auto const rows = int((frames.size() + frames_per_row - 1) / frames_per_row);

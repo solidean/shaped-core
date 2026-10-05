@@ -11,7 +11,7 @@
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-/// One shape to draw: which shape, where its em space lands on the object's xy plane, and its colour.
+/// One shape to draw: which shape, where its em space lands on the object's xy plane, and its color.
 /// 68 bytes, read once per quad by the vertex stage; build one with `sr::make_slug_instance`.
 struct sr::slug_instance
 {
@@ -49,7 +49,8 @@ enum class sr::slug_visibility : sr::u8
 /// the draw's `object_to_clip` starts from — pixels for a 2D overlay, the world for a scene.
 /// The axes are free: their lengths and angle stretch and shear the plane.
 ///
-/// A frame can be shown or hidden as a whole by one depth test at its probe, made per quad in the vertex stage.
+/// A frame can be shown or hidden as a whole by one depth test at its probe, made by the vertex stage at each corner
+/// against the same texel, so the four agree.
 /// That is what an annotation flat on screen wants: hidden when the point it marks is, never cut in half where it
 /// crosses a silhouette.
 struct sr::slug_frame
@@ -99,7 +100,7 @@ struct sr::slug_view
     f32 probe_tolerance = 0.01f;
 };
 
-/// The routine's parameter: the scope's colour format, and its depth format or undefined for none.
+/// The routine's parameter: the scope's color format, and its depth format or undefined for none.
 struct sr::slug_pipeline_key
 {
     sg::pixel_format color = sg::pixel_format::undefined;

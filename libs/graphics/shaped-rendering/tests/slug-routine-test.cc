@@ -339,7 +339,7 @@ ASYNC_INVOCABLE_TEST("sr::slug_routine - a job places one record under many fram
     CHECK(channel_at(pixels, 20, 20, 1) < 0.01f);
     CHECK(channel_at(pixels, 100, 15, 1) > 0.99f);
     CHECK(channel_at(pixels, 100, 15, 0) < 0.01f);
-    // the bar is ten pixels tall, so its frame's y axis stretched the square as much as the x axis did
+    // the bar is ten pixels tall: its frame's y axis stretched the square independently of the x axis
     CHECK(channel_at(pixels, 100, 25, 1) < 0.01f);
     CHECK(channel_at(pixels, 50, 15, 3) < 0.01f);
 }

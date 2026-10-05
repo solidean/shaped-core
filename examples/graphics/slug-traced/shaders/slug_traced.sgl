@@ -43,7 +43,7 @@ fun linear_to_srgb(c: float) -> float:
     if c <= 0.0031308 => return c * 12.92
     return 1.055 * pow(c, 1.0 / 2.4) - 0.055
 
-/// An instance's rgba8 sRGB colour, red in the low byte, as linear rgb.
+/// An instance's rgba8 sRGB color, red in the low byte, as linear rgb.
 fun unpack_color(c: uint) -> float3:
     let r = ((c & 0xff) as float) / 255.0
     let g = (((c >> 8) & 0xff) as float) / 255.0

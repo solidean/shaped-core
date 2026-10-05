@@ -210,7 +210,7 @@ void shift(cc::vector<sr::slug_instance>& instances, isize first, tg::vec2f offs
 /// Every glyph is its own instance with its own basis, which is what a per-shape 2x2 placement buys.
 void append_circle(cc::vector<sr::slug_instance>& out, sr::slug_font& font, cc::string_view text, f32 radius, tg::vec4f color)
 {
-    auto const size = 6.2831853f * radius / font.line_width(text, 1.0f);
+    auto const size = 6.2831853f * radius / font.text_width(text, 1.0f);
     auto const unit = size / f32(font.face().units_per_em());
     auto angle = 1.5707963f;
     for (auto const c : text) // ASCII only, so one byte is one character
@@ -371,21 +371,21 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         auto const limit_size = 0.085f;
         auto const mid = 0.15f;
         auto const baseline = -0.07f;
-        auto const sigma_width = font.line_width(sigma, big);
-        font.append_line(latin, sigma, tg::pos2f(0, baseline), big, ink);
-        font.append_line(latin, "n", tg::pos2f((sigma_width - font.line_width("n", limit_size)) * 0.5f, baseline + big * 0.78f), limit_size, muted);
-        font.append_line(latin, "i=1", tg::pos2f((sigma_width - font.line_width("i=1", limit_size)) * 0.5f, baseline - 0.10f), limit_size, muted);
+        auto const sigma_width = font.text_width(sigma, big);
+        font.append_text(latin, sigma, tg::pos2f(0, baseline), big, ink);
+        font.append_text(latin, "n", tg::pos2f((sigma_width - font.text_width("n", limit_size)) * 0.5f, baseline + big * 0.78f), limit_size, muted);
+        font.append_text(latin, "i=1", tg::pos2f((sigma_width - font.text_width("i=1", limit_size)) * 0.5f, baseline - 0.10f), limit_size, muted);
         auto x = sigma_width + 0.02f;
-        font.append_line(latin, "i = ", tg::pos2f(x, baseline + 0.035f), mid, ink);
-        x += font.line_width("i = ", mid);
+        font.append_text(latin, "i = ", tg::pos2f(x, baseline + 0.035f), mid, ink);
+        x += font.text_width("i = ", mid);
         auto const numerator = 0.11f;
-        auto const top_width = font.line_width("n(n+1)", numerator);
-        font.append_line(latin, "n(n+1)", tg::pos2f(x, baseline + 0.105f), numerator, ink);
-        font.append_line(latin, "2", tg::pos2f(x + (top_width - font.line_width("2", numerator)) * 0.5f, baseline - 0.035f), numerator, ink);
+        auto const top_width = font.text_width("n(n+1)", numerator);
+        font.append_text(latin, "n(n+1)", tg::pos2f(x, baseline + 0.105f), numerator, ink);
+        font.append_text(latin, "2", tg::pos2f(x + (top_width - font.text_width("2", numerator)) * 0.5f, baseline - 0.035f), numerator, ink);
         auto const bar = font.atlas().add(sr::compile_slug_shape(sr::slug_outline::rectangle(tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(1, 1))))).value();
         latin.push_back(sr::make_slug_instance(bar, tg::pos2f(x, baseline + 0.075f), tg::vec2f(top_width, 0), tg::vec2f(0, 0.012f), ink));
         shift(latin, first, tg::vec2f(-(x + top_width) * 0.5f, 0));
-        font.append_line(latin, "sum of 1 .. n", tg::pos2f(-font.line_width("sum of 1 .. n", 0.06f) * 0.5f, 0.33f), 0.06f, muted);
+        font.append_text(latin, "sum of 1 .. n", tg::pos2f(-font.text_width("sum of 1 .. n", 0.06f) * 0.5f, 0.33f), 0.06f, muted);
         end_run(latin);
     }
 
@@ -395,14 +395,14 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         if (japanese.has_value())
         {
             auto& jp = japanese.value();
-            auto const em = cc::min(0.84f / jp.line_width(hiragana, 1.0f), 0.2f);
+            auto const em = cc::min(0.84f / jp.text_width(hiragana, 1.0f), 0.2f);
             begin_run(jp, kana, 3);
-            jp.append_line(kana, hiragana, tg::pos2f(-jp.line_width(hiragana, em) * 0.5f, -0.02f), em, ink);
+            jp.append_text(kana, hiragana, tg::pos2f(-jp.text_width(hiragana, em) * 0.5f, -0.02f), em, ink);
             end_run(kana);
         }
         begin_run(font, latin, 3);
         auto const reading = japanese.has_value() ? "konnichiwa" : "(no Japanese font found)";
-        font.append_line(latin, reading, tg::pos2f(-font.line_width(reading, 0.1f) * 0.5f, -0.21f), 0.1f, muted);
+        font.append_text(latin, reading, tg::pos2f(-font.text_width(reading, 0.1f) * 0.5f, -0.21f), 0.1f, muted);
         end_run(latin);
     }
 
@@ -432,9 +432,9 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         for (auto const& l : lines)
         {
             y -= l.size * 1.05f;
-            font.append_line(latin, "Slug", tg::pos2f(-0.4f, y), l.size, l.color);
+            font.append_text(latin, "Slug", tg::pos2f(-0.4f, y), l.size, l.color);
         }
-        font.append_line(latin, "oblique by shear", tg::pos2f(-0.4f, -0.32f), 0.085f, muted, tg::vec2f(1, 0), tg::vec2f(0.25f, 1));
+        font.append_text(latin, "oblique by shear", tg::pos2f(-0.4f, -0.32f), 0.085f, muted, tg::vec2f(1, 0), tg::vec2f(0.25f, 1));
         end_run(latin);
     }
 
@@ -527,9 +527,9 @@ ASYNC_EXAMPLE("graphics/slug-cube")
 
         // the caption, rebuilt every frame since it would carry a frame time in a real tool
         auto overlay = cc::vector<sr::slug_instance>();
-        font.append_line(overlay, "Slug: text and shapes from their outlines", tg::pos2f(28, 52), 34.0f, tg::vec4f(1, 1, 1, 1),
+        font.append_text(overlay, "Slug: text and shapes from their outlines", tg::pos2f(28, 52), 34.0f, tg::vec4f(1, 1, 1, 1),
                          tg::vec2f(1, 0), tg::vec2f(0, -1));
-        font.append_line(overlay, "each side is quads from the routine, the star on top is drawn by the cube's own shader",
+        font.append_text(overlay, "each side is quads from the routine, the star on top is drawn by the cube's own shader",
                          tg::pos2f(30, 86), 18.0f, tg::vec4f(0.75f, 0.78f, 0.85f, 1), tg::vec2f(1, 0), tg::vec2f(0, -1));
 
         auto cmd = ctx->create_command_list();

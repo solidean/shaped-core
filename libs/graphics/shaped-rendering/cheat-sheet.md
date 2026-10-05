@@ -315,13 +315,11 @@ auto const job = sr::slug_routine::prepare_job(cmd, atlas, frames, quads);      
 sr::slug_routine::prewarm(ctx, {.color = f, .depth = sg::pixel_format::undefined});  // one pipeline per format pair
 
 auto font = sr::slug_font::load_system_ui_font().value();   // or slug_font::load(path); owns its own atlas
-font.append_line(out, "text", origin, size, color, right = {1, 0}, up = {0, 1});      // kerned; "
-" starts a line along -up
+font.append_text(out, "text", origin, size, color, right = {1, 0}, up = {0, 1});      // kerned; "\n" starts a line along -up
 #include <shaped-rendering/text_layout.hh>
-auto const l = sr::layout_text(face, "two
-lines", {.size = 14, .line_height = 1.2f, .max_width = 0, .align = sr::text_align::left});
+auto const l = sr::layout_text(face, "two\nlines", {.size = 14, .line_height = 1.2f, .max_width = 0, .align = sr::text_align::left});
 l.glyphs; l.box; l.scale;                     // laid_out_glyph {glyph, origin}: baseline origins, y DOWN from the box top; glyph outlines are y UP
-font.line_width("text", size);  font.atlas();  font.glyph(g);
+font.text_width("text", size);  font.atlas();  font.glyph(g);
 
 #include <shaped-rendering/slug_traced.hh>     // shapes as ray-traced geometry
 auto const records = sr::upload_slug_records(cmd, atlas, instances);   // buffer<sgl_modules::slug::shape_instance>; prepares atlas
@@ -329,7 +327,7 @@ auto const blas = sr::build_slug_blas(cmd, instances.subspan({.offset = first, .
 sg::tlas_instance{.blas = blas, .instance_id = scene_id, .cull_mode = sg::instance_cull_mode::none};   // the SCENE maps scene_id -> first
 ```
 
-- **Output is linear and premultiplied**, blended premultiplied; an instance's colour is 8-bit sRGB, straight alpha.
+- **Output is linear and premultiplied**, blended premultiplied; an instance's color is 8-bit sRGB, straight alpha.
 - **A scope with depth tests and never writes it**; `depth_bias` keeps a shape on a surface in front of it.
 - **The routine's pipelines name slug_quads.sgl's target set**: open the scope with a plain `rendering_info`, not another shader's generated target.
 - **Any pixel shader can cover a shape**: `use slug`, list `{slug.tables}` and call `slug.coverage(em, banding, glyph, weight_boost)`.

@@ -29,7 +29,7 @@ sr::slug_path            shaped-rendering  contours that may stay open, and the 
 sr::stroke_outline       shaped-rendering  a path and a stroke style -> the outline of the area the stroke covers
 sr::compile_slug_shape   shaped-rendering  outline -> curve and band tables, device-free
 sr::slug_atlas           shaped-rendering  caller-owned textures many shapes share, plus a CPU copy of them
-sr::slug_routine         shaped-rendering  draws shape instances from an atlas, one pipeline per (colour, depth) format
+sr::slug_routine         shaped-rendering  draws shape instances from an atlas, one pipeline per (color, depth) format
 module slug              shaped-rendering  the coverage itself, in SGL: any pixel shader that `use`s it may call it
 sr::slug_font            shaped-rendering  a face's glyphs compiled on demand, and text set over them
 sr::layout_text          shaped-rendering  a string set in a face: kerned advances, line breaks, wrapping, alignment
@@ -73,13 +73,13 @@ The vertex stage folds a quad's frame into the draw's matrix rows, then dilates 
 Records and frames are textures rather than buffers because a vertex stage may read no storage buffer on WebGPU.
 
 **A frame can be shown or hidden by a probe.**
-It names a point in a depth texture the draw binds, and that point's own depth; the vertex stage reads the texel once per quad.
+It names a point in a depth texture the draw binds, and that point's own depth; the vertex stage reads the texel at each corner, which reads the same texel for all four.
 A frame drawn `if_visible` is dropped where something nearer is there, one drawn `if_hidden` only there, so a pair of frames gives a visible look and a hidden one.
 That is what a label flat on screen wants: its anchor decides for the whole label, which is never cut where it crosses a silhouette.
 Depth is `1 - near / distance`, so comparing `1 - depth` compares near over distance and needs no near plane; the tolerance is a fraction of the distance.
 
-**Colour is linear and premultiplied.**
-An instance carries its colour as 8-bit sRGB, the vertex stage linearizes it, and output blends premultiplied — what shaped-viewer's targets hold.
+**Color is linear and premultiplied.**
+An instance carries its color as 8-bit sRGB, the vertex stage linearizes it, and output blends premultiplied — what shaped-viewer's targets hold.
 
 **Depth from day one.**
 A scope with a depth target draws depth-tested and never writes depth, so shapes lying on one surface layer in draw order.
@@ -189,7 +189,7 @@ A primary ray knows its neighbours; a ray past a bounce would carry a ray cone i
 ```cpp
 auto font = sr::slug_font::load_system_ui_font().value();          // a TrueType font the OS ships
 auto instances = cc::vector<sr::slug_instance>();
-font.append_line(instances, "hello", tg::pos2f(24, 48), 32.0f, tg::vec4f(1, 1, 1, 1), tg::vec2f(1, 0), tg::vec2f(0, -1));
+font.append_text(instances, "hello", tg::pos2f(24, 48), 32.0f, tg::vec4f(1, 1, 1, 1), tg::vec2f(1, 0), tg::vec2f(0, -1));
 
 auto const prepared = sr::slug_routine::prepare(*cmd, font.atlas(), instances);   // before the scope
 auto pass = cmd->raster.render_to({.color_targets = {target.preserved()}});
