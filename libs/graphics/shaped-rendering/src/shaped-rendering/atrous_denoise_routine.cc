@@ -22,6 +22,7 @@ constexpr u32 k_has_depth = 1u << 2;
 constexpr u32 k_demodulate_in = 1u << 3;
 constexpr u32 k_remodulate_out = 1u << 4;
 constexpr u32 k_has_specular_albedo = 1u << 5;
+constexpr u32 k_has_sample_counts = 1u << 6;
 
 // Where this member's images live in the history's state slots.
 // à-trous keeps no history, so the two scratch slots are all it ever touches — the rest stay empty under it.
@@ -147,6 +148,8 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
         guide_flags |= k_has_normal;
     if (is_set(in.guides.depth))
         guide_flags |= k_has_depth;
+    if (is_set(in.sample_counts))
+        guide_flags |= k_has_sample_counts;
     auto const demodulate = options.demodulate_albedo && is_set(in.guides.albedo);
 
     // A missing guide is bound to the colour texture as a stand-in, so the group has every slot filled; its flag is
@@ -157,8 +160,10 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     auto const specular_albedo = stand_in(in.guides.specular_albedo);
     auto const normal = stand_in(in.guides.normal);
     auto const depth = stand_in(in.guides.depth);
+    auto const sample_counts = stand_in(in.sample_counts);
 
-    auto const sample_count = in.sample_count == 0 ? 1u : in.sample_count;
+    // A per-pixel count is divided out in the shader, at each pixel; the scalar one is folded in here.
+    auto const sample_count = in.sample_count == 0 || is_set(in.sample_counts) ? 1u : in.sample_count;
     auto luminance_scale = options.luminance_sigma / tg::sqrt(f32(sample_count));
 
     auto const last = options.iterations - 1;
@@ -188,6 +193,7 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
                                                                   .gSpecularAlbedo = specular_albedo,
                                                                   .gNormal = normal,
                                                                   .gDepth = depth,
+                                                                  .gSampleCounts = sample_counts,
                                                                   .gTarget = target.as_any_image_view(),
                                                               });
 

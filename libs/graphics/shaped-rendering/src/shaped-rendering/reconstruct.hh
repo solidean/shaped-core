@@ -214,6 +214,11 @@ struct sr::reconstruct_inputs
     /// Spatial members back off as it grows, so a converged image is left alone; 0 means one.
     u32 sample_count = 0;
 
+    /// The same count per pixel, in the red channel of a float texture at the input extent, for a mean whose pixels
+    /// average different numbers of samples.
+    /// Where set, a member that reads a count reads this one and ignores `sample_count`.
+    sg::texture_2d sample_counts;
+
     /// The guides this call carries, derived from which textures are set — `specular` included.
     [[nodiscard]] reconstruct_guide_set present_guides() const;
 };

@@ -3,7 +3,11 @@
 Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
-- First routines on the framework: texture compression, tonemapping.
+- Tonemapping, the first routine on the framework still missing.
+- BC6H, the HDR block format, has no encoder; `sr::bc_compress_routine` covers BC1, BC3, BC4, BC5 and BC7.
+  The signed BC4 and BC5 forms are not written either.
+- BC7 tries modes 6, 1, 3 and 7 over two candidate partitions; a wider partition search and modes 4 and 5 (rotated
+  alpha) are where its remaining quality is, at a cost per block.
 - The OIDN weights are found through a compile-time path, which is fine for a test and not for a shipped binary.
   `SR_OIDN_WEIGHTS_DIR` points into the source tree; the member will want the blob staged beside the executable the way OIDN's own runtime is, or embedded.
 - Denoising, beyond à-trous, SVGF and OIDN — [reconstruction.md](reconstruction.md) is the design and the order:
