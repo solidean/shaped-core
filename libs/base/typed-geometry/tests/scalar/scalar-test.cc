@@ -3,6 +3,7 @@
 #include <nexus/test.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
+#include <limits>
 #include <type_traits>
 
 using namespace cc::primitive_defines;
@@ -19,6 +20,13 @@ static_assert(tg::traits::has_abs<int>, "integers have abs");
 static_assert(!tg::traits::has_abs<bool>, "bool has no magnitude");
 static_assert(tg::traits::has_pow2<float>, "f32 has the exact base-two operations");
 static_assert(!tg::traits::has_pow2<int>, "shifting an integer truncates, so it is a different operation");
+static_assert(tg::traits::has_non_finite<float> && tg::traits::has_non_finite<double>, "floats have NaN and infinities");
+static_assert(!tg::traits::has_non_finite<int>, "an integer has no NaN, so asking one is refused rather than answered");
+
+template <class T>
+concept classifies_non_finite = requires(T x) { tg::is_finite(x); };
+static_assert(classifies_non_finite<float>);
+static_assert(!classifies_non_finite<int>);
 
 // The exponent must be an integer type, so `scale_by_pow2(x, 1.5f)` is a compile error rather than a silent
 // truncation to 1 — the whole point of the family being exact.
@@ -85,6 +93,28 @@ TEST("tg scalar - abs")
     CHECK(tg::abs(-0.0f) == 0.0f);
 
     static_assert(tg::abs(-3) == 3, "integer abs is constexpr");
+}
+
+TEST("tg scalar - is_finite / is_nan / is_inf")
+{
+    auto const inf = std::numeric_limits<float>::infinity();
+    auto const nan = std::numeric_limits<double>::quiet_NaN();
+
+    CHECK(tg::is_finite(1.5f));
+    CHECK(tg::is_finite(-0.0f));
+    CHECK(tg::is_finite(std::numeric_limits<float>::denorm_min()));
+    CHECK(!tg::is_finite(inf));
+    CHECK(!tg::is_finite(-inf));
+    CHECK(!tg::is_finite(nan));
+
+    CHECK(tg::is_inf(inf));
+    CHECK(tg::is_inf(-inf));
+    CHECK(!tg::is_inf(nan));
+    CHECK(!tg::is_inf(std::numeric_limits<float>::max()));
+
+    CHECK(tg::is_nan(nan));
+    CHECK(!tg::is_nan(inf));
+    CHECK(!tg::is_nan(0.0));
 }
 
 TEST("tg scalar - pow / exp / log")

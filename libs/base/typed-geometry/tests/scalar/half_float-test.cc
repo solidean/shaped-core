@@ -41,6 +41,8 @@ static_assert(f16::make_from_bits(0x3555).to_f32() == 0.333251953125f);
 static_assert(f16(1.0f) + f16(2.0f) == f16(3.0f));
 static_assert(tg::literals::operator""_f16(0.5L) == f16(0.5f));
 static_assert(f16::max.bits() == 0x7bff && f16::infinity.is_inf() && f16::quiet_nan.is_nan());
+// The free classification reaches f16 through the scalar seam, and agrees with its members.
+static_assert(tg::is_inf(f16::infinity) && tg::is_nan(f16::quiet_nan) && tg::is_finite(f16::max));
 
 static_assert(tg::traits::has_sqrt<f16> && tg::traits::has_trigonometry<f16> && tg::traits::has_exponential<f16>);
 static_assert(tg::traits::has_rounding<f16> && tg::traits::has_abs<f16> && tg::traits::has_pow2<f16>);
