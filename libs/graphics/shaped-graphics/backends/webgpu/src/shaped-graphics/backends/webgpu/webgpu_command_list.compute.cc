@@ -4,6 +4,7 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_binding_group.hh>
+#include <shaped-graphics/backends/webgpu/webgpu_buffer.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 
 namespace sg::backend::webgpu
@@ -184,6 +185,21 @@ void webgpu_command_list::compute_dispatch(int x, int y, int z)
     open_compute_pass();
     apply_compute_state();
     wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), u32(x), u32(y), u32(z));
+}
+
+void webgpu_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes)
+{
+    CC_ASSERT(!_in_rendering_scope, "dispatch must not be recorded inside a rendering scope; close the scope first");
+    auto const* buffer = dynamic_cast<webgpu_buffer const*>(args.get());
+    CC_ASSERT(buffer != nullptr, "indirect dispatch arguments are not a webgpu buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect dispatch arguments are a transient buffer used past its epoch");
+
+    // WebGPU orders the arguments' reads after earlier passes' writes itself; the list only keeps the buffer alive.
+    touch(args);
+    bring_pool_writes_forward();
+    open_compute_pass();
+    apply_compute_state();
+    wgpuComputePassEncoderDispatchWorkgroupsIndirect(compute_pass(), buffer->raw(), u64(offset_in_bytes));
 }
 
 // -- raster state helpers shared with webgpu_command_list.raster.cc --

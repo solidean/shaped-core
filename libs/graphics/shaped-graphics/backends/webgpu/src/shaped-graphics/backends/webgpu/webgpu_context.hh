@@ -158,6 +158,9 @@ public:
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;
+        case sg::feature::texture_compression_bc:
+            // Requested at creation wherever the adapter offers it, so the device has it exactly then.
+            return wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureCompressionBC);
         }
         return false;
     }

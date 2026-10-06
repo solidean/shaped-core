@@ -47,7 +47,8 @@ Consequences of that rule:
   `depth32_float_stencil8` is the portable depth-stencil format.
 - **BC** (BC1–BC7) *is* included, mapping in all four APIs, but it is a **runtime capability** every backend gates.
   Vk `textureCompressionBC`, WGPU `texture-compression-bc`, Metal `supportsBCTextureCompression`.
-  The enumerant always exists, and a future device-capability query will gate actual use.
+  The enumerant always exists, and `sg::feature::texture_compression_bc` gates actual use: creating a BC texture without it is a refusal.
+  No shader writes one, so a GPU encoder writes its blocks to a buffer and `cmd.copy.buffer_to_texture` moves them in.
   Mobile-only compression (ASTC / ETC / PVRTC) is out entirely.
 
 When in doubt, leave a format out until a concrete need plus a capability query justify it.

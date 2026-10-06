@@ -40,6 +40,11 @@ u32 sg::impl::bindless_array_state::_acquire(raw_view const& view, bool pin)
     return r.index;
 }
 
+void sg::impl::bindless_array_state::release(raw_view const& view)
+{
+    table.release(view, ctx->current_epoch(), [&](u32 freed) { clear(freed); });
+}
+
 void sg::impl::bindless_array_state::unpin(u32 index)
 {
     table.unpin(index, ctx->current_epoch(), [&](u32 freed) { clear(freed); });

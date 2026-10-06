@@ -343,6 +343,25 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
     _list->Dispatch(UINT(x), UINT(y), UINT(z));
 }
 
+void dx12_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes)
+{
+    CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before dispatch");
+    CC_ASSERT(!_in_render_pass, "dispatch must not be recorded inside a rendering scope; close the scope first");
+    auto const buffer = std::dynamic_pointer_cast<dx12_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect dispatch arguments are not a dx12 buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect dispatch arguments are a transient buffer used past its epoch");
+
+    // The arguments are read by the command processor, a stage of their own, before the dispatch runs at all.
+    track_buffer_access(buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
+    declare_array_accesses(_bound_groups, _bound_footprint, _bound_footprint_owner, sg::pipeline_stage_flag::compute,
+                           _pending_array_buffer_declares, _pending_array_texture_declares);
+    flush_barriers();
+
+    _list->ExecuteIndirect(_ctx._dispatch_signature.Get(), 1, buffer->_resource.Get(), UINT64(offset_in_bytes), nullptr,
+                           0);
+}
+
 void dx12_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline)
 {
     keep_bound(pipeline.weak_from_this().lock());
@@ -717,6 +736,46 @@ void dx12_command_list::copy_buffer_region(sg::raw_buffer_handle src,
     flush_barriers();
     _list->CopyBufferRegion(d->_resource.Get(), UINT64(dst_offset_in_bytes), s->_resource.Get(),
                             UINT64(src_offset_in_bytes), UINT64(size_in_bytes));
+}
+
+void dx12_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
+                                               isize src_offset_in_bytes,
+                                               isize src_row_pitch_in_bytes,
+                                               sg::raw_texture_handle dst,
+                                               sg::subresource_index const& subresource,
+                                               sg::texture_region const& region)
+{
+    auto const s = std::dynamic_pointer_cast<dx12_buffer const>(src);
+    auto const d = std::dynamic_pointer_cast<dx12_texture const>(dst);
+    CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not dx12 resources");
+    CC_ASSERT(!s->is_expired(), "copy source is a transient buffer used past its epoch (expired)");
+    CC_ASSERT(!d->is_expired(), "copy target is a transient texture used past its epoch (expired)");
+    CC_ASSERT(s->usage().has(sg::buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
+    CC_ASSERT(d->usage().has(sg::texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
+
+    dx12_texture_footprint const fp = compute_texture_footprint(d->description(), subresource, region);
+
+    track_buffer_access(s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    track_texture_access(d, subresource, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
+                         sg::texture_layout::copy_dst);
+    flush_barriers();
+
+    D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
+    dst_loc.pResource = d->_resource.Get();
+    dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dst_loc.SubresourceIndex = fp.subresource;
+
+    D3D12_TEXTURE_COPY_LOCATION src_loc = {};
+    src_loc.pResource = s->_resource.Get();
+    src_loc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    src_loc.PlacedFootprint.Offset = UINT64(src_offset_in_bytes);
+    src_loc.PlacedFootprint.Footprint.Format = fp.format;
+    src_loc.PlacedFootprint.Footprint.Width = UINT(fp.width);
+    src_loc.PlacedFootprint.Footprint.Height = UINT(fp.height);
+    src_loc.PlacedFootprint.Footprint.Depth = UINT(fp.depth);
+    src_loc.PlacedFootprint.Footprint.RowPitch = UINT(src_row_pitch_in_bytes);
+
+    _list->CopyTextureRegion(&dst_loc, UINT(fp.x), UINT(fp.y), UINT(fp.z), &src_loc, nullptr);
 }
 
 cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command_list()

@@ -40,7 +40,7 @@ Every operation is reached through one of seven scope members, so the call site 
 |---|---|---|
 | `cmd.upload` | host→device writes, visible to later commands in the same list | [inline upload](upload.inline.md) |
 | `cmd.download` | device→host reads, delivered after the list runs | [inline download](download.inline.md) |
-| `cmd.copy` | device→device buffer copies | — |
+| `cmd.copy` | device→device copies: buffer regions, and a buffer into a texture | — |
 | `cmd.compute` | bind a compute pipeline + groups, dispatch | [bindings](bindings.md), [caches](caches.md) |
 | `cmd.raster` | open a rendering scope over a set of targets, then draw | [raster pipeline](raster-pipeline.md) |
 | `cmd.raytracing` | build acceleration structures, trace rays | [acceleration structures](acceleration-structures.md), [raytracing pipeline](raytracing-pipeline.md) |

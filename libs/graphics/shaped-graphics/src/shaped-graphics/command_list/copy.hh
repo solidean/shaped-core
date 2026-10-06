@@ -1,7 +1,9 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/texture_region.hh>
 
 #include <type_traits>
 
@@ -29,8 +31,37 @@ struct sg::buffer_data_copy
     isize dst_offset = 0; ///< element offset into dst
 };
 
+namespace sg
+{
+/// What a buffer's row pitch must be a multiple of to be copied into a texture, on every backend.
+/// D3D12 and WebGPU both ask for 256; Vulkan and Metal accept it.
+inline constexpr isize buffer_texture_row_pitch_alignment = 256;
+
+/// What a buffer offset must be a multiple of to be copied into a texture, on every backend; D3D12's placement alignment.
+inline constexpr isize buffer_texture_offset_alignment = 512;
+
+/// The smallest legal row pitch for `width` texels of `format`: one row of texels, or of blocks for a block-compressed
+/// format, rounded up to `buffer_texture_row_pitch_alignment`.
+[[nodiscard]] isize buffer_texture_row_pitch(pixel_format format, int width);
+} // namespace sg
+
+/// Arguments for a GPU copy from a buffer into one subresource of a texture (cmd.copy.buffer_to_texture).
+///
+/// The buffer holds the region row after row, `src_row_pitch_in_bytes` apart, and depth slice after depth slice.
+/// A row of a block-compressed format is a row of blocks, so a 4x4-block format's region of height h is h / 4 rows.
+/// This is the copy a compute shader's output takes into a texture it could not write directly, such as a BC encoder's.
+struct sg::buffer_texture_copy
+{
+    raw_buffer_handle src;                    ///< copy source; must not be null; needs buffer_usage::copy_src
+    raw_texture_handle dst;                   ///< copy destination; must not be null; needs texture_usage::copy_dst
+    isize src_row_pitch_in_bytes;             ///< a multiple of buffer_texture_row_pitch_alignment, at least one row
+    isize src_offset_in_bytes = 0;            ///< a multiple of buffer_texture_offset_alignment
+    subresource_index subresource = {};       ///< the one subresource written
+    cc::optional<texture_region> region = {}; ///< the box written; none is the whole subresource
+};
+
 /// Device→device copy facade for a command list, reached as `cmd.copy`.
-/// Buffer regions only today; texture copy ops land here later, following the same `<resource>_<bytes|data>_region` scheme.
+/// Buffer regions and buffer→texture today; the rest of the texture copies land here later.
 /// See libs/graphics/shaped-graphics/docs/concepts/command-recording.md.
 class sg::command_list_copy_scope
 {
@@ -55,6 +86,13 @@ public:
                              .src_offset_in_bytes = args.src_offset * stride,
                              .dst_offset_in_bytes = args.dst_offset * stride});
     }
+
+    /// Copies `args.src`, laid out row by row, into a region of one subresource of `args.dst`.
+    /// The copy runs on the GPU in order with this list's other commands, and the write is visible to later ones.
+    /// An empty region is a no-op.
+    /// Preconditions: the pitch and offset keep their alignments, the region is in bounds and block-aligned, the buffer
+    /// holds every row the region needs, and the subresource is not one an open rendering scope draws into.
+    void buffer_to_texture(buffer_texture_copy args);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_copy_scope(command_list_copy_scope const&) = delete;

@@ -15,6 +15,13 @@ public:
     /// Never store the result where it outlives the epoch; that is what `persistent` is for.
     [[nodiscard]] bindless_index acquire(raw_view const& view) { return bindless_index(_state.acquire(view)); }
 
+    /// Frees `view`'s element, which the caller will not acquire again, and with it the view and what it keeps alive.
+    ///
+    /// An element left alone is reclaimed only once the array is full, so it holds its resource until then: a texture
+    /// replaced or dropped would stay resident for as long as the array has room.
+    /// Freed at once if no index from this epoch names it, otherwise at the first acquire of a later epoch.
+    void release(raw_view const& view) { _state.release(view); }
+
     // Pinned to its array, which rebinds it on move.
     bindless_array_transient_scope(bindless_array_transient_scope const&) = delete;
     bindless_array_transient_scope(bindless_array_transient_scope&&) = delete;

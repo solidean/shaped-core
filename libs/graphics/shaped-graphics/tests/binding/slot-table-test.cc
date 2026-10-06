@@ -96,3 +96,29 @@ TEST("sg slot_table - a full table of current-epoch slots asserts")
     // Both slots were acquired in this epoch: the working set exceeds the capacity.
     CHECK_ASSERTS(table.acquire(3, ep(0), [](u32) {}));
 }
+
+TEST("sg slot_table - a released key frees its slot now, or in the next epoch if this one used it")
+{
+    auto table = sg::impl::slot_table<u64>(8);
+    auto const old = table.acquire(1, ep(0), no_reclaim);
+    auto const current = table.acquire(2, ep(1), no_reclaim);
+
+    // Key 1 was last acquired in an earlier epoch, so nothing recorded this epoch can name it: freed at once.
+    auto reclaimed = cc::vector<u32>();
+    auto const record = [&](u32 freed) { reclaimed.push_back(freed); };
+    table.release(1, ep(1), record);
+    REQUIRE(reclaimed.size() == 1);
+    CHECK(reclaimed[0] == old.index);
+
+    // Key 2 was acquired this epoch, so its index may be in this epoch's work: it waits for the next epoch.
+    table.release(2, ep(1), record);
+    CHECK(reclaimed.size() == 1);
+    (void)table.acquire(3, ep(2), record);
+    REQUIRE(reclaimed.size() == 2);
+    CHECK(reclaimed[1] == current.index);
+
+    // A pinned key is unpin's to free, not release's.
+    auto const pinned = table.acquire_pinned(4, ep(2), record);
+    table.release(4, ep(3), record);
+    CHECK(table.is_pinned(pinned.index));
+}

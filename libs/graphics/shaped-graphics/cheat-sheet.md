@@ -94,6 +94,7 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
+                                                   //   | texture_compression_bc (BC1-BC7 textures; vulkan enables textureCompressionBC, metal on Apple-silicon Macs, webgpu with the adapter's feature)
                                                    //   | multisampled_array_textures (false on webgpu: no tex_2d_ms_array binding)
                                                    //   | primitive_index (a pixel shader's SV_PrimitiveID; vulkan needs geometryShader, false on webgpu)
                                                    //   | sample_rate_shading (per-sample pixel shading; vulkan needs sampleRateShading)
@@ -310,6 +311,9 @@ sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect a
 sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. the copy APIs take cc::optional<texture_region>: none = whole subresource, empty (size<=0) = no-op, else bounds-checked. block-aligned for BC. host bytes TIGHTLY packed (row = width-in-blocks × block-bytes); <shaped-graphics/resource/texture_region.hh>
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
 cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0}) // void — typed convenience (count + offsets in elements of T; like a subspan)
+cmd.copy.buffer_to_texture({.src, .dst, .src_row_pitch_in_bytes, .src_offset_in_bytes=0, .subresource={}, .region={}}) // void — buffer rows into one subresource; a BC row is a row of BLOCKS
+                                                   //   pitch a multiple of sg::buffer_texture_row_pitch_alignment (256), offset of buffer_texture_offset_alignment (512)
+sg::buffer_texture_row_pitch(format, width)        // isize — the smallest legal pitch for `width` texels; how a compute shader writing blocks lays out its buffer
 // cmd.upload/download = INLINE (recorded in this list); ctx.upload/download = ASYNC (copy queue, off the
 // frame path — for bulk streaming/readback). See docs/concepts/{upload,download}.async.md.
 // a download's bytes land only after BOTH the submitted list runs on the GPU and the readback actor copies them.
@@ -748,6 +752,8 @@ sg::bindless_array::for_binding(ctx, sbg_handle, name)  // -> bindless_array (by
 arr.transient.acquire(raw_view)   // -> sg::bindless_index (enum class : u32) — valid ONLY for the epoch it was acquired in; re-acquire the working set every epoch
                                   //   same view -> SAME index, O(1), no descriptor touched; a miss writes exactly ONE staging descriptor
                                   //   a full array reclaims EVERY index not acquired this epoch at once; all-current-epoch = the working set exceeds the count -> asserts
+arr.transient.release(raw_view)   // the caller will not acquire it again: frees its element NOW, or next epoch if this one acquired it
+                                  //   an element left alone holds its view, and so its RESOURCE, until the array fills — release a texture you replaced
 arr.persistent.acquire(raw_view)  // -> sg::bindless_element_handle (shared_ptr<bindless_element const>) — pinned; the index outlives the epoch
                                   //   THE ONLY index you may write into GPU memory that outlives an epoch (a material buffer above all)
                                   //   re-acquiring a held view returns the SAME handle; the refcount IS the pin
@@ -764,6 +770,10 @@ cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its
 cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)
 cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
+cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group counts buffer<sg::dispatch_args> element `index` holds, read by the GPU at the dispatch
+                                         //   sg::dispatch_args { u32 x = 0, y = 1, z = 1 } — a shader's own uint3 struct re-types with reinterpret_as<sg::dispatch_args>()
+                                         //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)
+                                         //   the args must not be bound writable to the same dispatch (webgpu refuses it); raw form: (raw_buffer_handle, offset_in_bytes % 4 == 0)
 //   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)

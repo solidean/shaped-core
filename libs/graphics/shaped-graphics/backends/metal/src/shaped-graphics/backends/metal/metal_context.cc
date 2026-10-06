@@ -159,6 +159,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::unaligned_block_compression:
         // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
         return false;
+    case sg::feature::texture_compression_bc:
+        // Every Apple-silicon Mac answers yes; an iPhone or iPad answers no.
+        return _device != nullptr && _device->supportsBCTextureCompression();
     case sg::feature::shader_f16:
     case sg::feature::shader_int16:
     case sg::feature::subgroups:

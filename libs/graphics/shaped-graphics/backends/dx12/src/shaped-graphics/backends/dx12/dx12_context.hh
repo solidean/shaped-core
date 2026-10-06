@@ -209,8 +209,9 @@ public:
         case sg::feature::sample_rate_shading:
         case sg::feature::wireframe_fill:
         case sg::feature::depth32_float_stencil8:
-        case sg::feature::device_coherence: // `globallycoherent` is core HLSL
-        case sg::feature::image_atomics:    // typed UAV atomics on r32 integer formats are required
+        case sg::feature::device_coherence:       // `globallycoherent` is core HLSL
+        case sg::feature::image_atomics:          // typed UAV atomics on r32 integer formats are required
+        case sg::feature::texture_compression_bc: // BC1-BC7 are required at feature level 11_0
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
@@ -616,6 +617,9 @@ public:
     ComPtr<IDXGIFactory4> _factory;
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
+
+    // What ExecuteIndirect reads a `sg::dispatch_args` record through; created with the device.
+    ComPtr<ID3D12CommandSignature> _dispatch_signature;
 
     // Kept for QueryVideoMemoryInfo, which is on IDXGIAdapter3 and has no route through the device.
     // Re-obtaining it per query via EnumAdapterByLuid would work and would cost a COM round trip on a call a dashboard

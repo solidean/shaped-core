@@ -795,6 +795,42 @@ void vulkan_command_list::copy_buffer_region(sg::raw_buffer_handle src,
     vkCmdCopyBuffer(_buffer, s->_buffer, d->_buffer, 1, &region);
 }
 
+void vulkan_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
+                                                 isize src_offset_in_bytes,
+                                                 isize src_row_pitch_in_bytes,
+                                                 sg::raw_texture_handle dst,
+                                                 sg::subresource_index const& subresource,
+                                                 sg::texture_region const& region)
+{
+    auto const s = std::dynamic_pointer_cast<vulkan_buffer const>(src);
+    auto const d = std::dynamic_pointer_cast<vulkan_texture const>(dst);
+    CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not vulkan resources");
+    CC_ASSERT(!s->is_expired(), "copy source is a transient buffer used past its epoch (expired)");
+    CC_ASSERT(!d->is_expired(), "copy target is a transient texture used past its epoch (expired)");
+    CC_ASSERT(s->usage().has(sg::buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
+    CC_ASSERT(d->usage().has(sg::texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
+
+    track_buffer_access(*s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    auto const dst_layout = track_texture_access(*d, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                                                 sg::access_flag::copy_write, sg::texture_layout::copy_dst);
+    suspend_rendering("a copy");
+    flush_barriers();
+
+    // Vulkan counts a buffer row in texels rather than bytes, so the pitch becomes the texels its whole blocks cover.
+    auto const format = d->description().format;
+    auto const extent = isize(sg::format_block_extent(format));
+    auto const row_texels = src_row_pitch_in_bytes / isize(sg::format_block_size(format)) * extent;
+    auto const copy = VkBufferImageCopy{
+        .bufferOffset = VkDeviceSize(src_offset_in_bytes),
+        .bufferRowLength = u32(row_texels),
+        .bufferImageHeight = 0, // the region's own height, rounded up to whole blocks
+        .imageSubresource = image_subresource_of(subresource, format),
+        .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
+        .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
+    };
+    vkCmdCopyBufferToImage(_buffer, s->_buffer, d->_image, vk_layout_from(dst_layout), 1, &copy);
+}
+
 // Now the device's own answer, since every build and dispatch seam is real.
 // The question this asks is whether THIS command list can trace rays rather than whether the GPU could — which is why
 // it reported false while the seams were stubs, and why it can stop doing so only now.

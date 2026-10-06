@@ -8,6 +8,7 @@
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/memory/allocation_info.hh>
 #include <shaped-graphics/memory/memory_heap.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 
 namespace sg
 {
@@ -125,6 +126,9 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
         return cc::error(cc::move(unsupported.value()));
     if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
         return cc::error(cc::move(error));
+    if (is_compressed_format(desc.format) && !_ctx.supports(feature::texture_compression_bc))
+        return cc::error("a block-compressed texture needs sg::feature::texture_compression_bc, which this device "
+                         "lacks");
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
     _ctx._stats.add(stat::textures_created);

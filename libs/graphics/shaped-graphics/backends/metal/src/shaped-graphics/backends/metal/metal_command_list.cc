@@ -666,6 +666,38 @@ void metal_command_list::copy_buffer_region(raw_buffer_handle src,
                                       NS::UInteger(dst_offset_in_bytes), NS::UInteger(size_in_bytes));
 }
 
+void metal_command_list::copy_buffer_to_texture(raw_buffer_handle src,
+                                                isize src_offset_in_bytes,
+                                                isize src_row_pitch_in_bytes,
+                                                raw_texture_handle dst,
+                                                subresource_index const& subresource,
+                                                texture_region const& region)
+{
+    CC_ASSERT(!src->is_expired(), "copy source is a transient buffer used past its epoch");
+    CC_ASSERT(!dst->is_expired(), "copy target is a transient texture used past its epoch");
+    CC_ASSERT(src->usage().has(sg::buffer_usage::copy_src), "copy source lacks copy_src usage");
+    CC_ASSERT(dst->usage().has(sg::texture_usage::copy_dst), "copy target lacks copy_dst usage");
+
+    suspend_render_encoder("a copy");
+
+    declare_buffer(src, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    declare_texture(dst, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    flush_barriers();
+
+    // Metal counts a block-compressed row as a row of blocks, the same unit sg's pitch is in.
+    auto const extent = isize(sg::format_block_extent(dst->description().format));
+    auto const rows = (isize(region.size[1]) + extent - 1) / extent;
+
+    auto const& mtl_src = static_cast<metal_buffer const&>(*src);
+    auto const& mtl_dst = static_cast<metal_texture const&>(*dst);
+    compute_encoder()->copyFromBuffer(
+        mtl_src.buffer(), NS::UInteger(src_offset_in_bytes), NS::UInteger(src_row_pitch_in_bytes),
+        NS::UInteger(src_row_pitch_in_bytes * rows),
+        MTL::Size(NS::UInteger(region.size[0]), NS::UInteger(region.size[1]), NS::UInteger(region.size[2])),
+        mtl_dst.texture(), NS::UInteger(subresource.array_layer), NS::UInteger(subresource.mip_level),
+        MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])));
+}
+
 void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
 {
     auto const& mtl_pipeline = static_cast<metal_compute_pipeline const&>(pipeline);
@@ -755,6 +787,25 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
 
     auto const size = _bound_compute->workgroup_size();
     compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
+                                            MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
+}
+
+void metal_command_list::compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes)
+{
+    CC_ASSERT(_bound_compute != nullptr, "a dispatch needs a bound compute pipeline");
+
+    place_inline_constants();
+
+    // Metal fetches an indirect dispatch's arguments in the dispatch stage itself, which `draw_indirect` maps to.
+    declare_buffer(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_bound_groups(sg::pipeline_stage_flag::compute, &_bound_compute->footprint());
+    declare_array_accesses(&_bound_compute->footprint(), _bound_compute, sg::pipeline_stage_flag::compute,
+                           _pending_array_buffer_declares, _pending_array_texture_declares);
+    flush_barriers();
+
+    auto const& mtl_buffer = static_cast<metal_buffer const&>(*args);
+    auto const size = _bound_compute->workgroup_size();
+    compute_encoder()->dispatchThreadgroups(MTL::GPUAddress(mtl_buffer.gpu_address() + u64(offset_in_bytes)),
                                             MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
 }
 

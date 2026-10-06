@@ -175,7 +175,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     Not every transition is even legal inside a scope, so the declaration has to reach the barrier before the scope opens, not just avoid the split.
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
-  - **indirect draws** — `draw_indirect` and count buffers;
+  - **indirect draws** — `draw_indirect` and count buffers.
+    Indirect *dispatch* landed as `cmd.compute.dispatch_groups_indirect`, so the args validation, the `indirect_read` declaration and the aliasing rule are the precedent to follow;
   - **dynamic primitive topology** and **dynamic depth bias**, both baked into the PSO for now;
   - **mesh / task** stages;
   - a **backend-neutral numeric `location`** on `sg::vertex_attribute`, replacing the HLSL `semantic` string.
@@ -191,6 +192,10 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
   - **compaction** on both backends, which is the one build-time flag neither implements.
+  - **opacity micromaps**, behind an sg feature: per-micro-triangle opaque / transparent / unknown masks built with the BLAS.
+    Most candidate hits on alpha-tested geometry then never reach an any-hit decision.
+    DXR 1.2 and vulkan's `VK_EXT_opacity_micromap` expose them to ray queries too; metal's equivalent is unchecked.
+    The planned caller is shaped-viewer's wavefront tracer, which keeps cutout opacity as data so it can bake them — [wavefront.md](../../shaped-viewer/docs/wavefront.md).
 - **A group's implicit constant buffer is one upload each.**
   `create_binding_group` allocates a buffer for a generated group's plain members and fills it with one copy per group.
   On `ctx.transient` that copy is recorded inline into the `cmd` the call takes, and on `ctx.persistent` it goes through `ctx.upload`.

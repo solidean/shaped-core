@@ -29,6 +29,15 @@ struct sg::array_texture_access
     // A subresource range (which mips / array slices / aspects) is a future addition — see resource/subresource.hh.
 };
 
+/// The workgroup counts an indirect dispatch reads from a GPU buffer, in the layout every backend shares.
+/// A shader that writes them declares a struct of three `uint`s; a buffer of it re-types with `reinterpret_as<sg::dispatch_args>()`.
+struct sg::dispatch_args
+{
+    u32 x = 0;
+    u32 y = 1;
+    u32 z = 1;
+};
+
 /// Compute recording facade for a command list, reached as `cmd.compute`: bind a pipeline and resource groups, then dispatch.
 /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md for the bind path.
 class sg::command_list_compute_scope
@@ -57,6 +66,16 @@ public:
     /// Dispatches enough workgroups to cover `x`*`y`*`z` **threads**, rounding up per axis by the bound pipeline's workgroup size (`ceil(threads / workgroup_size)`).
     /// A pipeline must be bound first.
     void dispatch_threads(int x, int y = 1, int z = 1);
+
+    /// Dispatches the workgroup counts element `index` of `args` holds, read by the GPU when the dispatch runs.
+    /// This is how a count only the GPU knows — a queue a previous dispatch appended to — sizes the next dispatch, with no readback.
+    /// `args` needs `buffer_usage::indirect_command_buffer`, and a shader writing it needs `readwrite_buffer` too.
+    /// It must not be bound to the same dispatch as a writable binding, which WebGPU refuses.
+    /// A count of 0 on any axis dispatches nothing.
+    void dispatch_groups_indirect(buffer<dispatch_args> const& args, isize index = 0);
+
+    /// The byte-addressed form: three `u32` counts at `offset_in_bytes`, which must be a multiple of 4.
+    void dispatch_groups_indirect(raw_buffer_handle const& args, isize offset_in_bytes);
 
     /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch only**.
     /// Declare again before each dispatch that needs it.

@@ -66,6 +66,12 @@ enum class sg::feature
     /// Where this is false, creating one is a refusal naming the size, which a loader of user textures can pad against.
     unaligned_block_compression,
 
+    /// A texture may have a BC format, `bc1_rgba_unorm` through `bc7_rgba_unorm_srgb`, and be sampled and copied into.
+    /// D3D12 requires it at feature level 11_0; Vulkan grants it with `textureCompressionBC`, which creation enables.
+    /// Metal grants it on macOS GPUs that support BC compression, and WebGPU with `texture-compression-bc`.
+    /// Where this is false, creating a BC texture is refused.
+    texture_compression_bc,
+
     /// A texture binding may be a multisampled 2D array (`texture_view_dimension::tex_2d_ms_array`).
     /// WebGPU has no such binding at all, and it is also how a multisampled cube is sampled.
     multisampled_array_textures,
@@ -137,6 +143,7 @@ inline constexpr feature k_all_features[] = {
     feature::float32_filtering,
     feature::extended_image_formats,
     feature::unaligned_block_compression,
+    feature::texture_compression_bc,
     feature::multisampled_array_textures,
     feature::primitive_index,
     feature::sample_rate_shading,
@@ -178,6 +185,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "extended_image_formats";
     case feature::unaligned_block_compression:
         return "unaligned_block_compression";
+    case feature::texture_compression_bc:
+        return "texture_compression_bc";
     case feature::multisampled_array_textures:
         return "multisampled_array_textures";
     case feature::primitive_index:

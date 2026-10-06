@@ -166,9 +166,17 @@ private:
                             isize dst_offset_in_bytes,
                             isize size_in_bytes) override;
 
+    void copy_buffer_to_texture(raw_buffer_handle src,
+                                isize src_offset_in_bytes,
+                                isize src_row_pitch_in_bytes,
+                                raw_texture_handle dst,
+                                subresource_index const& subresource,
+                                texture_region const& region) override;
+
     void compute_bind_pipeline(compute_pipeline const& pipeline) override;
     void compute_bind_group(int group_index, binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
+    void compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes) override;
     void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void compute_declare_array_buffer_access(cc::string_view binding_name,
                                              cc::span<array_buffer_access const> elements) override;

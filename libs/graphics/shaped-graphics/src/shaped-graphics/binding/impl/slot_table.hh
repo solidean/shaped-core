@@ -20,6 +20,11 @@ namespace sg::impl
 /// dirties the group and forces a snapshot anyway, so there is nothing to save by evicting less.
 /// If every slot was acquired in the current epoch, the working set exceeds the capacity and acquire asserts.
 ///
+/// A slot holds its key, and the group the view behind it, so a slot left to the full-table sweep keeps its resource
+/// alive for as long as the table has room.
+/// **`release` is how an owner that is done with a key frees it sooner**: at once if no index from the current epoch
+/// can name it, otherwise at the first acquire of a later epoch.
+///
 /// A slot may also be **pinned**, which is what outlives an epoch: the stale sweep never reclaims a pinned
 /// slot, whatever epoch last acquired it.
 /// `unpin` frees it again at once — so an index read after its pin is gone resolves to a vacant descriptor
@@ -72,6 +77,20 @@ public:
         return _acquire(key, e, true, on_reclaimed);
     }
 
+    /// Frees `key`'s slot, which its owner will not acquire again: now if it was not acquired in epoch `e`, otherwise
+    /// at the first acquire of a later epoch, since an index from `e` may still be recorded into that epoch's work.
+    /// A key that holds no slot, or a pinned one, is left alone; `unpin` is what frees the latter.
+    void release(Key const& key, epoch e, auto&& on_reclaimed)
+    {
+        auto const* slot = _by_key.get_ptr(key);
+        if (slot == nullptr || _entries[*slot].pinned)
+            return;
+        if (_entries[*slot].last_acquired != e)
+            _free_slot(*slot, on_reclaimed);
+        else
+            _deferred.push_back(key);
+    }
+
     /// Unpins `slot`, which must be occupied and pinned, and frees it unless it was also acquired in epoch `e`.
     /// A freed slot calls `on_reclaimed(slot)`, so the owner clears its descriptor.
     void unpin(u32 slot, epoch e, auto&& on_reclaimed)
@@ -113,6 +132,12 @@ private:
 
     [[nodiscard]] acquired _acquire(Key const& key, epoch e, bool pin, auto&& on_reclaimed)
     {
+        if (e != _swept)
+        {
+            _swept = e;
+            _release_deferred(e, on_reclaimed);
+        }
+
         if (auto const* slot = _by_key.get_ptr(key))
         {
             _entries[*slot].last_acquired = e;
@@ -159,9 +184,28 @@ private:
                                   "working set, plus what is pinned, exceeds the configured capacity)");
     }
 
+    /// Frees the slots `release` deferred, now that `e` is a later epoch; one acquired again since is kept.
+    void _release_deferred(epoch e, auto&& on_reclaimed)
+    {
+        for (auto const& key : _deferred)
+            if (auto const* slot = _by_key.get_ptr(key); slot != nullptr)
+            {
+                auto const& entry = _entries[*slot];
+                if (!entry.pinned && entry.last_acquired != e)
+                    _free_slot(*slot, on_reclaimed);
+            }
+        _deferred.clear();
+    }
+
     cc::vector<entry> _entries;
     cc::map<Key, u32> _by_key;
     cc::vector<u32> _free;
+
+    /// Keys released while an index from their epoch could still name them, freed in a later epoch.
+    cc::vector<Key> _deferred;
+
+    /// The epoch the deferred releases were last applied in, so they run once per epoch rather than once per acquire.
+    epoch _swept = epoch::invalid;
 
     /// Occupied-and-pinned slots, kept in step by every `_acquire`, `unpin` and `_free_slot`.
     isize _pinned_count = 0;

@@ -98,8 +98,10 @@ struct rendering_info;             // value type — what opens a rendering scop
 struct buffer_bytes_copy;
 template <class T>
 struct buffer_data_copy;
+struct buffer_texture_copy;
 struct array_buffer_access;
 struct array_texture_access;
+struct dispatch_args;
 
 class raw_buffer;
 class raw_texture;
