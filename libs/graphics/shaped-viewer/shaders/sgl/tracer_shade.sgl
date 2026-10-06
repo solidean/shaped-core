@@ -193,39 +193,48 @@ fun linear_rgba8(c: uint) -> float4:
 /// `footprint` is the world width one pixel spans at the hit, which the shapes' edges are antialiased over.
 fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){traced, slug.tables}:
     let count = traced.frame[0].decal_count
-    let q = float4(p.x, p.y, p.z, 1.0)
     for i in 0 ..< (count as int):
         let d = traced.decals[i]
-        if abs(dot(d.to_depth, q)) > 1.0 => continue
-        let x = dot(d.to_x, q)
-        let y = dot(d.to_y, q)
-        if x < d.bounds.x or y < d.bounds.y or x > d.bounds.z or y > d.bounds.w => continue
-        let fade = saturate((-dot(n, d.direction) - 0.05) * 4.0)
+        let mut at = float2(0.0)
+        let fade = decal_reach(d, p, n, mut at)
         if fade <= 0.0 => continue
-
-        let tint = linear_rgba8(d.tint)
-        let units = float2(footprint / d.unit_length.x, footprint / d.unit_length.y)
         let first = d.first_shape as int
         for k in 0 ..< (d.shape_count as int):
-            let s = traced.decal_shapes[first + k]
+            paint_decal_shape(mut surface, d, traced.decal_shapes[first + k], at, footprint, fade)
 
-            // The record places em space on the drawing's plane; its inverse takes the hit back into em space.
-            let col0 = float2(s.em_to_object.x, s.em_to_object.y)
-            let col1 = float2(s.em_to_object.z, s.em_to_object.w)
-            let rel = float2(x, y) - s.origin
-            let det = col0.x * col1.y - col1.x * col0.y
-            let em = float2(rel.x * col1.y - rel.y * col1.x, rel.y * col0.x - rel.x * col0.y) / det
-            let em_per_pixel = float2(units.x / length(col0), units.y / length(col1))
+/// How strongly decal `d` paints `p`, a surface whose geometric normal turned toward the viewer is `n`: 0 where it does not reach.
+/// Where it does, `at` is where `p` lands in the drawing's own units.
+fun decal_reach(d: decal_record, p: float3, n: float3, at: mut float2) -> float:
+    let q = float4(p.x, p.y, p.z, 1.0)
+    if abs(dot(d.to_depth, q)) > 1.0 => return 0.0
+    let x = dot(d.to_x, q)
+    let y = dot(d.to_y, q)
+    if x < d.bounds.x or y < d.bounds.y or x > d.bounds.z or y > d.bounds.w => return 0.0
+    at = float2(x, y)
+    return saturate((-dot(n, d.direction) - 0.05) * 4.0)
 
-            // Past the shape's box by more than a pixel, its coverage is 0 without walking a band.
-            if em.x < s.em_bounds.x - em_per_pixel.x or em.y < s.em_bounds.y - em_per_pixel.y => continue
-            if em.x > s.em_bounds.z + em_per_pixel.x or em.y > s.em_bounds.w + em_per_pixel.y => continue
+/// Paints shape `s` of decal `d` into `surface`'s base at `at`, the point `decal_reach` placed and weighted by `fade`.
+/// `footprint` is the world width one pixel spans there.
+fun paint_decal_shape(surface: mut openpbr.surface, d: decal_record, s: decal_shape, at: float2, footprint: float, fade: float){slug.tables}:
+    let units = float2(footprint / d.unit_length.x, footprint / d.unit_length.y)
 
-            let coverage = slug.coverage(em, em_per_pixel, s.banding, slug.glyph_of(s.glyph), false)
-            let color = linear_rgba8(s.color) * tint
-            let a = saturate(coverage) * color.w * fade
-            surface.base_color = mix(surface.base_color, float3(color.x, color.y, color.z), a)
-            surface.base_metalness = mix(surface.base_metalness, 0.0, a)
+    // The record places em space on the drawing's plane; its inverse takes the point back into em space.
+    let col0 = float2(s.em_to_object.x, s.em_to_object.y)
+    let col1 = float2(s.em_to_object.z, s.em_to_object.w)
+    let rel = at - s.origin
+    let det = col0.x * col1.y - col1.x * col0.y
+    let em = float2(rel.x * col1.y - rel.y * col1.x, rel.y * col0.x - rel.x * col0.y) / det
+    let em_per_pixel = float2(units.x / length(col0), units.y / length(col1))
+
+    // Past the shape's box by more than a pixel, its coverage is 0 without walking a band.
+    if em.x < s.em_bounds.x - em_per_pixel.x or em.y < s.em_bounds.y - em_per_pixel.y => return
+    if em.x > s.em_bounds.z + em_per_pixel.x or em.y > s.em_bounds.w + em_per_pixel.y => return
+
+    let coverage = slug.coverage(em, em_per_pixel, s.banding, slug.glyph_of(s.glyph), false)
+    let color = linear_rgba8(s.color) * linear_rgba8(d.tint)
+    let a = saturate(coverage) * color.w * fade
+    surface.base_color = mix(surface.base_color, float3(color.x, color.y, color.z), a)
+    surface.base_metalness = mix(surface.base_metalness, 0.0, a)
 
 /// Shades a located hit and writes the whole payload.
 ///
@@ -273,27 +282,7 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
         let u = pt.rand(mut rng)
         channel = min((u * 3.0) as uint, 2u)
 
-    // The shading frame, in three steps: the authored one if there is one, faced toward the ray, then the normal map on top.
-    let mut f = openpbr.make_frame(n)
-    if has_authored:
-        f = authored
-        // Two-sided, against the same test the geometric normal took: a ray arriving from behind needs the whole basis turned.
-        if dot(f.n, v) < 0.0 => f = openpbr.flip_frame(f)
-
-    // The frame as authored, which the coat's normal is written in the tangent space of.
-    let authored_frame = f
-
-    // A normal map is a rotation of the frame, not a replacement for it.
-    if surface.geometry_normal != float3(0.0, 0.0, 1.0) => f = openpbr.perturb_frame(f, surface.geometry_normal)
-
-    // The anisotropy direction, applied AFTER the normal map, because it is a rotation about the shading normal the normal map decided.
-    if surface.geometry_tangent != float3(1.0, 0.0, 0.0) => f = openpbr.rotate_frame_to_tangent(f, surface.geometry_tangent)
-
-    // The coat's normal, re-expressed in the frame the closure works in, before the closure reads it.
-    if surface.geometry_coat_normal != float3(0.0, 0.0, 1.0):
-        let coat_world = normalize(openpbr.to_world(authored_frame, normalize(surface.geometry_coat_normal)))
-        surface.geometry_coat_normal = normalize(openpbr.to_local(f, coat_world))
-
+    let f = openpbr.shading_frame(mut surface, n, v, authored, has_authored)
     let b = openpbr.bsdf_prepare(surface, exiting, channel)
 
     let wo_local = openpbr.to_local(f, v)
