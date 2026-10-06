@@ -200,3 +200,24 @@ TEST("sgl emit - an effect inside an inlined call is bound in SGL's order where 
                          "    const uint b = atomic_fetch_add_explicit(&work_counts[0], 1u, memory_order_relaxed);\n"
                          "    work_result[id.x] = a - b;\n"));
 }
+
+TEST("sgl emit - a bare literal shifted in HLSL is written as the int it is, which DXC otherwise refuses")
+{
+    constexpr cc::string_view source = "struct pixel_input:\n"
+                                       "    @position position: hpos4\n"
+                                       "\n"
+                                       "@pixel struct target:\n"
+                                       "    color: float4\n"
+                                       "\n"
+                                       "@pixel fun main_ps(p: pixel_input) -> target:\n"
+                                       "    let n = (p.position.x as int) & 7\n"
+                                       "    let top = (1 << n) - 1\n"
+                                       "    let unsigned_top = 1u << (n as uint)\n"
+                                       "    return { color = float4(top as float, unsigned_top as float, 0.0, 1.0) }\n";
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("int(1) << n")).dump("hlsl", hlsl);
+    // An unsigned literal says its type already.
+    CHECK(hlsl.contains("1u << ")).dump("hlsl", hlsl);
+    // The other targets type a literal by its context, and are left alone.
+    CHECK(text_of(source, target::wgsl).contains("int(1)") == false);
+}

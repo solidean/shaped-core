@@ -66,6 +66,17 @@ written write_bitwise(call_context const& c)
             .binds = precedence::bitwise};
 }
 
+/// Whether `text` is a bare decimal literal, which HLSL types only by context.
+bool is_bare_decimal(cc::string_view text)
+{
+    if (text.empty())
+        return false;
+    for (auto const ch : text)
+        if (ch < '0' || ch > '9')
+            return false;
+    return true;
+}
+
 /// `a << b` everywhere, where HLSL masks the count to its low five bits and WGSL does at run time;
 /// WGSL takes the count as unsigned, and MSL leaves a count past 31 undefined, so it masks.
 /// MSL is C++, where a left shift of a negative int is undefined, so an int shifts as the uint of its bits there.
@@ -85,7 +96,11 @@ written write_shift(call_context const& c)
         count = Width == 1 ? cc::format("u32({})", count) : cc::format("vec{}u({})", Width, count);
     else if (c.target == language::msl)
         count = cc::format("({} & 31)", count);
-    return {.text = cc::format("{} {} {}", operand(c.arguments[0]), op, count), .binds = precedence::bitwise};
+    // DXC refuses `1 << n`, whose left side is a literal it cannot type, so a bare one is written as the int it is.
+    auto left = operand(c.arguments[0]);
+    if (c.target == language::hlsl && IsSigned && Width == 1 && is_bare_decimal(left))
+        left = cc::format("int({})", left);
+    return {.text = cc::format("{} {} {}", left, op, count), .binds = precedence::bitwise};
 }
 
 constexpr cc::string_view k_as_type[] = {"as_type"};
