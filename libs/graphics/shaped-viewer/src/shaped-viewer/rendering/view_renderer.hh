@@ -157,12 +157,14 @@ private:
     ///
     /// `cameras` is this frame's view and projection and the previous frame's, which a member reprojecting in world
     /// space reads instead of the motion guide alone.
+    /// `sample_counts` is the mean's count per pixel where its pixels differ, and null where one count holds for the image.
     [[nodiscard]] static sr::reconstruct_status _denoise(sg::command_list& cmd,
                                                          render_settings const& settings,
                                                          denoise_schedule const& schedule,
                                                          impl::temporal_slot const& accumulator,
                                                          denoise_slots const& ds,
                                                          denoise_cameras const& cameras,
+                                                         sg::texture_2d const& sample_counts,
                                                          sg::texture_2d& presented);
 
     /// Bumped every time the routine initializes, which is once per shader reload.

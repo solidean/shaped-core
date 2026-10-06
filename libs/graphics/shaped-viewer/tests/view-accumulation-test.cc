@@ -450,3 +450,136 @@ ASYNC_INVOCABLE_TEST("sv - a camera cut waits for a traced frame and drops the t
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
+
+// A layer upscaling below native, down the plan path: a frame whose image changed is traced at the upscaler's input
+// extent and upscaled into the denoised slot, and is no sample of the mean.
+// The first frame the camera holds still restarts the mean at full size, and the next one accumulates onto it.
+ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a still one at full size",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+    if (!sr::query_reconstruct_support(ctx).fsr)
+        SKIP("no upscaler on this device");
+
+    auto const cloud = sv_test::make_triangle_cloud(32);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
+    resources.wait_for_pending_uploads();
+
+    auto const output_size = tg::vec2i(64, 64);
+    auto const moving_id = sv::view_id::from_string("moving");
+
+    auto def = sv::viewer_definition{};
+    {
+        auto v = sv::view_data{};
+        v.id = moving_id;
+        v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)};
+        auto& scene = sv::ensure_scene_3d(v);
+        scene.items.push_back(item);
+        scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
+        scene.settings.reconstruct.scale = sr::render_scale_preset::performance;
+        def.views.push_back(cc::move(v));
+
+        auto const root_node = def.nodes.add_container(sv::invalid_node);
+        auto leaf = sv::layout_leaf{};
+        leaf.views.push_back(sv::view_index(0));
+        def.nodes.add_leaf(root_node, cc::move(leaf));
+
+        auto root = sv::view_data{};
+        root.id = sv::view_id::from_string("root");
+        root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+        def.root_view = sv::view_index(def.views.size());
+        def.views.push_back(cc::move(root));
+    }
+
+    auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                          .width = output_size[0],
+                                                          .height = output_size[1],
+                                                          .usage = sg::texture_usage::render_target});
+
+    auto store = sv::view_store{};
+    auto const history = sv::view_history{};
+    auto step = 0.0;
+
+    // Moves the camera first when asked, so the frame sees a different image than the last one did.
+    auto const execute = [&](sg::command_list& cmd, u64 index, bool move)
+    {
+        if (move)
+        {
+            step += 0.05;
+            def.views[0].camera.position = tg::pos3d(2.4 + step, 1.8, -3.2);
+        }
+        resources.advance_to(ctx.current_epoch());
+        store.begin_frame(u64(ctx.current_epoch()));
+        auto const plan = sv::build_render_plan(def, output_size, index, history);
+        return sv::viewer_renderer::execute(cmd, def, plan, resources, store,
+                                            output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+    };
+
+    auto const frame = [&](u64 index, bool move) -> cc::shared_async<cc::unit>
+    {
+        auto cmd = ctx.create_command_list();
+        CHECK(execute(*cmd, index, move) == sg::routine_outcome::executed);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+    };
+
+    // Warmed moving and still, so both the upscaler and the full-size members have compiled before anything is counted.
+    sr::reconstruct_routine::prewarm(ctx);
+    (void)co_await ctx.routines.idle_completion();
+    REQUIRE(sv_test::frames_until_executed(ctx, [&](sg::command_list& cmd) { return execute(cmd, 0, true); }));
+
+    auto const accumulation = [&]() -> sv::impl::temporal_slot const&
+    {
+        auto const* const rec = store.peek_ptr(moving_id);
+        CC_ASSERT(rec != nullptr, "the view traced, so it has a record");
+        return *rec->temporal.get_ptr(sv::temporal_id::accumulation(0));
+    };
+
+    // A frame shaded by a stand-in counts as a changed image, so until every permutation has compiled a still camera
+    // traces scaled too; held still until the mean climbs, which is when none is left.
+    auto warm_frames = 0;
+    while (accumulation().accum_frame < 2)
+    {
+        (void)co_await frame(0, false);
+        ++warm_frames;
+        REQUIRE(warm_frames < 500);
+    }
+    auto const frame_samples = [&]() -> sv::impl::temporal_slot const&
+    { return *store.peek_ptr(moving_id)->temporal.get_ptr(sv::temporal_id::frame_samples(0)); };
+
+    for (auto i = u64(1); i <= 3; ++i)
+    {
+        (void)co_await frame(i, true);
+        CHECK(accumulation().traced_scaled);
+        CHECK(accumulation().accum_frame == 0);
+    }
+    auto const input = frame_samples().scaled_denoise.extent();
+    CHECK(input[0] < output_size[0]);
+    CHECK(input[1] < output_size[1]);
+    CHECK(frame_samples().scaled_denoise.output_extent() == output_size);
+    CHECK(accumulation().scaled_frame >= 3);
+
+    (void)co_await frame(4, false);
+    CHECK(!accumulation().traced_scaled);
+    CHECK(accumulation().accum_frame == 1);
+    CHECK(frame_samples().denoise.extent() == output_size);
+
+    (void)co_await frame(5, false);
+    CHECK(accumulation().accum_frame == 2);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}

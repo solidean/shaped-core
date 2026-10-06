@@ -364,7 +364,8 @@ struct reference_roots
         return {.count = 1, .t0 = -evaluate(o0) / qb, .shifted_origin = o0};
     }
 
-    auto const t_closest = -2.0 * (tg::dot(d, a_mul(o0)) + tg::dot(b, d)) / (2.0 * qa);
+    // The closest approach to the primitive's origin, as `quadric.roots_of` takes it.
+    auto const t_closest = -tg::dot(o0, d) / tg::dot(d, d);
     auto const o = o0 + d * t_closest;
     auto const qb = 2.0 * (tg::dot(d, a_mul(o)) + tg::dot(b, d));
     auto const qc = evaluate(o);

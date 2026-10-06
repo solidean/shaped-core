@@ -1,0 +1,46 @@
+// The wavefront path tracer's kernels: each is one stage of a round over module `tracer`'s path buffers.
+//
+// The stages themselves are module `tracer`'s (shaders/sgl/tracer_wavefront.sgl); a kernel here only names its threads and its groups.
+// Shading is not here: it is one generated kernel per material permutation, which `sv::generate_material_shader` writes.
+//
+// Group 0 is `tracer.traced` for every kernel.
+// The ones that trace or read a material's tables list `tracer.bindless` at group 1; the counting kernels list `tracer.dispatch` there instead,
+// since a dispatch may not read its arguments from a buffer it binds writable, and only those kernels write them.
+require ray_query
+// `tracer.traced`'s acceleration structure needs the pipeline wherever the device grants one, since either half may trace against it.
+require raytracing_pipeline
+
+use tracer
+
+@compute(64) fun begin(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+    tracer.wavefront_begin(id.x as uint)
+
+@compute(64) fun extend(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
+    tracer.wavefront_extend(id.x as uint)
+
+@compute(64) fun segment(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+    tracer.wavefront_segment(id.x as uint)
+
+@compute(64) fun sort(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+    tracer.wavefront_sort(id.x as uint)
+
+@compute(64) fun connect(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
+    tracer.wavefront_connect(id.x as uint)
+
+@compute(64) fun finalize(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+    tracer.wavefront_finalize(id.x as uint)
+
+@compute(64) fun resolve(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+    tracer.wavefront_resolve(id.x as uint)
+
+@compute(1) fun reset(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+    tracer.wavefront_reset()
+
+@compute(1) fun args_round(@thread_id id: int3){tracer.traced, tracer.dispatch, tracer.wavefront_step}:
+    tracer.wavefront_args_round()
+
+@compute(1) fun args_shade(@thread_id id: int3){tracer.traced, tracer.dispatch, tracer.wavefront_step}:
+    tracer.wavefront_args_shade()
+
+@compute(1) fun args_connect(@thread_id id: int3){tracer.traced, tracer.dispatch, tracer.wavefront_step}:
+    tracer.wavefront_args_connect()

@@ -136,7 +136,8 @@ namespace
 cc::shared_async<cc::unit> capture_box(sg::context& ctx,
                                        sr::denoise_method method,
                                        cc::string const& path,
-                                       int accumulate = 2)
+                                       int accumulate = 2,
+                                       sv::path_integrator integrator = sv::path_integrator::megakernel)
 {
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
@@ -162,7 +163,12 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
         // sampled directly, so from above the box is lit through its lamp mesh alone and comes out nearly black.
         // Moderate, because nothing tone-maps and a bright box clips to flat white; either way the noise would hide.
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
-        scene.settings({.samples_per_pixel = 1, .reconstruct = {.denoiser = method}});
+        // No frame budget: it sizes a still frame by the GPU's own timing, so a capture at `accumulate` frames would hold
+        // however many samples this machine reached, and two captures would compare different estimates.
+        scene.settings({.samples_per_pixel = 1,
+                        .integrator = integrator,
+                        .frame_budget_ms = 0.0f,
+                        .reconstruct = {.denoiser = method}});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
         // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.
@@ -205,7 +211,82 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
     REQUIRE(count > 0).context(cc::format("{}: all {} neighbour pairs clipped", path, clipped));
     return sum / count;
 }
+
+/// The mean of every channel of every pixel of the PNG at `path`, in [0, 255].
+[[nodiscard]] f64 brightness_of(cc::string const& path)
+{
+    auto reread = cc::file_read_stream_adapter::open(path);
+    REQUIRE(reread.has_value());
+    cc::read_stream in = reread.value();
+    auto const decoded = babel::image::read(in);
+    REQUIRE(decoded.has_value());
+
+    auto const& img = decoded.value();
+    REQUIRE(img.comp == babel::image::component::u8);
+    auto sum = 0.0;
+    for (auto const p : img.pixels)
+        sum += f64(p);
+    return sum / f64(img.pixels.size());
+}
 } // namespace
+
+// The wavefront tracer through the viewer: its restart, its drain on a changed frame, its carry on a still one, and the
+// per-pixel counts and guides it hands the denoisers.
+//
+// The megakernel's capture is the reference for the image, at a tolerance the noise of a 16-frame mean leaves room for.
+// Denoised captures that come out smoother than the raw one are what show the guides and the count texture reaching a member:
+// à-trous at 32 frames is past the temporal window, so it runs spatially on the mean and reads the counts,
+// and `automatic` at 2 frames runs SVGF on the frame's own samples and the motion guide.
+ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's image",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+    if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
+        SKIP("the wavefront tracer needs inline ray queries");
+
+    auto const reference_path = cc::format("{}/sv-wavefront-megakernel.png", cc::temp_directory_path());
+    auto const raw_path = cc::format("{}/sv-wavefront-raw.png", cc::temp_directory_path());
+    auto const spatial_path = cc::format("{}/sv-wavefront-atrous.png", cc::temp_directory_path());
+    auto const young_raw_path = cc::format("{}/sv-wavefront-young-raw.png", cc::temp_directory_path());
+    auto const temporal_path = cc::format("{}/sv-wavefront-automatic.png", cc::temp_directory_path());
+
+    auto const wavefront = sv::path_integrator::wavefront;
+    co_await capture_box(ctx, sr::denoise_method::none, reference_path, 16);
+    co_await capture_box(ctx, sr::denoise_method::none, raw_path, 16, wavefront);
+    co_await capture_box(ctx, sr::denoise_method::atrous, spatial_path, 32, wavefront);
+    co_await capture_box(ctx, sr::denoise_method::none, young_raw_path, 2, wavefront);
+    co_await capture_box(ctx, sr::denoise_method::automatic, temporal_path, 2, wavefront);
+
+    auto const reference = brightness_of(reference_path);
+    auto const traced = brightness_of(raw_path);
+    CHECK(tg::abs(traced - reference) < 0.05 * reference)
+        .context(cc::format("mean brightness megakernel {} wavefront {}", reference, traced));
+
+    auto const raw = roughness_of(raw_path);
+    auto const spatial = roughness_of(spatial_path);
+    CHECK(spatial < 0.7 * raw).context(cc::format("roughness raw {} atrous {}", raw, spatial));
+
+    auto const young_raw = roughness_of(young_raw_path);
+    auto const temporal = roughness_of(temporal_path);
+    CHECK(temporal < 0.7 * young_raw).context(cc::format("roughness raw {} automatic (svgf) {}", young_raw, temporal));
+
+    cc::remove_file(reference_path);
+    cc::remove_file(raw_path);
+    cc::remove_file(spatial_path);
+    cc::remove_file(young_raw_path);
+    cc::remove_file(temporal_path);
+}
 
 // The one check that the viewer PRESENTS the denoised image rather than only computing it.
 // Captures of the same two-frame estimate: each denoised one must be clearly smoother than the raw one.

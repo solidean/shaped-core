@@ -72,7 +72,7 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
     check_entry_compiles(g, sg::shader_stage::closest_hit, "sv_closest_hit");
     if (kind == sv::geometry_kind::quadrics)
         check_entry_compiles(g, sg::shader_stage::intersection, "sv_intersection");
-    else if (g.can_cut_out)
+    else if (g.opacity.can_cut_out())
     {
         check_entry_compiles(g, sg::shader_stage::any_hit, "sv_any_hit");
         check_entry_compiles(g, sg::shader_stage::any_hit, "sv_shadow_any_hit");
@@ -148,7 +148,7 @@ TEST("sv - a hit group compiles at every attribute frequency, sampled, swizzled 
 
     auto const resolved = sv::resolve_material(materials, id, mesh);
     auto const g = sv::generate_material_shader(resolved);
-    CHECK(g.can_cut_out);
+    CHECK(g.opacity.can_cut_out());
     CHECK(g.source.contains("const sv_supplied_tangent_frame = true"));
     CHECK(g.source.contains("palette_nearest_clamp_repeat"));
     CHECK(g.source.contains("palette_linear_repeat_repeat"));

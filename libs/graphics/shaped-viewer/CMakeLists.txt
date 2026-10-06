@@ -44,6 +44,8 @@ add_library(shaped-viewer
     src/shaped-viewer/resources/bindless_tables.cc
     src/shaped-viewer/resources/gpu_resource_manager.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
+    src/shaped-viewer/rendering/traced_group.cc
+    src/shaped-viewer/rendering/wavefront_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/depth_fill_routine.cc
@@ -178,6 +180,7 @@ sc_add_shader_package(
     SHADERS
         module:tracer
         tracer_pipeline.sgl:*
+        wavefront.sgl:*
         layout.sgl:*
         depth_fill.sgl:*
 )
@@ -214,7 +217,14 @@ if(SC_BUILD_TESTS)
         tests/material-shader-cache-test.cc
         tests/asset-loading-test.cc
     )
-    sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    # Twice sg's WARP allowance: an unoptimized build path-traces the whole suite in about 4.5 minutes, the wavefront's
+    # many small dispatches being what a debug build records slowest.
+    # TEMPORARY: the suite should narrow itself under nx::is_thorough instead; see libs/graphics/shaped-viewer/docs/plans/rendering-roadmap.md.
+    if(WIN32)
+        sc_nexus_binary(shaped-viewer-test KINDS tests TIMEOUT 360)
+    else()
+        sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    endif()
 
     target_link_libraries(shaped-viewer-test
         PRIVATE
@@ -240,6 +250,11 @@ if(SC_BUILD_TESTS)
             tests/pt-support-probe-test.cc
             tests/cross-backend-trace-test.cc
             tests/volumetric-furnace-test.cc
+            tests/accumulated-mean-test.cc
+            tests/cutout-trace-test.cc
+            tests/wavefront-trace-test.cc
+            tests/wavefront-view-test.cc
+            tests/wavefront-benchmark.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc

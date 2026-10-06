@@ -16,6 +16,7 @@
 #include <shaped-shader-library/raytracing_pipeline.hh> // slib::raytracing_host_parts
 #include <shaped-viewer/drawing/decal.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/rendering/traced_group.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh>
@@ -34,6 +35,14 @@ namespace sv
 /// blends in place at 1 / (accum_frame + 1), and nothing caps it, so the caller restarts it whenever the image stopped
 /// describing what this frame renders.
 [[nodiscard]] shaders::tracer::frame_constants default_frame_constants();
+
+/// Writes into `record` what `gpu_resource_manager::describe_instance` leaves to the trace: the placement, and how its cutout opacity is read.
+///
+/// The placement is copied from `instance`, the TLAS instance the record describes, so the two cannot disagree.
+/// `opacity` is the permutation the instance shades with THIS trace, which only the trace knows: a stand-in's cuts out nothing.
+void place_instance_record(shaders::tracer::instance_record& record,
+                           sg::tlas_instance const& instance,
+                           material_opacity const& opacity);
 
 static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table has one slot per light_path");
 } // namespace sv
@@ -115,6 +124,10 @@ struct sv::pt_trace_desc
     /// Set exactly when the frame block's `write_primary_depth` is; what a raster pass after the trace is occluded by.
     sg::texture_2d primary_depth;
 
+    /// How many samples each pixel of `output` averages (r32_float), at `output`'s extent, or null.
+    /// Only the wavefront tracer writes it, and only while the guides are written: its pixels average different counts, which the megakernel's never do.
+    sg::texture_2d sample_counts;
+
     /// One `sv::shaders::tracer::instance_record` per entry of `instances`, in that same order — `traced.instances`, read by a hit's instance id.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
     sg::buffer<shaders::tracer::instance_record> instance_table;
@@ -163,6 +176,11 @@ struct sv::pt_trace_desc
     /// The atlas those shapes live in, already prepared, bound as `slug.tables`, the pipeline's third group.
     /// Null means no decals, and the routine binds empty stand-ins.
     sr::slug_atlas const* decal_atlas = nullptr;
+
+    /// Where set, receives whether a frame that executed traced any permutation with its stand-in.
+    /// Such a frame is an image of different materials than the one the scene converges to, so a caller accumulating a
+    /// mean must not average it with any other frame.
+    bool* traced_with_stand_ins = nullptr;
 };
 
 /// The global-illumination path-tracing pass: shaders/tracer_pipeline.sgl, over module `tracer` (shaders/sgl).
@@ -214,24 +232,8 @@ protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    /// What a target the trace writes nothing to is bound to, since every binding of the group must be filled.
-    sg::texture_2d _guide_normal_stand_in;
-    sg::texture_2d _guide_depth_stand_in;
-    sg::texture_2d _guide_albedo_stand_in;
-    sg::texture_2d _guide_specular_albedo_stand_in;
-    sg::texture_2d _guide_roughness_stand_in;
-    sg::texture_2d _frame_output_stand_in;
-    sg::texture_2d _frame_diffuse_stand_in;
-    sg::texture_2d _frame_specular_stand_in;
-    sg::texture_2d _guide_hit_distance_stand_in;
-    sg::texture_2d _guide_motion_stand_in;
-    sg::texture_2d _primary_depth_stand_in;
-
-    /// What a trace without decals binds as the atlas's two tables and the two decal buffers.
-    sg::texture_2d _decal_curves_stand_in;
-    sg::texture_2d _decal_bands_stand_in;
-    sg::buffer<shaders::tracer::decal_record> _decals_stand_in;
-    sg::buffer<shaders::tracer::decal_shape> _decal_shapes_stand_in;
+    /// What a target the trace writes nothing to is bound to, the wavefront's path state included.
+    impl::traced_stand_ins _stand_ins;
 
     /// One pipeline, built over one ordered set of hit groups, in two steps polled rather than waited on.
     struct pipeline_variant
@@ -256,7 +258,8 @@ private:
     };
 
     /// The variant for `d`'s hit groups, or null while it is building and after it failed; never waits.
-    [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx, pt_trace_desc const& d);
+    /// `substituted` is set to whether it stands any permutation in with a fallback.
+    [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx, pt_trace_desc const& d, bool& substituted);
 
     /// Keyed on the substituted hit groups in order; dropped by every reload.
     /// A map rather than a vector for the references: a variant is held across the dispatch that follows its build.

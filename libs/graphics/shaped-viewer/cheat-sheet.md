@@ -50,7 +50,8 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+sv::render_settings              // { int samples_per_pixel, max_bounces; path_integrator integrator; int rounds_per_frame; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+sv::path_integrator              // wavefront (default) | megakernel — both stay; switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
@@ -198,8 +199,10 @@ Gotchas:
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
 
 ```cpp
-sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute; hash128 hash; }
-sv::material_type::create(name, signature, shader, opacity_attribute = {})  // -> hashes all four; asserts a name declared twice, and a default that is not its format's size
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute; hash128 hash; }
+sv::material_type::create(name, signature, shader, opacity_attribute = {}, opacity_cutoff_attribute = {})
+                                 //   -> hashes all five; asserts a name declared twice, a default that is not its format's size,
+                                 //      an opacity attribute that is not a declared float, and a fragment that writes geometry_opacity
                                  //   shader: an SGL FRAGMENT, statements unindented, attributes immutable locals, `surface` the one `let mut`
 t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
 sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
@@ -221,7 +224,7 @@ lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> ma
 sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
-                                 //   openpbr also declares `alpha_cutoff` (0 = off, glTF's MASK) and `occlusion` (imported, ignored here)
+                                 //   openpbr also declares `alpha_cutoff`, its opacity cutoff (0 = off, glTF's MASK), and `occlusion` (imported, ignored here)
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
 sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
@@ -269,9 +272,8 @@ signature.push_back(sv::material_signature_entry::of("tint", tg::vec3f(0.9f, 0.9
 signature.push_back(sv::material_signature_entry::of("opacity", 1.0f));
 auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::move(signature),
                                                                  "surface.base_color = saturate(tint)\n"
-                                                                 "surface.specular_roughness = 0.8\n"
-                                                                 "surface.geometry_opacity = saturate(opacity)\n",
-                                                                 "opacity"));
+                                                                 "surface.specular_roughness = 0.8\n",
+                                                                 "opacity")); // the fragment never reads it: the tracer does
 ```
 - **An acquire creates the buffer and hands the payload to `ctx.stream`; it does not upload.**
   `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.
@@ -292,8 +294,10 @@ auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::
   `material_shader_cache::acquire_fallback()` is a neutral hit group over an EMPTY signature, so it reads no per-instance block and can stand in for any material whatever that material's layout was.
   `pathtrace_routine` keys its pipeline on the SUBSTITUTED set, so the frame the real permutation lands the key changes and a new variant is built.
   A `pt_trace_desc` with no `fallback` keeps the old all-or-nothing behavior: one material still compiling makes the whole trace a no-op.
-- **A cutout is a DECLARATION, not a detection.** `material_type::opacity_attribute` names which attribute the fragment writes `geometry_opacity` from.
-  A permutation can cut out only where something other than the signature's own default supplied that attribute.
+- **A cutout is DATA, not code.** `material_type::opacity_attribute` names the attribute that is the opacity, and `opacity_cutoff_attribute` the optional threshold.
+  One generic reader, `tracer.instance_opacity`, takes it straight out of the parameter block through the instance record's opacity fields, whatever the material.
+  So a kernel that traces never recompiles for a material, and a fragment cannot compute opacity: writing `geometry_opacity` asserts.
+  A permutation can cut out only where something other than the signature's own default supplied that attribute (`material_opacity::can_cut_out`).
   That is what becomes the instance's `opaque_override`, so a type that leaves it empty keeps the hardware's opaque path on every ray.
 - **A sample transform splits the OTHER way from the swizzle.**
   Only *whether* there is one reaches `permutation_key`, since that decides whether the shader carries a multiply-add; the numbers live in the parameter block.
@@ -315,7 +319,11 @@ auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::
 `material/shader_generator.hh`; modules `material`, `openpbr` and `tracer` (shaders/sgl) are the hand-authored half it is written against.
 
 ```cpp
-sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; layout; bool can_cut_out; hash128 key;}
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; layout; material_opacity opacity; hash128 key;}
+sv::material_opacity             // { kind (none|constant|attribute|texture); offset, uv_offset, frequency, channel, sampler, transform, cutoff }
+                                 //   where the cutout opacity lives in the parameter block; o.can_cut_out() -> kind != none
+sv::place_instance_record(record, tlas_instance, opacity)  // writes the placement rows and the opacity fields describe_instance leaves to the trace
+sv::palette_index(sampler)       // -> u32, the palette sampler as a number: filter * 9 + address_u * 3 + address_v
                                  //   source: `hit_group sv_material for path_rays`, one SGL file slib::compile_hit_group takes
 sv::sgl_palette_sampler(sampler) // -> "palette_<mag filter>_<u>_<v>", module tracer's static sampler a texture of that state is sampled through
 sv::sgl_type_of(format)          // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
@@ -324,7 +332,7 @@ sv::material_shader_key(permutation_key, opts)  // -> hash128 — what `g.key` i
 
 resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, compiling for its context
 sv::material_shader_cache::create(&ctx)   // one hit group per permutation; a null ctx makes every permutation's hit group an error
-cache.acquire(resolved, kind = triangles) // -> material_permutation const& {hash128 key; layout; geometry_kind kind; bool can_cut_out; hit_group; string source;}
+cache.acquire(resolved, kind = triangles) // -> material_permutation const& {hash128 key; layout; geometry_kind kind; material_opacity opacity; hit_group; string source;}
 p.hit_group                      // -> shared_async<vector<sg::hit_shader>>, COLD: one hit shader per ray type, which pathtrace_routine starts
 cache.acquire_fallback(kind) / acquire_quadric_fallback()  // the neutral permutation of each kind, over an EMPTY signature
 cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
@@ -570,7 +578,7 @@ loader.load(babel::obj::data) / loader.load(babel::stl::data)
 loader.load_async(uri)           // -> sv::asset; fetch + parse + import off this thread, the LOADER must outlive it
 sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl
 
-sv::asset                        // a load in flight; move-only, and dropping it drops the load
+sv::asset                        // a load in flight; move-only; dropping it mid-load WAITS for the worker to leave the loader
 a.poll()                         // -> bool; collects a landed load and mints its materials — never blocks, call it per frame
 a.wait()                         // -> bool; drives the load on THIS thread, then collects
 a.is_ready() / a.has_error() / a.error()
@@ -734,12 +742,14 @@ sv::residency                      // pending | base_resident | complete | faile
 m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as
 m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own
 m.pending_work_count()              // -> isize — resources still waiting for their follow-up
-// config: { texture_policy textures_policy = {.generate_mips = true}; work_budget work = {.max_dispatches_per_epoch = 16} }
+// config: { texture_policy textures_policy = {.generate_mips = true, .compress = true, .compress_min_extent = 64}; work_budget work = {.max_dispatches_per_epoch = 16} }
+// compress: a complete RGBA8 texture (mips generated first) is re-encoded to BC7 behind the SAME texture_id, at a quarter
+//   of its memory; queued as follow-up work like the mips, needs sg::feature::texture_compression_bc, and frees the RGBA8 one
 // payload transfers are NOT budgeted here — they ride ctx.stream, paced by its copy actor and ordered by priority
 ```
 
 **The two budgets are different things.** Bytes in flight are sg's to schedule (`ctx.stream.set_upload_ratio`, per-handle priorities, aging).
-What `work_budget` bounds is the work that runs *after* a resource lands — mip generation today — and leaving it unbounded is what produces the microstutter.
+What `work_budget` bounds is the work that runs *after* a resource lands — mip generation and BC7 compression — and leaving it unbounded is what produces the microstutter.
 A chain is never split across epochs: a partially generated one would read as complete while its tail is uninitialized.
 
 The layout is hand-written rather than reflected, so the manager is constructible before any shader compiles — a shader matches the names above.
@@ -918,6 +928,7 @@ view.is_accumulation_converged(frames = {}) -> bool             // ASK THIS, not
                                                                //   so a target above the cap is one `accumulated_frames()` can never reach
                                                                //   unset frames = "finished as far as it can"; false for a view with no traced layer
 frame.register_capture("name", body)                           // a named capture; body runs INLINE here, every frame, only when it is the one taken
+frame.hold_capture("why")                                      // this frame is not the finished image (a load of your own); holds THIS frame only
                                                                //   takes sv::capture_context { first_frame, name, size }
                                                                //   MUST be idempotent after the first frame, or accumulation never settles
                                                                //   the name must also appear in the example's .capture.json; a mismatch fails, never falls back

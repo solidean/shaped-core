@@ -177,12 +177,14 @@ namespace
 material_type material_type::create(cc::string name,
                                     cc::vector<material_signature_entry> signature,
                                     cc::string shader,
-                                    cc::string opacity_attribute)
+                                    cc::string opacity_attribute,
+                                    cc::string opacity_cutoff_attribute)
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_string(name);
     b.add_string(shader);
     b.add_string(opacity_attribute);
+    b.add_string(opacity_cutoff_attribute);
     b.add_pod(i64(signature.size()));
     for (auto const& d : signature)
     {
@@ -197,6 +199,7 @@ material_type material_type::create(cc::string name,
                               .signature = cc::move(signature),
                               .shader = cc::move(shader),
                               .opacity_attribute = cc::move(opacity_attribute),
+                              .opacity_cutoff_attribute = cc::move(opacity_cutoff_attribute),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
 
     for (auto i = 0; i < type.signature.size(); ++i)
@@ -230,8 +233,21 @@ material_type material_type::create(cc::string name,
         CC_ASSERT(d.name != "surface" && d.name != "ctx", "'surface' and 'ctx' are the entry function's own locals");
     }
 
-    CC_ASSERT(type.opacity_attribute.empty() || type.find(type.opacity_attribute) != nullptr,
-              "a material type's opacity_attribute must name an attribute its signature declares");
+    auto const scalar_float = attribute_format::of_scalar(scalar_type::f32);
+    auto const* const opacity = type.opacity_attribute.empty() ? nullptr : type.find(type.opacity_attribute);
+    CC_ASSERT(type.opacity_attribute.empty() || (opacity != nullptr && opacity->format == scalar_float),
+              "a material type's opacity_attribute must name a float attribute its signature declares");
+    auto const* const cutoff = type.opacity_cutoff_attribute.empty() ? nullptr : type.find(type.opacity_cutoff_attribute);
+    CC_ASSERT(type.opacity_cutoff_attribute.empty() || (cutoff != nullptr && cutoff->format == scalar_float),
+              "a material type's opacity_cutoff_attribute must name a float attribute its signature declares");
+    CC_ASSERT(type.opacity_cutoff_attribute.empty() || !type.opacity_attribute.empty(),
+              "a cutoff thresholds the opacity attribute, so a type declaring one declares both");
+
+    // Cutout opacity is read from the declared attributes by one generic reader, so a value the fragment computed would
+    // shade nothing and cut out nothing — refused rather than silently ignored.
+    CC_ASSERT(!cc::string_view(type.shader).contains("geometry_opacity"),
+              "a material fragment may not write surface.geometry_opacity: declare opacity_attribute (and "
+              "opacity_cutoff_attribute) instead");
 
     return type;
 }

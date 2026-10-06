@@ -25,6 +25,8 @@ namespace
 {
 // The identity fragment: every attribute is already an OpenPBR parameter, so this only clamps what the BSDF requires.
 //
+// `opacity` and `alpha_cutoff` are not read here: the type declares them as its cutout opacity and cutoff, which the
+// tracer reads directly.
 // A cutout is a step rather than a blend: alpha_cutoff at 0 leaves opacity continuous, and any positive value makes the
 // surface either fully present or fully absent at that threshold.
 // Baking the step into the imported alpha instead fails as soon as mips filter it, which is exactly when a cutout matters.
@@ -80,7 +82,6 @@ surface.emission_color = max(float3(0.0), emission_color)
 surface.geometry_thin_walled = thin_walled
 surface.geometry_normal = normalize(normal)
 surface.geometry_coat_normal = normalize(coat_normal)
-surface.geometry_opacity = if alpha_cutoff > 0.0 => step(alpha_cutoff, opacity) else saturate(opacity)
 
 surface.geometry_tangent_frame = tangent_frame
 surface.geometry_tangent = tangent
@@ -114,8 +115,6 @@ surface.specular_weight = 0.0
 
 surface.emission_luminance = 1.0
 surface.emission_color = color
-
-surface.geometry_opacity = saturate(opacity)
 )sgl";
 
 [[nodiscard]] material_type make_openpbr()
@@ -205,7 +204,7 @@ surface.geometry_opacity = saturate(opacity)
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
 
     return material_type::create(cc::string(builtin_material::openpbr), cc::move(signature), cc::string(openpbr_shader),
-                                 "opacity");
+                                 "opacity", "alpha_cutoff");
 }
 
 [[nodiscard]] material_type make_pbr()

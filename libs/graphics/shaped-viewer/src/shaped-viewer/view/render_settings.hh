@@ -21,6 +21,23 @@ namespace sv
 inline constexpr u32 accumulation_frame_cap = 4096;
 } // namespace sv
 
+/// Which path tracer a layer is traced with.
+///
+/// Both converge to the same image; they differ in what a frame costs and how a moving image looks.
+/// Neither wins everywhere: the megakernel is about twice as fast on a shallow scene, the wavefront far ahead wherever paths run deep, as in a scattering medium.
+/// libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
+enum class sv::path_integrator : sv::u8
+{
+    /// One ray-tracing dispatch per frame, every path traced to its end inside it.
+    /// A frame costs `render_settings::samples_per_pixel` samples per pixel.
+    megakernel,
+
+    /// Paths split into stages that each run as their own dispatch, and carried across frames.
+    /// A still frame costs `render_settings::rounds_per_frame` rounds.
+    /// A frame that sees the image change starts one sample per pixel and runs each to its end.
+    wavefront,
+};
+
 /// View-wide render settings — everything that applies to a whole view rather than a single scene item.
 ///
 /// Just the path-tracer integration controls for now.
@@ -37,6 +54,23 @@ struct sv::render_settings
     /// Path length: the primary hit plus this many diffuse bounces.
     i32 max_bounces = 5;
 
+    /// Which path tracer traces this layer; switching restarts its image.
+    path_integrator integrator = path_integrator::wavefront;
+
+    /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
+    ///
+    /// The wavefront's counterpart to `samples_per_pixel`, which it does not read: this is what a still frame costs, and a path still alive after it carries on next frame.
+    /// A frame that sees the image change ignores it, and runs until every sample it started has finished.
+    /// With a `frame_budget_ms`, it is only where the rounds start, until the frame's own timestamps say what one costs.
+    i32 rounds_per_frame = 8;
+
+    /// How much GPU time a still frame of the wavefront tracer may take, in milliseconds; 0 runs `rounds_per_frame` always.
+    ///
+    /// The rounds a still frame runs follow from what the last ones measured, so the image converges as fast per second
+    /// as the GPU allows while the viewer stays responsive; a frame that sees the image change is not held to it.
+    /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
+    f32 frame_budget_ms = 16.0f;
+
     /// How this layer's image is denoised before its parent composites it; off unless asked for.
     ///
     /// **Never restarts accumulation.**
@@ -50,8 +84,11 @@ struct sv::render_settings
     /// A temporal member cannot run the spatial phase at all: it would be handed the converging mean with no motion
     /// guide, and would report `unsupported`.
     ///
-    /// Its `upscaler`, `scale`, `upscale_sharpness` and `frame_time_ms` are not read yet: sv traces at the view's own
-    /// size, so nothing upscales.
+    /// **A `scale` below native upscales only while the image changes.**
+    /// A frame that restarts the mean is traced at the smaller extent with one jitter for all its rays, denoised by the
+    /// temporal member and upscaled to the view's size; the first frame the image holds still restarts at full size.
+    /// That needs a temporal member, and a layer without drawings, whose depth test reads the view-sized primary depth.
+    /// `frame_time_ms` is not read yet.
     sr::reconstruct_settings reconstruct = {.denoiser = sr::denoise_method::none};
 
     /// For how many accumulated frames after a restart a temporal member denoises this frame's own samples, before the

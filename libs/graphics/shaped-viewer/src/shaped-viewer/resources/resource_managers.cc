@@ -391,6 +391,38 @@ void texture_manager::mark_mips_complete(texture_id id)
     record->state = residency::complete;
 }
 
+namespace
+{
+/// What a chain of `levels` levels of `format` from `width` x `height` occupies, block-compressed formats included.
+isize chain_bytes_of(sg::pixel_format format, i32 width, i32 height, i32 levels)
+{
+    auto const extent = isize(sg::format_block_extent(format));
+    auto const block = isize(sg::format_block_size(format));
+    auto bytes = isize(0);
+    for (auto mip = i32(0); mip < levels; ++mip)
+    {
+        auto const w = cc::max(isize(1), isize(width) >> mip);
+        auto const h = cc::max(isize(1), isize(height) >> mip);
+        bytes += (w + extent - 1) / extent * ((h + extent - 1) / extent) * block;
+    }
+    return bytes;
+}
+} // namespace
+
+void texture_manager::replace_with_compressed(texture_id id, sg::texture_2d compressed)
+{
+    auto* const record = mutable_record(id);
+    if (record == nullptr)
+        return;
+
+    auto const& old = record->texture;
+    auto const before = chain_bytes_of(old.format(), old.width(), old.height(), record->total_mips);
+    auto const after = chain_bytes_of(compressed.format(), compressed.width(), compressed.height(), record->total_mips);
+    record->texture = cc::move(compressed);
+    record->compressed = true;
+    add_bytes(id, after - before);
+}
+
 texture_id texture_manager::acquire(texture_data const& texture)
 {
     if (auto const resident = find_by_hash(texture.hash); resident.has_value())

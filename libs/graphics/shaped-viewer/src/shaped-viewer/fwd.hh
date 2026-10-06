@@ -72,6 +72,7 @@ struct background;
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
+enum class path_integrator : u8; // which path tracer traces a layer (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;
@@ -138,6 +139,8 @@ struct resolved_material;           // a type + material + mesh resolved down th
 enum class material_slot_kind : u8; // what one field of a per-instance parameter block holds
 struct material_slot;
 struct material_parameter_layout; // the parameter block one permutation reads
+enum class material_opacity_kind : u32;
+struct material_opacity;          // where a permutation's cutout opacity lives, for the one generic reader
 struct generated_material_shader; // that permutation as an SGL hit group, plus its layout
 struct material_shader_options;
 class material_library;
@@ -252,6 +255,11 @@ class material_shader_cache;
 struct pt_light_table; // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
 class pathtrace_routine;
+struct wavefront_state;          // the wavefront tracer's path state for one view (rendering/traced_group.hh)
+struct wavefront_trace_desc;     // one wavefront frame (rendering/wavefront_routine.hh)
+enum class wavefront_stage : u8; // what a wavefront frame's timestamps divide it into (rendering/wavefront_routine.hh)
+struct wavefront_timing;         // one wavefront frame's stage timestamps (rendering/wavefront_routine.hh)
+class wavefront_routine;
 class view_renderer;
 class viewer_renderer;
 

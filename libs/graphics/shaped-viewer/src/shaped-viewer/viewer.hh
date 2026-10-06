@@ -161,6 +161,9 @@ private:
     /// which is what lets it override what the body already wrote.
     void apply_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body, frame& f);
 
+    /// Holds a capture for this frame, `reason` naming what it waits for; called from `frame::hold_capture`.
+    void hold_capture(cc::string_view reason);
+
     /// The persistent state of the view named `id`, created on first use.
     /// The frame reaches this on a caller's behalf; nothing outside authoring should hold the reference across frames,
     /// since the cache reclaims views that go unseen.

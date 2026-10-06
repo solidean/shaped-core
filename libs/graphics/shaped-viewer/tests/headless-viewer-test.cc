@@ -4,6 +4,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/record/scope.hh> // CC_RECORD_SCOPE, cc::rec::impl::t_writer
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -333,6 +334,41 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
     cc::remove_file(partial);
 }
 
+// A frame that holds the capture is not the finished image, whatever the viewer itself sees.
+//
+// A view with nothing traced settles on its first frame, so the hold is the only thing that can keep this run going.
+// That is the Sponza example's situation: its scene is not there until its own load lands, and an unheld capture
+// converged on the empty sky instead.
+INVOCABLE_TEST("sv - a capture waits for every frame that holds it", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto const path = cc::format("{}/sv-capture-hold.jpg", cc::temp_directory_path());
+    cc::remove_file(path); // a leftover from an earlier run would make the check below vacuous
+
+    auto const request = sr::capture_request{.active = true,
+                                             .output_path = path,
+                                             .size = tg::vec2i(64, 48),
+                                             .accumulate_frames = 1,
+                                             .timeout_seconds = 120.0};
+
+    auto frames = 0;
+    for (auto f : sv::interactive(ctx, "sv-test/capture-hold", {}, request))
+    {
+        (void)f.window().view();
+
+        ++frames;
+        if (frames < 5)
+            f.hold_capture("the test is holding it");
+
+        REQUIRE(frames < 200); // the first unheld frame settles it; this only keeps a hang from becoming a timeout
+    }
+
+    CHECK(frames == 5);
+    CHECK(cc::file_read_stream_adapter::open(path).has_value());
+    cc::remove_file(path);
+}
+
 // A light's id is hashed under the frame's id stack exactly as a view's is, so the same name under two scopes names
 // two lights — and the same name twice in one layer is the aliasing that stable identity exists to prevent.
 ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate in one layer asserts",
@@ -386,6 +422,26 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
 // The case the sweep exists for is a loop paced slowly enough that the GPU is never behind — a real display's vsync,
 // or a frame limiter — and no test reaches it yet.
 // libs/graphics/shaped-viewer/docs/TODO.md carries it.
+// A frames() loop opens no `sv.frame` scope, so tearing its viewer down must close none.
+// An unmatched close pops whatever scope the caller has open on its thread, and a coroutine step around the loop then
+// fails as a profiling scope crossing a co_await.
+INVOCABLE_TEST("sv - a viewer closes no profiling scope it did not open", (sg::context_handle const& ctx_h))
+{
+    CC_RECORD_SCOPE("sv-test.enclosing");
+    auto const depth = cc::rec::impl::t_writer.scope_depth;
+    {
+        auto v_r = sv::viewer::try_create(*ctx_h, "sv-test/scope-balance", {.width = 32, .height = 32, .headless = true});
+        REQUIRE(v_r.has_value());
+        auto viewer = cc::move(v_r.value());
+        for (auto f : viewer.frames())
+        {
+            (void)f;
+            viewer.request_close();
+        }
+    }
+    CHECK(cc::rec::impl::t_writer.scope_depth == depth);
+}
+
 INVOCABLE_TEST("sv - a frame loop lands its streamed payloads", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;

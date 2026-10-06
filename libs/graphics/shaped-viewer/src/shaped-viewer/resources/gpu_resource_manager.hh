@@ -44,6 +44,15 @@ struct sv::texture_policy
 {
     /// Fill the levels an acquire did not supply, through whichever mipmap routine the format admits.
     bool generate_mips = true;
+
+    /// Replace an RGBA8 texture by its BC7 encoding once its chain is complete, at a quarter of the memory.
+    ///
+    /// The texture is sampled uncompressed until then, and keeps its `texture_id` across the swap.
+    /// Applies only where the device has `sg::feature::texture_compression_bc`, and only from `compress_min_extent` up.
+    bool compress = true;
+
+    /// The smallest width and height worth compressing: below it a texture saves too little to be worth the encode.
+    i32 compress_min_extent = 64;
 };
 
 /// Per-manager configuration for a whole scene's GPU resources.
@@ -96,6 +105,9 @@ public:
     /// So this covers the whole group rather than the tables a caller believes it touched, which is the only version
     /// that cannot silently under-declare.
     void declare_raytracing_access(sg::command_list& cmd) const;
+
+    /// The same, for the **next compute dispatch on `cmd`** — what a wavefront kernel reading the tables needs.
+    void declare_compute_access(sg::command_list& cmd) const;
 
 private:
     friend class gpu_resource_manager;
@@ -440,12 +452,27 @@ private:
     /// One resource waiting for its post-load step, in request order.
     /// A texture whose record is gone by the time its turn comes is skipped: eviction is the answer to
     /// "was this still wanted".
+    enum class work_kind : u8
+    {
+        /// fill the levels the upload did not supply
+        mips,
+        /// encode the complete chain to BC7 and swap it in
+        compress,
+    };
+
     struct pending_work
     {
         texture_id texture = texture_id::invalid;
+        work_kind kind = work_kind::mips;
         i32 dispatches = 0; ///< what it will cost, counted when it was queued
     };
     cc::vector<pending_work> _pending;
+
+    /// Queues `id`'s compression when the policy, the device and the texture all allow it.
+    void _queue_compression(texture_id id);
+
+    /// Encodes every level of `id` into a new BC7 texture and swaps it in; false while the encoder is not ready.
+    [[nodiscard]] bool _compress(sg::command_list& cmd, texture_id id);
 
     /// Every resolved parameter block, indexed by `instance_id`, plus the `parameter_key` index onto it.
     cc::vector<instance_record> _instances;

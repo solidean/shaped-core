@@ -60,7 +60,7 @@ rays path_rays:
         // jittered pinhole primary ray
         let jitter_x = pt.rand(mut rng)
         let jitter_y = pt.rand(mut rng)
-        let jitter = float2(jitter_x, jitter_y)
+        let jitter = if f.fixed_jitter != 0u => f.jitter else float2(jitter_x, jitter_y)
         let cam = scene.camera(..f.camera)
         let mut origin = cam.position
         let mut dir = normalize(scene.camera_ray_offset(cam, px_f + jitter, dim_f))

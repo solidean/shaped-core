@@ -339,6 +339,9 @@ struct sv::texture_record
     /// How many mip levels the pixels carried, and how many the texture has room for.
     i32 uploaded_mips = 0;
     i32 total_mips = 1;
+
+    /// Whether `texture` is the BC7 encoding that replaced what was uploaded.
+    bool compressed = false;
 };
 
 /// Hands out `texture_id`s and owns the texture behind each, with LRU budgeting (see resource_budget).
@@ -376,6 +379,10 @@ public:
     /// Marks `id`'s chain filled — what the manager calls once it has recorded the mip generation.
     /// A no-op for an id that has been evicted since.
     void mark_mips_complete(texture_id id);
+
+    /// Puts `compressed` behind `id` in place of what was uploaded, and charges the budget what it costs instead.
+    /// `compressed` holds the same chain, encoded; a no-op for an id that has been evicted since.
+    void replace_with_compressed(texture_id id, sg::texture_2d compressed);
 
 private:
     explicit texture_manager(sg::context& ctx) : _ctx(ctx) {}

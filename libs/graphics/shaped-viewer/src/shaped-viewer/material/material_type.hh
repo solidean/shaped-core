@@ -39,25 +39,28 @@ struct sv::material_type
     /// the SGL fragment, run inside the generated material function
     cc::string shader;
 
-    /// Which declared attribute this type's fragment writes `surface.geometry_opacity` from, or empty for a type that
-    /// cannot cut out at all.
+    /// Which declared float attribute is this type's cutout opacity, a coverage fraction, or empty for a type that cannot cut out at all.
     ///
-    /// Declared rather than detected, because what the generator needs is not "does the fragment mention opacity" but
-    /// "can THIS permutation reject anything" — and only the attribute's resolved frequency answers that.
-    /// A permutation whose opacity attribute came through as the signature's own default is a constant the fragment
-    /// clamps to 1, so no any-hit could reject a thing; see `generated_material_shader::can_cut_out`.
-    /// Must name an attribute the signature declares.
+    /// **The fragment never computes it**: one generic reader takes it straight from the attribute, so a kernel that traces
+    /// compiles once whatever materials a scene holds, and a fragment writing `surface.geometry_opacity` asserts.
+    /// A permutation whose opacity attribute came through as the signature's own default cannot cut out; see `material_opacity`.
     cc::string opacity_attribute;
+
+    /// Which declared float attribute thresholds the opacity, or empty for pure coverage.
+    /// Above 0 a hit is kept where the opacity reaches it — glTF's MASK — and at 0 the opacity stays a coverage fraction.
+    /// It must resolve to a value per instance; one sourced from a texture or a mesh attribute is ignored with a warning.
+    cc::string opacity_cutoff_attribute;
 
     cc::hash128 hash;
 
-    /// Hashes `name`, `signature`, `shader` and `opacity_attribute` into the content key.
+    /// Hashes `name`, `signature`, `shader` and both opacity attributes into the content key.
     /// A signature declaring one name twice asserts: the resolver would have no way to say which declaration a binding meant.
-    /// So does an `opacity_attribute` naming something the signature does not declare.
+    /// So does an opacity attribute naming something the signature does not declare as a float.
     [[nodiscard]] static material_type create(cc::string name,
                                               cc::vector<material_signature_entry> signature,
                                               cc::string shader,
-                                              cc::string opacity_attribute = {});
+                                              cc::string opacity_attribute = {},
+                                              cc::string opacity_cutoff_attribute = {});
 
     /// The declaration of `name`, or null if this type does not read it.
     [[nodiscard]] material_signature_entry const* find(cc::string_view name) const;

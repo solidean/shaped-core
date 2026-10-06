@@ -65,7 +65,17 @@ fun light_cone(l: light, cos_axis: float) -> float:
 
 // ---- Scene items ----------------------------------------------------------------------------------------------------
 
-/// One scene item, as a closest-hit reads it by its instance id — `tracer.instance_record`, which `gpu_resource_manager::describe_instance` fills, 32 bytes.
+/// How an instance's cutout opacity is read, `instance.opacity_kind`; `sv::material_opacity_kind` mirrors these.
+const opacity_none = 0u
+const opacity_constant = 1u
+const opacity_attribute = 2u
+const opacity_texture = 3u
+
+/// What `instance.opacity_offset` and `opacity_uv_offset` name when they are not a parameter-block offset.
+const no_offset = 0xffffffffu
+
+/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 112 bytes.
+/// `gpu_resource_manager::describe_instance` fills the first six fields, and `view_renderer` the opacity and the placement.
 ///
 /// Keep the two in lockstep: this is a byte layout, not a description of one.
 struct instance:
@@ -76,7 +86,25 @@ struct instance:
     is_indexed: uint
     /// RESERVED for light linking, read by nothing yet
     link_mask: uint
-    padding: uint2
+
+    /// Where the cutout opacity lives in the parameter block and how it is read — `sv::material_opacity` says per field.
+    /// `opacity_none` never cuts out.
+    opacity_kind: uint
+    opacity_offset: uint
+    opacity_uv_offset: uint
+    opacity_frequency: uint
+    opacity_channel: uint
+    opacity_sampler: uint
+    opacity_transform: uint
+    opacity_cutoff: uint
+    /// the index of the permutation the instance shades with in this trace, which a wavefront hit is sorted by
+    shade_group: uint
+    pad: uint
+
+    /// The rows of the object-to-world transform the instance is placed by, which a hit stored for later shading needs.
+    to_world_x: float4
+    to_world_y: float4
+    to_world_z: float4
 
 // ---- The environment ------------------------------------------------------------------------------------------------
 //

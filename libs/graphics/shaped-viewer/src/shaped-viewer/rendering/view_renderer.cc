@@ -13,6 +13,7 @@
 #include <shaped-viewer/drawing/drawing_manager.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
+#include <shaped-viewer/rendering/wavefront_routine.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
@@ -52,6 +53,7 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
         inst.transform[r * 4 + 3] = p[r];
     }
 }
+
 
 /// One view resolved to what the path tracer binds: a TLAS instance and an `shaders::tracer::instance_record` per item, over the set of
 /// permutations those items shade with.
@@ -148,6 +150,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.instances.push_back(cc::move(inst));
 
             out.records.push_back(resources.describe_instance(cmd, item.quadrics, item.instance));
+            place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
             out.parameter_blocks.push_back(item.instance);
 
             // Set for any batch, pending or not: a pending one is a triangle instance this frame and a procedural one
@@ -191,12 +194,13 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         auto inst = sg::tlas_instance{.blas = is_pending ? resources.meshes.placeholder_blas() : mesh->blas,
                                       .instance_id = u32(out.instances.size()),
                                       .hit_group_offset = permutation * 2,
-                                      .opaque_override = !out.hit_groups[permutation]->can_cut_out};
+                                      .opaque_override = !out.hit_groups[permutation]->opacity.can_cut_out()};
         pack_transform(inst, is_pending ? placeholder_transform(mesh->bounds.value(), item.transform) : item.transform);
         out.instances.push_back(cc::move(inst));
 
         // This is where every index a hit reads is minted, so it must stay ahead of `freeze()` and on the list that traces.
         out.records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
+        place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
         out.parameter_blocks.push_back(item.instance);
     }
 
@@ -435,6 +439,108 @@ struct ensured_slot
 
     return {.slot = &slot, .resized = resized};
 }
+
+/// The bounce after which the wavefront's Russian roulette may end a path, which leaves `max_bounces` a cap.
+constexpr u32 wavefront_roulette_after = 3;
+
+/// The most rounds a budget gives a still frame, however cheap a round measured.
+constexpr i32 max_budgeted_rounds = 64;
+
+/// How many rounds a still frame runs: `rounds_per_frame`, or as many as fit `frame_budget_ms` once a round is measured.
+///
+/// Folds in every frame whose timestamps have landed first, so the estimate is as fresh as the GPU allows.
+/// The estimate is smoothed rather than replaced, since one frame's time moves with what else the GPU is doing.
+[[nodiscard]] i32 still_rounds(render_settings const& settings, impl::wavefront_pacing& pacing)
+{
+    auto const fixed = cc::max(1, settings.rounds_per_frame);
+    if (settings.frame_budget_ms <= 0.0f)
+    {
+        pacing.in_flight.clear();
+        return fixed;
+    }
+
+    while (!pacing.in_flight.empty())
+    {
+        auto const seconds = pacing.in_flight.front().timing.try_seconds();
+        if (!seconds.has_value())
+            break;
+        auto total = 0.0;
+        for (auto const s : seconds.value())
+            total += s;
+        auto const per_round = total / f64(cc::max(1, pacing.in_flight.front().rounds));
+        pacing.seconds_per_round
+            = pacing.seconds_per_round <= 0.0 ? per_round : 0.7 * pacing.seconds_per_round + 0.3 * per_round;
+        pacing.in_flight.remove_at(0);
+    }
+
+    // A device that times nothing never lands one, so the queue is bounded rather than grown forever.
+    constexpr isize max_in_flight = 8;
+    while (pacing.in_flight.size() > max_in_flight)
+        pacing.in_flight.remove_at(0);
+
+    if (pacing.seconds_per_round <= 0.0)
+        return fixed;
+    auto const fit = i32(f64(settings.frame_budget_ms) * 1e-3 / pacing.seconds_per_round);
+    return cc::clamp(fit, 1, max_budgeted_rounds);
+}
+
+/// Traces one frame of a layer into `slot` with the layer's integrator, `d.frame` holding `fc`.
+///
+/// The wavefront's path state lives on `slot`, so this is where it is sized and where a frame decides between restarting and carrying.
+/// A frame whose mean restarts (`accum_frame == 0`) restarts every path and drains: it starts one sample per pixel and runs them to their end,
+/// so a moving image is always an exact mean.
+/// Every other frame carries the paths the last one left.
+/// A `scaled` frame, traced at the upscaler's input extent, always restarts and drains, in paths of its own.
+[[nodiscard]] sg::routine_outcome trace_layer(sg::command_list& cmd,
+                                              render_settings const& settings,
+                                              pt_trace_desc const& d,
+                                              shaders::tracer::frame_constants const& fc,
+                                              impl::temporal_slot& slot,
+                                              bool scaled)
+{
+    if (settings.integrator == path_integrator::megakernel)
+        return pathtrace_routine::execute(cmd, d);
+
+    auto const extent = tg::vec2i(d.output.width(), d.output.height());
+    auto const permutations = i32(d.hit_groups.size());
+    auto& held = scaled ? slot.scaled_paths : slot.paths;
+    if (!held.has_value() || held.value().extent != extent || held.value().max_permutations < permutations)
+    {
+        // Twice today's permutations, so a material appearing does not reallocate every slot of the view.
+        held = wavefront_state::create(cmd.context(), extent, cc::max(16, 2 * permutations));
+        // A new state holds no paths, so its mean starts over whatever the hash says.
+        slot.accum_frame = 0;
+    }
+
+    auto& paths = held.value();
+    auto const restart = scaled || slot.accum_frame == 0;
+    if (restart)
+        ++paths.generation;
+
+    // A path takes one round per surface bounce, capped by `max_bounces`, and one per medium scatter, which only a roulette ends.
+    // Room for every bounce and for a walk up to where that roulette starts (`pt.roulette_after`, 16).
+    // A walk deeper than that is still alive at the frame's end: a still next frame finishes it, and a restart drops it,
+    // which biases a moving image only where a medium scatters that often.
+    auto const drain_rounds = cc::max(0, fc.max_bounces) + 1 + 16;
+    auto const rounds = restart ? drain_rounds : still_rounds(settings, slot.pacing);
+
+    // Only a still frame's rounds are full of paths, so only its timestamps say what a round costs.
+    auto* timing = static_cast<wavefront_timing*>(nullptr);
+    if (!restart && settings.frame_budget_ms > 0.0f)
+    {
+        slot.pacing.in_flight.push_back({.rounds = rounds});
+        timing = &slot.pacing.in_flight.back().timing;
+    }
+    return wavefront_routine::execute(cmd, {.trace = d,
+                                            .frame = fc,
+                                            .state = &paths,
+                                            .rounds = rounds,
+                                            .restart = restart,
+                                            .regenerate = !restart,
+                                            .generation = paths.generation,
+                                            .roulette_after = wavefront_roulette_after,
+                                            .timing = timing});
+}
 } // namespace
 
 cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
@@ -539,9 +645,15 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
             bytes += texture_bytes(tg::vec2i(rec->composite.width(), rec->composite.height()),
                                    rec->composite.raw()->description().format);
         for (auto const& [temporal_id, slot] : rec->temporal)
+        {
             if (slot.texture.raw() != nullptr)
                 bytes += texture_bytes(tg::vec2i(slot.texture.width(), slot.texture.height()),
                                        slot.texture.raw()->description().format);
+            if (slot.paths.has_value())
+                bytes += slot.paths.value().size_in_bytes();
+            if (slot.scaled_paths.has_value())
+                bytes += slot.scaled_paths.value().size_in_bytes();
+        }
         store.set_payload_bytes(id, bytes);
     }
 
@@ -581,7 +693,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto fc = make_frame_constants(v, l, lights, tr.resolution);
     fc.decal_count = u32(decals.decals.size());
     auto const bg = background_gpu::from(l.background);
-    auto const hash = trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation);
+    // The integrator is folded in too: both converge to the same image, but a mean must not hold samples of both.
+    auto const hash
+        = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation),
+                           cc::make_hash(u32(l.settings.integrator)));
 
     // The same, with the camera left out: what a temporal denoiser's history restarts on.
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
@@ -600,6 +715,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         {
             (void)slot_id;
             s.denoise.reset();
+            s.scaled_denoise.reset();
             s.has_last_camera = false;
         }
         rec.camera_cut_pending = false;
@@ -608,6 +724,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
     if (slot == nullptr)
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate
+
+    // Whether this frame's image differs from the last one's, which is what may trace it at the upscaler's extent.
+    auto const image_changed = slot->reset_hash != hash;
 
     // A different image must not be averaged into the old one.
     // The tracer publishes its own hash as this slot's reset rule: it covers the bytes actually uploaded, so it
@@ -697,7 +816,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         // The temporal member's history restarts on a different SCENE, never on camera motion: carrying history across
         // camera motion is what it exists for, while the mean restarts on every move.
         if (ds.frame->reset_hash != scene_hash)
+        {
             ds.frame->denoise.reset();
+            ds.frame->scaled_denoise.reset();
+        }
         ds.frame->reset_hash = scene_hash;
     }
 
@@ -717,6 +839,40 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     {
         fc.write_primary_depth = 1;
         fc.near_plane = f32(v.camera.projection.near_plane);
+    }
+
+    // A frame whose image changed traces at the upscaler's input extent, every primary ray at one jitter, and the
+    // temporal member denoises it on its own samples before the upscaler brings it to the view's size.
+    // The first frame the image holds still restarts at full size and accumulates as any still frame does.
+    // Only where the temporal member runs, since an upscaler does not denoise, and never under drawings, whose depth
+    // test reads the primary depth at the view's own size.
+    auto upscale_settings = schedule.temporal_settings;
+    upscale_settings.upscaler = l.settings.reconstruct.upscaler;
+    auto const may_scale = image_changed && writes_temporal && depth_slot == nullptr;
+    auto const input_extent = may_scale
+                                ? sr::reconstruct_input_extent(ctx, upscale_settings, tr.resolution, traceable_guides())
+                                : tr.resolution;
+    auto const scaled = input_extent != tr.resolution;
+
+    auto jitter = tg::vec2f(0, 0);
+    if (scaled)
+    {
+        // Each stream's history reprojects only from the frame before it, so a switch from the other one starts it over.
+        if (!slot->traced_scaled)
+            ds.frame->scaled_denoise.reset();
+
+        jitter = sr::reconstruct_jitter(ctx, upscale_settings, tr.resolution, slot->scaled_frame, traceable_guides());
+        fc.fixed_jitter = 1;
+        fc.jitter = jitter + tg::vec2f(0.5f, 0.5f);
+        fc.pixel_spread = 2.0f * fc.camera.up_scaled.length() / f32(input_extent[1]);
+        // A moving frame's mean restarts every time, so the accumulation's seed would draw one sequence on all of them.
+        fc.rng_seed = slot->scaled_frame + 1;
+        fc.guide_frame = 0;
+        ++slot->scaled_frame;
+    }
+    else if (slot->traced_scaled && has_temporal)
+    {
+        ds.frame->denoise.reset();
     }
 
     auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
@@ -741,45 +897,93 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // A triangle-only view still never asks for it.
     auto const* const quadric_fallback = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 
-    auto const traced = pathtrace_routine::execute(
-        cmd, {.frame = frame,
-              .background = background,
-              .instances = resolved.instances,
-              .output = slot->texture,
-              .guide_normal = has_guides ? ds.normal->texture : sg::texture_2d(),
-              .guide_depth = has_guides ? ds.depth->texture : sg::texture_2d(),
-              .guide_albedo = has_guides ? ds.albedo->texture : sg::texture_2d(),
-              .guide_specular_albedo = has_guides ? ds.specular_albedo->texture : sg::texture_2d(),
-              .guide_roughness = has_guides ? ds.roughness->texture : sg::texture_2d(),
-              .frame_output = writes_temporal ? ds.frame->texture : sg::texture_2d(),
-              .guide_motion = writes_temporal ? ds.motion->texture : sg::texture_2d(),
-              .frame_diffuse = has_split ? ds.frame_diffuse->texture : sg::texture_2d(),
-              .frame_specular = has_split ? ds.frame_specular->texture : sg::texture_2d(),
-              .guide_hit_distance = has_split ? ds.hit_distance->texture : sg::texture_2d(),
-              .primary_depth = depth_slot != nullptr ? depth_slot->texture : sg::texture_2d(),
-              .instance_table = instance_table,
-              .lights = light_buffer,
-              .hit_groups = resolved.hit_groups,
-              // One material still compiling, or one that does not compile, degrades to gray
-              // shading on its own meshes rather than costing the view its whole image.
-              // Two stand-ins rather than one: a substitution has to keep the hit group's kind, or a quadric batch
-              // traced by a triangle group reports no hits and disappears instead of shading flat.
-              // The procedural one only where the view actually has a procedural instance -- acquiring it starts a
-              // compile, and a triangle-only scene must not owe a drain for a group it can never select.
-              .fallback = &resources.shaders.acquire_fallback(),
-              .quadric_fallback = quadric_fallback,
-              .bindless = &bindless,
-              .decals = decal_buffers.decals,
-              .decal_shapes = decal_buffers.shapes,
-              .decal_atlas = decal_buffers.atlas});
+    // How many samples each pixel averages, where the wavefront traces a layer the spatial denoiser reads: its pixels
+    // finish different numbers of paths, so one count for the image would misjudge every one of them.
+    // Transient, since the tallies hold the counts and the resolve rewrites every pixel each frame.
+    auto const sample_counts
+        = has_guides && l.settings.integrator == path_integrator::wavefront
+            ? ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
+                                               .width = input_extent[0],
+                                               .height = input_extent[1],
+                                               .usage = sg::texture_usage::texture | sg::texture_usage::image})
+            : sg::texture_2d();
+
+    // What the trace writes: the layer's own slots, or on a scaled frame scratch at the input extent, which the
+    // upscale reads and the epoch drops.
+    auto const image_of = [&](impl::temporal_slot const* s, bool written, sg::pixel_format format) -> sg::texture_2d
+    {
+        if (!written)
+            return {};
+        if (!scaled)
+            return s->texture;
+        return ctx.transient.create_texture_2d({.format = format,
+                                                .width = input_extent[0],
+                                                .height = input_extent[1],
+                                                .usage = sg::texture_usage::texture | sg::texture_usage::image});
+    };
+    auto const output = image_of(slot, true, sg::pixel_format::rgba32_float);
+    auto const guide_normal = image_of(ds.normal, has_guides, sg::pixel_format::rgba16_float);
+    auto const guide_depth = image_of(ds.depth, has_guides, sg::pixel_format::r32_float);
+    auto const guide_albedo = image_of(ds.albedo, has_guides, sg::pixel_format::rgba16_float);
+    auto const guide_specular_albedo = image_of(ds.specular_albedo, has_guides, sg::pixel_format::rgba16_float);
+    auto const guide_roughness = image_of(ds.roughness, has_guides, sg::pixel_format::r16_float);
+    auto const frame_output = image_of(ds.frame, writes_temporal, sg::pixel_format::rgba16_float);
+    auto const guide_motion = image_of(ds.motion, writes_temporal, sg::pixel_format::rg32_float);
+    auto const frame_diffuse = image_of(ds.frame_diffuse, has_split, sg::pixel_format::rgba16_float);
+    auto const frame_specular = image_of(ds.frame_specular, has_split, sg::pixel_format::rgba16_float);
+    auto const guide_hit_distance = image_of(ds.hit_distance, has_split, sg::pixel_format::rg32_float);
+
+    auto stand_ins = false;
+    auto const traced = trace_layer(
+        cmd, l.settings,
+        {.frame = frame,
+         .background = background,
+         .instances = resolved.instances,
+         .output = output,
+         .guide_normal = guide_normal,
+         .guide_depth = guide_depth,
+         .guide_albedo = guide_albedo,
+         .guide_specular_albedo = guide_specular_albedo,
+         .guide_roughness = guide_roughness,
+         .frame_output = frame_output,
+         .guide_motion = guide_motion,
+         .frame_diffuse = frame_diffuse,
+         .frame_specular = frame_specular,
+         .guide_hit_distance = guide_hit_distance,
+         .primary_depth = depth_slot != nullptr ? depth_slot->texture : sg::texture_2d(),
+         .sample_counts = sample_counts,
+         .instance_table = instance_table,
+         .lights = light_buffer,
+         .hit_groups = resolved.hit_groups,
+         // One material still compiling, or one that does not compile, degrades to gray
+         // shading on its own meshes rather than costing the view its whole image.
+         // Two stand-ins rather than one: a substitution has to keep the hit group's kind, or a quadric batch
+         // traced by a triangle group reports no hits and disappears instead of shading flat.
+         // The procedural one only where the view actually has a procedural instance -- acquiring it starts a
+         // compile, and a triangle-only scene must not owe a drain for a group it can never select.
+         .fallback = &resources.shaders.acquire_fallback(),
+         .quadric_fallback = quadric_fallback,
+         .bindless = &bindless,
+         .decals = decal_buffers.decals,
+         .decal_shapes = decal_buffers.shapes,
+         .decal_atlas = decal_buffers.atlas,
+         .traced_with_stand_ins = &stand_ins},
+        fc, *slot, scaled);
 
     // Only a frame that actually dispatched advances the accumulation: counting a declined one would make the blend
     // weight say more samples had landed than did, and the estimate would stop moving toward the answer.
     if (traced == sg::routine_outcome::declined)
         return sg::routine_outcome::declined;
 
-    if (slot->accum_frame < accumulation_frame_cap)
+    // A frame shaded by a stand-in material is an image of a different scene, so the next frame restarts rather than
+    // averaging into it — the trace hash cannot see the substitution, which the routine alone decides.
+    if (stand_ins)
+        slot->reset_hash = cc::combine_hash(hash, u64(1));
+
+    // A scaled frame is no sample of the mean, which the next still frame restarts at full size.
+    if (!scaled && slot->accum_frame < accumulation_frame_cap)
         ++slot->accum_frame;
+    slot->traced_scaled = scaled;
 
     // Every frame, the temporal member's or not: the first one it runs after a still period reprojects from here.
     if (has_temporal)
@@ -790,7 +994,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     if (has_guides)
     {
-        if (ds.normal->accum_frame < accumulation_frame_cap)
+        if (!scaled && ds.normal->accum_frame < accumulation_frame_cap)
             ++ds.normal->accum_frame;
         // A denoiser still compiling declines the frame, as a tracer still compiling does: a capture that saved it
         // would hold the raw mean where the caller asked for a denoised image.
@@ -804,7 +1008,41 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             = matrices_of(has_temporal && ds.motion->has_last_camera ? ds.motion->last_camera : fc.camera, near_plane),
         };
 
-        if (_denoise(cmd, l.settings, schedule, *slot, ds, cameras, res.traces[trace_index])
+        if (scaled)
+        {
+            auto const previous_jitter = slot->last_jitter;
+            slot->last_jitter = jitter;
+            auto const inputs = sr::reconstruct_inputs{
+                .color = has_split ? frame_diffuse : frame_output,
+                .specular = frame_specular,
+                .guides = {.albedo = guide_albedo,
+                           .specular_albedo = guide_specular_albedo,
+                           .normal = guide_normal,
+                           .roughness = guide_roughness,
+                           .depth = guide_depth,
+                           .motion = guide_motion,
+                           .hit_distance = guide_hit_distance,
+                           .jitter = jitter,
+                           .previous_jitter = previous_jitter,
+                           .view_to_clip = cameras.current.view_to_clip,
+                           .previous_view_to_clip = cameras.previous.view_to_clip,
+                           .world_to_view = cameras.current.world_to_view,
+                           .previous_world_to_view = cameras.previous.world_to_view},
+                .output = ds.denoised->texture,
+            };
+            auto const outcome
+                = sr::reconstruct_routine::execute(cmd, inputs, ds.frame->scaled_denoise, upscale_settings);
+
+            // The mean is not this frame's image, so a frame the upscale did not land presents the last one that did.
+            if (outcome.is_denoised())
+                ds.denoised->accum_frame = 1;
+            res.traces[trace_index] = ds.denoised->texture;
+            if (outcome.status == sr::reconstruct_status::pending)
+                return sg::routine_outcome::declined;
+            return sg::routine_outcome::executed;
+        }
+
+        if (_denoise(cmd, l.settings, schedule, *slot, ds, cameras, sample_counts, res.traces[trace_index])
             == sr::reconstruct_status::pending)
             return sg::routine_outcome::declined;
     }
@@ -839,8 +1077,8 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     {
         auto copy = settings.reconstruct;
         copy.fresh_samples = fresh;
-        // sv traces at the view's own size and does not jitter, so an upscaler here would run 1:1 on a mean it cannot
-        // reconstruct from; sv's TODO item for `render_settings::render_scale` is what lifts this.
+        // These two run at the view's own size, without a jitter, so an upscaler would run 1:1 on an image it cannot
+        // reconstruct from; only a frame traced at the input extent upscales, and `trace` asks for that itself.
         copy.upscaler = sr::upscale_method::none;
         return copy;
     };
@@ -875,6 +1113,7 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
                                                impl::temporal_slot const& accumulator,
                                                denoise_slots const& ds,
                                                denoise_cameras const& cameras,
+                                               sg::texture_2d const& sample_counts,
                                                sg::texture_2d& presented)
 {
     auto& denoised = *ds.denoised;
@@ -937,6 +1176,7 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
             .guides = guides,
             .output = target,
             .sample_count = u32(cc::max(1, settings.samples_per_pixel)) * accumulator.accum_frame,
+            .sample_counts = sample_counts,
         };
         auto const spatial_outcome
             = sr::reconstruct_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
@@ -996,7 +1236,8 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto fc = make_frame_constants(v, *scene, lights, v.resolution);
     fc.decal_count = u32(decals.decals.size());
     auto const bg = background_gpu::from(scene->background);
-    auto const hash = trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation);
+    auto const hash = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
+                                       cc::make_hash(u32(scene->settings.integrator)));
 
     // No plan here to size the view's temporal inputs, so this path resolves the ones it needs itself.
     // The layer index is the primary scene_3d's, which `primary_scene_3d` already found.
@@ -1048,28 +1289,35 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const* const quadric_fallback = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 
     // Called under our own guard; the leaf takes its own, which is a different routine and so nests no lock.
-    auto const traced = pathtrace_routine::execute(
-        cmd, {.frame = frame,
-              .background = background,
-              .instances = resolved.instances,
-              .output = slot.texture,
-              .instance_table = instance_table,
-              .lights = light_buffer,
-              .hit_groups = resolved.hit_groups,
-              // One material still compiling, or one that does not compile, degrades to gray
-              // shading on its own meshes rather than costing the view its whole image.
-              // Two stand-ins rather than one: a substitution has to keep the hit group's kind, or a quadric batch
-              // traced by a triangle group reports no hits and disappears instead of shading flat.
-              // The procedural one only where the view actually has a procedural instance -- acquiring it starts a
-              // compile, and a triangle-only scene must not owe a drain for a group it can never select.
-              .fallback = &resources.shaders.acquire_fallback(),
-              .quadric_fallback = quadric_fallback,
-              .bindless = &bindless,
-              .decals = decal_buffers.decals,
-              .decal_shapes = decal_buffers.shapes,
-              .decal_atlas = decal_buffers.atlas});
+    auto stand_ins = false;
+    auto const traced = trace_layer(
+        cmd, scene->settings,
+        {.frame = frame,
+         .background = background,
+         .instances = resolved.instances,
+         .output = slot.texture,
+         .instance_table = instance_table,
+         .lights = light_buffer,
+         .hit_groups = resolved.hit_groups,
+         // One material still compiling, or one that does not compile, degrades to gray
+         // shading on its own meshes rather than costing the view its whole image.
+         // Two stand-ins rather than one: a substitution has to keep the hit group's kind, or a quadric batch
+         // traced by a triangle group reports no hits and disappears instead of shading flat.
+         // The procedural one only where the view actually has a procedural instance -- acquiring it starts a
+         // compile, and a triangle-only scene must not owe a drain for a group it can never select.
+         .fallback = &resources.shaders.acquire_fallback(),
+         .quadric_fallback = quadric_fallback,
+         .bindless = &bindless,
+         .decals = decal_buffers.decals,
+         .decal_shapes = decal_buffers.shapes,
+         .decal_atlas = decal_buffers.atlas,
+         .traced_with_stand_ins = &stand_ins},
+        fc, slot, false);
 
-    // As above: a declined trace recorded nothing, so it must not count as a sample.
+    // As above: a declined trace recorded nothing, so it must not count as a sample, and a frame shaded by a stand-in
+    // must not be averaged with the next.
+    if (traced == sg::routine_outcome::executed && stand_ins)
+        slot.reset_hash = cc::combine_hash(hash, u64(1));
     if (traced == sg::routine_outcome::executed && slot.accum_frame < accumulation_frame_cap)
         ++slot.accum_frame;
     return slot.texture;

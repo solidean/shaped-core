@@ -10,14 +10,13 @@ Bigger design intent lives in [structure.md](structure.md).
   - **The specular and split guides are declared for `automatic` whatever the device supports**, because `build_render_plan` is a pure function with no context to ask.
     That is five textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
     Only the declaration, though: the tracer writes the split lobes only when the member that resolves on this device reads them.
-  - **A per-frame Halton jitter** while an upscaler runs; SVGF does not need one, FSR and DLSS Ray Reconstruction do.
-    `sr::reconstruct_jitter` hands it out, one offset per frame.
-    Distinct from the per-pixel random offset the raygen already applies, whose mean is the pixel centre and which is why `reconstruct_guides::jitter` is correctly zero today.
-    What is missing is one offset shared by every pixel of a frame, which is what a temporal upscaler reconstructs sub-pixel detail from.
-    So it lands with `render_settings::render_scale` rather than before it.
   - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
-  - **`render_settings::render_scale`**, which plugs sv into FSR and `dlss_rr`: the plan traces at `sr::reconstruct_input_extent` instead of the view's own size.
-    Until then `_schedule_denoise` sets `reconstruct.upscaler` to `none`, which is what this item lifts.
+  - **Upscaling runs only while the image changes**, which is `reconstruct.scale` below native: a changed frame traces at the input extent with one jitter, and a still one restarts at full size.
+    What is left of it:
+    - **A layer with drawings never upscales**, because their depth test reads the primary depth at the view's size; a full-size depth from the scaled frame would lift it.
+    - **The first still frame starts the full-size temporal history over**, since that history last saw the camera before the move, so stopping shows one frame denoised from a single sample.
+    - **`dlss_rr` is not reached**: it upscales by itself, and nothing has run it against the scaled stream.
+    - **`frame_time_ms` is the default 60 Hz**, not the viewer's own frame time.
   - **`render_settings::exposure`**, for the tonemap when it lands; `dlss_rr` and the fsr upscaler already read `reconstruct.exposure`, and NRD deliberately does not.
   - **`view_renderer::execute`** — the single-view entry point — does not denoise; only the plan path does.
 
@@ -84,11 +83,6 @@ What is left is the interaction on top of it, in dependency order:
 - **A traced layer has no alpha.** The raygen in `tracer_pipeline.sgl` writes none, so a `scene_3d` layer is forced to
   `layer_blend::replace`. Writing coverage into `.a` is what would let a traced layer composite `over` another.
   Until then `view_ref::add_scene` can express two scene layers on one view but only the last is visible.
-- **The accumulated image is never read back.** The tests pin the *policy* — a camera or scene change restarts the
-  counter, a relayout does not — but nothing checks that the blend itself produces the running mean it claims to.
-  The cheap check is a readback test: trace a converging static view twice at a known constant color and assert the
-  target holds the mean rather than the last frame.
-  Until that exists, `pathtraced-window-manual-test` is the only real confirmation.
 - **A camera move throws the whole estimate away**, which is the deliberate trade behind an uncapped exact mean, and
   it is what makes flying noisy.
   Reprojecting the history through the previous camera and rejecting per pixel is the classical answer and was tried;
@@ -107,20 +101,8 @@ What is left is the interaction on top of it, in dependency order:
   drive.
   The plan and `trace` are already per `(view, layer)`.
 - **A path runs to completion inside one dispatch**, which is what makes a frame cost the DEEPEST path in it rather than
-  the average one.
-  `path_trace` loops `samples_per_pixel` times over `max_bounces` and a pixel is not done until its whole path is, so
-  a scene with one deep corner pays for that corner everywhere — and it is the same property that makes a heavy dispatch
-  trip a driver watchdog rather than merely run slowly.
-  The wavefront answer is one dispatch per bounce, with the path's live state persisted between them rather than held in
-  registers, which also lets a frame carry a path forward instead of finishing it.
-  Two things have to be decided before that is worth starting.
-  The state is a G-buffer by another name — origin, direction, throughput, rng, the medium's three fields, the collapsed
-  wavelength and `prev_pdf`, all per pixel per sample — and this library has just finished deleting one for the
-  accumulation rework, so the trade wants making deliberately rather than by default.
-  And it changes what a frame means to the accumulator: `accum_frame` counts completed estimates and the mean is exact
-  because every sample folded in is a finished path, so either only terminated paths fold in, which makes the effective
-  sample count vary per pixel and gives back the "one eye, one mean" property, or partial radiance folds in and the target
-  is no longer a mean of anything.
+  the average one, and what lets a heavy dispatch trip a driver watchdog.
+  The wavefront tracer that replaces it is designed in [wavefront.md](wavefront.md), with its landing order.
 
 ## What the bindless lock does not cover
 
@@ -139,7 +121,8 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
 
 ## What the path tracer still needs
 
-`sv::pathtrace_routine` traces `shaders/tracer_pipeline.sgl` over module `tracer` (shaders/sgl), with one generated hit group per material permutation.
+`sv::wavefront_routine`, the default, and `sv::pathtrace_routine`, the megakernel in `shaders/tracer_pipeline.sgl`, both trace over module `tracer` (shaders/sgl).
+Each material permutation gets one generated hit group.
 
 - **A permutation's hit group does not reload with a module it uses.**
   It is compiled once per permutation key, which hashes the resolution and the geometry kind, so an edit to module `tracer` reaches the raygen and not the hit groups.
@@ -162,6 +145,22 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
   `cross-backend-trace-test.cc` holds the two to 1e-4 relative, against measured differences of at most 7.5e-6.
 - **The path tracer is traced on dx12 and vulkan alone.**
   The viewer's default context and the examples are dx12's; metal has the ray-tracing pipeline the tracer needs and has never run it.
+- **Every texture is sampled at mip 0.**
+  A footprint along the ray (ray cones) is what picks the level.
+  On Intel's Sponza (the `sponza` example) it is what the megakernel's frame is left paying for: about 470 ms at 1920x1080 on an RTX 5070 Laptop GPU, against the wavefront's 150 ms.
+  BC7 compression already took the scene from 7.7 GB, over the device's budget, to 3.1 GB; the wavefront's frame went from over 800 ms to 150 ms with it.
+- **A texture the LRU evicts stays resident until the bindless table fills.**
+  Its element holds the view and with it the texture, as a replaced one did before `sg::bindless_array` gained `transient.release`.
+  Eviction calling release, through a hook from `texture_manager` to the table's owner, is the fix.
+- **Compression re-encodes on every load.**
+  A BC7 encode of a 4096x4096 chain is a few milliseconds of GPU time per texture, and Sponza's 72 take about 20 s of frames at the default work budget.
+  Caching the encoded blocks under the source's content hash, in `bcache`, is what asset-loading's "derived recipe" names for it.
+- **Glossy chains sparkle, and stay unbiased by decision.**
+  The quadric gallery's fireflies near the shapes' bases are light the glossy floor reflects off the glossy shapes: rare paths, each carrying up to about 2 × 2 × the light's radiance.
+  Both tracers converge to the right image, and making every surface fully rough removes them, so no sampler or intersection is at fault.
+  The remedies all trade bias for variance.
+  One clamps what a sample brings back from beyond its first hit (Cycles' "clamp indirect"); the other raises a later vertex's roughness to the path's so far (Cycles' "filter glossy").
+  Neither is taken; one would be a `render_settings` member, off by default.
 
 ## What the material system still needs
 
@@ -414,13 +413,12 @@ importance-samples the continuation — so what is left is coverage of the model
   balanced against the BSDF sampler the way a rect light already is.
 - **A partly-covered surface is expressible now**, through the cutout any hits a generated hit group carries.
   Reaching it takes two things, and for a while it only had one.
-  The hit group needs the any-hit attached, which `material_permutation::can_cut_out` decides — and that is now a
-  DECLARATION rather than a substring test: a type names its `opacity_attribute`, and a permutation can cut out only where
-  something other than the signature's own default supplied it.
-  The instance then has to be non-opaque, which `view_renderer` sets from the same flag through
+  The hit group needs the any-hit attached, which `material_permutation::opacity` decides: a type names its
+  `opacity_attribute`, and a permutation can cut out only where something other than the signature's own default supplied it.
+  The instance then has to be non-opaque, which `view_renderer` sets from the same descriptor through
   `sg::tlas_instance::opaque_override`.
-  Without that second half every BLAS sv builds is opaque, and the trace behaves as if no any-hit were attached at all — so the
-  whole path was unreachable and `geometry_opacity` affected nothing.
+  Without that second half every BLAS sv builds is opaque, and the trace behaves as if no any-hit were attached at all.
+  `cutout-trace-test.cc` reads both halves back, for each way an opacity can be sourced.
 - **A cutout costs two hit records and two any-hit compiles per permutation**, which is what it takes for a shadow ray to
   see through one.
   An any-hit is invoked with whatever payload its caller passed and declares exactly one type, so the surface ray

@@ -51,6 +51,7 @@ gpu_resource_manager                     [in progress]  where resource managemen
 bindless tables                          [in progress]  module tracer's `binding bindless` is the one declaration (shaders/sgl/tracer_bindings.sgl): one table per view dimension, raw byte buffers.
                                                         The manager's staging group is laid out from its reflection, so the trace's group 1 is the very layout its pipeline was compiled against and sg resolves its footprint by name
 pathtrace_routine                        [in progress]  the GI trace view_renderer drives: shaders/tracer_pipeline.sgl over module tracer, TLAS + dispatch_rays into an image target, one hit group per material permutation
+wavefront tracer                         [planned]      replaces pathtrace_routine's megakernel with one compute dispatch per stage over the live paths; docs/wavefront.md is the design
 sv_shaders package                       [in progress]  one SGL package: the tracer pipeline with module tracer exported, plus layout.sgl (border / view / wipe) and depth_fill.sgl, via slib
 camera / controls                        [in progress]  dev-friendly pinhole camera, plus sv::orbit_camera_controller (event-driven) and sv::fps_camera_controller (integrated over time).
                                                         BOTH are wired in: `view_ref::camera_style` picks one, the viewer routes that view's events to it and runs the per-frame update, and switching mid-session re-seeds the incoming controller from where the outgoing one left the camera
@@ -62,7 +63,7 @@ denoising                                [in progress]  render_settings::reconst
                                                         blends beside it; the parent samples the denoised image. Nothing in it reaches the trace hash.
                                                         While the mean is young SVGF runs on the frame's own samples and camera motion vectors, then à-trous on the mean.
                                                         The hand-off is crossfaded, and view_ref::camera_cut() drops the history on a teleport.
-                                                        The tracer writes specular albedo + roughness too, so DLSS Ray Reconstruction runs where its SDK was fetched. Still to come: render_scale.
+                                                        The tracer writes specular albedo + roughness too, so DLSS Ray Reconstruction runs where its SDK was fetched. A scale below native upscales the frames whose image changed.
                                                         shaped-rendering's docs/reconstruction.md is the design
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
                                                         Follow-up steps (mip generation through whichever sr mipmap routine the format admits) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.

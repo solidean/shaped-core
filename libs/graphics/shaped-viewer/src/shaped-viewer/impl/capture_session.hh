@@ -34,6 +34,12 @@ public:
     [[nodiscard]] bool is_first_application() const { return !_applied; }
     void mark_applied() { _applied = true; }
 
+    /// Holds the capture for the frame being authored, `reason` naming what it waits for; the first reason a frame gives wins.
+    void hold(cc::string_view reason);
+
+    /// The reason this frame was held for, empty when it was not, and clears it for the next frame.
+    [[nodiscard]] cc::string take_hold();
+
     /// Starts the clock, once, when the loop opens.
     void begin();
 
@@ -72,6 +78,9 @@ private:
     bool _applied = false;
     bool _done = false;
     bool _settled_before_writing = false;
+
+    /// What the frame being authored is held for; empty when nothing holds it.
+    cc::string _hold_reason;
 
     /// The request's `clock_seconds` as the loop opened.
     double _start_seconds = 0.0;

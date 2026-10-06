@@ -7,6 +7,8 @@
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
+#include <shaped-viewer/rendering/traced_group.hh>
+#include <shaped-viewer/rendering/wavefront_routine.hh> // wavefront_timing, held by value
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/camera_controller.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -19,6 +21,22 @@ namespace sv::impl
 /// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
 /// now asking for it means the history describes something else, and `accum_frame` restarts at 0.
 /// A resize does the same, since a fresh texture holds nothing to blend into.
+/// How a still wavefront frame fits its time budget: a smoothed estimate of one round's GPU time, and the frames whose
+/// timestamps have not landed yet.
+struct wavefront_pacing
+{
+    /// GPU seconds per round, or 0 before any frame has been measured.
+    f64 seconds_per_round = 0.0;
+
+    /// One traced frame, kept until its timestamps land.
+    struct pending
+    {
+        wavefront_timing timing;
+        i32 rounds = 0;
+    };
+    cc::vector<pending> in_flight;
+};
+
 struct temporal_slot
 {
     /// What the frame writes, and what everything downstream samples.
@@ -47,10 +65,39 @@ struct temporal_slot
     /// beside the view because it lives and dies with the image it produces.
     sr::reconstruct_history denoise;
 
+    /// The temporal member's state for the frames traced at the upscaler's smaller extent, held only by a
+    /// `temporal_id::frame_samples` slot.
+    /// Apart from `denoise` because the two streams run at different extents: one history would be rebuilt on every
+    /// switch between moving and still.
+    sr::reconstruct_history scaled_denoise;
+
     /// The camera this slot's layer was last traced from, held only by a `temporal_id::motion_guide` slot.
     /// The next frame's motion vectors reproject into it.
     shaders::tracer::camera_record last_camera = {};
     bool has_last_camera = false;
+
+    /// The wavefront tracer's paths, held only by a `temporal_id::accumulation` slot whose layer it traces.
+    ///
+    /// Here because `texture` is the mean of exactly these paths' tallies: the two restart together, and one without the other is a mean of nothing.
+    /// Unset until the layer's first wavefront frame, and replaced whenever the extent or the permutation count outgrows it.
+    cc::optional<wavefront_state> paths;
+
+    /// The wavefront paths of a frame traced at the upscaler's input extent, held beside `paths` for the same reason
+    /// `scaled_denoise` is beside `denoise`.
+    cc::optional<wavefront_state> scaled_paths;
+
+    /// Whether the last frame of this accumulation slot's layer was traced at the upscaler's input extent.
+    /// The next frame is full-size and restarts whenever the image did not change since, so this is what ends a move.
+    bool traced_scaled = false;
+
+    /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
+    u32 scaled_frame = 0;
+
+    /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's.
+    tg::vec2f last_jitter = tg::vec2f(0, 0);
+
+    /// What a round of those paths costs, as the frames' own timestamps measured it; a frame budget picks rounds from it.
+    wavefront_pacing pacing;
 };
 
 /// Everything a view keeps across frames, keyed by its view_id — held by `sv::view_store`.

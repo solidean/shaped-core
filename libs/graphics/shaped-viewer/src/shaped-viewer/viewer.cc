@@ -174,6 +174,11 @@ struct viewer::impl
     // Closed between the two, and unused by frames(), whose frame belongs to the loop variable.
     frame current_frame;
 
+    // Whether begin_frame opened the `sv.frame` scope that end_frame closes.
+    // A frames() loop and a destructor with no frame open must close nothing: an unmatched end would pop whatever scope
+    // the caller has open on this thread.
+    bool frame_scope_open = false;
+
     // Everything this viewer's views keep across frames: cameras, controllers, placements and textures alike.
     // Handed to the renderers rather than reached out of them — see view/view_store.hh.
     sv::view_store views;
@@ -394,6 +399,12 @@ void viewer::apply_capture(cc::string_view name, cc::function_ref<void(capture_c
 
     body({.first_frame = session->is_first_application(), .name = name, .size = f.viewport_size()});
     session->mark_applied();
+}
+
+void viewer::hold_capture(cc::string_view reason)
+{
+    if (auto* const session = _impl->capture.get(); session != nullptr)
+        session->hold(reason);
 }
 
 sv::impl::view_state& viewer::state_of(view_id id)
@@ -663,6 +674,7 @@ frame& viewer::begin_frame()
     // The outer frame bracket, closed in end_frame — everything a frame does nests under this one span.
     // After the assert above, so the misuse it catches does not also open a second span.
     CC_RECORD_SCOPE_BEGIN("sv.frame");
+    im.frame_scope_open = true;
 
     // A closed frame holds no backbuffer and no command list, so overwriting one strands nothing.
     im.current_frame = acquire_frame();
@@ -677,7 +689,11 @@ void viewer::end_frame()
     _impl->current_frame = frame{};
 
     // Closed LAST, so the present is inside the frame it belongs to rather than after it.
-    CC_RECORD_SCOPE_END("sv.frame");
+    if (_impl->frame_scope_open)
+    {
+        CC_RECORD_SCOPE_END("sv.frame");
+        _impl->frame_scope_open = false;
+    }
 }
 
 frame_range viewer::frames()
@@ -1020,7 +1036,9 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     // Payloads still streaming count as owed work too: until they land their meshes are traced as placeholder boxes, and
     // an image converged over those is a picture of the stand-ins.
     // Landing does restart the accumulation, but a stream slower than the convergence lets the stand-ins finish first.
-    auto const owed = im.resources.pending_work_count() + im.resources.settling_count();
+    // A frame whose body says its image is not the finished one owes work the viewer cannot see, such as a load of its own.
+    auto const held = session.take_hold();
+    auto const owed = im.resources.pending_work_count() + im.resources.settling_count() + (held.empty() ? 0 : 1);
     auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran);
     if (!settled && !session.is_out_of_time())
         return;
@@ -1033,9 +1051,10 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     auto const path = session.settled_before_writing() ? cc::string(session.request().output_path)
                                                        : sv::impl::partial_capture_path(session.request().output_path);
     if (!session.settled_before_writing())
-        CC_LOG_WARNING("capture: giving up after {}s at {}/{} accumulated frames — writing what it has to {}, and "
+        CC_LOG_WARNING("capture: giving up after {}s at {}/{} accumulated frames{} — writing what it has to {}, and "
                        "nothing to {}",
-                       session.elapsed_seconds(), lowest, session.request().accumulate_frames, path,
+                       session.elapsed_seconds(), lowest, session.request().accumulate_frames,
+                       held.empty() ? cc::string() : cc::format(", held for {}", held), path,
                        session.request().output_path);
 
     auto const failure = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));

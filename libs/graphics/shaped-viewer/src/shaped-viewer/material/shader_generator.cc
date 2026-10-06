@@ -1,6 +1,7 @@
 #include "shader_generator.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
@@ -357,24 +358,129 @@ enum class load_shape
     return out;
 }
 
-/// The hit group of one permutation; `generate_material_shader`'s header says what it holds.
-[[nodiscard]] cc::string generate_hit_group(resolved_material const& r,
-                                            material_parameter_layout const& layout,
-                                            geometry_kind kind,
-                                            bool can_cut_out)
+/// Module `material`'s `frequency_*` for a mesh attribute's frequency.
+[[nodiscard]] u32 frequency_code(attribute_frequency f)
 {
-    auto const procedural = kind == geometry_kind::quadrics;
+    switch (f)
+    {
+    case attribute_frequency::per_vertex:
+        return 1;
+    case attribute_frequency::per_corner:
+        return 2;
+    default:
+        return 0;
+    }
+}
 
+/// `tracer.texel_channel`'s number for one swizzle selector.
+[[nodiscard]] u32 channel_code(texture_channel c)
+{
+    switch (c)
+    {
+    case texture_channel::r:
+        return 0;
+    case texture_channel::g:
+        return 1;
+    case texture_channel::b:
+        return 2;
+    case texture_channel::a:
+        return 3;
+    case texture_channel::zero:
+        return 4;
+    case texture_channel::one:
+        return 5;
+    }
+    return 0;
+}
+
+/// Where `r`'s cutout opacity lives in `layout`, or `none` where the permutation cannot cut out.
+///
+/// It cannot where the type declares no opacity attribute, or where nothing supplied it: at `material_type` frequency the
+/// value is the signature's own default, and an any-hit would run at every intersection to reject nothing.
+[[nodiscard]] material_opacity opacity_of(resolved_material const& r, material_parameter_layout const& layout)
+{
+    auto out = material_opacity();
+    if (r.type->opacity_attribute.empty())
+        return out;
+
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        auto const& a = r.attributes[i];
+        if (a.name != r.type->opacity_attribute || a.frequency == material_frequency::material_type)
+            continue;
+
+        switch (a.frequency)
+        {
+        case material_frequency::material_type:
+        case material_frequency::material:
+        case material_frequency::mesh_instance:
+            out.kind = material_opacity_kind::constant;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
+            break;
+
+        case material_frequency::mesh_attribute:
+            out.kind = material_opacity_kind::attribute;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.attribute->frequency);
+            break;
+
+        case material_frequency::material_texture:
+        case material_frequency::mesh_texture_binding:
+            out.kind = material_opacity_kind::texture;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::texture_index).offset);
+            out.uv_offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.uv->frequency);
+            out.channel = channel_code(a.sample->swizzle.components[0]);
+            out.sampler = palette_index(a.sample->sampler);
+            if (!a.sample->transform.is_identity(a.format.component_count()))
+                out.transform = u32(slot_for(layout, i32(i), material_slot_kind::sample_transform).offset);
+            break;
+        }
+    }
+    if (!out.can_cut_out() || r.type->opacity_cutoff_attribute.empty())
+        return out;
+
+    // A cutoff is a threshold, so it has to be one value for the instance: sourced from a texture or a mesh attribute, it is ignored.
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        auto const& a = r.attributes[i];
+        if (a.name != r.type->opacity_cutoff_attribute)
+            continue;
+        auto const constant = a.frequency == material_frequency::material_type
+                           || a.frequency == material_frequency::material
+                           || a.frequency == material_frequency::mesh_instance;
+        if (constant)
+            out.cutoff = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
+        else
+            CC_LOG_WARNING("material type '{}' resolved its opacity cutoff '{}' from a texture or a mesh attribute, "
+                           "which a "
+                           "threshold cannot be; the cutout falls back to coverage",
+                           r.type->name, a.name);
+    }
+    return out;
+}
+
+/// The header every generated source of one permutation opens with: what it is, what it requires, and the modules it joins.
+[[nodiscard]] cc::string source_header(resolved_material const& r, geometry_kind kind, cc::string_view requires_)
+{
     auto src = cc::string();
     cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
-    src += "require raytracing_pipeline\n\n";
-    src += "use material\nuse openpbr\n";
-    if (procedural)
+    src += requires_;
+    src += "\nuse material\nuse openpbr\n";
+    if (kind == geometry_kind::quadrics)
         src += "use quadric\n";
     src += "use slug\nuse tracer\n\n";
+    return src;
+}
 
-    // Restated rather than named as `tracer.path_rays`, since a hit group names a set of its own file.
-    src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
+/// The material itself, which every source of a permutation shares: the `sv_supplied_*` constants, an attribute
+/// function per attribute, and `sv_evaluate_material`.
+/// Hands back what a stage passes as `supplied_tangent_frame`.
+[[nodiscard]] cc::string material_body(resolved_material const& r,
+                                       material_parameter_layout const& layout,
+                                       cc::string& supplied_frame)
+{
+    auto src = cc::string();
 
     // Whether anything actually supplied each attribute, as a compile-time constant per permutation.
     //
@@ -418,10 +524,28 @@ enum class load_shape
     src += "    return surface\n\n";
 
     // The tangent frame is the one supplied attribute the shading itself asks after, and a type that declares none supplies none.
-    auto supplied_frame = cc::string("false");
+    supplied_frame = cc::string("false");
     for (auto const& a : r.attributes)
         if (a.name == "tangent_frame")
             supplied_frame = "sv_supplied_tangent_frame";
+    return src;
+}
+
+/// The hit group of one permutation; `generate_material_shader`'s header says what it holds.
+[[nodiscard]] cc::string generate_hit_group(resolved_material const& r,
+                                            material_parameter_layout const& layout,
+                                            geometry_kind kind,
+                                            bool can_cut_out)
+{
+    auto const procedural = kind == geometry_kind::quadrics;
+
+    auto src = source_header(r, kind, "require raytracing_pipeline\n");
+
+    // Restated rather than named as `tracer.path_rays`, since a hit group names a set of its own file.
+    src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
+
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame);
 
     if (procedural)
     {
@@ -459,17 +583,43 @@ enum class load_shape
     }
 
     // The cutout test twice, since an any hit takes the payload of the one ray type its record serves.
+    // Neither reads the material's code: opacity comes through the instance's record, the same for every material.
     src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload, @launch_id id: "
-           "int3){tracer.traced, "
-           "tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, id, sv_evaluate_material(tracer.candidate_context(c)).geometry_opacity)\n\n";
+           "int3){tracer.traced, tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, id, tracer.candidate_opacity(c))\n\n";
     src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload, @launch_id id: "
-           "int3){tracer.traced, "
-           "tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, id, sv_evaluate_material(tracer.candidate_context(c)).geometry_opacity)\n\n";
+           "int3){tracer.traced, tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, id, tracer.candidate_opacity(c))\n\n";
     src += "hit_group sv_material for path_rays:\n"
            "    surface = (closest_hit = sv_closest_hit, any_hit = sv_any_hit)\n"
            "    occlusion = (any_hit = sv_shadow_any_hit)\n";
+    return src;
+}
+
+/// The wavefront's shade kernel of one permutation: `sv_shade`, over this permutation's range of the sorted hits.
+[[nodiscard]] cc::string generate_shade_kernel(resolved_material const& r,
+                                               material_parameter_layout const& layout,
+                                               geometry_kind kind)
+{
+    // The tracer's acceleration structure is in the group this lists, and it needs the pipeline wherever a device grants one.
+    auto src = source_header(r, kind, "require ray_query\nrequire raytracing_pipeline\n");
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame);
+
+    src += "@compute(64) fun sv_shade(@thread_id id: int3){tracer.traced, tracer.bindless, slug.tables, "
+           "tracer.wavefront_step}:\n"
+           "    let slot = tracer.shade_slot(id.x as uint)\n"
+           "    if slot == tracer.no_slot => return\n";
+    if (kind == geometry_kind::quadrics)
+        cc::format_append(src,
+                          "    let ctx = tracer.stored_quadric_context(slot)\n"
+                          "    tracer.shade_stored_quadric(slot, sv_evaluate_material(ctx), {})\n",
+                          supplied_frame);
+    else
+        cc::format_append(src,
+                          "    let ctx = tracer.stored_triangle_context(slot)\n"
+                          "    tracer.shade_stored_triangle(slot, ctx, sv_evaluate_material(ctx), {})\n",
+                          supplied_frame);
     return src;
 }
 } // namespace
@@ -491,6 +641,25 @@ cc::string sgl_palette_sampler(sg::sampler const& s)
     };
     auto const filter = s.mag_filter == sg::sampler_filter::nearest ? cc::string_view("nearest") : "linear";
     return cc::format("palette_{}_{}_{}", filter, address(s.address_u), address(s.address_v));
+}
+
+u32 palette_index(sg::sampler const& s)
+{
+    auto const address = [](sg::sampler_address_mode m) -> u32
+    {
+        switch (m)
+        {
+        case sg::sampler_address_mode::repeat:
+            return 0;
+        case sg::sampler_address_mode::mirror_repeat:
+            return 1;
+        case sg::sampler_address_mode::clamp_edge:
+            return 2;
+        }
+        return 0;
+    };
+    auto const filter = s.mag_filter == sg::sampler_filter::nearest ? u32(0) : u32(1);
+    return filter * 9 + address(s.address_u) * 3 + address(s.address_v);
 }
 
 cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_options const& opts)
@@ -547,29 +716,14 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                                                   "u32");
 
     auto layout = build_layout(r);
+    auto const opacity = opacity_of(r, layout);
 
-    // Whether THIS permutation can reject an intersection, which is narrower than whether its type could.
-    //
-    // The type names the attribute its fragment writes `geometry_opacity` from, and that attribute's resolved frequency
-    // is what decides the answer.
-    // `material_type` frequency means nothing supplied it, so the fragment clamps the signature's own default and the
-    // value is a compile-time constant.
-    // An any-hit there would run at every intersection to reject nothing, and cost the instance its opaque fast path.
-    auto const can_cut_out = [&]
-    {
-        if (r.type->opacity_attribute.empty())
-            return false;
-
-        for (auto const& a : r.attributes)
-            if (a.name == r.type->opacity_attribute)
-                return a.frequency != material_frequency::material_type;
-        return false;
-    }();
-
-    auto source = generate_hit_group(r, layout, opts.kind, can_cut_out);
+    auto source = generate_hit_group(r, layout, opts.kind, opacity.can_cut_out());
+    auto shade_source = generate_shade_kernel(r, layout, opts.kind);
     return {.source = cc::move(source),
+            .shade_source = cc::move(shade_source),
             .layout = cc::move(layout),
-            .can_cut_out = can_cut_out,
+            .opacity = opacity,
             .key = material_shader_key(r.permutation_key, opts)};
 }
 } // namespace sv
