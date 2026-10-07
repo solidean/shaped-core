@@ -588,6 +588,19 @@ That is why the footprint follows the member through the call as it follows it t
 A subscript is the spelling every port writes for a texel, and the one an `@atomic` image needs for its texel to have methods (CHK-373).
 It is sugar over `load` and `store`, so a texel can never mean anything those calls do not.
 
+## CHK-390
+
+One source that writes whatever format its host picks needs to name the value it stores, and that value's width follows the format.
+A type named after the format says so where the code reads it, and an option makes it one type per compile as it makes the format one.
+
+## CHK-391
+
+Every target already stores a four-wide value into a narrower format by dropping the channels it lacks: HLSL through a typed view, WGSL's `textureStore`, MSL's `write`.
+Letting a store do that silently would take away the one check a strictly typed image gives, that what is stored is what the format holds.
+A store that names nothing, a `store4`, would keep the check but hide the narrowing inside a method name.
+A conversion keeps the check and states the narrowing at the value, in the spelling SGL already gives every explicit conversion.
+(0, 0, 0, 1) is the fill a sampled texture's load uses for a missing channel, so widening and loading agree.
+
 ## CHK-368
 
 `globallycoherent` is the attribute every port of a cross-workgroup handoff already has, one to one, and a per-member fact sg can carry.
