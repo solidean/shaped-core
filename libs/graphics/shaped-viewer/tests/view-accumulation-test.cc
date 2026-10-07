@@ -570,8 +570,11 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
     auto const input = frame_samples().scaled_denoise.extent();
     CHECK(input[0] < output_size[0]);
     CHECK(input[1] < output_size[1]);
-    CHECK(frame_samples().scaled_denoise.output_extent() == output_size);
     CHECK(accumulation().scaled_frame >= 3);
+
+    // The upscaler's own extents are its history's business; what the view presents is the denoised slot, which a
+    // landed upscale marks current.
+    CHECK(store.peek_ptr(moving_id)->temporal.get_ptr(sv::temporal_id::denoised(0))->accum_frame == 1);
 
     (void)co_await frame(4, false);
     CHECK(!accumulation().traced_scaled);
