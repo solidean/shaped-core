@@ -52,11 +52,10 @@ Bigger design intent lives in [structure.md](structure.md).
 - à-trous estimates noise from the sample count alone, assuming one noise width per sample equal to the pixel's luminance.
   A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.
 - Port the rest of sr's HLSL to SGL.
-  Every routine's own shaders are SGL but three, and each waits on SGL rather than on a workaround:
-  - the compute box-filter mipmap and FSR's two clear jobs write images of every format, one, two and four channels alike.
-    An SGL image's value has its format's channel count, so one source cannot store into all of them, even with the format an option.
-  - `nrd_repack` and `nrd_resolve` call NRD's own packing functions from `NRD.hlsli`, which SGL has no way to call.
-    Reimplementing them would make two copies of formulas NRD's build owns, which reconstruction.md rules out.
+  Every routine's own shaders are SGL but the compute box-filter mipmap and FSR's two clear jobs, which wait on SGL.
+  They write images of every format, one, two and four channels alike.
+  An SGL image's value has its format's channel count, so one source cannot store into all of them, even with the format an option.
+  `nrd_repack` and `nrd_resolve` are not on this list: they stay HLSL around NRD's own `NRD.hlsli`, whose license allows no translation.
   The native denoise members and the network now build on every backend; they are tested on dx12 and vulkan alone, since their tests still sit in the DXC-gated list.
   Moving those tests to the SGL list is what would hold webgpu and metal to them.
   Each member compiles its last pass for the caller's output format, so it is a routine parametrized on that format, as `mix_routine` is.

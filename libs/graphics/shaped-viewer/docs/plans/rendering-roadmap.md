@@ -61,14 +61,14 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 ### SGL
 
 - No array constants yet, so lookup tables live inside functions.
-- **Three HLSL shaders are left, each waiting on a language decision.**
-  - `box_filter_mipmap` and FSR's two clear passes store a `float4` into an image of whatever format the host picks.
-    SGL types an image's value by its format, so one body cannot store into `r16_float` and `rgba16_float` alike.
-    The candidates are an explicit four-wide store beside the strict one, or an image that names its value type as a texture does.
-  - `nrd_repack` and `nrd_resolve` call NVIDIA's own `NRD.hlsli`.
-    An `@extern` HLSL function would keep that, dx12 and vulkan only.
-    A port to SGL would be portable, but NRD's license grants modification of its sample code alone and distribution in object code alone, so its shaders cannot be translated into this repository.
-    A clean implementation from NRD's documented encodings, pinned by tests against NRD's own functions, is the portable route, and a question for whoever owns the license call.
+- **`box_filter_mipmap` and FSR's two clear passes are HLSL until SGL can convert a value to an image's format.**
+  Each stores a `float4` into an image of whatever format the host picks.
+  SGL types an image's value by its format, so one body cannot store into `r16_float` and `rgba16_float` alike.
+  The direction is an explicit conversion to the target's texel, dropping what the format has no channel for, rather than a store that does it silently.
+  Its spelling is open.
+- **NRD's two glue shaders stay HLSL, by decision, and SGL gets no way to call foreign code for them.**
+  NRD's license grants modification of its sample code alone and distribution in object code alone, so its shaders cannot be translated into SGL here.
+  The NRD member is an HLSL routine around the fetched SDK, compiled by DXC, which is all it needs: NRD itself runs where DXC's output runs.
 - `is_nan` and `is_inf` take floats only: WGSL cannot bitcast a lone `f16`, so halves want a test of their own.
 
 ### Kept as decided
