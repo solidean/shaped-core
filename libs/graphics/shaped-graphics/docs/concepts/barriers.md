@@ -43,7 +43,7 @@ The inline-constants block is the exception: it is set on the list rather than b
 **A check a shader edit can flip logs and degrades; it never asserts.**
 Hot reload replaces a shader under a running program, so a declaration that disagreed with the old code may disagree with the new one at any frame.
 Such a mismatch logs an error once per pipeline, binding and kind of mismatch, and falls back to a barrier that covers both sides.
-Only a mistake in the host's own code — a declaration naming no bound array, an element out of range — asserts.
+Only a mistake in the host's own code — a declaration that never meets its array, an element out of range — asserts.
 
 Access is inferred everywhere except where sg cannot see into the code, and there the caller says what it will do.
 
@@ -51,8 +51,30 @@ Access is inferred everywhere except where sg cannot see into the code, and ther
 Element usage of a resource *array* bound to a shader cannot be inferred: the shader may index only some elements, or use them differently.
 So the caller declares it explicitly, split by resource family since buffers carry no layout.
 `declare_array_buffer_access` takes `array_buffer_access` `{index, access}`; `declare_array_texture_access` takes `array_texture_access`, which also names the required `layout`.
-A declaration applies to the next dispatch or draw only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
 The compute, raytracing and raster scopes each carry the pair, and an element is tracked at the stages the pipeline's code touches its array in, as a scalar binding is.
+
+**A declaration is a value, `sg::array_access_declaration`, in force on its bind point until it is withdrawn or destroyed.**
+Compute and raytracing are one bind point, raster the other, and a raster declaration also ends when its rendering scope closes.
+Binding a pipeline or a group ends nothing, and an op where no bound group holds the array leaves the declaration dormant.
+Every live declaration naming an array applies to it, as several declarations before one op always have.
+Submitting the list while one is alive asserts; dropping the list ends them silently.
+
+What one declaration meeting many ops changes is the element work, and only that — the rules below still decide per op:
+
+- **Each group is checked once.** The first time the declarations naming an array meet a group, every element is checked for range and vacancy against *that* group's array.
+  A different group at the same name, or a new set of declarations, is checked again.
+- **A current read-only application is skipped.** It is current while nothing wrote an array member since it was applied, and its op touches stages and access within what it applied.
+  Skipping it is exactly what declaring again would do, since a read already synced against the last write needs no barrier.
+  A write, declared or widened by the footprint, is applied at every op.
+- **A member write ends every current application.** A resource an application tracked is an array member of the list.
+  Any tracked access landing in a member's write bucket — an unordered write or a layout change — counts.
+  That covers every path: a scalar binding, a copy, an upload, a render target, a native scope, and an application's own layout transitions.
+  An application whose op already wrote one of its elements, before it applied, is not current either.
+- **A declaration that never met its array asserts when it ends.** That is where a misspelled name is caught; a list drop skips the check.
+
+`ctx.metrics` counts the element work as `array_element_tracks`, declared or covered, so a skipped application shows as none.
+[plans/sticky-array-declarations.md](../plans/sticky-array-declarations.md) has the design and the reasoning.
+
 The footprint still says whether the code touches the array at all:
 
 - an array the code never indexes needs no declaration, and one declared anyway is dropped;
@@ -63,7 +85,7 @@ The footprint still says whether the code touches the array at all:
 
 A declaration narrower than the code element by element is the caller's to make: the footprint knows only what the code does to the array as a whole.
 
-Declaring a vacant (null-handle) or out-of-range element, or an array no bound group holds, asserts.
+Declaring a vacant (null-handle) or out-of-range element asserts at the first op meeting it.
 See [bindings — array bindings](bindings.md#array-bindings).
 
 **Foreign code, through a native scope.**
@@ -195,6 +217,11 @@ They may not be reasoned about from outside, and a caller never has to.
 
 This is the contract a backend implements rather than a description of what one does.
 Where an implementation reads something the model does not define — a check taken during recording, say — that is a defect in the implementation whether or not it currently misbehaves.
+
+**A list's transfer waits are folded at submit**, on dx12 as on vulkan, over every resource the list touched.
+So a transfer enqueued after an access was recorded, and before the submit, is still waited on.
+One record-time read is left: a texture with a transfer in flight is tracked in `general` rather than the layout an op asks for.
+A sticky array declaration freezes that choice at its application, where a later op would otherwise read it again.
 
 ## The transfer queue never moves a layout — the direct queue settles it first
 

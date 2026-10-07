@@ -1,7 +1,7 @@
 # Plan: sticky array declarations
 
-Status: **agreed, not built** — the [decisions](#decisions) record what an independent review settled.
-An array declaration today covers one dispatch or draw, so a caller binding a large bindless table for many ops pays O(elements) per op.
+Status: **built** — the [decisions](#decisions) record what an independent review settled, and [where it is built](#where-it-is-built) names the code.
+An array declaration used to cover one dispatch or draw, so a caller binding a large bindless table for many ops paid O(elements) per op.
 This plan makes a declaration live until the caller withdraws it, so sg pays O(elements) once and O(arrays) per op after that.
 Background: [barriers](../concepts/barriers.md) for the tracking model and [bindings — array bindings](../concepts/bindings.md#array-bindings) for the contract.
 
@@ -20,6 +20,20 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
 - **(P2) transfer waits fold at submit.**
   dx12 folds every touched resource's pending transfer values at submit over `_touched_buffers` / `_touched_textures`, as vulkan does ([vulkan_command_list.cc:158-177][vk-cl-cc-submit]).
   The record-time fold is gone from `track_*`.
+
+## Where it is built
+
+- **The value and its lifetime**: [`sg::array_access_declaration`][aad-hh], made by the facades ([compute.hh][compute-hh], [raytracing.hh][raytracing-hh], [raster.hh][raster-hh]).
+  The core list keeps the links, ends the raster ones at `close_rendering` and all of them when it dies ([command_list.cc][cl-cc]).
+- **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one ([command_list.hh][command-list-hh]).
+- **What every backend shares**: [`sg::impl::array_declaration_book`][book-hh] holds one bind point's declarations, their per-name generations and the application records.
+  Its `apply` is the per-op procedure under [what an op does](#what-an-op-does).
+- **The backends** feed it their bound groups and their trackers: [dx12][dx12-apply], [vulkan][vk-apply] and [metal][mtl-apply].
+  Each tracker reports `sg::impl::member_track` from the one lock it takes, and the list counts `member_writes`.
+  metal retains every bound group and reads it at each op ([bind_group_to_table][mtl-bind]); webgpu returns ids for its empty declarations.
+- **sv**: `bound_resources::declare_*_access` return an [`sv::declared_tables`][sv-declared], made once per [wavefront][wf-declare], [raster pass][raster-declare] and [trace][pt-declare].
+- **The count** a test reads is `sg::stat::array_element_tracks`.
+- **Tests**: [array-declaration-book-test.cc][book-test] has no device; [sticky-array-test.cc][sticky-test] runs on every backend with binding arrays.
 
 ## The problem
 
@@ -58,7 +72,8 @@ The megakernel does not suffer: it traces once per frame.
 
 ## Today, precisely
 
-This section describes the tree before P1 and P2, since that is what was measured.
+This section describes the tree before P1 and P2, since that is what was measured, and before this plan was built (be346fb22).
+Its citations name the files of that tree; the code they quote is gone.
 
 ### The API
 
@@ -599,31 +614,40 @@ It still matters for the first application, every `cover_all`, every writing dec
 - **Transfer waits fold at submit** — a prerequisite, landed as P2.
 - **Lock fusion first and separately** — landed as P1.
 
-[vk-cl-cc-submit]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc#L158-L177
-[vk-track]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc#L423-L440
-[wf-use]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L265-L278
-[wf-rounds]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L302-L350
-[wf-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L273
-[raster-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L287
-[raster-loop]: ../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L278-L289
-[pt-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc#L338
-[grm-cc]: ../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L119-L142
-[grm-declares]: ../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L118-L161
-[compute-hh]: ../../src/shaped-graphics/command_list/compute.hh#L80-L89
-[raytracing-hh]: ../../src/shaped-graphics/command_list/raytracing.hh#L76-L83
-[raster-hh]: ../../src/shaped-graphics/command_list/raster.hh#L158-L167
-[command-list-hh]: ../../src/shaped-graphics/command_list/command_list.hh#L137-L142
-[raytracing-cc]: ../../src/shaped-graphics/command_list/raytracing.cc#L136-L147
+[vk-cl-cc-submit]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
+[vk-track]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
+[wf-use]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc
+[wf-rounds]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc
+[wf-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L268
+[raster-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L282
+[raster-loop]: ../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc
+[pt-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc#L339
+[grm-cc]: ../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L120
+[grm-declares]: ../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L118-L167
+[compute-hh]: ../../src/shaped-graphics/command_list/compute.hh#L82-L93
+[raytracing-hh]: ../../src/shaped-graphics/command_list/raytracing.hh#L77-L87
+[raster-hh]: ../../src/shaped-graphics/command_list/raster.hh#L158-L170
+[command-list-hh]: ../../src/shaped-graphics/command_list/command_list.hh#L138-L151
+[raytracing-cc]: ../../src/shaped-graphics/command_list/raytracing.cc
 [dx12-cl-cc]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc
-[dx12-cl-hh]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.hh#L149-L150
-[dx12-raster-cc]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.raster.cc#L382
-[dx12-buffer-cc]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc#L37-L95
-[dx12-buffer-flush]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc#L68-L79
-[vk-cl-hh]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.hh#L137-L138
-[vk-compute-cc]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc#L36
-[mtl-cl-hh]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.hh#L480-L486
-[mtl-bind]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L738-L761
-[mtl-declare]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L205-L243
-[wgpu-compute-cc]: ../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.compute.cc#L163-L174
-[wgpu-cl-cc]: ../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.cc#L83
+[dx12-cl-hh]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.hh
+[dx12-raster-cc]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.raster.cc
+[dx12-buffer-cc]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc
+[dx12-buffer-flush]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc
+[vk-cl-hh]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
+[vk-compute-cc]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc
+[mtl-cl-hh]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.hh
+[mtl-bind]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L742
+[mtl-declare]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc
+[wgpu-compute-cc]: ../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.compute.cc
+[wgpu-cl-cc]: ../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.cc
 [footprint-cc]: ../../src/shaped-graphics/barrier/footprint.cc#L159-L219
+[aad-hh]: ../../src/shaped-graphics/command_list/array_access_declaration.hh#L27
+[cl-cc]: ../../src/shaped-graphics/command_list/command_list.cc
+[book-hh]: ../../src/shaped-graphics/barrier/array_declarations.hh#L40
+[dx12-apply]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L498
+[vk-apply]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc#L150
+[mtl-apply]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L925
+[sv-declared]: ../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.hh#L134
+[book-test]: ../../tests/barrier/array-declaration-book-test.cc
+[sticky-test]: ../../tests/barrier/sticky-array-test.cc

@@ -351,7 +351,7 @@ cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  /
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
 cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state; blend constants are 0 until set, per rendering scope
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
-cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // void — as on cmd.compute, next draw only
+cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // -> sg::array_access_declaration — as on cmd.compute, every draw while it lives; also ends with the scope
                                                          //   an element is tracked at the stages the code touches its array in (every stage of the op without a footprint)
 cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.size=1}})   // void — ranges are cc::offset_size {first, count}
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
@@ -777,10 +777,16 @@ cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group cou
                                          //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)
                                          //   the args must not be bound writable to the same dispatch (webgpu refuses it); raw form: (raw_buffer_handle, offset_in_bytes % 4 == 0)
 //   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
-cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
-cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
+auto const d = cmd.compute.declare_array_buffer_access(name, elements)  // [[nodiscard]] -> sg::array_access_declaration — in force for EVERY dispatch/trace while `d` lives
+cmd.compute.declare_array_texture_access(name, elements) // same for a texture array (elements also carry a layout)
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pair)
                                                          // an array the code indexes and nobody declared LOGS and gets a global barrier; one it never indexes needs none
+d.withdraw();                                            // ends it now; destroying it does the same. Move-only; a moved-from one ends nothing
+                                                         // compute + raytracing are one bind point; a pipeline/group rebind ends nothing; an op binding no such array leaves it dormant
+                                                         // once applied, a later op reading the array the same way skips the element work, until an element is written
+                                                         // GOTCHA: submitting the list while `d` lives ASSERTS — hold it in a scope that ends before the submit
+                                                         // GOTCHA: one that NO op met with a bound group holding its array asserts when it ends — a misspelled name, or declared where nothing binds it
+                                                         // a dropped list ends its declarations silently; a value outliving it then does nothing
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
 //   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()

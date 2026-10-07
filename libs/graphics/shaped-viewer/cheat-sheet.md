@@ -734,7 +734,10 @@ m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot 
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
 bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
-bound.declare_raytracing_access(cmd)        // declares EVERY table for the next dispatch_rays, empty ones included
+auto const d = bound.declare_raytracing_access(cmd)  // -> sv::declared_tables — EVERY table, empty ones included, for every trace while `d` lives
+bound.declare_compute_access(cmd) / bound.declare_raster_access(cmd)  // the same for every dispatch / every draw of the open scope
+                                            //   declare once per routine, not per op: a later op binding group() skips the element work
+                                            //   GOTCHA: must die before the submit, and must meet group() bound at some op, or it asserts
 m.bindless_layout()                         // -> the same layout, without taking a snapshot
 m.table_capacity(table)                     // -> u32 — capacity_of(table), as the array holds it
 

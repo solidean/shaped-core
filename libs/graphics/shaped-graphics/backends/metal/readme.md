@@ -73,6 +73,8 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A buffer holds a GPU address, a texture or sampler an `MTLResourceID`, and an array binding takes `count` consecutive slots.
   That is what SPIRV-Cross emits for a descriptor set, which is the whole reason the layout was chosen.
   A group holds every resource it names: an argument buffer is raw addresses, so nothing else keeps the target alive.
+  **A command list retains every group it binds** until it is consumed, and reads a bound group's resources and arrays through it at each op rather than copying them at the bind.
+  A copy of a bindless array would cost its whole capacity at every bind, and a retained group's address is what an array declaration's application is keyed on.
   A staging group is the CPU-side image of one such buffer, and a snapshot is a fresh buffer copied from it — which is what makes snapshots independent of the builder and of each other.
   It needs **one** descriptor array where dx12 needs two: an argument buffer has no view/sampler heap split, so both of the base's offsets are `binding.index`.
   **An array binding consumes `count` indices, and nothing checks that.**
@@ -123,7 +125,8 @@ Each of these is a fact about Metal rather than a gap in the backend.
   That is also what makes a mask clamping to nothing in `flush_barriers` harmless rather than a dropped dependency.
 - **An array binding's elements are declared one at a time, and an undeclared one is an error.**
   Which elements a shader indexes is decided by data no backend sees, so a group keeps its array bindings apart from its scalar ones.
-  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by the `declare_array_*_access` pair on the scope recording the op.
+  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by a live declaration from the `declare_array_*_access` pair of the op's bind point.
+  A texture has no layout here, so a layout another declaration asks for writes nothing, and leaves an applied declaration current.
   An array the code indexes with no declare is logged and covered whole, and an empty span is how a caller says one is unused — the same accounting dx12 and vulkan keep.
   An acceleration-structure array is the exception and stays automatic.
   A trace reads every structure its table can reach, and sg's two declare calls are split by buffer and texture with no third for that kind to arrive through.
