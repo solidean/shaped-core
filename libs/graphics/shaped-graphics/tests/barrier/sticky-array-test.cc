@@ -542,6 +542,10 @@ ASYNC_INVOCABLE_TEST("sg - a compute declaration re-applies after a raster decla
     REQUIRE(ctx != nullptr);
     require_arrays(*ctx);
 
+    // The draw's declaration moves both images out of `general` inside the scope, which splits it on vulkan.
+    // The warning comes once per context and cause, so this test sees it only when no earlier test on that context split a scope around a barrier.
+    nx::allow_warnings("was closed and reopened around a barrier", "sg");
+
     auto const look_annex = co_await shaders::sticky_arrays.look_annex.acquire_pipeline(*ctx);
     auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::sticky_arrays.gallery_in_fragment);
     auto const first = make_image(*ctx, 0.25f);
