@@ -13,6 +13,11 @@ if(NOT (WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12))
     return()
 endif()
 
+# The per-example settings below name the example's target, which does not exist when examples are off.
+if(NOT SC_BUILD_EXAMPLES)
+    return()
+endif()
+
 # Its own gate passed, so the question left is which backend the build was ASKED for.
 # The viewer's default context is dx12's, so a build set to vulkan gets targets that say so, though the tracer itself runs there.
 sc_resolve_example_backend(_sv_backend _sv_mode SUPPORTS dx12)

@@ -9,6 +9,11 @@ if(NOT SC_HAS_DXC_COMPILER)
     return()
 endif()
 
+# The per-example settings below name the example's target, which does not exist when examples are off.
+if(NOT SC_BUILD_EXAMPLES)
+    return()
+endif()
+
 # dx12 and vulkan both take SGL's HLSL through DXC and both present through a swapchain, so one source serves them.
 sc_resolve_example_backend(_sr_backend _sr_mode SUPPORTS dx12 vulkan)
 if(_sr_mode STREQUAL "none")
