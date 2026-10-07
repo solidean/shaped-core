@@ -1,4 +1,4 @@
-// Fills one mip level from the level above it with the 4-tap box filter box_filter_mipmap.hlsl applies,
+// Fills one mip level from the level above it with the 4-tap box filter box_filter_mipmap.sgl applies,
 // through the raster pipeline rather than through an image.
 //
 // This is the path for a format that cannot be a storage image, which in practice means an sRGB one.

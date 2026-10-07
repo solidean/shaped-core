@@ -5,6 +5,7 @@
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-rendering/fsr_upscale_routine.hh>
 
 #include <memory>
@@ -71,10 +72,25 @@ struct sr::fsr_upscale_routine::programs
         sg::compute_pipeline_handle pipeline;
     };
 
-    /// sr's own: the depth conversion, and FSR's clear job for float and for unsigned images.
+    /// FSR's clear job for the images of one format, whose texel the shader is compiled for.
+    struct clear_pass
+    {
+        sg::pixel_format format = sg::pixel_format::undefined;
+        pass program;
+    };
+
+    /// sr's own: the depth conversion, and FSR's clear job for each format of image it clears.
     pass prepare_depth;
-    pass clear_float;
-    pass clear_uint;
+    cc::vector<clear_pass> clears;
+
+    /// The clear of `format`'s images; null for a format FSR never clears.
+    [[nodiscard]] clear_pass const* clear_for(sg::pixel_format format) const
+    {
+        for (auto const& c : clears)
+            if (c.format == format)
+                return &c;
+        return nullptr;
+    }
 
     /// AMD's.
     std::shared_ptr<impl::fsr_pass_programs const> fsr;

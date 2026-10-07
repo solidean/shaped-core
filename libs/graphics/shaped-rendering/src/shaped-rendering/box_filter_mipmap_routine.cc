@@ -1,27 +1,49 @@
-#include <clean-core/common/asserts.hh>
+#include <clean-core/common/assert.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
-#include <sr_shaders.hh>
+#include <sr_sgl_shaders.hh>
 
 namespace sr
 {
 namespace
 {
-/// Everything that differs per variant: the entry point it compiles, and the binding names it declares.
-/// The names differ because HLSL cannot overload a resource declaration on its dimension.
-struct variant_traits
+/// The entry point of `shape` compiled for `values`, and the bindings of its group.
+struct shape_program
 {
-    cc::string_view source;
-    cc::string_view target;
+    sg::async_compute_pipeline pipeline;
+    cc::vector<sg::binding> bindings;
 };
 
-constexpr variant_traits traits_of[] = {
-    {.source = "gSource1D", .target = "gTarget1D"}, {.source = "gSource1DArray", .target = "gTarget1DArray"},
-    {.source = "gSource2D", .target = "gTarget2D"}, {.source = "gSource2DArray", .target = "gTarget2DArray"},
-    {.source = "gSource3D", .target = "gTarget3D"},
-};
+/// Each shape reads and writes through a binding of its own, which is why this is a switch over generated types.
+[[nodiscard]] shape_program program_of(sg::context& ctx,
+                                       mipmap_variant shape,
+                                       sgl_shaders::box_filter_mipmap_options const& values)
+{
+    auto const& file = sgl_shaders::box_filter_mipmap;
+    switch (shape)
+    {
+    case mipmap_variant::tex_1d:
+        return {.pipeline = file.main_1d_cs.acquire_pipeline(ctx, values),
+                .bindings = sgl_shaders::mipmap_1d::declared_bindings(values)};
+    case mipmap_variant::tex_1d_array:
+        return {.pipeline = file.main_1d_array_cs.acquire_pipeline(ctx, values),
+                .bindings = sgl_shaders::mipmap_1d_array::declared_bindings(values)};
+    case mipmap_variant::tex_2d:
+        return {.pipeline = file.main_2d_cs.acquire_pipeline(ctx, values),
+                .bindings = sgl_shaders::mipmap_2d::declared_bindings(values)};
+    case mipmap_variant::tex_2d_array:
+        return {.pipeline = file.main_2d_array_cs.acquire_pipeline(ctx, values),
+                .bindings = sgl_shaders::mipmap_2d_array::declared_bindings(values)};
+    case mipmap_variant::tex_3d:
+        return {.pipeline = file.main_3d_cs.acquire_pipeline(ctx, values),
+                .bindings = sgl_shaders::mipmap_3d::declared_bindings(values)};
+    case mipmap_variant::count_:
+        break;
+    }
+    CC_UNREACHABLE("a mipmap key names one of the five shapes");
+}
 } // namespace
 
 cc::shared_async<cc::unit> box_filter_mipmap_routine::init(sg::routine_init_scope scope)
@@ -31,38 +53,19 @@ cc::shared_async<cc::unit> box_filter_mipmap_routine::init(sg::routine_init_scop
     // Cleared first, so a reload that fails to compile leaves nothing built against the previous shaders.
     _program = nullptr;
 
-    using asset_ptr = decltype(sr::shaders::box_filter_mipmap.compute.main_2d_cs);
-    asset_ptr const entries[]
-        = {sr::shaders::box_filter_mipmap.compute.main_1d_cs, sr::shaders::box_filter_mipmap.compute.main_1d_array_cs,
-           sr::shaders::box_filter_mipmap.compute.main_2d_cs, sr::shaders::box_filter_mipmap.compute.main_2d_array_cs,
-           sr::shaders::box_filter_mipmap.compute.main_3d_cs};
-    static_assert(sizeof(entries) / sizeof(entries[0]) == int(mipmap_variant::count_), "one entry point per variant");
-
-    // One variant per instance, so only what a caller actually asks for is ever compiled — the laziness the
-    // per-variant cache used to provide, now a property of which instances exist.
-    auto const shader = entries[int(params())]->acquire(ctx);
-    co_await cc::async_settled(shader);
-    auto const* const compiled = shader->try_value();
-    if (compiled == nullptr)
-    {
-        fail_init(); // the shader did not build, and will not until a reload
-        co_return;
-    }
-
-    auto layout = ctx.cached.acquire_binding_group_layout(compiled->bindings);
-    auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {layout}});
-
-    auto const pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
-    co_await cc::async_settled(pipeline);
-    auto const* const built = pipeline->try_value();
+    // One key per instance, so only the shapes and formats a caller actually asks for are ever compiled.
+    auto const program = program_of(ctx, params().shape, {.target_format = params().format});
+    co_await cc::async_settled(program.pipeline);
+    auto const* const built = program.pipeline->try_value();
     if (built == nullptr)
     {
-        fail_init();
+        fail_init(); // the shader did not build, which a format SGL has no image of never does
         co_return;
     }
 
     // Published as one immutable block, so execute reads a program that is either wholly there or not there at all.
-    _program = std::make_shared<mipmap_program const>(mipmap_program{.layout = cc::move(layout), .pipeline = *built});
+    _program = std::make_shared<mipmap_program const>(
+        mipmap_program{.layout = ctx.cached.acquire_binding_group_layout(program.bindings), .pipeline = *built});
     co_return;
 }
 
@@ -75,11 +78,11 @@ void box_filter_mipmap_routine::_dispatch_level(sg::command_list& cmd,
                                                 int z)
 {
     // execute already established that the routine is ready and its program built, once for the whole chain.
+    // Every shape's binding declares its source first and its target second.
     auto& ctx = cmd.context();
-    auto const& names = traits_of[int(self.params())];
-
-    auto const group = ctx.transient.create_binding_group(
-        self._program->layout, {{.name = names.source, .view = source}, {.name = names.target, .view = target}});
+    sg::slotted_view const views[]
+        = {{.slot = sg::binding_slot(0), .view = source}, {.slot = sg::binding_slot(1), .view = target}};
+    auto const group = ctx.transient.create_binding_group(self._program->layout, views);
 
     cmd.compute.bind_pipeline(*self._program->pipeline);
     cmd.compute.bind_group(0, *group);

@@ -740,26 +740,34 @@ bool fsr_stream::record_clear(sg::command_list& cmd, FfxClearFloatJobDescription
     if (r == nullptr || !is_set(r->texture))
         return true; // nothing there to clear, as for an optional input the caller left out
 
+    auto const format = r->texture.format();
+    auto const* const clear = programs->clear_for(format);
+    if (clear == nullptr)
+    {
+        CC_LOG_ERROR("fsr: a clear of an image of pixel_format {}, which sr builds no clear for", int(format));
+        return false;
+    }
+
     // Mip 0 only, as AMD's own backend clears through the view of the first mip.
     auto const target = r->texture.as_any_image_view({.mip = 0});
-    if (is_uint_format(r->texture.format()))
+    cmd.compute.bind_pipeline(*clear->program.pipeline);
+    if (is_uint_format(format))
     {
         auto bits = u32(0);
         cc::memcpy(&bits, &job.color[0], sizeof(bits));
-        auto const group = ctx->transient.create_binding_group(cmd, programs->clear_uint.layout,
-                                                               shaders::fsr_clear_uint_bindings{.gTarget = target});
-        cmd.compute.bind_pipeline(*programs->clear_uint.pipeline);
-        cmd.compute.bind<shaders::fsr_clear_uint_bindings>(*group);
-        cmd.compute.set_inline_constants(shaders::fsr_clear_uint_constants{.value = bits});
+        auto const group = ctx->transient.create_binding_group(cmd, clear->program.layout,
+                                                               sgl_shaders::fsr_clear_uint_target{.target = target});
+        cmd.compute.bind_group(0, *group);
+        cmd.compute.set_inline_constants(sgl_shaders::fsr_clear_uint_constants{.value = bits}.to_block());
     }
     else
     {
-        auto const group = ctx->transient.create_binding_group(cmd, programs->clear_float.layout,
-                                                               shaders::fsr_clear_float_bindings{.gTarget = target});
-        cmd.compute.bind_pipeline(*programs->clear_float.pipeline);
-        cmd.compute.bind<shaders::fsr_clear_float_bindings>(*group);
-        cmd.compute.set_inline_constants(
-            shaders::fsr_clear_float_constants{.value = {job.color[0], job.color[1], job.color[2], job.color[3]}});
+        auto const group = ctx->transient.create_binding_group(cmd, clear->program.layout,
+                                                               sgl_shaders::fsr_clear_float_target{.target = target});
+        cmd.compute.bind_group(0, *group);
+        auto const value = sgl_shaders::fsr_clear_float_constants{
+            .value = tg::vec4f(job.color[0], job.color[1], job.color[2], job.color[3])};
+        cmd.compute.set_inline_constants(value.to_block());
     }
     cmd.compute.dispatch_threads(r->texture.width(), r->texture.height(), 1);
     return true;

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
@@ -9,21 +11,32 @@
 #include <memory>
 
 /// Which shader entry point a texture shape reads through, and the only thing its dimension decides.
-///
-/// This is the routine's PARAMETER, so it is public: the registry holds one box_filter_mipmap_routine instance per
-/// variant, and a caller naming the type has to be able to name the parameter too.
 enum class sr::mipmap_variant : sg::u8
 {
     tex_1d,
     tex_1d_array,
     tex_2d,
-    tex_2d_array, ///< also every cube and cube array, whose UAV is a 2D array of faces
+    tex_2d_array, ///< also every cube and cube array, whose image is a 2D array of faces
     tex_3d,
 
     count_
 };
 
-/// One mipmap variant's compiled program: the group layout its bindings define, and the pipeline over it.
+/// What one box_filter_mipmap_routine instance is for: the shape it reads through and the format it writes.
+///
+/// This is the routine's PARAMETER, so it is public: the registry holds one instance per key, and a caller prewarming
+/// one names the shape and the format of the textures it will hand `execute`.
+/// The format is the texture's own, and must be a float, unorm or snorm one SGL names as an image format.
+struct sr::mipmap_key
+{
+    mipmap_variant shape = mipmap_variant::tex_2d;
+    sg::pixel_format format = sg::pixel_format::rgba8_unorm;
+
+    constexpr bool operator==(mipmap_key const&) const = default;
+    [[nodiscard]] friend u64 hash(mipmap_key const& key) { return cc::make_hash(u64(key.shape), u64(key.format)); }
+};
+
+/// One mipmap key's compiled program: the group layout its bindings define, and the pipeline over it.
 ///
 /// The two travel together because both fall out of the same compiled shader, and a caller needs the layout to
 /// build its binding group — so caching only the pipeline would mean waiting on that shader a second time.
@@ -43,8 +56,9 @@ struct sr::mipmap_program
 ///
 /// **Every mippable shape works** — 1D, 2D and 3D, arrays and cubes alike — because a mip chain is not a 2D
 /// idea.
-/// HLSL cannot abstract over view dimensions, so there is one shader entry point per dimension and `execute`
-/// picks between them from the texture's own type; a shape that cannot carry mips at all fails to compile.
+/// There is one shader entry point per dimension, and `execute` picks between them from the texture's own type; a
+/// shape that cannot carry mips at all fails to compile.
+/// The shader writes the texture's own format, so each format a caller hands it is a compile of its own.
 /// An array averages within a slice and never across slices, and a cube face is a slice, so nothing bleeds
 /// between faces.
 /// A 3D texture is the one shape that halves in z too, which is why it averages 8 taps rather than 4.
@@ -53,7 +67,7 @@ struct sr::mipmap_program
 /// N+1, so no level is read and written by the same dispatch.
 /// The texture must carry `texture | image` usage and have the levels allocated already —
 /// this fills a chain, it never reshapes one.
-class sr::box_filter_mipmap_routine : public sg::render_routine<box_filter_mipmap_routine, sr::mipmap_variant>
+class sr::box_filter_mipmap_routine : public sg::render_routine<box_filter_mipmap_routine, sr::mipmap_key>
 {
 public:
     /// Generates levels `first_level` through the end of `texture`'s chain from the level below each.
@@ -61,7 +75,7 @@ public:
     /// `first_level` must be >= 1 (level 0 is the source of everything and is never generated) and within the
     /// chain; generating from a level whose own contents are not yet uploaded produces garbage, so the caller
     /// orders this after the upload it depends on.
-    /// Declines while this variant's shader is still compiling, and after a compile that failed.
+    /// Declines while the shader for this shape and format is still compiling, and after a compile that failed.
     /// A texture with no level to generate is not a refusal — level_count says so first.
     template <class Traits>
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd,
@@ -73,9 +87,9 @@ public:
         if (level_count(texture, first_level) == 0)
             return sg::routine_outcome::executed;
 
-        // Acquired ONCE for the whole chain rather than once per level: the variant is fixed by the texture's shape,
-        // so every level of one call lands on the same instance.
-        auto const self = try_acquire(cmd, _variant_of<Traits>());
+        // Acquired ONCE for the whole chain rather than once per level: the key is fixed by the texture's shape and
+        // format, so every level of one call lands on the same instance.
+        auto const self = try_acquire(cmd, {.shape = _variant_of<Traits>(), .format = texture.format()});
         if (!self.is_ready() || self->_program == nullptr)
             return sg::routine_outcome::declined;
 
@@ -202,10 +216,9 @@ protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    /// The one program this instance is for — its variant is params().
+    /// The one program this instance is for — its shape and format are params().
     ///
-    /// Only the variants a caller actually asks for are ever instantiated, which is the laziness the old per-variant
-    /// cache existed to provide: a caller that only mips 2D textures never reaches the 1D, 3D or array shaders,
-    /// because it never acquires those instances.
+    /// Only the keys a caller actually asks for are ever instantiated: a caller that only mips 2D RGBA8 textures
+    /// never compiles the 1D, 3D or array shaders, nor another format's.
     std::shared_ptr<mipmap_program const> _program;
 };

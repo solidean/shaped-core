@@ -51,14 +51,12 @@ Bigger design intent lives in [structure.md](structure.md).
   What the memory buys is a larger tile, and tile size is the lever that still pays.
 - à-trous estimates noise from the sample count alone, assuming one noise width per sample equal to the pixel's luminance.
   A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.
-- Port the rest of sr's HLSL to SGL.
-  Every routine's own shaders are SGL but the compute box-filter mipmap and FSR's two clear jobs, which wait on SGL.
-  They write images of every format, one, two and four channels alike.
-  An SGL image's value has its format's channel count, so one source cannot store into all of them, even with the format an option.
-  `nrd_repack` and `nrd_resolve` are not on this list: they stay HLSL around NRD's own `NRD.hlsli`, whose license allows no translation.
-  The native denoise members and the network now build on every backend; they are tested on dx12 and vulkan alone, since their tests still sit in the DXC-gated list.
+- Hold webgpu and metal to sr's SGL routines.
+  Every routine's own shaders are SGL; only `nrd_repack` and `nrd_resolve` stay HLSL, around NRD's own `NRD.hlsli`, whose license allows no translation.
+  The native denoise members, the network, the compute box-filter mipmap and FSR's clears build on every backend.
+  They are tested on dx12 and vulkan alone, since their tests still sit in the DXC-gated list.
   Moving those tests to the SGL list is what would hold webgpu and metal to them.
-  Each member compiles its last pass for the caller's output format, so it is a routine parametrized on that format, as `mix_routine` is.
+  The box filter's 1D array is the case to watch there: WGSL has no 1D array texture, and SGL writes it as a 2D array one.
 - Two denoise tests worth having and not written yet.
   A method switch on one history — à-trous then SVGF on the same `sr::reconstruct_history` — which is the one branch of `reconstruct_history::_prepare` nothing covers.
   And `options_for` on both members, which maps `quality` and `sharpness` onto pass counts and sigmas and is what any settings UI drives.

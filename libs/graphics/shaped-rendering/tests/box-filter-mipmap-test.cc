@@ -1,3 +1,4 @@
+#include <clean-core/common/utility.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -10,7 +11,7 @@ using namespace cc::primitive_defines;
 // sr::box_filter_mipmap_routine over every mippable shape.
 //
 // A mip chain is not a 2D idea, so the routine has one shader entry point per view dimension and picks between
-// them from the texture's type.
+// them from the texture's type, compiled for the texture's own format.
 // What these pin is that each shape resolves to a variant that records, and that the level accounting is
 // per-shape — an array never halves its slice count, a 3D texture does halve its depth.
 //
@@ -21,19 +22,19 @@ namespace
 {
 constexpr auto mip_usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_dst;
 
-/// Brings every variant up before a command list opens.
+/// Brings every shape up for `format` before a command list opens.
 ///
 /// **A workaround, and here to be found again.**
 /// A tick drives only routines that are already REGISTERED, and `execute` is what registers one — so a caller meeting
-/// a shape for the first time declines that frame and draws on the next.
-/// An app absorbs that; a test asserting on the first call cannot, so it names the variants up front — which couples
+/// a shape or a format for the first time declines that frame and draws on the next.
+/// An app absorbs that; a test asserting on the first call cannot, so it names the keys up front — which couples
 /// this test to a choice the code under test makes.
 /// It goes away once a routine's readiness is an async, where this becomes a co_await on it;
 /// see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
-cc::shared_async<cc::unit> prewarm_every_variant(sg::context& ctx)
+cc::shared_async<cc::unit> prewarm_every_variant(sg::context& ctx, sg::pixel_format format = sg::pixel_format::rgba8_unorm)
 {
     for (auto v = 0; v < int(sr::mipmap_variant::count_); ++v)
-        sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant(v));
+        sr::box_filter_mipmap_routine::prewarm(ctx, {.shape = sr::mipmap_variant(v), .format = format});
     (void)co_await ctx.routines.idle_completion();
 }
 } // namespace
@@ -252,4 +253,101 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging p
     auto const level_2 = co_await read_back(level_2_future);
     REQUIRE(level_2.size() == 1);
     CHECK(level_2[0] == 12); // (4 + 20) / 2
+}
+
+namespace
+{
+/// The floats of a tightly-packed r32_float readback.
+[[nodiscard]] cc::shared_async<cc::vector<f32>> read_back_floats(sg::bytes_future const& future)
+{
+    auto const data = co_await future.bytes();
+    auto values = cc::vector<f32>::create_filled(data.size() / isize(sizeof(f32)), 0.0f);
+    cc::memcpy(values.data(), data.data(), values.size() * isize(sizeof(f32)));
+    co_return values;
+}
+} // namespace
+
+// A format of fewer channels than the four the filter averages stores the leading ones, which is the conversion its
+// shader states; distinct values pin which texels each tap reads, where a constant would pass any wiring.
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap averages a one-channel float format exactly",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    auto const tex = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::r32_float, .width = 4, .height = 4, .mip_levels = 3, .usage = readback_usage});
+
+    // texel (x, y) holds x + 4y, so every average below is an exact float
+    auto base = cc::vector<f32>();
+    for (auto y = 0; y < 4; ++y)
+        for (auto x = 0; x < 4; ++x)
+            base.push_back(f32(x + 4 * y));
+    auto bytes = cc::vector<byte>::create_filled(base.size() * isize(sizeof(f32)), byte(0));
+    cc::memcpy(bytes.data(), base.data(), bytes.size());
+
+    co_await prewarm_every_variant(ctx, sg::pixel_format::r32_float);
+    auto up = ctx.create_command_list();
+    up->upload.bytes_to_texture(tex.raw(), bytes, {.mip_level = 0});
+    CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);
+    ctx.submit_command_list(cc::move(up));
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+
+    auto dl = ctx.create_command_list();
+    auto const level_1_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 1});
+    auto const level_2_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 2});
+    ctx.submit_command_list(cc::move(dl));
+    ctx.advance_epoch();
+
+    auto const level_1 = co_await read_back_floats(level_1_future);
+    REQUIRE(level_1.size() == 4);
+    CHECK(level_1[0] == 2.5f);  // (0 + 1 + 4 + 5) / 4
+    CHECK(level_1[1] == 4.5f);  // (2 + 3 + 6 + 7) / 4
+    CHECK(level_1[2] == 10.5f); // (8 + 9 + 12 + 13) / 4
+    CHECK(level_1[3] == 12.5f); // (10 + 11 + 14 + 15) / 4
+
+    auto const level_2 = co_await read_back_floats(level_2_future);
+    REQUIRE(level_2.size() == 1);
+    CHECK(level_2[0] == 7.5f);
+}
+
+// The one shape that halves in z: eight distinct texels, each tap reading a different one.
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap averages all eight texels of a 3D level",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    auto const tex = ctx.persistent.create_texture_3d({.format = sg::pixel_format::rgba8_unorm,
+                                                       .width = 2,
+                                                       .height = 2,
+                                                       .depth = 2,
+                                                       .mip_levels = 2,
+                                                       .usage = readback_usage});
+
+    // 0, 8, ..., 56: their average, 28, is an exact byte, and a tap reading one texel twice would miss it
+    auto base = cc::vector<byte>();
+    for (auto i = 0; i < 8; ++i)
+        for (auto c = 0; c < 4; ++c)
+            base.push_back(byte(u8(8 * i)));
+
+    co_await prewarm_every_variant(ctx);
+    auto up = ctx.create_command_list();
+    up->upload.bytes_to_texture(tex.raw(), base, {.mip_level = 0});
+    CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);
+    ctx.submit_command_list(cc::move(up));
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+
+    auto dl = ctx.create_command_list();
+    auto const level_1_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 1});
+    ctx.submit_command_list(cc::move(dl));
+    ctx.advance_epoch();
+
+    auto const level_1 = co_await read_back(level_1_future);
+    REQUIRE(level_1.size() == 1);
+    CHECK(level_1[0] == 28);
 }

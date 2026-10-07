@@ -21,8 +21,9 @@ class blit_routine; // fullscreen-triangle blit of a source texture across an op
 class box_filter_mipmap_routine;        // fills a texture's mip chain by 2x2 averaging (box_filter_mipmap_routine.hh)
 class bc_compress_routine;              // a texture to BC1/3/4/5/7 on the GPU, a mip level per call
 class raster_box_filter_mipmap_routine; // the same, through the raster pipeline, for formats no typed UAV covers
-enum class mipmap_variant : u8;         // which entry point a texture shape mips through (the routine's parameter)
-struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
+enum class mipmap_variant : u8;         // which entry point a texture shape mips through
+struct mipmap_key;                      // a shape and the format it writes: the routine's parameter
+struct mipmap_program;                  // one mipmap key's group layout + compute pipeline
 
 // Reconstruction (see reconstruct.hh): one front routine over denoise and upscale members.
 enum class denoise_method : u8;      // which member runs, or automatic

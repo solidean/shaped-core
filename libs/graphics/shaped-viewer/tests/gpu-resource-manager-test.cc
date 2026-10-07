@@ -359,7 +359,8 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
     // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
-    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     (void)co_await ctx.routines.idle_completion();
 
     auto cmd = ctx.create_command_list();
@@ -399,7 +400,8 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
     // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
-    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     (void)co_await ctx.routines.idle_completion();
 
     // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
@@ -455,7 +457,8 @@ ASYNC_INVOCABLE_TEST("sv - a completed RGBA8 texture is replaced by its BC7 enco
     (void)element_of(m, id); // sampled before the swap, as a frame drawing it meanwhile does
 
     // WORKAROUND, the one the mip tests above carry: a tick drives only routines that are already registered.
-    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     sr::bc_compress_routine::prewarm(ctx, sg::pixel_format::bc7_rgba_unorm);
     (void)co_await ctx.routines.idle_completion();
 

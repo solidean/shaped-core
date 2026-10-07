@@ -350,13 +350,15 @@ Fills a texture's mip chain by averaging each level into the next — one comput
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 sr::box_filter_mipmap_routine::execute(cmd, texture, first_level = 1);  // generates first_level..end from the level below each
 sr::box_filter_mipmap_routine::level_count(texture, first_level = 1);   // -> int — dispatches it WOULD record; ask before committing, for a work budget
-sr::box_filter_mipmap_routine::prewarm(ctx);                            // warm the compiles ahead of the first use
+sr::box_filter_mipmap_routine::prewarm(ctx, {.shape = sr::mipmap_variant::tex_2d, .format = f});   // warm one shape and format's compile
+// keyed by sr::mipmap_key { shape, format }: box_filter_mipmap.sgl writes `as texel[target_format]`, so EACH FORMAT is a compile
+//   a float, unorm or snorm format SGL names as an image format; one of fewer channels keeps the average's leading ones
 // EVERY mippable shape: texture_1d/_2d/_3d, arrays, cube, cube array. Templated on the texture, so a multisampled one fails to COMPILE
-//   one HLSL entry point per view dimension (HLSL cannot abstract over them); a cube rides the 2D-array one, since its UAV is already a 2D array
+//   one entry point per view dimension; a cube rides the 2D-array one, since its image is already a 2D array
 //   arrays average WITHIN a slice, never across — so cube faces never bleed. 3D is the one shape halving in z, so it is an 8-tap average
 // texture needs texture | image usage, and the levels ALLOCATED already — this fills a chain, never reshapes one
 // source is bound as a single-mip view of level N, target as the UAV of N+1, so no level is read and written by one dispatch
-// no-op when that variant's shader did not compile (a broken 3D shader leaves 2D working), or when there is no level to generate
+// declines when that key's shader did not compile (a broken 3D shader leaves 2D working); a no-op when there is no level to generate
 // NOT for a format `sg::supports_typed_uav` refuses — an sRGB one above all; that is the raster routine below
 ```
 

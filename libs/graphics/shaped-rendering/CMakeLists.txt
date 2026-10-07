@@ -228,7 +228,7 @@ endif()
 # sr's own shader packages, one per language: a package has one.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
 # A routine's shaders go in the SGL package, which reaches dx12, vulkan, webgpu and metal from one source.
-# The HLSL package holds the shaders not yet ported; docs/TODO.md says what holds each back.
+# The HLSL package holds the shaders that include a vendor SDK's own headers: FSR 3.1's passes and NRD's packing.
 #
 # Deliberately not gated on a compiler existing.
 # Package generation needs none — it emits C++ descriptors and embeds the sources;
@@ -270,33 +270,30 @@ sc_add_shader_package(
         atrous_denoise.sgl:*
         svgf.sgl:*
         fsr_prepare_depth.sgl:*
+        fsr_clear_float.sgl:*
+        fsr_clear_uint.sgl:*
+        box_filter_mipmap.sgl:*
 )
 
 # sr's SGL modules, which another package `use`s by naming this directory in its own MODULE_DIRS.
 # Module `slug` is Slug's coverage: a mesh's own pixel shader draws a shape on its surface through it.
 set(SR_SGL_MODULE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders/modules" CACHE INTERNAL "sr's SGL module directory")
 
-sc_add_shader_package(
-    TARGET     shaped-rendering
-    NAME       sr_shaders
-    NAMESPACE  sr::shaders
-    SOURCE_DIR shaders
-    LANGUAGE   hlsl
-    SHADERS
-        box_filter_mipmap.hlsl:compute:main_1d_cs
-        box_filter_mipmap.hlsl:compute:main_1d_array_cs
-        box_filter_mipmap.hlsl:compute:main_2d_cs
-        box_filter_mipmap.hlsl:compute:main_2d_array_cs
-        box_filter_mipmap.hlsl:compute:main_3d_cs
-        fsr_clear_float.hlsl:compute:main_cs
-        fsr_clear_float.hlsl:binding:fsr_clear_float_bindings
-        fsr_clear_float.hlsl:constants:gConstants
-        fsr_clear_uint.hlsl:compute:main_cs
-        fsr_clear_uint.hlsl:binding:fsr_clear_uint_bindings
-        fsr_clear_uint.hlsl:constants:gConstants
-        ${_sr_fsr_shaders}
-        ${_sr_nrd_shaders}
-)
+# The HLSL package holds only what a vendor SDK brings, so a build without either SDK has none.
+set(_sr_hlsl_shaders ${_sr_fsr_shaders} ${_sr_nrd_shaders})
+if(_sr_hlsl_shaders)
+    sc_add_shader_package(
+        TARGET     shaped-rendering
+        NAME       sr_shaders
+        NAMESPACE  sr::shaders
+        SOURCE_DIR shaders
+        LANGUAGE   hlsl
+        SHADERS    ${_sr_hlsl_shaders}
+    )
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_HLSL_SHADERS=1)
+else()
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_HLSL_SHADERS=0)
+endif()
 
 # Test executable.
 # The window/input tests and the imgui arithmetic (scissor clamping, ortho projection, texture-rect packing) need no device and run everywhere;
@@ -411,13 +408,14 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE tests/imgui-manual-test.cc)
     endif()
 
-    # The routines whose shaders are still HLSL need DXC, which reaches dx12 and vulkan and nothing else.
-    # A build with DXC has no other backend, so these never meet a context their shaders cannot reach.
+    # The tests held to dx12 and vulkan, which a build with DXC has and no other: NRD's and FSR's HLSL need DXC.
+    # The SGL routines among them are listed here until webgpu and metal are held to them too (docs/TODO.md).
     if(_sr_test_backends AND SC_HAS_DXC_COMPILER)
         target_sources(shaped-rendering-test PRIVATE
             tests/box-filter-mipmap-test.cc
             tests/denoise-test.cc
             tests/denoise-reference-test.cc
+            tests/fsr-clear-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
             tests/nrd-test.cc
