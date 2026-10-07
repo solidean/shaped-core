@@ -694,8 +694,16 @@ struct checker
     type_id check_function_call(function_scope& scope, ast::expr_id id, ast::call const& call, local_name const& local);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
     [[nodiscard]] type_id resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text);
-    /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.
+    /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`, and the value type `texel[.rgba8_unorm]` (CHK-390); `none`
+    /// where `node` heads with none of those names.
     [[nodiscard]] type_id resolve_resource_applied(i32 file, ast::expr_id expr, ast::index const& node);
+    /// The position in `k_image_formats` an image's argument `argument` names, an enum case or a const of one
+    /// (CHK-200); -1 where it names none, which the caller reports, and `k_format_failed` where the const it names
+    /// failed, which was reported.
+    [[nodiscard]] i32 resolve_image_format(i32 file, ast::expr_id argument);
+    static constexpr i32 k_format_failed = -2;
+    /// `texel[F]`, the scalar or plain vector an image of format `F` loads and stores (CHK-390).
+    [[nodiscard]] type_id resolve_texel(i32 file, ast::expr_id expr, ast::index const& node);
     /// `mut` or `out` in front of `inner`, which only a buffer and an image take.
     [[nodiscard]] type_id qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access);
     /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
@@ -871,6 +879,10 @@ struct checker
     void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
     [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
+    /// True where the type `type` of a cast is written `texel[F]`, which alone may change a width (CHK-392).
+    [[nodiscard]] bool is_texel_type_expr(i32 file, ast::expr_id type) const;
+    /// `x as texel[F]` of another type than the texel, `written` being its `texel[F]` (CHK-391, CHK-392).
+    [[nodiscard]] type_id check_texel_conversion(i32 file, ast::expr_id id, type_id from, type_id to, ast::expr_id written);
 
     // ---- statements and control flow (check_stmt.cc) ----------------------------------------------------------------
 

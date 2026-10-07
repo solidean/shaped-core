@@ -678,6 +678,54 @@ struct flattener
         return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
     }
 
+    /// CHK-391: `value as texel[F]` of the texel type `type` and of another width: its leading components, or
+    /// all of them and the rest of (0, 0, 0, 1), from an operand that is evaluated once.
+    flat_expr_id texel_conversion(flat_expr_id value, type_id type, ast::expr_id id)
+    {
+        if (!is_valid(value))
+            return fail();
+        auto const value_type = entry.at(value).type;
+        auto const* const source = c.out.builtin_type_of(value_type);
+        auto const* const texel = c.out.builtin_type_of(type);
+        if (source == nullptr || texel == nullptr)
+            return fail();
+        auto const from_width = source->leaf_count;
+        auto const to_width = texel->leaf_count;
+        if (to_width < from_width)
+        {
+            auto letters = swizzle{.count = i8(to_width)};
+            for (auto i = 0; i < to_width; ++i)
+                letters.fields[i] = i8(i);
+            return swizzle_of(value, letters, type, id);
+        }
+
+        // a widened texel is a vector, whose fields are its component
+        auto const component = field_type(type, 0);
+        auto arguments = cc::vector<flat_expr_id>();
+        if (from_width == 1)
+            arguments.push_back(value);
+        else
+        {
+            auto const once = evaluate_once(value, "texel", id);
+            for (auto i = 0; i < from_width; ++i)
+            {
+                auto const operand = i == 0 ? once.first : again(once.later, id);
+                arguments.push_back(add_expr(component, id, flat_member{.object = operand, .member = i}));
+            }
+        }
+        for (auto i = from_width; i < to_width; ++i)
+        {
+            auto const fill = i == 3 ? 1 : 0;
+            if (texel->leaf_kind == value_kind::scalar_float)
+                arguments.push_back(add_expr(component, id, flat_literal{.value = f64(fill)}));
+            else
+                arguments.push_back(add_expr(
+                    component, id,
+                    flat_int_literal{.value = fill, .is_unsigned = texel->leaf_kind == value_kind::scalar_uint}));
+        }
+        return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
+    }
+
     flat_expr_id read_swizzle(swizzled const& s, type_id type, ast::expr_id id)
     {
         return swizzle_of(flatten_expr(s.operand), s.letters, type, id);
@@ -839,6 +887,8 @@ struct flattener
         if (auto const* const cast = e.node.try_as<ast::cast>())
         {
             auto const value = flatten_expr(cast->value);
+            if (where.kind == target_kind::texel_conversion)
+                return texel_conversion(value, type, id);
             // A cast to the type the value already has is the value itself.
             if (where.kind != target_kind::overload)
                 return value;

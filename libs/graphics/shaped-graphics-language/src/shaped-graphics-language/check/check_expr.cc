@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
@@ -332,6 +333,72 @@ void checker::check_texel_store(function_scope& scope, ast::expr_id value, type_
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
 
+namespace
+{
+/// The name of the scalar family whose leaves are `kind`, which is the stem of its vectors' names; empty for none.
+cc::string_view family_of(value_kind kind)
+{
+    switch (kind)
+    {
+    case value_kind::scalar_float:
+        return "float";
+    case value_kind::scalar_int:
+        return "int";
+    case value_kind::scalar_uint:
+        return "uint";
+    case value_kind::scalar_half:
+        return "half";
+    case value_kind::scalar_short:
+        return "short";
+    case value_kind::scalar_ushort:
+        return "ushort";
+    case value_kind::boolean:
+        return "bool";
+    case value_kind::none:
+        return {};
+    }
+    return {};
+}
+} // namespace
+
+bool checker::is_texel_type_expr(i32 file, ast::expr_id type) const
+{
+    auto const* const applied = ast::is_valid(type) ? ast_of(file).at(type).node.try_as<ast::index>() : nullptr;
+    return applied != nullptr && is_named(file, applied->object, "texel");
+}
+
+type_id checker::check_texel_conversion(i32 file, ast::expr_id id, type_id from, type_id to, ast::expr_id written)
+{
+    auto const where = span_of(file, id);
+    auto const spelled = text_of(file, span_of(file, written));
+    auto const* const source = out.builtin_type_of(from);
+    auto const* const texel = out.builtin_type_of(to);
+    auto const family = source != nullptr ? family_of(source->leaf_kind) : cc::string_view();
+    auto const plain_name = source == nullptr || source->leaf_count == 1
+                              ? cc::string(family)
+                              : cc::format("{}{}", family, source->leaf_count);
+    // CHK-391: a scalar or a plain vector, which `vec3`, `pos3` and `hpos4` are not
+    if (texel == nullptr || family.empty() || source->leaf_count > 4 || out.name_of(from) != plain_name)
+    {
+        report(diagnostic_kind::no_matching_overload, file, where,
+               cc::format("{} as {}: only a scalar or a plain vector converts to a texel", out.name_of(from), spelled));
+        return error_type;
+    }
+    // CHK-392: a width changes here and a kind never does, which CHK-197's conversion does first
+    if (source->leaf_kind != texel->leaf_kind)
+    {
+        auto const converted = source->leaf_count == 1
+                                 ? cc::string(family_of(texel->leaf_kind))
+                                 : cc::format("{}{}", family_of(texel->leaf_kind), source->leaf_count);
+        report(diagnostic_kind::type_mismatch, file, where,
+               cc::format("{} as {}: the texel is {}, and a kind converts first: `(v as {}) as {}`", out.name_of(from),
+                          spelled, out.name_of(to), converted, spelled));
+        return error_type;
+    }
+    set_target(file, id, {.kind = target_kind::texel_conversion});
+    return to;
+}
+
 type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node)
 {
     auto const file = scope.file;
@@ -342,6 +409,8 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
         return error_type;
     if (from == to)
         return to;
+    if (is_texel_type_expr(file, node.type))
+        return check_texel_conversion(file, id, from, to, node.type);
 
     // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
     auto const* const candidates = operators_seen_from(file).get_ptr("as");
