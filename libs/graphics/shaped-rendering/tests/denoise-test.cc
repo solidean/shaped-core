@@ -930,6 +930,14 @@ ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call 
     // call — `try_acquire` reports readiness rather than establishing it.
     co_await prewarm(ctx);
 
+    // A reload runs the init again on the same routine, and it must not open NGX a second time.
+    // An open no close balances keeps NGX open for the device until exit, where its library releases the device
+    // after the driver's threads are gone, and the process never exits.
+    REQUIRE(sr::impl::dlss_open_count(ctx) == 1);
+    sg::signal_reload();
+    co_await prewarm(ctx);
+    CHECK(sr::impl::dlss_open_count(ctx) == 1);
+
     // Every guide it requires, all at the input extent.
     // The values are a plausible surface rather than a rendered one: what is under test is that NGX accepts the set
     // and writes the output, and a network's opinion of a synthetic image is not something to assert on.

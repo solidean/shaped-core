@@ -354,6 +354,19 @@ void dlss_release_stream(dlss_stream* stream)
     delete stream;
 }
 
+int dlss_open_count(sg::context const& ctx)
+{
+    auto* const device = device_of(ctx);
+    return ngx().lock(
+        [&](ngx_state& s)
+        {
+            for (auto const& i : s.open)
+                if (i->device == device)
+                    return i->opens;
+            return 0;
+        });
+}
+
 int dlss_released_stream_count()
 {
     return released_streams.load();

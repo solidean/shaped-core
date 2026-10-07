@@ -80,7 +80,5 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 
 - **The viewer's tests take about 4.5 minutes in a debug build**, so its binary carries a 360 s timeout of its own rather than sg's 180 s.
   The expensive tests should narrow themselves under `nx::is_thorough()` and the allowance go back.
-- **`shaped-rendering-test` hung once in the `debug-nopch` leg of `check`**, killed at 180 s with nothing on stderr.
-  Eight repeats of that binary alone in the same preset passed in about 25 s each, so it is unreproduced.
 - Re-test the NVIDIA `InterlockedOr` driver bug on each new driver; the wavefront's counter workaround rests on the shape of its code.
 - Whether Sponza gets a committed capture: the asset is a 4 GB on-request fetch, so CI cannot produce one.

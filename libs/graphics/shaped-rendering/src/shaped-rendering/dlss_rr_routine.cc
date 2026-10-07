@@ -33,7 +33,11 @@ dlss_rr_routine::~dlss_rr_routine()
 cc::shared_async<cc::unit> dlss_rr_routine::init(sg::routine_init_scope scope)
 {
     _ctx = &scope.context();
-    _instance = impl::dlss_open(*_ctx);
+    // Init runs again on every reload, on the same routine, and an instance is still the device's after one.
+    // Opening again would count an open that no close balances, so NGX would never shut down for the device and its
+    // feature library would keep the device until process exit, where releasing it deadlocks in the driver.
+    if (_instance == nullptr)
+        _instance = impl::dlss_open(*_ctx);
     co_return;
 }
 
