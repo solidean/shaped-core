@@ -6,13 +6,22 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 
 ## In flight
 
-- **The remaining HLSL shaders move to SGL** — atrous, SVGF and the other HLSL-only sr routines.
-  SGL already unrolls loops itself; what it lacks is a way for the source to ask for it on one loop.
-  Anything else a port turns out to need is a question first, not a language change made on the way.
-- **A rasterization path for the PBR materials** — first slice landed as `path_integrator::raster` ([raster.md](../raster.md)).
+- **A rasterization path for the PBR materials** — first slice landed as `render_mode::raster` ([raster.md](../raster.md)).
   The same OpenPBR materials are drawn rather than traced, through the generated material body the hit groups use, lit directly and unshadowed.
   Its primary-hit G-buffer lands in the guide slots every frame, which is what a later lighting pass reads.
-  Left in it: quadric batches, antialiasing, blended transparency, lights seen by the camera, and a depth prepass.
+  Left in it: quadric batches, antialiasing, transparency, lights seen by the camera, and a depth prepass.
+
+## Decided for the raster path and the hybrid
+
+- **Quality over cost for what is not opaque.**
+  Glass gets depth peeling, layered rather than sorted, and foliage-style cutouts get alpha clipping.
+  The single cut at one half the first slice makes is the stand-in until then.
+- **Ray tracing is the first choice and never a requirement.**
+  Interactively the hybrid is the mode: rasterized primaries, lighting by hardware ray tracing or by the ray-query polyfill where there is none.
+  So `view_renderer` must stop requiring the path tracer to come up before a raster frame can draw.
+- **A G-buffer holding all of OpenPBR is too much.**
+  A visibility buffer is the approach to try first — instance and primitive per pixel, the hit rebuilt where it is lit, which is the wavefront's own hit record.
+  Its cost is real, so it is the first candidate rather than the decision; the design review weighs it.
 
 ## Next, in order
 
@@ -52,6 +61,15 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 ### SGL
 
 - No array constants yet, so lookup tables live inside functions.
+- **Three HLSL shaders are left, each waiting on a language decision.**
+  - `box_filter_mipmap` and FSR's two clear passes store a `float4` into an image of whatever format the host picks.
+    SGL types an image's value by its format, so one body cannot store into `r16_float` and `rgba16_float` alike.
+    The candidates are an explicit four-wide store beside the strict one, or an image that names its value type as a texture does.
+  - `nrd_repack` and `nrd_resolve` call NVIDIA's own `NRD.hlsli`.
+    An `@extern` HLSL function would keep that, dx12 and vulkan only.
+    A port to SGL would be portable, but NRD's license grants modification of its sample code alone and distribution in object code alone, so its shaders cannot be translated into this repository.
+    A clean implementation from NRD's documented encodings, pinned by tests against NRD's own functions, is the portable route, and a question for whoever owns the license call.
+- `is_nan` and `is_inf` take floats only: WGSL cannot bitcast a lone `f16`, so halves want a test of their own.
 
 ### Kept as decided
 
