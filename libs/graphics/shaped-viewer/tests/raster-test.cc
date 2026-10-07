@@ -514,7 +514,7 @@ ASYNC_INVOCABLE_TEST("sv - a raster layer's capture finishes on its first drawn 
         auto scene = view.add_scene();
         scene.add_mesh(mesh);
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(40);
-        scene.settings({.integrator = sv::path_integrator::raster});
+        scene.settings({.mode = sv::render_mode::raster});
         REQUIRE(cc::current_time_steady_secs() - start < 35.0);
     }
     co_await cc::async_settled(sv::background_work(ctx));

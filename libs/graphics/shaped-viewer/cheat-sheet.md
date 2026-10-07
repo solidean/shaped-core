@@ -50,8 +50,8 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; path_integrator integrator; int rounds_per_frame; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
-sv::path_integrator              // wavefront (default) | megakernel | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+sv::render_mode              // wavefront (default) | megakernel | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
@@ -847,7 +847,7 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   One that cannot run presents the raw mean and logs once.
 - **Only the plan path denoises.** `view_renderer::execute`, the single-view entry point, still returns the raw accumulator.
 
-**Raster layers** (`render_settings::integrator = path_integrator::raster`, [docs/raster.md](docs/raster.md)) go through the same plan trace, and draw instead.
+**Raster layers** (`render_settings::mode = render_mode::raster`, [docs/raster.md](docs/raster.md)) go through the same plan trace, and draw instead.
 - **Every frame is final**: the accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `is_accumulation_converged` and a capture finish at once.
   A frame drawn through a stand-in material is not final, and restarts next frame.
 - **The G-buffer is written every frame, denoised or not**, into the guide slots of the same meaning.

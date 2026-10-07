@@ -72,7 +72,7 @@ struct background;
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
-enum class path_integrator : u8; // how a layer is drawn: one of two path tracers, or raster (render_settings.hh)
+enum class render_mode : u8; // how a layer is drawn: one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;

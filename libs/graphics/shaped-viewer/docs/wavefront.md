@@ -1,7 +1,7 @@
 # The wavefront path tracer
 
 **Built, and the default.**
-The megakernel in [tracer_pipeline.sgl](../shaders/tracer_pipeline.sgl), one ray-tracing pipeline whose raygen walks every path to its end in registers, stays as `path_integrator::megakernel`.
+The megakernel in [tracer_pipeline.sgl](../shaders/tracer_pipeline.sgl), one ray-tracing pipeline whose raygen walks every path to its end in registers, stays as `render_mode::megakernel`.
 This document is the wavefront's shape, the decisions behind it, the alternatives that were weighed and rejected, and what it measured.
 
 ## Why
@@ -236,14 +236,14 @@ On the Radeon 780M, where pixel order always worked, the wavefront measures:
 5. The wavefront itself: slots, stages, sort, the sum-and-count accumulator, drain, generations.
 6. Parity: analytic-light and environment MIS, decals, quadrics, media, the guides, the split signal, motion and primary depth.
 7. Measurement, the benchmark and a one-off image comparison against the megakernel.
-8. The wavefront becomes the default, and the megakernel stays as a choice — `render_settings::integrator`.
+8. The wavefront becomes the default, and the megakernel stays as a choice — `render_settings::mode`.
 
 The plan ended with deleting the megakernel.
 It stays because neither tracer wins everywhere: the megakernel is about twice as fast on a shallow scene, and the wavefront far ahead on a deep one.
 
 ### Where it stands
 
-Every step has landed: the wavefront traces a layer unless `render_settings::integrator` asks for the megakernel.
+Every step has landed: the wavefront traces a layer unless `render_settings::mode` asks for the megakernel.
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
 A frame whose image changed restarts and drains, a still one carries for `rounds_per_frame` rounds, and a layer that denoises hands the spatial member the tallies' per-pixel counts.
 Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the Cornell box, media, glass and cutouts,

@@ -26,7 +26,7 @@ inline constexpr u32 accumulation_frame_cap = 4096;
 /// The two tracers converge to the same image; they differ in what a frame costs and how a moving image looks.
 /// Neither wins everywhere: the megakernel is about twice as fast on a shallow scene, the wavefront far ahead wherever paths run deep, as in a scattering medium.
 /// libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
-enum class sv::path_integrator : sv::u8
+enum class sv::render_mode : sv::u8
 {
     /// One ray-tracing dispatch per frame, every path traced to its end inside it.
     /// A frame costs `render_settings::samples_per_pixel` samples per pixel.
@@ -64,7 +64,7 @@ struct sv::render_settings
     i32 max_bounces = 5;
 
     /// Which path tracer traces this layer, or `raster` to draw it instead; switching restarts its image.
-    path_integrator integrator = path_integrator::wavefront;
+    render_mode mode = render_mode::wavefront;
 
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///

@@ -56,7 +56,7 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         // A rasterized layer writes its whole G-buffer every frame, denoised or not: it is what a lighting pass after it reads.
         // The slots are the guides', in the guides' formats, so a denoiser or a hybrid pass reads either path's alike.
         // It never denoises, since every frame it draws is final.
-        if (v.layers[i].settings.integrator == path_integrator::raster)
+        if (v.layers[i].settings.mode == render_mode::raster)
         {
             out.push_back({.id = temporal_id::normal_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
             out.push_back({.id = temporal_id::depth_guide(u8(i)), .format = sg::pixel_format::r32_float});

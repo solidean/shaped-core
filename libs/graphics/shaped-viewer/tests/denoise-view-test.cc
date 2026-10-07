@@ -137,7 +137,7 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
                                        sr::denoise_method method,
                                        cc::string const& path,
                                        int accumulate = 2,
-                                       sv::path_integrator integrator = sv::path_integrator::megakernel)
+                                       sv::render_mode mode = sv::render_mode::megakernel)
 {
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
@@ -165,10 +165,8 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
         // No frame budget: it sizes a still frame by the GPU's own timing, so a capture at `accumulate` frames would hold
         // however many samples this machine reached, and two captures would compare different estimates.
-        scene.settings({.samples_per_pixel = 1,
-                        .integrator = integrator,
-                        .frame_budget_ms = 0.0f,
-                        .reconstruct = {.denoiser = method}});
+        scene.settings(
+            {.samples_per_pixel = 1, .mode = mode, .frame_budget_ms = 0.0f, .reconstruct = {.denoiser = method}});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
         // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.
@@ -261,7 +259,7 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's
     auto const young_raw_path = cc::format("{}/sv-wavefront-young-raw.png", cc::temp_directory_path());
     auto const temporal_path = cc::format("{}/sv-wavefront-automatic.png", cc::temp_directory_path());
 
-    auto const wavefront = sv::path_integrator::wavefront;
+    auto const wavefront = sv::render_mode::wavefront;
     co_await capture_box(ctx, sr::denoise_method::none, reference_path, 16);
     co_await capture_box(ctx, sr::denoise_method::none, raw_path, 16, wavefront);
     co_await capture_box(ctx, sr::denoise_method::atrous, spatial_path, 32, wavefront);

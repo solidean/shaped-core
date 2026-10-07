@@ -759,7 +759,7 @@ TEST("sv - a raster layer implies its G-buffer and nothing a denoiser keeps")
     v.id = sv::view_id::from_string("raster");
     auto& scene = sv::ensure_scene_3d(v);
     scene.items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
-    scene.settings.integrator = sv::path_integrator::raster;
+    scene.settings.mode = sv::render_mode::raster;
     // Asked for, and ignored: a raster frame is final, so there is nothing to denoise.
     scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
     auto const raster = sv::view_index(def.views.size());

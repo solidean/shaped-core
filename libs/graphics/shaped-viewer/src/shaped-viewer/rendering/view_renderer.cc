@@ -510,7 +510,7 @@ constexpr i32 max_budgeted_rounds = 64;
                                               impl::temporal_slot& slot,
                                               bool scaled)
 {
-    if (settings.integrator == path_integrator::megakernel)
+    if (settings.mode == render_mode::megakernel)
         return pathtrace_routine::execute(cmd, d);
 
     auto const extent = tg::vec2i(d.output.width(), d.output.height());
@@ -856,7 +856,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The integrator is folded in too: both converge to the same image, but a mean must not hold samples of both.
     auto const hash
         = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation),
-                           cc::make_hash(u32(l.settings.integrator)));
+                           cc::make_hash(u32(l.settings.mode)));
 
     // The same, with the camera left out: what a temporal denoiser's history restarts on.
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
@@ -887,7 +887,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     // A rasterized layer draws its final image and its G-buffer in one frame, so nothing below — accumulation,
     // denoising, upscaling — has anything to do with it.
-    if (l.settings.integrator == path_integrator::raster)
+    if (l.settings.mode == render_mode::raster)
         return raster_layer(
             cmd, v, l, tr.layer, tr.resolution,
             {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash}, rec, *slot,
@@ -1069,7 +1069,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // finish different numbers of paths, so one count for the image would misjudge every one of them.
     // Transient, since the tallies hold the counts and the resolve rewrites every pixel each frame.
     auto const sample_counts
-        = has_guides && l.settings.integrator == path_integrator::wavefront
+        = has_guides && l.settings.mode == render_mode::wavefront
             ? ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
                                                .width = input_extent[0],
                                                .height = input_extent[1],
@@ -1405,7 +1405,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     fc.decal_count = u32(decals.decals.size());
     auto const bg = background_gpu::from(scene->background);
     auto const hash = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
-                                       cc::make_hash(u32(scene->settings.integrator)));
+                                       cc::make_hash(u32(scene->settings.mode)));
 
     // No plan here to size the view's temporal inputs, so this path resolves the ones it needs itself.
     // The layer index is the primary scene_3d's, which `primary_scene_3d` already found.
@@ -1425,7 +1425,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     if (acc.resized)
         store.set_payload_bytes(v.id, texture_bytes(v.resolution, sg::pixel_format::rgba32_float));
 
-    if (scene->settings.integrator == path_integrator::raster)
+    if (scene->settings.mode == render_mode::raster)
     {
         // No plan sized the G-buffer either, so this path ensures it beside the image.
         for (auto const& s : raster_slots)

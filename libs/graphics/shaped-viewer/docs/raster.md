@@ -1,7 +1,7 @@
 # The raster path
 
 **Built, and a choice rather than the default.**
-A layer whose `render_settings::integrator` is `path_integrator::raster` is drawn by sg raster pipelines instead of traced: the same scene, the same OpenPBR materials, lit directly.
+A layer whose `render_settings::mode` is `render_mode::raster` is drawn by sg raster pipelines instead of traced: the same scene, the same OpenPBR materials, lit directly.
 It is raster alone for now, and it is shaped as the base the interactive hybrid mode grows from.
 That mode is rasterized primary visibility, then ray-traced lighting through a radiance cache ([rendering-roadmap.md](plans/rendering-roadmap.md)).
 This document is what a raster frame draws, how it shares its materials with the tracer, the G-buffer seam a hybrid lighting pass reads, and what is not done yet.
@@ -29,12 +29,12 @@ one draw per triangle item ─▶ environment where nothing was drawn
 
 ## Selecting it
 
-**A third `path_integrator`, not a separate mode setting.**
-`integrator` already answers "how is this layer's image produced from its scene", already restarts the image when it changes, and is already folded into the trace hash.
+**A third `render_mode`, not a separate setting.**
+`render_settings::mode` already answers "how is this layer's image produced from its scene", already restarts the image when it changes, and is already folded into the trace hash.
 A second setting would need a precedence rule — what does raster plus wavefront mean — and every reader of either would have to know it.
 The hybrid joins as a fourth value of the same switch: rasterized primaries, traced lighting.
 
-The enum is still called `path_integrator`, which reads oddly for `raster`; renaming it is an open question rather than a change made here.
+The enum was `path_integrator` while it held the two tracers alone, and is named for what it chooses now that it holds more than paths.
 
 ## Materials are the tracer's
 

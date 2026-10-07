@@ -180,7 +180,7 @@ EXAMPLE("shaped-viewer/raster")
     {
         auto columns = f.window().view().layout_columns({.padding = 6, .spacing = 6});
 
-        auto const panel = [&](cc::string_view id, sv::path_integrator integrator)
+        auto const panel = [&](cc::string_view id, sv::render_mode mode)
         {
             auto view = columns.add_view(id);
             view.initial_orbit({.target = tg::pos3d(0, 0.6, 0.6),
@@ -193,7 +193,7 @@ EXAMPLE("shaped-viewer/raster")
             scene.background(sky);
             scene.add_rect_light("key", tg::pos3f(-1.5f, 3.5f, -1.0f), tg::vec3f(0.8f, 0, 0), tg::vec3f(0, 0, 0.8f)).nits(6);
             scene.add_directional_light("sun", sun_direction).lux(1.5f);
-            scene.settings({.integrator = integrator});
+            scene.settings({.mode = mode});
 
             // Seen from above, the floor's normal is +y, so the marking projects down: y_axis x x_axis is -y.
             scene.add_decal(marking, {.at = tg::pos3f(0, 0, -1.0f),
@@ -208,7 +208,7 @@ EXAMPLE("shaped-viewer/raster")
                 {.size = 0.24f, .color = tg::vec4f(1, 1, 1, 1)});
         };
 
-        panel("traced", sv::path_integrator::wavefront);
-        panel("raster", sv::path_integrator::raster);
+        panel("traced", sv::render_mode::wavefront);
+        panel("raster", sv::render_mode::raster);
     }
 }

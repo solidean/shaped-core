@@ -26,12 +26,9 @@ namespace
 constexpr auto k_size = tg::vec2i(96, 64);
 constexpr int k_block = 8;
 
-/// Captures the Cornell box with three spheres and a decal on its back wall, traced by `integrator` for `accumulate` frames.
+/// Captures the Cornell box with three spheres and a decal on its back wall, traced in `mode` for `accumulate` frames.
 /// PNG, so nothing but the tracer's own noise separates two captures.
-cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
-                                         sv::path_integrator integrator,
-                                         cc::string const& path,
-                                         int accumulate)
+cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode, cc::string const& path, int accumulate)
 {
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
@@ -69,7 +66,7 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
                                  .y_axis = tg::vec3f(0, -1, 0),
                                  .scale = 1,
                                  .depth = 0.5f});
-        scene.settings({.samples_per_pixel = 4, .integrator = integrator});
+        scene.settings({.samples_per_pixel = 4, .mode = mode});
 
         REQUIRE(cc::current_time_steady_secs() - loop_start < 50.0);
     }
@@ -121,8 +118,8 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
     auto const reference_path = cc::format("{}/sv-parity-megakernel.png", cc::temp_directory_path());
     auto const traced_path = cc::format("{}/sv-parity-wavefront.png", cc::temp_directory_path());
 
-    co_await capture_scene(ctx, sv::path_integrator::megakernel, reference_path, 48);
-    co_await capture_scene(ctx, sv::path_integrator::wavefront, traced_path, 96);
+    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 48);
+    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 96);
 
     auto const reference = read_png(reference_path);
     auto const traced = read_png(traced_path);
