@@ -31,6 +31,11 @@ Bigger design intent lives in [structure.md](structure.md).
   - **`view_renderer` declares the path tracer as its dependency**, so a raster layer still needs a device with ray tracing.
     Decided: ray tracing is preferred and never required, so the tracer is acquired only by a layer that traces.
 
+- **A radiance cache, for the interactive hybrid mode.**
+  The hybrid rasterizes primary visibility and lights it by tracing; a cache of incoming radiance is what makes that lighting cheap enough per frame.
+  It is for the interactive mode alone: a final render converges with the wavefront tracer and no cache, so nothing it caches biases a finished image.
+  Its design comes out of the rendering-modes review in [the roadmap](plans/rendering-roadmap.md), together with the hybrid's visibility buffer.
+
 - **Nothing tests the pump sweep in `viewer::finish_frame`, and no test shape reached it.**
   `(void)cc::thread_pump_all()` exists so an unthreaded viewer drives the copy actor on a frame whose epoch wait does not block.
   Every test loop runs flat out, so the CPU is always `buffer_count` epochs ahead and the wait always blocks.
