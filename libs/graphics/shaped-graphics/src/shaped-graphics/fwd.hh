@@ -101,6 +101,7 @@ struct buffer_data_copy;
 struct buffer_texture_copy;
 struct array_buffer_access;
 struct array_texture_access;
+class array_access_declaration; // a live array declaration, ended when it dies (see command_list/array_access_declaration.hh)
 struct dispatch_args;
 
 class raw_buffer;
@@ -289,8 +290,16 @@ class pipeline_footprint;                       // a pipeline's footprint, resol
 struct view_access;                             // the access and stages a bound view is declared with at an op
 struct array_declarations;                      // what a dispatch's declarations say about one bound array
 struct array_plan;                              // how a dispatch tracks one bound array, given its declarations
+struct array_declaration_link; // what a live array declaration and its list share (command_list/array_access_declaration.hh)
+using array_declaration_token = std::shared_ptr<array_declaration_link>;
+class array_declaration_book; // one bind point's live array declarations (barrier/array_declarations.hh)
+struct member_track;          // what tracking one declared array element found
+template <class ArrayBinding>
+struct array_site; // one array binding of one bound group, as an op meets it
 // the counts `cmd` recorded, for its backend to fold in at submit; defined in command_list/command_list.cc
 stat_counts const& recorded_stats(command_list const& cmd);
+// asserts that no array declaration made on `cmd` is alive, which every backend's submit calls; command_list/command_list.cc
+void check_no_live_array_declarations(command_list const& cmd);
 void record_stats(sg::stats const& delta); // each non-zero counted stat as one CC_RECORD_ACCUM; context/metrics.cc
 } // namespace impl
 

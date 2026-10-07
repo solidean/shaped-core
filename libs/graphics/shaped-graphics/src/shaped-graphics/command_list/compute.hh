@@ -6,6 +6,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, for bind<G>
+#include <shaped-graphics/command_list/array_access_declaration.hh>
 #include <shaped-graphics/fwd.hh>
 
 #include <type_traits>
@@ -77,16 +78,17 @@ public:
     /// The byte-addressed form: three `u32` counts at `offset_in_bytes`, which must be a multiple of 4.
     void dispatch_groups_indirect(raw_buffer_handle const& args, isize offset_in_bytes);
 
-    /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch only**.
-    /// Declare again before each dispatch that needs it.
-    /// A scalar binding has its access inferred from the shader and the bound view.
-    /// Array element usage cannot be, since a shader may index only some elements, or use them differently.
+    /// Declares per-element access for a *buffer* array / bindless binding, for every dispatch on this bind point while the result lives.
+    /// Array element usage cannot be inferred, since a shader may index only some elements, or use them differently.
+    /// Every live declaration naming an array applies to it, and an empty `elements` declares it unused.
+    /// Elements are resolved against whichever bound group holds the array at each op, and checked the first time they meet that group.
     /// `binding_name` is the array binding's reflection name, and each `array_buffer_access` names one element and how it is accessed.
-    void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
+                                                                       cc::span<array_buffer_access const> elements);
 
-    /// Declares per-element access for a *texture* array / bindless binding.
-    /// Like the buffer form it applies to the next dispatch only, but each element also names the layout it must be in.
-    void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
+    /// The texture form: each element also names the layout it must be in.
+    [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
+                                                                        cc::span<array_texture_access const> elements);
 
     /// Writes inline constants into the bound pipeline layout's `inline_constants` block — dx12 root constants / vulkan push constants.
     /// Small per-dispatch data, with no descriptor space.

@@ -160,17 +160,25 @@ void webgpu_command_list::compute_set_inline_constants(cc::span<byte const> data
     set_constants_into(_compute, data, offset);
 }
 
-void webgpu_command_list::compute_declare_array_buffer_access(cc::string_view,
-                                                              cc::span<sg::array_buffer_access const> elements)
+u32 webgpu_command_list::compute_declare_array_buffer_access(cc::string_view,
+                                                             cc::span<sg::array_buffer_access const> elements)
 {
     // No layout accepts an array binding here, so the only declaration that can be right is the empty one.
+    // It still gets an id, so the value holding it works as it does everywhere else.
     CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
+    return next_array_declaration_id();
 }
 
-void webgpu_command_list::compute_declare_array_texture_access(cc::string_view,
-                                                               cc::span<sg::array_texture_access const> elements)
+u32 webgpu_command_list::compute_declare_array_texture_access(cc::string_view,
+                                                              cc::span<sg::array_texture_access const> elements)
 {
     CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
+    return next_array_declaration_id();
+}
+
+void webgpu_command_list::withdraw_array_declaration(u32)
+{
+    // Nothing was kept: with no array to meet, there is nothing a declaration could change or have missed.
 }
 
 void webgpu_command_list::compute_dispatch(int x, int y, int z)

@@ -185,9 +185,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     sg::array_texture_access const tex_access[] = {
         {.index = 1, .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture},
     };
-    disp->compute.declare_array_buffer_access("Bufs", buf_access);
-    disp->compute.declare_array_texture_access("Texs", tex_access);
-    disp->compute.dispatch_groups(1);
+    {
+        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
+        auto const texs = disp->compute.declare_array_texture_access("Texs", tex_access);
+        disp->compute.dispatch_groups(1);
+    }
     ctx.submit_command_list(cc::move(disp));
 
     auto down = ctx.create_command_list();
@@ -279,9 +281,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: an undeclared array logs
         disp->compute.bind_group(0, *g0);
         disp->compute.bind_group(1, *g1);
         disp->compute.bind_group(2, *g2);
-        disp->compute.declare_array_buffer_access("Bufs", {});
-        disp->compute.declare_array_texture_access("Texs", {});
-        disp->compute.dispatch_groups(1);
+        {
+            auto const bufs = disp->compute.declare_array_buffer_access("Bufs", {});
+            auto const texs = disp->compute.declare_array_texture_access("Texs", {});
+            disp->compute.dispatch_groups(1);
+        }
         ctx.submit_command_list(cc::move(disp));
         ctx.advance_epoch();
         co_await ctx.idle_completion();
@@ -344,9 +348,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a declaration for an arr
     sg::array_buffer_access const buf_access[] = {
         {.index = 0, .access = sg::access_flag::shader_read},
     };
-    disp->compute.declare_array_buffer_access("Bufs", buf_access);
-    disp->compute.declare_array_texture_access("Texs", {});
-    disp->compute.dispatch_groups(1);
+    {
+        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
+        auto const texs = disp->compute.declare_array_texture_access("Texs", {});
+        disp->compute.dispatch_groups(1);
+    }
     ctx.submit_command_list(cc::move(disp));
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -386,11 +392,190 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a write the declarations
         sg::array_buffer_access const reads[] = {
             {.index = 1, .access = sg::access_flag::storage_read},
         };
-        disp->compute.declare_array_buffer_access("Rws", reads);
-        disp->compute.dispatch_groups(1);
+        {
+            auto const rws = disp->compute.declare_array_buffer_access("Rws", reads);
+            disp->compute.dispatch_groups(1);
+        }
         ctx.submit_command_list(cc::move(disp));
     }
     ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
+namespace
+{
+/// `array_hlsl`'s pipeline, its three group layouts, and two groups for each array: the shapes the cases below vary.
+struct array_rig
+{
+    sg::binding_group_layout_handle out_layout;
+    sg::binding_group_layout_handle bufs_layout;
+    sg::binding_group_layout_handle texs_layout;
+    sg::compute_pipeline_handle pipeline;
+    sg::binding_group_handle out_group;
+    sg::binding_group_handle texs_group;
+};
+
+[[nodiscard]] array_rig make_array_rig(sg::context& ctx, ssc::dxc::compiler& comp, sg::raw_buffer_handle const& out_buf)
+{
+    auto const shader = compile_compute(comp, array_hlsl);
+    cc::vector<sg::binding> set0;
+    cc::vector<sg::binding> set1;
+    cc::vector<sg::binding> set2;
+    for (auto const& b : shader.bindings)
+    {
+        if (b.space == 0u)
+            set0.push_back(b);
+        else if (b.space == 1u)
+            set1.push_back(b);
+        else
+            set2.push_back(b);
+    }
+    auto rig = array_rig();
+    rig.out_layout = ctx.uncached.create_binding_group_layout(set0);
+    rig.bufs_layout = ctx.uncached.create_binding_group_layout(set1);
+    rig.texs_layout = ctx.uncached.create_binding_group_layout(set2);
+    auto const pipeline_layout
+        = ctx.uncached.create_pipeline_layout({.groups = {rig.out_layout, rig.bufs_layout, rig.texs_layout}});
+    rig.pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    sg::named_view const out_view = {.name = "Out", .view = sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()};
+    rig.out_group = ctx.persistent.create_binding_group(rig.out_layout, cc::span<sg::named_view const>(&out_view, 1));
+    auto tex_elements = cc::vector<sg::raw_view>();
+    for (isize i = 0; i < 4; ++i)
+        tex_elements.push_back(sg::vacant_view{});
+    auto const texs_nv = sg::named_view{.name = "Texs", .view = cc::move(tex_elements)};
+    rig.texs_group = ctx.persistent.create_binding_group(rig.texs_layout, cc::span<sg::named_view const>(&texs_nv, 1));
+    return rig;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a declaration is checked again against each group it meets",
+                     (sg::context_handle const& handle))
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
+
+    auto const out_buf = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readwrite_buffer);
+    auto const buf = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readonly_buffer);
+    auto const rig = make_array_rig(ctx, comp.value(), out_buf);
+    REQUIRE(rig.pipeline != nullptr);
+
+    // The same layout twice, element 3 filled in the first group and vacant in the second.
+    auto const bufs_of = [&](bool last_filled)
+    {
+        auto elements = cc::vector<sg::raw_view>();
+        elements.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
+        elements.push_back(sg::vacant_view{});
+        elements.push_back(sg::vacant_view{});
+        if (last_filled)
+            elements.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
+        else
+            elements.push_back(sg::vacant_view{});
+        auto const nv = sg::named_view{.name = "Bufs", .view = cc::move(elements)};
+        return ctx.persistent.create_binding_group(rig.bufs_layout, cc::span<sg::named_view const>(&nv, 1));
+    };
+    auto const filled = bufs_of(true);
+    auto const holed = bufs_of(false);
+
+    sg::array_buffer_access const buf_access[] = {
+        {.index = 0, .access = sg::access_flag::shader_read},
+        {.index = 3, .access = sg::access_flag::shader_read},
+    };
+    auto disp = ctx.create_command_list();
+    {
+        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
+        auto const texs = disp->compute.declare_array_texture_access("Texs", {});
+        disp->compute.bind_pipeline(*rig.pipeline);
+        disp->compute.bind_group(0, *rig.out_group);
+        disp->compute.bind_group(1, *filled);
+        disp->compute.bind_group(2, *rig.texs_group);
+        disp->compute.dispatch_groups(1);
+
+        // Another group at the same name: resolved and checked again, at its first op.
+        disp->compute.bind_group(1, *holed);
+        CHECK_ASSERTS(disp->compute.dispatch_groups(1));
+    }
+    ctx.drop_command_list(cc::move(disp));
+    co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: two bound groups holding one name at different sizes are each "
+                     "checked",
+                     (sg::context_handle const& handle))
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+    REQUIRE(handle != nullptr);
+    sg::context& ctx = *handle;
+
+    auto const out_buf = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readwrite_buffer);
+    auto const buf = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readonly_buffer);
+    auto const shader = compile_compute(comp.value(), array_hlsl);
+    cc::vector<sg::binding> set0;
+    cc::vector<sg::binding> set1;
+    cc::vector<sg::binding> set2;
+    for (auto const& b : shader.bindings)
+    {
+        if (b.space == 0u)
+            set0.push_back(b);
+        else if (b.space == 1u)
+            set1.push_back(b);
+        else
+            set2.push_back(b);
+    }
+    REQUIRE(set1.size() == 1);
+
+    // A fourth group the code never touches, holding an array of the same name, two elements long.
+    auto spare = set1[0];
+    spare.space = 3;
+    spare.count = 2;
+    cc::vector<sg::binding> set3;
+    set3.push_back(spare);
+    auto const layout0 = ctx.uncached.create_binding_group_layout(set0);
+    auto const layout1 = ctx.uncached.create_binding_group_layout(set1);
+    auto const layout2 = ctx.uncached.create_binding_group_layout(set2);
+    auto const layout3 = ctx.uncached.create_binding_group_layout(set3);
+    auto const pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {layout0, layout1, layout2, layout3}});
+    auto const pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    REQUIRE(pipeline != nullptr);
+
+    sg::named_view const out_view = {.name = "Out", .view = sg::buffer<u32>::from_raw(out_buf).as_readwrite_buffer()};
+    auto const g0 = ctx.persistent.create_binding_group(layout0, cc::span<sg::named_view const>(&out_view, 1));
+    auto large = cc::vector<sg::raw_view>();
+    for (isize i = 0; i < 4; ++i)
+        large.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
+    auto const large_nv = sg::named_view{.name = "Bufs", .view = cc::move(large)};
+    auto const g1 = ctx.persistent.create_binding_group(layout1, cc::span<sg::named_view const>(&large_nv, 1));
+    auto texs = cc::vector<sg::raw_view>();
+    for (isize i = 0; i < 4; ++i)
+        texs.push_back(sg::vacant_view{});
+    auto const texs_nv = sg::named_view{.name = "Texs", .view = cc::move(texs)};
+    auto const g2 = ctx.persistent.create_binding_group(layout2, cc::span<sg::named_view const>(&texs_nv, 1));
+    auto small = cc::vector<sg::raw_view>();
+    for (isize i = 0; i < 2; ++i)
+        small.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
+    auto const small_nv = sg::named_view{.name = "Bufs", .view = cc::move(small)};
+    auto const g3 = ctx.persistent.create_binding_group(layout3, cc::span<sg::named_view const>(&small_nv, 1));
+    REQUIRE(g3 != nullptr);
+
+    sg::array_buffer_access const buf_access[] = {
+        {.index = 0, .access = sg::access_flag::shader_read},
+        {.index = 3, .access = sg::access_flag::shader_read},
+    };
+    auto disp = ctx.create_command_list();
+    {
+        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
+        auto const texs_declared = disp->compute.declare_array_texture_access("Texs", {});
+        disp->compute.bind_pipeline(*pipeline);
+        disp->compute.bind_group(0, *g0);
+        disp->compute.bind_group(1, *g1);
+        disp->compute.bind_group(2, *g2);
+        disp->compute.bind_group(3, *g3);
+        // Index 3 is valid only in the larger: checking the first group that holds the name alone would let it through.
+        CHECK_ASSERTS(disp->compute.dispatch_groups(1));
+    }
+    ctx.drop_command_list(cc::move(disp));
     co_await ctx.idle_completion();
 }
 
@@ -587,8 +772,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: partial fill, dec
         pass.bind_pipeline(*p.pipeline);
         pass.bind_group(0, *bufs_group);
         pass.bind_group(1, *texs_group);
-        pass.declare_array_buffer_access("RasterBufs", buf_access);
-        pass.declare_array_texture_access("RasterTexs", tex_access);
+        auto const bufs = pass.declare_array_buffer_access("RasterBufs", buf_access);
+        auto const texs = pass.declare_array_texture_access("RasterTexs", tex_access);
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     auto future = cmd->download.bytes_from_texture(target);
@@ -629,8 +814,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: an undeclared arr
         pass.bind_group(1, *groups.texs);
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
-        pass.declare_array_buffer_access("RasterBufs", {});
-        pass.declare_array_texture_access("RasterTexs", {});
+        auto const bufs = pass.declare_array_buffer_access("RasterBufs", {});
+        auto const texs = pass.declare_array_texture_access("RasterTexs", {});
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     ctx.submit_command_list(cc::move(cmd));
@@ -661,32 +846,40 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: a draw resolves o
 
     auto cmd = ctx.create_command_list();
 
-    // A declaration still pending when its scope closes goes with the scope.
+    // A raster declaration ends with its scope, and destroying its value afterwards does nothing.
+    // Held past the scope on purpose: still in force, it would meet the next scope's group and assert on the vacant element.
     {
-        auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
-        pass.bind_pipeline(*p.pipeline);
-        pass.declare_array_buffer_access("RasterBufs", vacant_access);
-    }
-    {
-        auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
-        pass.bind_pipeline(*p.pipeline);
-        pass.bind_group(0, *groups.bufs);
-        pass.bind_group(1, *groups.texs);
-        pass.declare_array_buffer_access("RasterBufs", {});
-        pass.declare_array_texture_access("RasterTexs", {});
-        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+        auto outlived = sg::array_access_declaration();
+        {
+            auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
+            pass.bind_pipeline(*p.pipeline);
+            outlived = pass.declare_array_buffer_access("RasterBufs", vacant_access);
+        }
+        {
+            auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
+            pass.bind_pipeline(*p.pipeline);
+            pass.bind_group(0, *groups.bufs);
+            pass.bind_group(1, *groups.texs);
+            auto const bufs = pass.declare_array_buffer_access("RasterBufs", {});
+            auto const texs = pass.declare_array_texture_access("RasterTexs", {});
+            pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+        }
     }
 
-    // A compute declaration waits for a dispatch, however many draws come first.
-    cmd->compute.declare_array_buffer_access("RasterBufs", vacant_access);
+    // A compute declaration is never met by a draw, however many draws bind its array.
+    // So it reaches its end never met, and asserts there.
     {
-        auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
-        pass.bind_pipeline(*p.pipeline);
-        pass.bind_group(0, *groups.bufs);
-        pass.bind_group(1, *groups.texs);
-        pass.declare_array_buffer_access("RasterBufs", {});
-        pass.declare_array_texture_access("RasterTexs", {});
-        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+        auto compute = cmd->compute.declare_array_buffer_access("RasterBufs", vacant_access);
+        {
+            auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
+            pass.bind_pipeline(*p.pipeline);
+            pass.bind_group(0, *groups.bufs);
+            pass.bind_group(1, *groups.texs);
+            auto const bufs = pass.declare_array_buffer_access("RasterBufs", {});
+            auto const texs = pass.declare_array_texture_access("RasterTexs", {});
+            pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+        }
+        CHECK_ASSERTS(compute.withdraw());
     }
     ctx.drop_command_list(cc::move(cmd));
 }

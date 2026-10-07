@@ -426,13 +426,15 @@ TEST("sg metal - a draw resolves its array declarations against the groups it bi
         scope.set_inline_constants(tint_constants{});
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
 
-        scope.declare_array_buffer_access("inputs", {});
+        auto unused = scope.declare_array_buffer_access("inputs", {});
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+        unused.withdraw();
 
+        // Checked the first time it meets the group, which is the next draw.
         sg::array_buffer_access const out_of_range[] = {
             {.index = 4, .access = sg::access_flag::shader_read},
         };
-        scope.declare_array_buffer_access("inputs", out_of_range);
+        auto const bad = scope.declare_array_buffer_access("inputs", out_of_range);
         CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
     }
     ctx->drop_command_list(cc::move(cmd));
@@ -445,7 +447,7 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
         SKIP("no metal 4 device on this host");
 
     // A group bound in one scope must not still be bound in the next, or a draw that bound nothing resolves the arrays
-    // of a group it never saw — which is what `_group_arrays` outliving its scope would cause.
+    // of a group it never saw — which is what a slot outliving its scope would cause.
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
 
@@ -507,9 +509,11 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
 
-        // Nothing this scope binds carries `inputs`, so a declaration naming it asserts unless a stale group does.
-        scope.declare_array_buffer_access("inputs", {});
-        CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
+        // Nothing this scope binds carries `inputs`, so a declaration naming it never meets it, and asserts when it
+        // ends, unless a stale group does.
+        auto declared = scope.declare_array_buffer_access("inputs", {});
+        scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+        CHECK_ASSERTS(declared.withdraw());
     }
     ctx->drop_command_list(cc::move(cmd));
 }
@@ -596,9 +600,11 @@ TEST("sg metal - a compute-bound group is not bound at the first draw of a rende
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
 
-        // Nothing this scope binds carries `inputs`, so a declaration naming it asserts unless a stale group does.
-        scope.declare_array_buffer_access("inputs", {});
-        CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
+        // Nothing this scope binds carries `inputs`, so a declaration naming it never meets it, and asserts when it
+        // ends, unless a stale group does.
+        auto declared = scope.declare_array_buffer_access("inputs", {});
+        scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+        CHECK_ASSERTS(declared.withdraw());
     }
     ctx->drop_command_list(cc::move(cmd));
 }

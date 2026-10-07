@@ -1,0 +1,48 @@
+#pragma once
+
+#include <clean-core/common/utility.hh> // cc::move
+#include <shaped-graphics/fwd.hh>
+
+/// What one live array declaration and the command list it was made on share.
+/// The list clears `list` when it ends the declaration from its side — a rendering scope closing, the list dropped —
+/// so the value reaches the list only while `list` is set.
+struct sg::impl::array_declaration_link
+{
+    command_list* list = nullptr;
+    u32 id = 0;
+
+    /// Made on the raster bind point, so the rendering scope's end ends it too.
+    bool raster = false;
+};
+
+/// One array binding's declared per-element access, in force on the bind point it was made on while this value lives.
+/// Move-only: destroying or `withdraw`ing it ends the declaration, and a moved-from one ends nothing.
+/// Submitting its list while it is alive asserts; dropping the list ends it silently, so unwinding past a drop is safe.
+/// A raster declaration also ends when its rendering scope closes.
+/// Once ended by any of those, destroying the value does nothing — it never touches a list that is gone.
+///
+/// A declaration that never met its array — no op of its bind point had a bound group holding an array of that name
+/// and family — asserts when it is withdrawn or destroyed, which is where a misspelled name is caught.
+/// See libs/graphics/shaped-graphics/docs/concepts/bindings.md#array-bindings.
+class sg::array_access_declaration
+{
+public:
+    array_access_declaration() = default;
+    array_access_declaration(array_access_declaration&& rhs) noexcept = default;
+    array_access_declaration& operator=(array_access_declaration&& rhs) noexcept;
+    ~array_access_declaration();
+
+    array_access_declaration(array_access_declaration const&) = delete;
+    array_access_declaration& operator=(array_access_declaration const&) = delete;
+
+    /// Ends the declaration now rather than at destruction.
+    void withdraw();
+
+private:
+    friend class command_list;
+    explicit array_access_declaration(impl::array_declaration_token token) : _token(cc::move(token)) {}
+
+    // Shared with the list, which clears it when the declaration ends from its side — scope close, drop.
+    // The value reaches the list only through a live token.
+    impl::array_declaration_token _token;
+};

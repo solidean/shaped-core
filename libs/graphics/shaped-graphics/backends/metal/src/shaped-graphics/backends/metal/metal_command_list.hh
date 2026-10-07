@@ -15,6 +15,7 @@
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_query.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
+#include <shaped-graphics/barrier/array_declarations.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/compute.hh> // sg::array_buffer_access, sg::array_texture_access
@@ -69,21 +70,6 @@ public:
 
         /// Releases what the copy out borrowed, whether it ran or was cancelled.
         void settle_staging();
-    };
-
-    /// One `declare_array_buffer_access` call, held until the next dispatch or draw resolves it against the bound
-    /// groups.
-    struct array_buffer_declare
-    {
-        cc::string name;
-        cc::vector<sg::array_buffer_access> elements;
-    };
-
-    /// The texture twin of array_buffer_declare; the layout each element carries is dropped, as every layout is here.
-    struct array_texture_declare
-    {
-        cc::string name;
-        cc::vector<sg::array_texture_access> elements;
     };
 
     /// One acceleration structure a declare named, kept alive for as long as the recording that names it.
@@ -178,10 +164,11 @@ private:
     void compute_dispatch(int x, int y, int z) override;
     void compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes) override;
     void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
-    void compute_declare_array_buffer_access(cc::string_view binding_name,
-                                             cc::span<array_buffer_access const> elements) override;
-    void compute_declare_array_texture_access(cc::string_view binding_name,
-                                              cc::span<array_texture_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                          cc::span<array_buffer_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_texture_access(cc::string_view binding_name,
+                                                           cc::span<array_texture_access const> elements) override;
+    void withdraw_array_declaration(u32 id) override;
 
     void raster_begin_rendering(rendering_info const& info) override;
     void raster_end_rendering() override;
@@ -189,10 +176,10 @@ private:
     void raster_bind_group(int group_index, binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(index_buffer_view const& view) override;
-    void raster_declare_array_buffer_access(cc::string_view binding_name,
-                                            cc::span<array_buffer_access const> elements) override;
-    void raster_declare_array_texture_access(cc::string_view binding_name,
-                                             cc::span<array_texture_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                         cc::span<array_buffer_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_texture_access(cc::string_view binding_name,
+                                                          cc::span<array_texture_access const> elements) override;
     void raster_set_viewport(viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;
@@ -250,23 +237,20 @@ private:
     /// It does not flush: the op does, once, after adding whatever else it reads.
     void declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint);
 
-    /// Forget what the bound groups named, at the end of a rendering scope and of the recording.
-    ///
-    /// **`_group_arrays` is the one that must be cleared rather than merely should.**
-    /// A stale entry in the other three costs one redundant declare, which folds into a barrier already being
-    /// emitted; a stale array binding lets a draw's declaration name an array no group of its scope binds.
+    /// Forget which group each slot binds, at the start and end of a rendering scope and of the recording.
+    /// The groups stay retained by `_bound_keep_alive`; only the slots are cleared, and that ends no array declaration.
     void clear_bound_groups();
 
-    /// Declare what one bind point's pending `declare_array_*_access` calls named, and clear them.
+    /// Meet one bind point's live array declarations with the bound groups' arrays, and declare what
+    /// sg::impl::array_declaration_book::apply decides.
     ///
     /// An array binding is the one thing an op cannot infer, so this is the caller's declaration being applied
-    /// rather than a derived one, met with what `footprint` says the code does as sg::impl::plan_array_declarations decides.
+    /// rather than a derived one, met with what `footprint` says the code does.
     /// `pipeline` is the bound pipeline, which a mismatch is logged against.
     void declare_array_accesses(sg::impl::pipeline_footprint const* footprint,
                                 void const* pipeline,
                                 sg::pipeline_stage_flags op_stages,
-                                cc::vector<array_buffer_declare>& buffer_declares,
-                                cc::vector<array_texture_declare>& texture_declares);
+                                sg::impl::array_declaration_book& book);
 
     /// Patch the inline-constants shadow, for whichever pipeline kind is bound.
     ///
@@ -328,11 +312,19 @@ private:
     void bind_group_to_table(int group_index, binding_group const& group);
 
     /// Declare `access` on `buffer` for the op about to be recorded, and remember it for the finalize at submit.
-    void declare_buffer(raw_buffer_handle const& buffer, pipeline_stage_flags stages, access_flags access);
+    /// A write to an array member counts toward `_member_writes`.
+    /// `from_array_application` makes the buffer one, and the result says whether the op already held a write of it.
+    sg::impl::member_track declare_buffer(raw_buffer_handle const& buffer,
+                                          pipeline_stage_flags stages,
+                                          access_flags access,
+                                          bool from_array_application = false);
 
     /// The texture twin of declare_buffer.
     /// A texture carries no layout here, so the two differ only in which list the resource is remembered on.
-    void declare_texture(raw_texture_handle const& texture, pipeline_stage_flags stages, access_flags access);
+    sg::impl::member_track declare_texture(raw_texture_handle const& texture,
+                                           pipeline_stage_flags stages,
+                                           access_flags access,
+                                           bool from_array_application = false);
 
     /// The acceleration-structure twin, for an AS build and for a trace against a bound TLAS.
     /// `owner` keeps the structure alive and is type-erased because sg::blas and sg::tlas share no base, while the
@@ -469,21 +461,27 @@ private:
     /// names, so this is the check rather than the binding.
     metal_raytracing_pipeline const* _bound_raytracing = nullptr;
 
-    /// Per slot, the buffers the group bound there names — copied at bind time, because a binding_group is handed over
-    /// by reference and has no handle to take.
-    /// Rebinding a slot replaces its list, so what a dispatch declares is exactly what is bound when it runs.
-    cc::vector<metal_binding_group::bound_buffer> _group_buffers[sg::max_binding_groups];
-    cc::vector<metal_binding_group::bound_texture> _group_textures[sg::max_binding_groups];
-    cc::vector<sg::tlas_handle> _group_tlases[sg::max_binding_groups];
-    cc::vector<metal_binding_group::array_binding> _group_arrays[sg::max_binding_groups];
+    /// Per slot, the group bound there, read through at every op rather than copied at every bind.
+    /// Rebinding a slot replaces it, so what a dispatch declares is exactly what is bound when it runs.
+    metal_binding_group const* _bound_groups[sg::max_binding_groups] = {};
 
-    /// The array declares recorded since the last dispatch, applied by `declare_array_accesses`.
-    cc::vector<array_buffer_declare> _pending_array_buffer_declares;
-    cc::vector<array_texture_declare> _pending_array_texture_declares;
+    /// Every group bound, retained until the list is consumed, as dx12 and vulkan retain theirs.
+    /// That keeps each slot's pointer valid, and makes a group's address its identity for the whole list: a transient
+    /// group freed while the list records could otherwise leave its address to a new one, which the array
+    /// applications key on.
+    cc::vector<std::shared_ptr<void const>> _bound_keep_alive;
 
-    /// The same for the next draw, kept apart as dx12 and vulkan keep theirs, and dropped when the scope closes.
-    cc::vector<array_buffer_declare> _pending_raster_array_buffer_declares;
-    cc::vector<array_texture_declare> _pending_raster_array_texture_declares;
+    /// The live array declarations of the compute bind point, which ray tracing shares, in force until withdrawn.
+    sg::impl::array_declaration_book _compute_arrays;
+
+    /// The same for draws, kept apart as dx12 and vulkan keep theirs, and ended when the scope closes.
+    sg::impl::array_declaration_book _raster_arrays;
+
+    /// How many accesses this list declared into the write bucket of an array member, which ends every current application.
+    u64 _member_writes = 0;
+
+    /// The bound arrays of the op being recorded, kept to reuse their storage.
+    cc::vector<sg::impl::array_site<metal_binding_group::array_binding>> _array_sites;
 
     /// Counted for `barriers_emitted`, incremented where a barrier actually reaches an encoder.
     /// A pass reopen counts as one too: it is the barrier, for a dependency the encoder cannot name.

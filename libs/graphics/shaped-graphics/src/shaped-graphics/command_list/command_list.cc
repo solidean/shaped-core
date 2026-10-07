@@ -6,7 +6,38 @@
 
 namespace sg
 {
-command_list::~command_list() = default;
+command_list::~command_list()
+{
+    // A drop, or the list consumed: a value destroyed later must find its token dead rather than this list.
+    end_array_declarations(false);
+}
+
+array_access_declaration command_list::adopt_array_declaration(u32 id, bool raster)
+{
+    auto link = std::make_shared<impl::array_declaration_link>(impl::array_declaration_link{
+        .list = this,
+        .id = id,
+        .raster = raster,
+    });
+    _live_array_declarations.push_back(link);
+    return array_access_declaration(cc::move(link));
+}
+
+void command_list::end_array_declaration(impl::array_declaration_link& link)
+{
+    CC_ASSERT(link.list == this, "an array declaration was ended through a list it was not made on");
+    _live_array_declarations.remove_first_where([&](impl::array_declaration_token const& t) { return t.get() == &link; });
+    link.list = nullptr;
+    withdraw_array_declaration(link.id);
+}
+
+void command_list::end_array_declarations(bool raster_only)
+{
+    for (auto const& link : _live_array_declarations)
+        if (!raster_only || link->raster)
+            link->list = nullptr;
+    _live_array_declarations.remove_all_where([](impl::array_declaration_token const& t) { return t->list == nullptr; });
+}
 
 void command_list::ensure_layout(raw_texture_handle texture, texture_layout layout, cc::optional<subresource_range> range)
 {
@@ -57,4 +88,11 @@ void command_list::note_render_pass_split(cc::string_view cause, split_remedy re
 sg::impl::stat_counts const& sg::impl::recorded_stats(command_list const& cmd)
 {
     return cmd._stats;
+}
+
+void sg::impl::check_no_live_array_declarations(command_list const& cmd)
+{
+    CC_ASSERT(cmd._live_array_declarations.empty(),
+              "a command list was submitted while an array declaration made on it is alive. Withdraw it, or let it go "
+              "out of scope, before the submit");
 }

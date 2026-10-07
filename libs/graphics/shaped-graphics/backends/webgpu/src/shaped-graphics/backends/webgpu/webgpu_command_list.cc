@@ -91,6 +91,7 @@ wgpu_command_buffer webgpu_command_list::finish()
 sg::submission_token webgpu_context::submit_webgpu_command_list(std::unique_ptr<webgpu_command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
+    sg::impl::check_no_live_array_declarations(*cmd);
     assert_on_device_thread();
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");

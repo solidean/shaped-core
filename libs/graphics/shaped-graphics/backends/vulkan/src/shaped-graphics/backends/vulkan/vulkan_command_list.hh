@@ -11,24 +11,11 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_inline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_query.hh>
+#include <shaped-graphics/barrier/array_declarations.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
-
-/// One declare_array_buffer_access call, held until the next dispatch or draw resolves it against the bound groups.
-struct sg::backend::vulkan::vulkan_array_buffer_declare
-{
-    cc::string name;
-    cc::vector<sg::array_buffer_access> elements;
-};
-
-/// One declare_array_texture_access call, the texture analogue of vulkan_array_buffer_declare.
-struct sg::backend::vulkan::vulkan_array_texture_declare
-{
-    cc::string name;
-    cc::vector<sg::array_texture_access> elements;
-};
 
 /// Vulkan implementation of sg::command_list.
 /// Owns its command pool and the single command buffer allocated from it, handed out already recording.
@@ -56,7 +43,12 @@ public:
 
     /// Accumulate one declared access for the next op, and enqueue the buffer for the pre-op flush exactly once.
     /// Declaring is separate from flushing so a buffer bound several times to one op produces a single merged barrier.
-    void track_buffer_access(vulkan_buffer const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
+    /// An access landing in the write bucket of an array member counts toward _member_writes.
+    /// `from_array_application` makes the buffer one, and the result says whether the op already held a write of it.
+    sg::impl::member_track track_buffer_access(vulkan_buffer const& buffer,
+                                               sg::pipeline_stage_flags stages,
+                                               sg::access_flags access,
+                                               bool from_array_application = false);
 
     /// The texture equivalent, scoped to one subresource range and carrying the layout the op needs it in.
     /// Declare one access, returning the layout this call asked the tracker for — which is not always `layout`, since
@@ -70,6 +62,21 @@ public:
                                                           sg::pipeline_stage_flags stages,
                                                           sg::access_flags access,
                                                           sg::texture_layout layout);
+
+    /// What `track_texture` found: the layout asked for, as `track_texture_access` returns it, and the array-member report.
+    struct texture_track
+    {
+        sg::texture_layout layout = sg::texture_layout::general;
+        sg::impl::member_track found;
+    };
+
+    /// `track_texture_access`, counting toward _member_writes as the buffer form does.
+    [[nodiscard]] texture_track track_texture(vulkan_texture const& texture,
+                                              sg::subresource_range range,
+                                              sg::pipeline_stage_flags stages,
+                                              sg::access_flags access,
+                                              sg::texture_layout layout,
+                                              bool from_array_application);
 
     /// Record one vkCmdPipelineBarrier2 for everything declared since the last flush, then clear the staging.
     /// Called once per op, immediately before recording it.
@@ -133,9 +140,15 @@ public:
             _bound_keep_alive.push_back(cc::move(object));
     }
 
-    // Array bindings are not auto-tracked, so their accesses arrive as explicit declarations and wait here.
-    cc::vector<vulkan_array_buffer_declare> _pending_array_buffer_declares;
-    cc::vector<vulkan_array_texture_declare> _pending_array_texture_declares;
+    // Array bindings are not auto-tracked, so their accesses arrive as explicit declarations, in force until withdrawn.
+    // The compute bind point's, which ray tracing shares.
+    sg::impl::array_declaration_book _compute_arrays;
+
+    // How many accesses this list tracked into the write bucket of an array member, which ends every current application.
+    u64 _member_writes = 0;
+
+    // The bound arrays of the op being recorded, kept to reuse their storage.
+    cc::vector<sg::impl::array_site<vulkan_array_binding>> _array_sites;
 
     // Set inside a rendering scope; a dispatch inside one is rejected because Vulkan forbids it outright.
     bool _in_render_pass = false;
@@ -172,8 +185,7 @@ public:
     cc::vector<vulkan_binding_group const*> _bound_raster_groups;
     sg::impl::pipeline_footprint const* _bound_raster_footprint = nullptr;
     void const* _bound_raster_footprint_owner = nullptr;
-    cc::vector<vulkan_array_buffer_declare> _pending_raster_array_buffer_declares;
-    cc::vector<vulkan_array_texture_declare> _pending_raster_array_texture_declares;
+    sg::impl::array_declaration_book _raster_arrays; // ended with the rendering scope
     cc::vector<vulkan_buffer const*> _bound_vertex_buffers;
     vulkan_buffer const* _bound_index_buffer = nullptr;
 
@@ -212,15 +224,14 @@ public:
     // Flushes what the build declared, then records it.
     void record_acceleration_structure_build(built_acceleration_structure const& built);
 
-    /// Resolves one bind point's pending array declares against its bound groups and `footprint`, tracks what
-    /// sg::impl::plan_array_declarations decides at `op_stages`, then clears both pending sets.
+    /// Meets one bind point's live array declarations with its bound groups and `footprint`, and tracks what
+    /// sg::impl::array_declaration_book::apply decides at `op_stages`.
     /// A mismatch is logged against `pipeline`.
     void declare_array_accesses(cc::span<vulkan_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,
                                 void const* pipeline,
                                 sg::pipeline_stage_flags op_stages,
-                                cc::vector<vulkan_array_buffer_declare>& buffer_declares,
-                                cc::vector<vulkan_array_texture_declare>& texture_declares);
+                                sg::impl::array_declaration_book& book);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
@@ -278,10 +289,11 @@ protected:
     void compute_bind_group(int group_index, sg::binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
     void compute_dispatch_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes) override;
-    void compute_declare_array_buffer_access(cc::string_view binding_name,
-                                             cc::span<sg::array_buffer_access const> elements) override;
-    void compute_declare_array_texture_access(cc::string_view binding_name,
-                                              cc::span<sg::array_texture_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_buffer_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_texture_access(cc::string_view binding_name,
+                                                           cc::span<sg::array_texture_access const> elements) override;
+    void withdraw_array_declaration(u32 id) override;
     void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
 
     // Raster rendering scope + draws (reached through cmd.raster / cmd.raster.manual).
@@ -292,10 +304,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
-    void raster_declare_array_buffer_access(cc::string_view binding_name,
-                                            cc::span<sg::array_buffer_access const> elements) override;
-    void raster_declare_array_texture_access(cc::string_view binding_name,
-                                             cc::span<sg::array_texture_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                         cc::span<sg::array_buffer_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_texture_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;

@@ -99,16 +99,16 @@ void command_list_compute_scope::dispatch_groups_indirect(raw_buffer_handle cons
     _cmd.dispatch_indirect(args, offset_in_bytes);
 }
 
-void command_list_compute_scope::declare_array_buffer_access(cc::string_view binding_name,
-                                                             cc::span<array_buffer_access const> elements)
+array_access_declaration command_list_compute_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                                                 cc::span<array_buffer_access const> elements)
 {
-    _cmd.compute_declare_array_buffer_access(binding_name, elements);
+    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_buffer_access(binding_name, elements), false);
 }
 
-void command_list_compute_scope::declare_array_texture_access(cc::string_view binding_name,
-                                                              cc::span<array_texture_access const> elements)
+array_access_declaration command_list_compute_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                                                  cc::span<array_texture_access const> elements)
 {
-    _cmd.compute_declare_array_texture_access(binding_name, elements);
+    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_texture_access(binding_name, elements), false);
 }
 
 void command_list_compute_scope::set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)

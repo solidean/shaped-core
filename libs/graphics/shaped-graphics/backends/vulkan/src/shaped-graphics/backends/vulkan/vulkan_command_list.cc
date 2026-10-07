@@ -101,6 +101,7 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
 sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
+    sg::impl::check_no_live_array_declarations(*cmd);
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
 
@@ -421,15 +422,18 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 
-void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
-                                              sg::pipeline_stage_flags stages,
-                                              sg::access_flags access)
+sg::impl::member_track vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
+                                                                sg::pipeline_stage_flags stages,
+                                                                sg::access_flags access,
+                                                                bool from_array_application)
 {
     // An empty buffer owns no VkBuffer, so there is nothing to synchronize on.
     if (buffer._buffer == VK_NULL_HANDLE)
-        return;
+        return {};
 
-    buffer.declare_access(_slot, stages, access);
+    auto const found = buffer.declare_access(_slot, stages, access, from_array_application);
+    if (found.member_write)
+        ++_member_writes;
 
     // Once per op, however many times this buffer is bound to it.
     if (buffer.mark_pending_barrier(_slot))
@@ -438,6 +442,7 @@ void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
     // Once per list, so submit can finalize the slot and drop can discard it.
     if (buffer.mark_recorded(_slot))
         _touched_buffers.push_back(std::static_pointer_cast<vulkan_buffer const>(buffer.shared_from_this()));
+    return found;
 }
 
 sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture const& texture,
@@ -446,8 +451,18 @@ sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture cons
                                                              sg::access_flags access,
                                                              sg::texture_layout layout)
 {
+    return track_texture(texture, range, stages, access, layout, false).layout;
+}
+
+vulkan_command_list::texture_track vulkan_command_list::track_texture(vulkan_texture const& texture,
+                                                                      sg::subresource_range range,
+                                                                      sg::pipeline_stage_flags stages,
+                                                                      sg::access_flags access,
+                                                                      sg::texture_layout layout,
+                                                                      bool from_array_application)
+{
     if (texture._image == VK_NULL_HANDLE)
-        return layout;
+        return {.layout = layout, .found = {}};
 
     // A texture with a transfer in flight stays in the layout that transfer needs.
     // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
@@ -456,7 +471,9 @@ sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture cons
     if (texture.has_pending_transfer())
         layout = sg::texture_layout::general;
 
-    texture.declare_access(_slot, range, stages, access, layout);
+    auto const found = texture.declare_access(_slot, range, stages, access, layout, from_array_application);
+    if (found.member_write)
+        ++_member_writes;
 
     if (texture.mark_pending_barrier(_slot))
         _pending_barrier_textures.push_back(&texture);
@@ -471,7 +488,7 @@ sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture cons
             _tentative_initial_transitions.push_back(_touched_textures.back());
     }
 
-    return layout;
+    return {.layout = layout, .found = found};
 }
 
 void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle texture,
