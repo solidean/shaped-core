@@ -3,6 +3,7 @@
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_track_result.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
@@ -115,6 +116,7 @@ public:
         bool active = false;          // this slot's command list has touched the buffer since it started tracking
         bool recorded = false;        // this slot's command list has added the buffer to its finalize set (dedup)
         bool pending_barrier = false; // declared for the current op, awaiting the pre-op flush (per-op dedup)
+        bool written = false;         // this slot's command list has added the buffer to its written set (dedup)
     };
     struct access_tracking
     {
@@ -124,25 +126,18 @@ public:
 
     /// Accumulate one declared `stages`/`access` for `slot` into the next-op state, seeding a fresh state on first touch, without emitting anything.
     /// Call once per binding — a buffer bound several times to the same op declares several times, and `flush_access` then merges them into one barrier.
+    /// Returns which firsts this access was, so the command list files the buffer once per op, once per list and once per write.
+    /// One lock for all of it: an access is tracked per element of every bound array, so the lock count is the hot cost.
     /// Thread-safe.
-    void declare_access(sg::command_list_slot slot, sg::pipeline_stage_flags stages, sg::access_flags access) const;
-
-    /// Test-and-set `slot`'s pending-barrier flag: true the first time it is called for `slot` since the last flush, false after.
-    /// The command list uses it to enqueue the buffer for the pre-op barrier flush exactly once, however many times it is bound.
-    /// `flush_access` clears it.
-    /// Thread-safe.
-    [[nodiscard]] bool mark_pending_barrier(sg::command_list_slot slot) const;
+    [[nodiscard]] dx12_track_result track_access(sg::command_list_slot slot,
+                                                 sg::pipeline_stage_flags stages,
+                                                 sg::access_flags access) const;
 
     /// Flush the accesses declared for `slot` since the last flush and return the single intra-list barrier that satisfies their union; `needed == false` when it is a freebie.
     /// Called once per op, before it, after all its bindings are declared.
     /// Also clears the pending-barrier flag.
     /// Thread-safe.
     [[nodiscard]] sg::access_barrier flush_access(sg::command_list_slot slot) const;
-
-    /// Test-and-set `slot`'s finalize-recorded flag: true the first time it is called for `slot`, false after, until the slot is cleared by finalize/discard.
-    /// The command list uses it to add the buffer to its touched set exactly once, in O(1), replacing a linear scan.
-    /// Thread-safe.
-    [[nodiscard]] bool mark_recorded(sg::command_list_slot slot) const;
 
     /// Finalize `slot` when its command list is submitted: just clear the slot, freeing the tracking slot for a future list.
     /// A buffer has no layout to promote or revert, no between-lists state to carry, and needs no barriers.

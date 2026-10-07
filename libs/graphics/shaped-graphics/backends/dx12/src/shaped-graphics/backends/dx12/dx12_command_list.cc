@@ -84,39 +84,18 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
     if (buffer->_resource == nullptr)
         return; // empty (size 0) buffer: no GPU storage, nothing to order
 
-    // Forward cross-queue sync: if an async upload (ctx.upload) is still writing this buffer on the copy queue, the direct queue must wait for that copy before this list runs.
-    // Fold its completion value into _required_copy_wait (idempotent max); the single wait is issued at submit.
-    fold_group_wait(_required_copy_waits,
-                    {buffer->_upload_group, buffer->_pending_async_upload_value.load(std::memory_order_acquire)});
-
-    // Reverse cross-queue sync for ctx.download: if this op WRITES a buffer an async readback is still reading, the direct queue must wait for that read before overwriting it.
-    // Only writes conflict, so fold the download value only for a write access.
-    if (sg::is_unordered_write(access))
-    {
-        fold_group_wait(_required_download_waits,
-                        {buffer->_download_group, buffer->_pending_async_download_value.load(std::memory_order_acquire)});
-    }
-
-    // A streaming transfer's values join the async ones, warning where they make this list wait.
-    fold_stream_wait(_required_copy_waits,
-                     {buffer->_upload_group, buffer->_pending_stream_copy_value.load(std::memory_order_acquire)}, buffer);
-    if (sg::is_unordered_write(access))
-        fold_stream_wait(
-            _required_download_waits,
-            {buffer->_download_group, buffer->_pending_stream_download_value.load(std::memory_order_acquire)}, buffer);
-
     // Accumulate the access; no barrier yet.
     // Declaring rather than flushing here is what lets a buffer bound several times to one op merge into a single barrier with the union of its stages/access.
     // flush_barriers() does the merge just before the op.
-    // mark_pending_barrier enqueues it for that flush exactly once — true only on the first binding this op — so the buffer appears in _pending_barrier_buffers at most once.
-    buffer->declare_access(slot(), stages, access);
-    if (buffer->mark_pending_barrier(slot()))
+    // The firsts file the buffer once each: for that flush, for finalization and the reverse async-upload stamp at submit, and for the download waits a write owes.
+    // The transfer waits themselves are folded at submit, from those sets, so a transfer enqueued after this access is still waited on.
+    auto const tracked = buffer->track_access(slot(), stages, access);
+    if (tracked.first_this_op)
         _pending_barrier_buffers.push_back(buffer);
-
-    // Record once so its slot is finalized at submit/drop and it gets the reverse async-upload stamp at submit.
-    // The per-slot recorded flag makes the dedup O(1), with no scan of _touched_buffers.
-    if (buffer->mark_recorded(slot()))
+    if (tracked.first_this_list)
         _touched_buffers.push_back(buffer);
+    if (tracked.first_write_this_list)
+        _written_buffers.push_back(buffer);
 }
 
 void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
@@ -128,29 +107,10 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
     if (texture->_resource == nullptr)
         return; // no GPU storage, nothing to order
 
-    // Cross-queue forward waits, mirroring track_buffer_access.
-    // If a ctx.upload wrote this texture on the copy queue this list must wait for that copy, and if this access WRITES while a ctx.download is still reading it, wait for the readback first.
-    // Both fold into a single per-list wait issued at submit.
-    fold_group_wait(_required_copy_waits,
-                    {texture->_upload_group, texture->_pending_async_upload_value.load(std::memory_order_acquire)});
-    if (sg::is_unordered_write(access))
-        fold_group_wait(
-            _required_download_waits,
-            {texture->_download_group, texture->_pending_async_download_value.load(std::memory_order_acquire)});
-
-    // A streaming transfer's values join the async ones, warning where they make this list wait.
-    fold_stream_wait(_required_copy_waits,
-                     {texture->_upload_group, texture->_pending_stream_copy_value.load(std::memory_order_acquire)},
-                     texture);
-    if (sg::is_unordered_write(access))
-        fold_stream_wait(
-            _required_download_waits,
-            {texture->_download_group, texture->_pending_stream_download_value.load(std::memory_order_acquire)}, texture);
-
     // Accumulate the access over the range; no barrier yet.
     // Declaring rather than flushing here is what lets a texture bound several times to one op merge its declares into one barrier per subresource box.
     // flush_barriers() does the merge just before the op.
-    // mark_pending_barrier enqueues it for that flush exactly once, so it appears in _pending_barrier_textures once.
+    // As for a buffer, the firsts file the texture once each, and the transfer waits are folded at submit from those sets.
 
     // A texture with a transfer in flight stays in the layout that transfer needs.
     // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
@@ -159,14 +119,51 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
     if (texture->has_pending_transfer())
         layout = sg::texture_layout::general;
 
-    texture->declare_texture_access(slot(), range, stages, access, layout);
-    if (texture->mark_pending_barrier(slot()))
+    auto const tracked = texture->track_texture_access(slot(), range, stages, access, layout);
+    if (tracked.first_this_op)
         _pending_barrier_textures.push_back(texture);
-
-    // Record once so its slot is finalized at submit/drop.
-    // The per-slot recorded flag makes the dedup O(1), with no scan of _touched_textures.
-    if (texture->mark_recorded(slot()))
+    if (tracked.first_this_list)
         _touched_textures.push_back(texture);
+    if (tracked.first_write_this_list)
+        _written_textures.push_back(texture);
+}
+
+void dx12_command_list::fold_transfer_waits()
+{
+    // Every touched resource owes the upload a transfer is still making, and only a written one the readback.
+    for (auto const& buffer : _touched_buffers)
+    {
+        fold_group_wait(_required_copy_waits,
+                        {buffer->_upload_group, buffer->_pending_async_upload_value.load(std::memory_order_acquire)});
+        fold_stream_wait(_required_copy_waits,
+                         {buffer->_upload_group, buffer->_pending_stream_copy_value.load(std::memory_order_acquire)},
+                         buffer);
+    }
+    for (auto const& buffer : _written_buffers)
+    {
+        fold_group_wait(_required_download_waits,
+                        {buffer->_download_group, buffer->_pending_async_download_value.load(std::memory_order_acquire)});
+        fold_stream_wait(
+            _required_download_waits,
+            {buffer->_download_group, buffer->_pending_stream_download_value.load(std::memory_order_acquire)}, buffer);
+    }
+    for (auto const& texture : _touched_textures)
+    {
+        fold_group_wait(_required_copy_waits,
+                        {texture->_upload_group, texture->_pending_async_upload_value.load(std::memory_order_acquire)});
+        fold_stream_wait(_required_copy_waits,
+                         {texture->_upload_group, texture->_pending_stream_copy_value.load(std::memory_order_acquire)},
+                         texture);
+    }
+    for (auto const& texture : _written_textures)
+    {
+        fold_group_wait(
+            _required_download_waits,
+            {texture->_download_group, texture->_pending_async_download_value.load(std::memory_order_acquire)});
+        fold_stream_wait(
+            _required_download_waits,
+            {texture->_download_group, texture->_pending_stream_download_value.load(std::memory_order_acquire)}, texture);
+    }
 }
 
 void dx12_command_list::forget_bind_state()
@@ -874,6 +871,11 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                 CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed");
             }
 
+            // The transfer waits, folded here rather than while recording: an upload or a readback enqueued after an
+            // access was recorded, and before this submit, must still be waited on, and only now is every one of them known.
+            // Under _next_submission, so a transfer enqueued by another thread lands either before this read or after this submit.
+            cmd->fold_transfer_waits();
+
             // If this list reads a resource an async upload is still writing, make the direct queue wait on that
             // resource's upload timeline before executing, so the copy is visible.
             // One Wait per timeline: over-waiting on a higher value is safe, and an already-signaled one returns at once.
@@ -937,6 +939,8 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
         stamp_token(tex->_last_used_submission_token);
     cmd->_touched_buffers.clear();
     cmd->_touched_textures.clear();
+    cmd->_written_buffers.clear();
+    cmd->_written_textures.clear();
 
     // The allocator is in flight until this epoch retires, so hand it to the pool's epoch capture.
     // The list is already closed and can be reused now — resetting an in-flight list onto a fresh, GPU-safe allocator is legal — so return it to the pool for the next acquire.
@@ -987,6 +991,8 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     _command_list_slots.release(cmd.slot());
     cmd._touched_buffers.clear();
     cmd._touched_textures.clear();
+    cmd._written_buffers.clear();
+    cmd._written_textures.clear();
 
     // Never submitted, so the GPU never touched this allocator.
     // Close the list so it is poolable, then return both to the pool: the list for reuse, the allocator straight to the free pool.

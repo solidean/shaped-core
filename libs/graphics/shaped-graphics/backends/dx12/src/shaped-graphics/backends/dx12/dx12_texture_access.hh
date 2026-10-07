@@ -4,6 +4,7 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/string/print.hh>
+#include <shaped-graphics/backends/dx12/dx12_track_result.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
@@ -166,6 +167,26 @@ public:
             });
     }
 
+    /// `declare`, then the two test-and-sets the command list files the texture by, under the one lock the caller holds.
+    /// Returns which firsts this access was: of this op, of this list, and of a write in this list.
+    [[nodiscard]] dx12_track_result track(sg::command_list_slot slot,
+                                          sg::subresource_range range,
+                                          sg::pipeline_stage_flags stages,
+                                          sg::access_flags access,
+                                          sg::texture_layout layout)
+    {
+        declare(slot, range, stages, access, layout);
+        auto& s = _slots[int(slot)];
+        auto const writes = sg::is_unordered_write(access);
+        auto const result = dx12_track_result{.first_this_op = !s.pending_barrier,
+                                              .first_this_list = !s.recorded,
+                                              .first_write_this_list = writes && !s.written};
+        s.pending_barrier = true;
+        s.recorded = true;
+        s.written = s.written || writes;
+        return result;
+    }
+
     /// Test-and-set `slot`'s pending-barrier flag: true the first time it is called for `slot` since the last flush, false after.
     /// Only valid on a slot that was declared (active), which is why it is only ever called right after declare.
     /// `flush` clears it.
@@ -284,6 +305,7 @@ private:
         bool active = false;
         bool recorded = false;        // this slot's command list has added the texture to its finalize set (dedup)
         bool pending_barrier = false; // declared for the current op, awaiting the pre-op flush (per-op dedup)
+        bool written = false;         // this slot's command list has added the texture to its written set (dedup)
     };
 
     slot_state& slot_for(sg::command_list_slot slot)
