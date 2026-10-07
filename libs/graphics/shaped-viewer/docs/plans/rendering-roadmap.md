@@ -76,7 +76,9 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 
 ### Housekeeping
 
-- **The viewer's tests take about 4.5 minutes in a debug build**, so its binary carries a 360 s timeout of its own rather than sg's 180 s.
-  The expensive tests should narrow themselves under `nx::is_thorough()` and the allowance go back.
+- **The viewer's tests take five to six minutes in a debug build**, so its binary carries a 600 s timeout of its own rather than sg's 180 s.
+  The time is the unoptimized SGL compiler: a debug build runs these tests 7 to 15 times slower than an optimized one, on identical GPU work.
+  Each test compiles its material permutations afresh, since the material shader cache belongs to the test's own resource manager.
+  A process-wide compile cache, keyed by source and target, is the fix, and it is deferred; narrowing the tests further gains little, since most are already narrowed.
 - Re-test the NVIDIA `InterlockedOr` driver bug on each new driver; the wavefront's counter workaround rests on the shape of its code.
 - Whether Sponza gets a committed capture: the asset is a 4 GB on-request fetch, so CI cannot produce one.

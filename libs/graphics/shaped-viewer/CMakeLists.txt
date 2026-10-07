@@ -222,11 +222,11 @@ if(SC_BUILD_TESTS)
         tests/material-shader-cache-test.cc
         tests/asset-loading-test.cc
     )
-    # Twice sg's WARP allowance: an unoptimized build path-traces the whole suite in about 4.5 minutes, the wavefront's
-    # many small dispatches being what a debug build records slowest.
-    # TEMPORARY: the suite should narrow itself under nx::is_thorough instead; see libs/graphics/shaped-viewer/docs/plans/rendering-roadmap.md.
+    # Over three times sg's WARP allowance: an unoptimized build runs the suite for five to six minutes, nearly all of it
+    # the SGL compiler, unoptimized, compiling each test's material permutations afresh.
+    # TEMPORARY: a process-wide compile cache is what would bring it back; see libs/graphics/shaped-viewer/docs/plans/rendering-roadmap.md.
     if(WIN32)
-        sc_nexus_binary(shaped-viewer-test KINDS tests TIMEOUT 360)
+        sc_nexus_binary(shaped-viewer-test KINDS tests TIMEOUT 600)
     else()
         sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
     endif()

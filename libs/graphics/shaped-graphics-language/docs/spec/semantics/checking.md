@@ -468,11 +468,14 @@ fun shade(k: float) -> float:
   Its component is `float` for a `_float`, `_unorm` or `_snorm` format, `uint` for a `_uint` one and `int` for a `_sint` one.
   Its width is the format's channel count: 1 for `r`, 2 for `rg`, 3 for `rg11b10_float`, and 4 for `rgba` and `bgra`; a width of 1 is the scalar.
   An argument that is no image format is `wrong-kind-of-name`.
+  The type needs no feature of its own: `texel[.r8_unorm]` is a `float` anywhere, and only an image of that format needs `extended_image_formats` (CHK-201).
 * **CHK-391** `x as texel[F]` converts a scalar or a plain vector whose component is the texel's component to the texel ([why](why/checking.md#chk-391)).
   A wider `x` keeps its leading components, and a narrower one takes the components it lacks from (0, 0, 0, 1) in the texel's component type.
   An `x` of the texel's own width is `x`, by CHK-196.
 * **CHK-392** An `x` whose component is not the texel's is `type-mismatch`, a conversion of kind being CHK-197's to write first: `(v as float4) as texel[F]`.
   A conversion that changes a width is `as texel[F]` and nothing else, so `float4 as float2` stays `no-matching-overload` by CHK-195.
+  A literal keeps its own type rather than taking the texel's component, so `1 as texel[.rg32_uint]` is `type-mismatch` and `1u` is what converts.
+  An `x` that is no scalar and no plain vector, `vec3`, `pos3` and `hpos4` among them, is `no-matching-overload`.
 * **CHK-368** `@coherent` on a `mut buffer` or a `mut` image member makes it **coherent** across the workgroups of a dispatch ([why](why/checking.md#chk-368)).
   A write to it that its workgroup follows with a barrier, `storage_barrier` for a buffer and `texture_barrier` for an image, is visible to every invocation of the dispatch.
   That holds for every invocation that has read the result of an atomic update made after that barrier by an invocation of the writer's workgroup.
@@ -1353,7 +1356,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-366, CHK-367 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-366, CHK-367, CHK-392 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
