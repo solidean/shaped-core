@@ -37,7 +37,8 @@ Proposed, from the independent review, and awaiting the user's confirmation:
 7. **The final shading re-evaluates the material per permutation**, from a persisted primary hit.
    It is measured against a reduced stored closure, with the extra dispatches counted in its cost.
 8. **A scene edit resets the reservoirs in the first slice**; revalidation waits for scene items with an identity that survives a frame.
-9. **The interactive budget is decided from measured per-round costs**, once the per-round live-path counts are measured.
+9. **The interactive budget is decided from per-round costs**: [Why](#why) now has the live-path counts, which put a moving frame's work in its first four rounds.
+   The cost per round is inferred from those counts, not timed.
    1080p will likely need half-rate candidates.
 10. **A device without ray tracing gets the raster path's direct lighting**, unless sg brings the ray-query polyfill to dx12 and vulkan.
     The roadmap assumes that polyfill, and it exists on webgpu alone, where the wavefront is out of scope; sg's TODO now carries it.
@@ -53,12 +54,27 @@ Measured on Intel's Sponza in daylight, in a 1280x720 window, on a laptop RTX 50
 | still: 1280x720, one round | begin 1.5–2.0, extend 4.0–4.6, segment 1.4–1.6, sort 0.8–1.5, shade 10.5–15.2, connect 4.9–7.0, finalize 1.2–1.8, resolve 0.7–1.3 | ~28 ms |
 
 - **The moving frame's wall time is ~24.7 ms**, with ~8 ms of CPU recording, 2.5 ms of it in `trace_layer`.
-- **Every slot is live in a still round**, since finalize regenerates it, so a still round is at full occupancy: ~28 ns per path segment.
+- **Every slot is live in a still round**, since finalize regenerates it, so a still round is at full occupancy: ~30 ns per path segment.
 - **A still frame's 16 ms budget fits no round**, and is clamped to one.
 - **à-trous denoising of a still frame takes ~6.3 ms.**
 - **Texture bandwidth is not the bottleneck**: sampling mip 4 at every hit saved at most 2 ms of shade.
-- **Per-round live-path counts on a moving frame are not measured yet.**
-  `wavefront_trace_desc::live_paths` and the `sv.wavefront.*` stats are how ([wavefront.md](../wavefront.md#what-it-measured)).
+- **A moving frame's live paths per round**, through `wavefront_trace_desc::live_paths` ([wavefront.md](../wavefront.md#what-it-measured)), stable to ~1% across frames (round 4 to ~3%):
+
+  | round | 0 | 1 | 2 | 3 | 4 | 5–21 |
+  |---|---|---|---|---|---|---|
+  | live paths | 230,400 | ~208,000 | ~185,000 | ~164,000 | ~7,400 | 0 |
+
+  So a moving frame traces ~795,000 segments in ~22 ms, ~28 ns each, close to the still round's ~30 ns at full occupancy.
+  That figure includes the frame's fixed costs.
+  Extend through connect alone, ~19–20 ms, gives ~24–25 ns per segment.
+  Rounds 0–3 hold ~99% of the segments.
+  The drain's 17 empty rounds still run every dispatch, and only args' share of their cost is known.
+  Args does the same work in every round, ~27 µs, so ~0.5 ms over the 17.
+  Round 4 is short because roulette runs once, in round 3's shade, and with `max_bounces = 5` round 4's shade ends every path it spares.
+  That puts survival near roulette's 0.05 floor, if ~90% of round 3's ~164,000 paths hit as in rounds 0–2, since 0.05 of those is ~7,400.
+  The hit rate in round 3 is inferred, not measured.
+  So where a moving frame's work ends is set by `max_bounces` and `wavefront_roulette_after`, not by the scene.
+  A higher cap leaves a longer, sparse tail.
 
 A moving frame is one path per pixel, and the temporal denoiser receives that path's noise.
 ReSTIR GI lets each pixel reuse the paths its neighbors and its own past found, and Ouyang et al. measure 9.3x to 166x lower mean squared error than path tracing at one sample per pixel.
@@ -570,9 +586,10 @@ What follows from it:
 - **ReSTIR costs ~6–8 ms more than today's moving frame**, and spends it on a signal the paper measures 9.3x–166x less noisy.
 - **At 1080p**, 960x540 traced, scaling by pixels gives ~63–68 ms, which does not fit a frame on this GPU; neither does today's moving frame.
   Half-rate candidates — half the pixels trace a new path each frame, in a checkerboard, and reuse covers the rest — halve the ~22 ms part, at the price of slower response to change.
-- **One-bounce GI saves at most the rounds after round 1.**
-  Rounds 0 and 1 cannot cost more than ~13 ms together, at full occupancy's ~28 ns per segment; the other ~9 ms is spread over 20 rounds of unmeasured occupancy.
-  How much of it the option saves waits for the per-round live-path counts.
+- **One-bounce GI saves the rounds after round 1**, measured at ~45% of the segments.
+  Rounds 2–4 hold ~356,000 of ~795,000 segments.
+  At ~45% of extend through connect's ~19–20 ms, that is ~8–9 ms saved, estimated by segment share.
+  Begin, resolve, args and the drain's empty rounds stay.
 - **Shade is the largest stage either way**, ~9.8 of the moving frame's 22 ms, and `sv_restir_shade` adds to it.
   Making shade cheaper pays twice here, and is a prerequisite rather than a part of this plan.
 
@@ -672,7 +689,7 @@ The throughput rebase, the direct sum, the candidate, the invalid rules, and `sv
   Diffuse only, low frequency, prone to leaks where probes land in walls, and in need of probe placement per scene.
 - **Neural radiance caching** (Müller et al. 2021): trained online on the GPU, which needs matrix hardware SGL does not reach.
   [compute-throughput.md](../../../shaped-graphics-language/docs/spec/incubator/compute-throughput.md) records what that asks of SGL.
-- **Making the plain wavefront cheaper**: shorter paths, fewer drain rounds, better occupancy.
+- **Making the plain wavefront cheaper**: shorter paths, fewer drain rounds (17 of a moving frame's 22 rounds are empty in Sponza), better occupancy.
   It lowers the cost and leaves the noise per path as it is, so it complements rather than replaces, and pays in both modes.
 - **RTXDI itself.** Its license is NVIDIA's RTX SDKs license, and SGL is the only shading language here.
   Translating its shaders raises the question NRD's license did, so this plan implements the published algorithms in our own SGL.

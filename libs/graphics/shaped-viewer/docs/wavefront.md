@@ -119,8 +119,10 @@ The denoiser learns how converged each pixel is from a per-pixel count texture, 
 
 ### Surface paths end by Russian roulette under a cap
 
-From bounce 3 on, a path survives with its throughput's largest channel as probability, floored at 0.05, and is divided by it — the rule the medium walk already uses.
-`max_bounces` becomes a safety cap, defaulting to 32, which is what bounds a draining frame; the last bounce keeps its rule that next-event estimation takes a light's full weight.
+After its third bounce, a path survives with its throughput's largest channel as probability, floored at 0.05, and is divided by it — the rule the medium walk already uses.
+`max_bounces` stays a cap, `render_settings`' default of 5, which is what bounds a draining frame.
+The last bounce keeps its rule that next-event estimation takes a light's full weight.
+At that default, roulette runs once, after the third bounce, and the cap ends every path it spares.
 Surface bounces and medium scatters keep separate counters and separate roulettes, so a fog bank cannot exhaust the surface budget.
 
 ### A medium's scatter is a segment like any other
@@ -161,7 +163,7 @@ They start in sv and move to shaped-rendering once a second caller exists.
 ## Measuring
 
 - GPU timestamps per stage, recorded into `cc::rec`.
-- Per-round live-path counts, a diagnostic readback behind a setting.
+- Per-round live-path counts, read back for a caller that passes `wavefront_trace_desc::live_paths`.
 - One benchmark, megakernel against wavefront, on `openpbr-spheres`, `lights`, `quadric-gallery`, `mesh-structure-dense` and the furnace test's dense interior.
 
 A wavefront is not faster on every scene: on a shallow, single-material one, the stored state's memory traffic usually loses to the megakernel's registers.
