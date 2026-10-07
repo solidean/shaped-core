@@ -74,7 +74,7 @@ struct sv::gpu_resource_manager_config
 /// Several may be taken per epoch, one per recording, because sg only ever reclaims an element *not acquired
 /// this epoch* — so indices another recording already handed to the GPU survive this one's mints.
 ///
-/// `elements(table)` is what a dispatch needs for `declare_array_texture_access` / `declare_array_buffer_access`:
+/// `elements(table)` is what an op needs for `declare_array_texture_access` / `declare_array_buffer_access`:
 /// sg logs and barriers every element of a bound array the code indexes and nobody declared, and the manager is
 /// the only thing that knows which elements this epoch actually acquired.
 /// Move-only; a moved-from snapshot is disarmed and unlocks nothing.
@@ -98,19 +98,24 @@ public:
     /// Empty means the table is unused this epoch, which is a perfectly good thing to declare.
     [[nodiscard]] cc::span<u32 const> elements(bindless_table table) const;
 
-    /// Declares this epoch's elements of every declared table for the **next `dispatch_rays` on `cmd`**, as shader reads.
+    /// Declares this epoch's elements of every table as shader reads, for **every trace on `cmd` while the result lives**.
     ///
-    /// sg refuses a dispatch whose bound array bindings were not all declared, and a table nobody acquired from still
-    /// has to be declared — as empty — rather than skipped.
+    /// sg covers and logs a bound array nobody declared, and a table nobody acquired from still has to be declared —
+    /// as empty — rather than skipped.
     /// So this covers the whole group rather than the tables a caller believes it touched, which is the only version
     /// that cannot silently under-declare.
-    void declare_raytracing_access(sg::command_list& cmd) const;
+    /// Declare where a trace will bind `group()`: a declaration that never meets its tables asserts when it dies.
+    [[nodiscard]] declared_tables declare_raytracing_access(sg::command_list& cmd) const;
 
-    /// The same, for the **next compute dispatch on `cmd`** — what a wavefront kernel reading the tables needs.
-    void declare_compute_access(sg::command_list& cmd) const;
+    /// The same, for **every compute dispatch on `cmd`** while the result lives — what a wavefront's kernels reading the
+    /// tables need, declared once rather than per dispatch.
+    /// A dispatch binding no table leaves the declarations dormant.
+    [[nodiscard]] declared_tables declare_compute_access(sg::command_list& cmd) const;
 
-    /// The same, for the **next draw on `cmd`** — what a raster frame's material pixel stage reading the tables needs, once per draw.
-    void declare_raster_access(sg::command_list& cmd) const;
+    /// The same, for **every draw of the open rendering scope** while the result lives — what a raster pass's material
+    /// pixel stage reading the tables needs.
+    /// The scope's end also ends them, so declare after it opens.
+    [[nodiscard]] declared_tables declare_raster_access(sg::command_list& cmd) const;
 
 private:
     friend class gpu_resource_manager;
@@ -121,6 +126,19 @@ private:
 
     gpu_resource_manager* _manager = nullptr; // null = disarmed (moved-from)
     sg::binding_group_handle _group;
+};
+
+/// Every bindless table declared on one bind point of one command list, as `bound_resources::declare_*_access` made them.
+/// In force while this lives: each op binding `bound_resources::group()` skips the element work once applied.
+/// Move-only, and destroying it withdraws them all.
+class sv::declared_tables
+{
+public:
+    declared_tables() = default;
+
+private:
+    friend class bound_resources;
+    cc::vector<sg::array_access_declaration> _declarations;
 };
 
 /// Where resource management comes together: the mesh, material and texture managers, the staging binding group

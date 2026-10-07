@@ -216,6 +216,7 @@ class attribute_manager;
 // mismatch here links a TU that only saw this declaration against a symbol nobody defines.
 class gpu_resource_manager;
 class bound_resources; // the manager's tables, snapshotted and locked for one recording
+class declared_tables; // every table declared on one bind point, in force while it lives
 
 // render plan
 enum class draw_kind : u8;

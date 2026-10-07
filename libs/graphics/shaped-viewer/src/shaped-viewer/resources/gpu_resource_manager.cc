@@ -117,7 +117,7 @@ namespace
 {
 /// Declares every table's elements of this epoch as shader reads, through whichever scope's pair of calls `scope` is.
 template <class Scope, class Tables>
-void declare_tables(Scope& scope, Tables const& tables)
+void declare_tables(Scope& scope, Tables const& tables, cc::vector<sg::array_access_declaration>& declared)
 {
     auto buffers = cc::vector<sg::array_buffer_access>();
     auto textures = cc::vector<sg::array_texture_access>();
@@ -129,7 +129,7 @@ void declare_tables(Scope& scope, Tables const& tables)
             buffers.clear();
             for (auto const e : t.acquired)
                 buffers.push_back({.index = i32(e), .access = sg::access_flag::shader_read});
-            scope.declare_array_buffer_access(name_of(t.table), buffers);
+            declared.push_back(scope.declare_array_buffer_access(name_of(t.table), buffers));
             continue;
         }
 
@@ -137,27 +137,33 @@ void declare_tables(Scope& scope, Tables const& tables)
         for (auto const e : t.acquired)
             textures.push_back(
                 {.index = i32(e), .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture});
-        scope.declare_array_texture_access(name_of(t.table), textures);
+        declared.push_back(scope.declare_array_texture_access(name_of(t.table), textures));
     }
 }
 } // namespace
 
-void bound_resources::declare_raytracing_access(sg::command_list& cmd) const
+declared_tables bound_resources::declare_raytracing_access(sg::command_list& cmd) const
 {
     CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
-    declare_tables(cmd.raytracing, _manager->_tables);
+    auto declared = declared_tables();
+    declare_tables(cmd.raytracing, _manager->_tables, declared._declarations);
+    return declared;
 }
 
-void bound_resources::declare_compute_access(sg::command_list& cmd) const
+declared_tables bound_resources::declare_compute_access(sg::command_list& cmd) const
 {
     CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
-    declare_tables(cmd.compute, _manager->_tables);
+    auto declared = declared_tables();
+    declare_tables(cmd.compute, _manager->_tables, declared._declarations);
+    return declared;
 }
 
-void bound_resources::declare_raster_access(sg::command_list& cmd) const
+declared_tables bound_resources::declare_raster_access(sg::command_list& cmd) const
 {
     CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
-    declare_tables(cmd.raster, _manager->_tables);
+    auto declared = declared_tables();
+    declare_tables(cmd.raster, _manager->_tables, declared._declarations);
+    return declared;
 }
 
 cc::span<u32 const> bound_resources::elements(bindless_table table) const

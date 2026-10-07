@@ -272,6 +272,14 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         .depth_stencil = depth.as_depth_stencil_view().cleared(1.0f),
     });
 
+    // Every table is declared once for the pass, after `pass` so it dies first, and only where a draw will meet them:
+    // a declaration that never meets its tables asserts when it dies.
+    // The first draw applies them, and a later one finds them current unless its pipeline touches them at new stages.
+    // The environment draw binds no table, so it leaves them dormant.
+    auto any_draw = false;
+    for (auto const& draw : d.draws)
+        any_draw = any_draw || draw.triangle_count > 0;
+    auto const declared = any_draw ? d.bindless->declare_raster_access(cmd) : declared_tables();
     for (auto const& draw : d.draws)
     {
         CC_ASSERT(isize(draw.permutation) < pipelines.size(), "a raster draw names a permutation the frame does not "
@@ -283,8 +291,6 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         pass.bind_group(bindless_group, *d.bindless->group());
         pass.bind_group(2, *tables);
         pass.set_inline_constants(raster::draw{.instance = draw.instance, .pad0 = {}}.to_block());
-        // An array the code indexes and nobody declared is logged and barriered whole, so every table is declared.
-        d.bindless->declare_raster_access(cmd);
         pass.draw({.vertex_range = {.offset = 0, .size = isize(draw.triangle_count) * 3}});
     }
 

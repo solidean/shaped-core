@@ -335,7 +335,8 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     cmd.raytracing.bind_group(2, *tables);
 
     // An array the code indexes and nobody declared is logged and barriered whole, so every table is declared.
-    d.bindless->declare_raytracing_access(cmd);
+    // Held across the one trace it is for.
+    auto const declared = d.bindless->declare_raytracing_access(cmd);
 
     cmd.raytracing.dispatch_rays(*variant->table, sg::raygen_index(0), d.output.width(), d.output.height());
     return sg::routine_outcome::executed;

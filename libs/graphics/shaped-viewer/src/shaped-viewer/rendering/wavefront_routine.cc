@@ -262,16 +262,17 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         bindless,
         counting,
     };
+    // Every table stays declared for each dispatch that binds them, until `declared` dies at the end of execute.
+    // The first extend applies them all, and every later bindless dispatch finds them current and touches no element.
+    // The kernels that bind no table leave them dormant.
+    auto const declared = t.bindless->declare_compute_access(cmd);
+
     auto const use = [&](sg::compute_pipeline const& kernel, second_group second)
     {
         cmd.compute.bind_pipeline(kernel);
         cmd.compute.bind_group(0, *traced);
         if (second == second_group::bindless)
-        {
             cmd.compute.bind_group(bindless_group, *t.bindless->group());
-            // An array the code indexes and nobody declared is logged and barriered whole, so every table is declared.
-            t.bindless->declare_compute_access(cmd);
-        }
         else if (second == second_group::counting)
             cmd.compute.bind_group(1, *counting);
         cmd.compute.set_inline_constants(step);
