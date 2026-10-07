@@ -263,7 +263,13 @@ sc_add_shader_package(
         raster_box_filter_mipmap.sgl:*
         nn_pool.sgl:*
         nn_upsample.sgl:*
+        nn_conv.sgl:*
+        nn_io.sgl:*
         slug_quads.sgl:*
+        mix.sgl:*
+        atrous_denoise.sgl:*
+        svgf.sgl:*
+        fsr_prepare_depth.sgl:*
 )
 
 # sr's SGL modules, which another package `use`s by naming this directory in its own MODULE_DIRS.
@@ -282,24 +288,6 @@ sc_add_shader_package(
         box_filter_mipmap.hlsl:compute:main_2d_cs
         box_filter_mipmap.hlsl:compute:main_2d_array_cs
         box_filter_mipmap.hlsl:compute:main_3d_cs
-        atrous_denoise.hlsl:compute:main_cs
-        atrous_denoise.hlsl:binding:atrous_bindings
-        atrous_denoise.hlsl:constants:gConstants
-        svgf_temporal.hlsl:compute:main_cs
-        svgf_temporal.hlsl:binding:svgf_temporal_bindings
-        svgf_temporal.hlsl:constants:gConstants
-        svgf_variance.hlsl:compute:main_cs
-        svgf_variance.hlsl:binding:svgf_variance_bindings
-        svgf_variance.hlsl:constants:gConstants
-        svgf_atrous.hlsl:compute:main_cs
-        svgf_atrous.hlsl:binding:svgf_atrous_bindings
-        svgf_atrous.hlsl:constants:gConstants
-        mix.hlsl:compute:main_cs
-        mix.hlsl:binding:mix_bindings
-        mix.hlsl:constants:gConstants
-        fsr_prepare_depth.hlsl:compute:main_cs
-        fsr_prepare_depth.hlsl:binding:fsr_prepare_depth_bindings
-        fsr_prepare_depth.hlsl:constants:gConstants
         fsr_clear_float.hlsl:compute:main_cs
         fsr_clear_float.hlsl:binding:fsr_clear_float_bindings
         fsr_clear_float.hlsl:constants:gConstants
@@ -308,15 +296,6 @@ sc_add_shader_package(
         fsr_clear_uint.hlsl:constants:gConstants
         ${_sr_fsr_shaders}
         ${_sr_nrd_shaders}
-        nn_conv.hlsl:compute:main_cs
-        nn_conv.hlsl:binding:nn_conv_bindings
-        nn_conv.hlsl:constants:gConstants
-        nn_input.hlsl:compute:main_cs
-        nn_input.hlsl:binding:nn_input_bindings
-        nn_input.hlsl:constants:gConstants
-        nn_output.hlsl:compute:main_cs
-        nn_output.hlsl:binding:nn_output_bindings
-        nn_output.hlsl:constants:gConstants
 )
 
 # Test executable.
@@ -438,6 +417,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE
             tests/box-filter-mipmap-test.cc
             tests/denoise-test.cc
+            tests/denoise-reference-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
             tests/nrd-test.cc

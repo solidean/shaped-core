@@ -7,7 +7,6 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/mix_routine.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
@@ -17,7 +16,7 @@ using namespace cc::primitive_defines;
 //
 // The endpoints are what a crossfade is judged on: a fade that does not reach its ends shows a step at whichever one
 // it misses, and a step is what the fade exists to remove.
-// Weight 0 is exact because `lerp` computes `a + (b - a) * w`, so nothing is added to the destination at all.
+// Weight 0 is exact because `mix` computes `a + (b - a) * w`, so nothing is added to the destination at all.
 // Weight 1 is not, since that same form re-derives `b` through a subtraction — which is a rounding error rather than a
 // step, and the check says so instead of pretending otherwise.
 // The middle is checked per channel, because a blend written against luminance rather than colour passes a grey test
@@ -44,7 +43,7 @@ constexpr auto image_usage
 /// Uploads both images, mixes `source` into `destination` by `weight`, and reads the destination back.
 cc::shared_async<cc::vector<tg::vec4f>> mix_once(sg::context& ctx, tg::vec4f destination, tg::vec4f source, f32 weight)
 {
-    sr::mix_routine::prewarm(ctx);
+    sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
     (void)co_await ctx.routines.idle_completion();
 
     auto const dst = make_image(ctx);

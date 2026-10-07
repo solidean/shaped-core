@@ -1,0 +1,26 @@
+// `destination = mix(destination, source, weight)`, per pixel.
+// Paired with sr::mix_routine, which compiles one variant per destination format.
+//
+// The destination is read AND written, which is what lets one extra image carry a crossfade rather than two: a per-pixel read-modify-write of an image needs no copy and no second target to land in.
+// Alpha crosses with the color, so fading between two images of the same thing leaves the alpha alone.
+
+require readwrite_image_formats
+
+// the destination's format, which the routine sets to the image it is handed: a four-channel float or normalized one
+@option const destination_format: pixel_format = .rgba16_float
+
+@inline binding mix_constants:
+    // 0 keeps the destination, 1 replaces it with the source
+    weight: float
+
+binding mix_images:
+    @unfilterable
+    source: texture_2d[float4]
+    destination: mut image_2d[destination_format]
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){mix_images, mix_constants}:
+    let size = mix_images.destination.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let blended = mix(mix_images.destination[id.xy], mix_images.source.load(id.xy), mix_constants.weight)
+    mix_images.destination[id.xy] = blended

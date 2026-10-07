@@ -13,7 +13,6 @@
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
@@ -150,12 +149,13 @@ void upload(sg::command_list& cmd, sg::texture_2d const& tex, cc::span<tg::vec4f
 ///
 /// `dlss_rr` is here even though it compiles nothing: `try_acquire` reports rather than initializes, so a routine
 /// nothing has ticked reads as pending whatever its init does.
+/// The native members compile for the format of the output they write, which is every test's `make_image`.
 cc::shared_async<cc::unit> prewarm(sg::context& ctx)
 {
-    sr::atrous_denoise_routine::prewarm(ctx);
-    sr::svgf_denoise_routine::prewarm(ctx);
+    sr::atrous_denoise_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
+    sr::svgf_denoise_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
     sr::dlss_rr_routine::prewarm(ctx);
-    sr::reconstruct_routine::prewarm(ctx);
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
     (void)co_await ctx.routines.idle_completion();
 }
 

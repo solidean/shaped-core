@@ -94,8 +94,8 @@ void upload(sg::command_list& cmd, sg::texture_2d const& tex, cc::span<tg::vec4f
 cc::shared_async<cc::unit> prewarm(sg::context& ctx)
 {
     sr::fsr_upscale_routine::prewarm(ctx);
-    sr::atrous_denoise_routine::prewarm(ctx);
-    sr::reconstruct_routine::prewarm(ctx);
+    sr::atrous_denoise_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
     (void)co_await ctx.routines.idle_completion();
 }
 

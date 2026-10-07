@@ -11,9 +11,9 @@ This is the design, including the parts not built yet.
 
 | member | kind | where it runs | status |
 |---|---|---|---|
-| `atrous` | spatial | dx12, vulkan (HLSL through DXC); WARP included | done |
-| `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
-| `oidn` | spatial, trained | dx12, vulkan (HLSL through DXC) | done; named only, not real-time |
+| `atrous` | spatial | every backend (SGL); tested on dx12 and vulkan, WARP included | done |
+| `svgf` | temporal | every backend (SGL); tested on dx12 and vulkan | done |
+| `oidn` | spatial, trained | every backend (SGL); tested on dx12 and vulkan | done; named only, not real-time |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12 | done, SDK fetched on request |
 | `fsr_rr` | temporal, split-signal | dx12 | planned |
 | `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
@@ -39,7 +39,7 @@ That is the same guide contract NRD wants, which is the argument for doing the t
 It is not built, and what it waits for is the tracer rather than the SDK.
 
 **The native members are what CI tests, and `nrd` does not join them.**
-à-trous and SVGF are our own HLSL, so they run on WARP, and the front's policy is tested through them.
+à-trous and SVGF are our own SGL, so they run on WARP, and the front's policy is tested through them.
 CI never fetches NRD, so what it builds and runs is the null path: `SR_HAS_NRD` is 0, the member reports `unsupported`, and its own tests do not exist.
 They run only where somebody fetched the SDK, which is why a green CI here says nothing about whether NRD works.
 
@@ -178,7 +178,7 @@ OIDN's own GPU devices are CUDA, HIP, SYCL and Metal over vendor GEMM libraries,
 Its CPU device would cost a download and an upload every frame.
 The weights are a separate Apache-2.0 repository, and they describe a small U-Net: sixteen 3x3 convolutions with a bias and a ReLU, four 2x2 max pools, and four nearest upsamples with a skip concat.
 So the member runs that network in five compute shaders of its own, with no vendor SDK and no particular hardware.
-They are HLSL today, so it runs where the other native members do, on dx12 and vulkan.
+They are SGL, as the other native members' are, so it builds wherever those do.
 
 **It is correct and portable, and far too slow for a frame loop** — roughly 0.2 s per megapixel, which is why `automatic` never picks it.
 Two networks are fetched, both `rt_hdr_alb_nrm`: HDR radiance with an albedo and a normal, the guides the tracer writes.
@@ -233,7 +233,7 @@ The CPU figure is `uv run dev.py test "OIDN's CPU device timed at 1080p" --manua
 - **The gap to CUDA is architectural.**
   OIDN runs cutlass implicit-GEMM convolutions in fp16 on tensor cores, with channels padded to eight, "required by Tensor Core operations".
   Ours is fp32 SIMT at about 3.2 TFLOP/s of a roughly 20-25 peak.
-  A perfect fp32 kernel would still land near 60 ms; the rest is matrix hardware, which neither the HLSL we compile nor SGL reaches today.
+  A perfect fp32 kernel would still land near 60 ms; the rest is matrix hardware, which SGL does not reach today.
 - **The limit is memory divergence, not issue rate.**
   Reading four channels per load cut load instructions fourfold and bought 1.4x, because a window's eighteen texels lie far apart and a `float4` costs the same cache line as a `float`.
   A layout that keeps a window's texels contiguous, as OIDN's CPU device does with CHW, is what would pay next.

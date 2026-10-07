@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/reconstruct.hh>
@@ -43,17 +44,20 @@ struct sr::oidn_options
 ///
 /// **Far too slow for a frame loop** — roughly 0.2 s per megapixel — so `automatic` never picks it; name it.
 ///
-/// **Only where the weights were fetched** (`extern/oidn-weights`, a default fetch) and on a backend its HLSL
-/// compiles for; everywhere else this routine still exists and reports `unsupported`.
+/// **Only where the weights were fetched** (`extern/oidn-weights`, a default fetch) and on a backend its shaders compile for.
+/// Everywhere else this routine still exists and reports `unsupported`.
 ///
 /// **Spatial, so it denoises a converging mean** rather than one frame's samples, and it reads no history.
 /// It requires an albedo and a normal, because the network it runs has nine input channels and those are six of them.
-class sr::oidn_denoise_routine : public sg::render_routine<oidn_denoise_routine>
+///
+/// A render routine **parametrized on the output's format**, which the network's last pass writes and its shader names.
+/// `reconstruct_routine` prewarms it.
+class sr::oidn_denoise_routine : public sg::render_routine<oidn_denoise_routine, sg::pixel_format>
 {
 public:
     /// Denoises `in.color` into `in.output`, carrying the network in `history`.
     ///
-    /// Does not upscale: `in.output` must be the input's extent.
+    /// Does not upscale: `in.output` must be the input's extent, in a four-channel float or normalized format.
     /// The image may be any size; the network pads its own tensors up to what four pools need.
     [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
                                                      reconstruct_inputs const& in,

@@ -43,8 +43,7 @@ Bigger design intent lives in [structure.md](structure.md).
   DX12 has it as SM 6.2 with `-enable-16bit-types`, Vulkan as `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, Metal has `half` outright, and WebGPU has the optional `shader-f16` feature.
   Optional on all four rather than guaranteed, so it wants a feature level rather than an assumption — but a shipped one, unlike the matrix instructions this network would really like.
   The gate exists: `sg::feature::shader_f16`, which every backend answers.
-  The flag exists for SGL: slib's SGL edge adds `-enable-16bit-types` through `shader_source_description::dxc_args`, so a network written in SGL takes `half` as it stands.
-  An HLSL package still has no way to set `dxc_args`, so a port that stays in HLSL needs that plumbed first.
+  The flag exists for SGL: slib's SGL edge adds `-enable-16bit-types` through `shader_source_description::dxc_args`, and the network is SGL, so it takes `half` as it stands.
   The C++ mirror problem in [binding-preprocessor.md](../../shaped-shader-library/docs/binding-preprocessor.md) is about constant blocks, which this network does not use.
   Its weights already arrive as fp16, and `tg::f16` widens them on load.
   **Expect memory rather than speed.**
@@ -52,15 +51,15 @@ Bigger design intent lives in [structure.md](structure.md).
   What the memory buys is a larger tile, and tile size is the lever that still pays.
 - à-trous estimates noise from the sample count alone, assuming one noise width per sample equal to the pixel's luminance.
   A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.
-- Port the rest of sr's HLSL to SGL; blit, imgui, the raster mip filter and the network's pool and upsample are ported.
-  What holds each remaining shader back is SGL's, and none of it is a blocker so much as a workaround to mark:
-  - à-trous and the SVGF passes want vector comparisons with `any`/`all`, integer-vector `min`/`max`/`clamp`, `const` arrays, and `use` for the shared SVGF helpers;
-  - `nn_input` and `nn_output` want `is_nan`/`is_inf`, and `nn_conv` an unroll hint before its tuned loop is trusted to SGL's HLSL;
-  - the compute box-filter mipmap writes whatever format its texture has, which an SGL image cannot say without a type parameterized on the format.
-  Every denoise member also writes the caller's `output` as an image, whose format an SGL image must name, so porting them means pinning that format.
-  Until the network is whole in SGL, `sr::query_reconstruct_support` answers false on webgpu and metal.
-  Porting also removes the hand-written "find the constants_buffer binding" loops the members and the playground example use to build their pipeline layouts,
-  since an SGL entry point states its layout (`acquire_layout`).
+- Port the rest of sr's HLSL to SGL.
+  Every routine's own shaders are SGL but three, and each waits on SGL rather than on a workaround:
+  - the compute box-filter mipmap and FSR's two clear jobs write images of every format, one, two and four channels alike.
+    An SGL image's value has its format's channel count, so one source cannot store into all of them, even with the format an option.
+  - `nrd_repack` and `nrd_resolve` call NRD's own packing functions from `NRD.hlsli`, which SGL has no way to call.
+    Reimplementing them would make two copies of formulas NRD's build owns, which reconstruction.md rules out.
+  The native denoise members and the network now build on every backend; they are tested on dx12 and vulkan alone, since their tests still sit in the DXC-gated list.
+  Moving those tests to the SGL list is what would hold webgpu and metal to them.
+  Each member compiles its last pass for the caller's output format, so it is a routine parametrized on that format, as `mix_routine` is.
 - Two denoise tests worth having and not written yet.
   A method switch on one history — à-trous then SVGF on the same `sr::reconstruct_history` — which is the one branch of `reconstruct_history::_prepare` nothing covers.
   And `options_for` on both members, which maps `quality` and `sharpness` onto pass counts and sigmas and is what any settings UI drives.

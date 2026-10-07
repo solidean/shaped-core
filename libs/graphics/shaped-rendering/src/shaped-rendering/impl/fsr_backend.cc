@@ -12,6 +12,7 @@
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/fsr_backend.hh>
 #include <shaped-shader-library/shader_asset.hh>
+#include <sr_sgl_shaders.hh>
 #include <sr_shaders.hh>
 #include <typed-geometry/scalar/half_float.hh>
 #include <typed-geometry/scalar/scalar.hh>
@@ -34,12 +35,12 @@ namespace sr::impl
 namespace
 {
 /// The flags every context is created with, which is what fixes the one permutation of each pass sr builds.
-/// Linear HDR radiance in, and the inverted, infinite-far depth fsr_prepare_depth.hlsl writes.
+/// Linear HDR radiance in, and the inverted, infinite-far depth fsr_prepare_depth.sgl writes.
 constexpr u32 k_context_flags = FFX_FSR3UPSCALER_ENABLE_HIGH_DYNAMIC_RANGE | FFX_FSR3UPSCALER_ENABLE_DEPTH_INVERTED
                               | FFX_FSR3UPSCALER_ENABLE_DEPTH_INFINITE;
 
-/// The near plane FSR is told, and the one fsr_prepare_depth.hlsl divides by: any positive value reads back as the
-/// same view depth, and FSR advises against one below 0.075.
+/// The near plane FSR is told, and the one fsr_prepare_depth.sgl divides by.
+/// Any positive value reads back as the same view depth, and FSR advises against one below 0.075.
 constexpr f32 k_near_plane = 0.1f;
 
 /// The far plane FSR is told; with an infinite depth it only has to lie past the near one.
@@ -962,11 +963,12 @@ bool fsr_dispatch(fsr_stream& stream, sg::command_list& cmd, upscale_inputs cons
         auto const& pass = stream.programs->prepare_depth;
         auto const group = ctx.transient.create_binding_group(
             cmd, pass.layout,
-            shaders::fsr_prepare_depth_bindings{.gLinearDepth = in.depth.as_texture_view(),
-                                                .gDeviceDepth = stream.device_depth.as_any_image_view()});
+            sgl_shaders::fsr_prepare_depth_io{
+                .linear_depth = in.depth.as_texture_view(),
+                .device_depth = stream.device_depth.as_image_view<sg::pixel_format::r32_float>()});
         cmd.compute.bind_pipeline(*pass.pipeline);
-        cmd.compute.bind<shaders::fsr_prepare_depth_bindings>(*group);
-        cmd.compute.set_inline_constants(shaders::fsr_prepare_depth_constants{.near_plane = k_near_plane});
+        cmd.compute.bind_group(0, *group);
+        cmd.compute.set_inline_constants(sgl_shaders::fsr_prepare_depth_constants{.near_plane = k_near_plane}.to_block());
         cmd.compute.dispatch_threads(stream.input_extent[0], stream.input_extent[1], 1);
     }
 

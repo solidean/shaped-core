@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/reconstruct.hh>
@@ -57,12 +58,16 @@ struct sr::svgf_options
 /// The colour history it carries is the integrated, unfiltered one, which is simpler than feeding a filtered pass back
 /// and keeps the filter from compounding across frames.
 /// A `restarted` call, or a `reconstruct_history::reset`, starts every pixel from this frame's samples alone.
-class sr::svgf_denoise_routine : public sg::render_routine<svgf_denoise_routine>
+///
+/// A render routine **parametrized on the output's format**, which its last pass writes and its shader names.
+/// `prewarm(ctx, format)` starts the compile for the outputs a caller will hand it; `reconstruct_routine` prewarms it.
+class sr::svgf_denoise_routine : public sg::render_routine<svgf_denoise_routine, sg::pixel_format>
 {
 public:
     /// Filters `in.color`, a fresh single-frame estimate, into `in.output`, carrying `history` to the next call.
     ///
-    /// `in.output` must match `in.color`'s extent and carry `image` usage; SVGF does not upscale.
+    /// `in.output` must match `in.color`'s extent, since SVGF does not upscale.
+    /// It carries `image` usage, in a four-channel float or normalized format the device writes as an image.
     /// The normal, depth and motion guides are required, and asserted on.
     /// `pending` while the shaders compile, `failed` after a compile that did not build.
     [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
@@ -81,10 +86,13 @@ private:
     struct pass
     {
         sg::binding_group_layout_handle group_layout;
-        sg::compute_pipeline_handle pipeline;
+        sg::async_compute_pipeline pipeline;
     };
 
     pass _temporal;
     pass _variance;
+    /// The filter passes that write the history's scratch images.
     pass _atrous;
+    /// The last filter pass, which writes the caller's output.
+    pass _atrous_output;
 };

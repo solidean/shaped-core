@@ -410,7 +410,7 @@ ASYNC_INVOCABLE_TEST("sv - a camera cut waits for a traced frame and drops the t
     };
 
     // Both denoisers and the tracer warmed first, so every counted frame below is one that dispatched.
-    sr::reconstruct_routine::prewarm(ctx);
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba16_float); // the format a denoised slot declares
     (void)co_await ctx.routines.idle_completion();
     REQUIRE(sv_test::frames_until_executed(ctx, [&](sg::command_list& cmd) { return execute(cmd, 0, traced).second; }));
     store = sv::view_store{}; // the warm-up's own counts are not what this test is about
@@ -538,7 +538,7 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
     };
 
     // Warmed moving and still, so both the upscaler and the full-size members have compiled before anything is counted.
-    sr::reconstruct_routine::prewarm(ctx);
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba16_float); // the format a denoised slot declares
     (void)co_await ctx.routines.idle_completion();
     REQUIRE(sv_test::frames_until_executed(ctx, [&](sg::command_list& cmd) { return execute(cmd, 0, true); }));
 

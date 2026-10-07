@@ -12,10 +12,8 @@
 #include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <sr_sgl_shaders.hh>
-#include <sr_shaders.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 using namespace cc::primitive_defines;
@@ -129,8 +127,8 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end", (sg::context_ha
     // Compiled first, and awaited on the assets themselves: a shader builds on the library's own scheduler rather
     // than on the context's backlog, so polling the latter would wait forever.
     // A member does this through its routine's init; a test has no routine, so it does it here.
-    for (auto const& asset : {sr::shaders::nn_conv.compute.main_cs, sr::shaders::nn_input.compute.main_cs,
-                              sr::shaders::nn_output.compute.main_cs, sr::sgl_shaders::nn_pool.main_cs.asset,
+    for (auto const& asset : {sr::sgl_shaders::nn_conv.main_cs.asset, sr::sgl_shaders::nn_io.input_cs.asset,
+                              sr::sgl_shaders::nn_io.output_cs.asset, sr::sgl_shaders::nn_pool.main_cs.asset,
                               sr::sgl_shaders::nn_upsample.main_cs.asset})
     {
         auto const shader = asset->acquire(ctx);
@@ -258,8 +256,8 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    for (auto const& asset : {sr::shaders::nn_conv.compute.main_cs, sr::shaders::nn_input.compute.main_cs,
-                              sr::shaders::nn_output.compute.main_cs, sr::sgl_shaders::nn_pool.main_cs.asset,
+    for (auto const& asset : {sr::sgl_shaders::nn_conv.main_cs.asset, sr::sgl_shaders::nn_io.input_cs.asset,
+                              sr::sgl_shaders::nn_io.output_cs.asset, sr::sgl_shaders::nn_pool.main_cs.asset,
                               sr::sgl_shaders::nn_upsample.main_cs.asset})
     {
         auto const shader = asset->acquire(ctx);
@@ -400,9 +398,10 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front",
 
     // The member's `init` and the network's five pipelines, both settled before the first call.
     // The pipelines compile on slib's queue, which nothing an epoch advance drains, so they are awaited directly.
-    sr::oidn_denoise_routine::prewarm(ctx);
+    sr::oidn_denoise_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
     (void)co_await ctx.routines.idle_completion();
-    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
+    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx, sg::pixel_format::rgba32_float))
+        .context("the network's pipelines did not build");
 
     constexpr auto k_width = 48;
     constexpr auto k_height = 48;
@@ -531,7 +530,7 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network run whole needs gigabytes, which is 
 
     // `create` starts the pipelines compiling, and this test asks a question that never runs them.
     // Drained rather than abandoned, because work still carrying a finished test's context is what nexus reports.
-    (void)co_await sr::impl::oidn_prewarm_pipelines(ctx);
+    (void)co_await sr::impl::oidn_prewarm_pipelines(ctx, sg::pixel_format::rgba32_float);
 
     if (!sr::impl::oidn_weights_present())
         SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
@@ -582,7 +581,8 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
     if (!sr::impl::oidn_weights_present())
         SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
 
-    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
+    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx, sg::pixel_format::rgba32_float))
+        .context("the network's pipelines did not build");
 
     struct tiling_case
     {
@@ -744,7 +744,8 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
+    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx, sg::pixel_format::rgba32_float))
+        .context("the network's pipelines did not build");
 
     // Not a multiple of sixteen either, so the last tile row and column sit next to the padding.
     // The small network against Intel's fast quality, at 2x2 tiles, so it fits WARP's budget in CI; the untiled

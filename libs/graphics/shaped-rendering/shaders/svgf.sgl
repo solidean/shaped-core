@@ -1,0 +1,307 @@
+// SVGF's three passes and what they share: the flag bits, the albedo round trip and the edge-stopping tests.
+// Paired with sr::svgf_denoise_routine; see docs/reconstruction.md for how the passes fit together.
+//
+// `temporal_cs` folds this frame's fresh samples into the history reprojected from the last frame.
+// `variance_cs` measures how noisy each pixel of that history still is, which is what steers the filter.
+// `atrous_cs` is one filter pass whose luminance edge-stop that variance steers, dispatched once per pass.
+
+// the format of the image a filter pass writes: the routine's scratch between passes, the caller's output on the last
+@option const target_format: pixel_format = .rgba32_float
+
+const has_albedo = 1u
+// the temporal pass ignores the history: a first frame, or a cut
+const reset = 2u
+// this filter pass is the last, and multiplies the albedo back in
+const remodulate_out = 4u
+const has_specular_albedo = 8u
+
+// A zero albedo would make demodulation divide by zero; one floor used both ways keeps the round trip exact.
+const albedo_floor = 0.001
+
+// What color is demodulated by: the surface's total reflectance, since SVGF filters unsplit radiance and a metal's color is in the specular half.
+fun reflectance(albedo: float3, specular_albedo: float3, flags: uint) -> float3:
+    let mut a = albedo
+    if (flags & has_specular_albedo) != 0u:
+        a += specular_albedo
+    return max(a, float3(albedo_floor))
+
+fun luminance(c: float3) => dot(c, float3(0.2126, 0.7152, 0.0722))
+
+// A zero normal or a non-positive depth is a pixel with no surface: the primary ray escaped.
+fun is_surface(n: float3, depth: float) => dot(n, n) > 0.0 and depth > 0.0
+
+// Whether a neighbor at `offset` pixels shows the same surface as the center, as a weight in [0, 1].
+// Two missed pixels match each other and nothing else, so the sky never averages into geometry.
+fun geometry_weight(n_p: float3, d_p: float, n_q: float3, d_q: float, offset: float2, normal_power: float, depth_sigma: float) -> float:
+    let surface_p = is_surface(n_p, d_p)
+    let surface_q = is_surface(n_q, d_q)
+    if surface_p != surface_q => return 0.0
+    if not surface_p => return 1.0
+
+    let w_n = pow(saturate(dot(normalize(n_p), normalize(n_q))), normal_power)
+    let allowed = depth_sigma * d_p * max(length(offset), 1.0) + 0.00001
+    return w_n * exp(-abs(d_q - d_p) / allowed)
+
+fun as_float2(v: int2) => float2(v.x as float, v.y as float)
+
+// ---- temporal -------------------------------------------------------------------------------------------------------
+
+// Each pixel follows its motion vector back to where its surface was, and takes the history there only if the surface matches: same side of a silhouette, similar normal and depth.
+// A pixel whose surface was not visible last frame (a disocclusion) starts over from this frame's samples alone, with a history length of one.
+// The variance pass then leans on its neighbors until it has more.
+//
+// Color is filtered with the albedo divided out, so what accumulates is lighting and texture survives exactly.
+// The history carries its own length in alpha, which is what makes a young pixel blend fast and an old one slowly.
+
+@inline binding svgf_temporal_constants:
+    flags: uint
+    // the smallest weight a new frame gets: 1 / length, but never below this
+    color_alpha_min: float
+    // the same for the luminance moments, which want to track change a little faster
+    moments_alpha_min: float
+    // where the history length stops growing
+    max_history: float
+    // the least dot(n_prev, n) that still counts as the same surface
+    normal_similarity: float
+    // the largest relative depth change that still counts as the same surface
+    depth_similarity: float
+
+binding svgf_temporal_images:
+    // this frame's noisy radiance; its alpha is the caller's and rides through untouched
+    @unfilterable
+    color: texture_2d[float4]
+    // diffuse albedo, or a stand-in when `has_albedo` is clear
+    @unfilterable
+    albedo: texture_2d[float4]
+    // or a stand-in when `has_specular_albedo` is clear
+    @unfilterable
+    specular_albedo: texture_2d[float4]
+    @unfilterable
+    normal: texture_2d[float4]
+    @unfilterable
+    depth: texture_2d[float4]
+    // this frame's pixel minus last frame's, in pixels
+    @unfilterable
+    motion: texture_2d[float4]
+    // xyz demodulated color, w a history length
+    @unfilterable
+    previous_history: texture_2d[float4]
+    // x mean luminance, y mean squared luminance
+    @unfilterable
+    previous_moments: texture_2d[float2]
+    // xyz normal, w depth, as last frame saw them
+    @unfilterable
+    previous_normal_depth: texture_2d[float4]
+    history: out image_2d[.rgba32_float]
+    moments: out image_2d[.rg32_float]
+    normal_depth: out image_2d[.rgba32_float]
+
+@compute(8, 8) fun temporal_cs(@thread_id id: int3){svgf_temporal_images, svgf_temporal_constants}:
+    let size = svgf_temporal_images.history.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let p = id.xy
+    let flags = svgf_temporal_constants.flags
+
+    let mut color = svgf_temporal_images.color.load(p).xyz
+    if (flags & has_albedo) != 0u:
+        let albedo = svgf_temporal_images.albedo.load(p).xyz
+        color /= reflectance(albedo, svgf_temporal_images.specular_albedo.load(p).xyz, flags)
+
+    let n = svgf_temporal_images.normal.load(p).xyz
+    let d = svgf_temporal_images.depth.load(p).x
+    let lum = luminance(color)
+    let moments = float2(lum, lum * lum)
+
+    // Where this pixel's surface was last frame: the pixel's center moved back by its motion.
+    let previous_center = as_float2(p) + 0.5 - svgf_temporal_images.motion.load(p).xy
+    let floored = floor(previous_center)
+    let q = int2(floored.x as int, floored.y as int)
+
+    let mut valid = (flags & reset) == 0u and all(q >= int2(0)) and all(q < size)
+    if valid:
+        let prev_nd = svgf_temporal_images.previous_normal_depth.load(q)
+        let surface = is_surface(n, d)
+        let prev_surface = is_surface(prev_nd.xyz, prev_nd.w)
+        if surface != prev_surface:
+            valid = false
+        else if surface:
+            let same_normal = dot(normalize(n), normalize(prev_nd.xyz))
+            let depth_change = abs(prev_nd.w - d) / max(d, 0.0001)
+            valid = same_normal >= svgf_temporal_constants.normal_similarity and depth_change <= svgf_temporal_constants.depth_similarity
+
+    let mut out_color = color
+    let mut out_moments = moments
+    let mut history_length = 1.0
+    if valid:
+        let prev = svgf_temporal_images.previous_history.load(q)
+        history_length = min(prev.w + 1.0, svgf_temporal_constants.max_history)
+
+        // 1 / length is the exact running mean while the history is young.
+        // The floor turns it into an exponential average once it is old, so a lighting change still shows up rather than being averaged away forever.
+        let color_alpha = max(1.0 / history_length, svgf_temporal_constants.color_alpha_min)
+        let moments_alpha = max(1.0 / history_length, svgf_temporal_constants.moments_alpha_min)
+        out_color = mix(prev.xyz, color, color_alpha)
+        out_moments = mix(svgf_temporal_images.previous_moments.load(q), moments, moments_alpha)
+
+    svgf_temporal_images.history[id.xy] = float4(..out_color, history_length)
+    svgf_temporal_images.moments[id.xy] = out_moments
+    svgf_temporal_images.normal_depth[id.xy] = float4(..n, d)
+
+// ---- variance -------------------------------------------------------------------------------------------------------
+
+// A pixel with enough history reads its variance straight off its accumulated moments.
+// A young one (a disocclusion, or the first frames) has too few samples for that to mean anything.
+// So it estimates the variance spatially instead, from the neighbors that show the same surface, and boosts it, so the filter leans hard on exactly the pixels that have the least to go on.
+//
+// Writes the color through unchanged, with the variance in alpha, as the first filter pass's input.
+
+@inline binding svgf_variance_constants:
+    normal_power: float
+    depth_sigma: float
+    // a history shorter than this estimates its variance spatially
+    spatial_below: float
+
+binding svgf_variance_images:
+    // xyz demodulated color, w a history length
+    @unfilterable
+    history: texture_2d[float4]
+    // x mean luminance, y mean squared luminance
+    @unfilterable
+    moments: texture_2d[float2]
+    @unfilterable
+    normal_depth: texture_2d[float4]
+    // xyz color, w a variance
+    target: out image_2d[.rgba32_float]
+
+@compute(8, 8) fun variance_cs(@thread_id id: int3){svgf_variance_images, svgf_variance_constants}:
+    let size = svgf_variance_images.target.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let p = id.xy
+    let history = svgf_variance_images.history.load(p)
+    let history_length = history.w
+
+    if history_length >= svgf_variance_constants.spatial_below:
+        let m = svgf_variance_images.moments.load(p)
+        svgf_variance_images.target[id.xy] = float4(..history.xyz, max(0.0, m.y - m.x * m.x))
+        return
+
+    // A 7x7 neighborhood of the same surface, weighted like the filter weights it will later be averaged with.
+    let nd_p = svgf_variance_images.normal_depth.load(p)
+    let mut sum_m = float2(0.0)
+    let mut weight_sum = 0.0
+    for dy in -3 ..< 4:
+        for dx in -3 ..< 4:
+            let q = p + int2(dx, dy)
+            if any(q < int2(0)) or any(q >= size) => continue
+            let nd_q = svgf_variance_images.normal_depth.load(q)
+            let offset = float2(dx as float, dy as float)
+            let w = geometry_weight(nd_p.xyz, nd_p.w, nd_q.xyz, nd_q.w, offset, svgf_variance_constants.normal_power, svgf_variance_constants.depth_sigma)
+            sum_m += svgf_variance_images.moments.load(q) * w
+            weight_sum += w
+
+    // The center always matches itself, so weight_sum is never zero.
+    let m = sum_m / weight_sum
+    let mut variance = max(0.0, m.y - m.x * m.x)
+
+    // Few samples mean the estimate itself is unreliable, and erring toward more noise filters harder where it matters.
+    variance *= svgf_variance_constants.spatial_below / max(history_length, 1.0)
+    svgf_variance_images.target[id.xy] = float4(..history.xyz, variance)
+
+// ---- filter ---------------------------------------------------------------------------------------------------------
+
+// The difference from sr's plain à-trous is where the noise estimate comes from.
+// There it is modeled from a sample count; here it is measured per pixel, blurred over a 3x3 so one lucky sample does not stop a pixel from being filtered, and carried through every pass.
+// A pass leaves each pixel's variance as the variance of the average it produced, so the next pass, at twice the spacing, filters less where this one already removed the noise.
+
+@inline binding svgf_atrous_constants:
+    step: int
+    flags: uint
+    // how many measured noise widths a luminance difference may span and still average
+    luminance_sigma: float
+    normal_power: float
+    depth_sigma: float
+
+binding svgf_atrous_images:
+    // xyz demodulated color, w a variance
+    @unfilterable
+    source: texture_2d[float4]
+    @unfilterable
+    normal_depth: texture_2d[float4]
+    // read only on the last pass, and only when `has_albedo` is set
+    @unfilterable
+    albedo: texture_2d[float4]
+    // likewise, and only when `has_specular_albedo` is set too
+    @unfilterable
+    specular_albedo: texture_2d[float4]
+    // this call's input color, read only on the last pass, for the alpha it carries
+    @unfilterable
+    color: texture_2d[float4]
+    target: out image_2d[target_format]
+
+@compute(8, 8) fun atrous_cs(@thread_id id: int3){svgf_atrous_images, svgf_atrous_constants}:
+    let size = svgf_atrous_images.target.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let p = id.xy
+    let flags = svgf_atrous_constants.flags
+
+    let center = svgf_atrous_images.source.load(p)
+    let nd_p = svgf_atrous_images.normal_depth.load(p)
+    let center_lum = luminance(center.xyz)
+
+    // The variance, blurred over 3x3 before it steers anything: one pixel that happened to draw similar samples would otherwise refuse all its neighbors and stay as noisy as it came in.
+    let mut blurred_variance = 0.0
+    let mut blur_weight = 0.0
+    @unroll
+    for by in -1 ..< 2:
+        @unroll
+        for bx in -1 ..< 2:
+            let q = clamp(p + int2(bx, by), int2(0), size - int2(1))
+            let w = (if bx == 0 => 0.5 else 0.25) * (if by == 0 => 0.5 else 0.25)
+            blurred_variance += svgf_atrous_images.source.load(q).w * w
+            blur_weight += w
+    blurred_variance /= blur_weight
+
+    let lum_width = svgf_atrous_constants.luminance_sigma * sqrt(max(blurred_variance, 0.0)) + 0.000001
+
+    let kernel = [1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0]
+
+    let mut sum = float3(0.0)
+    let mut variance_sum = 0.0
+    let mut weight_sum = 0.0
+    @unroll
+    for dy in -2 ..< 3:
+        @unroll
+        for dx in -2 ..< 3:
+            let offset = int2(dx, dy) * svgf_atrous_constants.step
+            let q = p + offset
+            if any(q < int2(0)) or any(q >= size) => continue
+
+            let c = svgf_atrous_images.source.load(q)
+            let nd_q = svgf_atrous_images.normal_depth.load(q)
+
+            let mut w = kernel[dx + 2] * kernel[dy + 2]
+            w *= geometry_weight(nd_p.xyz, nd_p.w, nd_q.xyz, nd_q.w, as_float2(offset), svgf_atrous_constants.normal_power, svgf_atrous_constants.depth_sigma)
+            w *= exp(-abs(luminance(c.xyz) - center_lum) / lum_width)
+
+            sum += c.xyz * w
+            variance_sum += c.w * w * w
+            weight_sum += w
+
+    // The center matches itself on every test, so weight_sum is at least kernel[2]^2.
+    let mut result = sum / weight_sum
+    let variance = variance_sum / (weight_sum * weight_sum)
+
+    // Between passes the alpha is the variance this filter carries forward.
+    // What lands in the CALLER's output is their own input's alpha instead.
+    // A denoised image keeps the alpha it came in with, which is what sr::reconstruct_inputs::output promises and what à-trous does too.
+    let mut out_alpha = variance
+    if (flags & remodulate_out) != 0u:
+        if (flags & has_albedo) != 0u:
+            let albedo = svgf_atrous_images.albedo.load(p).xyz
+            result *= reflectance(albedo, svgf_atrous_images.specular_albedo.load(p).xyz, flags)
+        out_alpha = svgf_atrous_images.color.load(p).w
+
+    svgf_atrous_images.target[id.xy] = float4(..result, out_alpha)

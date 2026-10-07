@@ -6,6 +6,7 @@
 #include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/fsr_backend.hh>
+#include <sr_sgl_shaders.hh>
 #include <sr_shaders.hh>
 
 namespace sr
@@ -82,7 +83,7 @@ bool fsr_upscale_routine::is_available(sg::context const& ctx)
         return false;
     if (!impl::fsr_passes_available(ctx))
         return false;
-    for (auto const& asset : {shaders::fsr_prepare_depth.compute.main_cs, shaders::fsr_clear_float.compute.main_cs,
+    for (auto const& asset : {sgl_shaders::fsr_prepare_depth.main_cs.asset, shaders::fsr_clear_float.compute.main_cs,
                               shaders::fsr_clear_uint.compute.main_cs})
         if (asset == nullptr || !asset->can_acquire(ctx))
             return false;
@@ -106,9 +107,12 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
     // AMD's passes compile while ours do.
     auto const fsr = impl::fsr_build_passes(ctx);
 
+    // The depth conversion is SGL, and states its own layout.
+    auto const prepare_depth = sgl_shaders::fsr_prepare_depth.main_cs.acquire_pipeline(ctx);
+
+    // FSR's clear job writes images of every channel count, which one SGL source cannot write yet.
+    // The two passes stay HLSL, and libs/graphics/shaped-rendering/docs/TODO.md says why.
     pass_request requests[] = {
-        {.shader = shaders::fsr_prepare_depth.compute.main_cs->acquire(ctx),
-         .group_layout = ctx.cached.acquire_binding_group_layout<shaders::fsr_prepare_depth_bindings>()},
         {.shader = shaders::fsr_clear_float.compute.main_cs->acquire(ctx),
          .group_layout = ctx.cached.acquire_binding_group_layout<shaders::fsr_clear_float_bindings>()},
         {.shader = shaders::fsr_clear_uint.compute.main_cs->acquire(ctx),
@@ -118,9 +122,9 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
     for (auto const& r : requests)
         co_await cc::async_settled(r.shader);
 
-    char const* const names[] = {"fsr_prepare_depth", "fsr_clear_float", "fsr_clear_uint"};
+    char const* const names[] = {"fsr_clear_float", "fsr_clear_uint"};
     auto pipelines = cc::vector<sg::async_compute_pipeline>();
-    for (auto i = isize(0); i < 3; ++i)
+    for (auto i = isize(0); i < 2; ++i)
     {
         auto const& r = requests[i];
         auto const* const compiled = r.shader->try_value();
@@ -140,7 +144,18 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
     }
 
     auto built = std::make_shared<programs>();
-    programs::pass* const passes[] = {&built->prepare_depth, &built->clear_float, &built->clear_uint};
+    co_await cc::async_settled(prepare_depth);
+    auto const* const depth_pipeline = prepare_depth->try_value();
+    if (depth_pipeline == nullptr)
+    {
+        CC_LOG_ERROR("fsr: the fsr_prepare_depth pipeline did not build");
+        fail_init();
+        co_return;
+    }
+    built->prepare_depth = {.layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::fsr_prepare_depth_io>(),
+                            .pipeline = *depth_pipeline};
+
+    programs::pass* const passes[] = {&built->clear_float, &built->clear_uint};
     for (auto i = isize(0); i < pipelines.size(); ++i)
     {
         co_await cc::async_settled(pipelines[i]);

@@ -713,7 +713,8 @@ cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
 
     // Warmed rather than declared: a layer that never crossfades must not wait on it, and one that does reaches the
     // fade a good many frames after the first trace — so the compile has long since finished by then.
-    sr::mix_routine::prewarm(ctx);
+    // It compiles per destination format, and what it fades is a denoised slot, which view_data declares half float.
+    sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
 
     // This runs again on every reload, which is exactly when an accumulated image stops being comparable to a fresh one.
     ++_shader_generation;
