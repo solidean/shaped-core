@@ -33,12 +33,12 @@ fun tonemap(color: float3) -> float3:
     return saturate(n / d)
 
 // The back buffer is unorm rather than _srgb, so the encode happens here.
-// Branchless: a mix by a step per component, since the prelude's `mix` takes one weight for the whole vector.
+// Branchless: a mix by a step per component.
 fun to_srgb(c: float3) -> float3:
     let lo = c * 12.92
     let hi = 1.055 * pow(max(c, float3(0.00000001)), float3(1.0 / 2.4)) - 0.055
     let s = step(c, float3(0.0031308))
-    return float3(mix(hi.x, lo.x, s.x), mix(hi.y, lo.y, s.y), mix(hi.z, lo.z, s.z))
+    return mix(hi, lo, s)
 
 fun as_float2(v: int2) => float2(v.x as float, v.y as float)
 
