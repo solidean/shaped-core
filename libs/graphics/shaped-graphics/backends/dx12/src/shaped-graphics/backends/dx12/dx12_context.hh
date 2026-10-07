@@ -110,6 +110,13 @@ struct sg::backend::dx12::dx12_config
     /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
     sg::execution_model execution = sg::execution_model::may_block;
 
+    /// Whether this context reports no ray tracing whatever the device has: neither `ray_query` nor `raytracing_pipeline`, and `cmd.raytracing.is_supported()` false.
+    ///
+    /// Test-only in intent, like `execution`.
+    /// It is how a suite proves that a caller draws on a device without ray tracing, on a host whose device has it.
+    /// Building an acceleration structure then breaks its precondition, exactly as it would on an adapter without DXR.
+    bool withhold_raytracing = false;
+
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
     isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;

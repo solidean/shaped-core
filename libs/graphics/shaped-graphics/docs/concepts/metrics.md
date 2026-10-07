@@ -5,7 +5,8 @@ The adapter, GPU memory and the engine busy counters are [gpu-metrics](gpu-metri
 
 ## A stat is a monotone total
 
-Each `sg::stat` is an `i64` that only ever grows: draws, dispatches, submitted lists, barriers, bytes moved per transfer path, resources created, time spent blocked on the GPU.
+Each `sg::stat` is an `i64` that only ever grows.
+It counts draws, dispatches, acceleration-structure builds, submitted lists, barriers, bytes moved per transfer path, resources created, and time spent blocked on the GPU.
 There is no reset and no "per frame" built in.
 A caller who wants one takes two readings and subtracts:
 
@@ -22,7 +23,8 @@ All stats are integers, times included: `gpu_wait_nanoseconds` is a count of nan
 ## When a reading includes what
 
 **A command list's counts join the totals when it is submitted.**
-Draws, dispatches, inline transfer bytes and the barriers recorded between ops are counted on the list while it records, on its one thread, and folded in under the submission lock.
+Draws, dispatches, acceleration-structure builds, inline transfer bytes and the barriers recorded between ops are counted on the list while it records.
+That happens on its one thread, and the counts are folded in under the submission lock.
 A dropped list counts nothing, because it did nothing on the GPU.
 The barriers a list needs on entry are resolved at its submit and counted there too.
 

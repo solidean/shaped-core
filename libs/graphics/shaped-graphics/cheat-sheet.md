@@ -117,6 +117,7 @@ ctx.implementation_of(f)                           // sg::feature_implementation
                                                    // ray tracing is TWO features: ray_query (a trace from any stage) and raytracing_pipeline
                                                    //   dx12: ray_query needs tier 1.1, the pipeline 1.0; vulkan: one probe for both;
                                                    //   metal: both; webgpu: ray_query only, emulated. cmd.raytracing.is_supported() = either
+                                                   //   dx12_config::withhold_raytracing = a context reporting neither, for a test of the no-RT path
 sg::to_string(f)  sg::feature_from_string(name)    // "ray_query" <-> feature::ray_query; sg::k_all_features lists them in enum order
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
 ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
@@ -136,6 +137,7 @@ sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total
                                                    //   see docs/concepts/gpu-metrics.md
 auto const d = ctx.metrics.stats() - before;       // sg::stats — monotone i64 totals per sg::stat; subtract two readings for "per frame"
 d[sg::stat::buffer_barriers]; d.is_counted(s)      //   an uncounted stat reads 0 — webgpu sees no barriers, metal no per-resource ones
+d[sg::stat::blas_builds] / d[sg::stat::tlas_builds] //   acceleration structures built, counted at the facade on every backend
                                                    //   a list counts at its SUBMIT, a transfer at its ENQUEUE; see docs/concepts/metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
                                                    //   the reason carries DRED's breadcrumbs + page fault when dx12_config::enable_dred was set BEFORE device creation

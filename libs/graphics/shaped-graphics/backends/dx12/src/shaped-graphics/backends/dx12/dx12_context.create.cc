@@ -435,7 +435,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // failed query leaves the tier at NOT_SUPPORTED, which is the correct "no ray tracing" answer.
     D3D12_RAYTRACING_TIER raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-    if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
+    if (!config.withhold_raytracing
+        && SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
         raytracing_tier = options5.RaytracingTier;
 
     // A failed query is an older runtime, which requires block-aligned sizes.
