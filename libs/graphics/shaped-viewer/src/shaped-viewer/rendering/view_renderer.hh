@@ -28,7 +28,10 @@ struct sv::plan_resources
 /// It never records a trace itself — that rule stays in the leaf routine.
 /// This one only sequences it.
 ///
-/// It rasters nothing and opens no scope, and it never sees the frame's output target.
+/// **A raster layer needs no ray tracing.** It is drawn through sv::raster_routine, builds no acceleration structure, and never waits on the tracer.
+/// A traced layer on a device without `sg::feature::raytracing_pipeline` is declined, and says so once.
+///
+/// It opens no scope of its own, and it never sees the frame's output target.
 /// Getting these textures onto a target is sv::viewer_renderer, which is the one place a rect, a viewport or the output's format is known.
 ///
 /// **The persistent resources are the caller's**, held in the `sv::view_store` every call here takes.
@@ -93,7 +96,7 @@ public:
     [[nodiscard]] static f32 crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fade_frames);
 
 protected:
-    /// No shaders of its own; it warms the path tracer so its compiles start early.
+    /// No shaders of its own; it warms the path tracer where the device has one, and never waits on it.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
@@ -173,9 +176,5 @@ private:
     /// shaders produced.
     /// Back when the accumulation lived on this routine, `evict` gave that for free; a store the caller owns outlives
     /// the instance, so the invalidation has to be said out loud.
-    /// The routine every trace goes through.
-    /// Declared rather than prewarmed, so this renderer reports pending until the pathtracer is ready.
-    sg::routine_dependency<pathtrace_routine, sg::routine_no_params> _pathtrace;
-
     u64 _shader_generation = 0;
 };

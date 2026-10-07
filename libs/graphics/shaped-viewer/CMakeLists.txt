@@ -8,7 +8,7 @@ project(shaped-viewer LANGUAGES CXX)
 # The library API is present on every platform (the vocabulary, managers, routines and renderer all compile
 # cross-platform), and every shader is SGL, so it compiles for whichever backend a context runs.
 # Tracing needs a backend with ray-tracing pipelines: dx12 and vulkan, where sv's tests run it.
-# Where that is missing, a routine simply acquires no shader and draws nothing — the same graceful path a broken shader edit takes.
+# Where that is missing, a raster layer still draws, and a traced layer is declined with one logged error.
 add_library(shaped-viewer
     src/shaped-viewer/shaped-viewer.cc
     src/shaped-viewer/context.cc
@@ -260,6 +260,7 @@ if(SC_BUILD_TESTS)
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
             tests/raster-test.cc
+            tests/raster-without-raytracing-test.cc
             tests/wavefront-benchmark.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc

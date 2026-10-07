@@ -101,6 +101,9 @@ struct temporal_slot
 
     /// Whether this accumulation slot's raster layer has said that it skips the quadric batches it holds, which it says once.
     bool raster_skip_reported = false;
+
+    /// Whether this accumulation slot's traced layer has said that the device cannot trace it, which it says once.
+    bool untraceable_reported = false;
 };
 
 /// Everything a view keeps across frames, keyed by its view_id — held by `sv::view_store`.

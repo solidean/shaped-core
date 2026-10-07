@@ -17,6 +17,7 @@
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh> // pt_light_table
 #include <shaped-viewer/rendering/shaders.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
@@ -170,6 +171,29 @@ template <class F>
             return false;
         drive_ambient_work();
     }
+}
+
+/// `id`'s BLAS, built on a list of its own when no trace has asked for it yet.
+///
+/// A mesh's BLAS waits for the first trace that reaches it, so a test placing one in a TLAS by hand builds it here.
+/// `id` must be `complete`, which `wait_for_pending_uploads` makes it.
+inline sg::blas_handle blas_of(sv::gpu_resource_manager& resources, sv::mesh_id id)
+{
+    auto& ctx = resources.context();
+    auto cmd = ctx.create_command_list();
+    auto blas = resources.meshes.acquire_blas(*cmd, id);
+    ctx.submit_command_list(cc::move(cmd));
+    return blas;
+}
+
+/// The same for a quadric batch's procedural BLAS.
+inline sg::blas_handle blas_of(sv::gpu_resource_manager& resources, sv::quadric_set_id id)
+{
+    auto& ctx = resources.context();
+    auto cmd = ctx.create_command_list();
+    auto blas = resources.quadrics.acquire_blas(*cmd, id);
+    ctx.submit_command_list(cc::move(cmd));
+    return blas;
 }
 
 } // namespace sv_test

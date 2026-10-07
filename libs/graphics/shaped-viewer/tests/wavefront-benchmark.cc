@@ -134,7 +134,7 @@ ASYNC_BENCHMARK("sv - wavefront against megakernel, GPU time per path")
         REQUIRE(permutation != nullptr);
 
         auto instances = cc::vector<sg::tlas_instance>();
-        instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas,
+        instances.push_back(sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh),
                                               .instance_id = 0,
                                               .hit_group_offset = 0,
                                               .opaque_override = !permutation->opacity.can_cut_out()});

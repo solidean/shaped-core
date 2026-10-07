@@ -47,7 +47,8 @@ struct cornell_scene
     REQUIRE(mesh != nullptr);
     auto const* const permutation = resources.shaders.find(s.item.shader_key);
     REQUIRE(permutation != nullptr);
-    s.instances.push_back(sg::tlas_instance{.blas = mesh->blas, .instance_id = 0, .hit_group_offset = 0});
+    s.instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, s.item.mesh), .instance_id = 0, .hit_group_offset = 0});
     s.hit_groups.push_back(permutation);
     s.lights = sv_test::light_table_of(s.box.light);
     s.camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
@@ -145,7 +146,7 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_wavefront(sg::context& ctx,
     REQUIRE(permutation != nullptr);
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas,
+    instances.push_back(sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh),
                                           .instance_id = 0,
                                           .hit_group_offset = 0,
                                           .opaque_override = !permutation->opacity.can_cut_out()});

@@ -59,7 +59,8 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
     // One instance at identity — the Cornell box geometry is already in world space.
     // Hit group 0 is the one permutation this scene shades with.
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
@@ -180,7 +181,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     REQUIRE(mesh_rec != nullptr);
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
 
@@ -293,7 +295,8 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material samples through the p
     REQUIRE(permutation->source.contains("tracer.traced.palette_"));
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
@@ -389,7 +392,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
     REQUIRE(permutation != nullptr);
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
 
@@ -558,7 +562,8 @@ struct light_scene
     if (mesh == nullptr || permutation == nullptr)
         return {};
 
-    scene.instances.push_back(sg::tlas_instance{.blas = mesh->blas, .instance_id = 0, .hit_group_offset = 0});
+    scene.instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, scene.item.mesh), .instance_id = 0, .hit_group_offset = 0});
     scene.hit_groups.push_back(permutation);
     scene.camera = camera;
     return scene;

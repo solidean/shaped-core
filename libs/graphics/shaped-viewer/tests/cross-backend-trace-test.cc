@@ -312,7 +312,7 @@ template <class T>
             auto const* const set = resources.quadrics.get_ptr(item.quadrics);
             if (set == nullptr)
                 return {};
-            blas = set->blas;
+            blas = sv_test::blas_of(resources, item.quadrics);
             scene.has_quadrics = true;
         }
         else
@@ -320,7 +320,7 @@ template <class T>
             auto const* const mesh = resources.meshes.get_ptr(item.mesh);
             if (mesh == nullptr)
                 return {};
-            blas = mesh->blas;
+            blas = sv_test::blas_of(resources, item.mesh);
             opaque = !permutation->opacity.can_cut_out();
         }
 

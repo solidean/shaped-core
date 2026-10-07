@@ -159,6 +159,9 @@ public:
     /// Creates the four managers, the staging group over module `tracer`'s bindless layout, and one array per table.
     [[nodiscard]] static gpu_resource_manager create(sg::context& ctx, gpu_resource_manager_config const& cfg = {});
 
+    /// The context every manager here records into.
+    [[nodiscard]] sg::context& context() const { return *_ctx; }
+
     /// Reclaim and advance to epoch `e`, if not already there.
     ///
     /// `e` must not be behind the epoch already reached: a stale window handing in an older one would run a full eviction pass

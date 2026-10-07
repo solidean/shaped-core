@@ -244,15 +244,6 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
         win = cc::move(win_r.value());
     }
 
-    // Ray tracing must be supported to build the meshes' BLAS; fail cleanly rather than asserting later.
-    {
-        auto probe = ctx.create_command_list();
-        auto const rt_supported = probe->raytracing.is_supported();
-        ctx.drop_command_list(cc::move(probe));
-        if (!rt_supported)
-            return cc::error("shaped-viewer: the rendering context reports no ray-tracing support");
-    }
-
     // The frame's output: a back buffer when there is a window, an offscreen texture when there is not.
     // Same format either way, so nothing downstream — the layout pipelines above all — sees which one it got.
     auto sc = sg::swapchain_handle();

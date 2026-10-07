@@ -117,7 +117,8 @@ image_stats trace_furnace(sg::context& ctx,
     REQUIRE(permutation != nullptr);
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);

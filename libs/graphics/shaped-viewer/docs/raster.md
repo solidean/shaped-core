@@ -27,6 +27,25 @@ one draw per triangle item ─▶ environment where nothing was drawn
 
 `sv::raster_routine` (rendering/raster_routine.hh) is the routine; `view_renderer` drives it from the same plan trace a traced layer goes through, before any accumulation or denoising.
 
+## No ray tracing needed
+
+**A raster layer draws on a device with no ray tracing at all.**
+Ray tracing is sv's first choice and never its requirement ([the roadmap](plans/rendering-roadmap.md#decided-for-the-raster-path-and-the-hybrid)).
+Nothing a raster frame records traces, and nothing it needs waits on something that does:
+
+- **No acceleration structure is built.** A mesh is `complete` once its geometry lands, and the first trace reaching it builds its BLAS.
+  That is `mesh_manager::acquire_blas`, so a mesh only ever rasterized never gets one.
+  A raster frame resolves its scene without a BLAS per instance, and only a trace builds a TLAS.
+- **The tracer is not a dependency.** `view_renderer` warms `pathtrace_routine` where the device has a ray-tracing pipeline, and never waits on it.
+  So a raster layer draws as soon as its own pipelines are up.
+- **No hit group compiles.** A permutation's hit group stays cold until a trace starts it; a raster frame compiles only the permutation's pixel stage.
+- **The pipelines need no feature of it.** The raster stages list `raster.drawn`, `tracer.bindless` and `slug.tables`, and none of them holds an acceleration structure.
+  Module `tracer`'s file-level `require raytracing_pipeline` binds only the stages that list a binding needing it.
+- **The geometry buffers carry build-input usage only where the device builds structures**, since vulkan refuses it on a device without them.
+
+A traced layer on such a device is declined, with one logged error naming the missing feature, rather than drawn blank: nothing it could draw is its image.
+`raster-without-raytracing-test.cc` holds both on a dx12 context created with `withhold_raytracing`.
+
 ## Selecting it
 
 **A third `render_mode`, not a separate setting.**
@@ -138,7 +157,6 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
 - **Light linking** is reserved in the records and read by neither path.
 - **A vulkan rendering scope splits once per fresh upload**: a draw's bindings are barriered at the draw, inside the scope.
   sg has no way to record a draw's accesses before its scope opens, and that is the extension that removes the split; sg's TODO tracks it.
-- **The raster path needs a device with ray tracing**, only because `view_renderer` declares the path tracer as its dependency; nothing a raster frame records traces.
 
 ## Tests
 
@@ -146,4 +164,5 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
   Beside it: cutouts thresholded and as coverage, a capture of a raster layer finishing on its first drawn frame, and vulkan against dx12 to rounding.
 - `material-shader-generator-test.cc`: the raster spelling of a textured cutout material.
 - `render-plan-test.cc`: the slots a raster layer declares.
+- `raster-without-raytracing-test.cc`: a raster layer's capture on a device without ray tracing, and a traced layer there declined with one error; neither builds an acceleration structure.
 - The `shaped-viewer/raster` example draws one scene traced and rasterized side by side.

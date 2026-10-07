@@ -18,7 +18,7 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
   The single cut at one half the first slice makes is the stand-in until then.
 - **Ray tracing is the first choice and never a requirement.**
   Interactively the hybrid is the mode: rasterized primaries, lighting by hardware ray tracing or by the ray-query polyfill where there is none.
-  So `view_renderer` must stop requiring the path tracer to come up before a raster frame can draw.
+  Done for raster: a raster layer draws on a device without ray tracing, building no acceleration structure, and only a traced layer acquires the tracer.
 - **A G-buffer holding all of OpenPBR is too much.**
   A visibility buffer is the approach to try first — instance and primitive per pixel, the hit rebuilt where it is lit, which is the wavefront's own hit record.
   Its cost is real, so it is the first candidate rather than the decision; the design review weighs it.

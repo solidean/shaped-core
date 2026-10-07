@@ -62,6 +62,7 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
 ///
 /// Two index relations, which together are the shape of the trace:
 /// `instances[i]` and `records[i]` describe the same item, and `instances[i].hit_group_offset` indexes `hit_groups`.
+/// A view resolved for a raster frame names no BLAS: its instances carry the placement and the permutation alone.
 struct resolved_view
 {
     cc::vector<sg::tlas_instance> instances;
@@ -122,7 +123,10 @@ struct resolved_view
     return tg::compose(placement, onto_box);
 }
 
-resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources)
+/// `l` resolved for a frame recorded onto `cmd`, its acceleration structures built on demand when `traced`.
+///
+/// A raster frame resolves with `traced` false and builds none, which is what lets it draw on a device without ray tracing.
+resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources, bool traced)
 {
     auto out = resolved_view{};
 
@@ -148,11 +152,18 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             // quadric permutation — a procedural hit group on a triangle BLAS is exactly the mismatch that refuses to build.
             auto const permutation = hit_group_of(out, pending ? fallback.key : item.shader_key, resources);
 
-            auto inst = sg::tlas_instance{.blas = pending ? resources.meshes.placeholder_blas() : set->blas,
+            // The bounds are read first: building the BLAS charges the budget, which may move what `set` points at.
+            auto const placement = pending ? placeholder_transform(set->bounds.value(), item.transform) : item.transform;
+            // None on a raster frame, which draws from the records alone.
+            auto blas = sg::blas_handle();
+            if (traced)
+                blas = pending ? resources.meshes.placeholder_blas()
+                               : resources.quadrics.acquire_blas(cmd, item.quadrics);
+            auto inst = sg::tlas_instance{.blas = cc::move(blas),
                                           .instance_id = u32(out.instances.size()),
                                           .hit_group_offset = permutation * 2,
                                           .opaque_override = true};
-            pack_transform(inst, pending ? placeholder_transform(set->bounds.value(), item.transform) : item.transform);
+            pack_transform(inst, placement);
             out.instances.push_back(cc::move(inst));
 
             out.records.push_back(resources.describe_instance(cmd, item.quadrics, item.instance));
@@ -198,19 +209,25 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // buffers would stall the trace until every one of them lands.
         auto const shade_fallback = is_pending || !resources.attributes_resident(item.instance);
         auto const permutation = hit_group_of(out, shade_fallback ? fallback.key : item.shader_key, resources);
-        auto inst = sg::tlas_instance{.blas = is_pending ? resources.meshes.placeholder_blas() : mesh->blas,
+        // Read first: building the BLAS charges the budget, which may move what `mesh` points at.
+        auto const placement = is_pending ? placeholder_transform(mesh->bounds.value(), item.transform) : item.transform;
+        auto const triangle_count
+            = is_pending ? u32(resources.meshes.placeholder_vertices().element_count() / 3) : u32(mesh->triangle_count);
+        auto blas = sg::blas_handle();
+        if (traced)
+            blas = is_pending ? resources.meshes.placeholder_blas() : resources.meshes.acquire_blas(cmd, item.mesh);
+        auto inst = sg::tlas_instance{.blas = cc::move(blas),
                                       .instance_id = u32(out.instances.size()),
                                       .hit_group_offset = permutation * 2,
                                       .opaque_override = !out.hit_groups[permutation]->opacity.can_cut_out()};
-        pack_transform(inst, is_pending ? placeholder_transform(mesh->bounds.value(), item.transform) : item.transform);
+        pack_transform(inst, placement);
         out.instances.push_back(cc::move(inst));
 
         // This is where every index a hit reads is minted, so it must stay ahead of `freeze()` and on the list that traces.
         out.records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
         place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
         out.parameter_blocks.push_back(item.instance);
-        out.triangle_counts.push_back(is_pending ? u32(resources.meshes.placeholder_vertices().element_count() / 3)
-                                                 : u32(mesh->triangle_count));
+        out.triangle_counts.push_back(triangle_count);
     }
 
     CC_ASSERT(!out.instances.empty(), "a view needs at least one drawable item to render");
@@ -554,6 +571,31 @@ constexpr i32 max_budgeted_rounds = 64;
                                             .timing = timing});
 }
 
+/// Whether a layer traced in `mode` may be traced on `ctx`, saying so once per `slot` when it may not.
+///
+/// Both tracers need the ray-tracing pipeline: the megakernel is one, and the structure the wavefront's group binds is declared for it.
+/// The wavefront traces inline too, so it needs `ray_query` beside it.
+/// A layer that cannot trace is declined rather than drawn blank, since nothing it could draw is its image.
+[[nodiscard]] bool can_trace(sg::context const& ctx, render_mode mode, impl::view_state const& rec, impl::temporal_slot& slot)
+{
+    auto missing = cc::optional<sg::feature>();
+    if (!ctx.supports(sg::feature::raytracing_pipeline))
+        missing = sg::feature::raytracing_pipeline;
+    else if (mode == render_mode::wavefront && !ctx.supports(sg::feature::ray_query))
+        missing = sg::feature::ray_query;
+    if (!missing.has_value())
+        return true;
+
+    if (!slot.untraceable_reported)
+    {
+        CC_LOG_ERROR("view '{}' traces a layer on a device without sg::feature::{}, so that layer is not drawn; "
+                     "render_mode::raster draws it without ray tracing",
+                     rec.display_name, sg::to_string(missing.value()));
+        slot.untraceable_reported = true;
+    }
+    return false;
+}
+
 /// The G-buffer slots a raster layer writes beside its image, and their formats — what `temporal_inputs_of` declares for one.
 struct raster_slot
 {
@@ -706,10 +748,11 @@ cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    // The renderer traces through the leaf routine, so the edge is declared rather than merely warmed: this routine is
-    // not handed out until the one it traces through is ready, which is what its callers would otherwise have to check
-    // for themselves on every frame.
-    _pathtrace = depend_on<pathtrace_routine>(ctx);
+    // Warmed rather than declared: a raster layer must draw without waiting on the tracer, and on a device without ray
+    // tracing it never could.
+    // A traced layer finds the tracer still initializing on its first frame at most, and declines that frame as it would anyway.
+    if (ctx.supports(sg::feature::raytracing_pipeline))
+        pathtrace_routine::prewarm(ctx);
 
     // Warmed rather than declared: a layer that never crossfades must not wait on it, and one that does reaches the
     // fade a good many frames after the first trace — so the compile has long since finished by then.
@@ -844,7 +887,16 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (!self.is_ready())
         return sg::routine_outcome::declined;
 
-    auto const resolved = resolve_scene(cmd, l, resources);
+    auto& rec = store.get_or_create(v.id);
+    auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
+    if (slot == nullptr)
+        return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate
+
+    auto const is_traced = l.settings.mode != render_mode::raster;
+    if (is_traced && !can_trace(ctx, l.settings.mode, rec, *slot))
+        return sg::routine_outcome::declined;
+
+    auto const resolved = resolve_scene(cmd, l, resources, is_traced);
 
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.
@@ -864,8 +916,6 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     scene_fc.camera = {};
     auto const scene_hash = trace_hash(scene_fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation);
 
-    auto& rec = store.get_or_create(v.id);
-
     // A cut teleports the camera, so nothing from the last frame reprojects: the temporal history describes another
     // part of the scene, and the motion guide would reproject into a camera nothing connects it to.
     // Every slot of the view at once rather than this layer's, so a view carrying two traced layers cuts as one.
@@ -881,13 +931,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         rec.camera_cut_pending = false;
     }
 
-    auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
-    if (slot == nullptr)
-        return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate
-
     // A rasterized layer draws its final image and its G-buffer in one frame, so nothing below — accumulation,
     // denoising, upscaling — has anything to do with it.
-    if (l.settings.mode == render_mode::raster)
+    if (!is_traced)
         return raster_layer(
             cmd, v, l, tr.layer, tr.resolution,
             {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash}, rec, *slot,
@@ -1395,18 +1441,6 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     // rather than the caller getting nothing back.
     auto const shader_generation = self.is_ready() ? self->_shader_generation : 0;
 
-    // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
-    // bindless index this trace reads.
-    auto const resolved = resolve_scene(cmd, *scene, resources);
-
-    auto const lights = traced_lights(*scene);
-    auto const decals = decals_of(*scene, resources.drawings.decal_atlas());
-    auto fc = make_frame_constants(v, *scene, lights, v.resolution);
-    fc.decal_count = u32(decals.decals.size());
-    auto const bg = background_gpu::from(scene->background);
-    auto const hash = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
-                                       cc::make_hash(u32(scene->settings.mode)));
-
     // No plan here to size the view's temporal inputs, so this path resolves the ones it needs itself.
     // The layer index is the primary scene_3d's, which `primary_scene_3d` already found.
     auto const layer = u8(scene - v.layers.begin());
@@ -1419,13 +1453,29 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     // nobody remembers.
     store.get_or_create(v.id).camera_cut_pending = false;
 
+    auto const is_traced = scene->settings.mode != render_mode::raster;
+    if (is_traced && !can_trace(ctx, scene->settings.mode, store.get_or_create(v.id), slot))
+        return slot.texture;
+
+    // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
+    // bindless index this trace reads.
+    auto const resolved = resolve_scene(cmd, *scene, resources, is_traced);
+
+    auto const lights = traced_lights(*scene);
+    auto const decals = decals_of(*scene, resources.drawings.decal_atlas());
+    auto fc = make_frame_constants(v, *scene, lights, v.resolution);
+    fc.decal_count = u32(decals.decals.size());
+    auto const bg = background_gpu::from(scene->background);
+    auto const hash = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
+                                       cc::make_hash(u32(scene->settings.mode)));
+
     if (!self.is_ready())
         return slot.texture; // nothing traced this frame; the caller re-presents what the slot already holds
 
     if (acc.resized)
         store.set_payload_bytes(v.id, texture_bytes(v.resolution, sg::pixel_format::rgba32_float));
 
-    if (scene->settings.mode == render_mode::raster)
+    if (!is_traced)
     {
         // No plan sized the G-buffer either, so this path ensures it beside the image.
         for (auto const& s : raster_slots)

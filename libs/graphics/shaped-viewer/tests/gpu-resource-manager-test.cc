@@ -831,6 +831,10 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
     CHECK(m.meshes.get(a.geometry).state == sv::residency::complete);
     CHECK(m.meshes.get(b.geometry).state == sv::residency::complete);
     CHECK(m.settling_count() == 0);
+
+    // Landed is drawable, and the BLAS still waits for the first trace that asks for it.
+    CHECK(m.meshes.get(a.geometry).blas == nullptr);
+    CHECK(sv_test::blas_of(m, a.geometry) != nullptr);
     CHECK(m.meshes.get(a.geometry).blas != nullptr);
 
     // Once resident, the record names its own geometry again.

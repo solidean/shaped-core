@@ -43,7 +43,7 @@ shader library provider                  [done]         the same shape for slib:
 input routing + key-bound zoom           [done]         picks the leaf under the cursor in painter's order through the plan's region links;
                                                         Ctrl+wheel magnifies what a leaf samples without touching a camera or a trace
 mesh / triangle_geometry / attributes    [in progress]  the authoring-side mesh: triangle_geometry (raw or indexed, pinned + hashed) plus named attributes (per element, or per instance for a per-mesh value), a material id, flags and textures
-resource managers (mesh / quadric / texture / attribute)  [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
+resource managers (mesh / quadric / texture / attribute)  [in progress]  strongly-typed ids -> GPU resources (BLAS built here, on a trace's first ask); LRU budget + idle eviction
 resource data (triangle / indexed / texture)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
 gpu_resource_manager                     [in progress]  where resource management comes together: the four managers, the staging binding group, and one sg::bindless_array per table.
                                                         Its tick is `advance_to(epoch)` — idempotent, so N windows drawing at N rates each call it and the first one pays.
@@ -100,7 +100,7 @@ mesh / resident_mesh type split          [done]         a mesh exists in two for
 streamed uploads + placeholders          [done]         every record carries an sv::residency, and an acquire hands its payload to sg's ctx.stream rather than uploading it.
                                                         That is the point rather than a detail: ctx.upload makes the next command list touching the resource wait on the copy, which is what turns a large asset from slow into a stalled frame.
                                                         Priority is the transfer's own — attributes above the geometry that indexes them, so an attribute is up before its mesh draws real triangles — and dropping a transfer cancels it, so evicting a streaming mesh is free.
-                                                        record_pending_work collects what landed and builds each BLAS behind it; a record's state advances only there, which is what keeps residency deterministic under test.
+                                                        record_pending_work collects what landed, and a record's state advances only there, which keeps residency deterministic under test; the first trace reaching a mesh builds its BLAS.
                                                         A pending mesh is traced as one shared unit-cube BLAS scaled onto its declared bounds and shaded through the fallback hit group; one with no bounds is skipped.
                                                         A pending texture is substituted at the bindless SLOT by a 1x1 seeded from the factor the sample beat — at the slot rather than by losing to a coarser rank, since losing would flip the permutation when it lands.
                                                         The viewer collects once per frame — which nothing did before, so a viewer's textures never grew their mip chains either

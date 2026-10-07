@@ -1041,8 +1041,8 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
     // What ORDER the transfers themselves ran in is the streaming actor's business, decided by the priority each
     // acquire set — this only collects the results.
     (void)attributes.collect_settled();
-    (void)meshes.record_settled(cmd);
-    (void)quadrics.record_settled(cmd);
+    (void)meshes.collect_settled();
+    (void)quadrics.collect_settled();
     _collect_textures();
 
     if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())

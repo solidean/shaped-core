@@ -194,8 +194,8 @@ cc::shared_async<cc::unit> viewer_renderer::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    // The frame runs through the view renderer, so the edge is declared: this routine reports pending until the whole
-    // chain below it -- view_renderer, and the pathtracer it traces through -- is ready.
+    // The frame runs through the view renderer, so the edge is declared: this routine reports pending until it is ready.
+    // The tracers are not in that chain, so a raster layer never waits on them; a traced layer declines while they come up.
     _view_renderer = depend_on<view_renderer>(ctx);
 
     // The layout routine is neither declared nor prewarmed here, and cannot be either: it is acquired per target

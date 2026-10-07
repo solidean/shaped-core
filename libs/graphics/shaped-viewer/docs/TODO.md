@@ -28,8 +28,8 @@ Bigger design intent lives in [structure.md](structure.md).
   - **A rect light visible to the camera is not drawn.**
   - **No depth prepass**, so an occluded surface is shaded before the one in front of it lands; and no vertex reuse, since no index buffer is bound.
   - **A vulkan rendering scope splits on the first draw after a fresh upload**: sg has no way to record a draw's accesses before its scope opens.
-  - **`view_renderer` declares the path tracer as its dependency**, so a raster layer still needs a device with ray tracing.
-    Decided: ray tracing is preferred and never required, so the tracer is acquired only by a layer that traces.
+  - **Only dx12 can pretend a device has no ray tracing** (`dx12_config::withhold_raytracing`), so the no-ray-tracing test runs there alone.
+    Vulkan's arm is untested on such a device; the same knob on `vulkan_config` would reach it.
 
 - **A radiance cache, for the interactive hybrid mode.**
   The hybrid rasterizes primary visibility and lights it by tracing; a cache of incoming radiance is what makes that lighting cheap enough per frame.

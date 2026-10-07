@@ -164,7 +164,7 @@ sv::instance_slot                      // { material_slot_kind kind; i32 offset,
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
 
 m.create_mesh(sv::mesh)                // -> resident_mesh const&, INTO the mesh's own cache; a repeat placement is a pointer compare, and it refreshes is_ready()
-                                       //   geometry + BLAS, every geometric attribute and every texture acquired, keyed by their hashes
+                                       //   geometry, every geometric attribute and every texture acquired, keyed by their hashes; no BLAS until a trace asks
                                        //   `bounds` comes from the mesh when it declared one (every glTF does), else from a scan of the positions
                                        //   a per_instance attribute uploads nothing — it is a constant, and its bytes ride along on the binding
 m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
@@ -280,7 +280,9 @@ auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::
   `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.
   The buffer exists immediately, so a descriptor naming it is always valid; only its contents are in flight.
 - **A record's state advances where the settle pass runs, never where the transfer finishes.**
-  So `residency` is deterministic under test, and `record_pending_work` is what turns a landed transfer into a built BLAS.
+  So `residency` is deterministic under test, and `record_pending_work` is what turns a landed transfer into a `complete` record.
+- **A BLAS is built by the first trace that reaches its mesh**, through `acquire_blas`, never at upload: a mesh only ever rasterized never gets one.
+  A test placing a mesh in a TLAS by hand builds it with `sv_test::blas_of`.
   A viewer calls it once per frame; anyone else calls `wait_for_pending_uploads`, and a test that traces what it just built must.
 - **Priority is the transfer's, not a drain order**: `set_priority` at acquire — attributes (20) over geometry (10), so an attribute is up before the mesh indexing it draws.
   Dropping a transfer cancels it, which is what makes evicting a still-streaming mesh free.
@@ -694,9 +696,11 @@ sv::indexed_triangle_data  // { pinned_data<pos3f const> positions; pinned_data<
 T::create(range…)          // pins (moving an owning rvalue in, deep-copying a borrow) + hashes now (XXH3-128); call once at authoring time, not per frame
 sv::hash_bytes_of(span) / sv::combine_hashes(a, b)  // the hashing primitives, if you key content yourself
 
-mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else uploads + builds a non-indexed BLAS
-mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, but an indexed BLAS: primitive order follows the index buffer
-sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas; }
+mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else uploads, and builds nothing — needs no ray tracing
+mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, indexed: a BLAS built later follows the index buffer's primitive order
+mesh_manager::acquire_blas(cmd, id) -> blas_handle const& // built onto cmd the first time, held after; id complete, ray tracing required
+quadric_manager::acquire_blas(cmd, id)                    // the same, a procedural BLAS over the batch's boxes
+sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas (null until a trace); }
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
 manager.used_bytes() / count() / evict(id)          // current residency; manual drop
@@ -742,8 +746,9 @@ m.record_pending_work(cmd) -> i32   // collects whatever transfers landed, then 
 m.wait_for_pending_uploads()       // blocks until every transfer lands, then finishes them — for a caller with no frame loop
 m.settling_count()                 // -> isize, payloads still in flight across the managers
 sv::residency                      // pending | base_resident | complete | failed — on EVERY record, not just textures
-m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as
-m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own
+m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as; ray tracing required
+m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own; no ray tracing needed
+m.context()                        // -> sg::context& every manager records into
 m.pending_work_count()              // -> isize — resources still waiting for their follow-up
 // config: { texture_policy textures_policy = {.generate_mips = true, .compress = true, .compress_min_extent = 64}; work_budget work = {.max_dispatches_per_epoch = 16} }
 // compress: a complete RGBA8 texture (mips generated first) is re-encoded to BC7 behind the SAME texture_id, at a quarter
@@ -854,6 +859,8 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   Those are `normal_guide`, `depth_guide`, `albedo_guide`, `specular_albedo_guide`, `roughness_guide` and `motion_guide`.
   `reconstruct` is ignored, and nothing denoises.
 - **Quadric batches are skipped**, with one warning per layer; triangle meshes, cutouts, decals and drawings work.
+- **No ray tracing needed**: a raster layer builds no acceleration structure and never waits on the tracer, so it draws on any device.
+  A traced layer on a device without `raytracing_pipeline` is declined, with one logged error; `viewer::try_create` no longer refuses such a device.
 
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
@@ -1035,7 +1042,7 @@ for (auto f : sv::interactive("simple"))
 ```cpp
 // setup (once): build the scene through the managers
 auto resources = sv::gpu_resource_manager::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
-auto const item = resources.acquire_scene_item(mesh);   // geometry + BLAS, the material resolved, its permutation compiled
+auto const item = resources.acquire_scene_item(mesh);   // geometry, the material resolved, its permutation generated
 
 // per frame: describe -> flatten -> record -> present, in one command list
 auto def = sv::viewer_definition{};
