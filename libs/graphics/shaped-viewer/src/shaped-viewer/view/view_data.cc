@@ -53,6 +53,20 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         if (v.layers[i].needs_primary_depth())
             out.push_back({.id = temporal_id::primary_depth(u8(i)), .format = sg::pixel_format::r32_float});
 
+        // A rasterized layer writes its whole G-buffer every frame, denoised or not: it is what a lighting pass after it reads.
+        // The slots are the guides', in the guides' formats, so a denoiser or a hybrid pass reads either path's alike.
+        // It never denoises, since every frame it draws is final.
+        if (v.layers[i].settings.integrator == path_integrator::raster)
+        {
+            out.push_back({.id = temporal_id::normal_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
+            out.push_back({.id = temporal_id::depth_guide(u8(i)), .format = sg::pixel_format::r32_float});
+            out.push_back({.id = temporal_id::albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
+            out.push_back({.id = temporal_id::specular_albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
+            out.push_back({.id = temporal_id::roughness_guide(u8(i)), .format = sg::pixel_format::r16_float});
+            out.push_back({.id = temporal_id::motion_guide(u8(i)), .format = sg::pixel_format::rg32_float});
+            continue;
+        }
+
         if (v.layers[i].settings.reconstruct.denoiser == sr::denoise_method::none)
             continue;
 

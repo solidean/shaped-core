@@ -46,6 +46,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/pathtrace_routine.cc
     src/shaped-viewer/rendering/traced_group.cc
     src/shaped-viewer/rendering/wavefront_routine.cc
+    src/shaped-viewer/rendering/raster_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/depth_fill_routine.cc
@@ -124,6 +125,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/resources/gpu_resource_manager.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
+    src/shaped-viewer/rendering/raster_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
     src/shaped-viewer/rendering/depth_fill_routine.hh
@@ -164,8 +166,9 @@ target_compile_options(shaped-viewer
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# sv's shader package: the path tracer (tracer_pipeline.sgl over module `tracer`, shaders/sgl) and the two raster passes.
+# sv's shader package: the path tracer (tracer_pipeline.sgl over module `tracer`, shaders/sgl), the raster path (raster_pass.sgl over module `raster`) and the compositing passes.
 # Module `tracer` is exported because a material's hit group, generated and compiled at run time, lists its bindings and traces its rays.
+# Module `raster` is exported for the same reason: a material's pixel shader is generated too, and lists its bindings and writes its targets.
 # The fullscreen blit lives in shaped-rendering (sr::blit_routine).
 # Must be declared here, in the CMakeLists that defines the target — the generated sources are added as
 # PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped. Deliberately not gated on a compiler:
@@ -179,8 +182,10 @@ sc_add_shader_package(
     MODULE_DIRS shaders/sgl ${SR_SGL_MODULE_DIR}
     SHADERS
         module:tracer
+        module:raster
         tracer_pipeline.sgl:*
         wavefront.sgl:*
+        raster_pass.sgl:*
         layout.sgl:*
         depth_fill.sgl:*
 )
@@ -254,6 +259,7 @@ if(SC_BUILD_TESTS)
             tests/cutout-trace-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
+            tests/raster-test.cc
             tests/wavefront-benchmark.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc

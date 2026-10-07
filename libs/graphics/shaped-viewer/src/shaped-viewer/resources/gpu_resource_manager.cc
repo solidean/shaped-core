@@ -154,6 +154,12 @@ void bound_resources::declare_compute_access(sg::command_list& cmd) const
     declare_tables(cmd.compute, _manager->_tables);
 }
 
+void bound_resources::declare_raster_access(sg::command_list& cmd) const
+{
+    CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
+    declare_tables(cmd.raster, _manager->_tables);
+}
+
 cc::span<u32 const> bound_resources::elements(bindless_table table) const
 {
     CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");

@@ -10,6 +10,7 @@ sv will grow into Shaped Code's visualization renderer — the top of the graphi
 A **view is the definition of one texture**, and one of a view's layers may be a whole layout tree — so views nest, at any depth.
 A frame is authored through fluent handles, flattened into a `render_plan`, and replayed by `viewer_renderer`.
 Raytracing-first: the path tracer and every shader are SGL, traced on dx12 and vulkan, and a material type is an SGL fragment.
+A layer may be rasterized instead, through the same material code ([docs/raster.md](docs/raster.md)).
 
 ```cpp
 for (auto f : sv::interactive("my viewer"))

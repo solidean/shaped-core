@@ -748,6 +748,52 @@ TEST("sv - a caller-declared temporal input rides alongside the implied one")
     CHECK(plan.temporals[1].resolution == tg::vec2i(128, 64));
 }
 
+// A rasterized layer writes its whole G-buffer beside its image every frame, whatever it denoises with.
+// The slots are the guides' own ids and formats, which is what lets a later lighting pass — or a denoiser — read
+// a raster layer's primary hits exactly as it reads a traced one's.
+TEST("sv - a raster layer implies its G-buffer and nothing a denoiser keeps")
+{
+    auto def = sv::viewer_definition{};
+
+    auto v = sv::view_data{};
+    v.id = sv::view_id::from_string("raster");
+    auto& scene = sv::ensure_scene_3d(v);
+    scene.items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
+    scene.settings.integrator = sv::path_integrator::raster;
+    // Asked for, and ignored: a raster frame is final, so there is nothing to denoise.
+    scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
+    auto const raster = sv::view_index(def.views.size());
+    def.views.push_back(cc::move(v));
+
+    auto const root = add_layout_view(def, "root");
+    (void)add_leaf(def, layout_root_of(def, root), cc::span<sv::view_index const>(&raster, 1));
+    def.root_view = root;
+
+    auto const plan = sv::build_render_plan(def, tg::vec2i(64, 32), 0, {});
+    REQUIRE(plan.validate());
+    REQUIRE(plan.traces.size() == 1);
+
+    auto const format_of = [&](u64 id) -> cc::optional<sg::pixel_format>
+    {
+        for (auto const& t : plan.temporals)
+            if (t.temporal_id == id)
+                return t.format;
+        return {};
+    };
+    CHECK(format_of(sv::temporal_id::accumulation(0)) == sg::pixel_format::rgba32_float);
+    CHECK(format_of(sv::temporal_id::normal_guide(0)) == sg::pixel_format::rgba16_float);
+    CHECK(format_of(sv::temporal_id::depth_guide(0)) == sg::pixel_format::r32_float);
+    CHECK(format_of(sv::temporal_id::albedo_guide(0)) == sg::pixel_format::rgba16_float);
+    CHECK(format_of(sv::temporal_id::specular_albedo_guide(0)) == sg::pixel_format::rgba16_float);
+    CHECK(format_of(sv::temporal_id::roughness_guide(0)) == sg::pixel_format::r16_float);
+    CHECK(format_of(sv::temporal_id::motion_guide(0)) == sg::pixel_format::rg32_float);
+
+    // No denoised image, no frame samples: what a parent samples is the raster image itself.
+    CHECK(!format_of(sv::temporal_id::denoised(0)).has_value());
+    CHECK(!format_of(sv::temporal_id::frame_samples(0)).has_value());
+    CHECK(plan.temporals.size() == 7);
+}
+
 // A scene layer that is authored but holds no geometry.
 //
 // `f.add_scene().add_light(...)` before any mesh exists is ordinary authoring — you light a view, then fill it — and

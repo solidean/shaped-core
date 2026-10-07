@@ -20,6 +20,16 @@ Bigger design intent lives in [structure.md](structure.md).
   - **`render_settings::exposure`**, for the tonemap when it lands; `dlss_rr` and the fsr upscaler already read `reconstruct.exposure`, and NRD deliberately does not.
   - **`view_renderer::execute`** — the single-view entry point — does not denoise; only the plan path does.
 
+- **The raster path's first slice is landed; what is left of it** — [raster.md](raster.md) is the design:
+  - **Quadric batches are not drawn**, and the layer warns once: a pixel stage ray-casting `quadric.intersect` over each primitive's box, writing its own depth, is the plan.
+  - **No antialiasing**: every pixel shades at its center, so edges alias where the tracer's jitter antialiases them.
+  - **Coverage is cut at one half**, with no blended transparency, and transmission refracts nothing.
+  - **A rect light visible to the camera is not drawn.**
+  - **No depth prepass**, so an occluded surface is shaded before the one in front of it lands; and no vertex reuse, since no index buffer is bound.
+  - **A vulkan rendering scope splits on the first draw after a fresh upload**: sg has no way to record a draw's accesses before its scope opens.
+  - **`view_renderer` declares the path tracer as its dependency**, so a raster layer still needs a device with ray tracing.
+  - **`path_integrator` names a raster value now**; whether the enum is renamed is open.
+
 - **Nothing tests the pump sweep in `viewer::finish_frame`, and no test shape reached it.**
   `(void)cc::thread_pump_all()` exists so an unthreaded viewer drives the copy actor on a frame whose epoch wait does not block.
   Every test loop runs flat out, so the CPU is always `buffer_count` epochs ahead and the wait always blocks.

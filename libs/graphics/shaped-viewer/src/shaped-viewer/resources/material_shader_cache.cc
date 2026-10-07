@@ -114,6 +114,7 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                                                      .hit_group = cc::move(hit_group),
                                                      .source = cc::move(generated.source),
                                                      .shade_source = cc::move(generated.shade_source),
+                                                     .raster_source = cc::move(generated.raster_source),
                                                      .label = cc::move(label)});
 }
 } // namespace sv

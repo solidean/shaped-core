@@ -9,9 +9,10 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 - **The remaining HLSL shaders move to SGL** — atrous, SVGF and the other HLSL-only sr routines.
   SGL already unrolls loops itself; what it lacks is a way for the source to ask for it on one loop.
   Anything else a port turns out to need is a question first, not a language change made on the way.
-- **A rasterization path for the PBR materials.**
-  Raster alone for now: the same OpenPBR materials drawn rather than traced.
-  It is the base the interactive hybrid mode grows from, so its primary-hit outputs should be what a later lighting pass reads.
+- **A rasterization path for the PBR materials** — first slice landed as `path_integrator::raster` ([raster.md](../raster.md)).
+  The same OpenPBR materials are drawn rather than traced, through the generated material body the hit groups use, lit directly and unshadowed.
+  Its primary-hit G-buffer lands in the guide slots every frame, which is what a later lighting pass reads.
+  Left in it: quadric batches, antialiasing, blended transparency, lights seen by the camera, and a depth prepass.
 
 ## Next, in order
 
@@ -22,6 +23,7 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 3. **Ray cones**, so a hit picks a texture's mip level instead of always sampling level 0.
 4. **A design review of the rendering modes and the radiance cache**, run with the review tool.
    - Interactive: rasterized primaries, then ray-traced lighting through a radiance cache, possibly on the megakernel.
+     The raster path's G-buffer is its input; what it lacks for that is the material itself, likely as a visibility buffer ([raster.md](../raster.md#the-g-buffer-seam)).
    - Final: the wavefront tracer converging without the cache.
    - Later: special handling for mirrors and caustics.
 

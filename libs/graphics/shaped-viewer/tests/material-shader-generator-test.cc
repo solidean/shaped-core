@@ -352,6 +352,52 @@ TEST("sv::generate_material_shader - a rotation attribute blends as a quaternion
     CHECK(f.source.contains("material.load_element_f4("));
 }
 
+TEST("sv::generate_material_shader - the raster pixel stage evaluates the same material body")
+{
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(sv::material_signature_entry::of("opacity", 1.0f));
+    signature.push_back(sv::material_signature_entry::of("cutoff", 0.0f));
+    auto const type = sv::material_type::create("cut", cc::move(signature), "surface.base_color = base_color\n",
+                                                "opacity", "cutoff");
+
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(make_uvs());
+    mesh.textures.push_back({.name = "base_color", .source = {.texture = sv::texture_id(3), .uv_attribute = "uv"}});
+    mesh.attributes.push_back(
+        bind(sv::mesh_attribute::create("opacity", sv::attribute_frequency::per_triangle, cc::array<f32>{0.3f})));
+    auto const material
+        = sv::material::create("m", sv::material_type_id(0), {sv::material_attribute_binding::of("cutoff", 0.5f)});
+    auto const g = sv::generate_material_shader(sv::resolve_material(type, material, mesh));
+    REQUIRE(g.opacity.can_cut_out());
+
+    // The fragment and every load come through as the hit group has them: only the sampler's group and level differ.
+    CHECK(g.raster_source.contains("use raster\n"));
+    CHECK(g.raster_source.contains("    surface.base_color = base_color\n"));
+    CHECK(g.raster_source.contains("fun sv_attribute_base_color(ctx: material.shading_context){raster.drawn, "
+                                   "tracer.bindless} -> float3:"));
+    // A pixel has derivatives, so it samples at the level they pick rather than at level 0.
+    CHECK(g.raster_source.contains(".sample(uv, raster.drawn.palette_linear_repeat_repeat)\n"));
+    CHECK(!g.raster_source.contains("tracer.traced"));
+    CHECK(!g.raster_source.contains("level = 0.0"));
+    CHECK(!g.raster_source.contains("require raytracing_pipeline"));
+
+    // The cut reads the declared opacity and cutoff through the material's own loads, ahead of the evaluation.
+    CHECK(g.raster_source.contains("@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, "
+                                   "slug.tables} -> raster.targets:"));
+    CHECK(g.raster_source.contains("    if raster.is_cut(sv_attribute_opacity(ctx), sv_attribute_cutoff(ctx)) => "
+                                   "discard\n"));
+    CHECK(g.raster_source.find("raster.is_cut") < g.raster_source.find("raster.shade("));
+
+    // The hit group keeps its own spelling.
+    CHECK(g.source.contains("tracer.traced.palette_linear_repeat_repeat, level = 0.0"));
+
+    // A quadric batch has no raster stage yet.
+    auto const quadric = sv::generate_material_shader(sv::resolve_material(type, material, make_mesh()),
+                                                      {.kind = sv::geometry_kind::quadrics});
+    CHECK(quadric.raster_source.empty());
+}
+
 TEST("sv::generate_material_shader - the builtin pbr type generates")
 {
     auto lib = sv::material_library::create();

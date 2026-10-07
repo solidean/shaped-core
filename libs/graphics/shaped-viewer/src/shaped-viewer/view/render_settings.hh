@@ -21,9 +21,9 @@ namespace sv
 inline constexpr u32 accumulation_frame_cap = 4096;
 } // namespace sv
 
-/// Which path tracer a layer is traced with.
+/// How a layer's image is produced from its scene: traced by one of two path tracers, or rasterized.
 ///
-/// Both converge to the same image; they differ in what a frame costs and how a moving image looks.
+/// The two tracers converge to the same image; they differ in what a frame costs and how a moving image looks.
 /// Neither wins everywhere: the megakernel is about twice as fast on a shallow scene, the wavefront far ahead wherever paths run deep, as in a scattering medium.
 /// libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
 enum class sv::path_integrator : sv::u8
@@ -36,6 +36,15 @@ enum class sv::path_integrator : sv::u8
     /// A still frame costs `render_settings::rounds_per_frame` rounds.
     /// A frame that sees the image change starts one sample per pixel and runs each to its end.
     wavefront,
+
+    /// No paths at all: the same materials drawn by sg raster pipelines, lit directly by the layer's lights and by its environment.
+    ///
+    /// **A different image, not a cheaper estimate of the same one**: nothing casts a shadow and nothing bounces.
+    /// Every frame is final, so the layer counts as converged as soon as one is drawn, and it never denoises.
+    /// It writes the primary hit's G-buffer beside the image every frame, which is the seam a hybrid lighting pass grows from.
+    /// Quadric batches are not drawn yet.
+    /// libs/graphics/shaped-viewer/docs/raster.md is the design.
+    raster,
 };
 
 /// View-wide render settings — everything that applies to a whole view rather than a single scene item.
@@ -54,7 +63,7 @@ struct sv::render_settings
     /// Path length: the primary hit plus this many diffuse bounces.
     i32 max_bounces = 5;
 
-    /// Which path tracer traces this layer; switching restarts its image.
+    /// Which path tracer traces this layer, or `raster` to draw it instead; switching restarts its image.
     path_integrator integrator = path_integrator::wavefront;
 
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.

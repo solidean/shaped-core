@@ -72,7 +72,7 @@ struct background;
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
-enum class path_integrator : u8; // which path tracer traces a layer (render_settings.hh)
+enum class path_integrator : u8; // how a layer is drawn: one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;
@@ -260,6 +260,10 @@ struct wavefront_trace_desc;     // one wavefront frame (rendering/wavefront_rou
 enum class wavefront_stage : u8; // what a wavefront frame's timestamps divide it into (rendering/wavefront_routine.hh)
 struct wavefront_timing;         // one wavefront frame's stage timestamps (rendering/wavefront_routine.hh)
 class wavefront_routine;
+struct raster_gbuffer; // what a raster frame writes: the image and the primary hit's G-buffer (rendering/raster_routine.hh)
+struct raster_draw;       // one draw of a raster frame (rendering/raster_routine.hh)
+struct raster_frame_desc; // one raster frame (rendering/raster_routine.hh)
+class raster_routine;
 class view_renderer;
 class viewer_renderer;
 

@@ -269,8 +269,29 @@ enum class load_shape
                       element_expression(binding.frequency));
 }
 
+/// What differs between the stages a material's body is spelled for: where the sampler palette lives, and how a texture picks its level.
+///
+/// Everything else — the loads, the fragment, the bindless tables — is the same text for a traced hit and a rasterized pixel.
+struct body_spelling
+{
+    /// The binding holding the palette `sgl_palette_sampler` names: `tracer.traced` at a hit, `raster.drawn` at a pixel.
+    cc::string_view palette_group = "tracer.traced";
+
+    /// Whether a sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
+    bool explicit_level = true;
+};
+
+/// The spelling a hit group and a wavefront shade kernel read their attributes in.
+constexpr auto traced_spelling = body_spelling{};
+
+/// The spelling a raster pixel stage reads its attributes in.
+constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", .explicit_level = false};
+
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
-[[nodiscard]] cc::string attribute_function(resolved_material const& r, material_parameter_layout const& layout, i32 index)
+[[nodiscard]] cc::string attribute_function(resolved_material const& r,
+                                            material_parameter_layout const& layout,
+                                            i32 index,
+                                            body_spelling const& spelling)
 {
     auto const& a = r.attributes[index];
     auto const components = a.format.component_count();
@@ -278,8 +299,12 @@ enum class load_shape
                       || a.frequency == material_frequency::mesh_texture_binding;
 
     auto out = cc::string();
-    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{{}}} -> {}:\n", a.name,
-                      samples ? "tracer.traced, tracer.bindless" : "tracer.bindless", sgl_type_of(a.format));
+    if (samples)
+        cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{{}, tracer.bindless}} -> {}:\n",
+                          a.name, spelling.palette_group, sgl_type_of(a.format));
+    else
+        cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{tracer.bindless}} -> {}:\n", a.name,
+                          sgl_type_of(a.format));
     out += "    let block = ctx.param_buffer as int\n";
 
     switch (a.frequency)
@@ -331,10 +356,10 @@ enum class load_shape
         cc::format_append(
             out, "    let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + {}u) as int\n",
             tex.offset);
-        // An explicit level, since a hit has no derivatives; the texel is named because a constant selector reads it twice.
-        cc::format_append(
-            out, "    let texel = tracer.bindless.{}[nonuniform image].sample(uv, tracer.traced.{}, level = 0.0)\n",
-            "textures_2d", sgl_palette_sampler(a.sample->sampler));
+        // An explicit level where there are no derivatives, at a hit; the texel is named because a constant selector reads it twice.
+        cc::format_append(out, "    let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, {}.{}{})\n",
+                          spelling.palette_group, sgl_palette_sampler(a.sample->sampler),
+                          spelling.explicit_level ? ", level = 0.0" : "");
 
         auto value = texel_expression(a.sample->swizzle, a.format);
 
@@ -461,7 +486,11 @@ enum class load_shape
 }
 
 /// The header every generated source of one permutation opens with: what it is, what it requires, and the modules it joins.
-[[nodiscard]] cc::string source_header(resolved_material const& r, geometry_kind kind, cc::string_view requires_)
+/// `extra_use` is one more module the stages join, or empty.
+[[nodiscard]] cc::string source_header(resolved_material const& r,
+                                       geometry_kind kind,
+                                       cc::string_view requires_,
+                                       cc::string_view extra_use = {})
 {
     auto src = cc::string();
     cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
@@ -469,6 +498,8 @@ enum class load_shape
     src += "\nuse material\nuse openpbr\n";
     if (kind == geometry_kind::quadrics)
         src += "use quadric\n";
+    if (!extra_use.empty())
+        cc::format_append(src, "use {}\n", extra_use);
     src += "use slug\nuse tracer\n\n";
     return src;
 }
@@ -478,7 +509,8 @@ enum class load_shape
 /// Hands back what a stage passes as `supplied_tangent_frame`.
 [[nodiscard]] cc::string material_body(resolved_material const& r,
                                        material_parameter_layout const& layout,
-                                       cc::string& supplied_frame)
+                                       cc::string& supplied_frame,
+                                       body_spelling const& spelling)
 {
     auto src = cc::string();
 
@@ -497,13 +529,17 @@ enum class load_shape
 
     for (auto i = 0; i < r.attributes.size(); ++i)
     {
-        src += attribute_function(r, layout, i32(i));
+        src += attribute_function(r, layout, i32(i), spelling);
         src += "\n";
     }
 
-    auto const samples = samples_texture(r);
-    cc::format_append(src, "fun sv_evaluate_material(ctx: material.shading_context){{{}}} -> openpbr.surface:\n",
-                      samples ? "tracer.traced, tracer.bindless" : "tracer.bindless");
+    if (samples_texture(r))
+        cc::format_append(src,
+                          "fun sv_evaluate_material(ctx: material.shading_context){{{}, tracer.bindless}} -> "
+                          "openpbr.surface:\n",
+                          spelling.palette_group);
+    else
+        src += "fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:\n";
     for (auto const& a : r.attributes)
         cc::format_append(src, "    let {} = sv_attribute_{}(ctx)\n", a.name, a.name);
     src += "    let mut surface = openpbr.default_surface()\n";
@@ -545,7 +581,7 @@ enum class load_shape
     src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
 
     auto supplied_frame = cc::string();
-    src += material_body(r, layout, supplied_frame);
+    src += material_body(r, layout, supplied_frame, traced_spelling);
 
     if (procedural)
     {
@@ -604,7 +640,7 @@ enum class load_shape
     // The tracer's acceleration structure is in the group this lists, and it needs the pipeline wherever a device grants one.
     auto src = source_header(r, kind, "require ray_query\nrequire raytracing_pipeline\n");
     auto supplied_frame = cc::string();
-    src += material_body(r, layout, supplied_frame);
+    src += material_body(r, layout, supplied_frame, traced_spelling);
 
     src += "@compute(64) fun sv_shade(@thread_id id: int3){tracer.traced, tracer.bindless, slug.tables, "
            "tracer.wavefront_step}:\n"
@@ -620,6 +656,37 @@ enum class load_shape
                           "    let ctx = tracer.stored_triangle_context(slot)\n"
                           "    tracer.shade_stored_triangle(slot, ctx, sv_evaluate_material(ctx), {})\n",
                           supplied_frame);
+    return src;
+}
+
+/// The raster path's pixel stage of one triangle permutation: `sv_raster`, over the triangle module `raster`'s vertex stage drew.
+///
+/// The cutout reads the type's declared opacity through the same attribute function the material does, so a pixel cuts exactly what a hit would.
+[[nodiscard]] cc::string generate_raster_pixel(resolved_material const& r,
+                                               material_parameter_layout const& layout,
+                                               material_opacity const& opacity)
+{
+    auto src = source_header(r, geometry_kind::triangles, {}, "raster");
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, raster_spelling);
+
+    src += "@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, slug.tables} -> raster.targets:\n"
+           "    let ctx = raster.pixel_context(p)\n";
+    if (opacity.can_cut_out())
+    {
+        // A vector opacity is read through its first lane, as the tracer's channel selector reads a texel.
+        auto const lane = [&](cc::string_view name) -> cc::string
+        {
+            for (auto const& a : r.attributes)
+                if (a.name == name && a.format.component_count() > 1)
+                    return cc::format("sv_attribute_{}(ctx).x", name);
+            return cc::format("sv_attribute_{}(ctx)", name);
+        };
+        auto const cutoff = opacity.cutoff != material_opacity::no_offset ? lane(r.type->opacity_cutoff_attribute)
+                                                                          : cc::string("0.0");
+        cc::format_append(src, "    if raster.is_cut({}, {}) => discard\n", lane(r.type->opacity_attribute), cutoff);
+    }
+    cc::format_append(src, "    return raster.shade(p, ctx, sv_evaluate_material(ctx), {})\n", supplied_frame);
     return src;
 }
 } // namespace
@@ -720,8 +787,11 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
 
     auto source = generate_hit_group(r, layout, opts.kind, opacity.can_cut_out());
     auto shade_source = generate_shade_kernel(r, layout, opts.kind);
+    // TODO: a quadric's raster stage, ray-cast over its box in a pixel shader; see libs/graphics/shaped-viewer/docs/raster.md.
+    auto raster_source = opts.kind == geometry_kind::triangles ? generate_raster_pixel(r, layout, opacity) : cc::string();
     return {.source = cc::move(source),
             .shade_source = cc::move(shade_source),
+            .raster_source = cc::move(raster_source),
             .layout = cc::move(layout),
             .opacity = opacity,
             .key = material_shader_key(r.permutation_key, opts)};

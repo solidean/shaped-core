@@ -47,6 +47,10 @@ struct sv::material_permutation
     /// Compiled by `wavefront_routine` the first time a trace names the permutation, and cached there.
     cc::string shade_source;
 
+    /// The raster path's pixel stage of this permutation, `generated_material_shader::raster_source`, and empty for a quadric one.
+    /// Compiled by `raster_routine` the first time a raster frame draws the permutation, and cached there.
+    cc::string raster_source;
+
     /// What a compile error calls this permutation: the material type's name, and whether it is the quadric form.
     cc::string label;
 

@@ -106,6 +106,11 @@ struct sv::generated_material_shader
     /// range of the sorted queue, shaded through `tracer.shade_stored_triangle` or `tracer.shade_stored_quadric`.
     cc::string shade_source;
 
+    /// The raster path's pixel stage, `@pixel fun sv_raster`: the same material over the triangle module `raster`'s vertex stage drew, lit without tracing.
+    /// It writes `raster.targets` through `raster.shade`, and cuts out where the hit group's any-hit would.
+    /// Empty for a quadric permutation, which the raster path does not draw yet.
+    cc::string raster_source;
+
     material_parameter_layout layout;
 
     /// Where this permutation's cutout opacity lives, and `none` where it cannot cut out.
@@ -148,6 +153,8 @@ namespace sv
 /// A triangle group is `tracer.shade_triangle`'s closest hit, and the cutout any-hits on both records where `can_cut_out`.
 /// A procedural group is `tracer.intersect_quadric`'s intersection, shared by both records, and `tracer.shade_quadric`'s closest hit.
 /// A texture is sampled through the palette sampler `sgl_palette_sampler` names for its state, at level 0.
+///
+/// The raster pixel stage is the same body over module `raster`'s copy of the palette, sampling at the level the pixel's derivatives pick.
 ///
 /// The generated text depends on `r.permutation_key` AND on `opts`, so `key` covers both — two calls agreeing on the pair
 /// generate the same source, byte for byte, and nothing else may share their cache entry.

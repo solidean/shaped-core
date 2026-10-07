@@ -51,7 +51,8 @@ cam.basis()                      // -> camera_basis { vec3d right, up, forward }
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; path_integrator integrator; int rounds_per_frame; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
-sv::path_integrator              // wavefront (default) | megakernel — both stay; switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+sv::path_integrator              // wavefront (default) | megakernel | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+                                 //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
@@ -319,7 +320,8 @@ auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::
 `material/shader_generator.hh`; modules `material`, `openpbr` and `tracer` (shaders/sgl) are the hand-authored half it is written against.
 
 ```cpp
-sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; layout; material_opacity opacity; hash128 key;}
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source, shade_source, raster_source; layout; material_opacity opacity; hash128 key;}
+                                 //   raster_source: `@pixel fun sv_raster`, the same body over module raster; empty for a quadric permutation
 sv::material_opacity             // { kind (none|constant|attribute|texture); offset, uv_offset, frequency, channel, sampler, transform, cutoff }
                                  //   where the cutout opacity lives in the parameter block; o.can_cut_out() -> kind != none
 sv::place_instance_record(record, tlas_instance, opacity)  // writes the placement rows and the opacity fields describe_instance leaves to the trace
@@ -354,6 +356,7 @@ Gotchas:
 - **A sampled attribute takes TWO slots** — the texture index, and the `sv::attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
 - **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
 - **A sample names its level, 0** — a ray tracing hit shader has no derivatives to pick a mip from.
+  The raster pixel stage is the one spelling that does not: it has derivatives, and samples through `raster.drawn`'s copy of the palette.
 - **Every bindless index is `nonuniform`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
 - **Each load is a function of its own**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
@@ -793,6 +796,11 @@ sv::pt_trace_desc                                    // the trace's targets and 
                                                      //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
                                                      //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
                                                      //   the guide and split targets are typed: rgba16_float / r32_float / r16_float / rg32_float as sv allocates them
+sv::raster_routine::execute(cmd, raster_frame_desc)  // one draw per raster_draw through its permutation's raster pixel stage, into a raster_gbuffer; declines while the vertex stage builds
+sv::raster_frame_desc                                // { raster frame constants; background, instance_table, lights, decals; draws; permutations; fallback; bindless; targets }
+sv::raster_draw                                      // { u32 instance, triangle_count, permutation } — three vertices per triangle, no vertex buffer
+sv::raster_gbuffer                                   // { color rgba32f; normal, albedo, specular_albedo rgba16f; depth r32f; roughness r16f; motion rg32f; primary_depth r32f }
+                                                     //   the layer's slots, every one render_target-capable; THE seam a hybrid lighting pass reads
 sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block
 sv::pt_light_table::grouped(span<light_record>)         // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
 table.describe_in(fc)                                // writes light_count + the per-path table into the frame block, so the two cannot disagree
@@ -829,7 +837,8 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
   Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them, and only on the frames it runs.
 - **`sv::matrices_of(camera_record, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
-  sv rasterizes nothing, so these exist for a denoiser that reprojects in world space; `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
+  A traced layer rasterizes nothing, so these exist for a denoiser that reprojects in world space.
+  `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
   `reconstruct_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
   The per-frame offset a temporal upscaler reconstructs from is the other kind, and sv has none.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
@@ -837,6 +846,14 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.
   One that cannot run presents the raw mean and logs once.
 - **Only the plan path denoises.** `view_renderer::execute`, the single-view entry point, still returns the raw accumulator.
+
+**Raster layers** (`render_settings::integrator = path_integrator::raster`, [docs/raster.md](docs/raster.md)) go through the same plan trace, and draw instead.
+- **Every frame is final**: the accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `is_accumulation_converged` and a capture finish at once.
+  A frame drawn through a stand-in material is not final, and restarts next frame.
+- **The G-buffer is written every frame, denoised or not**, into the guide slots of the same meaning.
+  Those are `normal_guide`, `depth_guide`, `albedo_guide`, `specular_albedo_guide`, `roughness_guide` and `motion_guide`.
+  `reconstruct` is ignored, and nothing denoises.
+- **Quadric batches are skipped**, with one warning per layer; triangle meshes, cutouts, decals and drawings work.
 
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.

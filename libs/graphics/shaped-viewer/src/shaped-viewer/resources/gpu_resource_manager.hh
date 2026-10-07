@@ -109,6 +109,9 @@ public:
     /// The same, for the **next compute dispatch on `cmd`** — what a wavefront kernel reading the tables needs.
     void declare_compute_access(sg::command_list& cmd) const;
 
+    /// The same, for the **next draw on `cmd`** — what a raster frame's material pixel stage reading the tables needs, once per draw.
+    void declare_raster_access(sg::command_list& cmd) const;
+
 private:
     friend class gpu_resource_manager;
     bound_resources(gpu_resource_manager& manager, sg::binding_group_handle group)

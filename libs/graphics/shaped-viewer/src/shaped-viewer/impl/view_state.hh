@@ -98,6 +98,9 @@ struct temporal_slot
 
     /// What a round of those paths costs, as the frames' own timestamps measured it; a frame budget picks rounds from it.
     wavefront_pacing pacing;
+
+    /// Whether this accumulation slot's raster layer has said that it skips the quadric batches it holds, which it says once.
+    bool raster_skip_reported = false;
 };
 
 /// Everything a view keeps across frames, keyed by its view_id — held by `sv::view_store`.
