@@ -3,7 +3,7 @@
 **Built, and a choice rather than the default.**
 A layer whose `render_settings::mode` is `render_mode::raster` is drawn by sg raster pipelines instead of traced: the same scene, the same OpenPBR materials, lit directly.
 It is raster alone for now, and it is shaped as the base the interactive hybrid mode grows from.
-That mode is rasterized primary visibility, then ray-traced lighting through a radiance cache ([rendering-roadmap.md](plans/rendering-roadmap.md)).
+That mode is rasterized primary visibility, then ray-traced lighting resampled by ReSTIR GI ([restir-gi.md](plans/restir-gi.md)).
 This document is what a raster frame draws, how it shares its materials with the tracer, the G-buffer seam a hybrid lighting pass reads, and what is not done yet.
 
 ## What a frame is

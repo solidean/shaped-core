@@ -17,6 +17,7 @@ shaped-viewer is built on [shaped-rendering](../../shaped-rendering/readme.md), 
 - [wavefront](wavefront.md) — the wavefront path tracer: its stages, the decisions behind them, and what was rejected.
   Built, and the default; the megakernel stays as the other integrator.
 - [plans/rendering-roadmap](plans/rendering-roadmap.md) — what is open after the wavefront tracer, across sv, sr, sg and SGL, and in what order.
+- [plans/restir-gi](plans/restir-gi.md) — the interactive mode's traced lighting: ReSTIR GI and ReSTIR DI on the wavefront's stages, with the user's decisions; a plan, not built.
 - [coding-guidelines](coding-guidelines.md) — sv-specific conventions (thin for now) on top of the repo-wide ones.
 - [TODO](TODO.md) — running list of known follow-ups.
 

@@ -19,6 +19,8 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 - **Ray tracing is the first choice and never a requirement.**
   Interactively the hybrid is the mode: rasterized primaries, lighting by hardware ray tracing or by the ray-query polyfill where there is none.
   Done for raster: a raster layer draws on a device without ray tracing, building no acceleration structure, and only a traced layer acquires the tracer.
+  **The polyfill exists on webgpu alone**, where the wavefront is out of scope, so a dx12 or vulkan device without ray tracing has none.
+  Bringing it there is an sg item ([sg's TODO](../../../shaped-graphics/docs/TODO.md)); until it lands, the hybrid there falls back to the raster path's direct lighting.
 - **A G-buffer holding all of OpenPBR is too much.**
   A visibility buffer is the approach to try first — instance and primitive per pixel, the hit rebuilt where it is lit, which is the wavefront's own hit record.
   Its cost is real, so it is the first candidate rather than the decision; the design review weighs it.
@@ -29,11 +31,14 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
    Before upscaling it was ~64 ms at 1080p; the number decides how urgent everything below is.
 2. **The step when the camera stops.**
    The first still frame starts the full-size temporal history over, so it is denoised from one sample.
+   [restir-gi.md](restir-gi.md#the-camera-stops) designs the fix with ReSTIR, and the hand-off to the converging wavefront waits for it.
 3. **Ray cones**, so a hit picks a texture's mip level instead of always sampling level 0.
-4. **A design review of the rendering modes and the radiance cache**, run with the review tool.
-   - Interactive: rasterized primaries, then ray-traced lighting through a radiance cache, possibly on the megakernel.
+4. **A design review of the rendering modes and ReSTIR GI**, run with the review tool; [restir-gi.md](restir-gi.md) is the plan it reviews.
+   - Interactive: rasterized primaries, then ray-traced lighting with indirect light resampled by ReSTIR GI, on the wavefront's stages.
      The raster path's G-buffer is its input; what it lacks for that is the material itself, likely as a visibility buffer ([raster.md](../raster.md#the-g-buffer-seam)).
-   - Final: the wavefront tracer converging without the cache.
+     ReSTIR GI was chosen over a radiance cache; a cache stays a possible later complement, ending the resampled paths early.
+   - ReSTIR DI runs as a second track beside it, after power-weighted light selection.
+   - Final: the wavefront tracer converging, plain path tracing, with power-weighted light selection now and unbiased ReSTIR DI later; ReSTIR PT is not planned.
    - Later: special handling for mirrors and caustics.
 
 ## Open, unordered

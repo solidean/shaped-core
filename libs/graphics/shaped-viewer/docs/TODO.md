@@ -31,10 +31,12 @@ Bigger design intent lives in [structure.md](structure.md).
   - **Only dx12 can pretend a device has no ray tracing** (`dx12_config::withhold_raytracing`), so the no-ray-tracing test runs there alone.
     Vulkan's arm is untested on such a device; the same knob on `vulkan_config` would reach it.
 
-- **A radiance cache, for the interactive hybrid mode.**
-  The hybrid rasterizes primary visibility and lights it by tracing; a cache of incoming radiance is what makes that lighting cheap enough per frame.
-  It is for the interactive mode alone: a final render converges with the wavefront tracer and no cache, so nothing it caches biases a finished image.
-  Its design comes out of the rendering-modes review in [the roadmap](plans/rendering-roadmap.md), together with the hybrid's visibility buffer.
+- **ReSTIR GI, for the interactive hybrid mode** — [plans/restir-gi.md](plans/restir-gi.md) is the plan.
+  The hybrid rasterizes primary visibility and lights it by tracing; resampling each pixel's paths across neighbors and frames is what makes that lighting clean enough per frame.
+  It is for the interactive mode alone: a final render converges with the wavefront tracer and no reuse, so nothing it resamples biases a finished image.
+  It was chosen over a radiance cache, which stays a possible later complement.
+  ReSTIR DI runs beside it as a second track, after power-weighted light selection; the plan's Decisions section records what the user settled.
+  The plan goes to the rendering-modes review in [the roadmap](plans/rendering-roadmap.md), together with the hybrid's visibility buffer.
 
 - **Nothing tests the pump sweep in `viewer::finish_frame`, and no test shape reached it.**
   `(void)cc::thread_pump_all()` exists so an unthreaded viewer drives the copy actor on a frame whose epoch wait does not block.

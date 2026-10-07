@@ -9,6 +9,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   `vkCmdPipelineBarrier2`, and it wants writing when a member needs it.
   Two smaller gaps in the dx12 one: it declares whole textures rather than subresource ranges, and a resource the
   foreign code touches without declaring is caught only by the debug layer.
+- **The ray-query polyfill exists on webgpu alone.**
+  sv's roadmap lights its hybrid mode by hardware ray tracing or, where a device has none, by the polyfill ([rendering-roadmap.md](../../shaped-viewer/docs/plans/rendering-roadmap.md)).
+  A dx12 or vulkan device without ray tracing has no polyfill, so the hybrid there falls back to raster's direct lighting until sg brings it to those backends.
 - **A barrier-only dx12 submit once landed outside any test.**
   One full `dev.py check` failed `shaped-graphics-test` on debug-nopch with the debug layer's "recorded only Barrier commands" warning, logged under no test owner.
   The message is allowlisted, but only inside a test, so an unowned one fails the run.
