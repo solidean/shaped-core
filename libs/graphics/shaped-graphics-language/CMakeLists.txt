@@ -400,6 +400,7 @@ if(SC_BUILD_TESTS)
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
         tests/emit/array-emit-test.cc
+        tests/emit/unroll-emit-test.cc
         tests/emit/primitive-stage-emit-test.cc
         tests/emit/buffer-emit-test.cc
         tests/emit/bytes-emit-test.cc

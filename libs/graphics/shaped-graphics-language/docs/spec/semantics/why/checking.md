@@ -646,3 +646,14 @@ HLSL forms a compute stage's quads from its threads' ids, as it forms the quads 
 DXC writes them for vulkan in the same derivative groups, which is why sg's vulkan grants `subgroups` only with linear compute derivatives.
 WGSL and MSL form quads of four consecutive invocations of a subgroup, which agree with the row and with no square.
 One row whose length is a multiple of 4 is the one shape every target forms alike, and it is the shape a single-pass reduction already takes.
+
+## CHK-389
+
+A loop worth unrolling is one whose index picks an element of a local array, a channel, or a branch, and what pays is the index becoming a constant.
+An array indexed by a constant stays in registers, where one indexed at run time is memory on every GPU.
+The target's own hints cannot promise that the same way everywhere.
+HLSL's `[unroll]` is the one a compiler must obey, MSL has only clang's `#pragma unroll`, which is advisory, and WGSL has none at all.
+So the compiler writes the copies itself, and every target compiles the same straight-line text.
+A hint over the loop would leave WebGPU the slow path on the very shaders that asked.
+Copying is also where the index can be a constant to SGL's own rules, which folds a branch on it as CHK-356 folds any other.
+The limit of 256 copies bounds the text a mistyped bound can write; a loop that long wants a loop.

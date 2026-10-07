@@ -1,0 +1,153 @@
+// `@unroll` on a for writes its body once per index and no loop, and means what the loop means (CHK-389)
+
+fun weighted_sum(values: float[5]) -> float:
+    let kernel = [0.0625, 0.25, 0.375, 0.25, 0.0625]
+    let mut total = 0.0
+    @unroll
+    for i in 0 ..< 5:
+        total += kernel[i] * values[i]
+    return total
+
+test weighted_sum(float[5].filled(2.0)) == 2.0
+
+// the same loop without the attribute gives the same value, in the same order of operations
+fun weighted_sum_looped(values: float[5]) -> float:
+    let kernel = [0.0625, 0.25, 0.375, 0.25, 0.0625]
+    let mut total = 0.0
+    for i in 0 ..< 5:
+        total += kernel[i] * values[i]
+    return total
+
+test:
+    let v = [0.1, 0.7, 1.3, 2.9, 3.1]
+    weighted_sum(v) == weighted_sum_looped(v)
+
+// a local of the body is a local of each copy, holding that copy's value
+fun sum_of_squares() -> int:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 4:
+        let square = i * i
+        total += square
+    return total
+
+test sum_of_squares() == 14
+
+// a bound may be any int constant: a literal, a const, an option, and an expression of them
+const taps = 3
+
+fun spread(center: int) -> int:
+    let mut total = 0
+    @unroll
+    for d in -taps ..< taps + 1:
+        total += center + d
+    return total
+
+test spread(10) == 70
+
+// `continue` moves on to the next index, and `break` leaves after the copy it stands in
+fun odd_sum_below(limit: int) -> int:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 8:
+        if i >= limit => break
+        if i % 2 == 0 => continue
+        total += i
+    return total
+
+// 1 + 3 + 5
+test odd_sum_below(6) == 9 and odd_sum_below(100) == 16
+
+// a return from a copy leaves the function, as it leaves it from the loop
+fun first_multiple_of(k: int) -> int:
+    @unroll
+    for i in 1 ..< 10:
+        if i % k == 0 => return i
+    return -1
+
+test first_multiple_of(4) == 4 and first_multiple_of(11) == -1
+
+// each copy sees its index as a constant, so a branch on the index keeps only the side that copy takes (CHK-356)
+fun edges_doubled(values: float[4]) -> float:
+    let mut total = 0.0
+    @unroll
+    for i in 0 ..< 4:
+        if i == 0 or i == 3:
+            total += values[i] * 2.0
+        else:
+            total += values[i]
+    return total
+
+test edges_doubled([1.0, 1.0, 1.0, 1.0]) == 6.0
+
+// unrolled loops nest, and an inner bound may read an outer index
+fun triangle(n: int) -> int:
+    let mut count = 0
+    @unroll
+    for row in 0 ..< 4:
+        @unroll
+        for column in 0 ..< row + 1:
+            count += n
+    return count
+
+test triangle(1) == 10
+
+// an empty range writes no copy at all
+fun none_run() -> int:
+    let mut count = 0
+    @unroll
+    for i in 4 ..< 2:
+        count += 1
+    return count
+
+test none_run() == 0
+
+// a bound held by a local is no constant, since a `let` holds none, so the loop cannot be unrolled
+@expect(error = "invalid-constant-argument")
+test:
+    let n = 3
+    let mut total = 0
+    @unroll
+    for i in 0 ..< n:
+        total += i
+    total == 3
+
+// nor can a range longer than the compiler writes copies of
+@expect(error = "invalid-constant-argument")
+test:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 1000:
+        total += i
+    total > 0
+
+// the attribute takes no arguments
+@expect(error = "invalid-attribute-arguments")
+test:
+    let mut total = 0
+    @unroll(2)
+    for i in 0 ..< 2:
+        total += 1
+    total == 2
+
+// and it stands on a for alone
+@expect(error = "unsupported-yet")
+test:
+    let mut total = 0
+    @unroll
+    while total < 2:
+        total += 1
+    total == 2
+
+// an unrolled loop in an entry point, whose text holds no loop on any target
+binding blur_io:
+    source: buffer[float]
+    target: mut buffer[float]
+
+@compute(64) fun blur(@thread_id id: int3){blur_io}:
+    let kernel = [0.25, 0.5, 0.25]
+    let mut total = 0.0
+    @unroll
+    for i in 0 ..< 3:
+        total += kernel[i] * blur_io.source[id.x + i]
+    blur_io.target[id.x] = total

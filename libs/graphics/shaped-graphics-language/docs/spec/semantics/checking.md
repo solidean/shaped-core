@@ -379,6 +379,7 @@ fun shade(k: float) -> float:
 | a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
+| a `for` statement | `@unroll` |
 
 * **CHK-323** `@internal` on a declaration of the prelude makes it the prelude's alone: no lookup from the program's file finds it, and the prelude's files still do.
   That holds for every path a lookup takes: a name, the type scope and declaring scope of a first argument's type (CHK-247), and `T.f(…)` (CHK-248).
@@ -1164,6 +1165,13 @@ hit_group textured for path_rays:
 * **CHK-120** `return`, `break` and `continue` are statements; one that stands as the result of a `case` arm leaves as it says, and that arm produces no value (CHK-165).
   One that stands as a value anywhere else is `unsupported-yet`.
 * **CHK-209** `print value` takes a value of any type; a string is `unsupported-yet`.
+* **CHK-389** `@unroll` on a `for` writes its body once per value of the range, in order, and no loop ([why](why/checking.md#chk-389)).
+  The loop means what it means without the attribute; the flat tree holds a block per value, and no target's text holds a loop or an unroll hint.
+  In each copy the variable is that value, as a literal, so a branch on it is CHK-356's and keeps the one side that copy takes.
+  `continue` leaves the copy it stands in, and `break` skips every copy after it.
+  Both bounds are `int` constants (CHK-310) once the entry point is inlined: a literal, a `const`, an option, a literal argument, an enclosing unrolled variable, or a pure builtin of those.
+  A bound that is none of those, and a range of more than 256 values, is `invalid-constant-argument`.
+  On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
 * **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
   Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.
   In the flat tree it is the block of CHK-170 around an `if`, so a branch under a non-uniform condition is in non-uniform control flow (CHK-284).
@@ -1362,7 +1370,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389 |
 | `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
 | `non-uniform-index` | CHK-300 |
 | `needless-nonuniform` | CHK-300 |
