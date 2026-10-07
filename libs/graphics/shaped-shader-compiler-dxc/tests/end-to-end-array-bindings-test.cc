@@ -526,17 +526,17 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: two bound groups holding
     }
     REQUIRE(set1.size() == 1);
 
-    // A fourth group the code never touches, holding an array of the same name, two elements long.
+    // Group 2 also holds an array of the same name, two elements long, at a register the code never touches.
+    // A fourth group would say the same, but sg binds at most three.
     auto spare = set1[0];
-    spare.space = 3;
+    spare.space = 2u;
+    spare.index = 8;
     spare.count = 2;
-    cc::vector<sg::binding> set3;
-    set3.push_back(spare);
+    set2.push_back(spare);
     auto const layout0 = ctx.uncached.create_binding_group_layout(set0);
     auto const layout1 = ctx.uncached.create_binding_group_layout(set1);
     auto const layout2 = ctx.uncached.create_binding_group_layout(set2);
-    auto const layout3 = ctx.uncached.create_binding_group_layout(set3);
-    auto const pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {layout0, layout1, layout2, layout3}});
+    auto const pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {layout0, layout1, layout2}});
     auto const pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
@@ -550,14 +550,15 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: two bound groups holding
     auto texs = cc::vector<sg::raw_view>();
     for (isize i = 0; i < 4; ++i)
         texs.push_back(sg::vacant_view{});
-    auto const texs_nv = sg::named_view{.name = "Texs", .view = cc::move(texs)};
-    auto const g2 = ctx.persistent.create_binding_group(layout2, cc::span<sg::named_view const>(&texs_nv, 1));
     auto small = cc::vector<sg::raw_view>();
     for (isize i = 0; i < 2; ++i)
         small.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
-    auto const small_nv = sg::named_view{.name = "Bufs", .view = cc::move(small)};
-    auto const g3 = ctx.persistent.create_binding_group(layout3, cc::span<sg::named_view const>(&small_nv, 1));
-    REQUIRE(g3 != nullptr);
+    sg::named_view const g2_views[] = {
+        {.name = "Texs", .view = cc::move(texs)},
+        {.name = "Bufs", .view = cc::move(small)},
+    };
+    auto const g2 = ctx.persistent.create_binding_group(layout2, g2_views);
+    REQUIRE(g2 != nullptr);
 
     sg::array_buffer_access const buf_access[] = {
         {.index = 0, .access = sg::access_flag::shader_read},
@@ -571,7 +572,6 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: two bound groups holding
         disp->compute.bind_group(0, *g0);
         disp->compute.bind_group(1, *g1);
         disp->compute.bind_group(2, *g2);
-        disp->compute.bind_group(3, *g3);
         // Index 3 is valid only in the larger: checking the first group that holds the name alone would let it through.
         CHECK_ASSERTS(disp->compute.dispatch_groups(1));
     }
