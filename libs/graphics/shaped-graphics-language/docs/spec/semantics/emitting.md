@@ -282,6 +282,8 @@ binding affine:
   `inverse_sqrt` is `rsqrt` in HLSL and MSL and `inverseSqrt` in WGSL; `fract` is `frac` in HLSL; `round` is `rint` in MSL, whose `round` is ties-away.
   `ddx` and `ddy` are `dpdx` and `dpdy` in WGSL and `dfdx` and `dfdy` in MSL.
   HLSL's `sign`, `countbits`, `firstbithigh` and `firstbitlow` give an int or a uint whatever they take, so the writer converts back, and `reversebits` of an int goes through a uint.
+  `is_nan` and `is_inf` are HLSL's `isnan` and `isinf`, and in WGSL and MSL a test of the float's bits: `(bits & 0x7fffffff)` above `0x7f800000` is a NaN, and equal to it an infinity.
+  WGSL may assume neither arises and Metal compiles fast-math by default, so a test of the value could fold to false there, where a test of its bits cannot.
   WGSL writes a reinterpretation as `bitcast<T>`, MSL as `as_type<T>` and HLSL as `asuint`, `asint` or `asfloat`.
   MSL's `first_bit_*` and HLSL's packing functions are helpers the text declares (EMIT-102).
 * **EMIT-127** A stage input is a parameter of the target's entry point, handed over as the target's own type, and converted to SGL's where the body reads it.

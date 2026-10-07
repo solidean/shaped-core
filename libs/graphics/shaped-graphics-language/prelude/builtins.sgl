@@ -1476,6 +1476,25 @@
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half4, high: half4, x: half4) -> half4
 
+// whether a float is a NaN or an infinity, per component; read from its bits on every target, so
+// no target's assumption that neither arises can fold the test away
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: float) -> bool
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: float) -> bool
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: float2) -> bool2
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: float2) -> bool2
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: float3) -> bool3
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: float3) -> bool3
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: float4) -> bool4
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: float4) -> bool4
+
 // derivatives across the 2x2 quad of pixels, which only a pixel stage has;
 // a run of one invocation has no neighbours, and reads 0; WGSL takes the derivative of no half
 @builtin @pure @stages(.pixel) fun ddx(x: float) -> float

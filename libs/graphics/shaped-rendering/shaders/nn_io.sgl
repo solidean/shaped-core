@@ -48,8 +48,7 @@ fun pu_inverse(x: float3) -> float3:
     return float3(pu_inverse_raw(s.x), pu_inverse_raw(s.y), pu_inverse_raw(s.z))
 
 // Zero for a NaN or an infinity, and `x` itself otherwise.
-// TEMPORARY until the prelude has `is_nan` and `is_inf`: the exponent bits all set are exactly those two, by IEEE 754.
-fun finite_or_zero(x: float) => if (x.bits & 0x7f800000u) == 0x7f800000u => 0.0 else x
+fun finite_or_zero(x: float) => if is_nan(x) or is_inf(x) => 0.0 else x
 
 // NaN and infinity reach the network as whatever the hardware does with them, and one of either poisons every pixel its receptive field touches, so both are removed on the way in.
 fun sanitize(v: float3) => float3(finite_or_zero(v.x), finite_or_zero(v.y), finite_or_zero(v.z))

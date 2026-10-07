@@ -324,6 +324,44 @@ written write_sign(call_context const& c)
     return {.text = cc::format("sign({})", c.arguments[0].text)};
 }
 
+/// Whether each component of a float is a NaN (`IsNan`) or an infinity, read from its IEEE bits: past the sign, an
+/// all-ones exponent with a nonzero mantissa is a NaN, and with a zero one an infinity.
+template <bool IsNan>
+void non_finite_each(leaves in, result& out)
+{
+    for (auto const& x : in)
+    {
+        auto const magnitude = x.bits & 0x7fffffffu;
+        out.push_back(scalar::of(IsNan ? magnitude > 0x7f800000u : magnitude == 0x7f800000u));
+    }
+}
+
+/// HLSL's `isnan` and `isinf`, and the same bit test written out in WGSL and MSL.
+/// WGSL may assume no NaN or infinity arises, and Metal compiles fast-math by default, so a test of the VALUE may be
+/// folded to false there; a test of its bits may not.
+template <bool IsNan, int Width>
+written write_non_finite(call_context const& c)
+{
+    auto const& x = c.arguments[0].text;
+    auto const op = IsNan ? ">" : "==";
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("{}({})", IsNan ? "isnan" : "isinf", x)};
+    case language::wgsl:
+    {
+        auto const uints = Width == 1 ? cc::string("u32") : cc::format("vec{}<u32>", Width);
+        return {.text = cc::format("((bitcast<{0}>({1}) & {0}(0x7fffffffu)) {2} {0}(0x7f800000u))", uints, x, op)};
+    }
+    case language::msl:
+    {
+        auto const uints = type_name("uint", Width);
+        return {.text = cc::format("((as_type<{0}>({1}) & {0}(0x7fffffffu)) {2} {0}(0x7f800000u))", uints, x, op)};
+    }
+    }
+    return {};
+}
+
 /// HLSL's bit functions give a uint, and `reversebits` takes one, so an int converts at the call.
 template <int Width, bool IsSigned>
 written write_bit_function(call_context const& c, cc::string_view hlsl, cc::string_view wgsl, cc::string_view msl)
@@ -491,6 +529,10 @@ written write_unpack_half(call_context const& c)
 // ---- the names each custom spelling writes, which no name of the program may take in that target ---------------
 
 constexpr cc::string_view k_sign[] = {"sign"};
+constexpr cc::string_view k_is_nan_hlsl[] = {"isnan"};
+constexpr cc::string_view k_is_inf_hlsl[] = {"isinf"};
+constexpr cc::string_view k_non_finite_wgsl[] = {"bitcast"};
+constexpr cc::string_view k_non_finite_msl[] = {"as_type"};
 constexpr cc::string_view k_count_bits_hlsl[] = {"countbits"};
 constexpr cc::string_view k_count_bits_wgsl[] = {"countOneBits"};
 constexpr cc::string_view k_count_bits_msl[] = {"popcount"};
@@ -619,6 +661,39 @@ void sgl::builtins::register_math(registry& r)
             "/// 0 where `x` is below `edge`, and 1 from it on.");
         add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep, {},
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
+    }
+
+    r.add_comment("// whether a float is a NaN or an infinity, per component; read from its bits on every target, so\n"
+                  "// no target's assumption that neither arises can fold the test away");
+    struct non_finite_writers
+    {
+        cc::string_view type;
+        cc::string_view bools;
+        custom_writer nan;
+        custom_writer inf;
+    };
+    non_finite_writers const non_finite[] = {
+        {"float", "bool", write_non_finite<true, 1>, write_non_finite<false, 1>},
+        {"float2", "bool2", write_non_finite<true, 2>, write_non_finite<false, 2>},
+        {"float3", "bool3", write_non_finite<true, 3>, write_non_finite<false, 3>},
+        {"float4", "bool4", write_non_finite<true, 4>, write_non_finite<false, 4>},
+    };
+    for (auto const& f : non_finite)
+    {
+        add(r, cc::format("@pure fun is_nan(x: {}) -> {}", f.type, f.bools), non_finite_each<true>,
+            {.kind = spelling_kind::custom,
+             .custom = f.nan,
+             .hlsl_names = k_is_nan_hlsl,
+             .wgsl_names = k_non_finite_wgsl,
+             .msl_names = k_non_finite_msl},
+            nullptr, false, "/// Whether each component is a NaN.");
+        add(r, cc::format("@pure fun is_inf(x: {}) -> {}", f.type, f.bools), non_finite_each<false>,
+            {.kind = spelling_kind::custom,
+             .custom = f.inf,
+             .hlsl_names = k_is_inf_hlsl,
+             .wgsl_names = k_non_finite_wgsl,
+             .msl_names = k_non_finite_msl},
+            nullptr, false, "/// Whether each component is an infinity, of either sign.");
     }
 
     r.add_comment("// derivatives across the 2x2 quad of pixels, which only a pixel stage has;\n"
