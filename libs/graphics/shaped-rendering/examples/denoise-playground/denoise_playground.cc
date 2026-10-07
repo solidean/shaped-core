@@ -222,7 +222,7 @@ struct camera
     }
 };
 
-/// Fills the tracer's constants block, which the shader package generates from noisy_scene.hlsl.
+/// Fills the tracer's constants block, which the shader package generates from noisy_scene.sgl.
 [[nodiscard]] shaders::scene_constants scene_constants_for(camera const& cam,
                                                            tg::mat4f const& prev_view_projection,
                                                            tg::vec2i extent,
@@ -243,32 +243,21 @@ struct camera
     // One shader float4 per matrix ROW, so nothing here depends on how a float4x4 would be packed into a constant
     // buffer.
     // tg::mat subscripts [col, row], so a row gathers across the columns.
-    float* const rows[] = {out.prev_vp_row0, out.prev_vp_row1, out.prev_vp_row2, out.prev_vp_row3};
+    tg::vec4f* const rows[] = {&out.prev_vp_row0, &out.prev_vp_row1, &out.prev_vp_row2, &out.prev_vp_row3};
     for (auto row = 0; row < 4; ++row)
         for (auto col = 0; col < 4; ++col)
-            rows[row][col] = prev_view_projection[col, row];
+            (*rows[row])[col] = prev_view_projection[col, row];
 
-    out.origin[0] = e[0];
-    out.origin[1] = e[1];
-    out.origin[2] = e[2];
-    out.origin[3] = tg::tan(cam.vertical_fov / 2.0f);
-    out.forward[0] = f[0];
-    out.forward[1] = f[1];
-    out.forward[2] = f[2];
-    out.forward[3] = aspect;
-    out.right[0] = r[0];
-    out.right[1] = r[1];
-    out.right[2] = r[2];
-    out.up[0] = u[0];
-    out.up[1] = u[1];
-    out.up[2] = u[2];
+    out.origin = tg::vec4f(e[0], e[1], e[2], tg::tan(cam.vertical_fov / 2.0f));
+    out.forward = tg::vec4f(f[0], f[1], f[2], aspect);
+    out.right = tg::vec4f(r[0], r[1], r[2], 0.0f);
+    out.up = tg::vec4f(u[0], u[1], u[2], 0.0f);
 
     out.frame = frame;
     out.accum_frame = accum_frame;
     out.spp = c.spp;
     out.light_size = c.light_size;
-    out.frame_jitter[0] = jitter[0];
-    out.frame_jitter[1] = jitter[1];
+    out.frame_jitter = jitter;
     out.use_frame_jitter = upscaling ? 1 : 0;
     return out;
 }
@@ -447,12 +436,14 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     auto& ctx = *context.value();
 
     // Every edge, because the backend decides which format the context accepts: DXIL for dx12, SPIR-V for vulkan.
-    // The tracer is HLSL, so without DXC there is nothing to show.
+    // The tracer is SGL, which reaches both through DXC, so without DXC there is nothing to show.
     auto lib = slib::shader_library();
     slib::add_available_compilers(lib);
     if (lib.supported_formats(slib::shader_language::hlsl).empty())
     {
-        cc::eprintln("no shader compiler for HLSL: DXC did not load, and the warning above says why");
+        cc::eprintln("no shader compiler for HLSL, which SGL reaches dx12 and vulkan through: DXC did not load, and "
+                     "the "
+                     "warning above says why");
         co_return;
     }
     sr::add_shader_packages(lib);        // imgui, blit and the denoise members
@@ -460,7 +451,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
     // Every supported member starts compiling now rather than on the first call that wants one, so switching the
     // method in the panel does not cost a frame of `pending`.
-    sr::reconstruct_routine::prewarm(ctx);
+    sr::reconstruct_routine::prewarm(ctx, k_scene_format);
 
     auto swapchain = sg::swapchain_handle();
     auto capture_target = sg::texture_2d();
@@ -477,30 +468,16 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
     // The tracer is a plain compute pipeline rather than a render routine, so there is no readiness to poll and
     // nothing worth drawing without it: build it up front and fail loudly.
-    auto const scene_layout = ctx.cached.acquire_binding_group_layout<shaders::scene_bindings>();
-    auto const scene_shader = shaders::noisy_scene.compute.main_cs->acquire(ctx);
+    // An SGL entry point states its own layout, so the pipeline is the shader's and nothing else.
+    auto const scene_layout = ctx.cached.acquire_binding_group_layout<shaders::scene_images>();
+    auto const scene_shader = shaders::noisy_scene.main_cs->acquire(ctx);
     co_await cc::async_settled(scene_shader);
-    auto const* const scene_compiled = scene_shader->try_value();
-    if (scene_compiled == nullptr)
+    if (auto const* const why = scene_shader->try_error(); why != nullptr)
     {
-        auto const* const why = scene_shader->try_error();
-        FAIL(cc::format("noisy_scene.hlsl did not compile: {}",
-                        why != nullptr ? why->underlying().to_string() : cc::string("no reason given")));
+        FAIL(cc::format("noisy_scene.sgl did not compile: {}", why->underlying().to_string()));
         co_return;
     }
-    auto const* scene_constants_binding = static_cast<sg::binding const*>(nullptr);
-    for (auto const& b : scene_compiled->bindings)
-        if (b.type == sg::binding_type::constants_buffer)
-            scene_constants_binding = &b;
-    if (scene_constants_binding == nullptr)
-    {
-        FAIL("the scene shader reflects no constants block"); // a bare co_return here would read as a passing example
-        co_return;
-    }
-    auto const scene_pipeline_async = ctx.cached.acquire_compute_pipeline(
-        {.shader = *scene_compiled,
-         .layout
-         = ctx.cached.acquire_pipeline_layout({.groups = {scene_layout}, .inline_constants = *scene_constants_binding})});
+    auto const scene_pipeline_async = shaders::noisy_scene.main_cs.acquire_pipeline(ctx);
     co_await cc::async_settled(scene_pipeline_async);
     auto const* const scene_pipeline = scene_pipeline_async->try_value();
     if (scene_pipeline == nullptr)
@@ -509,30 +486,15 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         co_return;
     }
 
-    auto const compose_layout = ctx.cached.acquire_binding_group_layout<shaders::compose_bindings>();
-    auto const compose_shader = shaders::compose.compute.main_cs->acquire(ctx);
+    auto const compose_layout = ctx.cached.acquire_binding_group_layout<shaders::compose_images>();
+    auto const compose_shader = shaders::compose.main_cs->acquire(ctx);
     co_await cc::async_settled(compose_shader);
-    auto const* const compose_compiled = compose_shader->try_value();
-    if (compose_compiled == nullptr)
+    if (auto const* const why = compose_shader->try_error(); why != nullptr)
     {
-        auto const* const why = compose_shader->try_error();
-        FAIL(cc::format("compose.hlsl did not compile: {}",
-                        why != nullptr ? why->underlying().to_string() : cc::string("no reason given")));
+        FAIL(cc::format("compose.sgl did not compile: {}", why->underlying().to_string()));
         co_return;
     }
-    auto const* compose_constants_binding = static_cast<sg::binding const*>(nullptr);
-    for (auto const& b : compose_compiled->bindings)
-        if (b.type == sg::binding_type::constants_buffer)
-            compose_constants_binding = &b;
-    if (compose_constants_binding == nullptr)
-    {
-        FAIL("the compose shader reflects no constants block"); // a bare co_return here would read as a passing example
-        co_return;
-    }
-    auto const compose_pipeline_async = ctx.cached.acquire_compute_pipeline(
-        {.shader = *compose_compiled,
-         .layout = ctx.cached.acquire_pipeline_layout(
-             {.groups = {compose_layout}, .inline_constants = *compose_constants_binding})});
+    auto const compose_pipeline_async = shaders::compose.main_cs.acquire_pipeline(ctx);
     co_await cc::async_settled(compose_pipeline_async);
     auto const* const compose_pipeline = compose_pipeline_async->try_value();
     if (compose_pipeline == nullptr)
@@ -624,21 +586,21 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
         // -- trace
         {
-            auto const group
-                = ctx.transient.create_binding_group(*cmd, scene_layout,
-                                                     shaders::scene_bindings{
-                                                         .gColor = images.color.as_any_image_view(),
-                                                         .gAlbedo = images.albedo.as_any_image_view(),
-                                                         .gNormal = images.normal.as_any_image_view(),
-                                                         .gDepth = images.depth.as_any_image_view(),
-                                                         .gMotion = images.motion.as_any_image_view(),
-                                                         .gSpecularAlbedo = images.specular_albedo.as_any_image_view(),
-                                                         .gRoughness = images.roughness.as_any_image_view(),
-                                                     });
+            auto const group = ctx.transient.create_binding_group(
+                *cmd, scene_layout,
+                shaders::scene_images{
+                    .color = images.color.as_image_view<k_scene_format>(),
+                    .albedo = images.albedo.as_image_view<k_scene_format>(),
+                    .normal = images.normal.as_image_view<k_scene_format>(),
+                    .depth = images.depth.as_image_view<k_scene_format>(),
+                    .motion = images.motion.as_image_view<k_scene_format>(),
+                    .specular_albedo = images.specular_albedo.as_image_view<k_scene_format>(),
+                    .roughness = images.roughness.as_image_view<k_scene_format>(),
+                });
             cmd->compute.bind_pipeline(**scene_pipeline);
-            cmd->compute.bind<shaders::scene_bindings>(*group);
+            cmd->compute.bind_group(0, *group);
             cmd->compute.set_inline_constants(
-                scene_constants_for(cam, prev_view_projection, traced, ui, frame, accum_frame, jitter, upscaling));
+                scene_constants_for(cam, prev_view_projection, traced, ui, frame, accum_frame, jitter, upscaling).to_block());
             cmd->compute.dispatch_threads(traced[0], traced[1], 1);
         }
 
@@ -684,19 +646,21 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
         // -- compose: the raw image and the denoised one either side of the divider, tonemapped
         {
-            auto const group = ctx.transient.create_binding_group(*cmd, compose_layout,
-                                                                  shaders::compose_bindings{
-                                                                      .gRaw = images.color.as_texture_view(),
-                                                                      .gDenoised = shown.as_texture_view(),
-                                                                      .gTarget = images.composed.as_any_image_view(),
-                                                                  });
+            auto const group
+                = ctx.transient.create_binding_group(*cmd, compose_layout,
+                                                     shaders::compose_images{
+                                                         .raw = images.color.as_texture_view(),
+                                                         .denoised = shown.as_texture_view(),
+                                                         .target = images.composed.as_image_view<k_scene_format>(),
+                                                     });
             cmd->compute.bind_pipeline(**compose_pipeline);
-            cmd->compute.bind<shaders::compose_bindings>(*group);
+            cmd->compute.bind_group(0, *group);
             cmd->compute.set_inline_constants(shaders::compose_constants{
                 .split = ui.split,
                 .exposure = ui.exposure,
                 .show_split = ui.show_split ? 1 : 0,
-            });
+            }
+                                                  .to_block());
             cmd->compute.dispatch_threads(viewport[0], viewport[1], 1);
         }
 
