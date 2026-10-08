@@ -85,6 +85,9 @@ struct babel::image::read_options
 {
     /// The most bytes a DDS or TGA decode may take, passed on as their own budget; past it the read is an error.
     /// PNG has its own fixed ceilings, and JPEG, HDR and PFM take none.
+    /// The default holds an 8192 x 8192 decode to rgba8, but only 4096 x 4096 to rgba32f, so a larger float
+    /// texture — an 8192 x 4096 BC6H environment map — needs it raised.
+    /// The largest `isize` disables the check.
     isize max_decoded_bytes = isize(1) << 28;
 };
 

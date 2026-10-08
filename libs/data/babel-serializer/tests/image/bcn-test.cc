@@ -68,8 +68,8 @@ struct bit_writer
     }
 };
 
-constexpr int texel_order[16] = {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3};
-constexpr int channel_order[16] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7};
+constexpr auto texel_order = cc::fixed_array<int, 16>{0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3};
+constexpr auto channel_order = cc::fixed_array<int, 16>{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7};
 
 bool texel_is(bcn::rgba8_block const& b, int texel, int r, int g, int bl, int a)
 {

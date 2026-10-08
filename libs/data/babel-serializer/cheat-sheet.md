@@ -486,7 +486,9 @@ Only what the signatures above cannot tell you.
 - **BC5 decodes to (x, y, 0, 1)**, and a normal's z is the consumer's to reconstruct; BC4 is (r, 0, 0, 1).
   The first BC5 block is red, ATI2 included.
 - **Signed BC4 / BC5 land biased in 8 bits** (-1 -> 0, 0 -> 128, 1 -> 255); `decode_rgba32f` has the signed values.
+- **The decode budget defaults to 256 MiB**: 8192 x 8192 in rgba8, but only 4096 x 4096 in rgba32f; the largest `isize` disables it.
 - **A DDS's stored pitch is ignored**: rows are read tightly packed, so a DWORD-padded legacy file reads skewed.
+- **A 16-bit TGA with attribute bits takes its alpha from bit 15**, which many writers leave 0, so such a file reads fully transparent.
 - **TGA has no magic.** `detect_format` takes a TGA 2.0 footer or, failing that, a header that parses — a guess, so pass the format to `read` when you know it.
 - **Image rows carry no padding**: `row_stride() == width * channels * bytes_per_component()`.
 - **`babel::png::encode` wants the buffer size exactly.** `width * height * channels * (decoded == u16 ? 2 : 1)`, so a buffer that merely fits is `decoded` disagreeing with it and is an error.

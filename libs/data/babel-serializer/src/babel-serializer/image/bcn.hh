@@ -10,8 +10,10 @@
 // babel::dds is the reader that hands such blocks out; KTX2 and a GPU readback carry the same bytes.
 //
 // Every decoder is bit-exact against one stated rule rather than against "whatever a GPU does".
-// Hardware disagrees in the last bit on BC1-BC5 interpolation, so the rule is the one the D3D specification and
-// DirectXTex compute: interpolate the expanded endpoints exactly, then round to nearest.
+// Hardware disagrees in the last bit on BC1-BC5 interpolation, and the D3D specification allows it a tolerance.
+// babel's rule for BC1-BC5 is bit-replicated endpoints, then exact interpolation, rounded to nearest.
+// Bit replication is what hardware does; a decoder that widens RGB565 as UNORM floats instead lands one step off on
+// some endpoint pairs, both within that tolerance.
 // BC6H and BC7 specify their interpolation in integers, and there the rule is the specification's own.
 //
 // Texels come back row-major, texel (x, y) at index y * 4 + x, four values each in r, g, b, a order.

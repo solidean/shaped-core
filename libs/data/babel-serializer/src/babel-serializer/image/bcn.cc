@@ -10,6 +10,9 @@ namespace
 // Shared tables
 // -------------------------------------------------------------------------------------------------
 
+// The lookup tables stay C arrays on purpose: constexpr, transcribed from the specification row by row, and never
+// passed anywhere a size could be lost.
+
 /// The 64 two-subset partitions of BC6H and BC7, bit i set where texel i is in subset 1.
 constexpr u16 partitions_2[64] = {
     0xCCCC, 0x8888, 0xEEEE, 0xECC8, 0xC880, 0xFEEC, 0xFEC8, 0xEC80, 0xC800, 0xFFEC, 0xFE80, 0xE800, 0xFFE8,

@@ -46,6 +46,7 @@ struct babel::tga::data
     /// 1 gray, 2 gray + alpha, 3 rgb or 4 rgba — what the stored pixels hold, a palette's entries for a color-mapped
     /// image.
     /// A 16-bit pixel has an alpha channel only when the header grants it the attribute bit.
+    /// That alpha is bit 15, which many writers leave 0 whatever the header says, so such a file reads fully transparent.
     int channels = 0;
 
     image_type type = image_type::true_color;
@@ -73,7 +74,7 @@ struct babel::tga::read_options
 {
     /// The most bytes the decoded pixels may take; a file describing more is an error before anything is allocated.
     /// The header alone is never believed, since a few kilobytes of run-length packets can describe 65535 x 65535.
-    /// The default holds an 8192 x 8192 rgba image.
+    /// The default holds an 8192 x 8192 rgba image; the largest `isize` disables the check.
     isize max_decoded_bytes = isize(1) << 28;
 };
 

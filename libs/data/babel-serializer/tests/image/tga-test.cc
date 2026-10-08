@@ -1,6 +1,7 @@
 #include <babel-serializer/image/image.hh>
 #include <babel-serializer/image/tga.hh>
 #include <clean-core/common/endian.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string_view.hh>
@@ -268,7 +269,12 @@ TEST("tga - a decode larger than the budget is refused before allocating")
     CHECK(tga::read(make_tga({}, body), {.max_decoded_bytes = 12}).has_value());
     CHECK(tga::read(make_tga({}, body), {.max_decoded_bytes = 11}).has_error());
 
-    // A 65535 x 65535 run-length header over a few bytes would be 16 GiB of rgba; the default budget refuses it.
-    u8 const packets[] = {0xFF, 1, 2, 3, 4, 0xFF, 1, 2, 3, 4};
-    CHECK(tga::read(make_tga({.type = 10, .width = 65535, .height = 65535, .depth = 32}, packets)).has_error());
+    // Valid run-length data: 64 x 64 rgba in 32 runs of 128 pixels, 16 KiB decoded from 160 bytes.
+    // Only the budget tells the two reads apart.
+    auto packets = cc::vector<u8>();
+    for (auto i = 0; i < 32; ++i)
+        packets.push_back_range(cc::span<u8 const>(cc::fixed_array<u8, 5>{0xFF, 1, 2, 3, 4}));
+    auto const rle = make_tga({.type = 10, .width = 64, .height = 64, .depth = 32}, packets);
+    CHECK(tga::read(rle, {.max_decoded_bytes = 64 * 64 * 4}).has_value());
+    CHECK(tga::read(rle, {.max_decoded_bytes = 64 * 64 * 4 - 1}).has_error());
 }

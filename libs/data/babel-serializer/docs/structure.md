@@ -217,7 +217,7 @@ It reads over pinned bytes like `gltf`, because every subresource comes back as 
 Legacy FourCC, legacy bit-mask and DX10 headers all resolve to one DXGI-shaped `pixel_format`, with the stored fields kept in `file_header`.
 Arrays, cube maps (partial legacy ones included) and volumes are laid out in file order, and a header that implies more bytes than the file has is an error.
 
-- `[done]` **decoding** — any subresource to rgba8, or to rgba32f for BC6H and the float formats, through `bcn`.
+- `[done]` **decoding** — any subresource to rgba8 (every format but the float ones), or to rgba32f (every format), through `bcn`.
 - `[planned]` **the remaining DXGI formats** — 10:10:10:2, 11:11:10, 16-bit unorm, and the rest of the uncompressed table, each a mapping plus a texel decoder.
   Legacy files reach most of them already through the bit-mask path.
 
@@ -232,7 +232,7 @@ TGA has no magic number, which is why the aggregator tries it last: its 2.0 foot
 ### bcn [done]
 
 BCn block decoding, independent of any container; see [bcn.hh](../src/babel-serializer/image/bcn.hh).
-BC1 - BC5 round interpolants to nearest, the D3D / DirectXTex rule; BC6H and BC7 follow their specifications' integer arithmetic.
+BC1 - BC5 bit-replicate their endpoints, then interpolate exactly and round to nearest; BC6H and BC7 follow their specifications' integer arithmetic.
 The tests pin hand-computed blocks, plus random BC7 and BC6H blocks checked against Pillow's decoder.
 Pillow skips signed BC6H's sign extension after the inverse transform, and babel follows the specification there instead.
 
