@@ -375,6 +375,8 @@ binding traced:
     /// Two halves each, this frame's and the last ReSTIR frame's, which `wavefront_flag_restir_parity` says apart.
     restir_surfaces: mut buffer[restir_surface]
     restir_reservoirs: mut buffer[restir_reservoir]
+    /// One per pixel: the spatial pass's reservoir, which the re-shade shades; the temporal one is what the next frame reuses.
+    restir_spatial: mut buffer[restir_reservoir]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //
@@ -534,7 +536,8 @@ binding dispatch:
     height: uint
     fill: uint
     mode: uint
-    pad0: uint
+    /// the spatial pass's neighbor radius in pixels, or 0 for the image's own
+    restir_radius: uint
 
 /// A shadow ray reads only visibility: the caller seeds `visible` with 0, and the shadow miss sets it to 1.
 struct shadow_payload:

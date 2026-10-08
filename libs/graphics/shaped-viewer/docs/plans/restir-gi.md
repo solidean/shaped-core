@@ -1,6 +1,6 @@
 # ReSTIR GI for the interactive mode
 
-**A plan, being built: phases G0 and G1 have landed, and everything past them is proposed.**
+**A plan, being built: phases G0 to G2 have landed, and everything past them is proposed.**
 It is the design of the traced lighting in sv's interactive mode, which the user chose to be ReSTIR GI rather than a radiance cache.
 The decided direction it serves ([the roadmap](rendering-roadmap.md)):
 
@@ -367,9 +367,11 @@ After the drain and before resolve, each a dense dispatch over the traced pixels
 1. **`restir_temporal`**: the pixel's candidate, merged with its reprojected history.
    The history's sample is shifted to this frame's `x_v` by reconnection, with its Jacobian and one visibility ray.
    The two are weighted by the generalized balance heuristic, with `M` capped at about 20 as the confidence weight.
-2. **`restir_spatial`**: up to `k` neighbors, merged by pairwise MIS with this pixel's temporal result as the canonical sample.
+2. **`restir_spatial`**: up to `k` neighbors, merged with this pixel's temporal result.
+   Built with the generalized balance heuristic over every domain rather than pairwise MIS.
    Each costs a reconnection shift and a visibility ray.
-   `k` is 1 or 2 by default, and more where the history is short, as after a disocclusion.
+   `k` is 2, drawn within a radius that follows the image's size.
+   More where the history is short, as after a disocclusion, is open.
 3. **The sort of the persisted primary hits**, then **`sv_restir_shade`** per permutation.
    It writes `frame_samples` and, for a split-signal member, `frame_diffuse`, `frame_specular` and the hit distance.
 
@@ -573,10 +575,11 @@ Rays per traced pixel per frame:
 | the candidate's ray to `x_s` | 1 |
 | each vertex from `x_s` on: its next-event estimate and continuation | up to 3, over the path's depth |
 | temporal visibility | 1 |
-| spatial visibility | `k`, 1 or 2 |
-| reverse visibility, `exact` only | 1 + `k` |
+| spatial visibility | `k`, 2 |
+| reverse visibility, `exact` only | 1 + `k`², 5 at `k` = 2 |
 
-Today's moving frame already traces everything above the temporal row; ReSTIR adds 2 or 3 rays per pixel, or 4 to 6 with `exact`.
+Today's moving frame already traces everything above the temporal row; ReSTIR adds 3 rays per pixel, or 8 with `exact`.
+The generalized balance heuristic is why `exact` costs `k`²: every sample is tested at every other domain it could have come from.
 
 **A moving frame at 640x360, for 720p, like for like** — full-depth candidates, `k = 2`:
 
@@ -679,8 +682,21 @@ One next-event sample's noise stays in both, since only the indirect half resamp
 - **The reservoir math as SGL functions with `test` blocks**, the foundation's CPU check that the MIS weights sum to one: owed.
 - A capture of Sponza, moving and at the stop, beside today's, for the user to judge; not a test, since the asset is an on-request fetch.
 
-**Phase G2: spatial reuse**, with the reconnection Jacobian, visibility rays, pairwise MIS and the reconnection criterion at `x_s`.
+**Phase G2: spatial reuse**, with the reconnection Jacobian, visibility rays, the generalized balance heuristic and the reconnection criterion at `x_s`.
 
+Built: `wavefront_restir_spatial` runs after the temporal pass, on `wavefront_trace_desc::restir_spatial`, which the view sets.
+Each pixel draws two neighbors within a fortieth of the image's diagonal, 2 to 16 pixels, that pass the temporal pass's same-surface test.
+Their reservoirs of this frame merge with the pixel's own by the generalized balance heuristic over all three domains, rather than the pairwise form.
+At two neighbors that is nine target evaluations, and it needs no canonical special case.
+The result goes to `restir_spatial`, which the re-shade shades; the temporal reservoir stays what the next frame reuses, per open question 3.
+
+Measured on the Cornell box over 48 frames, the indirect half's per-frame error against 192 plain frames' mean:
+0.243 plain, 0.181 with neighbors alone, 0.129 with temporal reuse alone, 0.117 with both, ~2.1x.
+Those are at the image's own radius, which the 32x32 test image clamps to its 2-pixel floor; at 12 pixels the neighbors gained nothing over temporal reuse.
+Every resampled mean stays within 0.15% of the plain one with `exact`, and 0.7% without.
+A fixed 16 pixels would reach across half of the test's 32x32 image and keep one neighbor in six, which is why the radius follows the image.
+
+- Built: unbiased with `exact`, within 0.7% without, against the plain mean; the indirect error's fall over temporal reuse alone; the glossy wall with neighbors too.
 - **The Jacobian against finite differences**: a probe shader maps a small cone of directions at one visible point to another, and compares solid angles.
 - **A white furnace, `exact`**: a closed Lambertian scene of albedo below 1 lit uniformly has an analytic answer everywhere.
   Every sample carries the same radiance, so an error in the weights or the Jacobian shows as a wrong mean rather than as noise.

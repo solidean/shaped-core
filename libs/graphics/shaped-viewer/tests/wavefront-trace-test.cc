@@ -277,6 +277,10 @@ struct restir_run
 {
     cc::vector<cc::vector<tg::vec3f>> frames;
     cc::vector<tg::vec3f> mean;
+    /// Each frame's indirect half alone, the re-shaded image less the visible point's own light, and their mean.
+    /// It is what ReSTIR GI resamples, without the next-event noise it leaves as it was.
+    cc::vector<cc::vector<tg::vec3f>> indirect_frames;
+    cc::vector<tg::vec3f> indirect_mean;
     /// The mean confidence of the last frame's reservoirs, over the pixels that kept one: how much reuse there was.
     f32 confidence = 0.0f;
 };
@@ -290,6 +294,9 @@ struct restir_reuse
     f64 pan = 0.0;
     /// Whether each frame is told the camera of the last one, or told that nothing moved.
     bool honest_motion = true;
+    /// Whether each frame also resamples with a few neighbors' reservoirs, and from how far, 0 for the image's own radius.
+    bool spatial = false;
+    i32 radius = 0;
 };
 
 /// Traces `frames` drained frames of the Cornell box, each keeping ReSTIR's records, and reads back what the re-shade made of each.
@@ -305,7 +312,10 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
     auto const target = make_target(ctx);
     auto state = sv::wavefront_state::create(ctx, k_size, 4);
     auto const slots = isize(k_size[0]) * isize(k_size[1]);
-    auto out = restir_run{.frames = {}, .mean = cc::vector<tg::vec3f>::create_filled(slots, tg::vec3f(0, 0, 0))};
+    auto out = restir_run{.frames = {},
+                          .mean = cc::vector<tg::vec3f>::create_filled(slots, tg::vec3f(0, 0, 0)),
+                          .indirect_frames = {},
+                          .indirect_mean = cc::vector<tg::vec3f>::create_filled(slots, tg::vec3f(0, 0, 0))};
     auto const start = cc::current_time_steady_secs();
     for (auto f = 0; f < frames;)
     {
@@ -339,10 +349,13 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
                                                                    .restir = true,
                                                                    .restir_history = reuse.history,
                                                                    .restir_exact = reuse.exact,
+                                                                   .restir_spatial = reuse.spatial,
+                                                                   .restir_radius = reuse.radius,
                                                                    .generation = u32(f) + 1u});
         auto results = sg::data_future<sv::shaders::tracer::restir_result>();
         auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();
         auto reservoirs = sg::data_future<sv::shaders::tracer::restir_reservoir>();
+        auto candidates = sg::data_future<sv::shaders::tracer::restir_candidate>();
         // The frame writes the half its parity named before it flipped it.
         auto const written_half = isize(state.restir_parity ^ 1u);
         if (outcome == sg::routine_outcome::executed)
@@ -350,6 +363,7 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
             results = cmd->download.data_from_buffer(state.restir_results);
             tallies = cmd->download.data_from_buffer(state.tallies);
             reservoirs = cmd->download.data_from_buffer(state.restir_reservoirs);
+            candidates = cmd->download.data_from_buffer(state.restir_candidates);
         }
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
@@ -364,15 +378,23 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
         auto const t = tallies.try_get_data();
         REQUIRE(r.has_value());
         REQUIRE(t.has_value());
+        auto const c = candidates.try_get_data();
+        REQUIRE(c.has_value());
         auto image = cc::vector<tg::vec3f>();
+        auto indirect = cc::vector<tg::vec3f>();
         for (auto i = isize(0); i < slots; ++i)
         {
             auto const own = t.value()[i].frame_sum / cc::max(t.value()[i].frame_count, 1.0f);
-            auto const pixel = r.value()[i].valid != 0 ? r.value()[i].radiance : own;
+            auto const reshaded = r.value()[i].valid != 0;
+            auto const pixel = reshaded ? r.value()[i].radiance : own;
+            auto const reflected = reshaded ? pixel - c.value()[i].direct : tg::vec3f(0, 0, 0);
             image.push_back(pixel);
+            indirect.push_back(reflected);
             out.mean[i] += pixel / f32(frames);
+            out.indirect_mean[i] += reflected / f32(frames);
         }
         out.frames.push_back(cc::move(image));
+        out.indirect_frames.push_back(cc::move(indirect));
         auto const kept = reservoirs.try_get_data();
         REQUIRE(kept.has_value());
         auto confidence_sum = 0.0f;
@@ -1054,7 +1076,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's history follows a panning
 
 // A glossy back wall, which the candidates of the walls facing it reach and cannot reconnect to.
 // The history never shifts such a sample, so its MIS weight must give it to the candidate whole, or reuse darkens what the wall reflects.
-ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's temporal reuse keeps the light a glossy wall reflects",
+// Neighbors' samples on the wall are not reconnectable either, so spatial reuse must also leave it whole.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's reuse keeps the light a glossy wall reflects",
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
@@ -1088,12 +1111,94 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's temporal reuse keeps the 
     auto const plain = co_await run_restir(ctx, resources, scene, frames, {.history = false});
     auto const exact = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true});
 
+    auto const spatial
+        = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true, .spatial = true});
+
     auto const plain_mean = mean_luminance_of(plain.mean);
     auto const exact_mean = mean_luminance_of(exact.mean);
+    auto const spatial_mean = mean_luminance_of(spatial.mean);
     CHECK(tg::abs(exact_mean - plain_mean) < 0.015f * plain_mean)
         .context(cc::format("glossy back wall: {} reusing, {} without", exact_mean, plain_mean));
-    CC_LOG_INFO("ReSTIR G1 with a glossy wall: means {} reusing, {} without; confidence {}", exact_mean, plain_mean,
-                exact.confidence);
+    CHECK(tg::abs(spatial_mean - plain_mean) < 0.015f * plain_mean)
+        .context(cc::format("glossy back wall: {} reusing neighbors too, {} without", spatial_mean, plain_mean));
+    CC_LOG_INFO("ReSTIR with a glossy wall: means {} temporal, {} with neighbors too, {} without; confidence {}",
+                exact_mean, spatial_mean, plain_mean, exact.confidence);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// ReSTIR GI's phase G2: spatial reuse on top of the temporal, each pixel resampling two neighbors' reservoirs of the same frame.
+// Its mean is pinned at 12 pixels, a third of the image, so the shifts are long enough that a wrong Jacobian or MIS weight would move it.
+// With the reverse visibility traced the frames still average to the plain image, the box's two blocks occluding many of the shifts.
+// So is its mean at the image's own radius, the 2-pixel floor here, with the reverse visibility traced and without it, which darkens.
+// Its noise is measured at that radius, on the indirect half, which is what resamples, against many plain frames.
+// Neighbors alone cut that noise, and on top of the temporal reuse they cut it further.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's spatial reuse keeps the box's image and cuts each frame's noise "
+                     "further",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+
+    constexpr int frames = 48;
+    constexpr int warm = 16;
+    constexpr i32 wide = 12;
+    // The plain run is long, so its indirect mean is the reference each resampled frame is measured against.
+    auto const plain = co_await run_restir(ctx, resources, scene, 4 * frames, {.history = false});
+    auto const temporal = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true});
+    auto const alone
+        = co_await run_restir(ctx, resources, scene, frames, {.history = false, .exact = true, .spatial = true});
+    auto const spatial
+        = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true, .spatial = true});
+    auto const far = co_await run_restir(ctx, resources, scene, frames,
+                                         {.history = true, .exact = true, .spatial = true, .radius = wide});
+    auto const fast = co_await run_restir(ctx, resources, scene, frames, {.history = true, .spatial = true});
+
+    auto const plain_mean = mean_luminance_of(plain.mean);
+    auto const far_mean = mean_luminance_of(far.mean);
+    auto const spatial_mean = mean_luminance_of(spatial.mean);
+    auto const fast_mean = mean_luminance_of(fast.mean);
+    CHECK(tg::abs(far_mean - plain_mean) < 0.01f * plain_mean)
+        .context(cc::format("exact, 12 pixels: {} against {} without reuse", far_mean, plain_mean));
+    CHECK(tg::abs(spatial_mean - plain_mean) < 0.01f * plain_mean)
+        .context(cc::format("exact: {} against {} without reuse", spatial_mean, plain_mean));
+    CHECK(tg::abs(fast_mean - plain_mean) < 0.03f * plain_mean)
+        .context(cc::format("default: {} against {} without reuse", fast_mean, plain_mean));
+
+    auto plain_error = 0.0f;
+    auto temporal_error = 0.0f;
+    auto alone_error = 0.0f;
+    auto spatial_error = 0.0f;
+    for (auto f = warm; f < frames; ++f)
+    {
+        plain_error += rms_error(plain.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+        temporal_error += rms_error(temporal.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+        alone_error += rms_error(alone.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+        spatial_error += rms_error(spatial.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+    }
+    CHECK(alone_error * 1.2f < plain_error)
+        .context(cc::format("indirect per-frame error: {} reusing neighbors alone, {} plain", alone_error, plain_error));
+    CHECK(spatial_error < temporal_error)
+        .context(
+            cc::format("indirect per-frame error: {} reusing both, {} temporal alone", spatial_error, temporal_error));
+    CC_LOG_INFO("ReSTIR G2 on the box: means {} exact, {} at 12 pixels, {} default, {} plain; "
+                "indirect per-frame error {} both, {} temporal alone, {} neighbors alone, {} plain",
+                spatial_mean, far_mean, fast_mean, plain_mean, spatial_error, temporal_error, alone_error, plain_error);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

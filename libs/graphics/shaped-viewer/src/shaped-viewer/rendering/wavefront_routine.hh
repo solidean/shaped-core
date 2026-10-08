@@ -93,6 +93,13 @@ struct sv::wavefront_trace_desc
     /// The tests' variant; the default skips it, and darkens contact and corners slightly for it.
     bool restir_exact = false;
 
+    /// Whether a ReSTIR frame also resamples each pixel's reservoir with a few neighbors' of the same frame.
+    /// What the re-shade shades then; the temporal reservoir stays what the next frame reuses.
+    bool restir_spatial = false;
+
+    /// The spatial pass's neighbor radius in pixels, or 0 for the image's own: a fortieth of its diagonal, between 2 and 16.
+    i32 restir_radius = 0;
+
     /// Which camera generation this frame's paths start under; one of an older generation never reaches the image.
     u32 generation = 1;
 
@@ -147,6 +154,7 @@ private:
         sg::compute_pipeline_handle reset;
         sg::compute_pipeline_handle restir_gather;
         sg::compute_pipeline_handle restir_temporal;
+        sg::compute_pipeline_handle restir_spatial;
         sg::compute_pipeline_handle args_round;
         sg::compute_pipeline_handle args_shade;
         sg::compute_pipeline_handle args_connect;

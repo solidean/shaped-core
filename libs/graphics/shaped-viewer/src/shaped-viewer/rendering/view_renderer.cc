@@ -581,6 +581,7 @@ void forget_restir_history(impl::temporal_slot& slot)
                                             .regenerate = !restart,
                                             .fill = plan.fill,
                                             .restir = restir,
+                                            .restir_spatial = true,
                                             .generation = paths.generation,
                                             .roulette_after = wavefront_roulette_after,
                                             .timing = timing});

@@ -61,6 +61,17 @@ const wavefront_flag_restir_parity = 8u
 /// `frame_constants::wavefront_flags`: reuse also traces the reverse visibility, which leaves it unbiased on a Lambertian scene.
 const wavefront_flag_restir_exact = 16u
 
+/// `frame_constants::wavefront_flags`: a spatial pass resamples each pixel's temporal reservoir with its neighbors'.
+const wavefront_flag_restir_spatial = 32u
+
+/// How many neighbors the spatial pass draws: exactly two, since the pass holds two neighbors' records and weighs three domains.
+const restir_spatial_neighbors = 2
+
+/// The radius the spatial pass draws neighbors from: `wavefront_step::restir_radius` where set, else a fortieth of the image's diagonal, 2 to 16 pixels.
+fun restir_spatial_radius(){wavefront_step} -> float:
+    if wavefront_step.restir_radius > 0u => return wavefront_step.restir_radius as float
+    return clamp(0.025 * length(image_size()), 2.0, 16.0)
+
 /// `restir_surface::kinds`: the pixel had a visible point.
 const restir_surface_visible = 1u
 /// `restir_surface::kinds`: the visible point's continuation could have made a candidate.
@@ -809,9 +820,7 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
             let hs = traced.restir_surfaces[restir_index(prev_slot, true)]
             let hr = traced.restir_reservoirs[restir_index(prev_slot, true)]
             let depth = dot(surf.position - eye, normalize(cam.forward))
-            let plane = abs(dot(surf.normal, hs.position - surf.position))
-            let same = (hs.kinds & restir_surface_shiftable) != 0u and plane < restir_plane_tolerance * depth and dot(hs.normal, surf.normal) > restir_normal_tolerance
-            if same and hs.roughness >= restir_reconnect_roughness:
+            if restir_same_surface(surf, hs, depth):
                 hist = hr
                 hist_surf = hs
                 hist_eye = prev.position
@@ -853,11 +862,158 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
     let mut kept = empty_reservoir(confidence)
     if total > 0.0:
         let u = pt.rand(mut rng)
-        if u * total < w_c:
+        // Rounding can carry `u * total` up to `total`; with no history weight the candidate is the pick then.
+        let takes_candidate = u * total < w_c or w_h <= 0.0
+        if takes_candidate:
             kept = restir_reservoir(cand.x_s, total / p_c, cand.n_s, confidence, cand.radiance, cand.flags & restir_flag_reconnectable)
         else:
             kept = restir_reservoir(hist.x_s, total / p_h_here, hist.n_s, confidence, hist.radiance, hist.flags & restir_flag_reconnectable)
     traced.restir_reservoirs[at] = kept
+
+/// Whether the visible point `b` is the same surface as `a`, as both reuse passes accept one.
+/// A plane distance relative to the view depth `depth` and normals within 25°, on a surface `b` a sample may be reused from at all.
+fun restir_same_surface(a: restir_surface, b: restir_surface, depth: float) -> bool:
+    if (b.kinds & restir_surface_shiftable) == 0u => return false
+    if b.roughness < restir_reconnect_roughness => return false
+    let plane = abs(dot(a.normal, b.position - a.position))
+    return plane < restir_plane_tolerance * depth and dot(b.normal, a.normal) > restir_normal_tolerance
+
+/// The target of a sample at the visible point `from` as the domain of `to` would see it, in `from`'s solid-angle measure.
+/// That is `to`'s target after the reconnection shift, times the shift's Jacobian from `from` to `to`.
+/// It is 0 where `to` could not hold the sample: a non-reconnectable one, `x_s` seen from behind, or under `exact` a blocked segment.
+fun restir_target_from(r: restir_reservoir, from: restir_surface, to: restir_surface, eye: float3, exact: bool, launch: int3){traced, bindless} -> float:
+    if (r.flags & restir_flag_reconnectable) == 0u => return 0.0
+    let jacobian = reconnection_jacobian(r.x_s, r.n_s, from.position, to.position)
+    if jacobian <= 0.0 => return 0.0
+    let target = restir_target(to, eye, r.x_s, r.radiance)
+    if target <= 0.0 => return 0.0
+    if exact and not restir_unblocked(to.position, to.normal, r.x_s, launch) => return 0.0
+    return target * jacobian
+
+/// ReSTIR's spatial reuse for `slot`: its temporal reservoir, the canonical one, merged with a few neighbors' of this frame.
+/// Each neighbor's sample moves here by reconnection, with its Jacobian and a visibility ray.
+/// The weights are the generalized balance heuristic over every domain taking part, each weighed by its confidence.
+/// Writes `traced.restir_spatial`, which the re-shade shades; the temporal reservoir stays what the next frame reuses.
+fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
+    if slot >= wavefront_step.width * wavefront_step.height => return
+    let f = traced.frame[0]
+    let s = slot as int
+    let center = traced.restir_surfaces[restir_index(slot, false)]
+    let own = traced.restir_reservoirs[restir_index(slot, false)]
+    let takes = (center.kinds & restir_surface_shiftable) != 0u and center.roughness >= restir_reconnect_roughness
+    if not takes:
+        traced.restir_spatial[s] = own
+        return
+
+    let cam = scene.camera(..f.camera)
+    let eye = cam.position
+    let px = slot_pixel(slot)
+    let launch = int3(px.x as int, px.y as int, 0)
+    let exact = (f.wavefront_flags & wavefront_flag_restir_exact) != 0u
+    let depth = dot(center.position - eye, normalize(cam.forward))
+    let mut rng = pt.hash(slot ^ pt.hash(f.rng_seed * 7919u + 202u))
+
+    // The neighbors that are the same surface: their reservoirs and surfaces, at most `restir_spatial_neighbors` of them.
+    let mut n_res_0 = empty_reservoir(0.0)
+    let mut n_res_1 = empty_reservoir(0.0)
+    let mut n_surf_0 = center
+    let mut n_surf_1 = center
+    let mut found = 0
+    let mut first = slot
+    let radius = restir_spatial_radius()
+    let size = image_size()
+    let angle0 = pt.rand(mut rng)
+    for i in 0 ..< restir_spatial_neighbors:
+        // The golden ratio's fraction between the draws' angles keeps them apart around the pixel.
+        let a = 2.0 * pt.pi * (angle0 + (i as float) * 0.618034)
+        let r = radius * sqrt(pt.rand(mut rng))
+        let q = float2(px.x as float, px.y as float) + 0.5 + float2(cos(a), sin(a)) * r
+        let inside = q.x >= 0.0 and q.y >= 0.0 and q.x < size.x and q.y < size.y
+        if not inside => continue
+        let other = (q.y as uint) * wavefront_step.width + (q.x as uint)
+        // A second draw landing on the first neighbor's pixel would weigh one domain twice.
+        let repeated = other == slot or (found > 0 and other == first)
+        if repeated => continue
+        let ns = traced.restir_surfaces[restir_index(other, false)]
+        if not restir_same_surface(center, ns, depth) => continue
+        let nr = traced.restir_reservoirs[restir_index(other, false)]
+        // A neighbor whose path did not finish saw no candidate: it would take a draw and weigh nothing.
+        if nr.confidence <= 0.0 => continue
+        if found == 0:
+            n_res_0 = nr
+            n_surf_0 = ns
+            first = other
+        else:
+            n_res_1 = nr
+            n_surf_1 = ns
+        found += 1
+
+    // Each domain's confidence; a neighbor not found takes no part.
+    let c_own = own.confidence
+    let c_0 = if found > 0 => n_res_0.confidence else 0.0
+    let c_1 = if found > 1 => n_res_1.confidence else 0.0
+
+    // The canonical sample's weight: its target here against what each neighbor's domain would make of it.
+    let mut w_own = 0.0
+    let mut p_own = 0.0
+    if own.weight > 0.0:
+        p_own = restir_target(center, eye, own.x_s, own.radiance)
+        if p_own > 0.0:
+            let from_0 = if c_0 > 0.0 => restir_target_from(own, center, n_surf_0, eye, exact, launch) else 0.0
+            let from_1 = if c_1 > 0.0 => restir_target_from(own, center, n_surf_1, eye, exact, launch) else 0.0
+            let mis = c_own * p_own / (c_own * p_own + c_0 * from_0 + c_1 * from_1)
+            w_own = mis * p_own * own.weight
+
+    // A neighbor's sample, shifted here: its target here, behind a visibility ray, against every domain's view of it.
+    let mut w_0 = 0.0
+    let mut p_0 = 0.0
+    if c_0 > 0.0 and n_res_0.weight > 0.0 and (n_res_0.flags & restir_flag_reconnectable) != 0u:
+        let jacobian = reconnection_jacobian(n_res_0.x_s, n_res_0.n_s, n_surf_0.position, center.position)
+        if jacobian > 0.0:
+            let there = restir_target(n_surf_0, eye, n_res_0.x_s, n_res_0.radiance)
+            p_0 = restir_target(center, eye, n_res_0.x_s, n_res_0.radiance)
+            let worth_a_ray = p_0 > 0.0 and there > 0.0
+            if worth_a_ray and not restir_unblocked(center.position, center.normal, n_res_0.x_s, launch) => p_0 = 0.0
+            if p_0 > 0.0:
+                // Every domain's target of this sample, in the center's measure: here, at its own neighbor, at the other one.
+                let at_home = there / jacobian
+                let at_other = if c_1 > 0.0 => restir_target_from(n_res_0, n_surf_0, n_surf_1, eye, exact, launch) / jacobian else 0.0
+                let mis = c_0 * at_home / (c_own * p_0 + c_0 * at_home + c_1 * at_other)
+                w_0 = mis * p_0 * n_res_0.weight * jacobian
+
+    let mut w_1 = 0.0
+    let mut p_1 = 0.0
+    if c_1 > 0.0 and n_res_1.weight > 0.0 and (n_res_1.flags & restir_flag_reconnectable) != 0u:
+        let jacobian = reconnection_jacobian(n_res_1.x_s, n_res_1.n_s, n_surf_1.position, center.position)
+        if jacobian > 0.0:
+            let there = restir_target(n_surf_1, eye, n_res_1.x_s, n_res_1.radiance)
+            p_1 = restir_target(center, eye, n_res_1.x_s, n_res_1.radiance)
+            let worth_a_ray = p_1 > 0.0 and there > 0.0
+            if worth_a_ray and not restir_unblocked(center.position, center.normal, n_res_1.x_s, launch) => p_1 = 0.0
+            if p_1 > 0.0:
+                let at_home = there / jacobian
+                let at_other = if c_0 > 0.0 => restir_target_from(n_res_1, n_surf_1, n_surf_0, eye, exact, launch) / jacobian else 0.0
+                let mis = c_1 * at_home / (c_own * p_1 + c_0 * at_other + c_1 * at_home)
+                w_1 = mis * p_1 * n_res_1.weight * jacobian
+
+    let total = w_own + w_0 + w_1
+    let confidence = min(c_own + c_0 + c_1, restir_confidence_cap)
+    let mut kept = empty_reservoir(confidence)
+    if total > 0.0:
+        let u = pt.rand(mut rng) * total
+        let mut choice = 0
+        if u >= w_own => choice = 1
+        if u >= w_own + w_0 => choice = 2
+        // Rounding can carry `u` up to `total` itself, past every weight; the last nonzero one is the pick then.
+        if choice == 2 and w_1 <= 0.0 => choice = 1
+        if choice == 1 and w_0 <= 0.0 => choice = 0
+        if choice == 0:
+            kept = restir_reservoir(own.x_s, total / p_own, own.n_s, confidence, own.radiance, own.flags)
+        else if choice == 1:
+            kept = restir_reservoir(n_res_0.x_s, total / p_0, n_res_0.n_s, confidence, n_res_0.radiance, n_res_0.flags)
+        else:
+            kept = restir_reservoir(n_res_1.x_s, total / p_1, n_res_1.n_s, confidence, n_res_1.radiance, n_res_1.flags)
+    traced.restir_spatial[s] = kept
 
 /// Queues every pixel whose candidate the re-shade can shade, by the permutation its primary hit shades with, and clears every result.
 fun wavefront_restir_gather(slot: uint){traced, wavefront_step}:
@@ -878,7 +1034,8 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
     let f = traced.frame[0]
     let vis = traced.restir_visible[s]
     let cand = traced.restir_candidates[s]
-    let kept = traced.restir_reservoirs[restir_index(slot, false)]
+    let spatial = (f.wavefront_flags & wavefront_flag_restir_spatial) != 0u
+    let kept = if spatial => traced.restir_spatial[s] else traced.restir_reservoirs[restir_index(slot, false)]
 
     let mut n = normalize(instance_normal_to_world(inst, n_obj))
     let v = -normalize(vis.direction)

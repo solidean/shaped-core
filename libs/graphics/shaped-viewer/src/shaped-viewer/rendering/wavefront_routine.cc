@@ -37,6 +37,7 @@ constexpr u32 wavefront_flag_restir = 2;
 constexpr u32 wavefront_flag_restir_history = 4;
 constexpr u32 wavefront_flag_restir_parity = 8;
 constexpr u32 wavefront_flag_restir_exact = 16;
+constexpr u32 wavefront_flag_restir_spatial = 32;
 
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
 [[nodiscard]] cc::optional<sg::shader_format> sgl_format_for(sg::context const& ctx, slib::shader_library const& lib)
@@ -69,6 +70,7 @@ cc::shared_async<cc::unit> wavefront_routine::init(sg::routine_init_scope scope)
         .reset = co_await w.reset.acquire_pipeline(ctx),
         .restir_gather = co_await w.restir_gather.acquire_pipeline(ctx),
         .restir_temporal = co_await w.restir_temporal.acquire_pipeline(ctx),
+        .restir_spatial = co_await w.restir_spatial.acquire_pipeline(ctx),
         .args_round = co_await w.args_round.acquire_pipeline(ctx),
         .args_shade = co_await w.args_shade.acquire_pipeline(ctx),
         .args_connect = co_await w.args_connect.acquire_pipeline(ctx),
@@ -265,6 +267,8 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
             fc.wavefront_flags |= wavefront_flag_restir_parity;
         if (d.restir_exact)
             fc.wavefront_flags |= wavefront_flag_restir_exact;
+        if (d.restir_spatial)
+            fc.wavefront_flags |= wavefront_flag_restir_spatial;
     }
     fc.permutation_count = u32(t.hit_groups.size());
     fc.roulette_after = d.roulette_after;
@@ -288,7 +292,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
                                        .height = height,
                                        .fill = u32(cc::clamp(d.fill, 0.0f, 1.0f) * f32(fill_full) + 0.5f),
                                        .mode = 0,
-                                       .pad0 = 0};
+                                       .restir_radius = u32(cc::max(0, d.restir_radius))};
 
     // What a kernel's groups are: `tracer.traced` at 0 always, then the bindless tables or the arguments at 1, and the decal tables at 2.
     enum class second_group
@@ -392,9 +396,14 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         mark(wavefront_stage::restir);
         step.parity = 0;
         step.permutation = 0;
-        // The temporal pass first: it writes the reservoir each pixel's re-shade then shades.
+        // The temporal pass first, then the spatial one over its reservoirs: the last of them is what each pixel's re-shade shades.
         use(*self->_kernels.restir_temporal, second_group::bindless);
         cmd.compute.dispatch_threads(int(width * height));
+        if (d.restir_spatial)
+        {
+            use(*self->_kernels.restir_spatial, second_group::bindless);
+            cmd.compute.dispatch_threads(int(width * height));
+        }
         step.mode = restir_shade_mode;
         use(*self->_kernels.reset, second_group::none);
         cmd.compute.dispatch_groups(1);

@@ -44,6 +44,8 @@ struct sv::wavefront_state
     /// Two halves each: the last ReSTIR frame's, which the temporal pass reads, and this one's.
     sg::buffer<shaders::tracer::restir_surface> restir_surfaces;
     sg::buffer<shaders::tracer::restir_reservoir> restir_reservoirs;
+    /// One per slot: the spatial pass's reservoir of the last ReSTIR frame, which its re-shade shaded.
+    sg::buffer<shaders::tracer::restir_reservoir> restir_spatial;
 
     /// Which half of the two-half records the next ReSTIR frame writes; it flips with every one.
     u32 restir_parity = 0;
