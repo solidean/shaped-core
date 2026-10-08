@@ -4,10 +4,12 @@
 #include <clean-core/string/format.hh>
 
 // The aggregator delegates to the low-level codecs and never includes the stb backend directly.
+#include <babel-serializer/image/dds.hh>
 #include <babel-serializer/image/hdr.hh>
 #include <babel-serializer/image/jpg.hh>
 #include <babel-serializer/image/pfm.hh>
 #include <babel-serializer/image/png.hh>
+#include <babel-serializer/image/tga.hh>
 
 namespace babel::image
 {
@@ -29,8 +31,18 @@ bool format_accepts(format fmt, component comp)
     case format::hdr:
     case format::pfm:
         return comp == component::f32;
+    case format::dds:
+        return comp == component::u8 || comp == component::f32;
+    case format::tga:
+        return comp == component::u8;
     }
     return false;
+}
+
+/// True for the formats babel reads and cannot write.
+bool is_read_only(format fmt)
+{
+    return fmt == format::dds || fmt == format::tga;
 }
 
 /// The aggregator's spelling of a PNG decode's own sample type.
@@ -59,6 +71,10 @@ cc::string_view name_of(format fmt)
         return "hdr";
     case format::pfm:
         return "pfm";
+    case format::dds:
+        return "dds";
+    case format::tga:
+        return "tga";
     }
     return "?";
 }
@@ -89,12 +105,18 @@ cc::string_view accepted_of(format fmt)
     case format::hdr:
     case format::pfm:
         return "f32";
+    case format::dds:
+        return "u8 or f32";
+    case format::tga:
+        return "u8";
     }
     return "?";
 }
 
 cc::result<cc::unit> check_encode_component(image const& img, format fmt)
 {
+    if (is_read_only(fmt))
+        return cc::error(cc::format("image encode: babel reads {} but does not write it", name_of(fmt)));
     if (!format_accepts(fmt, img.comp))
         return cc::error(cc::format("image encode: {} stores {} samples, but the image carries {}", //
                                     name_of(fmt), accepted_of(fmt), name_of(img.comp)));
@@ -150,19 +172,32 @@ cc::result<format> detect_format(cc::span<byte const> bytes)
         && (bytes[2] == byte('\n') || bytes[2] == byte('\r') || bytes[2] == byte(' ') || bytes[2] == byte('\t')))
         return format::pfm;
 
-    return cc::error("image: unrecognized format (magic bytes match none of PNG, JPEG, Radiance HDR and PFM)");
+    if (bytes.size() >= 4 && bytes[0] == byte('D') && bytes[1] == byte('D') && bytes[2] == byte('S')
+        && bytes[3] == byte(' '))
+        return format::dds;
+
+    // TGA has no leading magic, so it comes after every format that has one.
+    // The 2.0 footer is a real signature; a header that merely parses is a guess, and the last resort.
+    if (babel::tga::has_footer(bytes) || babel::tga::has_plausible_header(bytes))
+        return format::tga;
+
+    return cc::error("image: unrecognized format (the bytes match none of PNG, JPEG, Radiance HDR, PFM, DDS and TGA)");
 }
 
 cc::result<image> read(cc::span<byte const> bytes)
+{
+    auto fmt = detect_format(bytes);
+    CC_RETURN_IF_ERROR(fmt);
+    return read(bytes, fmt.value());
+}
+
+cc::result<image> read(cc::span<byte const> bytes, format fmt)
 {
     // The aggregator's span rather than the codec's, so a trace shows "load an image" above whichever codec ran.
     CC_RECORD_SCOPE("image.read");
     CC_RECORD_ACCUM("image.bytes_decoded", cc::rec::unit_bytes, bytes.size());
 
-    auto fmt = detect_format(bytes);
-    CC_RETURN_IF_ERROR(fmt);
-
-    switch (fmt.value())
+    switch (fmt)
     {
     case format::png:
     {
@@ -198,6 +233,46 @@ cc::result<image> read(cc::span<byte const> bytes)
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
         auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::f32};
+        result.pixels = cc::move(d.pixels);
+        return cc::move(result);
+    }
+    case format::dds:
+    {
+        // A span is a borrow, and babel::dds hands back views of what it reads, so it reads a copy — which lives
+        // only as long as this decode.
+        auto texture = babel::dds::read(bytes);
+        CC_RETURN_IF_ERROR(texture);
+        auto const& t = texture.value();
+        if (t.subresources.empty())
+            return cc::error("image: the DDS file holds no subresource");
+
+        // The first subresource in file order is mip 0 of the first layer and face; its first slice is the image.
+        auto top = t.subresources.front();
+        top.depth = 1;
+
+        auto result = image{.width = top.width, .height = top.height, .channels = 4};
+        if (babel::dds::is_float(t.format))
+        {
+            auto texels = babel::dds::decode_rgba32f(t, top);
+            CC_RETURN_IF_ERROR(texels);
+            result.comp = component::f32;
+            result.pixels = cc::vector<byte>::create_copy_of(cc::span<float const>(texels.value()).as_bytes());
+        }
+        else
+        {
+            auto texels = babel::dds::decode_rgba8(t, top);
+            CC_RETURN_IF_ERROR(texels);
+            result.comp = component::u8;
+            result.pixels = cc::move(texels.value());
+        }
+        return cc::move(result);
+    }
+    case format::tga:
+    {
+        auto decoded = babel::tga::read(bytes);
+        CC_RETURN_IF_ERROR(decoded);
+        auto& d = decoded.value();
+        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::u8};
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
@@ -254,6 +329,9 @@ cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options 
         pd.pixels = img.pixels;
         return babel::pfm::encode(pd);
     }
+    case format::dds:
+    case format::tga:
+        break; // check_encode_component has refused both already
     }
 
     return cc::error("image encode: unhandled format");

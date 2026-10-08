@@ -55,6 +55,16 @@ namespace babel::pfm
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.pfm");
 } // namespace babel::pfm
 
+namespace babel::dds
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.dds");
+} // namespace babel::dds
+
+namespace babel::tga
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.tga");
+} // namespace babel::tga
+
 namespace babel::image
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.image");

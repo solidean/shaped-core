@@ -13,11 +13,14 @@ add_library(babel-serializer
     src/babel-serializer/geometry/stl.cc
 
     src/babel-serializer/image/bcn.cc
+    src/babel-serializer/image/dds.cc
+    src/babel-serializer/image/dds_decode.cc
     src/babel-serializer/image/hdr.cc
     src/babel-serializer/image/image.cc
     src/babel-serializer/image/jpg.cc
     src/babel-serializer/image/pfm.cc
     src/babel-serializer/image/png.cc
+    src/babel-serializer/image/tga.cc
     src/babel-serializer/image/impl/spng_backend.cc
     src/babel-serializer/image/impl/stb_backend.cc
 
@@ -43,13 +46,15 @@ target_sources(babel-serializer
     src/babel-serializer/geometry/obj.hh
     src/babel-serializer/geometry/stl.hh
 
-    # image/impl/*.hh is internal (the libspng and stb backend seams) — deliberately NOT in the public FILE_SET.
+    # image/impl/*.hh is internal (the libspng and stb backend seams, the DDS flags) — deliberately NOT in the public FILE_SET.
     src/babel-serializer/image/bcn.hh
+    src/babel-serializer/image/dds.hh
     src/babel-serializer/image/hdr.hh
     src/babel-serializer/image/image.hh
     src/babel-serializer/image/jpg.hh
     src/babel-serializer/image/pfm.hh
     src/babel-serializer/image/png.hh
+    src/babel-serializer/image/tga.hh
 
     src/babel-serializer/trace/chrome_trace.hh
 )
@@ -113,9 +118,11 @@ if(SC_BUILD_TESTS)
         tests/geometry/stl-test.cc
 
         tests/image/bcn-test.cc
+        tests/image/dds-test.cc
         tests/image/hdr-test.cc
         tests/image/image-test.cc
         tests/image/pfm-test.cc
+        tests/image/tga-test.cc
 
         tests/trace/chrome_trace-test.cc
     )

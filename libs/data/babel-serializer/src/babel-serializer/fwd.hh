@@ -5,7 +5,8 @@
 /// Aggregate forward declarations for babel-serializer.
 /// babel-data's fwd.hh declares `namespace babel` itself plus the base64 / JSON / markdown half; this one adds
 /// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::font, babel::png,
-/// babel::jpg, babel::hdr, babel::pfm, the babel::image aggregator over the four codecs, and babel::chrome_trace.
+/// babel::jpg, babel::hdr, babel::pfm, babel::dds, babel::tga, the babel::bcn block decoders, the babel::image
+/// aggregator over the image codecs, and babel::chrome_trace.
 /// Each owns its own header; include that header directly when it is all you need.
 
 namespace babel::chrome_trace
@@ -164,6 +165,29 @@ namespace babel::bcn
 struct rgba8_block;
 struct rgba32f_block;
 } // namespace babel::bcn
+
+namespace babel::dds
+{
+enum class pixel_format : u8;
+enum class alpha_mode : u8;
+enum class dimension : u8;
+struct pixel_format_header;
+struct header;
+struct subresource;
+struct data;
+
+/// The domain every recording site in babel::dds is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::dds
+
+namespace babel::tga
+{
+enum class image_type : u8;
+struct data;
+
+/// The domain every recording site in babel::tga is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::tga
 
 namespace babel::image
 {
