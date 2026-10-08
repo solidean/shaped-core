@@ -78,14 +78,15 @@ See `tests/data/sqlite-test.cc`.
 
 Some backends are **committed in-source** rather than fetched.
 The stb image libraries (`extern/stb`, two small public-domain headers) were the first, and libspng (`extern/libspng`, one `.c` and one `.h`) followed, both on the xxhash / imgui model.
-Because the source is always on disk, the `stb` and `spng` targets always exist and babel **always** links them.
+ufbx (`extern/ufbx`, one `.c` and one `.h`) is the third, behind `babel::fbx`.
+Because the source is always on disk, the `stb`, `spng` and `ufbx` targets always exist and babel **always** links them.
 
 That drops the entire availability machinery the sqlite rule above carries.
 **No `is_available()`, no `BABEL_HAS_*` compile switch, no stub path, no runtime "backend missing" error, no `if(TARGET stb)`.**
-The link in `CMakeLists.txt` is unconditional (`target_link_libraries(babel-serializer PRIVATE spng stb)`).
+The links in `CMakeLists.txt` are unconditional (`target_link_libraries(babel-serializer PRIVATE spng stb)`, and `ufbx` beside them).
 
 **The header non-leak still binds**, with no availability gate carrying it.
-Each third-party header appears in exactly one TU — `spng.h` in `image/impl/spng_backend.cc`, stb's in `image/impl/stb_backend.cc` — and both links are `PRIVATE`.
+Each third-party header appears in exactly one TU — `spng.h` in `image/impl/spng_backend.cc`, stb's in `image/impl/stb_backend.cc`, `ufbx.h` in `geometry/fbx.cc` — and every link is `PRIVATE`.
 Here the reason is layering hygiene and a swappable backend rather than a conditionally-present engine.
 
 Pick the fetched-and-gated shape (the section above) only when the backend is genuinely heavy enough to keep out of the tree.

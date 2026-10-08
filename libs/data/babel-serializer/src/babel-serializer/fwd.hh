@@ -4,7 +4,7 @@
 
 /// Aggregate forward declarations for babel-serializer.
 /// babel-data's fwd.hh declares `namespace babel` itself plus the base64 / JSON / markdown half; this one adds
-/// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::font, babel::png,
+/// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::fbx, babel::font, babel::png,
 /// babel::jpg, babel::hdr, babel::pfm, babel::dds, babel::tga, the babel::bcn block decoders, the babel::image
 /// aggregator over the image codecs, and babel::chrome_trace.
 /// Each owns its own header; include that header directly when it is all you need.
@@ -99,6 +99,47 @@ struct data;
 /// The domain every recording site in babel::gltf is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::gltf
+
+namespace babel::fbx
+{
+// The index roles; a forward declaration must repeat the underlying type exactly.
+enum class node_index : int;
+enum class mesh_index : int;
+enum class material_index : int;
+enum class texture_index : int;
+enum class light_index : int;
+
+enum class encoding : u8;
+enum class axis : u8;
+enum class inherit_mode : u8;
+enum class property_type : u8;
+enum class wrap_mode : u8;
+enum class light_type : u8;
+enum class light_decay : u8;
+enum class issue_kind : u8;
+
+struct issue;
+struct file_info;
+struct scene_settings;
+struct transform;
+struct face;
+template <class T>
+struct corner_attribute;
+struct uv_set;
+struct color_set;
+struct mesh;
+struct property;
+struct material_texture;
+struct material;
+struct texture;
+struct light;
+struct node;
+struct read_options;
+struct data;
+
+/// The domain every recording site in babel::fbx is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::fbx
 
 namespace babel::sqlite
 {

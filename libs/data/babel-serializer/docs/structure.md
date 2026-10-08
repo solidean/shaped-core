@@ -29,6 +29,7 @@ babel-serializer/src/babel-serializer/
   data/        [in progress]   text / structured data formats needing more than clean-core
     sqlite     [done]          live database engine (read/write, transactions, incremental blob reads; fetch-on-demand backend)
   geometry/    [in progress]   mesh / geometry formats
+    fbx        [done]          FBX reader, both encodings, over the vendored ufbx
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
     obj        [done]          reader
   image/       [in progress]   image formats (read + write; committed libspng + stb backends, plus native codecs)
@@ -131,6 +132,31 @@ A faithful mirror: three positions per triangle in file order, each facet's decl
 Nothing is welded, indexed or derived, because STL is a soup of independent triangles and building a mesh out of one belongs to whoever wants a mesh.
 
 `[planned]` a writer.
+
+### fbx [done]
+
+Reader for both FBX encodings, binary and ASCII, and every version from 6100 on; see [fbx.hh](../src/babel-serializer/geometry/fbx.hh).
+The structure is FBX's own object model: nodes with their composed transforms, and polygon meshes with per-corner attributes.
+Beside them, Phong and Lambert materials as the property bags they are, file textures, and lights.
+Materials connect to the node rather than the mesh, so `node_materials` is where a face's slot is resolved.
+The scene's axes and unit are reported in `settings` and applied to nothing.
+
+**The parse is ufbx's** ([extern/ufbx](../../../../extern/ufbx/dependency.yml), MIT or public domain), committed in-source and confined to `fbx.cc`; babel copies its scene out and frees it.
+A native reader was the alternative, and ufbx won on what a reader of untrusted files most needs:
+
+- it is built for untrusted input — scenes come back sanitized, and an invalid file or an exhausted allocator is a graceful error rather than a crash;
+- its parsers, its Deflate included, are fuzzed both with AFL and semantically, at about 95% branch coverage;
+- it is Godot 4.3's default FBX importer, so real files from every DCC tool have already been through it;
+- it has no known CVEs — FBX's CVEs are all in Autodesk's own SDK;
+- and FBX is a format a native reader would spend months on: two encodings, compressed arrays, a decade of versions, the pivot chain and three scale-inheritance modes.
+
+ufbx is two files with no dependencies, which puts it in libspng's tier of the committed-in-source rule ([coding-guidelines.md](coding-guidelines.md)) rather than SQLite's fetched one.
+
+- `[done]` **triangulation**, as a read option: ufbx's ear clip, which a fan gets wrong on a concave polygon.
+- `[planned]` **cameras** — a camera's pose is a node like any other; its projection is the missing part.
+- `[planned]` **animation, skinning and blend shapes** — recorded today as `unsupported`, and the static pose is what comes back.
+- `[planned]` **the PBR shader models** ufbx recognizes (3ds Max Physical, Maya StandardSurface, Blender's Principled export), as typed fields beside the raw property bag.
+  Every FBX the importer has met so far is Phong or Lambert, whose meaning is the exporting pipeline's.
 
 ### Other geometry formats [planned]
 

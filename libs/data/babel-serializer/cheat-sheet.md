@@ -7,13 +7,13 @@ Namespace `babel`; headers included by full path from `src/`.
 > [docs/coding-guidelines.md](docs/coding-guidelines.md) owns both rules.
 
 ```cpp
-#include <babel-serializer/all.hh>   // umbrella (sqlite + obj + stl + gltf + png + jpg + hdr + pfm + dds + tga + bcn + image + chrome_trace, plus all of babel-data)
+#include <babel-serializer/all.hh>   // umbrella (sqlite + obj + stl + gltf + fbx + png + jpg + hdr + pfm + dds + tga + bcn + image + chrome_trace, plus all of babel-data)
 ```
 
 ---
 
 **Recording domain:** `babel`, declared one library down in babel-data.
-Each format here shadows it: `babel.obj`, `babel.stl`, `babel.gltf`, `babel.png`, `babel.jpg`, `babel.hdr`, `babel.pfm`, `babel.dds`, `babel.tga`, `babel.image`, `babel.sqlite`.
+Each format here shadows it: `babel.obj`, `babel.stl`, `babel.gltf`, `babel.fbx`, `babel.png`, `babel.jpg`, `babel.hdr`, `babel.pfm`, `babel.dds`, `babel.tga`, `babel.image`, `babel.sqlite`.
 Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
 
 ## OBJ (`babel::obj`)
@@ -181,6 +181,50 @@ a.element_size();    // packed element bytes INCLUDING per-column 4-byte matrix 
 node const& n = doc.nodes[0];
 n.has_matrix ? use(n.matrix) : use(n.translation, n.rotation, n.scale); // tg::mat4f / vec3f + quat_f + vec3f
 ```
+
+## FBX (`babel::fbx`)
+
+Both encodings, every version from 6100 on; the parse is the vendored ufbx's, copied out into FBX's own object model.
+
+```cpp
+#include <babel-serializer/geometry/fbx.hh>
+
+cc::result<babel::fbx::data> read(cc::read_stream& in, read_options = {});   // + span / string_view overloads
+struct read_options { bool triangulate = false; };  // ear-clips polygons; drops point and line faces
+
+auto const doc = babel::fbx::read(stream, {.triangulate = true}).value();
+doc.info;       // file_info { version (7500 = FBX 2016), encoding (binary | ascii), creator, application, application_version }
+doc.settings;   // scene_settings { right, up, front (axis::positive_x ..), unit_meters (0.01 = cm), original_unit_meters, fps }
+doc.settings.is_left_handed();  // REPORTED, applied to nothing — the caller converts
+doc.issues;  doc.has_issues();  doc.has_issue_of(kind);  doc.issue_report();   // as gltf's
+
+doc.nodes;      // PARENTS FIRST; nodes[0] is the nameless root
+n.parent;  doc.children_of(n);
+n.local;  n.geometry;                         // transform { translation, rotation, scale } — the pivot chain composed
+n.node_to_world;  n.geometry_to_world;        // tg::affine_transform3f, honouring n.inherit (FBX's scale inheritance)
+n.mesh;  n.light;                             // mesh_index / light_index; several nodes naming one mesh is instancing
+doc.materials_of(n);                          // span<material_index> — the node's material SLOTS
+
+doc.meshes;     // mesh { name, faces, positions, normals, tangents, bitangents, uv_sets, color_sets, face_materials }
+m.faces[f];                    // face { first_corner, corner_count } — polygons unless read with triangulate
+m.positions.at(corner);        // corner_attribute<T> { values, indices }: one index per face corner, every mapping mode unified
+m.normals.exists();            // false: both arrays empty
+m.uv_sets[0].uvs.at(corner);   // V points UP the image, as FBX writes it
+m.material_slot_of(f);         // index into materials_of(node), NOT into doc.materials
+
+doc.materials;  // material { name, shading_model ("phong"), properties, textures }
+mat.find_property("DiffuseColor");   // property const* { name, type, value (vec4f), value_int, text }; template defaults included
+mat.find_texture("NormalMap");       // texture_index — FBX connects a texture to a PROPERTY by name
+doc.textures;   // texture { name, relative_filename, absolute_filename (as written, backslashes too), content (embedded), wrap_u/v, uv_set }
+doc.lights;     // light { type, decay, color, intensity (FBX Intensity / 100, no unit), local_direction (-Y), inner/outer_angle_degrees (FULL cone) }
+```
+
+Gotchas:
+
+- **Materials belong to the node, not the mesh.** Two instances of one mesh may draw with different materials, so a face's slot means nothing without the node placing it.
+- **Nothing is converted.** Positions are in the file's axes and unit; `settings` says which, and a Z-up centimeter scene stays one.
+- **No file is opened.** A texture is its file names and its embedded bytes; resolving a name is the caller's policy, which babel owns none of.
+- **Cameras, animation, skinning, blend shapes and curves are not read**, and each is an `unsupported` issue rather than silence.
 
 ## SQLite (`babel::sqlite`)
 
@@ -452,6 +496,7 @@ Only what the signatures above cannot tell you.
 #include <babel-serializer/data/sqlite.hh>   // just SQLite
 #include <babel-serializer/geometry/obj.hh>  // just OBJ
 #include <babel-serializer/geometry/gltf.hh> // just glTF / GLB
+#include <babel-serializer/geometry/fbx.hh>  // just FBX
 #include <babel-serializer/image/png.hh>     // just PNG (low-level)
 #include <babel-serializer/image/jpg.hh>     // just JPG (low-level)
 #include <babel-serializer/image/hdr.hh>     // just Radiance HDR (low-level)

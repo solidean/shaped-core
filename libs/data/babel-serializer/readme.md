@@ -32,7 +32,7 @@ Spin off a third only when a format arrives carrying a dependency nobody should 
 **The namespace never splits with the libraries**: `babel::json` is `babel::json` wherever it is linked from, and `fwd.hh` layers rather than forks.
 
 This library is at an **early stage**.
-A live SQLite handle, OBJ, STL and glTF/GLB readers, PNG/JPG/HDR/PFM image read+write, DDS/TGA image readers, and a Chrome Trace writer exist so far.
+A live SQLite handle, OBJ, STL, glTF/GLB and FBX readers, PNG/JPG/HDR/PFM image read+write, DDS/TGA image readers, and a Chrome Trace writer exist so far.
 babel-data carries the base64 codec, the JSON reader and writer, and the markdown block reader underneath them.
 See [docs/structure.md](docs/structure.md) for what is `[done]` vs `[planned]`.
 
@@ -58,7 +58,7 @@ Source lives in `src/babel-serializer/`, grouped by topic:
 |-------------|--------------|
 | (root)      | `fwd.hh` (forward decls for the formats here, over babel-data's), `all.hh` (umbrella over both libraries) |
 | `data/`     | `sqlite` — a live SQLite handle (`database` / `statement` / `row`); base64, JSON and markdown live in [babel-data](../babel-data/readme.md) |
-| `geometry/` | `obj` — the Wavefront OBJ reader (`data` / `corner` / `face` / `group`, `read`); `stl` — the STL reader, both containers (`data`, `detect_container`, `read`); `gltf` — the glTF 2.0 / GLB reader (`data` + `accessor_view`, `read` over pinned bytes) |
+| `geometry/` | `obj` — the Wavefront OBJ reader (`data` / `corner` / `face` / `group`, `read`); `stl` — the STL reader, both containers (`data`, `detect_container`, `read`); `gltf` — the glTF 2.0 / GLB reader (`data` + `accessor_view`, `read` over pinned bytes); `fbx` — the FBX reader over the vendored ufbx (`data`, `read`) |
 | `image/`    | `png` / `jpg` / `hdr` / `pfm` — low-level image codecs (pixels + native metadata, `read` / `encode` / `write`); `dds` / `tga` — low-level readers; `bcn` — the BCn block decoders; `image` — the "just the pixels" aggregator (`read` auto-detects, `encode` / `write` by format) |
 | `trace/`    | `chrome_trace` — writes a `cc::rec::recording` as Chrome Trace Event JSON, for `chrome://tracing` and `ui.perfetto.dev` (`encode` / `write`) |
 

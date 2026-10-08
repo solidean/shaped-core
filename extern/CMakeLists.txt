@@ -38,6 +38,11 @@ option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an exter
 # Linked PRIVATE by babel, so spng.h never reaches a babel public header; it decodes over the vendored zlib above rather than a second bundled Deflate.
 option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
 
+# ufbx, committed in-source: one C file and one header, and the whole of babel-serializer's FBX reader.
+# The libspng tier for the same reason — two files, no build machinery and no dependencies, not even a Deflate.
+# Linked PRIVATE by babel, so ufbx.h never reaches a babel public header.
+option(SC_USE_VENDORED_UFBX "Build the in-tree vendored ufbx (OFF expects an external `ufbx` target)" ON)
+
 # Mbed TLS, committed in-source: the TLS handshake and record layer behind clean-net's TLS connections.
 # Vendored rather than fetched because a build that cannot do HTTPS is not a working build of clean-net -- the same
 # always-present argument zstd and zlib make, and the reason there is no configuration in which this may be absent.
@@ -142,6 +147,10 @@ endif()
 
 if(SC_USE_VENDORED_SPNG)
     add_subdirectory(libspng)
+endif()
+
+if(SC_USE_VENDORED_UFBX)
+    add_subdirectory(ufbx)
 endif()
 
 if(SC_USE_VENDORED_MBEDTLS)

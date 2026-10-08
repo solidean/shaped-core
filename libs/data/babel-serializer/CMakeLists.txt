@@ -8,6 +8,7 @@ add_library(babel-serializer
 
     src/babel-serializer/data/sqlite.cc
     src/babel-serializer/font/font.cc
+    src/babel-serializer/geometry/fbx.cc
     src/babel-serializer/geometry/gltf.cc
     src/babel-serializer/geometry/obj.cc
     src/babel-serializer/geometry/stl.cc
@@ -42,6 +43,7 @@ target_sources(babel-serializer
 
     src/babel-serializer/font/font.hh
 
+    src/babel-serializer/geometry/fbx.hh
     src/babel-serializer/geometry/gltf.hh
     src/babel-serializer/geometry/obj.hh
     src/babel-serializer/geometry/stl.hh
@@ -93,6 +95,10 @@ endif()
 # libspng is the PNG codec; stb is what JPEG still decodes and encodes through.
 target_link_libraries(babel-serializer PRIVATE spng stb)
 
+# ufbx is committed in-source too (extern/ufbx), and is the whole of the FBX reader.
+# PRIVATE, and ufbx.h is included by geometry/fbx.cc alone.
+target_link_libraries(babel-serializer PRIVATE ufbx)
+
 # Enable conforming preprocessor for MSVC
 target_compile_options(babel-serializer
     PUBLIC
@@ -113,6 +119,7 @@ if(SC_BUILD_TESTS)
 
         tests/font/font-test.cc
 
+        tests/geometry/fbx-test.cc
         tests/geometry/gltf-test.cc
         tests/geometry/obj-test.cc
         tests/geometry/stl-test.cc
@@ -135,6 +142,10 @@ if(SC_BUILD_TESTS)
     )
 
     sc_target_pch(babel-serializer-test CC_ALL NEXUS) # inherits the library's measured tier
+
+    # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the fbx test that reads the real scene when present.
+    cmake_path(SET _babel_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/bistro/.install")
+    target_compile_definitions(babel-serializer-test PRIVATE BABEL_TEST_BISTRO_DIR="${_babel_bistro_dir}")
 
     # tests/font/font_builder.hh crafts fonts byte by byte; another library's tests include it from this root.
     set(BABEL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests" CACHE INTERNAL "babel-serializer's test-helper include root")

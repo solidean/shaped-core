@@ -30,6 +30,11 @@ namespace babel::gltf
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.gltf");
 } // namespace babel::gltf
 
+namespace babel::fbx
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.fbx");
+} // namespace babel::fbx
+
 namespace babel::sqlite
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.sqlite");

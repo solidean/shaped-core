@@ -71,7 +71,8 @@ One-liner per library:
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
   The exception is one that must hand back zero-copy views of its input: `gltf` and `dds` take a `cc::pinned_data<byte const>`.
-  So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers) and glTF 2.0/GLB readers (`geometry/`), and an OpenType reader (`font/`, TrueType outlines as stored).
+  So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers), glTF 2.0/GLB and FBX readers (`geometry/`), and an OpenType reader (`font/`, TrueType outlines as stored).
+  FBX parses through the vendored ufbx and comes back as FBX's own object model, its axes and unit reported rather than applied.
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
   Native read-only DDS and TGA too: `babel::dds` hands back every mip, layer and cube face as views of the input, and `babel::bcn` decodes BC1 - BC7.
@@ -162,7 +163,7 @@ One-liner per library:
   A first vertical slice today: path-traced views blitted into a window.
   Every shader is SGL, so the trace runs on dx12 and vulkan; the default context and the examples are dx12's.
   **A material type is an SGL fragment** (`sv::material_type::shader`), generated into one hit group per permutation.
-  **`sv::asset_loader` reads glTF, OBJ and STL into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
+  **`sv::asset_loader` reads glTF, OBJ, STL and FBX into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
   A mesh exists in two forms: `sv::mesh` is what a caller holds — pinned payloads plus the resources minted for them, with `is_ready` — and `sv::resident_mesh` is that mesh as ids alone.
   **Drawings are Slug shapes**: flat on a canvas, over a scene, as annotations — and as decals, which the tracer paints into the surfaces they are projected onto.
   [docs/canvas.md](libs/graphics/shaped-viewer/docs/canvas.md) is the design.
