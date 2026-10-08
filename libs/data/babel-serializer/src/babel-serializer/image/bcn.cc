@@ -725,7 +725,9 @@ rgba32f_block decode_bc6h(large_block block, bool is_signed)
             mode = &candidate;
     if (mode == nullptr)
     {
-        // A reserved mode is zero, alpha included, as the specification requires.
+        // A reserved mode is opaque black: BC6H has no alpha, and the specification requires it.
+        for (auto i = 0; i < 16; ++i)
+            out.rgba[i * 4 + 3] = 1.0f;
         return out;
     }
 
@@ -760,7 +762,7 @@ rgba32f_block decode_bc6h(large_block block, bool is_signed)
             for (auto e = 1; e < endpoint_count; ++e)
             {
                 endpoints[e][c] = (endpoints[0][c] + endpoints[e][c]) & ((1 << mode->precision) - 1);
-                // Pillow 12 skips this step, so its signed decode never yields a negative delta-coded endpoint.
+                // Per the specification, so a delta-coded endpoint can be negative.
                 if (is_signed)
                     endpoints[e][c] = sign_extend(endpoints[e][c], mode->precision);
             }

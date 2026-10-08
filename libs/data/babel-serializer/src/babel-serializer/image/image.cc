@@ -113,6 +113,34 @@ cc::string_view accepted_of(format fmt)
     return "?";
 }
 
+/// The aggregator's one image of a read DDS texture.
+cc::result<image> image_of(babel::dds::data const& t, read_options opts)
+{
+    if (t.subresources.empty())
+        return cc::error("image: the DDS file holds no subresource");
+
+    // The first subresource in file order is mip 0 of the first layer and face; its first slice is the image.
+    auto top = t.subresources.front();
+    top.depth = 1;
+
+    auto result = image{.width = top.width, .height = top.height, .channels = 4};
+    if (babel::dds::is_float(t.format))
+    {
+        auto texels = babel::dds::decode_rgba32f(t, top, {.max_decoded_bytes = opts.max_decoded_bytes});
+        CC_RETURN_IF_ERROR(texels);
+        result.comp = component::f32;
+        result.pixels = cc::vector<byte>::create_copy_of(cc::span<float const>(texels.value()).as_bytes());
+    }
+    else
+    {
+        auto texels = babel::dds::decode_rgba8(t, top, {.max_decoded_bytes = opts.max_decoded_bytes});
+        CC_RETURN_IF_ERROR(texels);
+        result.comp = component::u8;
+        result.pixels = cc::move(texels.value());
+    }
+    return cc::move(result);
+}
+
 cc::result<cc::unit> check_encode_component(image const& img, format fmt)
 {
     if (is_read_only(fmt))
@@ -242,30 +270,7 @@ cc::result<image> read(cc::span<byte const> bytes, format fmt, read_options opts
         // only as long as this decode.
         auto texture = babel::dds::read(bytes);
         CC_RETURN_IF_ERROR(texture);
-        auto const& t = texture.value();
-        if (t.subresources.empty())
-            return cc::error("image: the DDS file holds no subresource");
-
-        // The first subresource in file order is mip 0 of the first layer and face; its first slice is the image.
-        auto top = t.subresources.front();
-        top.depth = 1;
-
-        auto result = image{.width = top.width, .height = top.height, .channels = 4};
-        if (babel::dds::is_float(t.format))
-        {
-            auto texels = babel::dds::decode_rgba32f(t, top, {.max_decoded_bytes = opts.max_decoded_bytes});
-            CC_RETURN_IF_ERROR(texels);
-            result.comp = component::f32;
-            result.pixels = cc::vector<byte>::create_copy_of(cc::span<float const>(texels.value()).as_bytes());
-        }
-        else
-        {
-            auto texels = babel::dds::decode_rgba8(t, top, {.max_decoded_bytes = opts.max_decoded_bytes});
-            CC_RETURN_IF_ERROR(texels);
-            result.comp = component::u8;
-            result.pixels = cc::move(texels.value());
-        }
-        return cc::move(result);
+        return image_of(texture.value(), opts);
     }
     case format::tga:
     {
@@ -285,6 +290,15 @@ cc::result<image> read(cc::read_stream& in, read_options opts)
 {
     auto bytes = in.read_all();
     CC_RETURN_IF_ERROR(bytes);
+
+    // A DDS keeps views of its input, so the slurped buffer moves into the pin rather than being copied again.
+    if (auto const fmt = detect_format(bytes.value()); fmt.has_value() && fmt.value() == format::dds)
+    {
+        CC_RECORD_SCOPE("image.read");
+        auto texture = babel::dds::read(cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(bytes).value())));
+        CC_RETURN_IF_ERROR(texture);
+        return image_of(texture.value(), opts);
+    }
     return read(bytes.value(), opts);
 }
 

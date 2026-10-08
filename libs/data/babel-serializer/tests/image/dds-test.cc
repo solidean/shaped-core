@@ -5,6 +5,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -564,6 +565,14 @@ TEST("dds - the aggregator detects DDS and keeps mip 0 of the first layer")
     CHECK(u8(img.value().pixels[2]) == 0);
 
     CHECK(babel::image::encode(img.value(), babel::image::format::dds).has_error());
+
+    // The stream overload pins the slurped buffer for DDS, and must decode the same image.
+    auto adapter = cc::span_read_stream_adapter(file);
+    cc::read_stream stream = adapter;
+    auto const streamed = babel::image::read(stream);
+    REQUIRE(streamed.has_value());
+    CHECK(streamed.value().width == 8);
+    CHECK(u8(streamed.value().pixels[0]) == 255);
 }
 
 // Real textures

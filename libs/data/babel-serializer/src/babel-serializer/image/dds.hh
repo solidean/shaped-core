@@ -32,8 +32,8 @@
 // A legacy writer that padded rows to a DWORD therefore reads as tight rows, and its padding shifts the texels.
 //
 //   auto const tex = babel::dds::read(cc::make_pinned_data(cc::move(file_bytes))).value();
-//   auto const* const top = tex.find(0, 0, 0);          // layer, face, mip
-//   auto const texels = babel::dds::decode_rgba8(tex, *top).value();
+//   auto const& top = tex.subresources.front();         // never empty after a successful read
+//   auto const texels = babel::dds::decode_rgba8(tex, top).value();
 
 /// What the texels of a DDS file are, as a GPU names them.
 /// The DXGI spelling, because that is the vocabulary both header generations map into.
@@ -70,8 +70,7 @@ enum class babel::dds::pixel_format : babel::u8
     rgba32_float,
 
     /// A legacy layout described by the header's bit masks alone, with no DXGI name.
-    /// `file_header.pixels` holds the masks and the bit count, and its flags say whether they are RGB, luminance or
-    /// alpha.
+    /// `file_header.pixels` holds the masks and the bit count, and its flags say whether they are RGB, luminance or alpha.
     masked,
 };
 
@@ -171,7 +170,8 @@ struct babel::dds::data
     /// The faces each layer has: the present ones of a cube map, 1 otherwise.
     [[nodiscard]] int face_count() const;
 
-    /// The subresource at that position, or nullptr where the texture has none.
+    /// The subresource at that position, or nullptr where the texture has none — a partial cube map may lack face 0.
+    /// A linear scan over `subresources`.
     [[nodiscard]] subresource const* find(int layer, int face, int mip) const;
 
     /// The bytes one row of a `width`-texel level occupies — a row of blocks for a compressed format.
@@ -208,37 +208,36 @@ namespace babel::dds
 
 /// Read a whole DDS file.
 /// This is the zero-copy entry point: every subresource's `bytes` is a view of `bytes` sharing its owner.
-/// Errors on a missing magic, a header that contradicts itself, a format it cannot name, or a file too short for
-/// the subresources its header describes.
+/// Errors on a missing magic, a header that contradicts itself, a format it cannot name, or a file too short for the subresources its header describes.
+/// Every subresource covers at least one input byte, so its records stay within about 48 times the input's size.
+/// The worst case is a 65536-layer cube array of 1 x 1 8-bit texels.
 [[nodiscard]] cc::result<data> read(cc::pinned_data<byte const> bytes);
 
 /// Convenience: slurps the stream, then pins the slurped buffer (moved into the pin, not copied).
 [[nodiscard]] cc::result<data> read(cc::read_stream& in);
 
-/// Convenience: COPIES the input into an owned pin first, so the subresources stay valid independently of the
-/// caller's memory.
+/// Convenience: COPIES the input into an owned pin first, so the subresources stay valid independently of the caller's memory.
 /// Pass a cc::pinned_data to avoid that copy.
 [[nodiscard]] cc::result<data> read(cc::span<byte const> bytes);
-
-// decoding
-// -------------------------------------------------------------------------------------------------
 
 } // namespace babel::dds
 
 /// Decode knobs.
 struct babel::dds::decode_options
 {
-    /// The most bytes a decoded subresource may take; one that would take more is an error before anything is
-    /// allocated.
-    /// A block-compressed texture decodes to 8 to 32 times its size, so this bounds what a large file can demand.
-    /// The default holds an 8192 x 8192 decode to rgba8, but only 4096 x 4096 to rgba32f, so a larger float
-    /// texture — an 8192 x 4096 BC6H environment map — needs it raised.
+    /// The most bytes a decoded subresource may take; one that would take more is an error before anything is allocated.
+    /// A block-compressed texture decodes to 4 to 32 times its size, so this bounds what a large file can demand.
+    /// The default holds an 8192 x 8192 decode to rgba8, but only 4096 x 4096 to rgba32f.
+    /// A larger float texture, such as an 8192 x 4096 BC6H environment map, needs it raised.
     /// The largest `isize` disables the check.
     isize max_decoded_bytes = isize(1) << 28;
 };
 
 namespace babel::dds
 {
+// decoding
+// -------------------------------------------------------------------------------------------------
+
 /// Decode one subresource of `tex` to 8-bit r, g, b, a texels, row-major and top-left origin, slice after slice.
 /// Errors for a float format, which decode_rgba32f handles.
 /// Channels a format lacks read as a GPU samples them: 0 for a missing color, 255 for a missing alpha.

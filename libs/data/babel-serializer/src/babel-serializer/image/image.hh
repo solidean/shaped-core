@@ -85,8 +85,8 @@ struct babel::image::read_options
 {
     /// The most bytes a DDS or TGA decode may take, passed on as their own budget; past it the read is an error.
     /// PNG has its own fixed ceilings, and JPEG, HDR and PFM take none.
-    /// The default holds an 8192 x 8192 decode to rgba8, but only 4096 x 4096 to rgba32f, so a larger float
-    /// texture — an 8192 x 4096 BC6H environment map — needs it raised.
+    /// The default holds an 8192 x 8192 decode to rgba8, but only 4096 x 4096 to rgba32f.
+    /// A larger float texture, such as an 8192 x 4096 BC6H environment map, needs it raised.
     /// The largest `isize` disables the check.
     isize max_decoded_bytes = isize(1) << 28;
 };
@@ -108,8 +108,7 @@ namespace babel::image
 /// Decode any supported image, auto-detecting the format and delegating to the matching low-level codec.
 [[nodiscard]] cc::result<image> read(cc::span<byte const> bytes, read_options opts = {});
 
-/// Decode `bytes` as `fmt`, skipping detection — for a caller that knows the format from a file extension or a
-/// MIME type.
+/// Decode `bytes` as `fmt`, skipping detection — for a caller that knows the format from a file extension or a MIME type.
 [[nodiscard]] cc::result<image> read(cc::span<byte const> bytes, format fmt, read_options opts = {});
 
 /// Convenience: slurp the stream to end, then decode.

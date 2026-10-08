@@ -200,8 +200,8 @@ cc::result<data> read(cc::span<byte const> bytes, read_options opts)
         break;
     }
 
-    // A header may claim 65535 x 65535, and a few kilobytes of run-length packets can describe that much, so the
-    // decoded size is checked against the budget before anything is allocated.
+    // Run-length data describes up to about 128 times its length in pixels, so a plausible file can still demand
+    // gigabytes; the budget is what bounds the allocation, checked before anything is made.
     auto const pixel_count = isize(h.width) * isize(h.height);
     if (pixel_count * result.channels > opts.max_decoded_bytes)
         return cc::error(cc::format("tga: {}x{} decodes to {} bytes, past the {}-byte budget", //

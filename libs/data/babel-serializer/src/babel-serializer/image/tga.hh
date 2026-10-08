@@ -16,9 +16,9 @@
 // Native, with no backend: an 18-byte header, an optional palette, then raw or run-length-encoded pixels.
 // Color-mapped, true-color and grayscale images all read, raw and RLE alike.
 //
-// TWO NORMALIZATIONS HAPPEN ON READ, so the decoded buffer matches every other babel image.
-// TGA stores blue before red, and usually stores its rows bottom-to-top; `pixels` come back r, g, b(, a) with a
-// top-left origin.
+// THREE NORMALIZATIONS HAPPEN ON READ, so the decoded buffer matches every other babel image.
+// TGA stores blue before red, and `pixels` come back r, g, b(, a).
+// It usually stores its rows bottom-to-top, and may store them right-to-left; `pixels` come back with a top-left origin.
 // `stored_bottom_up` and `stored_right_to_left` still report what the file did.
 //
 // TGA HAS NO MAGIC NUMBER.
@@ -43,8 +43,7 @@ struct babel::tga::data
     int width = 0;
     int height = 0;
 
-    /// 1 gray, 2 gray + alpha, 3 rgb or 4 rgba — what the stored pixels hold, a palette's entries for a color-mapped
-    /// image.
+    /// 1 gray, 2 gray + alpha, 3 rgb or 4 rgba — what the stored pixels hold, a palette's entries for a color-mapped image.
     /// A 16-bit pixel has an alpha channel only when the header grants it the attribute bit.
     /// That alpha is bit 15, which many writers leave 0 whatever the header says, so such a file reads fully transparent.
     int channels = 0;
@@ -73,7 +72,8 @@ struct babel::tga::data
 struct babel::tga::read_options
 {
     /// The most bytes the decoded pixels may take; a file describing more is an error before anything is allocated.
-    /// The header alone is never believed, since a few kilobytes of run-length packets can describe 65535 x 65535.
+    /// Run-length data describes up to about 128 times its length in pixels, so 67 MB of packets could still describe 17 GB.
+    /// The header and the data alone therefore never bound the allocation; this does.
     /// The default holds an 8192 x 8192 rgba image; the largest `isize` disables the check.
     isize max_decoded_bytes = isize(1) << 28;
 };

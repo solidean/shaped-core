@@ -332,7 +332,7 @@ cc::result<babel::image::image> read(cc::read_stream& in);            // slurps,
 cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); // magic bytes; TGA (no magic) last
 
 struct image {                        // row-major, top-left origin, tightly packed
-    int width; int height; int channels;      // 1 grey / 2 GA / 3 rgb / 4 rgba
+    int width; int height; int channels;      // 1 gray / 2 gray+alpha / 3 rgb / 4 rgba
     babel::image::component comp;             // u8 (png/jpg/tga/dds) | u16 (16-bit png, host-endian) | f32 (hdr/pfm/float dds)
     cc::vector<cc::byte> pixels;
     bool is_empty(); int bytes_per_component(); isize row_stride();
@@ -350,7 +350,7 @@ cc::result<cc::unit> write(cc::write_stream& out, image const&, babel::image::fo
 #include <babel-serializer/image/jpg.hh>   // low-level JPG: pixels + native metadata
 
 babel::png::data p = babel::png::read(bytes).value();
-p.width; p.height; p.channels; p.pixels;       // channels follow the file: 1 grey / 2 GA / 3 rgb / 4 rgba, +1 for a tRNS chunk
+p.width; p.height; p.channels; p.pixels;       // channels follow the file: 1 gray / 2 gray+alpha / 3 rgb / 4 rgba, +1 for a tRNS chunk
 p.decoded;                                     // u8, or u16 for a 16-bit PNG — HOST-endian, unlike the file
 p.bit_depth; p.color; p.interlace;             // native IHDR fields; 1/2/4-bit unpacks to u8, so bit_depth is where it survives
 p.gamma; p.srgb_intent; p.icc_profile; p.texts; p.physical;  // gAMA / sRGB / iCCP / tEXt+zTXt+iTXt / pHYs, read AND written
@@ -404,7 +404,7 @@ babel::tga::data g = babel::tga::read(bytes, {.max_decoded_bytes = 1 << 28}).val
 g.channels;                                    // 1 gray / 2 gray+alpha / 3 rgb / 4 rgba, from depth, palette and alpha bits
 g.type; g.run_length_encoded; g.pixel_depth; g.alpha_bits; g.stored_bottom_up; g.stored_right_to_left;
 
-babel::bcn::small_block(ptr); babel::bcn::large_block(ptr);   // fixed_span<byte const, 8 / 16>: the type is the length check
+babel::bcn::small_block(ptr); babel::bcn::large_block(ptr);   // fixed_span<byte const, 8 / 16>; the length is the constructor's precondition, unchecked
 babel::bcn::decode_bc1(block) / decode_bc2 / decode_bc3 / decode_bc7 -> rgba8_block;   // .rgba[texel * 4 + c]
 babel::bcn::decode_bc4(block, is_signed) / decode_bc5(block, is_signed) -> rgba8_block; // (r,0,0,1) / (r,g,0,1)
 babel::bcn::decode_bc6h(block, is_signed) -> rgba32f_block;  // half-float results widened, alpha 1

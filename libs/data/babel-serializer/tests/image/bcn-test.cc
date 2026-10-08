@@ -293,7 +293,7 @@ TEST("bcn - BC7 mode 5 rotation swaps alpha back into its channel")
     CHECK(texel_is(out, 0, 255, 0, 0, 0));
 }
 
-TEST("bcn - BC7 and BC6H reserved modes decode to zero")
+TEST("bcn - reserved modes are transparent black in BC7 and opaque black in BC6H")
 {
     auto const zero = block16{};
     auto const bc7 = decode_bc7(zero);
@@ -305,7 +305,7 @@ TEST("bcn - BC7 and BC6H reserved modes decode to zero")
     reserved[0] = byte(0x13);
     auto const bc6 = decode_bc6h(reserved, false);
     for (auto i = 0; i < 64; ++i)
-        CHECK(bc6.rgba[i] == 0.0f);
+        CHECK(bc6.rgba[i] == (i % 4 == 3 ? 1.0f : 0.0f));
 }
 
 TEST("bcn - BC6H mode 11 keeps 10-bit endpoints and interpolates in halves")

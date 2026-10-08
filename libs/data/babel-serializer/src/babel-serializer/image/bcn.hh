@@ -12,8 +12,8 @@
 // Every decoder is bit-exact against one stated rule rather than against "whatever a GPU does".
 // Hardware disagrees in the last bit on BC1-BC5 interpolation, and the D3D specification allows it a tolerance.
 // babel's rule for BC1-BC5 is bit-replicated endpoints, then exact interpolation, rounded to nearest.
-// Bit replication is what hardware does; a decoder that widens RGB565 as UNORM floats instead lands one step off on
-// some endpoint pairs, both within that tolerance.
+// Bit replication is what hardware does.
+// A decoder that widens RGB565 as UNORM floats instead lands one step off on some endpoint pairs, both within that tolerance.
 // BC6H and BC7 specify their interpolation in integers, and there the rule is the specification's own.
 //
 // Texels come back row-major, texel (x, y) at index y * 4 + x, four values each in r, g, b, a order.
@@ -41,7 +41,10 @@ struct babel::bcn::rgba32f_block
 namespace babel::bcn
 {
 /// The 8 bytes of a BC1 or BC4 block.
-/// A fixed extent rather than a checked length, so no decoder can be handed a short block.
+/// The extent is part of the type, so a decoder never checks a length.
+/// It is the constructor's precondition instead: building one from a shorter buffer is the caller's bug, which the
+/// pointer constructor does not check and the container one only asserts.
+/// babel's own decoders construct blocks only inside ranges they have validated.
 using small_block = cc::fixed_span<byte const, 8>;
 
 /// The 16 bytes of a BC2, BC3, BC5, BC6H or BC7 block.
@@ -75,7 +78,7 @@ using large_block = cc::fixed_span<byte const, 16>;
 
 /// BC6H: half-float RGB, fourteen modes, alpha always 1.
 /// Each value is the specification's half-float result, widened to a float without further rounding.
-/// A reserved mode decodes to zero.
+/// A reserved mode decodes to opaque black, (0, 0, 0, 1).
 [[nodiscard]] rgba32f_block decode_bc6h(large_block block, bool is_signed);
 
 /// BC1 - BC5 as floats: the interpolants exactly, before the rounding the 8-bit decoders apply.
