@@ -31,11 +31,14 @@ babel-serializer/src/babel-serializer/
   geometry/    [in progress]   mesh / geometry formats
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
     obj        [done]          reader
-  image/       [in progress]   image formats (read + write; committed libspng + stb backends, plus two native codecs)
+  image/       [in progress]   image formats (read + write; committed libspng + stb backends, plus native codecs)
     png        [done]          low-level reader + writer (native IHDR fields; ancillary chunks read and written)
     jpg        [done]          low-level reader + writer (native SOF/JFIF fields; rich metadata [todo])
     hdr        [done]          low-level reader + writer, fully native — Radiance RGBE, f32 out
     pfm        [done]          low-level reader + writer, fully native — Portable FloatMap, f32 out
+    dds        [done]          low-level reader, fully native — every subresource as pinned views; decode to rgba8 / rgba32f
+    tga        [done]          low-level reader, fully native — raw / RLE, true-color / gray / color-mapped
+    bcn        [done]          BC1 - BC7 block decoders, BC6H included
     image      [done]          aggregator: pixel buffer + format-dispatching read/encode/write
 ```
 
@@ -181,17 +184,44 @@ Low-level Portable FloatMap reader + writer, also fully native; see [pfm.hh](../
 PFM stores IEEE-754 bits, so the round-trip is **exact** — which is what makes it the format to reach for when values matter more than file size.
 Reading normalizes both of the format's conventions away: rows come back top-first, samples in host byte order, with `byte_order` still reporting what the file used.
 
+### dds [done]
+
+Low-level DirectDraw Surface reader, fully native; see [dds.hh](../src/babel-serializer/image/dds.hh).
+It reads over pinned bytes like `gltf`, because every subresource comes back as a view of the input rather than a copy — the blocks are already what a GPU uploads.
+Legacy FourCC, legacy bit-mask and DX10 headers all resolve to one DXGI-shaped `pixel_format`, with the stored fields kept in `file_header`.
+Arrays, cube maps (partial legacy ones included) and volumes are laid out in file order, and a header that implies more bytes than the file has is an error.
+
+- `[done]` **decoding** — any subresource to rgba8, or to rgba32f for BC6H and the float formats, through `bcn`.
+- `[planned]` **the remaining DXGI formats** — 10:10:10:2, 11:11:10, 16-bit unorm, and the rest of the uncompressed table, each a mapping plus a texel decoder.
+  Legacy files reach most of them already through the bit-mask path.
+
+### tga [done]
+
+Low-level Truevision TARGA reader, fully native; see [tga.hh](../src/babel-serializer/image/tga.hh).
+Raw and run-length-encoded, true-color (15/16/24/32-bit), grayscale and color-mapped, with both origin bits normalized to top-left.
+TGA has no magic number, which is why the aggregator tries it last: its 2.0 footer, then a header that parses.
+
+- `[planned]` **the 2.0 extension area** — the alpha-type byte says whether a 32-bit image's fourth channel is alpha at all.
+
+### bcn [done]
+
+BCn block decoding, independent of any container; see [bcn.hh](../src/babel-serializer/image/bcn.hh).
+BC1 - BC5 round interpolants to nearest, the D3D / DirectXTex rule; BC6H and BC7 follow their specifications' integer arithmetic.
+The tests pin hand-computed blocks, plus random BC7 and BC6H blocks checked against Pillow's decoder.
+Pillow skips signed BC6H's sign extension after the inverse transform, and babel follows the specification there instead.
+
 ### image [done]
 
 The aggregator: a plain pixel buffer, `detect_format` from the magic bytes, and format-dispatching `read` / `encode` / `write`.
 See [image.hh](../src/babel-serializer/image/image.hh).
 
 - `[done]` **the f32 sample path** — HDR and PFM decode to `component::f32`, and `encode` rejects an image whose `comp` the target format cannot store.
-- `[done]` **16-bit samples** — a 16-bit PNG decodes to `component::u16` and re-encodes at that width; PNG is the one format spanning two sample types.
+- `[done]` **16-bit samples** — a 16-bit PNG decodes to `component::u16` and re-encodes at that width.
+- `[done]` **DDS and TGA, read-only** — DDS keeps mip 0, as 4 channels of `u8`, or `f32` for a float format; `encode` refuses both.
 
 ### Other image formats [planned]
 
-`[planned]` further stb-supported containers (bmp / tga / gif), and `.exr`.
+`[planned]` further stb-supported containers (bmp / gif), KTX2, and `.exr`.
 
 ## Aggregators
 

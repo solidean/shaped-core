@@ -70,10 +70,12 @@ One-liner per library:
 * **`libs/data/babel-serializer`** — the rest of babel: everything that needs more than clean-core.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
-  The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
+  The exception is one that must hand back zero-copy views of its input: `gltf` and `dds` take a `cc::pinned_data<byte const>`.
   So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers) and glTF 2.0/GLB readers (`geometry/`), and an OpenType reader (`font/`, TrueType outlines as stored).
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
+  Native read-only DDS and TGA too: `babel::dds` hands back every mip, layer and cube face as views of the input, and `babel::bcn` decodes BC1 - BC7.
+  The aggregator keeps mip 0 of a DDS, as `u8`, or `f32` for BC6H and the float formats.
   Namespace `babel`. Depends on babel-data + typed-geometry.
   **One namespace, two libraries**, split by dependency rather than by topic — which is why `data/` spans both, `sqlite` living up here because of what it *needs*.
   `babel-serializer` is the target to link when in doubt; it links babel-data publicly.

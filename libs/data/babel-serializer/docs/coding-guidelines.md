@@ -115,6 +115,7 @@ Reach for a low-level codec when you need a format's metadata; reach for the agg
 
 **A format small enough to own outright skips the seam entirely and is written natively.**
 `babel::hdr` and `babel::pfm` are the first: Radiance RGBE is a text header plus two scanline encodings, and PFM is five ASCII tokens plus raw floats.
+`babel::dds` and `babel::tga` followed, DDS's block decoding included, since BCn is a specification of a few hundred lines rather than an entropy coder.
 Neither is worth a backend, and writing them natively is what lets them be complete rather than metadata-`[todo]` the way the stb-backed pair still is.
 The test is the format's own size, not whether stb happens to support it — stb reads `.hdr` too.
 A format whose decoder is a real piece of engineering (PNG's inflate, JPEG's entropy coding) goes behind the seam and grows a native path later.
@@ -127,6 +128,7 @@ This is the deviation the stream rule at the top of this file points at.
 **Take a `cc::pinned_data<byte const>` instead when the parsed structure has to hand back zero-copy views of the input bytes.**
 `gltf` is the first such format, and the test is narrow: a `.glb` carries its vertex / index / texture payload inline.
 So each `buffers` entry is a `subdata` of the input that shares its owner: nothing bulk is copied, and the views stay valid after the caller drops its own handle.
+`dds` is the second: a texture's subresources are already what a GPU uploads, so each one is a view of the input too.
 A stream cannot promise that — its window is a recycled buffer, so anything kept has to be copied out.
 
 **Why this is not a defeat for the stream rule** (not obvious): parsing the *text* still goes through a stream.
