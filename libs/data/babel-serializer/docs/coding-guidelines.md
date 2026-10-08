@@ -116,8 +116,8 @@ Reach for a low-level codec when you need a format's metadata; reach for the agg
 
 **A format small enough to own outright skips the seam entirely and is written natively.**
 `babel::hdr` and `babel::pfm` are the first: Radiance RGBE is a text header plus two scanline encodings, and PFM is five ASCII tokens plus raw floats.
-`babel::dds` and `babel::tga` followed, DDS's block decoding included, since BCn is a specification of a few hundred lines rather than an entropy coder.
 Neither is worth a backend, and writing them natively is what lets them be complete rather than metadata-`[todo]` the way the stb-backed pair still is.
+`babel::dds` and `babel::tga` followed on the same grounds, DDS's block decoding included, since BCn is a specification of a few hundred lines rather than an entropy coder.
 The test is the format's own size, not whether stb happens to support it — stb reads `.hdr` too.
 A format whose decoder is a real piece of engineering (PNG's inflate, JPEG's entropy coding) goes behind the seam and grows a native path later.
 
