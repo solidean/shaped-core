@@ -777,6 +777,85 @@ TEST("sv - the light table groups by path and keeps each run in the order it was
     }
 }
 
+// Next-event estimation picks a light in proportion to its power, which the table writes into each record.
+// Local lights are weighed by power and distant ones by irradiance, so the two kinds share the choice half and half.
+TEST("sv - the light table weighs next-event estimation by power, distant lights sharing half")
+{
+    auto const rect = [](f32 radiance)
+    {
+        return sv::shaders::tracer::light_record{.path = u32(sv::light_path::area),
+                                                 .area = 1.0f,
+                                                 .emission = tg::vec3f(radiance, radiance, radiance)};
+    };
+    auto const sun
+        = sv::shaders::tracer::light_record{.path = u32(sv::light_path::distant_point), .emission = tg::vec3f(2, 2, 2)};
+
+    SECTION("local lights alone are picked by power")
+    {
+        auto const given = cc::vector<sv::shaders::tracer::light_record>{rect(1), rect(3)};
+        auto const table = sv::pt_light_table::grouped(given);
+        CHECK(tg::abs(table.records[0].select_pdf - 0.25f) < 1e-6f);
+        CHECK(tg::abs(table.records[1].select_pdf - 0.75f) < 1e-6f);
+        CHECK(tg::abs(table.records[0].select_cdf - 0.25f) < 1e-6f);
+        CHECK(table.records[1].select_cdf == 1.0f);
+    }
+
+    SECTION("a distant light takes half the choice from the local ones")
+    {
+        auto const given = cc::vector<sv::shaders::tracer::light_record>{sun, rect(1), rect(3)};
+        auto const table = sv::pt_light_table::grouped(given);
+        // The table orders area before distant.
+        CHECK(tg::abs(table.records[0].select_pdf - 0.125f) < 1e-6f);
+        CHECK(tg::abs(table.records[1].select_pdf - 0.375f) < 1e-6f);
+        CHECK(tg::abs(table.records[2].select_pdf - 0.5f) < 1e-6f);
+        CHECK(table.records[2].select_cdf == 1.0f);
+    }
+
+    SECTION("a dark light keeps a floor, so it is never impossible to pick")
+    {
+        auto const given = cc::vector<sv::shaders::tracer::light_record>{rect(0), rect(4)};
+        auto const table = sv::pt_light_table::grouped(given);
+        CHECK(table.records[0].select_pdf > 0.0f);
+        CHECK(table.records[0].select_pdf < 1e-2f);
+        CHECK(tg::abs(table.records[0].select_pdf + table.records[1].select_pdf - 1.0f) < 1e-6f);
+    }
+
+    SECTION("among many lights every interval stays open and the last cdf is exactly 1")
+    {
+        // One bright light and many floored ones: the cdf's float steps near 1 are as wide as a floored light's share.
+        auto given = cc::vector<sv::shaders::tracer::light_record>();
+        given.push_back(rect(1000));
+        for (auto i = 0; i < 20000; ++i)
+            given.push_back(rect(0));
+        auto const table = sv::pt_light_table::grouped(given);
+        auto previous = 0.0f;
+        auto increasing = true;
+        auto positive = true;
+        for (auto const& r : table.records)
+        {
+            increasing = increasing && r.select_cdf > previous;
+            positive = positive && r.select_pdf > 0.0f && r.select_pdf == r.select_cdf - previous;
+            previous = r.select_cdf;
+        }
+        CHECK(increasing);
+        CHECK(positive);
+        CHECK(table.records.back().select_cdf == 1.0f);
+    }
+
+    SECTION("uniform selection writes the records' probabilities 0, which the tracer reads as alike")
+    {
+        // Out of a power-weighted table, whose probabilities the uniform one must not keep.
+        auto const given
+            = sv::pt_light_table::grouped(cc::vector<sv::shaders::tracer::light_record>{rect(1), rect(3)}).records;
+        auto const table = sv::pt_light_table::grouped(given, sv::light_selection::uniform);
+        for (auto const& r : table.records)
+        {
+            CHECK(r.select_pdf == 0.0f);
+            CHECK(r.select_cdf == 0.0f);
+        }
+    }
+}
+
 // The accumulation restarts when a hash of the uploaded bytes changes, and the lights are among them.
 // So two lights built the same way must lay out to the same bytes, pads included — otherwise the image restarts every
 // frame and never converges, which looks like noise rather than like a bug.

@@ -47,6 +47,15 @@ void place_instance_record(shaders::tracer::instance_record& record,
 static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table has one slot per light_path");
 } // namespace sv
 
+/// How next-event estimation picks among a table's lights.
+enum class sv::light_selection : sv::u8
+{
+    /// In proportion to each light's power; the distant lights, which have none, share half the choice where both kinds have light.
+    power,
+    /// Every light alike, which the records say by leaving their selection probabilities 0.
+    uniform,
+};
+
 /// The lights one trace samples, grouped by path — what `pt_trace_desc::lights` holds and the frame block's table indexes.
 ///
 /// Grouping is what lets a loop over every light of one path run in one branch, which is where the tracer visits lights
@@ -62,7 +71,9 @@ struct sv::pt_light_table
     u32 path_offset[4] = {};
     u32 path_count[4] = {};
 
-    [[nodiscard]] static pt_light_table grouped(cc::span<shaders::tracer::light_record const> lights);
+    /// Also writes each record's selection probability and the cumulative one, in the order the table keeps, or 0 in both for `light_selection::uniform`.
+    [[nodiscard]] static pt_light_table grouped(cc::span<shaders::tracer::light_record const> lights,
+                                                light_selection selection = light_selection::power);
 
     /// Writes the count and the per-path table into `fc`.
     void describe_in(shaders::tracer::frame_constants& fc) const;
@@ -200,8 +211,8 @@ struct sv::pt_trace_desc
 /// A caller's `hit_group_offset` counts two records per permutation and is rewritten to that permutation's row.
 /// A permutation whose hit group has not compiled is substituted by `fallback` or `quadric_fallback`, by its kind.
 ///
-/// The raygen bounces each ray and estimates direct light at every hit by next-event estimation toward two sources: one light,
-/// picked uniformly from the trace's, and the SH environment.
+/// The raygen bounces each ray and estimates direct light at every hit by next-event estimation toward two sources:
+/// one light, picked in proportion to its power (`pt_light_table`), and the SH environment.
 /// **Both are gathered by balance-heuristic multiple importance sampling** against the BSDF-sampled bounce ray.
 /// The environment pairs with that ray escaping, a light with it crossing that light, which is analytic and so is intersected
 /// rather than traced.

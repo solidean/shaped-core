@@ -810,13 +810,14 @@ sv::raster_draw                                      // { u32 instance, triangle
 sv::raster_gbuffer                                   // { color rgba32f; normal, albedo, specular_albedo rgba16f; depth r32f; roughness r16f; motion rg32f; primary_depth r32f }
                                                      //   the layer's slots, every one render_target-capable; THE seam a hybrid lighting pass reads
 sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block
-sv::pt_light_table::grouped(span<light_record>)         // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
+sv::pt_light_table::grouped(span<light_record>, sel) // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
+                                                   //   sel = light_selection::power (default) writes each record's select_pdf/select_cdf; ::uniform writes 0s
 table.describe_in(fc)                                // writes light_count + the per-path table into the frame block, so the two cannot disagree
 
 sv::shader_package()                                 // the one SGL package: tracer + module tracer, layout and depth fill; sv's default library adds it
 ```
 
-[`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward one light, picked uniformly, and the SH environment.
+[`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward one light, picked in proportion to its power, and the SH environment.
 Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
 What a caller supplies is a view.

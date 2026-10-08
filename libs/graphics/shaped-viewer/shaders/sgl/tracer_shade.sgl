@@ -46,7 +46,8 @@ fun visible(s: light_sample){traced} -> bool:
 
 /// Direct light from one of the trace's lights, with the BSDF folded in and weighted against the BSDF sampler.
 ///
-/// One light is picked uniformly and its choice is part of the density, which keeps one shadow ray per hit an unbiased estimate of every light at once.
+/// One light is picked, in proportion to its power or uniformly where the table carries no probabilities, and its choice is part of the density.
+/// That keeps one shadow ray per hit an unbiased estimate of every light at once.
 /// A point or a parallel light is a delta no sampled ray can reach, so it takes no weighting and is divided by the probability of picking it alone.
 /// A rect and a disc are reachable by the raygen's continuation ray too, and weight against it.
 fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced}:
@@ -64,7 +65,7 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
     let mut index = 0u
     if count != 1u:
         let u = pt.rand(mut rng)
-        index = min((u * (count as float)) as uint, count - 1u)
+        index = pick_light(u, count)
     let l = scene.light(..traced.lights[index as int])
 
     // Filled per path: where the shadow ray goes and how far, what arrives along it before the BSDF, and the density of that direction.
@@ -100,13 +101,13 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
 
         shadow_dist = dist - 2e-3
         incoming = l.emission * (scene.light_cone(l, dot(l.normal, -wi)) / dist2)
-        pdf = pt.light_select_pdf(count)
+        pdf = pt.light_select_pdf(l, count)
         delta = true
     else if l.path == scene.light_path_distant_point:
         wi = -l.normal
         shadow_dist = 1e20
         incoming = l.emission
-        pdf = pt.light_select_pdf(count)
+        pdf = pt.light_select_pdf(l, count)
         delta = true
     else:
         // scene.light_path_distant_disc
@@ -146,6 +147,20 @@ fun estimate_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p:
     let arrives = visible(s)
     out_diffuse = if arrives => s.diffuse else float3(0.0)
     out_specular = if arrives => s.specular else float3(0.0)
+
+/// The light next-event estimation picks with the uniform `u`, among the `count` the table holds.
+/// It searches the table's cumulative probabilities, which favor the powerful lights, and picks uniformly where the table carries none.
+fun pick_light(u: float, count: uint){traced} -> uint:
+    if traced.lights[(count - 1u) as int].select_cdf <= 0.0 => return min((u * (count as float)) as uint, count - 1u)
+    let mut lo = 0u
+    let mut hi = count - 1u
+    while lo < hi:
+        let mid = (lo + hi) / 2u
+        if u < traced.lights[mid as int].select_cdf:
+            hi = mid
+        else:
+            lo = mid + 1u
+    return lo
 
 /// `estimate_environment` without its visibility test.
 fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced} -> light_sample:

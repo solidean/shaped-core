@@ -128,7 +128,8 @@ A cone is stored as the scale and offset of glTF's falloff, which an unshaped li
 The flatten groups them by path with `pt_light_table` — a counting sort over the walk it does anyway — and the frame block carries the count and each path's offset and length.
 A loop over one path's run, like the bounce ray testing every area light, then runs in one branch.
 
-Next-event estimation picks one light uniformly, and the `1/N` of that pick is inside `pt.light_pdf`, and `pt.disc_pdf` for a sun.
+Next-event estimation picks one light with the probability its record carries, `select_pdf`, which `pt_light_table::grouped` writes.
+That probability is inside `pt.light_pdf`, and `pt.disc_pdf` for a sun.
 That density is the one thing both estimators share, since the next-event sample and the bounce ray reaching a light weight against each other.
 A density they disagree about makes the image wrong rather than noisy.
 With exactly one light no pick is drawn, so a one-light scene keeps the sample sequence it always had.
@@ -170,6 +171,12 @@ A layer with no lights of its own is traced under `layer::fallback_light`, a sun
    `visible_to_camera`, off by default and only for a light with an extent, and `casts_shadows`, on by default.
    A light that casts no shadow is ignored by geometry on both sides of the weighting, or the two would disagree about what they integrate.
    A light-linking mask is reserved in both GPU records, light and instance, all ones and read by nothing.
+7. **Power-weighted selection.** Landed, in both tracers.
+   `pt_light_table::grouped` writes each record's `select_pdf` and the running `select_cdf`, and next-event estimation picks by a binary search over them.
+   Local lights are weighed by power and distant ones by irradiance, which do not compare, so the two kinds share the choice half and half where both have light.
+   Every weight is floored at a thousandth of its kind's mean, so no light the multiple-importance weights count on is impossible to pick.
+   A table of `light_selection::uniform` writes both 0, which the tracer reads as every light alike.
+   A record no table wrote says the same.
 
 ## Designed, not landed
 
@@ -177,7 +184,7 @@ A layer with no lights of its own is traced under `layer::fallback_light`, a sun
 - Tube and box emitters.
 - Gobos and IES profiles, as further shaping kinds.
   When a two-dimensional texture sampler is built, it is built once for the environment map and shared.
-- Power-weighted light selection, and the point at which emitters should move into the acceleration structure.
+- The point at which emitters should move into the acceleration structure.
 - **An HDR sky, and the sun inside it.** A captured map carries its own sun, while "a sun is always a light" says the sky holds none.
   Two rules fit, and which one is decided when the HDR sky lands:
   - the sun is extracted into a `distant_disc` light and clipped out of the map, keeping the rule as it stands;

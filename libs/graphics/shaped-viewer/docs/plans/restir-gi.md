@@ -713,10 +713,11 @@ A fixed 16 pixels would reach across half of the test's 32x32 image and keep one
 
 ### DI track
 
-**Phase D0: power-weighted light selection**, in both tracers, for every mode.
+**Phase D0: power-weighted light selection**, in both tracers, for every mode — built; [lights.md](../lights.md#landing-order) describes it.
 
-- **Unbiased**: the `lights` scene converges to the same image as with uniform selection.
-- **Better**: a scene of lights of unequal power, equal samples, lower error than uniform.
+- **Unbiased and better**, measured on the Cornell box with a second light eight times dimmer: by power, the mean within 1% of uniform selection's, in both tracers.
+  Per-frame error against a long uniform reference on other seeds falls from 0.437 to 0.352, 1.24x.
+- The `lights` scene's comparison is owed.
 
 **Phase D1: ReSTIR DI at the visible point**, beside GI phase G1, on the foundation.
 

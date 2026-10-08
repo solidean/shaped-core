@@ -253,7 +253,8 @@ struct layout_pipeline_key;
 // rendering
 struct material_permutation; // one permutation generated + compiled (resources/material_shader_cache.hh)
 class material_shader_cache;
-struct pt_light_table; // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
+struct pt_light_table;           // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
+enum class light_selection : u8; // how next-event estimation picks among a table's lights (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
 class pathtrace_routine;
 struct wavefront_state;          // the wavefront tracer's path state for one view (rendering/traced_group.hh)

@@ -5,6 +5,7 @@
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/bit.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <sgl_modules/slug.hh>
@@ -222,7 +223,108 @@ shaders::tracer::frame_constants default_frame_constants()
     return fc;
 }
 
-pt_light_table pt_light_table::grouped(cc::span<shaders::tracer::light_record const> lights)
+namespace
+{
+/// The float right after `x`, which must be finite and not negative.
+[[nodiscard]] f32 next_float_up(f32 x)
+{
+    return cc::bit_cast<f32>(cc::bit_cast<u32>(x) + 1u);
+}
+
+/// The float right before `x`, which must be finite and positive.
+[[nodiscard]] f32 next_float_down(f32 x)
+{
+    return cc::bit_cast<f32>(cc::bit_cast<u32>(x) - 1u);
+}
+
+/// The luminance of a linear color.
+[[nodiscard]] f32 luminance_of(tg::vec3f c)
+{
+    return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+}
+
+/// What a light offers next-event estimation, before it is normalized against the others of its kind.
+/// A local light's power, its shaping ignored, which only overweighs a narrow spot; a distant light's irradiance, since it has no finite power.
+[[nodiscard]] f32 selection_weight_of(shaders::tracer::light_record const& l)
+{
+    auto const lum = cc::max(luminance_of(l.emission), 0.0f);
+    switch (light_path(l.path))
+    {
+    case light_path::point:
+        return lum * 4.0f * tg::pi<f32>;
+    case light_path::area:
+        return lum * l.area * tg::pi<f32> * ((l.flags & light_flag_two_sided) != 0 ? 2.0f : 1.0f);
+    case light_path::distant_point:
+        return lum;
+    case light_path::distant_disc:
+        return lum * 2.0f * tg::pi<f32> * l.one_minus_cos_angular_radius;
+    }
+    return 0.0f;
+}
+
+/// Writes each record's selection probability and the running sum of them, the last of which is 1.
+/// Local and distant lights are normalized apart and share the choice half and half where both exist, since their weights do not compare.
+/// Every weight is floored at a thousandth of its kind's mean, so no light is impossible to pick while its record says it may be.
+void weigh_by_power(cc::span<shaders::tracer::light_record> records)
+{
+    if (records.empty())
+        return;
+    auto const is_distant = [](shaders::tracer::light_record const& l)
+    { return light_path(l.path) == light_path::distant_point || light_path(l.path) == light_path::distant_disc; };
+
+    auto raw_total = cc::fixed_array<f64, 2>{0.0, 0.0};
+    auto count = cc::fixed_array<i32, 2>{0, 0};
+    for (auto const& l : records)
+    {
+        auto const kind = is_distant(l) ? 1 : 0;
+        raw_total[kind] += f64(selection_weight_of(l));
+        ++count[kind];
+    }
+    auto min_weight = cc::fixed_array<f64, 2>{1.0, 1.0};
+    for (auto k = 0; k < 2; ++k)
+        if (count[k] > 0 && raw_total[k] > 0.0)
+            min_weight[k] = 1e-3 * raw_total[k] / f64(count[k]);
+    auto const weight = [&](shaders::tracer::light_record const& l)
+    {
+        auto const kind = is_distant(l) ? 1 : 0;
+        return cc::max(f64(selection_weight_of(l)), min_weight[kind]);
+    };
+    auto total = cc::fixed_array<f64, 2>{0.0, 0.0};
+    for (auto const& l : records)
+        total[is_distant(l) ? 1 : 0] += weight(l);
+
+    // A kind takes half the choice only where it has light to offer and the other kind has too.
+    auto const local_lit = count[0] > 0 && raw_total[0] > 0.0;
+    auto const distant_lit = count[1] > 0 && raw_total[1] > 0.0;
+    auto const unlit_share = count[0] == 0 ? 0.0 : (count[1] == 0 ? 1.0 : 0.5);
+    auto const local_share = local_lit ? (distant_lit ? 0.5 : 1.0) : (distant_lit ? 0.0 : unlit_share);
+    auto const share = cc::fixed_array<f64, 2>{local_share, 1.0 - local_share};
+
+    // The search picks a light with the width of its interval between two f32 cdfs, so that width is the pdf it is given.
+    // Every interval is kept open by at least one float step, and the last cdf is exactly 1, among any number of lights.
+    auto running = 0.0;
+    auto previous = 0.0f;
+    for (auto& l : records)
+    {
+        auto const kind = is_distant(l) ? 1 : 0;
+        running += share[kind] * weight(l) / total[kind];
+        auto const cdf = cc::min(f32(running), 1.0f);
+        l.select_cdf = cdf > previous ? cdf : next_float_up(previous);
+        previous = l.select_cdf;
+    }
+    records.back().select_cdf = 1.0f;
+    for (auto i = records.size() - 2; i >= 0; --i)
+        records[i].select_cdf = cc::min(records[i].select_cdf, next_float_down(records[i + 1].select_cdf));
+    previous = 0.0f;
+    for (auto& l : records)
+    {
+        l.select_pdf = l.select_cdf - previous;
+        previous = l.select_cdf;
+    }
+}
+} // namespace
+
+pt_light_table pt_light_table::grouped(cc::span<shaders::tracer::light_record const> lights, light_selection selection)
 {
     auto out = pt_light_table{};
     for (auto const& l : lights)
@@ -239,6 +341,20 @@ pt_light_table pt_light_table::grouped(cc::span<shaders::tracer::light_record co
     auto next = cc::fixed_array<u32, 4>{out.path_offset[0], out.path_offset[1], out.path_offset[2], out.path_offset[3]};
     for (auto const& l : lights)
         out.records[next[l.path]++] = l;
+
+    if (selection == light_selection::power)
+    {
+        weigh_by_power(out.records);
+    }
+    else
+    {
+        // Written whatever the records carried in, since a record copied out of a power-weighted table would keep its own.
+        for (auto& l : out.records)
+        {
+            l.select_pdf = 0.0f;
+            l.select_cdf = 0.0f;
+        }
+    }
     return out;
 }
 

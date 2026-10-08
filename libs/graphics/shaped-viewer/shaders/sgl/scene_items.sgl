@@ -45,7 +45,10 @@ struct light:
     one_minus_cos_angular_radius: float
     /// RESERVED for light linking, read by nothing yet
     link_mask: uint
-    pad0: float2
+    /// The probability next-event estimation picks this light, and the cumulative one up to and including it in the table's order.
+    /// `sv::pt_light_table::grouped` writes them, in proportion to power; 0 in both is a table that picks uniformly.
+    select_pdf: float
+    select_cdf: float
 
 /// Whether geometry between `l` and a surface blocks it.
 fun light_casts_shadows(l: light) -> bool:

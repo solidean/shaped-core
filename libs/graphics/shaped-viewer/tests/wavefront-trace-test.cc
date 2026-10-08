@@ -297,6 +297,8 @@ struct restir_reuse
     /// Whether each frame also resamples with a few neighbors' reservoirs, and from how far, 0 for the image's own radius.
     bool spatial = false;
     i32 radius = 0;
+    /// Which run of seeds the frames draw, so a reference run shares none of the frames measured against it.
+    u32 seeds = 0;
 };
 
 /// Traces `frames` drained frames of the Cornell box, each keeping ReSTIR's records, and reads back what the re-shade made of each.
@@ -333,7 +335,7 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
             .lights = sv_test::upload_lights(*cmd, scene.lights),
             .hit_groups = scene.hit_groups,
             .bindless = &bindless};
-        auto fc = frame_of(scene, u32(f) * 7u + 3u, 0u, 1);
+        auto fc = frame_of(scene, u32(f) * 7u + 3u + reuse.seeds * 100003u, 0u, 1);
         auto camera = scene.camera;
         camera.position[0] += reuse.pan * f64(f % 2);
         auto previous = scene.camera;
@@ -1199,6 +1201,111 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's spatial reuse keeps the b
     CC_LOG_INFO("ReSTIR G2 on the box: means {} exact, {} at 12 pixels, {} default, {} plain; "
                 "indirect per-frame error {} both, {} temporal alone, {} neighbors alone, {} plain",
                 spatial_mean, far_mean, fast_mean, plain_mean, spatial_error, temporal_error, alone_error, plain_error);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// ReSTIR's DI track, phase D0: next-event estimation picks a light in proportion to its power, in both tracers.
+// The box gets a second ceiling light eight times dimmer than its own, which uniform selection gives half of every sample.
+// Picking by power leaves the image's mean where uniform selection, the known-good estimator, puts it, and brings each frame closer to it.
+// The megakernel picks through the same function and weighs a light it hits through its own, so its mean is pinned too.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the image and cuts its noise",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const base = make_scene(resources);
+
+    auto const& lamp = base.box.light;
+    auto records = cc::vector<sv::shaders::tracer::light_record>();
+    records.push_back(base.lights.records[0]);
+    records.push_back({.position = lamp.center + tg::vec3f(0, 0, 0.5f),
+                       .path = u32(sv::light_path::area),
+                       .u = tg::vec3f(lamp.half_x, 0, 0),
+                       .area = 4.0f * lamp.half_x * lamp.half_z,
+                       .v = tg::vec3f(0, 0, lamp.half_z),
+                       .emission = lamp.emission * 0.125f,
+                       .normal = tg::vec3f(0, -1, 0),
+                       .cone_offset = 1,
+                       .link_mask = ~0u});
+    auto uniform = base;
+    uniform.lights = sv::pt_light_table::grouped(records, sv::light_selection::uniform);
+    auto powered = base;
+    powered.lights = sv::pt_light_table::grouped(records, sv::light_selection::power);
+
+    constexpr int frames = 48;
+    auto const reference = co_await run_restir(ctx, resources, uniform, 4 * frames, {.history = false, .seeds = 1});
+    auto const by_uniform = co_await run_restir(ctx, resources, uniform, frames, {.history = false});
+    auto const by_power = co_await run_restir(ctx, resources, powered, frames, {.history = false});
+
+    // The lamp's jittered edge makes the image mean noisier than its pixel count suggests, so the bound is the other tests' 3%.
+    auto const reference_mean = mean_luminance_of(reference.mean);
+    auto const uniform_mean = mean_luminance_of(by_uniform.mean);
+    auto const power_mean = mean_luminance_of(by_power.mean);
+    CHECK(tg::abs(uniform_mean - reference_mean) < 0.03f * reference_mean)
+        .context(cc::format("uniform: {} against {}", uniform_mean, reference_mean));
+    CHECK(tg::abs(power_mean - reference_mean) < 0.03f * reference_mean)
+        .context(cc::format("by power: {} against {}", power_mean, reference_mean));
+
+    auto uniform_error = 0.0f;
+    auto power_error = 0.0f;
+    for (auto f = 0; f < frames; ++f)
+    {
+        uniform_error += rms_error(by_uniform.frames[f], reference.mean) / f32(frames);
+        power_error += rms_error(by_power.frames[f], reference.mean) / f32(frames);
+    }
+    CHECK(power_error < uniform_error)
+        .context(cc::format("per-frame error: {} by power, {} uniform", power_error, uniform_error));
+
+    // The megakernel, 16 frames of 8 samples each way.
+    auto const megakernel_mean = [&](cornell_scene const& scene) -> cc::shared_async<f32>
+    {
+        auto const target = make_target(ctx);
+        auto const background = sv::background_gpu::from(sv::background{});
+        auto const image = co_await trace_frames(
+            ctx, target, 16,
+            [&](sg::command_list& cmd, int f)
+            {
+                auto instance_records = cc::vector<sv::shaders::tracer::instance_record>();
+                instance_records.push_back(resources.describe_instance(cmd, scene.item.mesh, scene.item.instance));
+                sv::place_instance_record(instance_records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+                auto const fc = frame_of(scene, u32(f) + 1u, u32(f), 8);
+                auto const bindless = resources.freeze();
+                return sv::pathtrace_routine::execute(
+                    cmd, {.frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer),
+                          .background
+                          = ctx.transient.create_buffer_from_pod(cmd, background, sg::buffer_usage::readonly_buffer),
+                          .instances = scene.instances,
+                          .output = target,
+                          .instance_table = ctx.transient.create_buffer_from_data(cmd, instance_records,
+                                                                                  sg::buffer_usage::readonly_buffer),
+                          .lights = sv_test::upload_lights(cmd, scene.lights),
+                          .hit_groups = scene.hit_groups,
+                          .bindless = &bindless});
+            });
+        co_return mean_luminance_of(image);
+    };
+    auto const mk_uniform = co_await megakernel_mean(uniform);
+    auto const mk_power = co_await megakernel_mean(powered);
+    CHECK(tg::abs(mk_power - mk_uniform) < 0.03f * mk_uniform)
+        .context(cc::format("megakernel: {} by power, {} uniform", mk_power, mk_uniform));
+    CC_LOG_INFO("D0 on the box with a dim second light: means {} by power, {} uniform, {} reference; "
+                "per-frame error {} by power, {} uniform; megakernel {} by power, {} uniform",
+                power_mean, uniform_mean, reference_mean, power_error, uniform_error, mk_power, mk_uniform);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
