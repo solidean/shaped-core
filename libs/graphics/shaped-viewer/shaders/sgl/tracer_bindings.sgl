@@ -542,6 +542,9 @@ struct surface_payload:
     bsdf_pdf: float
     /// below 0 where the ray escaped
     hit_t: float
+    /// 1 where `direction` lies above the shading frame's horizon, the only directions next-event estimation samples.
+    /// Where it is 0, a light or the sky the continuation reaches is the BSDF's alone, at full weight.
+    nee_reachable: uint
 
 /// The wavefront's indirect-dispatch arguments, a group of their own: a dispatch may not read its counts from a buffer it binds writable.
 /// Only the small kernels that turn counts into arguments list it — `dispatch_*` name its records.
@@ -574,7 +577,7 @@ rays path_rays:
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
 fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0)
+    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:

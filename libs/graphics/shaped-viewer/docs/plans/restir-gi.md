@@ -248,7 +248,8 @@ What changes is what the path remembers:
   With reuse off, finalize adds `T_1 · L_i` to the direct light, which is today's estimator with a different roulette.
 - **The direct light at `x_v` keeps a sum of its own.**
   The next-event sample at bounce 0, and the analytic light or environment the bounce-0 ray reaches with its MIS weight, go there.
-  So `L_i` is exactly the light reflected at `x_s` and beyond; surface emission adds nothing at `x_s`, since sv counts it for camera rays only.
+  So for a candidate `L_i` is exactly the light reflected at `x_s` and beyond; surface emission adds nothing at `x_s`, since sv counts it for camera rays only.
+  A bounce-0 ray that transmitted makes no candidate, so what it reaches joins `L_i` and finalize folds it back into the direct light.
 - **Shade at bounce 1 writes the candidate's geometry**: `x_s`, its geometric normal, and whether `x_s` is reconnectable.
 - **Finalize completes the candidate** with `L_i` when the path ends.
 
@@ -656,7 +657,8 @@ The other young still frames wait for the camera-stop fix.
 The view turns the history off after a scene change or a camera cut, on both of a slot's path states, the full-size and the scaled one.
 A visible point inside a medium, or on a material that collapses onto one wavelength, neither gives nor takes a history: its material decides, never a draw.
 A pixel whose path is left unfinished starts over at confidence 0, which costs reuse but no bias.
-The records are unpacked floats for now: ~376 bytes per traced pixel with both halves, ~780 MB at 1080p; packing them as planned is open.
+The records are unpacked floats for now: ~376 bytes per traced pixel with both halves, ~780 MB at 1080p.
+Packing them is decided, and is the next step after D1.
 History is reprojected through the frame's `previous_camera`, and reused only where that is the camera the records were kept under, `wavefront_state::restir_camera`.
 Frames between, of the megakernel or on the other path state, may have moved the camera, and then the history is not reused.
 So the full-size state, whose last ReSTIR frame was the previous stop's, starts each stop afresh.
@@ -764,6 +766,8 @@ Every kind of light at once — rects, a two-sided one, a coned point, a sun and
 - **ReSTIR PT.** The unbiased, all-transport answer, and several times the work and cost of ReSTIR GI; decision 4 does not plan it.
 
 ## Open questions
+
+Questions 1 and 2 shape the camera-stop fix, and are decided with the maintainer before that fix starts, not on the way.
 
 1. **The step that remains at the stop**: seed the full-size denoiser history from the last upscaled output, an sr extension, or keep the scaled stream through the hand-off?
    Phase G1 measures the step first.

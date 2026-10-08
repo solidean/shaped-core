@@ -20,8 +20,8 @@ use slug
 const path_flag_alive = 1u
 /// the path's next segment is its camera ray, whose hit the guides describe
 const path_flag_primary = 2u
-/// the vertex the segment left ran next-event estimation, which a surface hit does and a medium scatter does not
-const path_flag_prev_did_nee = 4u
+/// next-event estimation at the vertex the segment left could have sampled its direction: a surface's upper hemisphere, never a medium scatter's
+const path_flag_prev_nee_reachable = 4u
 /// the path belongs to the specular signal, decided by the lobe its first continuation was drawn from
 const path_flag_specular = 8u
 /// ReSTIR split the path at its visible point: its own light is `L_i`, and its `restir_candidate` holds the rest.
@@ -272,7 +272,7 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
 
     let s = slot as int
     traced.path_rays[s] = path_ray(cam.position, dir)
-    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_did_nee, 0u, 0u, f.generation, jitter, 0u)
+    traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_nee_reachable, 0u, 0u, f.generation, jitter, 0u)
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
     if restir_on():
@@ -367,7 +367,7 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
     let b = st.bounce
     let primary = (st.flags & path_flag_primary) != 0u
     let path_is_specular = (st.flags & path_flag_specular) != 0u
-    let prev_did_nee = (st.flags & path_flag_prev_did_nee) != 0u
+    let prev_nee_reachable = (st.flags & path_flag_prev_nee_reachable) != 0u
 
     // The primary segment reprojects, hit or miss; an escape is a point at infinity, so the sky moves with rotation alone.
     if primary:
@@ -429,7 +429,7 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
             let u_phase_2 = pt.rand(mut rng)
             let scattered = pt.sample_hg(dir, md.g, u_phase_1, u_phase_2)
             st.prev_pdf = pt.hg_phase(dot(dir, scattered), md.g)
-            st.flags = (st.flags & ~path_flag_prev_did_nee) & ~path_flag_primary
+            st.flags = (st.flags & ~path_flag_prev_nee_reachable) & ~path_flag_primary
             dir = scattered
             st.scatters += 1u
 
@@ -476,7 +476,7 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
                     light.radiance += throughput * arriving
                     lit = true
             else if in_front or not scene.light_casts_shadows(l):
-                let w = if prev_did_nee => pt.mis_weight(st.prev_pdf, pt.light_pdf(l, f.light_count, t_light * t_light, cos_light)) else 1.0
+                let w = if prev_nee_reachable => pt.mis_weight(st.prev_pdf, pt.light_pdf(l, f.light_count, t_light * t_light, cos_light)) else 1.0
                 let c = throughput * arriving * w
                 light.radiance += c
                 lit = true
@@ -492,7 +492,7 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
                     light.radiance += throughput * l.emission
                     lit = true
             else if hit_t < 0.0 or not scene.light_casts_shadows(l):
-                let w = if prev_did_nee => pt.mis_weight(st.prev_pdf, pt.disc_pdf(l, f.light_count)) else 1.0
+                let w = if prev_nee_reachable => pt.mis_weight(st.prev_pdf, pt.disc_pdf(l, f.light_count)) else 1.0
                 let c = throughput * l.emission * w
                 light.radiance += c
                 lit = true
@@ -501,15 +501,17 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
     if hit_t < 0.0 and not (ended or escaped_inside):
         // Escaped to the SH environment: the primary ray sees it at full weight, a bounce ray as the BSDF strategy of the hit's own estimate.
         let emission = scene.background_radiance(background_sh(), normalize(dir))
-        let w = if b == 0u => 1.0 else pt.mis_weight(st.prev_pdf, pt.env_pdf())
+        // The environment's sample reaches only the shading frame's upper hemisphere, and a medium scatter takes none.
+        let w = if b == 0u or not prev_nee_reachable => 1.0 else pt.mis_weight(st.prev_pdf, pt.env_pdf())
         let c = throughput * emission * w
         light.radiance += c
         lit = true
         if path_is_specular and b > 0u => light.specular += c
 
     // The segment leaving ReSTIR's visible point: what it reaches directly is x_v's direct light, at the factor the path was rebased by.
-    // A surface it meets through vacuum is the candidate's `x_s`; a segment after a scatter on the way is part of `L_i` instead.
-    if (st.flags & path_flag_split) != 0u and b == 1u and prev_did_nee:
+    // A surface it meets through vacuum is the candidate's `x_s`.
+    // A segment after a scatter, or one that left x_v by transmission, is part of `L_i` instead, and finalize folds it back into `direct`.
+    if (st.flags & path_flag_split) != 0u and b == 1u and prev_nee_reachable:
         let mut cand = traced.restir_candidates[s]
         cand.direct += cand.rebase * (light.radiance - before.radiance)
         cand.direct_specular += cand.rebase * (light.specular - before.specular)
@@ -723,7 +725,11 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
             let vacuum = all(md.sigma_t <= float3(0.0)) and all(p.medium_sigma_t <= float3(0.0)) and p.channel >= 3u
             if reflected and vacuum => cand.flags = cand.flags | restir_flag_reflected
         st.prev_pdf = p.bsdf_pdf
-        st.flags = st.flags | path_flag_prev_did_nee
+        // The next segment's light hits weigh against next-event estimation only where it could have sampled this direction.
+        if p.nee_reachable != 0u:
+            st.flags = st.flags | path_flag_prev_nee_reachable
+        else:
+            st.flags = st.flags & ~path_flag_prev_nee_reachable
         st.bounce = b + 1u
 
         // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.

@@ -74,8 +74,9 @@ rays path_rays:
         // pdf of the direction the last hit sampled, for the escaped-environment MIS
         let mut prev_pdf = 0.0
 
-        // Whether the vertex this segment left ran next-event estimation, which a surface hit does and a medium scatter does not.
-        let mut prev_did_nee = true
+        // Whether next-event estimation at the vertex this segment left could have sampled its direction.
+        // A surface's upper hemisphere it could; a transmission or a medium scatter it could not.
+        let mut prev_nee_reachable = true
 
         // What the next segment travels through: vacuum until the path refracts into a solid.
         let mut medium_sigma_t = float3(0.0)
@@ -113,6 +114,7 @@ rays path_rays:
             let next_dir = p.direction
             let n = p.normal
             let pdf = p.bsdf_pdf
+            let reachable = p.nee_reachable != 0u
             let albedo = p.albedo
             let specular_albedo = p.specular_albedo
             let roughness = p.roughness
@@ -195,7 +197,7 @@ rays path_rays:
 
                     // The density at the direction ACTUALLY drawn, which a light's other strategy has to be balanced against.
                     prev_pdf = pt.hg_phase(dot(dir, scattered), medium_g)
-                    prev_did_nee = false
+                    prev_nee_reachable = false
                     dir = scattered
 
                     scatters += 1
@@ -244,7 +246,7 @@ rays path_rays:
                         // Seen directly, so it describes no bounce and goes to the diffuse signal.
                         if in_front and scene.light_visible_to_camera(l) => radiance += throughput * arriving
                     else if in_front or not scene.light_casts_shadows(l):
-                        let w = if prev_did_nee => pt.mis_weight(prev_pdf, pt.light_pdf(l, f.light_count, t_light * t_light, cos_light)) else 1.0
+                        let w = if prev_nee_reachable => pt.mis_weight(prev_pdf, pt.light_pdf(l, f.light_count, t_light * t_light, cos_light)) else 1.0
                         let c = throughput * arriving * w
                         radiance += c
                         if path_is_specular => radiance_specular += c
@@ -260,7 +262,7 @@ rays path_rays:
                     if b == 0:
                         if hit_t < 0.0 and scene.light_visible_to_camera(l) => radiance += throughput * l.emission
                     else if hit_t < 0.0 or not scene.light_casts_shadows(l):
-                        let w = if prev_did_nee => pt.mis_weight(prev_pdf, pt.disc_pdf(l, f.light_count)) else 1.0
+                        let w = if prev_nee_reachable => pt.mis_weight(prev_pdf, pt.disc_pdf(l, f.light_count)) else 1.0
                         let c = throughput * l.emission * w
                         radiance += c
                         if path_is_specular => radiance_specular += c
@@ -270,7 +272,8 @@ rays path_rays:
 
                 // Escaped to the SH environment, whose radiance the miss wrote back in `emission`.
                 // The primary ray sees the sky at full weight; a bounce ray is the BSDF strategy of the hit's own environment estimate.
-                let w = if b == 0 => 1.0 else pt.mis_weight(prev_pdf, pt.env_pdf())
+                // The environment's sample reaches only the shading frame's upper hemisphere, and a medium scatter takes none.
+                let w = if b == 0 or not prev_nee_reachable => 1.0 else pt.mis_weight(prev_pdf, pt.env_pdf())
                 let c = throughput * emission * w
                 radiance += c
 
@@ -293,7 +296,8 @@ rays path_rays:
 
             throughput *= weight
             prev_pdf = pdf
-            prev_did_nee = true
+            // A light the continuation reaches weighs against next-event estimation only where it could have sampled there.
+            prev_nee_reachable = reachable
 
             // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
             let side = if dot(next_dir, n) < 0.0 => -1e-3 else 1e-3
@@ -389,6 +393,7 @@ fun component_of(v: float3, i: uint) -> float:
     p.lobe = openpbr.bsdf_lobe_diffuse
     p.bsdf_pdf = 0.0
     p.hit_t = -1.0
+    p.nee_reachable = 0u
 
 /// The shadow ray's miss: reached only when nothing occluded the ray, so it marks it visible.
 @miss fun shadow_miss(p: mut tracer.shadow_payload){tracer.traced, tracer.bindless}:

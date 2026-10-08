@@ -349,9 +349,6 @@ importance-samples the continuation — so what is left is coverage of the model
   That is what makes a caustic converge slowly and a glass interior noisy.
   The fix is a shadow ray that accumulates transmittance instead of stopping at the first hit, which needs the any-hit to
   serve two purposes or a second traversal.
-  Meanwhile a lamp seen through glass loses energy in both tracers.
-  A continuation that transmits and then reaches a rect or a disc takes `mis(prev_pdf, light_pdf)` below 1, yet next-event estimation never samples there.
-  The hit should weigh 1: the path has to remember whether its continuation could have been a light sample, in the shading frame next-event estimation uses.
 - **The interface's two halves share one Fresnel now**, which they did not.
   The reflection used Schlick through `spec_f0` while the refraction used the exact dielectric relation, so they did not
   sum to 1 — invisible at the indices real glass has, where the two agree closely, and worth 12% of the light at an index

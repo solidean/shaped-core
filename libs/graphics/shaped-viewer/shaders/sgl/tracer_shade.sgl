@@ -316,6 +316,7 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
         payload.direction = float3(0.0)
         payload.lobe = openpbr.bsdf_lobe_diffuse
         payload.bsdf_pdf = 0.0
+        payload.nee_reachable = 0u
         payload.rng = rng
         payload.medium_sigma_t = in_sigma_t
         payload.medium_albedo = in_albedo
@@ -345,6 +346,7 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
         payload.throughput = weight
         payload.direction = openpbr.to_world(f, s.direction)
         payload.bsdf_pdf = s.pdf
+        payload.nee_reachable = if s.direction.z > 0.0 => 1u else 0u
         payload.lobe = s.lobe
         payload.channel = channel
 
@@ -372,6 +374,7 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
         // nothing continues, so the classification is never read
         payload.lobe = openpbr.bsdf_lobe_diffuse
         payload.bsdf_pdf = 0.0
+        payload.nee_reachable = 0u
         payload.medium_sigma_t = in_sigma_t
         payload.medium_albedo = in_albedo
         payload.medium_g = in_g

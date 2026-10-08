@@ -823,7 +823,7 @@ That is why it converges at far fewer `samples_per_pixel` than a naive path trac
 What a caller supplies is a view.
 The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `traced.lights`, and writes its table into the frame constants.
 Every path is traced; a point or a parallel light is a delta and has next-event estimation alone (docs/lights.md).
-The pick probability `1/N` is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced whatever N is.
+The pick probability, by power (`light_record::select_pdf`), is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced however the lights are picked.
 A layer with no lights falls back to `layer::fallback_light` — `sv::default_fallback_light()`, a sun — which `scene.fallback_light(cc::nullopt)` turns off.
 
 **Denoising.** A layer with `render_settings::reconstruct` on is denoised right after its trace, and its parent samples the result.

@@ -1522,9 +1522,25 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         cc::string_view name;
         cc::vector<binding> bindings;
         bool lossless = true;
+        /// a lossy case's lower bound, where it has one, which then replaces the absorption checks
+        f32 at_least = 0.0f;
     };
     auto cases = cc::vector<furnace_case>();
     cases.push_back({.name = "clear interior", .bindings = base()});
+    {
+        // Rough glass sends the sky through transmitted directions next-event estimation never samples, so they weigh 1.
+        // Weighed against next-event estimation it measures ~0.386; the bound sits between that and the ~0.420 it measures now.
+        // The rest of the loss is the rough transmission's uncompensated single-scattering GGX.
+        // Once that is compensated, this case is lossless and belongs with the others.
+        auto rough = cc::vector<binding>();
+        rough.push_back(binding::of("specular_ior", 1.5f));
+        rough.push_back(binding::of("specular_roughness", 0.5f));
+        rough.push_back(binding::of("transmission_weight", 1.0f));
+        cases.push_back({.name = "rough glass interior",
+                         .bindings = cc::move(rough),
+                         .lossless = false,
+                         .at_least = 0.81f * luminance_of(environment)});
+    }
     {
         auto glass = cc::vector<binding>();
         glass.push_back(binding::of("specular_ior", 1.5f));
@@ -1568,6 +1584,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         mean /= f32(pixels.size());
         if (c.lossless)
             CHECK(tg::abs(mean - expected) <= 0.06f * expected).context(c.name).dump("mean luminance", mean);
+        else if (c.at_least > 0.0f)
+            CHECK(mean > c.at_least).context(c.name).dump("mean luminance", mean);
         else
         {
             CHECK(mean < expected * 0.9f).context(c.name).dump("mean luminance", mean);

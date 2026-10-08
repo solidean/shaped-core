@@ -216,6 +216,7 @@ struct sv::pt_trace_desc
 /// **Both are gathered by balance-heuristic multiple importance sampling** against the BSDF-sampled bounce ray.
 /// The environment pairs with that ray escaping, a light with it crossing that light, which is analytic and so is intersected
 /// rather than traced.
+/// A bounce ray next-event estimation could not have drawn, one that transmitted or left a medium scatter, takes the full weight.
 /// The light half is what keeps a near-smooth surface usable: light sampling alone has to carry the whole GGX peak there.
 /// `samples_per_pixel` paths per pixel accumulate in one dispatch.
 /// `execute` may build a pipeline, so it takes the exclusive acquire — two traces on one context serialize on this routine.
