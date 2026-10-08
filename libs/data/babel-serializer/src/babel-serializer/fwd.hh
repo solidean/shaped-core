@@ -159,6 +159,12 @@ struct data;
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::pfm
 
+namespace babel::bcn
+{
+struct rgba8_block;
+struct rgba32f_block;
+} // namespace babel::bcn
+
 namespace babel::image
 {
 enum class format : u8;

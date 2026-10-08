@@ -12,6 +12,7 @@ add_library(babel-serializer
     src/babel-serializer/geometry/obj.cc
     src/babel-serializer/geometry/stl.cc
 
+    src/babel-serializer/image/bcn.cc
     src/babel-serializer/image/hdr.cc
     src/babel-serializer/image/image.cc
     src/babel-serializer/image/jpg.cc
@@ -43,6 +44,7 @@ target_sources(babel-serializer
     src/babel-serializer/geometry/stl.hh
 
     # image/impl/*.hh is internal (the libspng and stb backend seams) — deliberately NOT in the public FILE_SET.
+    src/babel-serializer/image/bcn.hh
     src/babel-serializer/image/hdr.hh
     src/babel-serializer/image/image.hh
     src/babel-serializer/image/jpg.hh
@@ -110,6 +112,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/obj-test.cc
         tests/geometry/stl-test.cc
 
+        tests/image/bcn-test.cc
         tests/image/hdr-test.cc
         tests/image/image-test.cc
         tests/image/pfm-test.cc
