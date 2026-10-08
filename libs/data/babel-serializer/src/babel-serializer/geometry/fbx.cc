@@ -740,11 +740,14 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
     // ufbx allocates a binary array's stated count before it inflates the array, so the ceiling is what makes a crafted count a read error rather than an allocation of whatever it asked for.
     // The allocation count is bounded alongside, since ufbx counts both.
     // One budget, split evenly between ufbx's working memory and the scene it builds, so the two together never pass it.
-    auto const half = size_t(babel::impl::memory_limit_of(opts.memory_limit, input_size) / 2);
+    // Both at least 1, since ufbx reads 0 as "unlimited" — a tiny budget must refuse rather than lift the ceiling.
+    auto const halved = babel::impl::memory_limit_of(opts.memory_limit, input_size) / 2;
+    auto const half = size_t(halved > 0 ? halved : 1);
+    auto const allocations = half / 64 > 0 ? half / 64 : size_t(1);
     load.temp_allocator.memory_limit = half;
     load.result_allocator.memory_limit = half;
-    load.temp_allocator.allocation_limit = half / 64;
-    load.result_allocator.allocation_limit = half / 64;
+    load.temp_allocator.allocation_limit = allocations;
+    load.result_allocator.allocation_limit = allocations;
 
     auto error = ufbx_error{};
     auto* const scene = ufbx_load_stream(&stream, &load, &error);

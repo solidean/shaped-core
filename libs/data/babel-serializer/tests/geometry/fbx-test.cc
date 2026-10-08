@@ -275,6 +275,8 @@ TEST("fbx - an array stating more than the memory ceiling allows is an error, no
     // The ceiling is a knob, and a tiny one refuses even an honest file.
     auto const honest = babel::test::fbx_binary_scene();
     CHECK(bf::read(cc::span<byte const>(honest), {.memory_limit = 1024}).has_error());
+    // 1 halves to 0, which ufbx would read as unlimited; the reader holds it at 1 byte instead.
+    CHECK(bf::read(cc::span<byte const>(honest), {.memory_limit = 1}).has_error());
     CHECK(bf::read(cc::span<byte const>(honest), {.memory_limit = i64(256) << 20}).has_value());
 }
 

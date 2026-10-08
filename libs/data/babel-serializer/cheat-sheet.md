@@ -223,9 +223,9 @@ Gotchas:
 
 - **Materials belong to the node, not the mesh.** Two instances of one mesh may draw with different materials, so a face's slot means nothing without the node placing it.
 - **Nothing is converted.** Positions are in the file's axes and unit; `settings` says which, and a Z-up centimeter scene stays one.
-  Axes that are not a permutation of X, Y and Z, or a unit that is not finite and positive, fall back to FBX's default with a `malformed` issue.
+  Axes that are not a permutation of X, Y and Z, or a unit outside 1e-9 to 1e9 meters, fall back to FBX's default with a `malformed` issue.
 - **A memory ceiling bounds every read** (`memory_limit`): an array's stated count is allocated before its bytes are, so a crafted file is an error rather than gigabytes.
-  A plain stream cannot say how long it is and gets the 4 GiB cap; the span overloads scale it to the input.
+  A plain stream cannot say how long it is and gets 1 GiB; the span overloads scale it to the input, at most 4 GiB, split evenly between ufbx's working memory and the scene.
 - **A mesh past `i32` counts is an error**, since every index here is an `i32`.
 - **No file is opened.** A texture is its file names and its embedded bytes; resolving a name is the caller's policy, which babel owns none of.
 - **Cameras, animation, skinning, blend shapes and curves are not read**, and each is an `unsupported` issue rather than silence.
