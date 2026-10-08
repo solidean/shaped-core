@@ -6,18 +6,16 @@
 """Vendor ufbx in-tree at a pinned commit.
 
 ufbx is the FBX reader behind babel::fbx (see the SC_USE_VENDORED_UFBX option in extern/CMakeLists.txt).
-This script shallow-clones the pinned tag into a transient `.clone/`, asserts that the tag resolves to the pinned hash,
-copies the two files we build, and deletes the clone.
+This script shallow-clones the pinned tag into a transient `.clone/` and asserts that the tag resolves to the pinned hash.
+It then copies the two files we build, and deletes the clone.
 The hash is the authority; the tag is a human-readable convenience.
 
 The subset is the whole library: upstream is ufbx.c and ufbx.h.
-What is dropped is only the scaffolding around them — tests, examples, the bindings, the extra headers in extra/ and
-the CI definitions.
+What is dropped is only the scaffolding around them — tests, examples, the bindings, the extra headers in extra/ and the CI definitions.
 Two files with no dependencies puts ufbx in the libspng tier rather than the fetched SQLite one.
 
 Upstream keeps both files at the repository root, and we split them into include/ + src/ to match the libspng layout.
-ufbx.c reaches ufbx.h with a quote include, which misses in src/ and then resolves against include/ off the target's
-include path.
+ufbx.c reaches ufbx.h with a quote include, which misses in src/ and then resolves against include/ off the target's include path.
 
 Re-running is idempotent: the previously vendored files are wiped first, so files dropped upstream do not linger.
 The vendored payload (include/, src/, LICENSE) is committed; this script is only needed to bump or re-vet the version.

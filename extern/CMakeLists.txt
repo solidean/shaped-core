@@ -39,7 +39,7 @@ option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an exter
 option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
 
 # ufbx, committed in-source: one C file and one header, and the whole of babel-serializer's FBX reader.
-# The libspng tier for the same reason — two files, no build machinery and no dependencies, not even a Deflate.
+# It sits in the libspng tier for the same reason: two files, no build machinery and no dependencies, not even a Deflate.
 # Linked PRIVATE by babel, so ufbx.h never reaches a babel public header.
 option(SC_USE_VENDORED_UFBX "Build the in-tree vendored ufbx (OFF expects an external `ufbx` target)" ON)
 

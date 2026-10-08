@@ -2,6 +2,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -28,26 +29,31 @@ constexpr u32 fbx_node_depth_limit = 4096;
 /// The largest count a mesh may carry, since babel::fbx stores its indices as `i32`.
 constexpr size_t fbx_max_count = 0x7fffffff;
 
-/// The automatic memory ceiling: 32 times the input plus 64 MiB, under a hard 4 GiB.
-/// Bistro's exterior, 114 MB of binary FBX, needs about 630 MB, which leaves room for files that compress their arrays far harder than Maya does.
+/// The automatic memory budget: 32 times the input plus 64 MiB, under a hard 4 GiB, or 1 GiB for a plain stream.
+/// Bistro's exterior, 114 MB of binary FBX, builds a 630 MB scene, which leaves room for files that compress their arrays far harder than Maya does.
 constexpr i64 fbx_memory_per_input_byte = 32;
 constexpr i64 fbx_memory_floor = i64(64) << 20;
 constexpr i64 fbx_memory_cap = i64(4) << 30;
+constexpr i64 fbx_memory_unsized = i64(1) << 30;
+
+/// The most corners one polygon may have: ufbx's ear clip is quadratic in it, and no modeling tool writes more.
+constexpr u32 fbx_max_face_corners = 4096;
 
 [[nodiscard]] i64 memory_limit_of(i64 requested, i64 input_size)
 {
     if (requested > 0)
         return requested;
     if (input_size < 0)
-        return fbx_memory_cap;
+        return fbx_memory_unsized;
     auto const scaled = input_size * fbx_memory_per_input_byte + fbx_memory_floor;
     return scaled < fbx_memory_cap ? scaled : fbx_memory_cap;
 }
 
-/// Whether `f` is a usable scale: finite and positive.
-[[nodiscard]] bool is_positive_finite(f64 f)
+/// Whether `f` is a usable scene unit, in meters: between a nanometer and a million kilometers.
+/// Outside it a unit is damage rather than intent, and its f32 would collapse a scene to 0 or blow it up to infinity.
+[[nodiscard]] bool is_sane_unit(f64 f)
 {
-    return f == f && f > 0 && f < 1e300;
+    return f >= 1e-9 && f <= 1e9;
 }
 
 [[nodiscard]] cc::string to_string(ufbx_string const& s)
@@ -212,14 +218,14 @@ struct fbx_converter
             note(bf::issue_kind::malformed, "fbx: the scene's axes do not name X, Y and Z once each, so FBX's default "
                                             "(+X right, +Y up, +Z front) stands in for them");
 
-        if (!is_positive_finite(out.settings.unit_meters))
+        if (!is_sane_unit(out.settings.unit_meters))
         {
-            note(bf::issue_kind::malformed, cc::format("fbx: the scene's unit is {} meters, so FBX's default of a "
-                                                       "centimeter stands in for it",
+            note(bf::issue_kind::malformed, cc::format("fbx: the scene's unit is {} meters, outside a nanometer to a "
+                                                       "million kilometers, so FBX's default of a centimeter stands in",
                                                        out.settings.unit_meters));
             out.settings.unit_meters = 0.01;
         }
-        if (!is_positive_finite(out.settings.original_unit_meters))
+        if (!is_sane_unit(out.settings.original_unit_meters))
             out.settings.original_unit_meters = out.settings.unit_meters;
 
         // Deduplicated by ufbx: each kind is one warning carrying a count, so the list stays short on a damaged file.
@@ -308,13 +314,19 @@ struct fbx_converter
 
             // The file's own properties first, then the template defaults it did not override — what the FBX SDK would report.
             // That is what a reader of `EmissiveFactor` expects when the file left it out.
+            // The names the file wrote, looked up as a set so the merge stays linear in the property count.
+            auto written = cc::set<cc::string_view>();
             for (auto p = size_t(0); p < m.props.props.count; ++p)
-                material.properties.push_back(to_property(m.props.props.data[p]));
+            {
+                auto const& own = m.props.props.data[p];
+                material.properties.push_back(to_property(own));
+                written.insert(cc::string_view(own.name.data, isize(own.name.length)));
+            }
             if (m.props.defaults != nullptr)
                 for (auto p = size_t(0); p < m.props.defaults->props.count; ++p)
                 {
                     auto const& d = m.props.defaults->props.data[p];
-                    if (material.find_property(cc::string_view(d.name.data, isize(d.name.length))) == nullptr)
+                    if (!written.contains(cc::string_view(d.name.data, isize(d.name.length))))
                         material.properties.push_back(to_property(d));
                 }
 
@@ -384,8 +396,17 @@ struct fbx_converter
         auto face_sources = cc::vector<u32>(); // the source face of every output face, for its material
         if (opts.triangulate)
         {
-            auto scratch = cc::vector<u32>::create_filled(isize(m.max_face_triangles) * 3, 0u);
+            // The scratch holds one face's triangles, sized by the largest face the ear clip is allowed to see.
+            auto largest = u32(3);
+            for (auto f = size_t(0); f < m.faces.count; ++f)
+            {
+                auto const corners_of = m.faces.data[f].num_indices;
+                if (corners_of <= babel::impl::fbx_max_face_corners && corners_of > largest)
+                    largest = corners_of;
+            }
+            auto scratch = cc::vector<u32>::create_filled(isize(largest - 2) * 3, 0u);
             auto dropped = isize(0);
+            auto oversized = isize(0);
             corners.reserve(isize(m.num_triangles) * 3);
             for (auto f = size_t(0); f < m.faces.count; ++f)
             {
@@ -393,6 +414,11 @@ struct fbx_converter
                 if (face.num_indices < 3)
                 {
                     ++dropped;
+                    continue;
+                }
+                if (face.num_indices > babel::impl::fbx_max_face_corners)
+                {
+                    ++oversized;
                     continue;
                 }
 
@@ -406,6 +432,10 @@ struct fbx_converter
                 }
             }
 
+            if (oversized > 0)
+                note(bf::issue_kind::unsupported, cc::format("fbx: mesh '{}' has {} face(s) of more than {} corners, "
+                                                             "dropped rather than ear-clipped",
+                                                             mesh.name, oversized, babel::impl::fbx_max_face_corners));
             if (dropped > 0)
                 note(bf::issue_kind::unsupported, cc::format("fbx: mesh '{}' has {} point or line face(s), dropped by "
                                                              "triangulation",
@@ -709,11 +739,12 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
 
     // ufbx allocates a binary array's stated count before it inflates the array, so the ceiling is what makes a crafted count a read error rather than an allocation of whatever it asked for.
     // The allocation count is bounded alongside, since ufbx counts both.
-    auto const memory = size_t(babel::impl::memory_limit_of(opts.memory_limit, input_size));
-    load.temp_allocator.memory_limit = memory;
-    load.result_allocator.memory_limit = memory;
-    load.temp_allocator.allocation_limit = memory / 64;
-    load.result_allocator.allocation_limit = memory / 64;
+    // One budget, split evenly between ufbx's working memory and the scene it builds, so the two together never pass it.
+    auto const half = size_t(babel::impl::memory_limit_of(opts.memory_limit, input_size) / 2);
+    load.temp_allocator.memory_limit = half;
+    load.result_allocator.memory_limit = half;
+    load.temp_allocator.allocation_limit = half / 64;
+    load.result_allocator.allocation_limit = half / 64;
 
     auto error = ufbx_error{};
     auto* const scene = ufbx_load_stream(&stream, &load, &error);

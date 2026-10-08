@@ -9,10 +9,11 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 
-// Small FBX scenes written out as ASCII FBX 7.4, for the tests that read them.
+// Small FBX scenes for the tests that read them, in both encodings.
 //
 // Header-only, so another library's tests can import one too: babel's `BABEL_TEST_DIR` is the include root.
-// No FBX writer exists to produce these, and a binary scene is not something to hand-edit, so the ASCII encoding is the one the fixtures are in; ufbx reads both through the same object model.
+// The shared scene is ASCII FBX 7.4 text, readable and easy to vary one line at a time.
+// The binary scene comes from `fbx_binary_writer` below, a minimal writer for the encoding real files use, so its compressed arrays are covered without committing a file.
 
 namespace babel::test
 {
@@ -198,10 +199,10 @@ namespace babel::test
 {
 /// The scene every fixture shares, below its `GlobalSettings`.
 ///
-/// - One mesh, "shape": a quad (0,0,0)-(1,1,0) and a triangle beside it, with per-corner normals, one uv set "map1"
-///   and per-face materials: the quad is slot 0, the triangle slot 1.
-/// - Two nodes INSTANCING it: "parent" at (10,0,0) scaled by 2, with slots [red, glow]; and "child" under it at
-///   (0,5,0) in the parent's space, with the slots the other way round, [glow, red].
+/// - One mesh, "shape": a quad (0,0,0)-(1,1,0) and a triangle beside it, with per-corner normals and one uv set "map1".
+///   Its materials are per face: the quad is slot 0, the triangle slot 1.
+/// - Two nodes INSTANCING it: "parent" at (10,0,0) scaled by 2, with slots [red, glow].
+///   And "child" under it at (0,5,0) in the parent's space, with the slots the other way round, [glow, red].
 /// - A point light "lamp" on node "lamp" at (0,0,3): color (1, 0.5, 0.25), FBX Intensity 250, quadratic decay.
 /// - Material "red": Phong, DiffuseColor (1,0,0), Shininess 20, a texture "wood" on DiffuseColor.
 /// - Material "glow": Lambert, DiffuseColor (0,0,1), EmissiveColor (1,1,0), EmissiveFactor 4.

@@ -21,10 +21,10 @@
 // Nothing is converted: the axes and the unit the file declares are reported in `settings` and applied to nothing.
 //
 // Two things are interpreted rather than copied, because the raw format leaves them unusable:
-// - A node's local transform is FBX's pivot chain (pre- and post-rotation, rotation and scaling pivots and offsets)
-//   composed into one translation, rotation and scale; `node_to_world` also honors the file's scale inheritance mode.
-// - FBX's per-layer mapping modes (by polygon vertex, by control point, by polygon, all same; direct or index-to-direct)
-//   are unified into one shape: each attribute is a value array plus one index per face corner.
+// - A node's local transform is FBX's pivot chain (pre- and post-rotation, rotation and scaling pivots and offsets).
+//   It is composed into one translation, rotation and scale, and `node_to_world` also honors the file's scale inheritance mode.
+// - FBX's per-layer mapping modes (by polygon vertex, by control point, by polygon, all same; direct or index-to-direct).
+//   They are unified into one shape: each attribute is a value array plus one index per face corner.
 //
 // No triangulation by default (`read_options::triangulate` asks for it), no welding, no pixel decoding, no file I/O.
 // A texture is recorded by the file names it carries and by its embedded bytes when it has any; resolving a file name is the caller's business, as babel owns no filesystem policy.
@@ -483,13 +483,17 @@ struct babel::fbx::read_options
 {
     /// Split every polygon into triangles, ear-clipping a concave one rather than fanning it.
     /// Faces with fewer than three corners are dropped, and each triangle keeps its polygon's material slot.
+    /// So is a face of more than 4096 corners, with an issue: the ear clip is quadratic in a face's size, and no modeling tool writes one that large.
     /// Corners are copied rather than re-indexed, so every attribute keeps its `values` and only its `indices` grow.
     bool triangulate = false;
 
-    /// The most memory the parse may hold, in bytes, applied to both ufbx's working and result allocators.
-    /// A binary FBX array states its element count before its compressed bytes, and ufbx allocates that count first, so without a ceiling a few crafted bytes can ask for tens of gigabytes.
-    /// 0 picks one from the input: 32 times its size plus 64 MiB, capped at 4 GiB — Bistro's 114 MB exterior needs about 630 MB, under its 3.7 GB.
-    /// A plain stream cannot say how long it is, so it gets the cap; the span overloads know.
+    /// The most memory ufbx may hold while parsing, in bytes: half for its working memory, half for the scene it builds.
+    /// The copy into `data` comes on top, and is about the size of that scene.
+    /// A binary FBX array states its element count before its compressed bytes, and ufbx allocates that count first.
+    /// So without a ceiling a few crafted bytes can ask for tens of gigabytes.
+    /// 0 picks one from the input: 32 times its size plus 64 MiB, capped at 4 GiB.
+    /// Bistro's 114 MB exterior builds a 630 MB scene, under its 1.8 GB half.
+    /// A plain stream cannot say how long it is, so it gets 1 GiB, which a scene that size exceeds: read a large file through the span overload, or pass a limit.
     /// Exceeding it is a read error, never a truncated scene.
     i64 memory_limit = 0;
 };

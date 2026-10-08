@@ -288,14 +288,45 @@ TEST("fbx - axes that do not name X, Y and Z once each fall back to FBX's defaul
     CHECK(doc.has_issue_of(bf::issue_kind::malformed));
 }
 
-TEST("fbx - a unit that is not finite and positive falls back to a centimeter, with an issue")
+TEST("fbx - a unit outside a nanometer to a million kilometers falls back to a centimeter, with an issue")
 {
-    for (auto const factor : {0.0, -5.0})
+    auto const zero = 0.0;
+    for (auto const factor : {0.0, -5.0, 1e-300, 1e35, zero / zero, 1.0 / zero})
     {
         auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(babel::test::fbx_scene({.unit_scale_factor = factor}))));
         CHECK(near(f32(doc.settings.unit_meters), 0.01f));
         CHECK(doc.has_issue_of(bf::issue_kind::malformed));
     }
+}
+
+TEST("fbx - a polygon past the corner cap is dropped rather than ear-clipped")
+{
+    // 5000 corners: an ear clip of it is quadratic, and the cap refuses it before ufbx starts.
+    auto vertices = cc::string();
+    auto corners = cc::string();
+    constexpr auto count = 5000;
+    for (auto i = 0; i < count; ++i)
+    {
+        // Points on a parabola, which make a convex polygon.
+        vertices += cc::format("{}{},{},0", i == 0 ? "" : ",", i, i * i);
+        corners += cc::format("{}{}", i == 0 ? "" : ",", i + 1 == count ? -count : i);
+    }
+    auto text = cc::string("; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n\tFBXVersion: 7400\n}\nObjects:  {\n");
+    text += cc::format("\tGeometry: 100, \"Geometry::disc\", \"Mesh\" {{\n\t\tVertices: *{} {{\n\t\t\ta: {}\n\t\t}}\n",
+                       count * 3, vertices);
+    text += cc::format("\t\tPolygonVertexIndex: *{} {{\n\t\t\ta: {}\n\t\t}}\n\t}}\n", count, corners);
+    text += "\tModel: 200, \"Model::disc\", \"Mesh\" {\n\t}\n}\nConnections:  {\n\tC: \"OO\",200,0\n\tC: "
+            "\"OO\",100,200\n}\n";
+
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(text), {.triangulate = true}));
+    REQUIRE(doc.meshes.size() == 1);
+    CHECK(doc.meshes[0].faces.empty());
+    CHECK(cc::string_view(doc.issue_report()).contains("4096"));
+
+    // Untriangulated, the polygon is kept as the file wrote it.
+    auto const raw = REQUIRED_VALUE(bf::read(cc::string_view(text)));
+    REQUIRE(raw.meshes[0].faces.size() == 1);
+    CHECK(raw.meshes[0].faces[0].corner_count == count);
 }
 
 TEST("fbx - a geometric transform moves the mesh and not the node's children")
@@ -372,7 +403,8 @@ TEST("fbx - Bistro exterior reads when present")
 
     auto stream = adapter.value().stream();
     cc::read_stream plain = cc::move(stream);
-    auto const doc = REQUIRED_VALUE(bf::read(plain, {.triangulate = true}));
+    // A plain stream gets 1 GiB, which the exterior's 630 MB scene plus ufbx's working half exceeds.
+    auto const doc = REQUIRED_VALUE(bf::read(plain, {.triangulate = true, .memory_limit = i64(4) << 30}));
 
     CHECK(doc.meshes.size() == 1296);
     CHECK(doc.materials.size() == 132);
