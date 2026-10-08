@@ -1,0 +1,141 @@
+#include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
+#include <nexus/test.hh>
+#include <shaped-viewer/impl/wavefront_pacing.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::abs
+
+using namespace cc::primitive_defines;
+
+// How a still wavefront frame fits its budget, against a modeled GPU.
+//
+// No device: the controller is arithmetic over landed frame times, and the model is what makes its corrections land
+// the way a GPU's would — late, and with a round's cost growing slower than its fill.
+
+namespace
+{
+constexpr f64 k_budget = 0.016;
+
+/// A still round's GPU seconds at `fill`, for a scene whose full round costs `full_round` and whose paths live `m` rounds.
+/// Paths that carry over stay, so live slots are `fill * m / (1 + fill * m)` of a full round's, not `fill` of them.
+[[nodiscard]] f64 modeled_round(f64 full_round, f64 fill, f64 m)
+{
+    auto const live = fill * m / (1.0 + fill * m);
+    auto const full = m / (1.0 + m);
+    return full_round * live / full;
+}
+
+/// The last frame a run planned, and what it cost.
+struct pacing_run
+{
+    sv::impl::wavefront_plan last = {};
+    f64 last_seconds = 0.0;
+};
+
+/// Runs `frames` still frames through `pacing`, each landing `latency` frames after it ran, as timestamps do, and the rest at the end.
+/// A frame's cost is the model's, scaled by `transient(f)`, which lets a run stand in for the frames after a restart.
+template <class Transient>
+[[nodiscard]] pacing_run run_frames(sv::impl::wavefront_pacing& pacing, f64 full_round, int frames, Transient transient)
+{
+    constexpr isize latency = 2;
+    constexpr f64 path_rounds = 3.5;
+    auto costs = cc::vector<f64>();
+    auto out = pacing_run{};
+    for (auto f = 0; f < frames; ++f)
+    {
+        if (costs.size() >= latency)
+        {
+            pacing.land(pacing.in_flight.front(), costs.front(), k_budget);
+            pacing.in_flight.remove_at(0);
+            costs.remove_at(0);
+        }
+        auto const plan = pacing.next(k_budget, 8);
+        (void)pacing.queue(plan);
+        auto const seconds = transient(f) * f64(plan.rounds) * modeled_round(full_round, f64(plan.fill), path_rounds);
+        costs.push_back(seconds);
+        out = {.last = plan, .last_seconds = seconds};
+    }
+    // Everything still in flight lands, so the next run's frames pair with their own costs.
+    for (auto const seconds : costs)
+    {
+        pacing.land(pacing.in_flight.front(), seconds, k_budget);
+        pacing.in_flight.remove_at(0);
+    }
+    return out;
+}
+
+[[nodiscard]] pacing_run run_frames(sv::impl::wavefront_pacing& pacing, f64 full_round, int frames)
+{
+    return run_frames(pacing, full_round, frames, [](int) { return 1.0; });
+}
+} // namespace
+
+TEST("sv::impl::wavefront_pacing - a round that overruns the budget lowers the fill until one fits")
+{
+    auto pacing = sv::impl::wavefront_pacing();
+    auto const run = run_frames(pacing, 0.028, 60);
+
+    CHECK(run.last.rounds == 1);
+    CHECK(run.last.fill < 1.0f);
+    CHECK(run.last.fill > sv::impl::wavefront_pacing::min_fill);
+    CHECK(tg::abs(run.last_seconds - k_budget) < 0.1 * k_budget)
+        .context(cc::format("a frame of fill {} costs {} s against {}", run.last.fill, run.last_seconds, k_budget));
+}
+
+TEST("sv::impl::wavefront_pacing - a round that fits runs whole rounds at full fill")
+{
+    auto pacing = sv::impl::wavefront_pacing();
+    // 0.016 / 0.0015 holds 10 rounds, so the plan is the measurement's and not the fallback's 8.
+    auto const run = run_frames(pacing, 0.0015, 30);
+
+    CHECK(run.last.fill == 1.0f);
+    CHECK(run.last.rounds == 10);
+}
+
+// A view that turns from a dense scene to an empty sky must regain its rounds, not stay one round at the fill it last needed.
+TEST("sv::impl::wavefront_pacing - a scene that becomes cheap regains full fill and whole rounds")
+{
+    auto pacing = sv::impl::wavefront_pacing();
+    (void)run_frames(pacing, 0.028, 60);
+    REQUIRE(pacing.fill < 1.0f);
+
+    auto const run = run_frames(pacing, 0.002, 60);
+    CHECK(run.last.fill == 1.0f);
+    CHECK(run.last.rounds > 1);
+    CHECK(run.last_seconds <= 1.1 * k_budget);
+}
+
+TEST("sv::impl::wavefront_pacing - a scene that becomes expensive drops from whole rounds to a fill that fits")
+{
+    auto pacing = sv::impl::wavefront_pacing();
+    (void)run_frames(pacing, 0.002, 60);
+    REQUIRE(pacing.fill == 1.0f);
+
+    auto const run = run_frames(pacing, 0.028, 60);
+    CHECK(run.last.rounds == 1);
+    CHECK(run.last.fill < 1.0f);
+    CHECK(tg::abs(run.last_seconds - k_budget) < 0.1 * k_budget);
+}
+
+// The restart drained every slot, so the first still frames after it hold only what their fill started and cost far less.
+// Steering by them would raise the fill, and the frames after the warm-up would overrun until the correction landed.
+TEST("sv::impl::wavefront_pacing - the cheap frames right after a restart leave the fill alone")
+{
+    auto pacing = sv::impl::wavefront_pacing();
+    (void)run_frames(pacing, 0.028, 60);
+    auto const settled = pacing.fill;
+    REQUIRE(settled < 1.0f);
+
+    pacing.note_restart();
+    constexpr int warmup = sv::impl::wavefront_pacing::warmup_frames;
+    (void)run_frames(pacing, 0.028, warmup, [](int) { return 0.3; });
+    CHECK(tg::abs(pacing.fill - settled) < 0.01f)
+        .context(cc::format("fill {} after the warm-up, {} before", pacing.fill, settled));
+}
+
+TEST("sv::impl::wavefront_pacing - a frame with nothing measured runs the fallback at full fill")
+{
+    auto const pacing = sv::impl::wavefront_pacing();
+    auto const plan = pacing.next(k_budget, 6);
+    CHECK(plan.rounds == 6);
+    CHECK(plan.fill == 1.0f);
+}

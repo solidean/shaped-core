@@ -69,6 +69,12 @@ struct sv::wavefront_trace_desc
     /// A frame that drains takes none, so every sample it started finishes inside it.
     bool regenerate = true;
 
+    /// The share of free slots that start a new sample, in [0, 1]: each one starts with this probability, drawn from its own stream.
+    /// It applies at finalize and at a carrying frame's begin.
+    /// A restart's begin still starts every slot, since each pixel needs its first sample.
+    /// Below 1 a round holds fewer paths and costs less, which is how a still frame fits a budget one full round overruns.
+    f32 fill = 1.0f;
+
     /// Which camera generation this frame's paths start under; one of an older generation never reaches the image.
     u32 generation = 1;
 

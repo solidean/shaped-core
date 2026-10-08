@@ -48,6 +48,12 @@ const dispatch_shade = 4
 /// `frame_constants::wavefront_flags`: every path and every tally starts over, since the image describes something else now.
 const wavefront_flag_restart = 1u
 
+/// `wavefront_step::fill` that starts every free slot.
+const fill_full = 65536u
+
+/// `pixel_tally::primary_view_depth` of a primary ray that escaped: far enough that its clip depth is the far plane, 1.
+const escaped_view_depth = 1e30
+
 /// Where `segment_settle` sends a path: nowhere (a thread past the queue), the next round, finalize, or shade.
 const route_none = 0u
 const route_next = 1u
@@ -172,9 +178,16 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
 
+/// Whether a free slot starts a sample now: always at a full fill, and below it with probability `fill / fill_full`.
+/// Below a full fill the draw advances the slot's own stream `rng`, so a slot passed over draws afresh the next time.
+fun fills(rng: mut uint){wavefront_step} -> bool:
+    if wavefront_step.fill >= fill_full => return true
+    return pt.rand(mut rng) < (wavefront_step.fill as float) / (fill_full as float)
+
 // ---- begin: one thread per pixel, before the first round ------------------------------------------------------------
 
 /// Clears what this frame tallies, kills every path on a restart, and starts a sample in every slot without one.
+/// A carrying frame starts one only in the share of those slots `fill` asks for.
 /// Every live slot is queued for the first round, whose input is `queue_a`.
 fun wavefront_begin(slot: uint){traced, wavefront_step}:
     if slot >= wavefront_step.width * wavefront_step.height => return
@@ -188,17 +201,21 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
     tally.frame_sum_specular = float3(0.0)
     tally.frame_primary_count = 0.0
     tally.frame_motion = float2(0.0)
-    tally.primary_depth = -1.0
-    tally.hit_diffuse = float2(0.0)
-    tally.hit_specular = float2(0.0)
-    tally.escaped = float2(0.0)
+    // The depth and the hit distances carry over a still frame, like the other guides: few of its slots start a primary ray.
     traced.tallies[s] = tally
 
     let st = traced.path_states[s]
     let alive = (st.flags & path_flag_alive) != 0u and st.generation == f.generation and not restart
     if not alive:
         let px = slot_pixel(slot)
-        let rng = if restart => pt.hash(px.x + px.y * wavefront_step.width + f.rng_seed * 9781u) else st.rng
+        let mut rng = if restart => pt.hash(px.x + px.y * wavefront_step.width + f.rng_seed * 9781u) else st.rng
+        let starts = restart or fills(mut rng)
+        if not starts:
+            let mut waiting = st
+            waiting.flags = 0u
+            waiting.rng = rng
+            traced.path_states[s] = waiting
+            return
         start_sample(slot, rng)
 
     let at = traced.counters[counter_queue_a].add(1u)
@@ -263,8 +280,8 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
         if hit_t < 0.0:
             tally.guide_count += 1.0
             st.flags = st.flags & ~path_flag_primary
-            // The depth raster sees where the frame's first primary ray landed; one that escaped is the far plane.
-            if tally.primary_depth < 0.0 => tally.primary_depth = 1.0
+            // The depth raster sees where the first primary ray since the restart landed; one that escaped is the far plane.
+            if tally.primary_view_depth < 0.0 => tally.primary_view_depth = escaped_view_depth
         traced.tallies[s] = tally
     else if b == 1u:
         // The first SECONDARY hit's distance, which a split-signal denoiser sizes its reprojection from.
@@ -515,16 +532,14 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         tally.roughness_sum += p.roughness
         tally.guide_count += 1.0
 
-        // The depth raster sees at the pixel CENTER: the center ray met with the plane the frame's first primary hit lies on.
-        // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
-        if tally.primary_depth < 0.0:
+        // The depth raster sees at the pixel CENTER: the center ray met with the plane the first primary hit lies on.
+        if tally.primary_view_depth < 0.0:
             let px = slot_pixel(slot)
             let center = normalize(scene.camera_ray_offset(cam, float2(px.x as float, px.y as float) + 0.5, image_size()))
             let facing = dot(p.normal, center)
             let t = if abs(facing) > 1e-6 => dot(p.normal, ray_dir * hit.t) / facing else hit.t
             let t_forward = if t > 0.0 => t else hit.t
-            let view_depth = t_forward * dot(center, normalize(cam.forward))
-            tally.primary_depth = max(1.0 - f.near_plane / view_depth, 0.0)
+            tally.primary_view_depth = t_forward * dot(center, normalize(cam.forward))
         traced.tallies[s] = tally
 
         // The lobe the continuation was drawn from is what this path IS, for the denoiser's purposes.
@@ -594,7 +609,8 @@ fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
 
 // ---- finalize: the paths that ended ---------------------------------------------------------------------------------
 
-/// Folds the path at `index` of `queue_finished` into its pixel, then starts the slot's next sample where the frame still takes them.
+/// Folds the path at `index` of `queue_finished` into its pixel, then starts the slot's next sample where the frame still takes them
+/// and the slot's draw against `fill` lets it.
 fun wavefront_finalize(index: uint){traced, wavefront_step}:
     if index >= traced.counters[counter_finished].load() => return
     let slot = traced.queue_finished[index as int]
@@ -615,12 +631,15 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
         tally.frame_count += 1.0
         traced.tallies[s] = tally
 
-    if wavefront_step.regenerate != 0u:
-        start_sample(slot, st.rng)
+    let mut rng = st.rng
+    let starts = wavefront_step.regenerate != 0u and fills(mut rng)
+    if starts:
+        start_sample(slot, rng)
         push_next(slot)
     else:
         let mut dead = st
         dead.flags = 0u
+        dead.rng = rng
         traced.path_states[s] = dead
 
 // ---- resolve: one thread per pixel, after the last round ------------------------------------------------------------
@@ -657,7 +676,9 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
         let specular = if tally.hit_specular.y > 0.0 => tally.hit_specular.x / tally.hit_specular.y else specular_none
         traced.guide_hit_distance[xy] = float2(diffuse, specular)
 
-    if f.write_primary_depth != 0u => traced.primary_depth[xy] = if tally.primary_depth < 0.0 => 1.0 else tally.primary_depth
+    // The near plane is applied here rather than stored, since a drawing that starts needing depth changes it without a restart.
+    // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
+    if f.write_primary_depth != 0u => traced.primary_depth[xy] = if tally.primary_view_depth < 0.0 => 1.0 else max(1.0 - f.near_plane / tally.primary_view_depth, 0.0)
 
     if f.write_guides != 0u:
         traced.sample_counts[xy] = tally.count

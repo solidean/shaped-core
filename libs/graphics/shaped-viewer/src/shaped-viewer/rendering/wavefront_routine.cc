@@ -25,6 +25,9 @@ constexpr isize dispatch_shadow = 2;
 constexpr isize dispatch_finished = 3;
 constexpr isize dispatch_shade = 4;
 
+/// `wavefront_step::fill` that starts every free slot (`fill_full` in shaders/sgl/tracer_wavefront.sgl).
+constexpr u32 fill_full = 65536;
+
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
 [[nodiscard]] cc::optional<sg::shader_format> sgl_format_for(sg::context const& ctx, slib::shader_library const& lib)
 {
@@ -251,9 +254,9 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
                                        .regenerate = d.regenerate ? 1u : 0u,
                                        .width = width,
                                        .height = height,
+                                       .fill = u32(cc::clamp(d.fill, 0.0f, 1.0f) * f32(fill_full) + 0.5f),
                                        .pad0 = 0,
-                                       .pad1 = 0,
-                                       .pad2 = 0};
+                                       .pad1 = 0};
 
     // What a kernel's groups are: `tracer.traced` at 0 always, then the bindless tables or the arguments at 1, and the decal tables at 2.
     enum class second_group

@@ -40,6 +40,7 @@ add_library(shaped-viewer
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/capture.cc
     src/shaped-viewer/viewer.cc
+    src/shaped-viewer/impl/wavefront_pacing.cc
     src/shaped-viewer/resources/resource_managers.cc
     src/shaped-viewer/resources/bindless_tables.cc
     src/shaped-viewer/resources/gpu_resource_manager.cc
@@ -120,6 +121,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/impl/content_hash.hh
     src/shaped-viewer/impl/keyed_cache.hh
     src/shaped-viewer/impl/view_state.hh
+    src/shaped-viewer/impl/wavefront_pacing.hh
     src/shaped-viewer/resources/resource_managers.hh
     src/shaped-viewer/resources/bindless_tables.hh
     src/shaped-viewer/resources/gpu_resource_manager.hh
@@ -215,6 +217,7 @@ if(SC_BUILD_TESTS)
         tests/drawing-test.cc
         tests/decal-test.cc
         tests/view-convergence-test.cc
+        tests/wavefront-pacing-test.cc
         tests/bindless-tables-test.cc
         tests/material-resolution-test.cc
         tests/material-shader-generator-test.cc

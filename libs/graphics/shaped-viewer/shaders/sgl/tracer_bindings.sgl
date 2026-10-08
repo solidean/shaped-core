@@ -220,13 +220,13 @@ struct pixel_tally:
     albedo_sum: float3
     roughness_sum: float
     specular_albedo_sum: float3
-    /// the clip depth of this frame's first primary ray, 1 where it escaped, and below 0 until one has
-    primary_depth: float
+    /// the view depth of the first primary ray since the restart, `escaped_view_depth` where it escaped, and below 0 until one has
+    primary_view_depth: float
     frame_motion: float2
-    /// this frame's first secondary hits, per lobe of the path: the distances summed and how many hit
+    /// every path's first secondary hit since the restart, per lobe: the distances summed and how many hit
     hit_diffuse: float2
     hit_specular: float2
-    /// this frame's first secondary rays that escaped, per lobe
+    /// every path's first secondary ray that escaped since the restart, per lobe
     escaped: float2
 
 /// The workgroup counts an indirect dispatch reads, `sg::dispatch_args`.
@@ -461,15 +461,16 @@ binding dispatch:
 
 /// What one wavefront dispatch is told beside the frame: which of `queue_a` and `queue_b` it reads,
 /// which permutation's range it shades, whether a finished slot starts a new sample, and the image's size.
+/// `fill` is the share of free slots that start one, out of 65536.
 @inline binding wavefront_step:
     parity: uint
     permutation: uint
     regenerate: uint
     width: uint
     height: uint
+    fill: uint
     pad0: uint
     pad1: uint
-    pad2: uint
 
 /// A shadow ray reads only visibility: the caller seeds `visible` with 0, and the shadow miss sets it to 1.
 struct shadow_payload:

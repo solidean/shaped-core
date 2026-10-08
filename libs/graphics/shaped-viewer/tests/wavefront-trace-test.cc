@@ -9,7 +9,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/rendering/wavefront_routine.hh>
-#include <typed-geometry/scalar/scalar.hh> // tg::abs
+#include <typed-geometry/scalar/scalar.hh> // tg::abs, tg::sqrt
 
 #if SV_TEST_HAS_VULKAN
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh> // sg::create_vulkan_context
@@ -185,6 +185,57 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_wavefront(sg::context& ctx,
                                                         .regenerate = !last,
                                                         .generation = 1});
         });
+}
+
+/// Traces the Cornell box at `fill`: a restart that drains, carrying frames, and a last frame that drains again.
+/// The restart leaves every slot free, so the second frame's first round holds exactly the samples `fill` started.
+/// `live_paths`, where set, receives that second frame's per-round counts.
+cc::shared_async<cc::vector<tg::vec3f>> trace_cornell_at_fill(sg::context& ctx,
+                                                              sv::gpu_resource_manager& resources,
+                                                              cornell_scene const& scene,
+                                                              f32 fill,
+                                                              int frames,
+                                                              sg::data_future<u32>* live_paths)
+{
+    auto const background = sv::background_gpu::from(sv::background{});
+    auto const target = make_target(ctx);
+    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+    co_return co_await trace_frames(
+        ctx, target, frames,
+        [&](sg::command_list& cmd, int f)
+        {
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
+            records.push_back(resources.describe_instance(cmd, scene.item.mesh, scene.item.instance));
+            sv::place_instance_record(records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+            auto const bindless = resources.freeze();
+            auto const trace = sv::pt_trace_desc{
+                .background = ctx.transient.create_buffer_from_pod(cmd, background, sg::buffer_usage::readonly_buffer),
+                .instances = scene.instances,
+                .output = target,
+                .instance_table = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer),
+                .lights = sv_test::upload_lights(cmd, scene.lights),
+                .hit_groups = scene.hit_groups,
+                .bindless = &bindless};
+            auto const draining = f == 0 || f == frames - 1;
+            return sv::wavefront_routine::execute(cmd, {.trace = trace,
+                                                        .frame = frame_of(scene, 7u, 0u, 1),
+                                                        .state = &state,
+                                                        .rounds = draining ? 16 : 6,
+                                                        .restart = f == 0,
+                                                        .regenerate = !draining,
+                                                        .fill = fill,
+                                                        .generation = 1,
+                                                        .live_paths = f == 1 ? live_paths : nullptr});
+        });
+}
+
+/// The mean luminance of `pixels`.
+[[nodiscard]] f32 mean_luminance_of(cc::span<tg::vec3f const> pixels)
+{
+    auto sum = 0.0f;
+    for (auto const& p : pixels)
+        sum += luminance_of(p);
+    return sum / f32(pixels.size());
 }
 
 /// A closed cube, wound so every face points outward.
@@ -393,6 +444,146 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
     for (auto r = 1; r < drain_rounds; ++r)
         CHECK(drain.value()[r] <= drain.value()[r - 1]).context(cc::format("draining round {}", r));
     CHECK(drain.value()[drain_rounds - 1] == 0u);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A fill below 1 starts that share of the free slots, by a draw from each slot's own stream.
+// It lowers what a round holds, which is how a still frame fits a budget, and must leave the image's mean where a full fill puts it.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a partial fill starts its share of the free slots and keeps the image's "
+                     "mean",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+
+    // A quarter fill finishes fewer samples per frame, so it runs twice the frames to reach a comparable count.
+    constexpr int frames = 48;
+    constexpr f32 fill = 0.25f;
+    auto full_live = sg::data_future<u32>();
+    auto partial_live = sg::data_future<u32>();
+    auto const full = co_await trace_cornell_at_fill(ctx, resources, scene, 1.0f, frames, &full_live);
+    auto const partial = co_await trace_cornell_at_fill(ctx, resources, scene, fill, 2 * frames, &partial_live);
+
+    auto const slots = u32(k_size[0] * k_size[1]);
+    auto const full_counts = full_live.try_get_data();
+    REQUIRE(full_counts.has_value());
+    CHECK(full_counts.value()[0] == slots);
+
+    // Each free slot starts with probability `fill`, so the first round's count is binomial: 256 of 1024, within five deviations.
+    auto const partial_counts = partial_live.try_get_data();
+    REQUIRE(partial_counts.has_value());
+    auto const expected = f32(slots) * fill;
+    auto const deviation = tg::sqrt(f32(slots) * fill * (1.0f - fill));
+    CHECK(tg::abs(f32(partial_counts.value()[0]) - expected) < 5.0f * deviation)
+        .context(cc::format("first round: {} live of {}, expected ~{}", partial_counts.value()[0], slots, expected));
+
+    auto const full_mean = mean_luminance_of(full);
+    auto const partial_mean = mean_luminance_of(partial);
+    CHECK(full_mean > 0.01f);
+    CHECK(tg::is_finite(partial_mean));
+    CHECK(tg::abs(partial_mean - full_mean) < 0.03f * full_mean)
+        .context(cc::format("image mean: fill {} gives {}, a full fill {}", fill, partial_mean, full_mean));
+    CC_LOG_INFO("wavefront at fill {}: first round {} live of {}, image means {} / {} at a full fill", fill,
+                partial_counts.value()[0], slots, partial_mean, full_mean);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// The tally keeps the view depth of each pixel's first primary hit since the restart, and resolve applies the near plane.
+// A drawing that starts needing depth on a still view sets the near plane without a restart, and must still see the geometry.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a primary depth first asked for on a still frame lands on the geometry",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+    auto const background = sv::background_gpu::from(sv::background{});
+    auto const target = make_target(ctx);
+    auto const depth = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::r32_float,
+         .width = k_size[0],
+         .height = k_size[1],
+         .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
+    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+
+    constexpr int frames = 6;
+    constexpr f32 near_plane = 0.1f;
+    auto depth_back = sg::data_future<f32>();
+    (void)co_await trace_frames(
+        ctx, target, frames,
+        [&](sg::command_list& cmd, int f)
+        {
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
+            records.push_back(resources.describe_instance(cmd, scene.item.mesh, scene.item.instance));
+            sv::place_instance_record(records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+            auto const bindless = resources.freeze();
+            auto const trace = sv::pt_trace_desc{
+                .background = ctx.transient.create_buffer_from_pod(cmd, background, sg::buffer_usage::readonly_buffer),
+                .instances = scene.instances,
+                .output = target,
+                .primary_depth = depth,
+                .instance_table = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer),
+                .lights = sv_test::upload_lights(cmd, scene.lights),
+                .hit_groups = scene.hit_groups,
+                .bindless = &bindless};
+            // Only the last frame asks for depth, as a drawing added to a still view does: the earlier ones leave the near plane 0.
+            auto const last = f == frames - 1;
+            auto fc = frame_of(scene, 7u, 0u, 1);
+            if (last)
+            {
+                fc.write_primary_depth = 1;
+                fc.near_plane = near_plane;
+            }
+            auto const outcome = sv::wavefront_routine::execute(cmd, {.trace = trace,
+                                                                      .frame = fc,
+                                                                      .state = &state,
+                                                                      .rounds = 2,
+                                                                      .restart = f == 0,
+                                                                      .regenerate = true,
+                                                                      .fill = 0.25f,
+                                                                      .generation = 1});
+            if (last && outcome == sg::routine_outcome::executed)
+                depth_back = sg::data_future<f32>(cmd.download.bytes_from_texture(depth.raw()));
+            return outcome;
+        });
+
+    // The center pixel sees the back wall, 4.4 in front of the camera.
+    auto const texels = depth_back.try_get_data();
+    REQUIRE(texels.has_value());
+    auto const center = (k_size[1] / 2) * k_size[0] + k_size[0] / 2;
+    auto const expected = 1.0f - near_plane / 4.4f;
+    CHECK(tg::abs(texels.value()[center] - expected) < 2e-3f)
+        .context(cc::format("center depth {}, the back wall's {}", texels.value()[center], expected));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

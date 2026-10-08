@@ -33,7 +33,7 @@ enum class sv::render_mode : sv::u8
     megakernel,
 
     /// Paths split into stages that each run as their own dispatch, and carried across frames.
-    /// A still frame costs `render_settings::rounds_per_frame` rounds.
+    /// A still frame costs what `render_settings::frame_budget_ms` holds, or `rounds_per_frame` rounds without one.
     /// A frame that sees the image change starts one sample per pixel and runs each to its end.
     wavefront,
 
@@ -77,6 +77,7 @@ struct sv::render_settings
     ///
     /// The rounds a still frame runs follow from what the last ones measured, so the image converges as fast per second
     /// as the GPU allows while the viewer stays responsive; a frame that sees the image change is not held to it.
+    /// Where one full round overruns it, a still frame runs one round and starts new samples in only a share of the free slots.
     /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
     f32 frame_budget_ms = 16.0f;
 

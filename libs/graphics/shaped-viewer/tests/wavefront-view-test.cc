@@ -1,14 +1,18 @@
 #include "viewer_test_env.hh"
 
 #include <babel-serializer/image/image.hh>
+#include <clean-core/common/macros.hh> // CC_ARCH_ARM64
 #include <clean-core/common/time.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/record/event_view.hh>
 #include <clean-core/record/log.hh> // CC_LOG_INFO
+#include <clean-core/record/recording.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
+#include <nexus/rec.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -28,7 +32,11 @@ constexpr int k_block = 8;
 
 /// Captures the Cornell box with three spheres and a decal on its back wall, traced in `mode` for `accumulate` frames.
 /// PNG, so nothing but the tracer's own noise separates two captures.
-cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode, cc::string const& path, int accumulate)
+cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
+                                         sv::render_mode mode,
+                                         cc::string const& path,
+                                         int accumulate,
+                                         f32 frame_budget_ms = 16.0f)
 {
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
@@ -66,7 +74,7 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode,
                                  .y_axis = tg::vec3f(0, -1, 0),
                                  .scale = 1,
                                  .depth = 0.5f});
-        scene.settings({.samples_per_pixel = 4, .mode = mode});
+        scene.settings({.samples_per_pixel = 4, .mode = mode, .frame_budget_ms = frame_budget_ms});
 
         REQUIRE(cc::current_time_steady_secs() - loop_start < 50.0);
     }
@@ -95,6 +103,19 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode,
         for (auto x = bx * k_block; x < (bx + 1) * k_block; ++x)
             sum += f64(img.pixels[(y * img.width + x) * img.channels + c]);
     return sum / f64(k_block * k_block);
+}
+
+/// The least value of every stat snapshot named `name` in `r`, or 2 when there is none.
+[[nodiscard]] f64 least_stat(cc::rec::recording const& r, cc::string_view name)
+{
+    auto least = 2.0;
+    r.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() == cc::rec::event_kind::stat_snapshot && cc::string_view(e.name()) == name)
+                least = cc::min(least, e.field_as_double("value").value_or(2.0));
+        });
+    return least;
 }
 } // namespace
 
@@ -142,4 +163,49 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
 
     cc::remove_file(reference_path);
     cc::remove_file(traced_path);
+}
+
+// A still frame whose budget no round fits runs one round, starting samples in only a share of the free slots.
+// wavefront-trace-test.cc pins that a partial fill keeps the image's mean; this pins that the viewer lowers it at all.
+ASYNC_INVOCABLE_TEST("sv - a still wavefront view held to a budget no round fits lowers its fill",
+                     (sg::context_handle const& ctx_h),
+                     nx::config::recorded)
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+    if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
+        SKIP("the wavefront tracer needs inline ray queries");
+    if (!ctx.supports(sg::feature::timestamp_query))
+        SKIP("a frame budget is paced by GPU timestamps, which this device does not take");
+
+    auto rec = nx::test_recording();
+    REQUIRE(rec.is_attached());
+
+    // A microsecond: no round of any scene fits, so every measured frame lowers the fill.
+    auto const path = cc::format("{}/sv-starved-wavefront.png", cc::temp_directory_path());
+    co_await capture_scene(ctx, sv::render_mode::wavefront, path, 48, 0.001f);
+
+    auto const fill = least_stat(rec.sync(), "sv.wavefront.still_fill");
+    CHECK(fill < 0.5).context(cc::format("the least fill a still frame ran at: {}", fill));
+
+    // Fewer samples per frame, but samples: the walls are lit.
+    auto const image = read_png(path);
+    auto sum = 0.0;
+    for (auto const p : image.pixels)
+        sum += f64(p);
+    CHECK(sum / f64(image.pixels.size()) > 10.0);
+
+    cc::remove_file(path);
 }

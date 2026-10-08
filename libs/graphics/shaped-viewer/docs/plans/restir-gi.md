@@ -54,8 +54,9 @@ Measured on Intel's Sponza in daylight, in a 1280x720 window, on a laptop RTX 50
 | still: 1280x720, one round | begin 1.5–2.0, extend 4.0–4.6, segment 1.4–1.6, sort 0.8–1.5, shade 10.5–15.2, connect 4.9–7.0, finalize 1.2–1.8, resolve 0.7–1.3 | ~28 ms |
 
 - **The moving frame's wall time is ~24.7 ms**, with ~8 ms of CPU recording, 2.5 ms of it in `trace_layer`.
-- **Every slot is live in a still round**, since finalize regenerates it, so a still round is at full occupancy: ~30 ns per path segment.
-- **A still frame's 16 ms budget fits no round**, and is clamped to one.
+- **Every slot was live in a still round at full fill**, since finalize regenerated it, so the round ran at full occupancy: ~30 ns per path segment.
+- **A still frame's 16 ms budget fits no round at full occupancy.**
+  A still frame now runs one round and starts samples in only a share of the free slots, as [wavefront.md](../wavefront.md#a-still-frame-fits-its-budget-by-rounds-then-by-fill) describes.
 - **à-trous denoising of a still frame takes ~6.3 ms.**
 - **Texture bandwidth is not the bottleneck**: sampling mip 4 at every hit saved at most 2 ms of shade.
 - **A moving frame's live paths per round**, through `wavefront_trace_desc::live_paths` ([wavefront.md](../wavefront.md#what-it-measured)), stable to ~1% across frames (round 4 to ~3%):

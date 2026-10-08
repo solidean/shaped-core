@@ -6,9 +6,10 @@
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/wavefront_pacing.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/rendering/traced_group.hh>
-#include <shaped-viewer/rendering/wavefront_routine.hh> // wavefront_timing, held by value
+#include <shaped-viewer/rendering/wavefront_routine.hh>
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/camera_controller.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -21,22 +22,6 @@ namespace sv::impl
 /// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
 /// now asking for it means the history describes something else, and `accum_frame` restarts at 0.
 /// A resize does the same, since a fresh texture holds nothing to blend into.
-/// How a still wavefront frame fits its time budget: a smoothed estimate of one round's GPU time, and the frames whose
-/// timestamps have not landed yet.
-struct wavefront_pacing
-{
-    /// GPU seconds per round, or 0 before any frame has been measured.
-    f64 seconds_per_round = 0.0;
-
-    /// One traced frame, kept until its timestamps land.
-    struct pending
-    {
-        wavefront_timing timing;
-        i32 rounds = 0;
-    };
-    cc::vector<pending> in_flight;
-};
-
 struct temporal_slot
 {
     /// What the frame writes, and what everything downstream samples.

@@ -472,33 +472,29 @@ struct ensured_slot
 /// The bounce after which the wavefront's Russian roulette may end a path, which leaves `max_bounces` a cap.
 constexpr u32 wavefront_roulette_after = 3;
 
-/// The most rounds a budget gives a still frame, however cheap a round measured.
-constexpr i32 max_budgeted_rounds = 64;
-
-/// How many rounds a still frame runs: `rounds_per_frame`, or as many as fit `frame_budget_ms` once a round is measured.
+/// What a still frame runs: `rounds_per_frame` at full fill, or what fits `frame_budget_ms` once a frame is measured.
 ///
-/// Folds in every frame whose timestamps have landed first, so the estimate is as fresh as the GPU allows.
-/// The estimate is smoothed rather than replaced, since one frame's time moves with what else the GPU is doing.
-[[nodiscard]] i32 still_rounds(render_settings const& settings, impl::wavefront_pacing& pacing)
+/// Folds in every frame whose timestamps have landed first, so the plan is as fresh as the GPU allows.
+[[nodiscard]] impl::wavefront_plan still_plan(render_settings const& settings, impl::wavefront_pacing& pacing)
 {
     auto const fixed = cc::max(1, settings.rounds_per_frame);
     if (settings.frame_budget_ms <= 0.0f)
     {
-        pacing.in_flight.clear();
-        return fixed;
+        pacing.reset();
+        return {.rounds = fixed, .fill = 1.0f};
     }
 
+    auto const budget = f64(settings.frame_budget_ms) * 1e-3;
     while (!pacing.in_flight.empty())
     {
-        auto const seconds = pacing.in_flight.front().timing.try_seconds();
+        auto const& front = pacing.in_flight.front();
+        auto const seconds = front.timing.try_seconds();
         if (!seconds.has_value())
             break;
         auto total = 0.0;
         for (auto const s : seconds.value())
             total += s;
-        auto const per_round = total / f64(cc::max(1, pacing.in_flight.front().rounds));
-        pacing.seconds_per_round
-            = pacing.seconds_per_round <= 0.0 ? per_round : 0.7 * pacing.seconds_per_round + 0.3 * per_round;
+        pacing.land(front, total, budget);
         pacing.in_flight.remove_at(0);
     }
 
@@ -507,10 +503,7 @@ constexpr i32 max_budgeted_rounds = 64;
     while (pacing.in_flight.size() > max_in_flight)
         pacing.in_flight.remove_at(0);
 
-    if (pacing.seconds_per_round <= 0.0)
-        return fixed;
-    auto const fit = i32(f64(settings.frame_budget_ms) * 1e-3 / pacing.seconds_per_round);
-    return cc::clamp(fit, 1, max_budgeted_rounds);
+    return pacing.next(budget, fixed);
 }
 
 /// Traces one frame of a layer into `slot` with the layer's integrator, `d.frame` holding `fc`.
@@ -551,21 +544,29 @@ constexpr i32 max_budgeted_rounds = 64;
     // A walk deeper than that is still alive at the frame's end: a still next frame finishes it, and a restart drops it,
     // which biases a moving image only where a medium scatters that often.
     auto const drain_rounds = cc::max(0, fc.max_bounces) + 1 + 16;
-    auto const rounds = restart ? drain_rounds : still_rounds(settings, slot.pacing);
+    auto const plan
+        = restart ? impl::wavefront_plan{.rounds = drain_rounds, .fill = 1.0f} : still_plan(settings, slot.pacing);
 
-    // Only a still frame's rounds are full of paths, so only its timestamps say what a round costs.
+    // Only a still frame keeps its rounds as full as its fill, so only its timestamps say what a round costs.
     auto* timing = static_cast<wavefront_timing*>(nullptr);
-    if (!restart && settings.frame_budget_ms > 0.0f)
+    if (restart)
     {
-        slot.pacing.in_flight.push_back({.rounds = rounds});
-        timing = &slot.pacing.in_flight.back().timing;
+        slot.pacing.note_restart();
+    }
+    else
+    {
+        if (settings.frame_budget_ms > 0.0f)
+            timing = &slot.pacing.queue(plan);
+        CC_RECORD_STAT("sv.wavefront.still_rounds", cc::rec::unit_count, plan.rounds);
+        CC_RECORD_STAT("sv.wavefront.still_fill", cc::rec::unit_ratio, plan.fill);
     }
     return wavefront_routine::execute(cmd, {.trace = d,
                                             .frame = fc,
                                             .state = &paths,
-                                            .rounds = rounds,
+                                            .rounds = plan.rounds,
                                             .restart = restart,
                                             .regenerate = !restart,
+                                            .fill = plan.fill,
                                             .generation = paths.generation,
                                             .roulette_after = wavefront_roulette_after,
                                             .timing = timing});

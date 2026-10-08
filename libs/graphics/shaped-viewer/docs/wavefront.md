@@ -141,6 +141,23 @@ Connect adds into a radiance field of its own per slot, which resolve sums with 
 `render_settings::samples_per_pixel` is replaced by a round budget per frame, and `k` stays internal.
 `max_bounces` keeps its name and becomes the cap.
 
+### A still frame fits its budget by rounds, then by fill
+
+A still frame runs as many rounds as `render_settings::frame_budget_ms` holds, from the GPU time its earlier frames measured.
+A round of a full slot pool can cost more than the whole budget: ~28 ms of Sponza at 1280x720 on a laptop RTX 5070, against 16 ms.
+There the frame runs one round, and a free slot starts a new sample only with probability `fill`, drawn from its own random stream.
+
+- A round then holds fewer paths, so it costs less, and `impl::wavefront_pacing` moves `fill` toward the budget with each measured frame.
+- Each pixel still averages whole samples, and which slots start is independent of what any sample returns, so the mean is unchanged.
+- A round's cost grows slower than `fill`, since the paths a round carries stay, so each correction is partial and the fill settles over a few frames.
+- A restart's first one-round still frames steer nothing, since the drain left their slots empty and they cost less than they will.
+- A fill moving toward a target within 5% of 1 snaps to 1 once it is that close itself, so a view turned toward something cheap regains whole rounds.
+- Below a full fill a round's queue is never full, so it loses the pixel-order fast path of `round_slot`, and a segment costs more than at full occupancy.
+
+The depth and the hit-distance guides carry over a still frame, since few of its slots start a primary ray and the camera has not moved.
+The depth is kept as view depth and made clip depth at resolve, since a drawing that starts needing it sets the near plane without a restart.
+`sv.wavefront.still_rounds` and `sv.wavefront.still_fill` record what each still frame ran.
+
 ### Where the generic kernels live
 
 The queue append, the count-to-arguments kernel and the counting sort know nothing about paths.
@@ -247,7 +264,7 @@ It stays because neither tracer wins everywhere: the megakernel is about twice a
 
 Every step has landed: the wavefront traces a layer unless `render_settings::mode` asks for the megakernel.
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
-A frame whose image changed restarts and drains, a still one carries for `rounds_per_frame` rounds, and a layer that denoises hands the spatial member the tallies' per-pixel counts.
+A frame whose image changed restarts and drains, a still one carries for what its frame budget holds, and a layer that denoises hands the spatial member the tallies' per-pixel counts.
 Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the Cornell box, media, glass and cutouts,
 and `wavefront-view-test.cc` through the viewer on quadrics and decals.
 
