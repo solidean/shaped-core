@@ -1,6 +1,7 @@
 #pragma once
 
 #include <babel-serializer/fwd.hh>
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
@@ -21,7 +22,7 @@
 //
 // Two things are interpreted rather than copied, because the raw format leaves them unusable:
 // - A node's local transform is FBX's pivot chain (pre- and post-rotation, rotation and scaling pivots and offsets)
-//   composed into one translation, rotation and scale; `node_to_world` also honours the file's scale inheritance mode.
+//   composed into one translation, rotation and scale; `node_to_world` also honors the file's scale inheritance mode.
 // - FBX's per-layer mapping modes (by polygon vertex, by control point, by polygon, all same; direct or index-to-direct)
 //   are unified into one shape: each attribute is a value array plus one index per face corner.
 //
@@ -330,8 +331,8 @@ struct babel::fbx::texture
     cc::string absolute_filename;
 
     /// The embedded copy of the image, when the file carries one; empty otherwise.
-    /// Several textures referring to one embedded `Video` each hold their own copy.
-    cc::vector<byte> content;
+    /// Textures embedding one blob SHARE it: the pin is copied out of the file once, so the result never holds more embedded bytes than the input did.
+    cc::pinned_data<byte const> content;
 
     wrap_mode wrap_u = wrap_mode::repeat;
     wrap_mode wrap_v = wrap_mode::repeat;
@@ -378,9 +379,10 @@ struct babel::fbx::light
 /// One FBX `Model`: a place in the hierarchy with what it carries.
 ///
 /// `local` is the node's transform relative to its parent, FBX's full pivot chain composed by the reader.
-/// `geometry` is FBX's geometric transform, which moves the node's mesh and light but NOT its children.
-/// `node_to_world` and `geometry_to_world` are the composed results, with the file's scale inheritance honoured.
-/// A plain product of `local` transforms does not honour it for a node whose `inherit` is not `normal`.
+/// `geometry` is FBX's geometric transform, which moves the node's mesh but NOT its children, and not its light either.
+/// A light is placed by `node_to_world`, as ufbx and the FBX SDK place one.
+/// `node_to_world` and `geometry_to_world` are the composed results, with the file's scale inheritance honored.
+/// A plain product of `local` transforms does not honor it for a node whose `inherit` is not `normal`.
 struct babel::fbx::node
 {
     cc::string name;
@@ -404,6 +406,7 @@ struct babel::fbx::node
     i32 first_material = 0;
     i32 material_count = 0;
 
+    /// FBX's `Visibility`: false marks helper or proxy geometry the scene's author hid.
     bool visible = true;
 };
 
@@ -482,6 +485,13 @@ struct babel::fbx::read_options
     /// Faces with fewer than three corners are dropped, and each triangle keeps its polygon's material slot.
     /// Corners are copied rather than re-indexed, so every attribute keeps its `values` and only its `indices` grow.
     bool triangulate = false;
+
+    /// The most memory the parse may hold, in bytes, applied to both ufbx's working and result allocators.
+    /// A binary FBX array states its element count before its compressed bytes, and ufbx allocates that count first, so without a ceiling a few crafted bytes can ask for tens of gigabytes.
+    /// 0 picks one from the input: 32 times its size plus 64 MiB, capped at 4 GiB — Bistro's 114 MB exterior needs about 630 MB, under its 3.7 GB.
+    /// A plain stream cannot say how long it is, so it gets the cap; the span overloads know.
+    /// Exceeding it is a read error, never a truncated scene.
+    i64 memory_limit = 0;
 };
 
 namespace babel::fbx
@@ -491,7 +501,8 @@ namespace babel::fbx
 
 /// Parse an FBX file from a stream, in either encoding.
 /// The stream is read front to back and never seeked; ufbx keeps what it needs in memory as it goes.
-/// Fails on anything that is not FBX, or on a file too damaged to yield a scene.
+/// Fails on anything that is not FBX, and on a file too damaged to yield a scene.
+/// Also on one that needs more than `read_options::memory_limit`, and on a mesh whose counts do not fit the `i32` indices stored here.
 [[nodiscard]] cc::result<data> read(cc::read_stream& in, read_options opts = {});
 
 /// Convenience: parse from an in-memory buffer (wraps a span_read_stream_adapter).

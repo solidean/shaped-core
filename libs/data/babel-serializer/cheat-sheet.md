@@ -190,18 +190,18 @@ Both encodings, every version from 6100 on; the parse is the vendored ufbx's, co
 #include <babel-serializer/geometry/fbx.hh>
 
 cc::result<babel::fbx::data> read(cc::read_stream& in, read_options = {});   // + span / string_view overloads
-struct read_options { bool triangulate = false; };  // ear-clips polygons; drops point and line faces
+struct read_options { bool triangulate = false; i64 memory_limit = 0; };  // ear clip; 0 = 32x input + 64 MiB, at most 4 GiB
 
 auto const doc = babel::fbx::read(stream, {.triangulate = true}).value();
 doc.info;       // file_info { version (7500 = FBX 2016), encoding (binary | ascii), creator, application, application_version }
-doc.settings;   // scene_settings { right, up, front (axis::positive_x ..), unit_meters (0.01 = cm), original_unit_meters, fps }
+doc.settings;   // scene_settings { right, up, front (axis::positive_x ..), unit_meters (0.01 = cm), original_unit_meters, frames_per_second }
 doc.settings.is_left_handed();  // REPORTED, applied to nothing — the caller converts
 doc.issues;  doc.has_issues();  doc.has_issue_of(kind);  doc.issue_report();   // as gltf's
 
 doc.nodes;      // PARENTS FIRST; nodes[0] is the nameless root
 n.parent;  doc.children_of(n);
 n.local;  n.geometry;                         // transform { translation, rotation, scale } — the pivot chain composed
-n.node_to_world;  n.geometry_to_world;        // tg::affine_transform3f, honouring n.inherit (FBX's scale inheritance)
+n.node_to_world;  n.geometry_to_world;        // tg::affine_transform3f, honoring n.inherit (FBX's scale inheritance)
 n.mesh;  n.light;                             // mesh_index / light_index; several nodes naming one mesh is instancing
 doc.materials_of(n);                          // span<material_index> — the node's material SLOTS
 
@@ -215,7 +215,7 @@ m.material_slot_of(f);         // index into materials_of(node), NOT into doc.ma
 doc.materials;  // material { name, shading_model ("phong"), properties, textures }
 mat.find_property("DiffuseColor");   // property const* { name, type, value (vec4f), value_int, text }; template defaults included
 mat.find_texture("NormalMap");       // texture_index — FBX connects a texture to a PROPERTY by name
-doc.textures;   // texture { name, relative_filename, absolute_filename (as written, backslashes too), content (embedded), wrap_u/v, uv_set }
+doc.textures;   // texture { name, relative_filename, absolute_filename (as written, backslashes too), content (embedded, SHARED pin), wrap_u/v, uv_set }
 doc.lights;     // light { type, decay, color, intensity (FBX Intensity / 100, no unit), local_direction (-Y), inner/outer_angle_degrees (FULL cone) }
 ```
 
@@ -223,6 +223,10 @@ Gotchas:
 
 - **Materials belong to the node, not the mesh.** Two instances of one mesh may draw with different materials, so a face's slot means nothing without the node placing it.
 - **Nothing is converted.** Positions are in the file's axes and unit; `settings` says which, and a Z-up centimeter scene stays one.
+  Axes that are not a permutation of X, Y and Z, or a unit that is not finite and positive, fall back to FBX's default with a `malformed` issue.
+- **A memory ceiling bounds every read** (`memory_limit`): an array's stated count is allocated before its bytes are, so a crafted file is an error rather than gigabytes.
+  A plain stream cannot say how long it is and gets the 4 GiB cap; the span overloads scale it to the input.
+- **A mesh past `i32` counts is an error**, since every index here is an `i32`.
 - **No file is opened.** A texture is its file names and its embedded bytes; resolving a name is the caller's policy, which babel owns none of.
 - **Cameras, animation, skinning, blend shapes and curves are not read**, and each is an `unsupported` issue rather than silence.
 

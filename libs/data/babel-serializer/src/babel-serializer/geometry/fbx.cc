@@ -1,6 +1,7 @@
 #include <babel-serializer/geometry/fbx.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/map.hh>
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -23,6 +24,31 @@ namespace bf = babel::fbx;
 /// How deep a node may nest before ufbx refuses the file.
 /// A cap rather than a stack budget: past this depth the file is malformed rather than large, and every consumer of a hierarchy walks it somehow.
 constexpr u32 fbx_node_depth_limit = 4096;
+
+/// The largest count a mesh may carry, since babel::fbx stores its indices as `i32`.
+constexpr size_t fbx_max_count = 0x7fffffff;
+
+/// The automatic memory ceiling: 32 times the input plus 64 MiB, under a hard 4 GiB.
+/// Bistro's exterior, 114 MB of binary FBX, needs about 630 MB, which leaves room for files that compress their arrays far harder than Maya does.
+constexpr i64 fbx_memory_per_input_byte = 32;
+constexpr i64 fbx_memory_floor = i64(64) << 20;
+constexpr i64 fbx_memory_cap = i64(4) << 30;
+
+[[nodiscard]] i64 memory_limit_of(i64 requested, i64 input_size)
+{
+    if (requested > 0)
+        return requested;
+    if (input_size < 0)
+        return fbx_memory_cap;
+    auto const scaled = input_size * fbx_memory_per_input_byte + fbx_memory_floor;
+    return scaled < fbx_memory_cap ? scaled : fbx_memory_cap;
+}
+
+/// Whether `f` is a usable scale: finite and positive.
+[[nodiscard]] bool is_positive_finite(f64 f)
+{
+    return f == f && f > 0 && f < 1e300;
+}
 
 [[nodiscard]] cc::string to_string(ufbx_string const& s)
 {
@@ -135,6 +161,12 @@ struct fbx_converter
 
     bf::data out;
 
+    /// set when the scene cannot be represented, which fails the read
+    cc::string error;
+
+    /// the embedded blobs already pinned, by the address ufbx holds them at
+    cc::map<isize, cc::pinned_data<byte const>> embedded;
+
     void note(bf::issue_kind kind, cc::string message)
     {
         out.issues.push_back({.kind = kind, .message = cc::move(message)});
@@ -156,16 +188,39 @@ struct fbx_converter
         auto const right = to_axis(s.axes.right);
         auto const up = to_axis(s.axes.up);
         auto const front = to_axis(s.axes.front);
-        if (!right.has_value() || !up.has_value() || !front.has_value())
-            note(bf::issue_kind::malformed, "fbx: the scene's axes are incomplete, so FBX's default (+X right, +Y up, "
-                                            "+Z front) stands in for the missing ones");
 
-        out.settings = {.right = right.has_value() ? right.value() : bf::axis::positive_x,
-                        .up = up.has_value() ? up.value() : bf::axis::positive_y,
-                        .front = front.has_value() ? front.value() : bf::axis::positive_z,
-                        .unit_meters = f64(s.unit_meters),
+        // The three must name X, Y and Z once each, in either sign; anything else is no coordinate system at all.
+        auto valid_axes = right.has_value() && up.has_value() && front.has_value();
+        if (valid_axes)
+        {
+            auto const r = int(right.value()) / 2;
+            auto const u = int(up.value()) / 2;
+            auto const f = int(front.value()) / 2;
+            valid_axes = r != u && u != f && r != f;
+        }
+
+        out.settings = {.unit_meters = f64(s.unit_meters),
                         .original_unit_meters = f64(s.original_unit_meters),
                         .frames_per_second = s.frames_per_second};
+        if (valid_axes)
+        {
+            out.settings.right = right.value();
+            out.settings.up = up.value();
+            out.settings.front = front.value();
+        }
+        else
+            note(bf::issue_kind::malformed, "fbx: the scene's axes do not name X, Y and Z once each, so FBX's default "
+                                            "(+X right, +Y up, +Z front) stands in for them");
+
+        if (!is_positive_finite(out.settings.unit_meters))
+        {
+            note(bf::issue_kind::malformed, cc::format("fbx: the scene's unit is {} meters, so FBX's default of a "
+                                                       "centimeter stands in for it",
+                                                       out.settings.unit_meters));
+            out.settings.unit_meters = 0.01;
+        }
+        if (!is_positive_finite(out.settings.original_unit_meters))
+            out.settings.original_unit_meters = out.settings.unit_meters;
 
         // Deduplicated by ufbx: each kind is one warning carrying a count, so the list stays short on a damaged file.
         for (auto i = size_t(0); i < meta.warnings.count; ++i)
@@ -220,9 +275,19 @@ struct fbx_converter
                               .uv_transform = to_transform(t.uv_transform),
                               .is_file = t.type == UFBX_TEXTURE_FILE};
 
+            // ufbx points every texture of one embedded Video at the same blob, so the pin is keyed on that pointer.
             if (t.content.size > 0)
-                texture.content = cc::vector<byte>::create_copy_of(
-                    cc::span<byte const>(static_cast<byte const*>(t.content.data), isize(t.content.size)));
+            {
+                auto const key = reinterpret_cast<isize>(t.content.data);
+                if (auto const* const shared = embedded.get_ptr(key); shared != nullptr)
+                    texture.content = *shared;
+                else
+                {
+                    texture.content = cc::pinned_data<byte const>(cc::pinned_data<byte>::create_copy_of(
+                        cc::span<byte const>(static_cast<byte const*>(t.content.data), isize(t.content.size))));
+                    embedded[key] = texture.content;
+                }
+            }
 
             if (!texture.is_file)
                 note(bf::issue_kind::unsupported, cc::format("fbx: texture '{}' is layered, procedural or a shader, "
@@ -287,9 +352,32 @@ struct fbx_converter
         return out_attr;
     }
 
+    /// Whether every count of `m` fits the `i32` indices babel::fbx stores — a corner, a face, a value of any attribute.
+    [[nodiscard]] bool fits_indices(ufbx_mesh const& m) const
+    {
+        auto largest = m.num_indices;
+        auto const consider = [&](size_t count) { largest = count > largest ? count : largest; };
+        consider(m.faces.count);
+        consider(opts.triangulate ? m.num_triangles * 3 : m.num_indices);
+        consider(m.vertex_position.values.count);
+        consider(m.vertex_normal.values.count);
+        consider(m.vertex_tangent.values.count);
+        consider(m.vertex_bitangent.values.count);
+        for (auto i = size_t(0); i < m.uv_sets.count; ++i)
+            consider(m.uv_sets.data[i].vertex_uv.values.count);
+        for (auto i = size_t(0); i < m.color_sets.count; ++i)
+            consider(m.color_sets.data[i].vertex_color.values.count);
+        return largest <= fbx_max_count;
+    }
+
     void convert_mesh(ufbx_mesh const& m)
     {
         auto mesh = bf::mesh{.name = to_string(m.name)};
+        if (!fits_indices(m))
+        {
+            error = cc::format("fbx: mesh '{}' has more corners, faces or values than an i32 index reaches", mesh.name);
+            return;
+        }
 
         // The source corner of every output corner, and the faces over them.
         auto corners = cc::vector<u32>();
@@ -376,7 +464,7 @@ struct fbx_converter
     void convert_meshes()
     {
         out.meshes.reserve(isize(scene.meshes.count));
-        for (auto i = size_t(0); i < scene.meshes.count; ++i)
+        for (auto i = size_t(0); i < scene.meshes.count && error.empty(); ++i)
             convert_mesh(*scene.meshes.data[i]);
     }
 
@@ -599,7 +687,10 @@ cc::string data::issue_report() const
     return out;
 }
 
-cc::result<data> read(cc::read_stream& in, read_options opts)
+namespace
+{
+/// The one parse every overload reaches; `input_size` is -1 when the source cannot say how long it is.
+cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_size)
 {
     CC_RECORD_SCOPE("fbx.read");
 
@@ -615,6 +706,14 @@ cc::result<data> read(cc::read_stream& in, read_options opts)
     load.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_PRESERVE;
     load.inherit_mode_handling = UFBX_INHERIT_MODE_HANDLING_PRESERVE;
     load.node_depth_limit = babel::impl::fbx_node_depth_limit;
+
+    // ufbx allocates a binary array's stated count before it inflates the array, so the ceiling is what makes a crafted count a read error rather than an allocation of whatever it asked for.
+    // The allocation count is bounded alongside, since ufbx counts both.
+    auto const memory = size_t(babel::impl::memory_limit_of(opts.memory_limit, input_size));
+    load.temp_allocator.memory_limit = memory;
+    load.result_allocator.memory_limit = memory;
+    load.temp_allocator.allocation_limit = memory / 64;
+    load.result_allocator.allocation_limit = memory / 64;
 
     auto error = ufbx_error{};
     auto* const scene = ufbx_load_stream(&stream, &load, &error);
@@ -638,14 +737,22 @@ cc::result<data> read(cc::read_stream& in, read_options opts)
     converter.convert_nodes();
     ufbx_free_scene(scene);
 
+    if (!converter.error.empty())
+        return cc::error(cc::move(converter.error));
     return cc::move(converter.out);
+}
+} // namespace
+
+cc::result<data> read(cc::read_stream& in, read_options opts)
+{
+    return read_sized(in, opts, -1);
 }
 
 cc::result<data> read(cc::span<byte const> bytes, read_options opts)
 {
     auto adapter = cc::span_read_stream_adapter(bytes);
     cc::read_stream stream = adapter;
-    return read(stream, opts);
+    return read_sized(stream, opts, bytes.size());
 }
 
 cc::result<data> read(cc::string_view text, read_options opts)

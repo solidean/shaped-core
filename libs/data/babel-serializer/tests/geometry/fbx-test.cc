@@ -202,7 +202,7 @@ TEST("fbx - materials are property bags with textures connected by property name
     CHECK(texture->name == "wood");
     CHECK(texture->relative_filename == "textures\\wood.png");
     CHECK(texture->absolute_filename == "C:/somewhere/textures/wood.png");
-    CHECK(texture->content.empty());
+    CHECK(texture->content.size() == 0);
     CHECK(texture->is_file);
     CHECK(red.find_texture("NormalMap") == bf::texture_index::invalid);
 
@@ -246,6 +246,117 @@ TEST("fbx - anything that is not FBX is an error, not an empty scene")
 
     // A binary header cut off right after its magic.
     CHECK(bf::read(cc::string_view("Kaydara FBX Binary  \0\x1a\0", 23)).has_error());
+}
+
+TEST("fbx - a binary file reads through its compressed arrays")
+{
+    auto const bytes = babel::test::fbx_binary_scene();
+    auto const doc = REQUIRED_VALUE(bf::read(cc::span<byte const>(bytes)));
+
+    CHECK(doc.info.encoding == bf::encoding::binary);
+    CHECK(doc.info.version == 7400);
+    REQUIRE(doc.meshes.size() == 1);
+    CHECK(doc.meshes[0].corner_count() == 3);
+    CHECK(near(doc.meshes[0].positions.at(1), tg::pos3f(1, 0, 0)));
+
+    auto const* const tri = node_named(doc, "tri");
+    REQUIRE(tri != nullptr);
+    CHECK(near(tri->node_to_world.transform(tg::pos3f::zero), tg::pos3f(0, 0, 5)));
+}
+
+TEST("fbx - an array stating more than the memory ceiling allows is an error, not an allocation")
+{
+    // A few hundred bytes claiming two billion vertices: ufbx sizes its buffer from the stated count.
+    auto const bytes = babel::test::fbx_binary_scene(0x7ffffff0);
+    auto const refused = bf::read(cc::span<byte const>(bytes));
+    REQUIRE(refused.has_error());
+    CHECK(cc::format("{}", refused.error()).contains("limit"));
+
+    // The ceiling is a knob, and a tiny one refuses even an honest file.
+    auto const honest = babel::test::fbx_binary_scene();
+    CHECK(bf::read(cc::span<byte const>(honest), {.memory_limit = 1024}).has_error());
+    CHECK(bf::read(cc::span<byte const>(honest), {.memory_limit = i64(256) << 20}).has_value());
+}
+
+TEST("fbx - axes that do not name X, Y and Z once each fall back to FBX's default, with an issue")
+{
+    // Up and right both X.
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(babel::test::fbx_scene({.up_axis = 0}))));
+    CHECK(doc.settings.right == bf::axis::positive_x);
+    CHECK(doc.settings.up == bf::axis::positive_y);
+    CHECK(doc.settings.front == bf::axis::positive_z);
+    CHECK(doc.has_issue_of(bf::issue_kind::malformed));
+}
+
+TEST("fbx - a unit that is not finite and positive falls back to a centimeter, with an issue")
+{
+    for (auto const factor : {0.0, -5.0})
+    {
+        auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(babel::test::fbx_scene({.unit_scale_factor = factor}))));
+        CHECK(near(f32(doc.settings.unit_meters), 0.01f));
+        CHECK(doc.has_issue_of(bf::issue_kind::malformed));
+    }
+}
+
+TEST("fbx - a geometric transform moves the mesh and not the node's children")
+{
+    auto const text
+        = babel::test::fbx_scene_with("\t\t\tP: \"Lcl Scaling\", \"Lcl Scaling\", \"\", \"A\",2,2,2\n",
+                                      "\t\t\tP: \"Lcl Scaling\", \"Lcl Scaling\", \"\", \"A\",2,2,2\n"
+                                      "\t\t\tP: \"GeometricTranslation\", \"Vector3D\", \"Vector\", \"\",0,0,7\n");
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(text)));
+
+    auto const* const parent = node_named(doc, "parent");
+    auto const* const child = node_named(doc, "child");
+    REQUIRE(parent != nullptr);
+    REQUIRE(child != nullptr);
+    CHECK(parent->has_geometry_transform);
+    CHECK(near(parent->geometry.translation[2], 7.0f));
+
+    // The mesh moves by 7, doubled by the node's scale; the node itself and its child stay where they were.
+    CHECK(near(parent->geometry_to_world.transform(tg::pos3f::zero), tg::pos3f(10, 0, 14)));
+    CHECK(near(parent->node_to_world.transform(tg::pos3f::zero), tg::pos3f(10, 0, 0)));
+    CHECK(near(child->node_to_world.transform(tg::pos3f::zero), tg::pos3f(10, 10, 0)));
+}
+
+TEST("fbx - a node ignoring its parent's scale says so, and its world transform honors it")
+{
+    auto const text
+        = babel::test::fbx_scene_with("\t\t\tP: \"Lcl Translation\", \"Lcl Translation\", \"\", \"A\",0,5,0\n",
+                                      "\t\t\tP: \"Lcl Translation\", \"Lcl Translation\", \"\", \"A\",0,5,0\n"
+                                      "\t\t\tP: \"InheritType\", \"enum\", \"\", \"\",2\n");
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(text)));
+
+    auto const* const child = node_named(doc, "child");
+    REQUIRE(child != nullptr);
+    CHECK(child->inherit == bf::inherit_mode::ignore_parent_scale);
+
+    // The parent scales by 2; this child does not, which a plain product of local transforms would get wrong.
+    CHECK(near(child->node_to_world.transform(tg::vec3f(1, 0, 0)).length(), 1.0f));
+}
+
+TEST("fbx - textures embedding one blob share it rather than each holding a copy")
+{
+    auto const text = babel::test::fbx_scene_with("\tTexture: 500,", "\tVideo: 600, \"Video::wood\", \"Clip\" {\n"
+                                                                     "\t\tType: \"Clip\"\n"
+                                                                     "\t\tRelativeFilename: \"wood.png\"\n"
+                                                                     "\t\tContent: , \"AAECAw==\"\n"
+                                                                     "\t}\n"
+                                                                     "\tTexture: 501, \"Texture::wood2\", \"\" {\n"
+                                                                     "\t\tType: \"TextureVideoClip\"\n"
+                                                                     "\t\tRelativeFilename: \"wood.png\"\n"
+                                                                     "\t}\n"
+                                                                     "\tTexture: 500,");
+    auto patched = cc::string(text);
+    REQUIRE(patched.replace_first("\tC: \"OO\",300,0\n", "\tC: \"OO\",300,0\n\tC: \"OO\",600,500\n\tC: "
+                                                         "\"OO\",600,501\n"));
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(patched)));
+
+    REQUIRE(doc.textures.size() == 2);
+    REQUIRE(doc.textures[0].content.size() == 4);
+    REQUIRE(doc.textures[1].content.size() == 4);
+    CHECK(u8(doc.textures[0].content.span()[3]) == 3);
+    CHECK(doc.textures[0].content.data() == doc.textures[1].content.data());
 }
 
 // The real thing, when a developer has fetched it with extern/bistro/fetch-bistro.py.
