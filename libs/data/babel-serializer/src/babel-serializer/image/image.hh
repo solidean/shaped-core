@@ -80,6 +80,14 @@ struct babel::image::image
     [[nodiscard]] cc::span<float const> samples_f32() const;
 };
 
+/// Aggregator read knobs.
+struct babel::image::read_options
+{
+    /// The most bytes a DDS or TGA decode may take, passed on as their own budget; past it the read is an error.
+    /// PNG has its own fixed ceilings, and JPEG, HDR and PFM take none.
+    isize max_decoded_bytes = isize(1) << 28;
+};
+
 namespace babel::image
 {
 
@@ -95,14 +103,14 @@ namespace babel::image
 [[nodiscard]] cc::result<format> detect_format(cc::span<byte const> bytes);
 
 /// Decode any supported image, auto-detecting the format and delegating to the matching low-level codec.
-[[nodiscard]] cc::result<image> read(cc::span<byte const> bytes);
+[[nodiscard]] cc::result<image> read(cc::span<byte const> bytes, read_options opts = {});
 
 /// Decode `bytes` as `fmt`, skipping detection — for a caller that knows the format from a file extension or a
 /// MIME type.
-[[nodiscard]] cc::result<image> read(cc::span<byte const> bytes, format fmt);
+[[nodiscard]] cc::result<image> read(cc::span<byte const> bytes, format fmt, read_options opts = {});
 
 /// Convenience: slurp the stream to end, then decode.
-[[nodiscard]] cc::result<image> read(cc::read_stream& in);
+[[nodiscard]] cc::result<image> read(cc::read_stream& in, read_options opts = {});
 
 // writing
 // -------------------------------------------------------------------------------------------------

@@ -184,14 +184,14 @@ cc::result<format> detect_format(cc::span<byte const> bytes)
     return cc::error("image: unrecognized format (the bytes match none of PNG, JPEG, Radiance HDR, PFM, DDS and TGA)");
 }
 
-cc::result<image> read(cc::span<byte const> bytes)
+cc::result<image> read(cc::span<byte const> bytes, read_options opts)
 {
     auto fmt = detect_format(bytes);
     CC_RETURN_IF_ERROR(fmt);
-    return read(bytes, fmt.value());
+    return read(bytes, fmt.value(), opts);
 }
 
-cc::result<image> read(cc::span<byte const> bytes, format fmt)
+cc::result<image> read(cc::span<byte const> bytes, format fmt, read_options opts)
 {
     // The aggregator's span rather than the codec's, so a trace shows "load an image" above whichever codec ran.
     CC_RECORD_SCOPE("image.read");
@@ -253,14 +253,14 @@ cc::result<image> read(cc::span<byte const> bytes, format fmt)
         auto result = image{.width = top.width, .height = top.height, .channels = 4};
         if (babel::dds::is_float(t.format))
         {
-            auto texels = babel::dds::decode_rgba32f(t, top);
+            auto texels = babel::dds::decode_rgba32f(t, top, {.max_decoded_bytes = opts.max_decoded_bytes});
             CC_RETURN_IF_ERROR(texels);
             result.comp = component::f32;
             result.pixels = cc::vector<byte>::create_copy_of(cc::span<float const>(texels.value()).as_bytes());
         }
         else
         {
-            auto texels = babel::dds::decode_rgba8(t, top);
+            auto texels = babel::dds::decode_rgba8(t, top, {.max_decoded_bytes = opts.max_decoded_bytes});
             CC_RETURN_IF_ERROR(texels);
             result.comp = component::u8;
             result.pixels = cc::move(texels.value());
@@ -269,7 +269,7 @@ cc::result<image> read(cc::span<byte const> bytes, format fmt)
     }
     case format::tga:
     {
-        auto decoded = babel::tga::read(bytes);
+        auto decoded = babel::tga::read(bytes, {.max_decoded_bytes = opts.max_decoded_bytes});
         CC_RETURN_IF_ERROR(decoded);
         auto& d = decoded.value();
         auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::u8};
@@ -281,11 +281,11 @@ cc::result<image> read(cc::span<byte const> bytes, format fmt)
     return cc::error("image: unhandled format");
 }
 
-cc::result<image> read(cc::read_stream& in)
+cc::result<image> read(cc::read_stream& in, read_options opts)
 {
     auto bytes = in.read_all();
     CC_RETURN_IF_ERROR(bytes);
-    return read(bytes.value());
+    return read(bytes.value(), opts);
 }
 
 cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options opts)

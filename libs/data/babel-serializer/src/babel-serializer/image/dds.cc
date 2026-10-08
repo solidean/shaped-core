@@ -2,6 +2,7 @@
 #include <babel-serializer/image/impl/dds_flags.hh>
 #include <clean-core/common/endian.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/string/format.hh>
 
@@ -32,8 +33,7 @@ constexpr u32 d3dfmt_a16b16g16r16f = 113;
 constexpr u32 d3dfmt_r32f = 114;
 constexpr u32 d3dfmt_a32b32g32r32f = 116;
 
-// One axis may not exceed this, nor an array this many layers; both are far past what any API creates.
-constexpr u32 max_extent = 1u << 16;
+// An array may not have more layers than this, far past what any API creates.
 constexpr u32 max_array_size = 1u << 16;
 
 struct resolved_format
@@ -156,6 +156,15 @@ cc::string describe_four_cc(u32 code)
     return cc::format("'{}'", text);
 }
 
+/// True for an empty mask or one run of set bits: a channel's value is the bits it covers, read as one integer.
+bool is_contiguous_mask(u32 mask)
+{
+    if (mask == 0)
+        return true;
+    auto const run = u64(mask >> cc::count_trailing_zeroes(mask));
+    return (run & (run + 1)) == 0;
+}
+
 cc::result<resolved_format> resolve_masked(pixel_format_header const& pf)
 {
     if ((pf.flags & (pf_rgb | pf_luminance | pf_alpha)) == 0)
@@ -172,6 +181,10 @@ cc::result<resolved_format> resolve_masked(pixel_format_header const& pf)
         return cc::error(cc::format("dds: a channel mask reaches past the {}-bit pixel", bits));
     if ((pf.r_mask | pf.g_mask | pf.b_mask | a) == 0)
         return cc::error("dds: a masked pixel format with every mask zero has no channels");
+    auto const masks = cc::fixed_array<u32, 4>{pf.r_mask, pf.g_mask, pf.b_mask, a};
+    for (auto const mask : masks)
+        if (!is_contiguous_mask(mask))
+            return cc::error(cc::format("dds: channel mask {:#x} is not one run of bits", mask));
 
     // The layouts a DXGI format names map to it, so a consumer can upload them as they are.
     if ((pf.flags & pf_rgb) != 0)
@@ -376,14 +389,14 @@ subresource const* data::find(int layer, int face, int mip) const
 isize data::row_pitch(int row_width) const
 {
     if (auto const block_bytes = block_bytes_of(format); block_bytes > 0)
-        return isize((row_width + 3) / 4) * block_bytes;
+        return (isize(row_width) + 3) / 4 * block_bytes;
     return (isize(row_width) * bits_per_texel(format, file_header.pixels.rgb_bit_count) + 7) / 8;
 }
 
 isize data::slice_byte_size(int slice_width, int slice_height) const
 {
     if (is_block_compressed(format))
-        return row_pitch(slice_width) * isize((slice_height + 3) / 4);
+        return row_pitch(slice_width) * ((isize(slice_height) + 3) / 4);
     return row_pitch(slice_width) * isize(slice_height);
 }
 
@@ -529,11 +542,13 @@ cc::result<data> read(cc::pinned_data<byte const> bytes)
 
     // A count of 0 means the base level alone; so does a header that leaves the count's flag unset yet fills it in,
     // which writers do, and which every reader takes at its word.
-    auto const mips = h.mip_map_count == 0 ? 1 : int(h.mip_map_count);
+    // The count is compared as stored, so a huge u32 cannot wrap into a negative int on the way.
+    auto const stored_mips = h.mip_map_count == 0 ? u32(1) : h.mip_map_count;
     auto const longest = full_chain_length(h.width, height, depth);
-    if (mips > longest)
+    if (stored_mips > u32(longest))
         return cc::error(cc::format("dds: {} mip levels, where a {}x{}x{} texture has at most {}", //
-                                    mips, h.width, height, depth, longest));
+                                    stored_mips, h.width, height, depth, longest));
+    auto const mips = int(stored_mips);
 
     result.width = int(h.width);
     result.height = int(height);

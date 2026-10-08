@@ -27,6 +27,10 @@
 // The header must be self-consistent, and every subresource it implies must lie inside the input.
 // Bytes past the last subresource are tolerated.
 //
+// ROWS ARE READ TIGHTLY PACKED, and the header's pitch / linear size is ignored.
+// The extent and the format alone decide each level's size, as DirectXTex reads a file by default.
+// A legacy writer that padded rows to a DWORD therefore reads as tight rows, and its padding shifts the texels.
+//
 //   auto const tex = babel::dds::read(cc::make_pinned_data(cc::move(file_bytes))).value();
 //   auto const* const top = tex.find(0, 0, 0);          // layer, face, mip
 //   auto const texels = babel::dds::decode_rgba8(tex, *top).value();
@@ -109,7 +113,7 @@ struct babel::dds::header
     u32 flags = 0;
     u32 height = 0;
     u32 width = 0;
-    u32 pitch_or_linear_size = 0;
+    u32 pitch_or_linear_size = 0; // as stored, and ignored: rows are read tightly packed
     u32 depth = 0;
     u32 mip_map_count = 0;
     pixel_format_header pixels;
@@ -219,15 +223,32 @@ namespace babel::dds
 // decoding
 // -------------------------------------------------------------------------------------------------
 
+} // namespace babel::dds
+
+/// Decode knobs.
+struct babel::dds::decode_options
+{
+    /// The most bytes a decoded subresource may take; one that would take more is an error before anything is
+    /// allocated.
+    /// A block-compressed texture decodes to 8 to 32 times its size, so this bounds what a large file can demand.
+    /// The default holds an 8192 x 8192 decode to rgba8.
+    isize max_decoded_bytes = isize(1) << 28;
+};
+
+namespace babel::dds
+{
 /// Decode one subresource of `tex` to 8-bit r, g, b, a texels, row-major and top-left origin, slice after slice.
 /// Errors for a float format, which decode_rgba32f handles.
 /// Channels a format lacks read as a GPU samples them: 0 for a missing color, 255 for a missing alpha.
 /// BC4 and BC5 follow babel::bcn, signed values included — their bias is documented there.
 /// A legacy luminance format replicates into r, g and b.
-[[nodiscard]] cc::result<cc::vector<byte>> decode_rgba8(data const& tex, subresource const& sub);
+[[nodiscard]] cc::result<cc::vector<byte>> decode_rgba8(data const& tex, subresource const& sub, decode_options opts = {});
 
 /// Decode one subresource of `tex` to float r, g, b, a texels, row-major and top-left origin, slice after slice.
 /// Every format is accepted: a normalized one lands in 0..1, or -1..1 where it is signed.
+/// BC1 - BC5 come back as their exact interpolants, not the 8-bit decode's rounded ones.
 /// sRGB formats come back still encoded, as their bytes are; converting to linear is the caller's.
-[[nodiscard]] cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const& sub);
+[[nodiscard]] cc::result<cc::vector<float>> decode_rgba32f(data const& tex,
+                                                           subresource const& sub,
+                                                           decode_options opts = {});
 } // namespace babel::dds

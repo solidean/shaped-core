@@ -3,6 +3,7 @@
 #include <babel-serializer/image/impl/dds_flags.hh>
 #include <clean-core/common/endian.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/math/bit.hh>
 #include <clean-core/string/format.hh>
 #include <typed-geometry/scalar/half_float.hh>
@@ -15,7 +16,8 @@ namespace
 {
 using namespace babel::dds::impl;
 
-/// One masked channel scaled to 0..1, or nothing when the mask is empty.
+/// One masked channel scaled to 0..1.
+/// The mask is one run of bits — the reader refuses any other — so the shifted value never exceeds its maximum.
 float masked_channel(u32 texel, u32 mask)
 {
     auto const shift = cc::count_trailing_zeroes(mask);
@@ -25,10 +27,10 @@ float masked_channel(u32 texel, u32 mask)
 }
 
 /// A masked texel as r, g, b, a in 0..1.
-void decode_masked_texel(pixel_format_header const& pf, u32 texel, float* out)
+cc::fixed_array<float, 4> decode_masked_texel(pixel_format_header const& pf, u32 texel)
 {
     auto const a_mask = effective_alpha_mask(pf);
-    auto const alpha = a_mask != 0 ? masked_channel(texel, a_mask) : 1.0f;
+    auto out = cc::fixed_array<float, 4>{0.0f, 0.0f, 0.0f, a_mask != 0 ? masked_channel(texel, a_mask) : 1.0f};
 
     if ((pf.flags & pf_luminance) != 0)
     {
@@ -43,13 +45,17 @@ void decode_masked_texel(pixel_format_header const& pf, u32 texel, float* out)
         out[1] = pf.g_mask != 0 ? masked_channel(texel, pf.g_mask) : 0.0f;
         out[2] = pf.b_mask != 0 ? masked_channel(texel, pf.b_mask) : 0.0f;
     }
-    else
-    {
-        out[0] = 0.0f;
-        out[1] = 0.0f;
-        out[2] = 0.0f;
-    }
-    out[3] = alpha;
+    return out;
+}
+
+/// The texel of a masked format at byte `at`: up to four bytes, little-endian, read byte by byte so a 24-bit texel
+/// stays in bounds.
+u32 load_masked_texel(cc::span<byte const> src, isize at, isize bytes_per_texel)
+{
+    auto texel = u32(0);
+    for (auto b = isize(0); b < bytes_per_texel; ++b)
+        texel |= u32(u8(src[at + b])) << (8 * b);
+    return texel;
 }
 
 u8 to_unorm8(float v)
@@ -58,12 +64,28 @@ u8 to_unorm8(float v)
     return u8(clamped * 255.0f + 0.5f);
 }
 
-/// Checks `sub` against what `tex` says it should hold, so decoding a hand-built one never reads out of bounds.
-cc::result<cc::unit> check_subresource(data const& tex, subresource const& sub)
+/// Checks `sub` against what `tex` says it should hold, and the decoded size against the budget.
+/// `data` and `subresource` are plain structs a caller may build by hand, so nothing here trusts that `read` made them.
+cc::result<cc::unit> check_subresource(data const& tex, subresource const& sub, isize sample_bytes, decode_options opts)
 {
     if (sub.width <= 0 || sub.height <= 0 || sub.depth <= 0)
         return cc::error(cc::format("dds decode: subresource has a non-positive extent {}x{}x{}", //
                                     sub.width, sub.height, sub.depth));
+    if (u32(sub.width) > max_extent || u32(sub.height) > max_extent || u32(sub.depth) > max_extent)
+        return cc::error(cc::format("dds decode: implausible extent {}x{}x{}", sub.width, sub.height, sub.depth));
+
+    if (tex.format == pixel_format::masked)
+    {
+        auto const bits = tex.file_header.pixels.rgb_bit_count;
+        if (bits != 8 && bits != 16 && bits != 24 && bits != 32)
+            return cc::error(cc::format("dds decode: a masked pixel format of {} bits per pixel", bits));
+    }
+
+    auto const decoded = isize(sub.width) * sub.height * sub.depth * 4 * sample_bytes;
+    if (decoded > opts.max_decoded_bytes)
+        return cc::error(cc::format("dds decode: {}x{}x{} decodes to {} bytes, past the {}-byte budget", //
+                                    sub.width, sub.height, sub.depth, decoded, opts.max_decoded_bytes));
+
     auto const needed = tex.slice_byte_size(sub.width, sub.height) * isize(sub.depth);
     if (needed <= 0)
         return cc::error(cc::format("dds decode: {} has no byte size", to_string(tex.format)));
@@ -73,20 +95,21 @@ cc::result<cc::unit> check_subresource(data const& tex, subresource const& sub)
     return cc::unit{};
 }
 
-/// Calls `fn(block_bytes, block_x, block_y, slice)` for every block of a block-compressed subresource.
+/// Calls `fn(block, block_x, block_y, slice)` for every block of a block-compressed subresource.
+/// `block` points at the block's first byte; check_subresource has made sure every block lies inside `sub.bytes`.
 template <class Fn>
 void for_each_block(data const& tex, subresource const& sub, Fn&& fn)
 {
     auto const block_bytes = tex.row_pitch(4); // one block
     auto const blocks_x = (sub.width + 3) / 4;
     auto const blocks_y = (sub.height + 3) / 4;
-    auto const bytes = sub.bytes.span();
+    auto const* const bytes = sub.bytes.data();
     auto offset = isize(0);
     for (auto z = 0; z < sub.depth; ++z)
         for (auto by = 0; by < blocks_y; ++by)
             for (auto bx = 0; bx < blocks_x; ++bx)
             {
-                fn(bytes.subspan({.offset = offset, .size = block_bytes}), bx, by, z);
+                fn(bytes + offset, bx, by, z);
                 offset += block_bytes;
             }
 }
@@ -111,18 +134,76 @@ void store_block(cc::span<T const> block_texels, subresource const& sub, int bx,
         }
     }
 }
+
+bcn::rgba8_block decode_block_rgba8(pixel_format fmt, byte const* block)
+{
+    switch (fmt)
+    {
+    case pixel_format::bc1_unorm:
+    case pixel_format::bc1_unorm_srgb:
+        return bcn::decode_bc1(bcn::small_block(block));
+    case pixel_format::bc2_unorm:
+    case pixel_format::bc2_unorm_srgb:
+        return bcn::decode_bc2(bcn::large_block(block));
+    case pixel_format::bc3_unorm:
+    case pixel_format::bc3_unorm_srgb:
+        return bcn::decode_bc3(bcn::large_block(block));
+    case pixel_format::bc4_unorm:
+    case pixel_format::bc4_snorm:
+        return bcn::decode_bc4(bcn::small_block(block), fmt == pixel_format::bc4_snorm);
+    case pixel_format::bc5_unorm:
+    case pixel_format::bc5_snorm:
+        return bcn::decode_bc5(bcn::large_block(block), fmt == pixel_format::bc5_snorm);
+    default:
+        return bcn::decode_bc7(bcn::large_block(block));
+    }
+}
+
+/// BC7's interpolation is integer-specified, so its 8-bit result is exact and only widens here.
+bcn::rgba32f_block decode_block_rgba32f(pixel_format fmt, byte const* block)
+{
+    switch (fmt)
+    {
+    case pixel_format::bc1_unorm:
+    case pixel_format::bc1_unorm_srgb:
+        return bcn::decode_bc1_f32(bcn::small_block(block));
+    case pixel_format::bc2_unorm:
+    case pixel_format::bc2_unorm_srgb:
+        return bcn::decode_bc2_f32(bcn::large_block(block));
+    case pixel_format::bc3_unorm:
+    case pixel_format::bc3_unorm_srgb:
+        return bcn::decode_bc3_f32(bcn::large_block(block));
+    case pixel_format::bc4_unorm:
+    case pixel_format::bc4_snorm:
+        return bcn::decode_bc4_f32(bcn::small_block(block), fmt == pixel_format::bc4_snorm);
+    case pixel_format::bc5_unorm:
+    case pixel_format::bc5_snorm:
+        return bcn::decode_bc5_f32(bcn::large_block(block), fmt == pixel_format::bc5_snorm);
+    case pixel_format::bc6h_ufloat:
+    case pixel_format::bc6h_sfloat:
+        return bcn::decode_bc6h(bcn::large_block(block), fmt == pixel_format::bc6h_sfloat);
+    default:
+    {
+        auto const texels = bcn::decode_bc7(bcn::large_block(block));
+        auto out = bcn::rgba32f_block{};
+        for (auto i = 0; i < 64; ++i)
+            out.rgba[i] = float(texels.rgba[i]) / 255.0f;
+        return out;
+    }
+    }
+}
 } // namespace
 
 // decoding
 // -------------------------------------------------------------------------------------------------
 
-cc::result<cc::vector<byte>> decode_rgba8(data const& tex, subresource const& sub)
+cc::result<cc::vector<byte>> decode_rgba8(data const& tex, subresource const& sub, decode_options opts)
 {
     CC_RECORD_SCOPE("dds.decode_rgba8");
 
     if (is_float(tex.format))
         return cc::error(cc::format("dds decode: {} holds floats; decode it with decode_rgba32f", to_string(tex.format)));
-    CC_RETURN_IF_ERROR(check_subresource(tex, sub));
+    CC_RETURN_IF_ERROR(check_subresource(tex, sub, 1, opts));
 
     auto const texel_count = isize(sub.width) * sub.height * sub.depth;
     auto out = cc::vector<byte>::create_uninitialized(texel_count * 4);
@@ -130,37 +211,10 @@ cc::result<cc::vector<byte>> decode_rgba8(data const& tex, subresource const& su
 
     if (is_block_compressed(tex.format))
     {
-        auto const fmt = tex.format;
         for_each_block(tex, sub,
-                       [&](cc::span<byte const> block, int bx, int by, int z)
+                       [&](byte const* block, int bx, int by, int z)
                        {
-                           auto texels = bcn::rgba8_block{};
-                           switch (fmt)
-                           {
-                           case pixel_format::bc1_unorm:
-                           case pixel_format::bc1_unorm_srgb:
-                               texels = bcn::decode_bc1(block);
-                               break;
-                           case pixel_format::bc2_unorm:
-                           case pixel_format::bc2_unorm_srgb:
-                               texels = bcn::decode_bc2(block);
-                               break;
-                           case pixel_format::bc3_unorm:
-                           case pixel_format::bc3_unorm_srgb:
-                               texels = bcn::decode_bc3(block);
-                               break;
-                           case pixel_format::bc4_unorm:
-                           case pixel_format::bc4_snorm:
-                               texels = bcn::decode_bc4(block, fmt == pixel_format::bc4_snorm);
-                               break;
-                           case pixel_format::bc5_unorm:
-                           case pixel_format::bc5_snorm:
-                               texels = bcn::decode_bc5(block, fmt == pixel_format::bc5_snorm);
-                               break;
-                           default:
-                               texels = bcn::decode_bc7(block);
-                               break;
-                           }
+                           auto const texels = decode_block_rgba8(tex.format, block);
                            store_block<u8>(cc::span<u8 const>(texels.rgba), sub, bx, by, z, dst);
                        });
         return cc::move(out);
@@ -216,12 +270,8 @@ cc::result<cc::vector<byte>> decode_rgba8(data const& tex, subresource const& su
                     break;
                 default:
                 {
-                    // Masked: up to four bytes, little-endian, read byte by byte so a 24-bit texel stays in bounds.
-                    auto texel = u32(0);
-                    for (auto b = isize(0); b < bytes_per_texel; ++b)
-                        texel |= u32(u8(src[at + b])) << (8 * b);
-                    float rgba[4] = {};
-                    decode_masked_texel(tex.file_header.pixels, texel, rgba);
+                    auto const rgba
+                        = decode_masked_texel(tex.file_header.pixels, load_masked_texel(src, at, bytes_per_texel));
                     for (auto c = 0; c < 4; ++c)
                         o[c] = to_unorm8(rgba[c]);
                     break;
@@ -233,44 +283,21 @@ cc::result<cc::vector<byte>> decode_rgba8(data const& tex, subresource const& su
     return cc::move(out);
 }
 
-cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const& sub)
+cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const& sub, decode_options opts)
 {
     CC_RECORD_SCOPE("dds.decode_rgba32f");
-    CC_RETURN_IF_ERROR(check_subresource(tex, sub));
+    CC_RETURN_IF_ERROR(check_subresource(tex, sub, isize(sizeof(float)), opts));
 
     auto const texel_count = isize(sub.width) * sub.height * sub.depth;
     auto const fmt = tex.format;
 
-    if (fmt == pixel_format::bc6h_ufloat || fmt == pixel_format::bc6h_sfloat)
+    if (is_block_compressed(fmt))
     {
         auto out = cc::vector<float>::create_uninitialized(texel_count * 4);
         for_each_block(tex, sub,
-                       [&](cc::span<byte const> block, int bx, int by, int z)
+                       [&](byte const* block, int bx, int by, int z)
                        {
-                           auto const texels = bcn::decode_bc6h(block, fmt == pixel_format::bc6h_sfloat);
-                           store_block<float>(cc::span<float const>(texels.rgba), sub, bx, by, z, out.data());
-                       });
-        return cc::move(out);
-    }
-
-    if (fmt == pixel_format::bc4_snorm || fmt == pixel_format::bc5_snorm)
-    {
-        // The signed values themselves, which the 8-bit decode can only carry biased.
-        auto out = cc::vector<float>::create_uninitialized(texel_count * 4);
-        for_each_block(tex, sub,
-                       [&](cc::span<byte const> block, int bx, int by, int z)
-                       {
-                           auto texels = bcn::rgba32f_block{};
-                           auto const red = bcn::decode_bc4_channel(block, true);
-                           auto green = cc::fixed_array<i16, 16>{};
-                           if (fmt == pixel_format::bc5_snorm)
-                               green = bcn::decode_bc4_channel(block.subspan(8), true);
-                           for (auto i = 0; i < 16; ++i)
-                           {
-                               texels.rgba[i * 4 + 0] = float(red[i]) / 127.0f;
-                               texels.rgba[i * 4 + 1] = float(green[i]) / 127.0f;
-                               texels.rgba[i * 4 + 3] = 1.0f;
-                           }
+                           auto const texels = decode_block_rgba32f(fmt, block);
                            store_block<float>(cc::span<float const>(texels.rgba), sub, bx, by, z, out.data());
                        });
         return cc::move(out);
@@ -280,7 +307,7 @@ cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const&
     {
         auto out = cc::vector<float>::create_uninitialized(texel_count * 4);
         auto const src = sub.bytes.span();
-        auto const bytes_per_texel = isize(tex.file_header.pixels.rgb_bit_count / 8);
+        auto const bytes_per_texel = tex.row_pitch(1);
         auto const row_pitch = tex.row_pitch(sub.width);
         auto const slice_size = tex.slice_byte_size(sub.width, sub.height);
         for (auto z = 0; z < sub.depth; ++z)
@@ -288,11 +315,11 @@ cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const&
                 for (auto x = 0; x < sub.width; ++x)
                 {
                     auto const at = isize(z) * slice_size + isize(y) * row_pitch + isize(x) * bytes_per_texel;
-                    auto texel = u32(0);
-                    for (auto b = isize(0); b < bytes_per_texel; ++b)
-                        texel |= u32(u8(src[at + b])) << (8 * b);
-                    decode_masked_texel(tex.file_header.pixels, texel,
-                                        out.data() + ((isize(z) * sub.height + y) * sub.width + x) * 4);
+                    auto const rgba
+                        = decode_masked_texel(tex.file_header.pixels, load_masked_texel(src, at, bytes_per_texel));
+                    auto const dst = ((isize(z) * sub.height + y) * sub.width + x) * 4;
+                    for (auto c = 0; c < 4; ++c)
+                        out[dst + c] = rgba[c];
                 }
         return cc::move(out);
     }
@@ -307,7 +334,7 @@ cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const&
         auto const sample_bytes = isize(is_half ? 2 : 4);
         for (auto t = isize(0); t < texel_count; ++t)
         {
-            float rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            auto rgba = cc::fixed_array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f};
             for (auto c = 0; c < channels; ++c)
             {
                 auto const at = (t * channels + c) * sample_bytes;
@@ -320,8 +347,8 @@ cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const&
         return cc::move(out);
     }
 
-    // Everything else is 8 bits a channel, so the 8-bit decode loses nothing.
-    auto bytes = decode_rgba8(tex, sub);
+    // What is left stores 8-bit channels as they are, so the 8-bit decode is exact and only widens here.
+    auto bytes = decode_rgba8(tex, sub, opts);
     CC_RETURN_IF_ERROR(bytes);
     auto out = cc::vector<float>::create_uninitialized(texel_count * 4);
     for (auto i = isize(0); i < texel_count * 4; ++i)

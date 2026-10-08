@@ -9,6 +9,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh>
 
 using namespace cc::primitive_defines;
 
@@ -278,6 +279,14 @@ TEST("dds - a truncated or malformed file is an error, never a short read")
                   .has_error());
         CHECK(dds::read(cc::span<byte const>(make_dds({.dx10 = true, .dxgi = 71, .array_size = 0}, block))).has_error());
     }
+
+    SECTION("a mip count past an int is still too many")
+    {
+        // Stored as a u32, these would turn negative as an int and skip every level.
+        auto const block = counting_payload(8);
+        CHECK(dds::read(cc::span<byte const>(make_dds({.mips = 0xFFFFFFFF}, block))).has_error());
+        CHECK(dds::read(cc::span<byte const>(make_dds({.mips = 0x80000000}, block))).has_error());
+    }
 }
 
 TEST("dds - a cube map stores each face's chain in turn")
@@ -488,6 +497,15 @@ TEST("dds - legacy masked layouts")
         CHECK(u8(out24[8]) == 8); // texel 2's red is byte 8
     }
 
+    SECTION("a mask that is not one run of bits is an error")
+    {
+        auto const texel = counting_payload(2);
+        CHECK(dds::read(
+                  cc::span<byte const>(make_dds(
+                      {.width = 1, .height = 1, .pf_flags = 0x40, .code = 0, .bit_count = 16, .r_mask = 0x0F0F}, texel)))
+                  .has_error());
+    }
+
     SECTION("a mask past the pixel is an error")
     {
         byte const texel[1] = {byte(0)};
@@ -584,28 +602,32 @@ TEST("dds - real Bistro textures decode, when present")
 {
     auto const dir = bistro_texture_dir();
 
+    // The small files cover every encoding Bistro uses; the 2048 x 2048 ones run under --thorough only.
     struct sample
     {
         cc::string_view name;
         babel::image::format format = babel::image::format::dds;
         int width = 0;
         int channels = 4;
+        bool heavy = false;
     };
     sample const samples[] = {
-        {"Antenna_Metal_BaseColor.dds", babel::image::format::dds, 2048, 4},      // DXT1, 12 levels
-        {"Foliage_Ivy_leaf_a_BaseColor.dds", babel::image::format::dds, 2048, 4}, // DXT5
-        {"Antenna_Metal_Normal.dds", babel::image::format::dds, 2048, 4},         // ATI2
-        {"Antenna_Metal_Specular.dds", babel::image::format::dds, 16, 4},         // DXT5, 16x16
-        {"Emissive_StreetLight_Emissive.dds", babel::image::format::dds, 64, 4},  // DXT1, 64x64
-        {"Bistro_Sign_Letters_Normal.dds", babel::image::format::dds, 1, 4},      // ATI2, 1x1, no mip count
-        {"Emissive_StreetLight_Emissive.tga", babel::image::format::tga, 16, 4},  // 32-bit, footer
-        {"M_StatueGlass_Normal.TGA", babel::image::format::tga, 1, 3},            // 24-bit, 1x1
-        {"M_StatueGlass_BaseColor.TGA", babel::image::format::tga, 2048, 3},      // 24-bit, 12 MB
+        {"Antenna_Metal_Specular.dds", babel::image::format::dds, 16, 4},               // DXT5, 16x16
+        {"Emissive_StreetLight_Emissive.dds", babel::image::format::dds, 64, 4},        // DXT1, 64x64
+        {"Bistro_Sign_Letters_Normal.dds", babel::image::format::dds, 1, 4},            // ATI2, 1x1, no mip count
+        {"Emissive_StreetLight_Emissive.tga", babel::image::format::tga, 16, 4},        // 32-bit, footer
+        {"M_StatueGlass_Normal.TGA", babel::image::format::tga, 1, 3},                  // 24-bit, 1x1
+        {"Antenna_Metal_BaseColor.dds", babel::image::format::dds, 2048, 4, true},      // DXT1, 12 levels
+        {"Foliage_Ivy_leaf_a_BaseColor.dds", babel::image::format::dds, 2048, 4, true}, // DXT5
+        {"Antenna_Metal_Normal.dds", babel::image::format::dds, 2048, 4, true},         // ATI2
+        {"M_StatueGlass_BaseColor.TGA", babel::image::format::tga, 2048, 3, true},      // 24-bit, 12 MB
     };
 
     auto found = 0;
     for (auto const& s : samples)
     {
+        if (s.heavy && !nx::is_thorough())
+            continue;
         auto const bytes = read_file(cc::format("{}/{}", dir, s.name));
         if (!bytes.has_value())
             continue;
@@ -635,4 +657,54 @@ TEST("dds - real Bistro textures decode, when present")
 
     if (found == 0)
         SKIP("the Bistro textures are not extracted; set SC_BISTRO_TEXTURES to their directory");
+}
+
+// Budgets and hand-built input
+// -------------------------------------------------------------------------------------------------
+
+TEST("dds - a decode larger than the budget is refused before allocating")
+{
+    auto const payload = counting_payload(4 * 8); // 8x8 DXT1
+    auto const tex = dds::read(cc::span<byte const>(make_dds({.width = 8, .height = 8}, payload)));
+    REQUIRE(tex.has_value());
+    auto const& sub = tex.value().subresources[0];
+
+    // 8 x 8 rgba8 is 256 bytes, and rgba32f four times that.
+    CHECK(dds::decode_rgba8(tex.value(), sub, {.max_decoded_bytes = 256}).has_value());
+    CHECK(dds::decode_rgba8(tex.value(), sub, {.max_decoded_bytes = 255}).has_error());
+    CHECK(dds::decode_rgba32f(tex.value(), sub, {.max_decoded_bytes = 1023}).has_error());
+
+    auto const file = make_dds({.width = 8, .height = 8}, payload);
+    CHECK(babel::image::read(file, {.max_decoded_bytes = 255}).has_error());
+}
+
+TEST("dds - decoding checks a hand-built texture rather than trusting it")
+{
+    auto tex = dds::data{.format = dds::pixel_format::masked, .width = 1, .height = 1};
+    tex.file_header.pixels = {.flags = 0x40, .rgb_bit_count = 40, .r_mask = 0xFF};
+    auto const bytes = counting_payload(8);
+    auto const sub = dds::subresource{.width = 1, .height = 1, .bytes = cc::make_pinned_data(bytes)};
+    CHECK(dds::decode_rgba8(tex, sub).has_error());
+    CHECK(dds::decode_rgba32f(tex, sub).has_error());
+
+    // An extent no reader produces, whose pitch would otherwise run past an int.
+    auto bc = dds::data{.format = dds::pixel_format::bc1_unorm, .width = 1, .height = 1};
+    auto const huge = dds::subresource{.width = 2147483647, .height = 1, .bytes = cc::make_pinned_data(bytes)};
+    CHECK(dds::decode_rgba8(bc, huge).has_error());
+}
+
+TEST("dds - the float decode of BC1 keeps its exact interpolants")
+{
+    // A 4x4 DXT1 with r = 1 (8 widened) over black; texel 2 takes index 2, two thirds of the way: 16/3.
+    auto payload = cc::vector<byte>::create_filled(8, byte(0));
+    cc::store_bytes_le<u16>(payload, 0, 0x0800);
+    cc::store_bytes_le<u32>(payload, 4, 0x20);
+    auto const tex = dds::read(cc::span<byte const>(make_dds({}, payload)));
+    REQUIRE(tex.has_value());
+    auto const floats = dds::decode_rgba32f(tex.value(), tex.value().subresources[0]);
+    REQUIRE(floats.has_value());
+    CHECK(floats.value()[2 * 4 + 0] == 16.0f / 765.0f);
+    auto const bytes = dds::decode_rgba8(tex.value(), tex.value().subresources[0]);
+    REQUIRE(bytes.has_value());
+    CHECK(u8(bytes.value()[2 * 4 + 0]) == 5);
 }

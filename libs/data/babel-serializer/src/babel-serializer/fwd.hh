@@ -216,6 +216,7 @@ struct pixel_format_header;
 struct header;
 struct subresource;
 struct data;
+struct decode_options;
 
 /// The domain every recording site in babel::dds is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
@@ -225,6 +226,7 @@ namespace babel::tga
 {
 enum class image_type : u8;
 struct data;
+struct read_options;
 
 /// The domain every recording site in babel::tga is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
@@ -235,6 +237,7 @@ namespace babel::image
 enum class format : u8;
 enum class component : u8;
 struct image;
+struct read_options;
 
 /// The domain every recording site in babel::image is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);

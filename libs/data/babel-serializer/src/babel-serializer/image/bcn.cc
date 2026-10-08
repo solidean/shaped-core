@@ -1,5 +1,4 @@
 #include <babel-serializer/image/bcn.hh>
-#include <clean-core/common/assert.hh>
 #include <clean-core/common/endian.hh>
 #include <clean-core/math/bit.hh>
 #include <typed-geometry/scalar/half_float.hh>
@@ -88,6 +87,13 @@ int weight_of(int index_bits, int index)
     return weights_4[index];
 }
 
+/// A block as the plain span the byte loads take.
+template <isize N>
+cc::span<byte const> bytes_of(cc::fixed_span<byte const, N> block)
+{
+    return cc::span<byte const>(block.data(), N);
+}
+
 /// Reads a 128-bit block least significant bit first, the order every field of BC6H and BC7 is stored in.
 struct bit_reader
 {
@@ -95,8 +101,8 @@ struct bit_reader
     u64 hi = 0;
     int pos = 0;
 
-    explicit bit_reader(cc::span<byte const> block)
-      : lo(cc::load_bytes_le<u64>(block, 0)), hi(cc::load_bytes_le<u64>(block, 8))
+    explicit bit_reader(large_block block)
+      : lo(cc::load_bytes_le<u64>(bytes_of(block), 0)), hi(cc::load_bytes_le<u64>(bytes_of(block), 8))
     {
     }
 
@@ -122,63 +128,126 @@ struct bit_reader
 // -------------------------------------------------------------------------------------------------
 
 /// An RGB565 endpoint widened to 8 bits a channel by replicating its top bits, the way every decoder widens it.
-void expand_565(u16 c, u8* out)
+cc::fixed_array<int, 3> expand_565(u16 c)
 {
-    auto const r = u32(c >> 11) & 31u;
-    auto const g = u32(c >> 5) & 63u;
-    auto const b = u32(c) & 31u;
-    out[0] = u8((r << 3) | (r >> 2));
-    out[1] = u8((g << 2) | (g >> 4));
-    out[2] = u8((b << 3) | (b >> 2));
-    out[3] = 255;
+    auto const r = int(c >> 11) & 31;
+    auto const g = int(c >> 5) & 63;
+    auto const b = int(c) & 31;
+    return {(r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)};
 }
 
-/// The color half of a BC1, BC2 or BC3 block into `out`'s rgb, and into its alpha too for BC1.
-void decode_color(cc::span<byte const> block, bool allow_three_color, rgba8_block& out)
+/// The four colors of a BC1-style block as exact fractions over one denominator, and the entry each texel takes.
+/// Keeping the fractions is what lets the 8-bit and the float decode come from one computation.
+struct color_palette
 {
-    auto const c0 = cc::load_bytes_le<u16>(block, 0);
-    auto const c1 = cc::load_bytes_le<u16>(block, 2);
-    auto const indices = cc::load_bytes_le<u32>(block, 4);
+    cc::fixed_array<cc::fixed_array<int, 4>, 4> numerators = {}; // [entry][r, g, b, a], 0..255 units
+    int denominator = 1;
+    cc::fixed_array<u8, 16> indices = {};
+};
 
-    u8 palette[4][4] = {};
-    expand_565(c0, palette[0]);
-    expand_565(c1, palette[1]);
+/// The color half of a BC1, BC2 or BC3 block; only BC1 may use the three-color mode.
+color_palette read_color(small_block block, bool allow_three_color)
+{
+    auto const c0 = cc::load_bytes_le<u16>(bytes_of(block), 0);
+    auto const c1 = cc::load_bytes_le<u16>(bytes_of(block), 2);
+    auto const indices = cc::load_bytes_le<u32>(bytes_of(block), 4);
+    auto const e0 = expand_565(c0);
+    auto const e1 = expand_565(c1);
 
+    auto p = color_palette{};
     if (!allow_three_color || c0 > c1)
     {
+        p.denominator = 3;
         for (auto c = 0; c < 3; ++c)
         {
-            auto const a = u32(palette[0][c]);
-            auto const b = u32(palette[1][c]);
-            palette[2][c] = u8((2 * a + b + 1) / 3);
-            palette[3][c] = u8((a + 2 * b + 1) / 3);
+            p.numerators[0][c] = 3 * e0[c];
+            p.numerators[1][c] = 3 * e1[c];
+            p.numerators[2][c] = 2 * e0[c] + e1[c];
+            p.numerators[3][c] = e0[c] + 2 * e1[c];
         }
-        palette[2][3] = 255;
-        palette[3][3] = 255;
+        for (auto e = 0; e < 4; ++e)
+            p.numerators[e][3] = 3 * 255;
     }
     else
     {
+        // Entry 3 stays transparent black.
+        p.denominator = 2;
         for (auto c = 0; c < 3; ++c)
-            palette[2][c] = u8((u32(palette[0][c]) + u32(palette[1][c]) + 1) / 2);
-        palette[2][3] = 255;
-        // palette[3] stays transparent black.
+        {
+            p.numerators[0][c] = 2 * e0[c];
+            p.numerators[1][c] = 2 * e1[c];
+            p.numerators[2][c] = e0[c] + e1[c];
+        }
+        for (auto e = 0; e < 3; ++e)
+            p.numerators[e][3] = 2 * 255;
     }
 
     for (auto i = 0; i < 16; ++i)
+        p.indices[i] = u8((indices >> (2 * i)) & 3u);
+    return p;
+}
+
+/// The eight values of a BC4 block as exact fractions over one denominator, and the entry each texel takes.
+struct channel_palette
+{
+    cc::fixed_array<int, 8> numerators = {}; // 0..255 units unsigned, -127..127 signed
+    int denominator = 1;
+    cc::fixed_array<u8, 16> indices = {};
+};
+
+channel_palette read_channel(small_block block, bool is_signed)
+{
+    // The endpoints are compared as stored, and only then is a signed -128 read as -127.
+    // That order is DirectXTex's, and it decides the mode of the one pair it matters for.
+    auto e0 = is_signed ? int(i8(block[0])) : int(u8(block[0]));
+    auto e1 = is_signed ? int(i8(block[1])) : int(u8(block[1]));
+    auto const eight_values = e0 > e1;
+    if (is_signed)
     {
-        auto const index = (indices >> (2 * i)) & 3u;
-        for (auto c = 0; c < 4; ++c)
-            out.rgba[i * 4 + c] = palette[index][c];
+        e0 = e0 < -127 ? -127 : e0;
+        e1 = e1 < -127 ? -127 : e1;
     }
+
+    auto p = channel_palette{};
+    if (eight_values)
+    {
+        p.denominator = 7;
+        p.numerators[0] = 7 * e0;
+        p.numerators[1] = 7 * e1;
+        for (auto k = 1; k <= 6; ++k)
+            p.numerators[k + 1] = (7 - k) * e0 + k * e1;
+    }
+    else
+    {
+        p.denominator = 5;
+        p.numerators[0] = 5 * e0;
+        p.numerators[1] = 5 * e1;
+        for (auto k = 1; k <= 4; ++k)
+            p.numerators[k + 1] = (5 - k) * e0 + k * e1;
+        p.numerators[6] = 5 * (is_signed ? -127 : 0);
+        p.numerators[7] = 5 * (is_signed ? 127 : 255);
+    }
+
+    // 48 bits of indices, 3 per texel, after the two endpoint bytes.
+    auto const indices = cc::load_bytes_le<u64>(bytes_of(block), 0) >> 16;
+    for (auto i = 0; i < 16; ++i)
+        p.indices[i] = u8((indices >> (3 * i)) & 7u);
+    return p;
 }
 
 /// Rounds `numerator / denominator` to nearest, symmetrically about zero.
-/// The denominators here are 5 and 7, so there is never a tie to break.
+/// Only the denominator 2 has ties, and its numerators are never negative, so ties round up.
 int divide_rounded(int numerator, int denominator)
 {
     if (numerator >= 0)
         return (numerator + denominator / 2) / denominator;
     return -((-numerator + denominator / 2) / denominator);
+}
+
+/// An unsigned 8-bit value from a signed BC4 one, -127 at 0 and 127 at 255.
+u8 bias_signed(int value)
+{
+    return u8(((value + 127) * 255 + 127) / 254);
 }
 
 /// A sign-extended value of `bits` bits.
@@ -187,12 +256,6 @@ int sign_extend(int value, int bits)
     auto const sign = 1 << (bits - 1);
     auto const masked = value & ((1 << bits) - 1);
     return (masked ^ sign) - sign;
-}
-
-/// An unsigned 8-bit value from a signed BC4 one, -127 at 0 and 127 at 255.
-u8 bias_signed(int value)
-{
-    return u8(((value + 127) * 255 + 127) / 254);
 }
 
 // BC6H
@@ -361,74 +424,96 @@ float bc6h_finish(int value, bool is_signed)
 // BC1 - BC5
 // -------------------------------------------------------------------------------------------------
 
-rgba8_block decode_bc1(cc::span<byte const> block)
+rgba8_block decode_bc1(small_block block)
 {
-    CC_ASSERT(block.size() >= small_block_bytes, "a BC1 block is 8 bytes");
+    auto const p = read_color(block, true);
     auto out = rgba8_block{};
-    decode_color(block, true, out);
-    return out;
-}
-
-rgba8_block decode_bc2(cc::span<byte const> block)
-{
-    CC_ASSERT(block.size() >= large_block_bytes, "a BC2 block is 16 bytes");
-    auto out = rgba8_block{};
-    decode_color(block.subspan(8), false, out);
-
-    auto const alpha = cc::load_bytes_le<u64>(block, 0);
     for (auto i = 0; i < 16; ++i)
-        out.rgba[i * 4 + 3] = u8(((alpha >> (4 * i)) & 15u) * 17u);
+        for (auto c = 0; c < 4; ++c)
+            out.rgba[i * 4 + c] = u8(divide_rounded(p.numerators[p.indices[i]][c], p.denominator));
     return out;
 }
 
-cc::fixed_array<i16, 16> decode_bc4_channel(cc::span<byte const> block, bool is_signed)
+rgba32f_block decode_bc1_f32(small_block block)
 {
-    CC_ASSERT(block.size() >= small_block_bytes, "a BC4 block is 8 bytes");
+    auto const p = read_color(block, true);
+    auto const denominator = float(p.denominator * 255);
+    auto out = rgba32f_block{};
+    for (auto i = 0; i < 16; ++i)
+        for (auto c = 0; c < 4; ++c)
+            out.rgba[i * 4 + c] = float(p.numerators[p.indices[i]][c]) / denominator;
+    return out;
+}
 
-    // The endpoints are compared as stored, and only then is a signed -128 read as -127.
-    // That order is DirectXTex's, and it decides the mode of the one pair it matters for.
-    auto e0 = is_signed ? int(i8(block[0])) : int(u8(block[0]));
-    auto e1 = is_signed ? int(i8(block[1])) : int(u8(block[1]));
-    auto const eight_values = e0 > e1;
-    if (is_signed)
+rgba8_block decode_bc2(large_block block)
+{
+    auto const p = read_color(small_block(block.data() + 8), false);
+    auto const alpha = cc::load_bytes_le<u64>(bytes_of(block), 0);
+    auto out = rgba8_block{};
+    for (auto i = 0; i < 16; ++i)
     {
-        e0 = e0 < -127 ? -127 : e0;
-        e1 = e1 < -127 ? -127 : e1;
+        for (auto c = 0; c < 3; ++c)
+            out.rgba[i * 4 + c] = u8(divide_rounded(p.numerators[p.indices[i]][c], p.denominator));
+        out.rgba[i * 4 + 3] = u8(((alpha >> (4 * i)) & 15u) * 17u);
     }
+    return out;
+}
 
-    int palette[8] = {e0, e1, 0, 0, 0, 0, 0, 0};
-    if (eight_values)
-        for (auto k = 1; k <= 6; ++k)
-            palette[k + 1] = divide_rounded((7 - k) * e0 + k * e1, 7);
-    else
+rgba32f_block decode_bc2_f32(large_block block)
+{
+    auto const p = read_color(small_block(block.data() + 8), false);
+    auto const denominator = float(p.denominator * 255);
+    auto const alpha = cc::load_bytes_le<u64>(bytes_of(block), 0);
+    auto out = rgba32f_block{};
+    for (auto i = 0; i < 16; ++i)
     {
-        for (auto k = 1; k <= 4; ++k)
-            palette[k + 1] = divide_rounded((5 - k) * e0 + k * e1, 5);
-        palette[6] = is_signed ? -127 : 0;
-        palette[7] = is_signed ? 127 : 255;
+        for (auto c = 0; c < 3; ++c)
+            out.rgba[i * 4 + c] = float(p.numerators[p.indices[i]][c]) / denominator;
+        out.rgba[i * 4 + 3] = float((alpha >> (4 * i)) & 15u) / 15.0f;
     }
+    return out;
+}
 
-    // 48 bits of indices, 3 per texel, after the two endpoint bytes.
-    auto const indices = cc::load_bytes_le<u64>(block, 0) >> 16;
+cc::fixed_array<i16, 16> decode_bc4_channel(small_block block, bool is_signed)
+{
+    auto const p = read_channel(block, is_signed);
     auto out = cc::fixed_array<i16, 16>{};
     for (auto i = 0; i < 16; ++i)
-        out[i] = i16(palette[(indices >> (3 * i)) & 7u]);
+        out[i] = i16(divide_rounded(p.numerators[p.indices[i]], p.denominator));
     return out;
 }
 
-rgba8_block decode_bc3(cc::span<byte const> block)
+rgba8_block decode_bc3(large_block block)
 {
-    CC_ASSERT(block.size() >= large_block_bytes, "a BC3 block is 16 bytes");
+    auto const p = read_color(small_block(block.data() + 8), false);
+    auto const alpha = decode_bc4_channel(small_block(block.data()), false);
     auto out = rgba8_block{};
-    decode_color(block.subspan(8), false, out);
-
-    auto const alpha = decode_bc4_channel(block, false);
     for (auto i = 0; i < 16; ++i)
+    {
+        for (auto c = 0; c < 3; ++c)
+            out.rgba[i * 4 + c] = u8(divide_rounded(p.numerators[p.indices[i]][c], p.denominator));
         out.rgba[i * 4 + 3] = u8(alpha[i]);
+    }
     return out;
 }
 
-rgba8_block decode_bc4(cc::span<byte const> block, bool is_signed)
+rgba32f_block decode_bc3_f32(large_block block)
+{
+    auto const p = read_color(small_block(block.data() + 8), false);
+    auto const alpha = read_channel(small_block(block.data()), false);
+    auto const denominator = float(p.denominator * 255);
+    auto const alpha_denominator = float(alpha.denominator * 255);
+    auto out = rgba32f_block{};
+    for (auto i = 0; i < 16; ++i)
+    {
+        for (auto c = 0; c < 3; ++c)
+            out.rgba[i * 4 + c] = float(p.numerators[p.indices[i]][c]) / denominator;
+        out.rgba[i * 4 + 3] = float(alpha.numerators[alpha.indices[i]]) / alpha_denominator;
+    }
+    return out;
+}
+
+rgba8_block decode_bc4(small_block block, bool is_signed)
 {
     auto const red = decode_bc4_channel(block, is_signed);
     auto out = rgba8_block{};
@@ -440,11 +525,23 @@ rgba8_block decode_bc4(cc::span<byte const> block, bool is_signed)
     return out;
 }
 
-rgba8_block decode_bc5(cc::span<byte const> block, bool is_signed)
+rgba32f_block decode_bc4_f32(small_block block, bool is_signed)
 {
-    CC_ASSERT(block.size() >= large_block_bytes, "a BC5 block is 16 bytes");
-    auto const red = decode_bc4_channel(block, is_signed);
-    auto const green = decode_bc4_channel(block.subspan(8), is_signed);
+    auto const p = read_channel(block, is_signed);
+    auto const denominator = float(p.denominator * (is_signed ? 127 : 255));
+    auto out = rgba32f_block{};
+    for (auto i = 0; i < 16; ++i)
+    {
+        out.rgba[i * 4 + 0] = float(p.numerators[p.indices[i]]) / denominator;
+        out.rgba[i * 4 + 3] = 1.0f;
+    }
+    return out;
+}
+
+rgba8_block decode_bc5(large_block block, bool is_signed)
+{
+    auto const red = decode_bc4_channel(small_block(block.data()), is_signed);
+    auto const green = decode_bc4_channel(small_block(block.data() + 8), is_signed);
     auto out = rgba8_block{};
     for (auto i = 0; i < 16; ++i)
     {
@@ -455,13 +552,20 @@ rgba8_block decode_bc5(cc::span<byte const> block, bool is_signed)
     return out;
 }
 
+rgba32f_block decode_bc5_f32(large_block block, bool is_signed)
+{
+    auto out = decode_bc4_f32(small_block(block.data()), is_signed);
+    auto const green = decode_bc4_f32(small_block(block.data() + 8), is_signed);
+    for (auto i = 0; i < 16; ++i)
+        out.rgba[i * 4 + 1] = green.rgba[i * 4];
+    return out;
+}
+
 // BC7
 // -------------------------------------------------------------------------------------------------
 
-rgba8_block decode_bc7(cc::span<byte const> block)
+rgba8_block decode_bc7(large_block block)
 {
-    CC_ASSERT(block.size() >= large_block_bytes, "a BC7 block is 16 bytes");
-
     struct mode_info
     {
         int subsets = 1;
@@ -497,7 +601,7 @@ rgba8_block decode_bc7(cc::span<byte const> block)
     auto const selector = int(bits.read(m.selector_bits));
 
     auto const endpoint_count = m.subsets * 2;
-    int endpoints[6][4] = {};
+    auto endpoints = cc::fixed_array<cc::fixed_array<int, 4>, 6>{};
     for (auto c = 0; c < 3; ++c)
         for (auto e = 0; e < endpoint_count; ++e)
             endpoints[e][c] = int(bits.read(m.color_bits));
@@ -508,7 +612,7 @@ rgba8_block decode_bc7(cc::span<byte const> block)
     auto alpha_bits = m.alpha_bits;
     if (m.endpoint_pbits || m.shared_pbits)
     {
-        int pbits[6] = {};
+        auto pbits = cc::fixed_array<int, 6>{};
         if (m.endpoint_pbits)
             for (auto e = 0; e < endpoint_count; ++e)
                 pbits[e] = int(bits.read(1));
@@ -556,10 +660,10 @@ rgba8_block decode_bc7(cc::span<byte const> block)
         return false;
     };
 
-    int indices[16] = {};
+    auto indices = cc::fixed_array<int, 16>{};
     for (auto i = 0; i < 16; ++i)
         indices[i] = int(bits.read(is_anchor(i) ? m.index_bits - 1 : m.index_bits));
-    int indices_2[16] = {};
+    auto indices_2 = cc::fixed_array<int, 16>{};
     if (m.index_bits_2 > 0)
         for (auto i = 0; i < 16; ++i)
             indices_2[i] = int(bits.read(i == 0 ? m.index_bits_2 - 1 : m.index_bits_2));
@@ -579,7 +683,7 @@ rgba8_block decode_bc7(cc::span<byte const> block)
             }
         }
 
-        int texel[4] = {};
+        auto texel = cc::fixed_array<int, 4>{};
         for (auto c = 0; c < 4; ++c)
         {
             auto const w = c < 3 ? color_weight : alpha_weight;
@@ -603,10 +707,8 @@ rgba8_block decode_bc7(cc::span<byte const> block)
 // BC6H
 // -------------------------------------------------------------------------------------------------
 
-rgba32f_block decode_bc6h(cc::span<byte const> block, bool is_signed)
+rgba32f_block decode_bc6h(large_block block, bool is_signed)
 {
-    CC_ASSERT(block.size() >= large_block_bytes, "a BC6H block is 16 bytes");
-
     auto out = rgba32f_block{};
     auto bits = bit_reader(block);
 
@@ -624,7 +726,7 @@ rgba32f_block decode_bc6h(cc::span<byte const> block, bool is_signed)
         return out;
     }
 
-    int fields[13] = {};
+    auto fields = cc::fixed_array<int, 13>{};
     for (auto const& run : mode->runs)
     {
         if (run.first == 0 && run.last == 0 && run.field == rw)
@@ -639,7 +741,7 @@ rgba32f_block decode_bc6h(cc::span<byte const> block, bool is_signed)
     }
 
     auto const endpoint_count = mode->regions * 2;
-    int endpoints[4][3] = {};
+    auto endpoints = cc::fixed_array<cc::fixed_array<int, 3>, 4>{};
     for (auto e = 0; e < endpoint_count; ++e)
         for (auto c = 0; c < 3; ++c)
             endpoints[e][c] = fields[e * 3 + c];

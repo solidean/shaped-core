@@ -322,7 +322,7 @@ Two layers: low-level per-format codecs that expose the format's own metadata, a
 ```cpp
 #include <babel-serializer/image/image.hh>  // aggregator — the "I just want pixels" layer
 
-cc::result<babel::image::image> read(cc::span<cc::byte const> bytes); // auto-detects PNG / JPG / HDR / PFM / DDS / TGA
+cc::result<babel::image::image> read(cc::span<cc::byte const> bytes, {.max_decoded_bytes = 1 << 28}); // auto-detects PNG / JPG / HDR / PFM / DDS / TGA; the budget binds DDS / TGA
 cc::result<babel::image::image> read(cc::span<cc::byte const> bytes, babel::image::format fmt); // no detection
 cc::result<babel::image::image> read(cc::read_stream& in);            // slurps, then decodes
 cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); // magic bytes; TGA (no magic) last
@@ -392,17 +392,19 @@ t.width; t.height; t.depth; t.mip_count; t.array_size; t.is_cube; t.cube_faces;
 t.file_header;                                 // the stored legacy + DX10 fields: FourCC, masks, DXGI number, ...
 t.subresources;                                // file order: layer, then face, then mip — each a pinned view of the input
 t.find(layer, face, mip);                      // -> subresource const*, nullptr where absent
-babel::dds::decode_rgba8(t, sub);              // -> result<vector<byte>> rgba8; errors for a float format
-babel::dds::decode_rgba32f(t, sub);            // -> result<vector<float>>; every format, signed ones in -1..1
+babel::dds::decode_rgba8(t, sub, {.max_decoded_bytes = 1 << 28}); // -> result<vector<byte>> rgba8; errors for a float format or past the budget
+babel::dds::decode_rgba32f(t, sub);            // -> result<vector<float>>; every format, signed ones in -1..1, BC1-BC5 unrounded
 babel::dds::is_block_compressed(fmt); is_float(fmt); is_srgb(fmt); mip_extent(base, level);
 
-babel::tga::data g = babel::tga::read(bytes).value();
+babel::tga::data g = babel::tga::read(bytes, {.max_decoded_bytes = 1 << 28}).value();  // the budget is checked before allocating
 g.channels;                                    // 1 gray / 2 gray+alpha / 3 rgb / 4 rgba, from depth, palette and alpha bits
 g.type; g.run_length_encoded; g.pixel_depth; g.alpha_bits; g.stored_bottom_up; g.stored_right_to_left;
 
+babel::bcn::small_block(ptr); babel::bcn::large_block(ptr);   // fixed_span<byte const, 8 / 16>: the type is the length check
 babel::bcn::decode_bc1(block) / decode_bc2 / decode_bc3 / decode_bc7 -> rgba8_block;   // .rgba[texel * 4 + c]
 babel::bcn::decode_bc4(block, is_signed) / decode_bc5(block, is_signed) -> rgba8_block; // (r,0,0,1) / (r,g,0,1)
 babel::bcn::decode_bc6h(block, is_signed) -> rgba32f_block;  // half-float results widened, alpha 1
+babel::bcn::decode_bc1_f32(block) ... decode_bc5_f32(block, is_signed);  // exact interpolants, before rounding
 babel::bcn::decode_bc4_channel(block, is_signed);            // the channel as integers: 0..255 or -127..127
 ```
 
@@ -484,6 +486,7 @@ Only what the signatures above cannot tell you.
 - **BC5 decodes to (x, y, 0, 1)**, and a normal's z is the consumer's to reconstruct; BC4 is (r, 0, 0, 1).
   The first BC5 block is red, ATI2 included.
 - **Signed BC4 / BC5 land biased in 8 bits** (-1 -> 0, 0 -> 128, 1 -> 255); `decode_rgba32f` has the signed values.
+- **A DDS's stored pitch is ignored**: rows are read tightly packed, so a DWORD-padded legacy file reads skewed.
 - **TGA has no magic.** `detect_format` takes a TGA 2.0 footer or, failing that, a header that parses — a guess, so pass the format to `read` when you know it.
 - **Image rows carry no padding**: `row_stride() == width * channels * bytes_per_component()`.
 - **`babel::png::encode` wants the buffer size exactly.** `width * height * channels * (decoded == u16 ? 2 : 1)`, so a buffer that merely fits is `decoded` disagreeing with it and is an error.

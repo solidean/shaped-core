@@ -68,6 +68,15 @@ struct babel::tga::data
     [[nodiscard]] bool is_empty() const { return width <= 0 || height <= 0; }
 };
 
+/// Read knobs.
+struct babel::tga::read_options
+{
+    /// The most bytes the decoded pixels may take; a file describing more is an error before anything is allocated.
+    /// The header alone is never believed, since a few kilobytes of run-length packets can describe 65535 x 65535.
+    /// The default holds an 8192 x 8192 rgba image.
+    isize max_decoded_bytes = isize(1) << 28;
+};
+
 namespace babel::tga
 {
 /// True when `bytes` end in the TGA 2.0 footer, the one signature the format has.
@@ -79,10 +88,10 @@ namespace babel::tga
 [[nodiscard]] bool has_plausible_header(cc::span<byte const> bytes);
 
 /// Decode a whole TGA buffer.
-/// Errors on an image type it does not know, a depth that type cannot store, a palette index past the palette, or
-/// pixel data that falls short of what the header describes.
-[[nodiscard]] cc::result<data> read(cc::span<byte const> bytes);
+/// Errors on an image type it does not know, a depth that type cannot store, a palette index past the palette,
+/// pixel data that falls short of what the header describes, or a decode larger than `opts` allows.
+[[nodiscard]] cc::result<data> read(cc::span<byte const> bytes, read_options opts = {});
 
 /// Convenience: slurp the stream to end, then decode.
-[[nodiscard]] cc::result<data> read(cc::read_stream& in);
+[[nodiscard]] cc::result<data> read(cc::read_stream& in, read_options opts = {});
 } // namespace babel::tga

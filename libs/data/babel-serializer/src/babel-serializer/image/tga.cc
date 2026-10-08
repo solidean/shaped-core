@@ -1,6 +1,7 @@
 #include <babel-serializer/image/tga.hh>
 #include <clean-core/common/endian.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 
@@ -11,10 +12,6 @@ namespace
 constexpr isize header_size = 18;
 constexpr isize footer_size = 26;
 constexpr cc::string_view footer_signature = cc::string_view("TRUEVISION-XFILE.\0", 18);
-
-// A header may claim up to 65535 x 65535; a file claiming more pixels than this is rejected before anything is
-// allocated, since a few run-length packets would otherwise demand gigabytes.
-constexpr isize max_pixels = isize(1) << 28;
 
 /// The fields of the 18-byte header, as stored.
 struct raw_header
@@ -144,7 +141,7 @@ bool has_plausible_header(cc::span<byte const> bytes)
     return check_header(h).has_value();
 }
 
-cc::result<data> read(cc::span<byte const> bytes)
+cc::result<data> read(cc::span<byte const> bytes, read_options opts)
 {
     CC_RECORD_SCOPE("tga.read");
 
@@ -203,9 +200,12 @@ cc::result<data> read(cc::span<byte const> bytes)
         break;
     }
 
+    // A header may claim 65535 x 65535, and a few kilobytes of run-length packets can describe that much, so the
+    // decoded size is checked against the budget before anything is allocated.
     auto const pixel_count = isize(h.width) * isize(h.height);
-    if (pixel_count > max_pixels)
-        return cc::error(cc::format("tga: implausible image size {}x{}", h.width, h.height));
+    if (pixel_count * result.channels > opts.max_decoded_bytes)
+        return cc::error(cc::format("tga: {}x{} decodes to {} bytes, past the {}-byte budget", //
+                                    h.width, h.height, pixel_count * result.channels, opts.max_decoded_bytes));
 
     auto const stored_bytes = isize((h.pixel_depth + 7) / 8);
     auto const remaining = bytes.size() - offset;
@@ -228,7 +228,7 @@ cc::result<data> read(cc::span<byte const> bytes)
         auto const y = result.stored_bottom_up ? h.height - 1 - sy : sy;
         auto* const dst = out + (y * h.width + x) * channels;
 
-        u8 rgba[4] = {};
+        auto rgba = cc::fixed_array<u8, 4>{};
         switch (result.type)
         {
         case image_type::color_mapped:
@@ -243,7 +243,7 @@ cc::result<data> read(cc::span<byte const> bytes)
             break;
         }
         case image_type::true_color:
-            decode_color(bytes, at, h.pixel_depth, rgba);
+            decode_color(bytes, at, h.pixel_depth, rgba.data());
             break;
         case image_type::grayscale:
             dst[0] = u8(bytes[at]);
@@ -292,10 +292,10 @@ cc::result<data> read(cc::span<byte const> bytes)
     return cc::move(result);
 }
 
-cc::result<data> read(cc::read_stream& in)
+cc::result<data> read(cc::read_stream& in, read_options opts)
 {
     auto bytes = in.read_all();
     CC_RETURN_IF_ERROR(bytes);
-    return read(bytes.value());
+    return read(bytes.value(), opts);
 }
 } // namespace babel::tga

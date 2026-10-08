@@ -261,3 +261,14 @@ TEST("tga - the aggregator detects TGA by footer and by header")
 
     CHECK(babel::image::encode(img.value(), babel::image::format::tga).has_error());
 }
+
+TEST("tga - a decode larger than the budget is refused before allocating")
+{
+    u8 const body[] = {1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16};
+    CHECK(tga::read(make_tga({}, body), {.max_decoded_bytes = 12}).has_value());
+    CHECK(tga::read(make_tga({}, body), {.max_decoded_bytes = 11}).has_error());
+
+    // A 65535 x 65535 run-length header over a few bytes would be 16 GiB of rgba; the default budget refuses it.
+    u8 const packets[] = {0xFF, 1, 2, 3, 4, 0xFF, 1, 2, 3, 4};
+    CHECK(tga::read(make_tga({.type = 10, .width = 65535, .height = 65535, .depth = 32}, packets)).has_error());
+}

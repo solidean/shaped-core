@@ -76,13 +76,46 @@ bool texel_is(bcn::rgba8_block const& b, int texel, int r, int g, int bl, int a)
     return b.rgba[texel * 4 + 0] == r && b.rgba[texel * 4 + 1] == g && b.rgba[texel * 4 + 2] == bl
         && b.rgba[texel * 4 + 3] == a;
 }
+// The decoders take fixed-extent spans; these wrap the test's own block arrays, temporaries included.
+bcn::rgba8_block decode_bc1(block8 const& b)
+{
+    return bcn::decode_bc1(bcn::small_block(b));
+}
+bcn::rgba8_block decode_bc2(block16 const& b)
+{
+    return bcn::decode_bc2(bcn::large_block(b));
+}
+bcn::rgba8_block decode_bc3(block16 const& b)
+{
+    return bcn::decode_bc3(bcn::large_block(b));
+}
+bcn::rgba8_block decode_bc4(block8 const& b, bool is_signed)
+{
+    return bcn::decode_bc4(bcn::small_block(b), is_signed);
+}
+bcn::rgba8_block decode_bc5(block16 const& b, bool is_signed)
+{
+    return bcn::decode_bc5(bcn::large_block(b), is_signed);
+}
+bcn::rgba8_block decode_bc7(block16 const& b)
+{
+    return bcn::decode_bc7(bcn::large_block(b));
+}
+bcn::rgba32f_block decode_bc6h(block16 const& b, bool is_signed)
+{
+    return bcn::decode_bc6h(bcn::large_block(b), is_signed);
+}
+cc::fixed_array<i16, 16> decode_bc4_channel(block8 const& b, bool is_signed)
+{
+    return bcn::decode_bc4_channel(bcn::small_block(b), is_signed);
+}
 } // namespace
 
 TEST("bcn - BC1 four-color mode interpolates thirds, rounded to nearest")
 {
     // Pure red over pure blue: c0 > c1 selects the four-color mode.
     auto const block = make_color_block(0xF800, 0x001F, texel_order);
-    auto const out = bcn::decode_bc1(block);
+    auto const out = decode_bc1(block);
 
     CHECK(texel_is(out, 0, 255, 0, 0, 255));
     CHECK(texel_is(out, 1, 0, 0, 255, 255));
@@ -96,14 +129,14 @@ TEST("bcn - BC1 widens 565 by bit replication and rounds the thirds")
     // r = 1 widens to 8; two thirds of 8 is 5.33 and one third 2.67, so rounding gives 5 and 3 where truncating
     // would give 5 and 2.
     auto const block = make_color_block(0x0800, 0x0000, texel_order);
-    auto const out = bcn::decode_bc1(block);
+    auto const out = decode_bc1(block);
 
     CHECK(texel_is(out, 0, 8, 0, 0, 255));
     CHECK(texel_is(out, 2, 5, 0, 0, 255));
     CHECK(texel_is(out, 3, 3, 0, 0, 255));
 
     // The widest values replicate their top bits: 31 -> 255, 63 -> 255, and 16 -> 132.
-    auto const white = bcn::decode_bc1(make_color_block(0xFFFF, 0x8000, texel_order));
+    auto const white = decode_bc1(make_color_block(0xFFFF, 0x8000, texel_order));
     CHECK(texel_is(white, 0, 255, 255, 255, 255));
     CHECK(texel_is(white, 1, 132, 0, 0, 255));
 }
@@ -111,14 +144,14 @@ TEST("bcn - BC1 widens 565 by bit replication and rounds the thirds")
 TEST("bcn - BC1 with c0 <= c1 is the three-color mode with transparent black")
 {
     // Blue over red: c0 < c1, so index 2 is the midpoint and index 3 transparent black.
-    auto const out = bcn::decode_bc1(make_color_block(0x001F, 0xF800, texel_order));
+    auto const out = decode_bc1(make_color_block(0x001F, 0xF800, texel_order));
     CHECK(texel_is(out, 0, 0, 0, 255, 255));
     CHECK(texel_is(out, 1, 255, 0, 0, 255));
     CHECK(texel_is(out, 2, 128, 0, 128, 255)); // 127.5 rounds up
     CHECK(texel_is(out, 3, 0, 0, 0, 0));
 
     // Equal endpoints are not "greater", so they select the three-color mode too.
-    auto const equal = bcn::decode_bc1(make_color_block(0xFFFF, 0xFFFF, texel_order));
+    auto const equal = decode_bc1(make_color_block(0xFFFF, 0xFFFF, texel_order));
     CHECK(texel_is(equal, 2, 255, 255, 255, 255));
     CHECK(texel_is(equal, 3, 0, 0, 0, 0));
 }
@@ -129,7 +162,7 @@ TEST("bcn - BC2 takes explicit 4-bit alpha and never the three-color mode")
     cc::store_bytes_le<u64>(alpha, 0, 0xFEDCBA9876543210ull);
 
     // c0 < c1 would be BC1's three-color mode; BC2's color half ignores that.
-    auto const out = bcn::decode_bc2(concat(alpha, make_color_block(0x001F, 0xF800, texel_order)));
+    auto const out = decode_bc2(concat(alpha, make_color_block(0x001F, 0xF800, texel_order)));
 
     for (auto i = 0; i < 16; ++i)
         CHECK(out.rgba[i * 4 + 3] == i * 17);
@@ -143,7 +176,7 @@ TEST("bcn - BC3 alpha has an 8-value and a 6-value mode")
 
     SECTION("a0 > a1 interpolates six values in sevenths")
     {
-        auto const out = bcn::decode_bc3(concat(make_channel_block(200, 10, channel_order), color));
+        auto const out = decode_bc3(concat(make_channel_block(200, 10, channel_order), color));
         int const expected[8] = {200, 10, 173, 146, 119, 91, 64, 37};
         for (auto i = 0; i < 16; ++i)
             CHECK(out.rgba[i * 4 + 3] == expected[i % 8]);
@@ -151,7 +184,7 @@ TEST("bcn - BC3 alpha has an 8-value and a 6-value mode")
 
     SECTION("a0 <= a1 interpolates four values in fifths, then 0 and 255")
     {
-        auto const out = bcn::decode_bc3(concat(make_channel_block(10, 200, channel_order), color));
+        auto const out = decode_bc3(concat(make_channel_block(10, 200, channel_order), color));
         int const expected[8] = {10, 200, 48, 86, 124, 162, 0, 255};
         for (auto i = 0; i < 16; ++i)
             CHECK(out.rgba[i * 4 + 3] == expected[i % 8]);
@@ -159,8 +192,8 @@ TEST("bcn - BC3 alpha has an 8-value and a 6-value mode")
 
     SECTION("the color half is four-color regardless of endpoint order")
     {
-        auto const out = bcn::decode_bc3(concat(make_channel_block(255, 255, channel_order), //
-                                                make_color_block(0x001F, 0xF800, texel_order)));
+        auto const out = decode_bc3(concat(make_channel_block(255, 255, channel_order), //
+                                           make_color_block(0x001F, 0xF800, texel_order)));
         CHECK(texel_is(out, 3, 170, 0, 85, 255));
     }
 }
@@ -169,14 +202,14 @@ TEST("bcn - BC4 decodes to red, unsigned and signed")
 {
     SECTION("unsigned")
     {
-        auto const out = bcn::decode_bc4(make_channel_block(200, 10, channel_order), false);
+        auto const out = decode_bc4(make_channel_block(200, 10, channel_order), false);
         CHECK(texel_is(out, 2, 173, 0, 0, 255));
     }
 
     SECTION("signed values span -127..127, and -128 reads as -127")
     {
         // -128 against 127: the stored bytes compare 0x80 as -128, which is not greater, so this is the 6-value mode.
-        auto const values = bcn::decode_bc4_channel(make_channel_block(0x80, 0x7F, channel_order), true);
+        auto const values = decode_bc4_channel(make_channel_block(0x80, 0x7F, channel_order), true);
         int const expected[8] = {-127, 127, -76, -25, 25, 76, -127, 127};
         for (auto i = 0; i < 16; ++i)
             CHECK(values[i] == expected[i % 8]);
@@ -186,18 +219,18 @@ TEST("bcn - BC4 decodes to red, unsigned and signed")
     {
         // -127 > -128 as stored selects the 8-value mode, even though both endpoints then read as -127.
         // Index 7 tells the modes apart: the 8-value mode interpolates it to -127, the 6-value mode pins it to 127.
-        auto const values = bcn::decode_bc4_channel(make_channel_block(0x81, 0x80, channel_order), true);
+        auto const values = decode_bc4_channel(make_channel_block(0x81, 0x80, channel_order), true);
         CHECK(values[7] == -127);
     }
 
     SECTION("signed values land in 8 bits biased")
     {
         int const indices[16] = {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-        auto const out = bcn::decode_bc4(make_channel_block(0x81, 0x7F, indices), true);
+        auto const out = decode_bc4(make_channel_block(0x81, 0x7F, indices), true);
         CHECK(texel_is(out, 0, 0, 0, 0, 255));   // -127
         CHECK(texel_is(out, 1, 255, 0, 0, 255)); // 127
 
-        auto const zero = bcn::decode_bc4(make_channel_block(0, 0, indices), true);
+        auto const zero = decode_bc4(make_channel_block(0, 0, indices), true);
         CHECK(texel_is(zero, 0, 128, 0, 0, 255));
     }
 }
@@ -206,7 +239,7 @@ TEST("bcn - BC5 is red from the first block and green from the second")
 {
     int const zeros[16] = {};
     auto const block = concat(make_channel_block(50, 50, zeros), make_channel_block(200, 200, zeros));
-    auto const out = bcn::decode_bc5(block, false);
+    auto const out = decode_bc5(block, false);
     for (auto i = 0; i < 16; ++i)
         CHECK(texel_is(out, i, 50, 200, 0, 255));
 }
@@ -228,7 +261,7 @@ TEST("bcn - BC7 mode 6 interpolates in 64ths with its p-bits")
         w.put(u32(i), i == 0 ? 3 : 4);
     CHECK(w.pos == 128);
 
-    auto const out = bcn::decode_bc7(w.bytes);
+    auto const out = decode_bc7(w.bytes);
     // (255 * (64 - w) + 32) >> 6 for weights 0, 4, 34 and 64.
     CHECK(texel_is(out, 0, 255, 255, 255, 255));
     CHECK(texel_is(out, 1, 239, 239, 239, 239));
@@ -256,21 +289,21 @@ TEST("bcn - BC7 mode 5 rotation swaps alpha back into its channel")
         w.put(0, i == 0 ? 1 : 2);
     CHECK(w.pos == 128);
 
-    auto const out = bcn::decode_bc7(w.bytes);
+    auto const out = decode_bc7(w.bytes);
     CHECK(texel_is(out, 0, 255, 0, 0, 0));
 }
 
 TEST("bcn - BC7 and BC6H reserved modes decode to zero")
 {
     auto const zero = block16{};
-    auto const bc7 = bcn::decode_bc7(zero);
+    auto const bc7 = decode_bc7(zero);
     for (auto i = 0; i < 64; ++i)
         CHECK(bc7.rgba[i] == 0);
 
     // 0x13 is one of BC6H's four reserved 5-bit mode codes.
     auto reserved = block16{};
     reserved[0] = byte(0x13);
-    auto const bc6 = bcn::decode_bc6h(reserved, false);
+    auto const bc6 = decode_bc6h(reserved, false);
     for (auto i = 0; i < 64; ++i)
         CHECK(bc6.rgba[i] == 0.0f);
 }
@@ -289,7 +322,7 @@ TEST("bcn - BC6H mode 11 keeps 10-bit endpoints and interpolates in halves")
         w.put(i == 0 ? 0 : 15, i == 0 ? 3 : 4);
     CHECK(w.pos == 128);
 
-    auto const out = bcn::decode_bc6h(w.bytes, false);
+    auto const out = decode_bc6h(w.bytes, false);
     CHECK(out.rgba[0] == 0.0f);
     CHECK(out.rgba[3] == 1.0f);
     // 0xFFFF * 31 >> 6 is 0x7BFF, the largest finite half.
@@ -423,7 +456,7 @@ TEST("bcn - BC7 matches an independent decoder in every mode")
 {
     for (auto const& ref : bc7_references)
     {
-        auto const out = bcn::decode_bc7(as_block(ref.block));
+        auto const out = decode_bc7(as_block(ref.block));
         auto matches = true;
         for (auto i = 0; i < 64; ++i)
             matches = matches && out.rgba[i] == ref.rgba[i];
@@ -435,7 +468,7 @@ TEST("bcn - unsigned BC6H matches an independent decoder")
 {
     for (auto const& ref : bc6h_references)
     {
-        auto const out = bcn::decode_bc6h(as_block(ref.block), false);
+        auto const out = decode_bc6h(as_block(ref.block), false);
         auto matches = true;
         for (auto t = 0; t < 16; ++t)
             for (auto c = 0; c < 3; ++c)
@@ -468,9 +501,34 @@ TEST("bcn - signed BC6H sign-extends an endpoint after its inverse transform")
     CHECK(w.pos == 128);
 
     // 10 unquantizes to 336, and 336 * 31 >> 5 is 325: half 0x0145, the subnormal 325 * 2^-24.
-    auto const out = bcn::decode_bc6h(w.bytes, true);
+    auto const out = decode_bc6h(w.bytes, true);
     auto const magnitude = 325.0f / 16777216.0f;
     CHECK(out.rgba[0] == magnitude);
     CHECK(out.rgba[4] == -magnitude);
     CHECK(out.rgba[7] == 1.0f);
+}
+
+TEST("bcn - the float decoders keep the exact interpolants")
+{
+    // r = 1 widens to 8, and two thirds of 8 is 16/3: the 8-bit decode rounds it to 5, the float one keeps it.
+    auto const block = make_color_block(0x0800, 0x0000, texel_order);
+    auto const exact = bcn::decode_bc1_f32(bcn::small_block(block));
+    CHECK(exact.rgba[2 * 4 + 0] == 16.0f / 765.0f);
+    CHECK(exact.rgba[2 * 4 + 3] == 1.0f);
+
+    // Three-color mode: index 3 is transparent black in floats too.
+    auto const three = bcn::decode_bc1_f32(bcn::small_block(make_color_block(0x001F, 0xF800, texel_order)));
+    CHECK(three.rgba[3 * 4 + 3] == 0.0f);
+
+    // BC3 alpha in sevenths: (6 * 200 + 10) / 7, unrounded.
+    auto const bc3 = bcn::decode_bc3_f32(
+        bcn::large_block(concat(make_channel_block(200, 10, channel_order), make_color_block(0xFFFF, 0, texel_order))));
+    CHECK(bc3.rgba[2 * 4 + 3] == 1210.0f / 1785.0f);
+
+    // Signed BC5 in -1..1, unbiased.
+    int const zeros[16] = {};
+    auto const bc5 = bcn::decode_bc5_f32(
+        bcn::large_block(concat(make_channel_block(0x81, 0x81, zeros), make_channel_block(0x7F, 0x7F, zeros))), true);
+    CHECK(bc5.rgba[0] == -1.0f);
+    CHECK(bc5.rgba[1] == 1.0f);
 }
