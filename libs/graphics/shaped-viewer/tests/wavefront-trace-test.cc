@@ -38,9 +38,10 @@ struct cornell_scene
     sv::camera camera;
 };
 
-[[nodiscard]] cornell_scene make_scene(sv::gpu_resource_manager& resources)
+[[nodiscard]] cornell_scene make_scene(sv::gpu_resource_manager& resources,
+                                       sv_test::cornell_box box = sv_test::make_cornell_box())
 {
-    auto s = cornell_scene{};
+    auto s = cornell_scene{.box = cc::move(box)};
     s.item = resources.acquire_scene_item(sv_test::as_mesh("wavefront cornell", s.box.positions, s.box.materials));
     resources.wait_for_pending_uploads();
     auto const* const mesh = resources.meshes.get_ptr(s.item.mesh);
@@ -269,6 +270,142 @@ cc::shared_async<cc::vector<tg::vec3f>> drain_cornell(sg::context& ctx,
                 read(cmd);
             return outcome;
         });
+}
+
+/// What a run of ReSTIR frames made of the Cornell box: each frame's re-shaded image, and their mean.
+struct restir_run
+{
+    cc::vector<cc::vector<tg::vec3f>> frames;
+    cc::vector<tg::vec3f> mean;
+    /// The mean confidence of the last frame's reservoirs, over the pixels that kept one: how much reuse there was.
+    f32 confidence = 0.0f;
+};
+
+/// How a run of ReSTIR frames reuses: whether each frame may take the last one's reservoirs, and whether it traces the reverse visibility.
+struct restir_reuse
+{
+    bool history = true;
+    bool exact = false;
+    /// How far the camera swings sideways, between two positions it alternates every frame.
+    f64 pan = 0.0;
+    /// Whether each frame is told the camera of the last one, or told that nothing moved.
+    bool honest_motion = true;
+};
+
+/// Traces `frames` drained frames of the Cornell box, each keeping ReSTIR's records, and reads back what the re-shade made of each.
+/// A pixel the re-shade did not shade shows its path's own estimate, as resolve hands the denoiser.
+/// Every frame draws its own seed, so the run is a sequence of independent frames tied together only by the reuse.
+cc::shared_async<restir_run> run_restir(sg::context& ctx,
+                                        sv::gpu_resource_manager& resources,
+                                        cornell_scene const& scene,
+                                        int frames,
+                                        restir_reuse reuse)
+{
+    auto const background = sv::background_gpu::from(sv::background{});
+    auto const target = make_target(ctx);
+    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+    auto const slots = isize(k_size[0]) * isize(k_size[1]);
+    auto out = restir_run{.frames = {}, .mean = cc::vector<tg::vec3f>::create_filled(slots, tg::vec3f(0, 0, 0))};
+    auto const start = cc::current_time_steady_secs();
+    for (auto f = 0; f < frames;)
+    {
+        (void)ctx.routines.tick();
+        auto cmd = ctx.create_command_list();
+        auto records = cc::vector<sv::shaders::tracer::instance_record>();
+        records.push_back(resources.describe_instance(*cmd, scene.item.mesh, scene.item.instance));
+        sv::place_instance_record(records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+        auto const bindless = resources.freeze();
+        auto const trace = sv::pt_trace_desc{
+            .background = ctx.transient.create_buffer_from_pod(*cmd, background, sg::buffer_usage::readonly_buffer),
+            .instances = scene.instances,
+            .output = target,
+            .instance_table = ctx.transient.create_buffer_from_data(*cmd, records, sg::buffer_usage::readonly_buffer),
+            .lights = sv_test::upload_lights(*cmd, scene.lights),
+            .hit_groups = scene.hit_groups,
+            .bindless = &bindless};
+        auto fc = frame_of(scene, u32(f) * 7u + 3u, 0u, 1);
+        auto camera = scene.camera;
+        camera.position[0] += reuse.pan * f64(f % 2);
+        auto previous = scene.camera;
+        previous.position[0] += f == 0 ? 0.0 : reuse.pan * f64((f - 1) % 2);
+        fc.camera = sv::camera_record_of(camera);
+        fc.previous_camera = sv::camera_record_of(reuse.honest_motion ? previous : camera);
+        auto const outcome = sv::wavefront_routine::execute(*cmd, {.trace = trace,
+                                                                   .frame = fc,
+                                                                   .state = &state,
+                                                                   .rounds = 16,
+                                                                   .restart = true,
+                                                                   .regenerate = false,
+                                                                   .restir = true,
+                                                                   .restir_history = reuse.history,
+                                                                   .restir_exact = reuse.exact,
+                                                                   .generation = u32(f) + 1u});
+        auto results = sg::data_future<sv::shaders::tracer::restir_result>();
+        auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();
+        auto reservoirs = sg::data_future<sv::shaders::tracer::restir_reservoir>();
+        // The frame writes the half its parity named before it flipped it.
+        auto const written_half = isize(state.restir_parity ^ 1u);
+        if (outcome == sg::routine_outcome::executed)
+        {
+            results = cmd->download.data_from_buffer(state.restir_results);
+            tallies = cmd->download.data_from_buffer(state.tallies);
+            reservoirs = cmd->download.data_from_buffer(state.restir_reservoirs);
+        }
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        if (outcome != sg::routine_outcome::executed)
+        {
+            REQUIRE(cc::current_time_steady_secs() - start < 60.0);
+            sv_test::drive_ambient_work();
+            continue;
+        }
+        auto const r = results.try_get_data();
+        auto const t = tallies.try_get_data();
+        REQUIRE(r.has_value());
+        REQUIRE(t.has_value());
+        auto image = cc::vector<tg::vec3f>();
+        for (auto i = isize(0); i < slots; ++i)
+        {
+            auto const own = t.value()[i].frame_sum / cc::max(t.value()[i].frame_count, 1.0f);
+            auto const pixel = r.value()[i].valid != 0 ? r.value()[i].radiance : own;
+            image.push_back(pixel);
+            out.mean[i] += pixel / f32(frames);
+        }
+        out.frames.push_back(cc::move(image));
+        auto const kept = reservoirs.try_get_data();
+        REQUIRE(kept.has_value());
+        auto confidence_sum = 0.0f;
+        auto keeping = 0;
+        for (auto i = isize(0); i < slots; ++i)
+        {
+            auto const& reservoir = kept.value()[written_half * slots + i];
+            if (reservoir.weight <= 0.0f)
+                continue;
+            confidence_sum += reservoir.confidence;
+            ++keeping;
+        }
+        out.confidence = confidence_sum / f32(cc::max(keeping, 1));
+        ++f;
+    }
+    co_return out;
+}
+
+/// The root mean square of `image`'s luminance against `reference`'s, over the pixels that see the box's surfaces.
+/// The lamp's own pixels are left out: its edge jitters from frame to frame, and that noise is no estimator's.
+[[nodiscard]] f32 rms_error(cc::span<tg::vec3f const> image, cc::span<tg::vec3f const> reference)
+{
+    auto sum = 0.0f;
+    auto count = 0;
+    for (auto i = isize(0); i < image.size(); ++i)
+    {
+        if (luminance_of(reference[i]) > 2.0f)
+            continue;
+        auto const d = luminance_of(image[i]) - luminance_of(reference[i]);
+        sum += d * d;
+        ++count;
+    }
+    return tg::sqrt(sum / f32(cc::max(count, 1)));
 }
 
 /// The mean luminance of `pixels`.
@@ -787,6 +924,176 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a path a ReSTIR frame leaves unfin
         for (auto c = 0; c < 3; ++c)
             worst = cc::max(worst, tg::abs(split[i][c] - plain[i][c]) / (tg::abs(plain[i][c]) + 1e-3f));
     CHECK(worst < 1e-3f).context(cc::format("the worst relative difference of the mean: {}", worst));
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// ReSTIR GI's phase G1: temporal reuse, on a still camera so every visible point reprojects onto itself.
+// The box is matte everywhere, the Lambertian case reconnection is exact for.
+// So with the reverse visibility traced the resampled frames average to the plain path tracer's image, and each is less noisy than one plain sample.
+// Without it they keep a slight bias, which a looser bound measures rather than hides.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's temporal reuse keeps the box's image and cuts each frame's "
+                     "noise",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+
+    // The reference: the plain tracer's converged mean, many samples a pixel.
+    auto const reference = co_await trace_cornell_at_fill(ctx, resources, scene, 1.0f, 96, nullptr);
+    auto const reference_mean = mean_luminance_of(reference);
+
+    constexpr int frames = 48;
+    constexpr int warm = 16;
+    auto const plain = co_await run_restir(ctx, resources, scene, frames, {.history = false});
+    auto const exact = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true});
+    auto const fast = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = false});
+
+    // Unbiased with `exact`: the mean of the resampled frames is the plain image's, to the frames' noise.
+    auto const exact_mean = mean_luminance_of(exact.mean);
+    auto const fast_mean = mean_luminance_of(fast.mean);
+    auto const plain_mean = mean_luminance_of(plain.mean);
+    CHECK(tg::abs(plain_mean - reference_mean) < 0.03f * reference_mean);
+    CHECK(tg::abs(exact_mean - plain_mean) < 0.01f * plain_mean)
+        .context(cc::format("exact: {} against {} without reuse", exact_mean, plain_mean));
+    CHECK(tg::abs(fast_mean - plain_mean) < 0.02f * plain_mean)
+        .context(cc::format("default: {} against {} without reuse", fast_mean, plain_mean));
+
+    // Block by block, against a tolerance the blocks' own noise sets, as the megakernel comparison does.
+    for (auto by = 0; by < k_size[1] / k_block; ++by)
+        for (auto bx = 0; bx < k_size[0] / k_block; ++bx)
+        {
+            auto const r = block_mean(reference, bx, by);
+            auto const e = block_mean(exact.mean, bx, by);
+            CHECK(tg::abs(e - r) / (r + 0.05f) < 0.25f)
+                .context(cc::format("block ({}, {}): exact {}, reference {}", bx, by, e, r));
+        }
+
+    // Reuse happens: with the camera still, the reservoirs fill toward the confidence cap, and without history they stay at 1.
+    CHECK(exact.confidence > 10.0f).context(cc::format("mean confidence {}", exact.confidence));
+    CHECK(plain.confidence <= 1.0f).context(cc::format("mean confidence without history {}", plain.confidence));
+
+    // The variance falls: once the history has filled, a resampled frame is closer to the reference.
+    // Only the indirect half resamples, so one next-event sample's noise stays in both, which bounds the gain on the whole image.
+    auto plain_error = 0.0f;
+    auto exact_error = 0.0f;
+    for (auto f = warm; f < frames; ++f)
+    {
+        plain_error += rms_error(plain.frames[f], reference) / f32(frames - warm);
+        exact_error += rms_error(exact.frames[f], reference) / f32(frames - warm);
+    }
+    CHECK(exact_error * 1.3f < plain_error)
+        .context(cc::format("per-frame error: {} resampled, {} plain", exact_error, plain_error));
+    CC_LOG_INFO("ReSTIR G1 on the box: means {} exact, {} default, {} plain, {} reference; per-frame error {} against "
+                "{} plain",
+                exact_mean, fast_mean, plain_mean, reference_mean, exact_error, plain_error);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// The temporal pass reprojects each visible point through the camera of the frame its history was kept under.
+// A panning camera told where it was keeps most of its history.
+// Told that nothing moved, its previous camera is not the one the history was kept under, and it reuses none of it.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's history follows a panning camera through its reprojection",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+
+    // About two pixels a frame at this size, back and forth, so every frame moves and the box stays in view.
+    constexpr f64 pan = 0.25;
+    constexpr int frames = 12;
+    auto const honest = co_await run_restir(ctx, resources, scene, frames, {.pan = pan, .honest_motion = true});
+    auto const blind = co_await run_restir(ctx, resources, scene, frames, {.pan = pan, .honest_motion = false});
+    auto const plain = co_await run_restir(ctx, resources, scene, frames, {.history = false, .pan = pan});
+
+    CHECK(honest.confidence > 5.0f).context(cc::format("mean confidence {} panning", honest.confidence));
+
+    // The moving image keeps the plain one's brightness: reuse across motion moves samples, it does not make light.
+    auto const honest_mean = mean_luminance_of(honest.mean);
+    auto const plain_mean = mean_luminance_of(plain.mean);
+    CHECK(tg::abs(honest_mean - plain_mean) < 0.03f * plain_mean)
+        .context(cc::format("moving: {} reusing, {} without", honest_mean, plain_mean));
+    CHECK(blind.confidence <= 1.0f)
+        .context(cc::format("mean confidence {} told the motion, {} told nothing moved", honest.confidence,
+                            blind.confidence));
+    CC_LOG_INFO("ReSTIR G1 panning: mean confidence {} with the motion, {} without", honest.confidence, blind.confidence);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A glossy back wall, which the candidates of the walls facing it reach and cannot reconnect to.
+// The history never shifts such a sample, so its MIS weight must give it to the candidate whole, or reuse darkens what the wall reflects.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's temporal reuse keeps the light a glossy wall reflects",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    // The back wall is the box's third quad, its triangles 4 and 5.
+    auto box = sv_test::make_cornell_box();
+    auto const glossy = sv_test::pbr_material{.base_color = tg::vec3f(0.9f, 0.9f, 0.9f),
+                                              .metallic = 1.0f,
+                                              .roughness = 0.1f,
+                                              .emissive = tg::vec3f(0, 0, 0)};
+    box.materials[4] = glossy;
+    box.materials[5] = glossy;
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources, cc::move(box));
+
+    constexpr int frames = 48;
+    auto const plain = co_await run_restir(ctx, resources, scene, frames, {.history = false});
+    auto const exact = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true});
+
+    auto const plain_mean = mean_luminance_of(plain.mean);
+    auto const exact_mean = mean_luminance_of(exact.mean);
+    CHECK(tg::abs(exact_mean - plain_mean) < 0.015f * plain_mean)
+        .context(cc::format("glossy back wall: {} reusing, {} without", exact_mean, plain_mean));
+    CC_LOG_INFO("ReSTIR G1 with a glossy wall: means {} reusing, {} without; confidence {}", exact_mean, plain_mean,
+                exact.confidence);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

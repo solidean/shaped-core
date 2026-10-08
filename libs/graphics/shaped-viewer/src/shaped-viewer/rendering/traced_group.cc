@@ -66,14 +66,17 @@ void wavefront_state::ensure_restir(sg::context& ctx)
     restir_candidates = ctx.persistent.create_buffer<tracer::restir_candidate>(slots, usage);
     restir_visible = ctx.persistent.create_buffer<tracer::visible_hit>(slots, usage);
     restir_results = ctx.persistent.create_buffer<tracer::restir_result>(slots, usage);
+    restir_surfaces = ctx.persistent.create_buffer<tracer::restir_surface>(2 * slots, usage);
+    restir_reservoirs = ctx.persistent.create_buffer<tracer::restir_reservoir>(2 * slots, usage);
 }
 
 isize wavefront_state::size_in_bytes() const
 {
-    auto const restir
-        = restir_candidates.raw() != nullptr
-            ? restir_candidates.size_in_bytes() + restir_visible.size_in_bytes() + restir_results.size_in_bytes()
-            : isize(0);
+    auto const restir = restir_candidates.raw() != nullptr
+                          ? restir_candidates.size_in_bytes() + restir_visible.size_in_bytes()
+                                + restir_results.size_in_bytes() + restir_surfaces.size_in_bytes()
+                                + restir_reservoirs.size_in_bytes()
+                          : isize(0);
     return path_rays.size_in_bytes() + path_states.size_in_bytes() + path_media.size_in_bytes()
          + path_lights.size_in_bytes() + hits.size_in_bytes() + shadow_rays.size_in_bytes() + tallies.size_in_bytes()
          + queue_a.size_in_bytes() + queue_b.size_in_bytes() + queue_hits.size_in_bytes() + queue_sorted.size_in_bytes()
@@ -168,6 +171,11 @@ shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
         = (paths.restir_visible.raw() != nullptr ? paths.restir_visible : s.paths.restir_visible).as_readwrite_buffer(),
         .restir_results
         = (paths.restir_results.raw() != nullptr ? paths.restir_results : s.paths.restir_results).as_readwrite_buffer(),
+        .restir_surfaces
+        = (paths.restir_surfaces.raw() != nullptr ? paths.restir_surfaces : s.paths.restir_surfaces).as_readwrite_buffer(),
+        .restir_reservoirs
+        = (paths.restir_reservoirs.raw() != nullptr ? paths.restir_reservoirs : s.paths.restir_reservoirs)
+              .as_readwrite_buffer(),
     };
 }
 

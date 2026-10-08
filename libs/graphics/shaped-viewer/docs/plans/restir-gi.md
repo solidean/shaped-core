@@ -1,6 +1,6 @@
 # ReSTIR GI for the interactive mode
 
-**A plan, being built: phase G0 has landed, and everything past it is proposed.**
+**A plan, being built: phases G0 and G1 have landed, and everything past them is proposed.**
 It is the design of the traced lighting in sv's interactive mode, which the user chose to be ReSTIR GI rather than a radiance cache.
 The decided direction it serves ([the roadmap](rendering-roadmap.md)):
 
@@ -646,16 +646,37 @@ On the Cornell box the re-shade gives back each path's own estimate to ~2e-5, an
 
 **Phase G1: temporal reuse, on traced primaries**, behind the per-layer setting, on moving frames and on the young still frames of [the camera-stop fix](#the-camera-stops).
 
-- **Unbiased on a Lambertian scene, `exact`**: a still camera, many frames of the resampled signal averaged, against the converged plain image; the bound is the noise of the frame count.
-  The default variant, held to a looser bound, measures what skipping the reverse visibility costs.
-- **The moving image has the still mean's brightness**: frames of a slow pan with full-depth candidates, their mean per block against the converged plain image, within a bound.
-  The same test with one-bounce GI shows the option's darkening, and pins that it stays an option.
-- **The variance falls**: per-frame error against the reference at least 3x below plain one-sample frames on the box, well inside the paper's lowest 9.3x.
-- **Reprojection is pinned**: a panning camera against the same stream told nothing moved; the honest one converges further, as svgf's test does.
-- **History resets where it must**: a camera cut and a scene change each leave every reservoir at `M = 1` on the next frame, read back.
-- **The stop keeps its history**: the first full-size still frame after a scaled stream reads back a mean `M` above 1.
-- **A disocclusion does not ghost**: a camera sliding past an occluder; the disoccluded blocks are no worse than plain path tracing.
-- **An invalid candidate falls back**: a fog volume between a wall and the camera's surfaces converges to the plain image.
+Built on the frames that restart and feed the temporal denoiser: every moving frame, and the first full-size still frame after a stop.
+The other young still frames wait for the camera-stop fix.
+`wavefront_restir_temporal` runs after the drain, before the re-shade, and writes this frame's half of two-half records: `restir_surfaces` and `restir_reservoirs`.
+`wavefront_flag_restir_parity` names the half, and `wavefront_flag_restir_history` whether the other half is the last ReSTIR frame's.
+The view turns the history off after a scene change or a camera cut, on both of a slot's path states, the full-size and the scaled one.
+A visible point inside a medium, or on a material that collapses onto one wavelength, neither gives nor takes a history: its material decides, never a draw.
+A pixel whose path is left unfinished starts over at confidence 0, which costs reuse but no bias.
+The records are unpacked floats for now: ~376 bytes per traced pixel with both halves, ~780 MB at 1080p; packing them as planned is open.
+History is reprojected through the frame's `previous_camera`, and reused only where that is the camera the records were kept under, `wavefront_state::restir_camera`.
+Frames between, of the megakernel or on the other path state, may have moved the camera, and then the history is not reused.
+So the full-size state, whose last ReSTIR frame was the previous stop's, starts each stop afresh.
+The scaled state's history survives a stop: the next move's `previous_camera` is the pose it was kept at.
+
+Measured on the Cornell box, 48 frames each, against the plain tracer's converged mean:
+the `exact` mean is 0.5955 against 0.5955 without reuse and 0.604 for the reference.
+The default mean is 0.5934, 0.4% darker for the skipped reverse visibility.
+The reservoirs fill to a mean confidence above 10 of the cap of 20.
+Per-frame error, without the lamp's own jittered edge, falls from 0.283 to 0.189, about 1.5x rather than the 3x expected.
+One next-event sample's noise stays in both, since only the indirect half resamples; ReSTIR DI is the track that removes it.
+
+- **Unbiased on a Lambertian scene, `exact`**, built: 48 resampled frames of a still camera, their mean against the plain frames' within 1%, and blocks against the converged image.
+  The default variant, held to 2% of the plain mean, measures what skipping the reverse visibility costs.
+- **A glossy `x_s` keeps its light**, built: a glossy back wall, the resampled mean against the plain one within 1.5%.
+- **The moving image has the still mean's brightness**, built as the plain moving frames' mean against the resampled ones within 3%, for a camera swinging every frame.
+  Block means against the converged image, and the one-bounce option's darkening, are still owed.
+- **The variance falls**, built at the 1.3x the whole image allows: one next-event sample's noise stays in both, so the measured gain is ~1.5x.
+- **Reprojection is pinned**, built: a swinging camera told where it was keeps a mean confidence above 5; told nothing moved, it reuses nothing.
+- **History resets where it must**: owed as a view-level test; the routine's switches are what the tests drive.
+- **The stop keeps its history**: owed with the camera-stop fix.
+- **A disocclusion does not ghost**, and **an invalid candidate falls back** through a fog volume: owed.
+- **The reservoir math as SGL functions with `test` blocks**, the foundation's CPU check that the MIS weights sum to one: owed.
 - A capture of Sponza, moving and at the stop, beside today's, for the user to judge; not a test, since the asset is an on-request fetch.
 
 **Phase G2: spatial reuse**, with the reconnection Jacobian, visibility rays, pairwise MIS and the reconnection criterion at `x_s`.

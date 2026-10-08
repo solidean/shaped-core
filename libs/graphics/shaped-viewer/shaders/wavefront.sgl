@@ -39,6 +39,9 @@ use tracer
 @compute(64) fun restir_gather(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
     tracer.wavefront_restir_gather(id.x as uint)
 
+@compute(64) fun restir_temporal(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
+    tracer.wavefront_restir_temporal(id.x as uint)
+
 @compute(1) fun args_round(@thread_id id: int3){tracer.traced, tracer.dispatch, tracer.wavefront_step}:
     tracer.wavefront_args_round()
 

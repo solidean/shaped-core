@@ -41,6 +41,18 @@ struct sv::wavefront_state
     sg::buffer<shaders::tracer::restir_candidate> restir_candidates;
     sg::buffer<shaders::tracer::visible_hit> restir_visible;
     sg::buffer<shaders::tracer::restir_result> restir_results;
+    /// Two halves each: the last ReSTIR frame's, which the temporal pass reads, and this one's.
+    sg::buffer<shaders::tracer::restir_surface> restir_surfaces;
+    sg::buffer<shaders::tracer::restir_reservoir> restir_reservoirs;
+
+    /// Which half of the two-half records the next ReSTIR frame writes; it flips with every one.
+    u32 restir_parity = 0;
+
+    /// Whether a ReSTIR frame has written the records, so the next one has a history to reuse.
+    bool restir_written = false;
+
+    /// The camera the records were last written under; a frame reuses them only if its `previous_camera` is this one.
+    shaders::tracer::camera_record restir_camera = {};
 
     /// The camera generation the last restart started its paths under, kept by whoever restarts: the next restart takes the one after.
     u32 generation = 0;

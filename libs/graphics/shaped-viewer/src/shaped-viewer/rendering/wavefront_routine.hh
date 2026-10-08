@@ -84,6 +84,15 @@ struct sv::wavefront_trace_desc
     /// The state grows the records on first use — libs/graphics/shaped-viewer/docs/plans/restir-gi.md is the design.
     bool restir = false;
 
+    /// Whether a ReSTIR frame may reuse the reservoirs the state last kept.
+    /// They are reused only where `frame.previous_camera` is the camera they were kept under (`wavefront_state::restir_camera`).
+    /// The view forgets a state's history on a scene change or a camera cut through `wavefront_state::restir_written`; this is the tests' switch.
+    bool restir_history = true;
+
+    /// Whether reuse also traces the reverse visibility, which leaves it unbiased on a Lambertian scene at one more ray.
+    /// The tests' variant; the default skips it, and darkens contact and corners slightly for it.
+    bool restir_exact = false;
+
     /// Which camera generation this frame's paths start under; one of an older generation never reaches the image.
     u32 generation = 1;
 
@@ -137,6 +146,7 @@ private:
         sg::compute_pipeline_handle resolve;
         sg::compute_pipeline_handle reset;
         sg::compute_pipeline_handle restir_gather;
+        sg::compute_pipeline_handle restir_temporal;
         sg::compute_pipeline_handle args_round;
         sg::compute_pipeline_handle args_shade;
         sg::compute_pipeline_handle args_connect;

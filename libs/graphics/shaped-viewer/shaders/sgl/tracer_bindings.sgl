@@ -255,6 +255,30 @@ struct visible_hit:
     origin: float3
     direction: float3
 
+/// The visible point a ReSTIR frame built its reservoir at, kept for the next frame's temporal pass to reproject into.
+/// The guides it carries are what the target function reads, so no pass but the re-shade evaluates a material.
+struct restir_surface:
+    position: float3
+    /// `restir_surface_*` bits: whether the pixel had a visible point that frame, and whether it could have made a candidate
+    kinds: uint
+    /// the geometric normal, facing the camera
+    normal: float3
+    roughness: float
+    albedo: float3
+    specular_albedo: float3
+
+/// A ReSTIR GI reservoir: one kept sample `x_s`, the radiance it sends toward the visible point, and its weights.
+struct restir_reservoir:
+    x_s: float3
+    /// the unbiased contribution weight, standing in for one over the kept sample's solid-angle density; 0 where it kept none
+    weight: float
+    n_s: float3
+    /// how many candidates it has seen, capped: its confidence weighed against another reservoir's
+    confidence: float
+    radiance: float3
+    /// `restir_flag_reconnectable` where its sample may be shifted to another visible point
+    flags: uint
+
 /// What the re-shade made of a pixel: the frame's estimate and its specular share, where `valid` is 1.
 struct restir_result:
     radiance: float3
@@ -348,6 +372,9 @@ binding traced:
     restir_candidates: mut buffer[restir_candidate]
     restir_visible: mut buffer[visible_hit]
     restir_results: mut buffer[restir_result]
+    /// Two halves each, this frame's and the last ReSTIR frame's, which `wavefront_flag_restir_parity` says apart.
+    restir_surfaces: mut buffer[restir_surface]
+    restir_reservoirs: mut buffer[restir_reservoir]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //

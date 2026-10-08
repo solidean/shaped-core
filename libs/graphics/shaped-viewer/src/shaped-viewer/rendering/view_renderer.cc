@@ -472,6 +472,16 @@ struct ensured_slot
 /// The bounce after which the wavefront's Russian roulette may end a path, which leaves `max_bounces` a cap.
 constexpr u32 wavefront_roulette_after = 3;
 
+/// Makes the next ReSTIR frame of either of `slot`'s path states start without history.
+/// Its reservoirs describe another scene, or a camera the cut took away.
+void forget_restir_history(impl::temporal_slot& slot)
+{
+    if (slot.paths.has_value())
+        slot.paths.value().restir_written = false;
+    if (slot.scaled_paths.has_value())
+        slot.scaled_paths.value().restir_written = false;
+}
+
 /// What a still frame runs: `rounds_per_frame` at full fill, or what fits `frame_budget_ms` once a frame is measured.
 ///
 /// Folds in every frame whose timestamps have landed first, so the plan is as fresh as the GPU allows.
@@ -932,6 +942,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             s.denoise.reset();
             s.scaled_denoise.reset();
             s.has_last_camera = false;
+            forget_restir_history(s);
         }
         rec.camera_cut_pending = false;
     }
@@ -1038,6 +1049,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         {
             ds.frame->denoise.reset();
             ds.frame->scaled_denoise.reset();
+            // ReSTIR's reservoirs live on the accumulation slot, and describe the old scene as the history does.
+            forget_restir_history(*slot);
         }
         ds.frame->reset_hash = scene_hash;
     }

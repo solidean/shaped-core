@@ -34,6 +34,9 @@ constexpr u32 restir_shade_mode = 1;
 /// `frame_constants::wavefront_flags`, as `wavefront_flag_*` in shaders/sgl/tracer_wavefront.sgl name them.
 constexpr u32 wavefront_flag_restart = 1;
 constexpr u32 wavefront_flag_restir = 2;
+constexpr u32 wavefront_flag_restir_history = 4;
+constexpr u32 wavefront_flag_restir_parity = 8;
+constexpr u32 wavefront_flag_restir_exact = 16;
 
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
 [[nodiscard]] cc::optional<sg::shader_format> sgl_format_for(sg::context const& ctx, slib::shader_library const& lib)
@@ -65,6 +68,7 @@ cc::shared_async<cc::unit> wavefront_routine::init(sg::routine_init_scope scope)
         .resolve = co_await w.resolve.acquire_pipeline(ctx),
         .reset = co_await w.reset.acquire_pipeline(ctx),
         .restir_gather = co_await w.restir_gather.acquire_pipeline(ctx),
+        .restir_temporal = co_await w.restir_temporal.acquire_pipeline(ctx),
         .args_round = co_await w.args_round.acquire_pipeline(ctx),
         .args_shade = co_await w.args_shade.acquire_pipeline(ctx),
         .args_connect = co_await w.args_connect.acquire_pipeline(ctx),
@@ -249,6 +253,19 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     if (d.restir)
         d.state->ensure_restir(ctx);
     fc.wavefront_flags = (d.restart ? wavefront_flag_restart : 0u) | (d.restir ? wavefront_flag_restir : 0u);
+    if (d.restir)
+    {
+        // The temporal pass reprojects through `previous_camera`, so the records are history only if they were kept under it.
+        // Frames between, of another tracer or on the other path state, may have moved the camera.
+        auto const same_camera
+            = cc::memcmp(&d.state->restir_camera, &fc.previous_camera, sizeof(tracer::camera_record)) == 0;
+        if (d.restir_history && d.state->restir_written && same_camera)
+            fc.wavefront_flags |= wavefront_flag_restir_history;
+        if (d.state->restir_parity != 0)
+            fc.wavefront_flags |= wavefront_flag_restir_parity;
+        if (d.restir_exact)
+            fc.wavefront_flags |= wavefront_flag_restir_exact;
+    }
     fc.permutation_count = u32(t.hit_groups.size());
     fc.roulette_after = d.roulette_after;
     auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer);
@@ -375,6 +392,9 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         mark(wavefront_stage::restir);
         step.parity = 0;
         step.permutation = 0;
+        // The temporal pass first: it writes the reservoir each pixel's re-shade then shades.
+        use(*self->_kernels.restir_temporal, second_group::bindless);
+        cmd.compute.dispatch_threads(int(width * height));
         step.mode = restir_shade_mode;
         use(*self->_kernels.reset, second_group::none);
         cmd.compute.dispatch_groups(1);
@@ -393,6 +413,11 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         }
         step.permutation = 0;
         step.mode = 0;
+
+        // This frame's half is the next one's history.
+        d.state->restir_written = true;
+        d.state->restir_parity ^= 1u;
+        d.state->restir_camera = fc.camera;
     }
 
     mark(wavefront_stage::resolve);
