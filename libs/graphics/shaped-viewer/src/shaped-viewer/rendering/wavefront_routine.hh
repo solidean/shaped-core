@@ -100,6 +100,10 @@ struct sv::wavefront_trace_desc
     /// The spatial pass's neighbor radius in pixels, or 0 for the image's own: a fortieth of its diagonal, between 2 and 16.
     i32 restir_radius = 0;
 
+    /// Whether the re-shade also replaces the visible point's next-event light sample by ReSTIR DI's, at that sample's half of the balance heuristic.
+    /// The emission, the environment and the continuation's hits on lights stay the path's own; the spatial pass runs for DI where it runs for GI.
+    bool restir_di = false;
+
     /// Which camera generation this frame's paths start under; one of an older generation never reaches the image.
     u32 generation = 1;
 
@@ -155,6 +159,8 @@ private:
         sg::compute_pipeline_handle restir_gather;
         sg::compute_pipeline_handle restir_temporal;
         sg::compute_pipeline_handle restir_spatial;
+        sg::compute_pipeline_handle restir_di_temporal;
+        sg::compute_pipeline_handle restir_di_spatial;
         sg::compute_pipeline_handle args_round;
         sg::compute_pipeline_handle args_shade;
         sg::compute_pipeline_handle args_connect;

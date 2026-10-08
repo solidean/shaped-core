@@ -46,12 +46,18 @@ struct sv::wavefront_state
     sg::buffer<shaders::tracer::restir_reservoir> restir_reservoirs;
     /// One per slot: the spatial pass's reservoir of the last ReSTIR frame, which its re-shade shaded.
     sg::buffer<shaders::tracer::restir_reservoir> restir_spatial;
+    /// ReSTIR DI's: two halves of temporal reservoirs, and one per slot of the spatial pass's.
+    sg::buffer<shaders::tracer::di_reservoir> restir_di_reservoirs;
+    sg::buffer<shaders::tracer::di_reservoir> restir_di_spatial;
 
     /// Which half of the two-half records the next ReSTIR frame writes; it flips with every one.
     u32 restir_parity = 0;
 
     /// Whether a ReSTIR frame has written the records, so the next one has a history to reuse.
     bool restir_written = false;
+
+    /// Whether that frame also ran DI, so its DI reservoirs are a history too.
+    bool restir_di_written = false;
 
     /// The camera the records were last written under; a frame reuses them only if its `previous_camera` is this one.
     shaders::tracer::camera_record restir_camera = {};

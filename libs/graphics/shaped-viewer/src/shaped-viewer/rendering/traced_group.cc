@@ -69,6 +69,8 @@ void wavefront_state::ensure_restir(sg::context& ctx)
     restir_surfaces = ctx.persistent.create_buffer<tracer::restir_surface>(2 * slots, usage);
     restir_reservoirs = ctx.persistent.create_buffer<tracer::restir_reservoir>(2 * slots, usage);
     restir_spatial = ctx.persistent.create_buffer<tracer::restir_reservoir>(slots, usage);
+    restir_di_reservoirs = ctx.persistent.create_buffer<tracer::di_reservoir>(2 * slots, usage);
+    restir_di_spatial = ctx.persistent.create_buffer<tracer::di_reservoir>(slots, usage);
 }
 
 isize wavefront_state::size_in_bytes() const
@@ -77,6 +79,7 @@ isize wavefront_state::size_in_bytes() const
                           ? restir_candidates.size_in_bytes() + restir_visible.size_in_bytes()
                                 + restir_results.size_in_bytes() + restir_surfaces.size_in_bytes()
                                 + restir_reservoirs.size_in_bytes() + restir_spatial.size_in_bytes()
+                                + restir_di_reservoirs.size_in_bytes() + restir_di_spatial.size_in_bytes()
                           : isize(0);
     return path_rays.size_in_bytes() + path_states.size_in_bytes() + path_media.size_in_bytes()
          + path_lights.size_in_bytes() + hits.size_in_bytes() + shadow_rays.size_in_bytes() + tallies.size_in_bytes()
@@ -179,6 +182,12 @@ shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
               .as_readwrite_buffer(),
         .restir_spatial
         = (paths.restir_spatial.raw() != nullptr ? paths.restir_spatial : s.paths.restir_spatial).as_readwrite_buffer(),
+        .restir_di_reservoirs
+        = (paths.restir_di_reservoirs.raw() != nullptr ? paths.restir_di_reservoirs : s.paths.restir_di_reservoirs)
+              .as_readwrite_buffer(),
+        .restir_di_spatial
+        = (paths.restir_di_spatial.raw() != nullptr ? paths.restir_di_spatial : s.paths.restir_di_spatial)
+              .as_readwrite_buffer(),
     };
 }
 

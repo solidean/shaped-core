@@ -278,7 +278,7 @@ struct restir_run
     cc::vector<cc::vector<tg::vec3f>> frames;
     cc::vector<tg::vec3f> mean;
     /// Each frame's indirect half alone, the re-shaded image less the visible point's own light, and their mean.
-    /// It is what ReSTIR GI resamples, without the next-event noise it leaves as it was.
+    /// It is what ReSTIR GI resamples, without the next-event noise it leaves as it was; meaningless once DI replaces part of that light.
     cc::vector<cc::vector<tg::vec3f>> indirect_frames;
     cc::vector<tg::vec3f> indirect_mean;
     /// The mean confidence of the last frame's reservoirs, over the pixels that kept one: how much reuse there was.
@@ -299,6 +299,10 @@ struct restir_reuse
     i32 radius = 0;
     /// Which run of seeds the frames draw, so a reference run shares none of the frames measured against it.
     u32 seeds = 0;
+    /// Whether the re-shade also replaces the visible point's next-event light sample by ReSTIR DI's.
+    bool di = false;
+    /// How many surface bounces a path takes.
+    i32 max_bounces = 5;
 };
 
 /// Traces `frames` drained frames of the Cornell box, each keeping ReSTIR's records, and reads back what the re-shade made of each.
@@ -336,6 +340,7 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
             .hit_groups = scene.hit_groups,
             .bindless = &bindless};
         auto fc = frame_of(scene, u32(f) * 7u + 3u + reuse.seeds * 100003u, 0u, 1);
+        fc.max_bounces = reuse.max_bounces;
         auto camera = scene.camera;
         camera.position[0] += reuse.pan * f64(f % 2);
         auto previous = scene.camera;
@@ -353,6 +358,7 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
                                                                    .restir_exact = reuse.exact,
                                                                    .restir_spatial = reuse.spatial,
                                                                    .restir_radius = reuse.radius,
+                                                                   .restir_di = reuse.di,
                                                                    .generation = u32(f) + 1u});
         auto results = sg::data_future<sv::shaders::tracer::restir_result>();
         auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();
@@ -1306,6 +1312,177 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
     CC_LOG_INFO("D0 on the box with a dim second light: means {} by power, {} uniform, {} reference; "
                 "per-frame error {} by power, {} uniform; megakernel {} by power, {} uniform",
                 power_mean, uniform_mean, reference_mean, power_error, uniform_error, mk_power, mk_uniform);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// ReSTIR's DI track, phase D1: the visible point's light from the trace's lights, resampled and reused, on 22 small lights.
+// With one next-event sample a frame a pixel sees one lamp of 22.
+// Resampling eight candidates, and the neighbors' and the last frame's choices, makes the one that matters to it close to certain.
+// The visibility is traced once, at the re-shade, so the estimate stays unbiased: its mean is the plain path tracer's.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR DI keeps the image of many lights and cuts its noise",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto scene = make_scene(resources);
+
+    // 22 small lamps under the ceiling, a grid of 5 by 4 and two more, each as bright as the box's own lamp per area.
+    auto records = cc::vector<sv::shaders::tracer::light_record>();
+    auto const half = 0.06f;
+    auto const add_lamp = [&](f32 x, f32 z)
+    {
+        records.push_back({.position = tg::vec3f(x, 0.99f, z),
+                           .path = u32(sv::light_path::area),
+                           .u = tg::vec3f(half, 0, 0),
+                           .area = 4.0f * half * half,
+                           .v = tg::vec3f(0, 0, half),
+                           .emission = scene.box.light.emission,
+                           .normal = tg::vec3f(0, -1, 0),
+                           .cone_offset = 1,
+                           .link_mask = ~0u});
+    };
+    for (auto ix = 0; ix < 5; ++ix)
+        for (auto iz = 0; iz < 4; ++iz)
+            add_lamp(-0.8f + 0.4f * f32(ix), -0.6f + 0.4f * f32(iz));
+    add_lamp(-0.9f, 0.9f);
+    add_lamp(0.9f, -0.9f);
+    scene.lights = sv::pt_light_table::grouped(records);
+
+    constexpr int frames = 48;
+    constexpr int warm = 16;
+    auto const reference = co_await run_restir(ctx, resources, scene, 4 * frames, {.history = false, .seeds = 1});
+    auto const plain = co_await run_restir(ctx, resources, scene, frames, {.history = false});
+    auto const gi = co_await run_restir(ctx, resources, scene, frames, {.history = true, .spatial = true});
+    auto const di = co_await run_restir(ctx, resources, scene, frames, {.history = true, .spatial = true, .di = true});
+
+    auto const reference_mean = mean_luminance_of(reference.mean);
+    auto const plain_mean = mean_luminance_of(plain.mean);
+    auto const di_mean = mean_luminance_of(di.mean);
+    CHECK(tg::abs(di_mean - plain_mean) < 0.03f * plain_mean)
+        .context(cc::format("ReSTIR DI: {} against {} without", di_mean, plain_mean));
+
+    // DI's own gain, over the GI reuse it runs beside.
+    auto plain_error = 0.0f;
+    auto gi_error = 0.0f;
+    auto di_error = 0.0f;
+    for (auto f = warm; f < frames; ++f)
+    {
+        plain_error += rms_error(plain.frames[f], reference.mean) / f32(frames - warm);
+        gi_error += rms_error(gi.frames[f], reference.mean) / f32(frames - warm);
+        di_error += rms_error(di.frames[f], reference.mean) / f32(frames - warm);
+    }
+    // The continuation's hits on the lamps keep their half of the weight, and their noise, so the gain is bounded below what DI alone would give.
+    CHECK(di_error * 1.15f < gi_error)
+        .context(cc::format("per-frame error: {} with ReSTIR DI, {} with GI reuse alone", di_error, gi_error));
+    CC_LOG_INFO("D1 on the box with 22 lamps: means {} with ReSTIR DI, {} without, {} reference; "
+                "per-frame error {} with DI, {} with GI reuse alone, {} plain",
+                di_mean, plain_mean, reference_mean, di_error, gi_error, plain_error);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// ReSTIR DI on every kind of light at once — a rect, a two-sided rect, a point with a cone, a sun and a sky disc — over a glossy wall.
+// A light reaching the visible point best through the BSDF's narrow lobe must keep its light, so the resampled mean is the plain one.
+// So must the image without the spatial pass.
+// With one bounce no continuation weighs against the light sample, and that runs on a matte box.
+// A glossy wall's reflection of a lamp then comes from light samples alone, whose fireflies move a 48-frame mean by several percent with any change to the stream.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR DI keeps the mean of every kind of light over a glossy wall",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto box = sv_test::make_cornell_box();
+    auto const glossy = sv_test::pbr_material{.base_color = tg::vec3f(0.9f, 0.9f, 0.9f),
+                                              .metallic = 1.0f,
+                                              .roughness = 0.1f,
+                                              .emissive = tg::vec3f(0, 0, 0)};
+    box.materials[4] = glossy;
+    box.materials[5] = glossy;
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto scene = make_scene(resources, cc::move(box));
+
+    auto records = cc::vector<sv::shaders::tracer::light_record>();
+    records.push_back(scene.lights.records[0]);
+    records.push_back({.position = tg::vec3f(0.6f, -0.2f, 0.3f),
+                       .path = u32(sv::light_path::area),
+                       .u = tg::vec3f(0.08f, 0, 0),
+                       .area = 4.0f * 0.08f * 0.08f,
+                       .v = tg::vec3f(0, 0.08f, 0),
+                       .flags = sv::light_flag_two_sided,
+                       .emission = tg::vec3f(6, 4, 2),
+                       .normal = tg::vec3f(0, 0, 1),
+                       .cone_offset = 1,
+                       .link_mask = ~0u});
+    records.push_back({.position = tg::vec3f(-0.5f, 0.2f, 0.0f),
+                       .path = u32(sv::light_path::point),
+                       .emission = tg::vec3f(0.5f, 0.5f, 0.8f),
+                       .cone_scale = 2.0f,
+                       .normal = tg::vec3f(0, -1, 0),
+                       .cone_offset = -0.5f,
+                       .link_mask = ~0u});
+    records.push_back({.path = u32(sv::light_path::distant_point),
+                       .emission = tg::vec3f(0.3f, 0.3f, 0.3f),
+                       .normal = tg::normalize(tg::vec3f(0.2f, -1, 0.6f)),
+                       .cone_offset = 1,
+                       .link_mask = ~0u});
+    records.push_back({.path = u32(sv::light_path::distant_disc),
+                       .emission = tg::vec3f(20, 20, 20),
+                       .normal = tg::normalize(tg::vec3f(-0.1f, -1, 0.8f)),
+                       .cone_offset = 1,
+                       .one_minus_cos_angular_radius = 0.01f,
+                       .link_mask = ~0u});
+    scene.lights = sv::pt_light_table::grouped(records);
+
+    constexpr int frames = 48;
+    auto const plain = co_await run_restir(ctx, resources, scene, frames, {.history = false});
+    auto const di = co_await run_restir(ctx, resources, scene, frames, {.history = true, .spatial = true, .di = true});
+    auto const temporal = co_await run_restir(ctx, resources, scene, frames, {.history = true, .di = true});
+    auto matte = make_scene(resources);
+    matte.lights = scene.lights;
+    auto const plain_once = co_await run_restir(ctx, resources, matte, frames, {.history = false, .max_bounces = 1});
+    auto const di_once = co_await run_restir(ctx, resources, matte, frames,
+                                             {.history = true, .spatial = true, .di = true, .max_bounces = 1});
+    auto const plain_mean = mean_luminance_of(plain.mean);
+    auto const di_mean = mean_luminance_of(di.mean);
+    auto const temporal_mean = mean_luminance_of(temporal.mean);
+    auto const plain_once_mean = mean_luminance_of(plain_once.mean);
+    auto const di_once_mean = mean_luminance_of(di_once.mean);
+    CHECK(tg::abs(di_mean - plain_mean) < 0.03f * plain_mean)
+        .context(cc::format("every kind of light: {} with ReSTIR DI, {} without", di_mean, plain_mean));
+    CHECK(tg::abs(temporal_mean - plain_mean) < 0.03f * plain_mean)
+        .context(cc::format("without the spatial pass: {} with ReSTIR DI, {} without", temporal_mean, plain_mean));
+    CHECK(tg::abs(di_once_mean - plain_once_mean) < 0.03f * plain_once_mean)
+        .context(cc::format("one bounce: {} with ReSTIR DI, {} without", di_once_mean, plain_once_mean));
+    CC_LOG_INFO("D1 with every kind of light over a glossy wall: means {} with ReSTIR DI, {} without", di_mean,
+                plain_mean);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

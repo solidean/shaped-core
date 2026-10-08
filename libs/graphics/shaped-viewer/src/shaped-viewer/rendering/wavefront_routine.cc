@@ -38,6 +38,8 @@ constexpr u32 wavefront_flag_restir_history = 4;
 constexpr u32 wavefront_flag_restir_parity = 8;
 constexpr u32 wavefront_flag_restir_exact = 16;
 constexpr u32 wavefront_flag_restir_spatial = 32;
+constexpr u32 wavefront_flag_restir_di = 64;
+constexpr u32 wavefront_flag_restir_di_history = 128;
 
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
 [[nodiscard]] cc::optional<sg::shader_format> sgl_format_for(sg::context const& ctx, slib::shader_library const& lib)
@@ -71,6 +73,8 @@ cc::shared_async<cc::unit> wavefront_routine::init(sg::routine_init_scope scope)
         .restir_gather = co_await w.restir_gather.acquire_pipeline(ctx),
         .restir_temporal = co_await w.restir_temporal.acquire_pipeline(ctx),
         .restir_spatial = co_await w.restir_spatial.acquire_pipeline(ctx),
+        .restir_di_temporal = co_await w.restir_di_temporal.acquire_pipeline(ctx),
+        .restir_di_spatial = co_await w.restir_di_spatial.acquire_pipeline(ctx),
         .args_round = co_await w.args_round.acquire_pipeline(ctx),
         .args_shade = co_await w.args_shade.acquire_pipeline(ctx),
         .args_connect = co_await w.args_connect.acquire_pipeline(ctx),
@@ -262,13 +266,19 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         auto const same_camera
             = cc::memcmp(&d.state->restir_camera, &fc.previous_camera, sizeof(tracer::camera_record)) == 0;
         if (d.restir_history && d.state->restir_written && same_camera)
+        {
             fc.wavefront_flags |= wavefront_flag_restir_history;
+            if (d.restir_di && d.state->restir_di_written)
+                fc.wavefront_flags |= wavefront_flag_restir_di_history;
+        }
         if (d.state->restir_parity != 0)
             fc.wavefront_flags |= wavefront_flag_restir_parity;
         if (d.restir_exact)
             fc.wavefront_flags |= wavefront_flag_restir_exact;
         if (d.restir_spatial)
             fc.wavefront_flags |= wavefront_flag_restir_spatial;
+        if (d.restir_di)
+            fc.wavefront_flags |= wavefront_flag_restir_di;
     }
     fc.permutation_count = u32(t.hit_groups.size());
     fc.roulette_after = d.roulette_after;
@@ -404,6 +414,16 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
             use(*self->_kernels.restir_spatial, second_group::bindless);
             cmd.compute.dispatch_threads(int(width * height));
         }
+        if (d.restir_di)
+        {
+            use(*self->_kernels.restir_di_temporal, second_group::none);
+            cmd.compute.dispatch_threads(int(width * height));
+            if (d.restir_spatial)
+            {
+                use(*self->_kernels.restir_di_spatial, second_group::none);
+                cmd.compute.dispatch_threads(int(width * height));
+            }
+        }
         step.mode = restir_shade_mode;
         use(*self->_kernels.reset, second_group::none);
         cmd.compute.dispatch_groups(1);
@@ -425,6 +445,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
 
         // This frame's half is the next one's history.
         d.state->restir_written = true;
+        d.state->restir_di_written = d.restir_di;
         d.state->restir_parity ^= 1u;
         d.state->restir_camera = fc.camera;
     }

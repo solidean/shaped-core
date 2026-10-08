@@ -204,7 +204,7 @@ struct shadow_ray:
     direction: float3
     tested: uint
     radiance: float3
-    /// 1 where what arrives belongs to ReSTIR's direct light at the visible point rather than to the path's
+    /// What arrives belongs to the path's light at 0, to ReSTIR's direct light at the visible point at 1, and to its light part too at 2
     to_direct: float
     specular: float3
     pad1: float
@@ -251,6 +251,10 @@ struct restir_candidate:
     n_s: float3
     /// `L_i`: the radiance arriving at `x_v` from `x_s`, which the path gathered after its rebase
     radiance: float3
+    /// the share of `direct` the next-event light sample sent, toward the hemisphere ReSTIR DI's target covers
+    /// ReSTIR DI replaces exactly this share; the emission, the environment and the continuation's own hits stay the path's.
+    light_part: float3
+    light_part_specular: float3
 
 /// The primary hit a ReSTIR frame shades again after its drain, since every round overwrites `traced.hits`.
 struct visible_hit:
@@ -281,6 +285,19 @@ struct restir_reservoir:
     radiance: float3
     /// `restir_flag_reconnectable` where its sample may be shifted to another visible point
     flags: uint
+
+/// A ReSTIR DI reservoir: one kept point on one of the trace's lights, and its weights.
+/// The sample lives in the light's own measure — area on a rect, solid angle on a disc, none on a point or a parallel light —
+/// so moving it to another visible point changes nothing about it, and the shift's Jacobian is 1.
+struct di_reservoir:
+    /// the point on the light, or for a disc the unit direction toward it
+    point: float3
+    /// the light's index in `traced.lights`
+    light: uint
+    /// the unbiased contribution weight, in the light's measure; 0 where it kept none
+    weight: float
+    /// how many candidates it has seen, capped
+    confidence: float
 
 /// What the re-shade made of a pixel: the frame's estimate and its specular share, where `valid` is 1.
 struct restir_result:
@@ -380,6 +397,9 @@ binding traced:
     restir_reservoirs: mut buffer[restir_reservoir]
     /// One per pixel: the spatial pass's reservoir, which the re-shade shades; the temporal one is what the next frame reuses.
     restir_spatial: mut buffer[restir_reservoir]
+    /// ReSTIR DI's: two halves of temporal reservoirs, as the GI ones, and one per pixel of the spatial pass's.
+    restir_di_reservoirs: mut buffer[di_reservoir]
+    restir_di_spatial: mut buffer[di_reservoir]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //

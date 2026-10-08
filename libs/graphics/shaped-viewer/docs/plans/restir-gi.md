@@ -1,6 +1,6 @@
 # ReSTIR GI for the interactive mode
 
-**A plan, being built: phases G0 to G2 have landed, and everything past them is proposed.**
+**A plan, being built: phases G0 to G2, D0 and D1 have landed, and everything past them is proposed.**
 It is the design of the traced lighting in sv's interactive mode, which the user chose to be ReSTIR GI rather than a radiance cache.
 The decided direction it serves ([the roadmap](rendering-roadmap.md)):
 
@@ -517,8 +517,8 @@ What differs is the sample: a light and a point on it, rather than a secondary v
 
 - **Candidates**: 8 to 32 light samples per pixel, drawn by power-weighted selection, with `p̂` the unshadowed contribution at `x_v`; they cost no rays.
 - **Reuse**: temporal and spatial as for GI.
-  A light sample is a point on a light, in area measure, so its shift is the identity and its Jacobian 1.
-- **One shadow ray** for the kept sample, replacing the bounce-0 light sample connect traces today.
+  A light sample lives in its light's own measure, so its shift is the identity and its Jacobian 1.
+- **One shadow ray** for the kept sample; built beside the path's own light sample rather than replacing it; phase D1 says why.
 - **The environment stays next-event estimation**; it has its own importance sampler.
 
 With 22 lanterns in Sponza's evening variant, uniform selection gives the one that matters to a pixel a 1-in-22 chance per sample.
@@ -719,10 +719,27 @@ A fixed 16 pixels would reach across half of the test's 32x32 image and keep one
   Per-frame error against a long uniform reference on other seeds falls from 0.437 to 0.352, 1.24x.
 - The `lights` scene's comparison is owed.
 
-**Phase D1: ReSTIR DI at the visible point**, beside GI phase G1, on the foundation.
+**Phase D1: ReSTIR DI at the visible point**, beside GI phase G1, on the foundation — built.
 
-- **Many lights**: a scene of 22 small lights, equal rays per pixel, error against the reference well below next-event estimation.
-- **Unbiased, `exact`**: frames averaged against the converged plain image.
+`wavefront_restir_di_temporal` draws 8 light samples by the table's probabilities, resamples them into one, and merges it with last frame's.
+`wavefront_restir_di_spatial` merges in two neighbors' of this frame, as GI's spatial pass does, over the same surface records.
+Its acceptance drops GI's shiftable and roughness conditions, since a light sample moves to any visible point.
+A light sample lives in its light's own measure, so moving it to another visible point is the identity: Jacobian 1, and no ray.
+The target is unshadowed; the re-shade traces the kept sample's one shadow ray and shades it with the exact BSDF.
+The path keeps the share of its visible point's light its next-event light sample sent, `restir_candidate::light_part`, and the re-shade replaces exactly that.
+The continuation's hits on lights stay the path's: the DI sample takes the next-event half of the balance heuristic, and the hits keep the other half.
+So a lamp seen best through a glossy lobe keeps the strategy that reaches it best.
+A visible point on a dispersive material keeps its light sample: the path shaded one wavelength's closure, which the re-shade does not rebuild.
+The emission and the environment stay the path's own, and the mean stays plain path tracing, its own light sample included.
+So the path still traces its bounce-0 light sample, for the mean, and the re-shade one more, rather than the one replacing the other as planned.
+
+Measured on the Cornell box with 22 small lamps, 48 frames: per-frame error 0.417 plain, 0.349 with GI reuse, 0.278 with DI beside it, 1.25x.
+Replacing both strategies by DI gave 0.210, but dropped the light only the BSDF reaches; the continuation's hits keep their noise instead.
+Folding the BSDF-sampled hit into DI's candidates, with its own source density, would win that back, and is open.
+Every kind of light at once — rects, a two-sided one, a coned point, a sun and a sky disc — over a glossy wall keeps the plain mean.
+
+- Built: 22 small lamps, DI's error below the GI reuse it runs beside; every kind of light over a glossy wall, also without the spatial pass; one bounce on a matte box.
+  Each holds the mean to the plain one's; ReSTIR DI has no `exact` variant, since its reuse traces no ray to skip.
 
 **Phase D2, later: unbiased ReSTIR DI in final renders.**
 

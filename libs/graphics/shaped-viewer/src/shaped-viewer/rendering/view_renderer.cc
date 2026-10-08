@@ -477,9 +477,15 @@ constexpr u32 wavefront_roulette_after = 3;
 void forget_restir_history(impl::temporal_slot& slot)
 {
     if (slot.paths.has_value())
+    {
         slot.paths.value().restir_written = false;
+        slot.paths.value().restir_di_written = false;
+    }
     if (slot.scaled_paths.has_value())
+    {
         slot.scaled_paths.value().restir_written = false;
+        slot.scaled_paths.value().restir_di_written = false;
+    }
 }
 
 /// What a still frame runs: `rounds_per_frame` at full fill, or what fits `frame_budget_ms` once a frame is measured.
@@ -582,6 +588,7 @@ void forget_restir_history(impl::temporal_slot& slot)
                                             .fill = plan.fill,
                                             .restir = restir,
                                             .restir_spatial = true,
+                                            .restir_di = true,
                                             .generation = paths.generation,
                                             .roulette_after = wavefront_roulette_after,
                                             .timing = timing});
