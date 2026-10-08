@@ -148,7 +148,9 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "96x64");
     auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", accumulate));
-    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "20");
+    // A wavefront capture that runs first in its process compiles every kernel cold, which an unoptimized build's SGL
+    // compiler takes about a minute for, before the first of its frames.
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto const box = sv_test::make_cornell_box();
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
@@ -177,7 +179,7 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
         // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.
-        REQUIRE(cc::current_time_steady_secs() - loop_start < 25.0);
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
     }
     co_await cc::async_settled(sv::background_work(ctx));
 }

@@ -43,7 +43,9 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", k_size[0], k_size[1]));
     auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", accumulate));
-    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
+    // A capture that runs first in its process compiles every wavefront kernel cold, which an unoptimized build's SGL
+    // compiler takes about a minute for, before the first of its frames.
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto const box = sv_test::make_cornell_box();
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
@@ -76,7 +78,7 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
                                  .depth = 0.5f});
         scene.settings({.samples_per_pixel = 4, .mode = mode, .frame_budget_ms = frame_budget_ms});
 
-        REQUIRE(cc::current_time_steady_secs() - loop_start < 50.0);
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
     }
     co_await cc::async_settled(sv::background_work(ctx));
 }
