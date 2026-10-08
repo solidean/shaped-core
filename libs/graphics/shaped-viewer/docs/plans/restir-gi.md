@@ -1,6 +1,6 @@
 # ReSTIR GI for the interactive mode
 
-**A plan: nothing here is built.**
+**A plan, being built: phase G0 has landed, and everything past it is proposed.**
 It is the design of the traced lighting in sv's interactive mode, which the user chose to be ReSTIR GI rather than a radiance cache.
 The decided direction it serves ([the roadmap](rendering-roadmap.md)):
 
@@ -281,17 +281,26 @@ It drops the light of every later bounce, so its image is darker, and it is neve
 
 So the final shading needs pieces of its own:
 
-- **A persisted primary hit per pixel.** Shade at bounce 0 copies the `hit_record` and the camera ray's direction into it, ~48 bytes.
-  A still frame writes it whenever a path of the pixel passes bounce 0, so a pixel always holds its latest.
-- **A sort of the persisted hits by permutation**, with the wavefront's sort kernels and counters of its own.
-  Its counters follow the wavefront's two rules for the NVIDIA driver bug: one append site per counter, read at a computed index.
-  Keeping round 0's sorted list instead would spare the sort on a moving frame, at 4 bytes per pixel, and does not exist on a still frame, whose slots are at mixed bounces.
-- **A second generated entry per permutation, `sv_restir_shade`.**
-  It builds the shading context from the persisted hit, evaluates the material, paints decals as `tracer.apply_decals` does, and evaluates the BSDF for the kept GI and DI samples.
+- **A persisted primary hit per pixel**, `traced.restir_visible`: shade at bounce 0 copies the `hit_record` and the camera ray into it.
+  G0 keeps it on draining frames only; a still frame of the camera-stop fix will write it whenever a path of the pixel passes bounce 0.
+- **A re-shade round after the drain**, built in G0: the counters are cleared, `wavefront_restir_gather` queues each pixel by its permutation, and the round's own sort runs.
+  Then each permutation's shade kernel runs again in `wavefront_step::mode`'s re-shade mode.
+  `tracer.stored_hit` hands the kernel the persisted hit in that mode, and `shade_stored` branches to `restir_shade_stored`.
+  That builds the closure exactly as the bounce-0 shade did, decals and shading frame included, and evaluates the BSDF toward the kept sample.
+  The gather is its own kernel, so `counter_hits` still has one append site per kernel, as the NVIDIA driver bug needs.
+
+**The plan had a second generated entry per permutation, `sv_restir_shade`; the mode replaced it.**
+It costs no second pipeline per permutation, and one uniform branch in every shade kernel.
+Each kernel is larger and compiles longer for it, since the re-shade's closure and decals are inlined beside the round's.
+Whether the larger kernel lowers shade's occupancy is measured on Sponza before phase G1 lands, through the wavefront benchmark given a ReSTIR variant.
+The viewer times still frames alone, and ReSTIR runs on restarting ones, so `sv.wavefront.restir` reaches a recording only from a caller that times one.
+Before G1 the re-shade's identity is also checked on a glossy and a coated item: the box is all matte, and G1's target function rests on that agreement.
+A path the frame splits carries `path_flag_split`, so a frame that finishes it later, a still one, recombines its light all the same.
+
+G0's records cost ~170 bytes per traced pixel, ~39 MB at 640x360 and ~350 MB at 1080p, allocated on first use.
 
 What it costs:
 
-- **Twice the compiled kernels per permutation**, which the viewer's tests already pay for in compile time ([the roadmap](rendering-roadmap.md#housekeeping)).
 - **One more indirect dispatch per permutation per frame, ~28 on Sponza**, each with the bindless declarations its execute makes.
   Their CPU recording time is not measured; a moving frame records for ~8 ms today.
 
@@ -623,8 +632,10 @@ Whichever track reaches it first builds it, and the other uses it:
 
 ### GI track
 
-**Phase G0: the candidate, with reuse off.**
-The throughput rebase, the direct sum, the candidate, the invalid rules, and `sv_restir_shade` shading the candidate itself.
+**Phase G0: the candidate, with reuse off — built.**
+The throughput rebase, the direct sum, the candidate, the invalid rules, and the re-shade shading the candidate itself.
+`render_settings::restir` turns it on for a layer's restarting frames that feed a temporal denoiser.
+On the Cornell box the re-shade gives back each path's own estimate to ~2e-5, and the mean moves by ~2e-7.
 
 - **The estimator is today's**: with reuse off, a Cornell box agrees with the wavefront block by block, within the noise of the sample count.
   The roulette differs, so the comparison is statistical.
@@ -703,7 +714,8 @@ The throughput rebase, the direct sum, the candidate, the invalid rules, and `sv
    Phase G1 measures the step first.
 2. **The young still frames' cost**: ~24–32 ms of full-size resampling and re-shade (estimated) on top of each round.
    If measurement confirms it, does the camera-stop fix run at full size, or at the scaled extent with the second option above?
-3. **Which reservoir feeds the next frame**: the spatial output, spreading samples faster, or the temporal one, correlating them less.
+3. **Which reservoir feeds the next frame**: taken as the temporal one while building, as the paper does, since it correlates the frames less.
+   The spatial output feeding back is a tuning experiment for after phase G2.
 
 ## References
 

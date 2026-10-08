@@ -229,6 +229,48 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_cornell_at_fill(sg::context& ctx,
         });
 }
 
+/// One drained frame of the Cornell box through the wavefront, ReSTIR's records kept where `restir` is set.
+/// `read` downloads whatever the test reads back of `state`, on the same list, after the frame.
+template <class Read>
+cc::shared_async<cc::vector<tg::vec3f>> drain_cornell(sg::context& ctx,
+                                                      sv::gpu_resource_manager& resources,
+                                                      cornell_scene const& scene,
+                                                      sv::wavefront_state& state,
+                                                      bool restir,
+                                                      Read read)
+{
+    auto const background = sv::background_gpu::from(sv::background{});
+    auto const target = make_target(ctx);
+    co_return co_await trace_frames(
+        ctx, target, 1,
+        [&](sg::command_list& cmd, int)
+        {
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
+            records.push_back(resources.describe_instance(cmd, scene.item.mesh, scene.item.instance));
+            sv::place_instance_record(records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+            auto const bindless = resources.freeze();
+            auto const trace = sv::pt_trace_desc{
+                .background = ctx.transient.create_buffer_from_pod(cmd, background, sg::buffer_usage::readonly_buffer),
+                .instances = scene.instances,
+                .output = target,
+                .instance_table = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer),
+                .lights = sv_test::upload_lights(cmd, scene.lights),
+                .hit_groups = scene.hit_groups,
+                .bindless = &bindless};
+            auto const outcome = sv::wavefront_routine::execute(cmd, {.trace = trace,
+                                                                      .frame = frame_of(scene, 7u, 0u, 1),
+                                                                      .state = &state,
+                                                                      .rounds = 16,
+                                                                      .restart = true,
+                                                                      .regenerate = false,
+                                                                      .restir = restir,
+                                                                      .generation = 1});
+            if (outcome == sg::routine_outcome::executed)
+                read(cmd);
+            return outcome;
+        });
+}
+
 /// The mean luminance of `pixels`.
 [[nodiscard]] f32 mean_luminance_of(cc::span<tg::vec3f const> pixels)
 {
@@ -584,6 +626,167 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a primary depth first asked for on
     auto const expected = 1.0f - near_plane / 4.4f;
     CHECK(tg::abs(texels.value()[center] - expected) < 2e-3f)
         .context(cc::format("center depth {}, the back wall's {}", texels.value()[center], expected));
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// ReSTIR GI's phase G0: the candidate recorded and shaded again, with reuse off (libs/graphics/shaped-viewer/docs/plans/restir-gi.md).
+// Keeping the records rebases each path at its visible point, which must leave the mean where the plain paths put it.
+// The re-shade evaluates the visible point's material toward the path's own `x_s`, which must give back the path's own estimate.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's re-shade of a drained frame gives back each path's own estimate",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+
+    auto plain_state = sv::wavefront_state::create(ctx, k_size, 4);
+    auto const plain = co_await drain_cornell(ctx, resources, scene, plain_state, false, [](sg::command_list&) {});
+
+    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+    auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();
+    auto candidates = sg::data_future<sv::shaders::tracer::restir_candidate>();
+    auto results = sg::data_future<sv::shaders::tracer::restir_result>();
+    auto const kept = co_await drain_cornell(ctx, resources, scene, state, true,
+                                             [&](sg::command_list& cmd)
+                                             {
+                                                 tallies = cmd.download.data_from_buffer(state.tallies);
+                                                 candidates = cmd.download.data_from_buffer(state.restir_candidates);
+                                                 results = cmd.download.data_from_buffer(state.restir_results);
+                                             });
+
+    // The same seed draws the same paths: only the order the throughput is multiplied in differs.
+    REQUIRE(plain.size() == kept.size());
+    auto worst_mean = 0.0f;
+    for (auto i = isize(0); i < plain.size(); ++i)
+        for (auto c = 0; c < 3; ++c)
+            worst_mean = cc::max(worst_mean, tg::abs(kept[i][c] - plain[i][c]) / (tg::abs(plain[i][c]) + 1e-3f));
+    CHECK(worst_mean < 1e-3f).context(cc::format("the worst relative difference of the mean: {}", worst_mean));
+
+    auto const t = tallies.try_get_data();
+    auto const c = candidates.try_get_data();
+    auto const r = results.try_get_data();
+    REQUIRE(t.has_value());
+    REQUIRE(c.has_value());
+    REQUIRE(r.has_value());
+
+    constexpr u32 candidate_flag = 4;
+    constexpr u32 reconnectable_flag = 8;
+    auto shaded = 0;
+    auto reconnectable = 0;
+    auto worst_shade = 0.0f;
+    auto outside = 0;
+    for (auto i = isize(0); i < t.value().size(); ++i)
+    {
+        auto const& cand = c.value()[i];
+        if ((cand.flags & candidate_flag) != 0)
+        {
+            // The box spans [-1, 1] on every axis, so a secondary vertex outside it was not where the path went.
+            auto const x = cand.x_s;
+            outside += tg::abs(x[0]) > 1.01f || tg::abs(x[1]) > 1.01f || tg::abs(x[2]) > 1.01f ? 1 : 0;
+            reconnectable += (cand.flags & reconnectable_flag) != 0 ? 1 : 0;
+        }
+        auto const& res = r.value()[i];
+        if (res.valid == 0)
+            continue;
+        ++shaded;
+        auto const own = t.value()[i].frame_sum / cc::max(t.value()[i].frame_count, 1.0f);
+        for (auto ch = 0; ch < 3; ++ch)
+            worst_shade = cc::max(worst_shade, tg::abs(res.radiance[ch] - own[ch]) / (tg::abs(own[ch]) + 1e-3f));
+    }
+
+    // Most of the image is the box's matte walls, whose continuations mostly stay inside it; some leave through the open front.
+    auto const slots = isize(k_size[0]) * isize(k_size[1]);
+    CHECK(shaded > slots / 3).context(cc::format("{} of {} pixels shaded again", shaded, slots));
+    CHECK(reconnectable > slots / 3).context(cc::format("{} reconnectable candidates", reconnectable));
+    CHECK(outside == 0);
+    CHECK(worst_shade < 1e-3f).context(cc::format("the worst relative difference of the re-shade: {}", worst_shade));
+    CC_LOG_INFO("ReSTIR G0 on the box: {} of {} re-shaded, worst {} against the paths, worst mean {}", shaded, slots,
+                worst_shade, worst_mean);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A ReSTIR frame that ends before every path does leaves its split paths to the next frame, which keeps no records.
+// That frame must still put each path's light back together, or the mean loses `T_1` and the visible point's direct light.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a path a ReSTIR frame leaves unfinished is recombined by the frame that "
+                     "ends it",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+    auto const background = sv::background_gpu::from(sv::background{});
+
+    // Two rounds, which leave most paths of the box alive, then a drain of the rest without ReSTIR.
+    auto const run = [&](bool restir) -> cc::shared_async<cc::vector<tg::vec3f>>
+    {
+        auto const target = make_target(ctx);
+        auto state = sv::wavefront_state::create(ctx, k_size, 4);
+        co_return co_await trace_frames(
+            ctx, target, 2,
+            [&](sg::command_list& cmd, int f)
+            {
+                auto records = cc::vector<sv::shaders::tracer::instance_record>();
+                records.push_back(resources.describe_instance(cmd, scene.item.mesh, scene.item.instance));
+                sv::place_instance_record(records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+                auto const bindless = resources.freeze();
+                auto const trace = sv::pt_trace_desc{.background = ctx.transient.create_buffer_from_pod(
+                                                         cmd, background, sg::buffer_usage::readonly_buffer),
+                                                     .instances = scene.instances,
+                                                     .output = target,
+                                                     .instance_table = ctx.transient.create_buffer_from_data(
+                                                         cmd, records, sg::buffer_usage::readonly_buffer),
+                                                     .lights = sv_test::upload_lights(cmd, scene.lights),
+                                                     .hit_groups = scene.hit_groups,
+                                                     .bindless = &bindless};
+                return sv::wavefront_routine::execute(cmd, {.trace = trace,
+                                                            .frame = frame_of(scene, 7u, 0u, 1),
+                                                            .state = &state,
+                                                            .rounds = f == 0 ? 2 : 16,
+                                                            .restart = f == 0,
+                                                            .regenerate = false,
+                                                            .restir = restir && f == 0,
+                                                            .generation = 1});
+            });
+    };
+    auto const plain = co_await run(false);
+    auto const split = co_await run(true);
+
+    REQUIRE(plain.size() == split.size());
+    auto worst = 0.0f;
+    for (auto i = isize(0); i < plain.size(); ++i)
+        for (auto c = 0; c < 3; ++c)
+            worst = cc::max(worst, tg::abs(split[i][c] - plain[i][c]) / (tg::abs(plain[i][c]) + 1e-3f));
+    CHECK(worst < 1e-3f).context(cc::format("the worst relative difference of the mean: {}", worst));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

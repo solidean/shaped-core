@@ -25,6 +25,8 @@ enum class sv::wavefront_stage : sv::u8
     connect,
     finalize,
     arguments,
+    /// ReSTIR's re-shade of the persisted primary hits: its gather, sort and shade, after the last round.
+    restir,
     resolve,
 };
 
@@ -33,7 +35,7 @@ enum class sv::wavefront_stage : sv::u8
 struct sv::wavefront_timing
 {
     /// How many `wavefront_stage` values there are.
-    static constexpr isize stage_count = 9;
+    static constexpr isize stage_count = 10;
 
     cc::vector<wavefront_stage> stages;
     cc::vector<sg::gpu_timestamp> starts;
@@ -74,6 +76,13 @@ struct sv::wavefront_trace_desc
     /// A restart's begin still starts every slot, since each pixel needs its first sample.
     /// Below 1 a round holds fewer paths and costs less, which is how a still frame fits a budget one full round overruns.
     f32 fill = 1.0f;
+
+    /// Whether the frame keeps ReSTIR GI's records and shades its primary hits again after the last round.
+    /// What the re-shade makes of a pixel replaces `trace.frame_output`, `frame_diffuse` and `frame_specular` there; the mean stays the paths'.
+    /// Its indirect specular share comes from the closure's specular lobes toward the sample, not from the lobe the path drew.
+    /// Only a draining frame may set it (`restart`, and `regenerate` off), so each pixel's records describe its one path.
+    /// The state grows the records on first use — libs/graphics/shaped-viewer/docs/plans/restir-gi.md is the design.
+    bool restir = false;
 
     /// Which camera generation this frame's paths start under; one of an older generation never reaches the image.
     u32 generation = 1;
@@ -127,6 +136,7 @@ private:
         sg::compute_pipeline_handle finalize;
         sg::compute_pipeline_handle resolve;
         sg::compute_pipeline_handle reset;
+        sg::compute_pipeline_handle restir_gather;
         sg::compute_pipeline_handle args_round;
         sg::compute_pipeline_handle args_shade;
         sg::compute_pipeline_handle args_connect;

@@ -57,13 +57,28 @@ wavefront_state wavefront_state::create(sg::context& ctx, tg::vec2i extent, i32 
                                                            usage | sg::buffer_usage::indirect_command_buffer)};
 }
 
+void wavefront_state::ensure_restir(sg::context& ctx)
+{
+    if (restir_candidates.raw() != nullptr)
+        return;
+    auto const slots = isize(extent[0]) * isize(extent[1]);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    restir_candidates = ctx.persistent.create_buffer<tracer::restir_candidate>(slots, usage);
+    restir_visible = ctx.persistent.create_buffer<tracer::visible_hit>(slots, usage);
+    restir_results = ctx.persistent.create_buffer<tracer::restir_result>(slots, usage);
+}
+
 isize wavefront_state::size_in_bytes() const
 {
+    auto const restir
+        = restir_candidates.raw() != nullptr
+            ? restir_candidates.size_in_bytes() + restir_visible.size_in_bytes() + restir_results.size_in_bytes()
+            : isize(0);
     return path_rays.size_in_bytes() + path_states.size_in_bytes() + path_media.size_in_bytes()
          + path_lights.size_in_bytes() + hits.size_in_bytes() + shadow_rays.size_in_bytes() + tallies.size_in_bytes()
          + queue_a.size_in_bytes() + queue_b.size_in_bytes() + queue_hits.size_in_bytes() + queue_sorted.size_in_bytes()
          + queue_shadow.size_in_bytes() + queue_finished.size_in_bytes() + counters.size_in_bytes()
-         + shade_offsets.size_in_bytes() + args.size_in_bytes();
+         + shade_offsets.size_in_bytes() + args.size_in_bytes() + restir;
 }
 
 namespace impl
@@ -80,6 +95,8 @@ traced_stand_ins traced_stand_ins::create(sg::context& ctx)
         return ctx.persistent.create_texture_2d(
             {.format = format, .width = 1, .height = 1, .usage = sg::texture_usage::texture});
     };
+    auto paths = wavefront_state::create(ctx, tg::vec2i(1, 1), 1);
+    paths.ensure_restir(ctx);
     return {.guide_normal = image(sg::pixel_format::rgba16_float),
             .guide_depth = image(sg::pixel_format::r32_float),
             .guide_albedo = image(sg::pixel_format::rgba16_float),
@@ -96,7 +113,7 @@ traced_stand_ins traced_stand_ins::create(sg::context& ctx)
             .decal_bands = table(sg::pixel_format::rg16_uint),
             .decals = ctx.persistent.create_buffer<tracer::decal_record>(1, sg::buffer_usage::readonly_buffer),
             .decal_shapes = ctx.persistent.create_buffer<tracer::decal_shape>(1, sg::buffer_usage::readonly_buffer),
-            .paths = wavefront_state::create(ctx, tg::vec2i(1, 1), 1)};
+            .paths = cc::move(paths)};
 }
 
 shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
@@ -143,6 +160,14 @@ shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
         .queue_finished = paths.queue_finished.as_readwrite_buffer(),
         .counters = paths.counters.as_readwrite_buffer(),
         .shade_offsets = paths.shade_offsets.as_readwrite_buffer(),
+        // A state that never kept ReSTIR's records binds the stand-ins' one slot of them, which no kernel reads.
+        .restir_candidates
+        = (paths.restir_candidates.raw() != nullptr ? paths.restir_candidates : s.paths.restir_candidates)
+              .as_readwrite_buffer(),
+        .restir_visible
+        = (paths.restir_visible.raw() != nullptr ? paths.restir_visible : s.paths.restir_visible).as_readwrite_buffer(),
+        .restir_results
+        = (paths.restir_results.raw() != nullptr ? paths.restir_results : s.paths.restir_results).as_readwrite_buffer(),
     };
 }
 

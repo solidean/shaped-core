@@ -37,11 +37,19 @@ struct sv::wavefront_state
     sg::buffer<u32> shade_offsets;
     sg::buffer<shaders::tracer::dispatch_args> args;
 
+    /// ReSTIR GI's records, one per slot, null until a trace first asks for them (`ensure_restir`).
+    sg::buffer<shaders::tracer::restir_candidate> restir_candidates;
+    sg::buffer<shaders::tracer::visible_hit> restir_visible;
+    sg::buffer<shaders::tracer::restir_result> restir_results;
+
     /// The camera generation the last restart started its paths under, kept by whoever restarts: the next restart takes the one after.
     u32 generation = 0;
 
     /// A state for `extent`, every path dead and every tally empty: the first trace through it has to restart.
     [[nodiscard]] static wavefront_state create(sg::context& ctx, tg::vec2i extent, i32 max_permutations);
+
+    /// Allocates ReSTIR GI's records where the state has none yet.
+    void ensure_restir(sg::context& ctx);
 
     /// What every buffer of the state occupies together.
     [[nodiscard]] isize size_in_bytes() const;

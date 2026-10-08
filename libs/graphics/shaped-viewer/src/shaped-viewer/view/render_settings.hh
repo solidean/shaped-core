@@ -81,6 +81,12 @@ struct sv::render_settings
     /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
     f32 frame_budget_ms = 16.0f;
 
+    /// Whether the wavefront's restarting frames that feed a temporal denoiser resample their paths by ReSTIR GI.
+    /// The converging mean stays plain path tracing; only what the denoiser is handed changes — libs/graphics/shaped-viewer/docs/plans/restir-gi.md.
+    /// So far phase G0: the records are kept and the primary hits shaded again, without reuse, so the image is the paths' own.
+    /// The records cost ~170 bytes per traced pixel, kept as long as the layer's path state.
+    bool restir = false;
+
     /// How this layer's image is denoised before its parent composites it; off unless asked for.
     ///
     /// **Never restarts accumulation.**

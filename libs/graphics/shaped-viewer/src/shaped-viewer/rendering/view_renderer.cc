@@ -549,9 +549,12 @@ constexpr u32 wavefront_roulette_after = 3;
 
     // Only a still frame keeps its rounds as full as its fill, so only its timestamps say what a round costs.
     auto* timing = static_cast<wavefront_timing*>(nullptr);
+    auto const restir = settings.restir && restart && fc.write_temporal != 0;
     if (restart)
     {
         slot.pacing.note_restart();
+        if (restir)
+            CC_RECORD_STAT("sv.wavefront.restir_frames", cc::rec::unit_count, 1);
     }
     else
     {
@@ -567,6 +570,7 @@ constexpr u32 wavefront_roulette_after = 3;
                                             .restart = restart,
                                             .regenerate = !restart,
                                             .fill = plan.fill,
+                                            .restir = restir,
                                             .generation = paths.generation,
                                             .roulette_after = wavefront_roulette_after,
                                             .timing = timing});

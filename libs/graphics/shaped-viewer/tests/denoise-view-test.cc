@@ -4,10 +4,13 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/record/event_view.hh>
+#include <clean-core/record/recording.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
+#include <nexus/rec.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -137,7 +140,8 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
                                        sr::denoise_method method,
                                        cc::string const& path,
                                        int accumulate = 2,
-                                       sv::render_mode mode = sv::render_mode::megakernel)
+                                       sv::render_mode mode = sv::render_mode::megakernel,
+                                       bool restir = false)
 {
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
@@ -165,8 +169,11 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
         // No frame budget: it sizes a still frame by the GPU's own timing, so a capture at `accumulate` frames would hold
         // however many samples this machine reached, and two captures would compare different estimates.
-        scene.settings(
-            {.samples_per_pixel = 1, .mode = mode, .frame_budget_ms = 0.0f, .reconstruct = {.denoiser = method}});
+        scene.settings({.samples_per_pixel = 1,
+                        .mode = mode,
+                        .frame_budget_ms = 0.0f,
+                        .restir = restir,
+                        .reconstruct = {.denoiser = method}});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
         // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.
@@ -540,4 +547,54 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
 
     cc::remove_file(path);
     cc::remove_file(partial);
+}
+
+// ReSTIR GI's phase G0 through the viewer: the frame that restarts keeps the records and shades its primary hits again,
+// and the temporal denoiser is handed the re-shade's image instead of the paths'.
+// Without reuse the two are the same estimate, which wavefront-trace-test.cc pins per pixel.
+// Two captures are not deterministic, so this one pins that the setting reaches the tracer and the image keeps its brightness.
+ASYNC_INVOCABLE_TEST("sv - a ReSTIR layer reaches the tracer and keeps the image's brightness while reuse is off",
+                     (sg::context_handle const& ctx_h),
+                     nx::config::recorded)
+{
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+    if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
+        SKIP("the wavefront tracer needs inline ray queries");
+
+    auto rec = nx::test_recording();
+    REQUIRE(rec.is_attached());
+
+    auto const plain_path = cc::format("{}/sv-restir-off.png", cc::temp_directory_path());
+    auto const restir_path = cc::format("{}/sv-restir-on.png", cc::temp_directory_path());
+
+    // At 2 frames the temporal member owns the capture, and the first of them is the restart ReSTIR runs on.
+    co_await capture_box(ctx, sr::denoise_method::svgf, plain_path, 2, sv::render_mode::wavefront, false);
+    co_await capture_box(ctx, sr::denoise_method::svgf, restir_path, 2, sv::render_mode::wavefront, true);
+
+    auto restir_frames = 0.0;
+    rec.sync().for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() == cc::rec::event_kind::stat_snapshot
+                && cc::string_view(e.name()) == "sv.wavefront.restir_frames")
+                restir_frames += e.field_as_double("value").value_or(0.0);
+        });
+    CHECK(restir_frames >= 1.0);
+
+    auto const plain = brightness_of(plain_path);
+    auto const restir = brightness_of(restir_path);
+    CHECK(plain > 5.0);
+    CHECK(tg::abs(restir - plain) < 0.1 * plain).context(cc::format("brightness {} with ReSTIR, {} without", restir, plain));
+
+    cc::remove_file(plain_path);
+    cc::remove_file(restir_path);
 }

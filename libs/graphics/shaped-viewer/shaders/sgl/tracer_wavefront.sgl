@@ -24,6 +24,9 @@ const path_flag_primary = 2u
 const path_flag_prev_did_nee = 4u
 /// the path belongs to the specular signal, decided by the lobe its first continuation was drawn from
 const path_flag_specular = 8u
+/// ReSTIR split the path at its visible point: its own light is `L_i`, and its `restir_candidate` holds the rest.
+/// A path a ReSTIR frame left unfinished is recombined by whichever frame finishes it.
+const path_flag_split = 16u
 
 /// `hit_record::kind`.
 const hit_none = 0u
@@ -47,6 +50,27 @@ const dispatch_shade = 4
 
 /// `frame_constants::wavefront_flags`: every path and every tally starts over, since the image describes something else now.
 const wavefront_flag_restart = 1u
+
+/// `frame_constants::wavefront_flags`: the frame keeps ReSTIR GI's records and shades its primary hits again after the drain.
+const wavefront_flag_restir = 2u
+
+/// `wavefront_step::mode` of ReSTIR's re-shade of the persisted primary hits; 0 is a round of the paths.
+const step_restir_shade = 1u
+
+/// `restir_candidate::flags`.
+/// The primary ray met a surface, which `traced.restir_visible` holds.
+const restir_flag_visible = 1u
+/// The continuation from `x_v` left it reflected and through vacuum, the only kind a reconnection can carry.
+const restir_flag_reflected = 2u
+/// That continuation met a surface `x_s` through vacuum.
+const restir_flag_candidate = 4u
+/// `x_s` is rough enough to reconnect to.
+const restir_flag_reconnectable = 8u
+/// The path finished, so `radiance` is all it gathered.
+const restir_flag_finished = 16u
+
+/// The least roughness `x_s` needs to be reconnected to, GRIS's criterion.
+const restir_reconnect_roughness = 0.2
 
 /// `wavefront_step::fill` that starts every free slot.
 const fill_full = 65536u
@@ -91,6 +115,15 @@ fun round_slot(index: uint){traced, wavefront_step} -> uint:
     if round_count() == wavefront_step.width * wavefront_step.height => return index
     if wavefront_step.parity == 0u => return traced.queue_a[index as int]
     return traced.queue_b[index as int]
+
+/// Whether this frame keeps ReSTIR GI's records.
+fun restir_on(){traced} -> bool:
+    return (traced.frame[0].wavefront_flags & wavefront_flag_restir) != 0u
+
+/// The hit `slot` shades: its round's, or in ReSTIR's re-shade its persisted primary hit.
+fun stored_hit(slot: uint){traced, wavefront_step} -> hit_record:
+    if wavefront_step.mode == step_restir_shade => return traced.restir_visible[slot as int].hit
+    return traced.hits[slot as int]
 
 /// Appends `slot` to the round's output queue, which is the next round's input.
 fun push_next(slot: uint){traced, wavefront_step}:
@@ -139,6 +172,11 @@ fun empty_tally() -> pixel_tally:
     let z2 = float2(0.0)
     return pixel_tally(z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, -1.0, z2, z2, z2, z2)
 
+/// A candidate with nothing in it: no light kept apart, and a continuation factor of 1.
+fun empty_candidate() -> restir_candidate:
+    let z3 = float3(0.0)
+    return restir_candidate(float3(1.0), 0.0, z3, 0u, z3, z3, z3, z3)
+
 // ---- Instances ------------------------------------------------------------------------------------------------------
 
 /// `v` in world space, through the instance's placement rows.
@@ -177,6 +215,7 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
     traced.path_states[s] = path_state(float3(1.0), 0.0, rng, path_flag_alive | path_flag_primary | path_flag_prev_did_nee, 0u, 0u, f.generation, jitter, 0u)
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
+    if restir_on() => traced.restir_candidates[s] = empty_candidate()
 
 /// Whether a free slot starts a sample now: always at a full fill, and below it with probability `fill / fill_full`.
 /// Below a full fill the draw advances the slot's own stream `rng`, so a slot passed over draws afresh the next time.
@@ -357,6 +396,8 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
     // A ray that escapes while still inside a solid traveled an unbounded distance through it, so nothing survives.
     let escaped_inside = inside and hit_t < 0.0
 
+    // What the light held before this segment's lights, so the segment leaving ReSTIR's visible point can take its share back out.
+    let before = light
     if not (ended or escaped_inside):
         // The BSDF strategy for every rect this segment crosses, and the camera's view of the ones it may see.
         let begin_area = f.path_offset.y
@@ -404,6 +445,18 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
         lit = true
         if path_is_specular and b > 0u => light.specular += c
 
+    // The segment leaving ReSTIR's visible point: what it reaches directly is x_v's direct light, at the factor the path was rebased by.
+    // A surface it meets through vacuum is the candidate's `x_s`; a segment after a scatter on the way is part of `L_i` instead.
+    if (st.flags & path_flag_split) != 0u and b == 1u and prev_did_nee:
+        let mut cand = traced.restir_candidates[s]
+        cand.direct += cand.rebase * (light.radiance - before.radiance)
+        cand.direct_specular += cand.rebase * (light.specular - before.specular)
+        light = before
+        if (cand.flags & restir_flag_reflected) != 0u and hit_t >= 0.0 and not inside:
+            cand.x_s = origin + dir * hit_t
+            cand.flags = cand.flags | restir_flag_candidate
+        traced.restir_candidates[s] = cand
+
     // Only what this segment changed goes back: off a medium the ray, the throughput and the random state are as extend left them.
     if inside or (primary and hit_t < 0.0):
         st.throughput = throughput
@@ -428,10 +481,10 @@ fun wavefront_segment(index: uint){traced, wavefront_step}:
 // ---- sort: the hits by permutation ----------------------------------------------------------------------------------
 
 /// Places the hit at `index` into its permutation's range of `queue_sorted`.
-fun wavefront_sort(index: uint){traced}:
+fun wavefront_sort(index: uint){traced, wavefront_step}:
     if index >= traced.counters[counter_hits].load() => return
     let slot = traced.queue_hits[index as int]
-    let hit = traced.hits[slot as int]
+    let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
     let permutation = inst.shade_group
     let cursor_index = counter_permutations + (traced.frame[0].permutation_count as int) + (permutation as int)
@@ -447,21 +500,21 @@ fun shade_slot(index: uint){traced, wavefront_step} -> uint:
 // ---- shade: what a generated kernel calls once its material has evaluated ------------------------------------------
 
 /// The shading context of the triangle hit `slot` recorded.
-fun stored_triangle_context(slot: uint){traced, bindless} -> material.shading_context:
-    let hit = traced.hits[slot as int]
+fun stored_triangle_context(slot: uint){traced, bindless, wavefront_step} -> material.shading_context:
+    let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
     let indices = inst.indices as int
     return material.make_context(inst, bindless.buffers[nonuniform indices], hit.primitive, hit.barycentrics)
 
 /// The shading context of the quadric hit `slot` recorded.
-fun stored_quadric_context(slot: uint){traced} -> material.shading_context:
-    let hit = traced.hits[slot as int]
+fun stored_quadric_context(slot: uint){traced, wavefront_step} -> material.shading_context:
+    let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
     return quadric.make_context(inst, hit.primitive)
 
 /// Shades the triangle hit of `slot`, whose material evaluated to `surface` — the wavefront's `shade_triangle`.
 fun shade_stored_triangle(slot: uint, ctx: material.shading_context, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables, wavefront_step}:
-    let hit = traced.hits[slot as int]
+    let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
     let v0 = instance_position(inst, ctx.corner.x)
     let v1 = instance_position(inst, ctx.corner.y)
@@ -470,13 +523,13 @@ fun shade_stored_triangle(slot: uint, ctx: material.shading_context, surface: op
 
 /// Shades the quadric hit of `slot` from the normal its intersection reported — the wavefront's `shade_quadric`.
 fun shade_stored_quadric(slot: uint, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables, wavefront_step}:
-    let hit = traced.hits[slot as int]
+    let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
     shade_stored(slot, inst, hit.normal, surface, supplied_tangent_frame)
 
 /// Writes one next-event sample of `slot`: a shadowless one counts now, one with a shadow ray waits for connect.
-/// `j` is which of the slot's two shadow rays it is.
-fun defer_light(slot: uint, j: uint, sample: light_sample, throughput: float3, b: uint, path_is_specular: bool, light: mut path_light){traced} -> bool:
+/// `j` is which of the slot's two shadow rays it is, and `to_direct` sends what arrives to ReSTIR's direct light rather than the path's.
+fun defer_light(slot: uint, j: uint, sample: light_sample, throughput: float3, b: uint, path_is_specular: bool, to_direct: bool, light: mut path_light){traced} -> bool:
     let radiance = throughput * (sample.diffuse + sample.specular)
     let specular = if b == 0u => throughput * sample.specular else (if path_is_specular => radiance else float3(0.0))
     let at = (2u * slot + j) as int
@@ -485,11 +538,15 @@ fun defer_light(slot: uint, j: uint, sample: light_sample, throughput: float3, b
         light.specular += specular
         traced.shadow_rays[at] = shadow_ray(sample.origin, 0.0, sample.direction, 0u, float3(0.0), 0.0, float3(0.0), 0.0)
         return false
-    traced.shadow_rays[at] = shadow_ray(sample.origin, sample.distance, sample.direction, 1u, radiance, 0.0, specular, 0.0)
+    let marker = if to_direct => 1.0 else 0.0
+    traced.shadow_rays[at] = shadow_ray(sample.origin, sample.distance, sample.direction, 1u, radiance, marker, specular, 0.0)
     return true
 
 /// The tail both geometry kinds share: the hit faced toward its ray, shaded, and the path moved on.
 fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables, wavefront_step}:
+    if wavefront_step.mode == step_restir_shade:
+        restir_shade_stored(slot, inst, n_obj, surface, supplied_tangent_frame)
+        return
     let s = slot as int
     let f = traced.frame[0]
     let hit = traced.hits[s]
@@ -521,6 +578,10 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     let throughput = st.throughput
     let mut path_is_specular = (st.flags & path_flag_specular) != 0u
 
+    // ReSTIR's visible point `x_v`: its own light is kept apart from what the continuation gathers, and its hit is kept to shade again.
+    let restir_here = restir_on() and (st.flags & path_flag_primary) != 0u
+    let mut cand = if restir_here => traced.restir_candidates[s] else empty_candidate()
+
     if (st.flags & path_flag_primary) != 0u:
         // Linear view depth rather than the distance along the ray, which grows toward the image's edges.
         let cam = scene.camera(..f.camera)
@@ -550,14 +611,37 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     // A surface's own emission reaches the camera directly and contributes nothing indirectly.
     if b == 0u => light.radiance += throughput * p.emission
 
-    let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, mut light)
-    let env_waits = defer_light(slot, 1u, env_s, throughput, b, path_is_specular, mut light)
+    let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, restir_here, mut light)
+    let env_waits = defer_light(slot, 1u, env_s, throughput, b, path_is_specular, restir_here, mut light)
     if light_waits or env_waits => push_shadow(slot)
+
+    if restir_here:
+        traced.restir_visible[s] = visible_hit(hit, ray_origin, ray_dir)
+        st.flags = st.flags | path_flag_split
+        cand.flags = cand.flags | restir_flag_visible
+        cand.direct += light.radiance
+        cand.direct_specular += light.specular
+        light = path_light(float3(0.0), float3(0.0))
+    else if (st.flags & path_flag_split) != 0u and b == 1u:
+        // ReSTIR's `x_s`: the normal a reconnection is weighed by, and whether it is rough enough to reconnect to at all.
+        let mut at_s = traced.restir_candidates[s]
+        if (at_s.flags & restir_flag_candidate) != 0u:
+            at_s.n_s = p.normal
+            if p.roughness >= restir_reconnect_roughness => at_s.flags = at_s.flags | restir_flag_reconnectable
+            traced.restir_candidates[s] = at_s
 
     let mut rng = p.rng
     let mut continues = not all(p.throughput <= float3(0.0))
     if continues:
         let mut next_throughput = throughput * p.throughput
+        if restir_here:
+            // Past x_v the path gathers `L_i` alone: the continuation's factor is kept, and the throughput starts over at 1.
+            cand.rebase = next_throughput
+            cand.source_pdf = p.bsdf_pdf
+            next_throughput = float3(1.0)
+            let reflected = dot(p.direction, p.normal) > 0.0
+            let vacuum = all(md.sigma_t <= float3(0.0)) and all(p.medium_sigma_t <= float3(0.0)) and p.channel >= 3u
+            if reflected and vacuum => cand.flags = cand.flags | restir_flag_reflected
         st.prev_pdf = p.bsdf_pdf
         st.flags = st.flags | path_flag_prev_did_nee
         st.bounce = b + 1u
@@ -582,10 +666,66 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     st.rng = rng
     traced.path_states[s] = st
     traced.path_lights[s] = light
+    if restir_here => traced.restir_candidates[s] = cand
     if continues:
         push_next(slot)
     else:
         push_finished(slot)
+
+// ---- ReSTIR: the persisted primary hits, shaded again -----------------------------------------------------------------
+
+/// Queues every pixel whose candidate the re-shade can shade, by the permutation its primary hit shades with, and clears every result.
+fun wavefront_restir_gather(slot: uint){traced, wavefront_step}:
+    if slot >= wavefront_step.width * wavefront_step.height => return
+    let s = slot as int
+    traced.restir_results[s] = restir_result(float3(0.0), 0u, float3(0.0))
+    let cand = traced.restir_candidates[s]
+    let usable = restir_flag_candidate | restir_flag_finished
+    if (cand.flags & usable) != usable => return
+    let hit = traced.restir_visible[s].hit
+    let inst = scene.instance(..traced.instances[hit.instance as int])
+    push_hit(slot, inst.shade_group)
+
+/// ReSTIR's re-shade of `slot`'s persisted primary hit, whose material evaluated to `surface_in`.
+/// It builds the closure exactly as the hit's shade did, and evaluates it toward the kept sample's `x_s`.
+/// With reuse off that sample is the pixel's own, so the result is the path's own estimate to rounding.
+fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface_in: openpbr.surface, supplied_tangent_frame: bool){traced, slug.tables, wavefront_step}:
+    let s = slot as int
+    let f = traced.frame[0]
+    let vis = traced.restir_visible[s]
+    let cand = traced.restir_candidates[s]
+
+    let mut n = normalize(instance_normal_to_world(inst, n_obj))
+    let v = -normalize(vis.direction)
+    let exiting = dot(n, v) < 0.0
+    if exiting => n = -n
+
+    let mut authored = openpbr.frame(float3(0.0), float3(0.0), float3(0.0))
+    if supplied_tangent_frame:
+        let local = openpbr.frame_from_quaternion(surface_in.geometry_tangent_frame, surface_in.geometry_handedness)
+        authored = openpbr.frame(normalize(instance_to_world(inst, local.t)), normalize(instance_to_world(inst, local.b)), normalize(instance_to_world(inst, local.n)))
+
+    let x_v = vis.origin + vis.direction * vis.hit.t
+    let mut surface = surface_in
+    apply_decals(mut surface, x_v, n, f.pixel_spread * vis.hit.t)
+    let frame = openpbr.shading_frame(mut surface, n, v, authored, supplied_tangent_frame)
+    let closure = openpbr.bsdf_prepare(surface, exiting, 3u)
+
+    // The continuation left from x_v lifted off the surface, as shade placed it, so the direction is the one it drew.
+    let wi = normalize(cand.x_s - (x_v + n * 1e-3))
+    let wo_local = openpbr.to_local(frame, v)
+    let wi_local = openpbr.to_local(frame, wi)
+    let mut f_diffuse = float3(0.0)
+    let mut f_specular = float3(0.0)
+    openpbr.bsdf_eval_split(closure, wo_local, wi_local, mut f_diffuse, mut f_specular)
+
+    // One candidate and no reuse: its contribution weight is the inverse of the density it was drawn with.
+    let weight = abs(wi_local.z) / max(cand.source_pdf, 1e-12)
+    let diffuse = f_diffuse * weight * cand.radiance
+    let specular = f_specular * weight * cand.radiance
+    let radiance = cand.direct + diffuse + specular
+    let valid = if pt.is_finite(radiance) => 1u else 0u
+    traced.restir_results[s] = restir_result(radiance, valid, cand.direct_specular + specular)
 
 // ---- connect: the shadow rays ---------------------------------------------------------------------------------------
 
@@ -597,15 +737,27 @@ fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
     let px = slot_pixel(slot)
     let launch = int3(px.x as int, px.y as int, 0)
     let mut light = traced.path_lights[slot as int]
+    let mut direct = path_light(float3(0.0), float3(0.0))
+    let mut to_direct = false
     for j in 0 ..< 2:
         let sr = traced.shadow_rays[((2u * slot) as int) + j]
         if sr.tested == 0u => continue
         let r = ray(origin = pos3(sr.origin.x, sr.origin.y, sr.origin.z), direction = vec3(sr.direction.x, sr.direction.y, sr.direction.z), t_min = 1e-3, t_max = sr.distance)
         let h = traced.world.trace(r, any_hit = c => cutout(c, launch, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
         if h.kind == hit_kind.none:
-            light.radiance += sr.radiance
-            light.specular += sr.specular
+            if sr.to_direct > 0.5:
+                direct.radiance += sr.radiance
+                direct.specular += sr.specular
+                to_direct = true
+            else:
+                light.radiance += sr.radiance
+                light.specular += sr.specular
     traced.path_lights[slot as int] = light
+    if to_direct:
+        let mut cand = traced.restir_candidates[slot as int]
+        cand.direct += direct.radiance
+        cand.direct_specular += direct.specular
+        traced.restir_candidates[slot as int] = cand
 
 // ---- finalize: the paths that ended ---------------------------------------------------------------------------------
 
@@ -617,7 +769,23 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
     let s = slot as int
     let f = traced.frame[0]
     let st = traced.path_states[s]
-    let light = traced.path_lights[s]
+    let mut light = traced.path_lights[s]
+
+    // A path ReSTIR split gathered `L_i` alone after its rebase, and x_v's direct light was kept apart.
+    // The pixel's estimate puts the two back together in whatever frame the path ends, with the plain path tracer's expectation.
+    // Not its sample: roulette then weighs the rebased throughput, which leaves out `T_1`.
+    if (st.flags & path_flag_split) != 0u:
+        let mut cand = traced.restir_candidates[s]
+        cand.radiance = light.radiance
+        light = path_light(cand.direct + cand.rebase * light.radiance, cand.direct_specular + cand.rebase * light.specular)
+        // A continuation no shift can carry, a transmission or one through a medium, stays the pixel's own: its light joins `direct`.
+        if (cand.flags & restir_flag_candidate) == 0u:
+            cand.direct = light.radiance
+            cand.direct_specular = light.specular
+            cand.radiance = float3(0.0)
+        // A path the mean drops as non-finite below is never re-shaded either, or it would poison the denoiser's history instead.
+        if pt.is_finite(light.radiance) => cand.flags = cand.flags | restir_flag_finished
+        traced.restir_candidates[s] = cand
 
     // One non-finite path would poison its pixel for good, since the sum is never re-derived: dropping it costs one sample.
     if st.generation == f.generation and pt.is_finite(light.radiance):
@@ -655,16 +823,25 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
     let mean = if tally.count > 0.0 => tally.sum / tally.count else float3(0.0)
     traced.output[xy] = float4(..mean, 1.0)
 
+    // ReSTIR's re-shade replaces what the frame hands the denoiser wherever it shaded the pixel; the mean stays the paths'.
+    // A frame without ReSTIR binds one-slot stand-ins, so the results are read only under the branch.
+    let mut result = restir_result(float3(0.0), 0u, float3(0.0))
+    if restir_on() => result = traced.restir_results[slot as int]
+    let reshaded = result.valid != 0u
+
     if f.write_temporal != 0u:
         // A pixel that finished no path this frame has no estimate of its own, so it hands the denoiser its mean.
-        let frame = if tally.frame_count > 0.0 => tally.frame_sum / tally.frame_count else mean
+        let own = if tally.frame_count > 0.0 => tally.frame_sum / tally.frame_count else mean
+        let frame = if reshaded => result.radiance else own
         traced.frame_output[xy] = float4(..frame, 1.0)
         traced.guide_motion[xy] = if tally.frame_primary_count > 0.0 => tally.frame_motion / tally.frame_primary_count else float2(0.0)
 
     if f.write_split != 0u:
         // The specular share was clamped to the total per path, so the difference is never negative.
-        let frame_specular = if tally.frame_count > 0.0 => tally.frame_sum_specular / tally.frame_count else (if tally.count > 0.0 => tally.sum_specular / tally.count else float3(0.0))
-        let frame = if tally.frame_count > 0.0 => tally.frame_sum / tally.frame_count else mean
+        let own_specular = if tally.frame_count > 0.0 => tally.frame_sum_specular / tally.frame_count else (if tally.count > 0.0 => tally.sum_specular / tally.count else float3(0.0))
+        let own = if tally.frame_count > 0.0 => tally.frame_sum / tally.frame_count else mean
+        let frame_specular = if reshaded => clamp(result.specular, float3(0.0), max(result.radiance, float3(0.0))) else own_specular
+        let frame = if reshaded => result.radiance else own
         traced.frame_specular[xy] = float4(..frame_specular, 1.0)
         traced.frame_diffuse[xy] = float4(..(frame - frame_specular), 1.0)
 

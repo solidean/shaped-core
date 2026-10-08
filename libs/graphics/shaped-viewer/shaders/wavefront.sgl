@@ -36,6 +36,9 @@ use tracer
 @compute(1) fun reset(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
     tracer.wavefront_reset()
 
+@compute(64) fun restir_gather(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+    tracer.wavefront_restir_gather(id.x as uint)
+
 @compute(1) fun args_round(@thread_id id: int3){tracer.traced, tracer.dispatch, tracer.wavefront_step}:
     tracer.wavefront_args_round()
 

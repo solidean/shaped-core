@@ -28,6 +28,13 @@ constexpr isize dispatch_shade = 4;
 /// `wavefront_step::fill` that starts every free slot (`fill_full` in shaders/sgl/tracer_wavefront.sgl).
 constexpr u32 fill_full = 65536;
 
+/// `wavefront_step::mode` of ReSTIR's re-shade (`step_restir_shade` in shaders/sgl/tracer_wavefront.sgl).
+constexpr u32 restir_shade_mode = 1;
+
+/// `frame_constants::wavefront_flags`, as `wavefront_flag_*` in shaders/sgl/tracer_wavefront.sgl name them.
+constexpr u32 wavefront_flag_restart = 1;
+constexpr u32 wavefront_flag_restir = 2;
+
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
 [[nodiscard]] cc::optional<sg::shader_format> sgl_format_for(sg::context const& ctx, slib::shader_library const& lib)
 {
@@ -57,6 +64,7 @@ cc::shared_async<cc::unit> wavefront_routine::init(sg::routine_init_scope scope)
         .finalize = co_await w.finalize.acquire_pipeline(ctx),
         .resolve = co_await w.resolve.acquire_pipeline(ctx),
         .reset = co_await w.reset.acquire_pipeline(ctx),
+        .restir_gather = co_await w.restir_gather.acquire_pipeline(ctx),
         .args_round = co_await w.args_round.acquire_pipeline(ctx),
         .args_shade = co_await w.args_shade.acquire_pipeline(ctx),
         .args_connect = co_await w.args_connect.acquire_pipeline(ctx),
@@ -170,6 +178,9 @@ void wavefront_routine::_record_landed_timings()
         CC_RECORD_STAT("sv.wavefront.connect", cc::rec::unit_seconds, at(wavefront_stage::connect));
         CC_RECORD_STAT("sv.wavefront.finalize", cc::rec::unit_seconds, at(wavefront_stage::finalize));
         CC_RECORD_STAT("sv.wavefront.arguments", cc::rec::unit_seconds, at(wavefront_stage::arguments));
+        // Only a frame that ran the re-shade has a time for it; the others would record a 0 that reads as a measurement.
+        if (at(wavefront_stage::restir) > 0.0)
+            CC_RECORD_STAT("sv.wavefront.restir", cc::rec::unit_seconds, at(wavefront_stage::restir));
         CC_RECORD_STAT("sv.wavefront.resolve", cc::rec::unit_seconds, at(wavefront_stage::resolve));
         _timed.remove_at(0);
     }
@@ -197,6 +208,8 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
               "wavefront_routine: the trace names more permutations than its state has room for");
     CC_ASSERT(t.bindless != nullptr, "wavefront_routine: a trace binds the manager's bindless tables");
     CC_ASSERT(d.rounds > 0, "wavefront_routine: a frame takes at least one round");
+    CC_ASSERT(!d.restir || (d.restart && !d.regenerate), "wavefront_routine: only a draining frame keeps ReSTIR's "
+                                                         "records");
 
     // Started whether or not a substitution ends up needing them.
     auto const fallback = t.fallback != nullptr ? self->_shade_kernel_of(ctx, t.fallback, *t.bindless) : nullptr;
@@ -233,7 +246,9 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
 
     auto fc = d.frame;
     fc.generation = d.generation;
-    fc.wavefront_flags = d.restart ? 1u : 0u;
+    if (d.restir)
+        d.state->ensure_restir(ctx);
+    fc.wavefront_flags = (d.restart ? wavefront_flag_restart : 0u) | (d.restir ? wavefront_flag_restir : 0u);
     fc.permutation_count = u32(t.hit_groups.size());
     fc.roulette_after = d.roulette_after;
     auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer);
@@ -255,8 +270,8 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
                                        .width = width,
                                        .height = height,
                                        .fill = u32(cc::clamp(d.fill, 0.0f, 1.0f) * f32(fill_full) + 0.5f),
-                                       .pad0 = 0,
-                                       .pad1 = 0};
+                                       .mode = 0,
+                                       .pad0 = 0};
 
     // What a kernel's groups are: `tracer.traced` at 0 always, then the bindless tables or the arguments at 1, and the decal tables at 2.
     enum class second_group
@@ -351,6 +366,33 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         mark(wavefront_stage::finalize);
         use(*self->_kernels.finalize, second_group::none);
         cmd.compute.dispatch_groups_indirect(args, dispatch_finished);
+    }
+
+    if (d.restir)
+    {
+        // The persisted primary hits, through the round's own sort and shade kernels.
+        // Counters cleared, the hits gathered by permutation and sorted, and each permutation's kernel run in its re-shade mode.
+        mark(wavefront_stage::restir);
+        step.parity = 0;
+        step.permutation = 0;
+        step.mode = restir_shade_mode;
+        use(*self->_kernels.reset, second_group::none);
+        cmd.compute.dispatch_groups(1);
+        use(*self->_kernels.restir_gather, second_group::none);
+        cmd.compute.dispatch_threads(int(width * height));
+        use(*self->_kernels.args_shade, second_group::counting);
+        cmd.compute.dispatch_groups(1);
+        use(*self->_kernels.sort, second_group::none);
+        cmd.compute.dispatch_groups_indirect(args, dispatch_hits);
+        for (auto p = isize(0); p < shade.size(); ++p)
+        {
+            step.permutation = u32(p);
+            use(*shade[p], second_group::bindless);
+            cmd.compute.bind_group(2, *tables);
+            cmd.compute.dispatch_groups_indirect(args, dispatch_shade + p);
+        }
+        step.permutation = 0;
+        step.mode = 0;
     }
 
     mark(wavefront_stage::resolve);

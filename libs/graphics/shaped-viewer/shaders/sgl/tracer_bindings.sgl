@@ -201,7 +201,8 @@ struct shadow_ray:
     direction: float3
     tested: uint
     radiance: float3
-    pad0: float
+    /// 1 where what arrives belongs to ReSTIR's direct light at the visible point rather than to the path's
+    to_direct: float
     specular: float3
     pad1: float
 
@@ -228,6 +229,37 @@ struct pixel_tally:
     hit_specular: float2
     /// every path's first secondary ray that escaped since the restart, per lobe
     escaped: float2
+
+/// What ReSTIR GI keeps of a path past its visible point `x_v`, written while `wavefront_flag_restir` is set.
+/// docs/plans/restir-gi.md is the design; `restir_flag_*` say what `flags` holds.
+struct restir_candidate:
+    /// `T_1`, the factor of the continuation from `x_v`, `f · |cos| / pdf`: the path's throughput was rebased to 1 past it
+    rebase: float3
+    /// the solid-angle density that continuation was drawn with
+    source_pdf: float
+    /// the light leaving `x_v` other than by way of `x_s`: its emission, its next-event estimates and what its continuation reached directly
+    /// Once the path finished without a candidate, a continuation no shift can carry, everything it gathered is here.
+    direct: float3
+    flags: uint
+    direct_specular: float3
+    /// `x_s`, where the continuation from `x_v` met a surface
+    x_s: float3
+    /// the geometric normal at `x_s`, facing the ray that reached it
+    n_s: float3
+    /// `L_i`: the radiance arriving at `x_v` from `x_s`, which the path gathered after its rebase
+    radiance: float3
+
+/// The primary hit a ReSTIR frame shades again after its drain, since every round overwrites `traced.hits`.
+struct visible_hit:
+    hit: hit_record
+    origin: float3
+    direction: float3
+
+/// What the re-shade made of a pixel: the frame's estimate and its specular share, where `valid` is 1.
+struct restir_result:
+    radiance: float3
+    valid: uint
+    specular: float3
 
 /// The workgroup counts an indirect dispatch reads, `sg::dispatch_args`.
 struct dispatch_args:
@@ -311,6 +343,11 @@ binding traced:
     counters: mut buffer[atomic[uint]]
     /// Where each permutation's range of `queue_sorted` starts.
     shade_offsets: mut buffer[uint]
+
+    /// ReSTIR GI's records, one per path slot while a frame sets `wavefront_flag_restir`, and one-slot stand-ins otherwise.
+    restir_candidates: mut buffer[restir_candidate]
+    restir_visible: mut buffer[visible_hit]
+    restir_results: mut buffer[restir_result]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //
@@ -461,7 +498,7 @@ binding dispatch:
 
 /// What one wavefront dispatch is told beside the frame: which of `queue_a` and `queue_b` it reads,
 /// which permutation's range it shades, whether a finished slot starts a new sample, and the image's size.
-/// `fill` is the share of free slots that start one, out of 65536.
+/// `fill` is the share of free slots that start one, out of 65536, and `mode` says whether the shade kernels run a round or ReSTIR's re-shade.
 @inline binding wavefront_step:
     parity: uint
     permutation: uint
@@ -469,8 +506,8 @@ binding dispatch:
     width: uint
     height: uint
     fill: uint
+    mode: uint
     pad0: uint
-    pad1: uint
 
 /// A shadow ray reads only visibility: the caller seeds `visible` with 0, and the shadow miss sets it to 1.
 struct shadow_payload:
