@@ -257,16 +257,16 @@ struct restir_candidate:
     light_part_specular: float3
 
 /// The primary hit a ReSTIR frame shades again after its drain, since every round overwrites `traced.hits`.
+/// Its ray left from the camera's position, which the frame's constants hold, so only the direction is kept.
 struct visible_hit:
     hit: hit_record
-    origin: float3
     direction: float3
 
 /// The visible point a ReSTIR frame built its reservoir at, kept for the next frame's temporal pass to reproject into.
 /// The guides it carries are what the target function reads, so no pass but the re-shade evaluates a material.
 struct restir_surface:
     position: float3
-    /// `restir_surface_*` bits: whether the pixel had a visible point that frame, and whether it could have made a candidate
+    /// `restir_surface_*` bits: whether the pixel had a visible point that frame, whether it could have made a candidate, and whether it is rough enough to reconnect from
     kinds: uint
     /// the geometric normal, facing the camera
     normal: float3
@@ -298,6 +298,51 @@ struct di_reservoir:
     weight: float
     /// how many candidates it has seen, capped
     confidence: float
+
+/// `restir_candidate` as `traced.restir_candidates` stores it.
+/// What finalize rebuilds the mean from stays a float, and so does what the re-shade subtracts from it; `n_s` and `L_i` are packed.
+struct packed_candidate:
+    rebase: float3
+    source_pdf: float
+    direct: float3
+    flags: uint
+    direct_specular: float3
+    x_s: float3
+    /// `n_s`, octahedral
+    n_s: uint
+    /// `radiance`, as three halves under one power of two
+    radiance: uint2
+    /// Floats: the re-shade subtracts them from `direct`, where a packed share would leave its rounding in the difference.
+    light_part: float3
+    light_part_specular: float3
+
+/// `restir_surface` as `traced.restir_surfaces` stores it.
+struct packed_surface:
+    position: float3
+    /// the geometric normal, octahedral
+    normal: uint
+    /// the albedo as three halves, and the roughness as the fourth
+    albedo_roughness: uint2
+    /// the specular albedo as three halves, and `kinds` in the fourth's place
+    specular_kinds: uint2
+
+/// `restir_reservoir` as `traced.restir_reservoirs` and `traced.restir_spatial` store it.
+struct packed_reservoir:
+    x_s: float3
+    weight: float
+    /// `n_s`, octahedral
+    n_s: uint
+    /// `radiance`, as three halves under one power of two
+    radiance: uint2
+    /// the confidence, a whole number, in the low 8 bits, and the flags above them
+    confidence_flags: uint
+
+/// `di_reservoir` as `traced.restir_di_reservoirs` and `traced.restir_di_spatial` store it.
+struct packed_di_reservoir:
+    point: float3
+    weight: float
+    /// the light's index in the low 24 bits, and the confidence, a whole number, above them
+    light_confidence: uint
 
 /// What the re-shade made of a pixel: the frame's estimate and its specular share, where `valid` is 1.
 struct restir_result:
@@ -389,17 +434,17 @@ binding traced:
     shade_offsets: mut buffer[uint]
 
     /// ReSTIR GI's records, one per path slot while a frame sets `wavefront_flag_restir`, and one-slot stand-ins otherwise.
-    restir_candidates: mut buffer[restir_candidate]
+    restir_candidates: mut buffer[packed_candidate]
     restir_visible: mut buffer[visible_hit]
     restir_results: mut buffer[restir_result]
     /// Two halves each, this frame's and the last ReSTIR frame's, which `wavefront_flag_restir_parity` says apart.
-    restir_surfaces: mut buffer[restir_surface]
-    restir_reservoirs: mut buffer[restir_reservoir]
+    restir_surfaces: mut buffer[packed_surface]
+    restir_reservoirs: mut buffer[packed_reservoir]
     /// One per pixel: the spatial pass's reservoir, which the re-shade shades; the temporal one is what the next frame reuses.
-    restir_spatial: mut buffer[restir_reservoir]
+    restir_spatial: mut buffer[packed_reservoir]
     /// ReSTIR DI's: two halves of temporal reservoirs, as the GI ones, and one per pixel of the spatial pass's.
-    restir_di_reservoirs: mut buffer[di_reservoir]
-    restir_di_spatial: mut buffer[di_reservoir]
+    restir_di_reservoirs: mut buffer[packed_di_reservoir]
+    restir_di_spatial: mut buffer[packed_di_reservoir]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //

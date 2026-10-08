@@ -1,0 +1,105 @@
+// The path tracer's packed numbers: radiance, unit vectors and counts in fewer bits than a float each, for the records ReSTIR keeps.
+// No `use`, so the file compiles on its own and SGL's interpreter runs its tests (tests/pt-packing-test.cc).
+module pt
+
+/// `x` rounded to nearest, ties to even, at the precision a half keeps at its magnitude, so a half holds it exactly.
+/// Backends differ on how a float becomes a half, and dx12 on NVIDIA truncates, which would darken every stored radiance.
+/// Integer arithmetic does the rounding, which every backend does alike; `x` must lie within a half's range.
+fun round_to_half(x: float) -> float:
+    let b = reinterpret_as_uint(x)
+    let sign = b & 0x80000000u
+    let e = (b >> 23u) & 255u
+    if e == 255u => return x
+    // below 2^-26, well under half of a half's least subnormal
+    if e < 101u => return reinterpret_as_float(sign)
+    let m = (b & 0x7fffffu) | 0x800000u
+    // a half's subnormals below 2^-14 are spaced 2^-24 apart; above, 10 bits follow the leading one
+    let s = if e < 113u => 126u - e else 13u
+    let r = (m + (1u << (s - 1u)) - 1u + ((m >> s) & 1u)) >> s
+    let step = reinterpret_as_float((if e < 113u => 103u else e - 10u) << 23u)
+    let v = (r as float) * step
+    return reinterpret_as_float(reinterpret_as_uint(v) | sign)
+
+/// Two floats as two halves in one word, each rounded to nearest on every backend.
+fun pack_halves(a: float, b: float) -> uint:
+    return pack_half2x16(float2(round_to_half(a), round_to_half(b)))
+
+/// `v` as three halves scaled by one power of two, whose exponent takes the fourth half's place.
+/// The largest component keeps a half's 11 bits from about 1e-38 up, where a plain half stops at 65504.
+fun pack_rgb(v: float3) -> uint2:
+    let m = max(abs(v.x), max(abs(v.y), abs(v.z)))
+    let e_m = clamp((reinterpret_as_uint(m) >> 23u) & 255u, 1u, 253u)
+    // A largest component that rounds up to 2 takes the next exponent, so what comes back packs to the same bits.
+    let rounds_up = round_to_half(m * reinterpret_as_float((254u - e_m) << 23u)) >= 2.0
+    let e = if rounds_up => min(e_m + 1u, 253u) else e_m
+    let s = v * reinterpret_as_float((254u - e) << 23u)
+    return uint2(pack_halves(s.x, s.y), (pack_halves(s.z, 0.0) & 0xffffu) | (e << 16u))
+
+fun unpack_rgb(u: uint2) -> float3:
+    let xy = unpack_half2x16(u.x)
+    let z = unpack_half2x16(u.y & 0xffffu).x
+    return float3(xy.x, xy.y, z) * reinterpret_as_float((u.y >> 16u) << 23u)
+
+/// A unit vector as two 16-bit fixed-point coordinates of its octahedral map, within about 5e-5 radians.
+/// A zero vector comes back as +z.
+fun pack_unit(n: float3) -> uint:
+    let a = n / max(abs(n.x) + abs(n.y) + abs(n.z), 1e-30)
+    let sx = if a.x >= 0.0 => 1.0 else -1.0
+    let sy = if a.y >= 0.0 => 1.0 else -1.0
+    let o = if a.z >= 0.0 => float2(a.x, a.y) else float2((1.0 - abs(a.y)) * sx, (1.0 - abs(a.x)) * sy)
+    let q = round(clamp(o, float2(-1.0), float2(1.0)) * 32767.0) + 32767.0
+    return (q.x as uint) | ((q.y as uint) << 16u)
+
+fun unpack_unit(u: uint) -> float3:
+    let o = float2((u & 0xffffu) as float, (u >> 16u) as float) / 32767.0 - 1.0
+    let z = 1.0 - abs(o.x) - abs(o.y)
+    let t = max(-z, 0.0)
+    let x = if o.x >= 0.0 => o.x - t else o.x + t
+    let y = if o.y >= 0.0 => o.y - t else o.y + t
+    return normalize(float3(x, y, z))
+
+/// A confidence, which every pass keeps a whole number from 0 to `restir_confidence_cap`.
+fun pack_confidence(c: float) -> uint:
+    return (clamp(c, 0.0, 255.0) + 0.5) as uint
+
+test round_to_half(1.0 + 0.75 / 1024.0) == 1.0 + 1.0 / 1024.0
+test round_to_half(1.0 + 0.25 / 1024.0) == 1.0
+// Ties go to even.
+test round_to_half(1.0 + 0.5 / 1024.0) == 1.0
+test round_to_half(1.0 + 1.5 / 1024.0) == 1.0 + 2.0 / 1024.0
+test round_to_half(-(1.0 + 0.75 / 1024.0)) == -(1.0 + 1.0 / 1024.0)
+// Rounding up past the top of a binade carries into the exponent.
+test round_to_half(2.0 - 0.25 / 1024.0) == 2.0
+// A half's subnormals: 2^-24 apart, and below half of the least of them, zero.
+test round_to_half(3e-8) == 5.9604645e-8
+test round_to_half(2e-8) == 0.0
+test round_to_half(1e-9) == 0.0
+test round_to_half(-1e-9) == -0.0
+// Half of the least subnormal is a tie, which goes to even: zero.
+test round_to_half(2.9802322e-8) == 0.0
+test round_to_half(1.5 * 5.9604645e-8) == 2.0 * 5.9604645e-8
+test unpack_rgb(pack_rgb(float3(1.0, 0.5, 0.25))) == float3(1.0, 0.5, 0.25)
+test unpack_rgb(pack_rgb(float3(1.0 + 0.75 / 1024.0, 0.5, 0.25))).x == 1.0 + 1.0 / 1024.0
+test unpack_rgb(pack_rgb(float3(-0.5, 1.0, 0.25))) == float3(-0.5, 1.0, 0.25)
+// Packing what came back gives the same bits, so a record read, changed elsewhere and written again does not drift.
+test pack_rgb(unpack_rgb(pack_rgb(float3(0.731, 12.37, 0.0021)))) == pack_rgb(float3(0.731, 12.37, 0.0021))
+test pack_rgb(unpack_rgb(pack_rgb(float3(1.9999, 0.3, 1e-6)))) == pack_rgb(float3(1.9999, 0.3, 1e-6))
+test pack_rgb(unpack_rgb(pack_rgb(float3(0.0)))) == pack_rgb(float3(0.0))
+// The largest exponent the packing keeps, where it clamps.
+test pack_rgb(unpack_rgb(pack_rgb(float3(3e38, 1.0, 0.0)))) == pack_rgb(float3(3e38, 1.0, 0.0))
+test pack_unit(unpack_unit(pack_unit(normalize(float3(0.3, -0.5, -0.8))))) == pack_unit(normalize(float3(0.3, -0.5, -0.8)))
+// Near the octahedral fold, just below the equator.
+test length(unpack_unit(pack_unit(normalize(float3(0.6, -0.8, -1e-4)))) - normalize(float3(0.6, -0.8, -1e-4))) < 1e-4
+test unpack_rgb(pack_rgb(float3(0.0))) == float3(0.0)
+// A sun's radiance, past a plain half's 65504, keeps a half's precision.
+test abs(unpack_rgb(pack_rgb(float3(2e5, 1e5, 3e4))).x / 2e5 - 1.0) < 5e-4
+test abs(unpack_rgb(pack_rgb(float3(2e5, 1e5, 3e4))).z / 3e4 - 1.0) < 5e-4
+// So does a dim one, below a plain half's normal range.
+test abs(unpack_rgb(pack_rgb(float3(3e-7, 1e-7, 2e-7))).x / 3e-7 - 1.0) < 5e-4
+test length(unpack_unit(pack_unit(normalize(float3(0.3, -0.5, -0.8)))) - normalize(float3(0.3, -0.5, -0.8))) < 1e-4
+test length(unpack_unit(pack_unit(normalize(float3(-0.7, 0.1, 0.2)))) - normalize(float3(-0.7, 0.1, 0.2))) < 1e-4
+test length(unpack_unit(pack_unit(float3(0.0, 0.0, -1.0))) - float3(0.0, 0.0, -1.0)) < 1e-4
+test length(unpack_unit(pack_unit(float3(1.0, 0.0, 0.0))) - float3(1.0, 0.0, 0.0)) < 1e-4
+test unpack_unit(pack_unit(float3(0.0))) == float3(0.0, 0.0, 1.0)
+test pack_confidence(20.0) == 20u
+test pack_confidence(0.0) == 0u

@@ -38,17 +38,17 @@ struct sv::wavefront_state
     sg::buffer<shaders::tracer::dispatch_args> args;
 
     /// ReSTIR GI's records, one per slot, null until a trace first asks for them (`ensure_restir`).
-    sg::buffer<shaders::tracer::restir_candidate> restir_candidates;
+    sg::buffer<shaders::tracer::packed_candidate> restir_candidates;
     sg::buffer<shaders::tracer::visible_hit> restir_visible;
     sg::buffer<shaders::tracer::restir_result> restir_results;
     /// Two halves each: the last ReSTIR frame's, which the temporal pass reads, and this one's.
-    sg::buffer<shaders::tracer::restir_surface> restir_surfaces;
-    sg::buffer<shaders::tracer::restir_reservoir> restir_reservoirs;
+    sg::buffer<shaders::tracer::packed_surface> restir_surfaces;
+    sg::buffer<shaders::tracer::packed_reservoir> restir_reservoirs;
     /// One per slot: the spatial pass's reservoir of the last ReSTIR frame, which its re-shade shaded.
-    sg::buffer<shaders::tracer::restir_reservoir> restir_spatial;
+    sg::buffer<shaders::tracer::packed_reservoir> restir_spatial;
     /// ReSTIR DI's: two halves of temporal reservoirs, and one per slot of the spatial pass's.
-    sg::buffer<shaders::tracer::di_reservoir> restir_di_reservoirs;
-    sg::buffer<shaders::tracer::di_reservoir> restir_di_spatial;
+    sg::buffer<shaders::tracer::packed_di_reservoir> restir_di_reservoirs;
+    sg::buffer<shaders::tracer::packed_di_reservoir> restir_di_spatial;
 
     /// Which half of the two-half records the next ReSTIR frame writes; it flips with every one.
     u32 restir_parity = 0;

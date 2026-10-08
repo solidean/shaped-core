@@ -278,7 +278,10 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         if (d.restir_spatial)
             fc.wavefront_flags |= wavefront_flag_restir_spatial;
         if (d.restir_di)
+        {
+            CC_ASSERT(fc.light_count < (1u << 24), "ReSTIR DI's reservoirs keep a light's index in 24 bits");
             fc.wavefront_flags |= wavefront_flag_restir_di;
+        }
     }
     fc.permutation_count = u32(t.hit_groups.size());
     fc.roulette_after = d.roulette_after;

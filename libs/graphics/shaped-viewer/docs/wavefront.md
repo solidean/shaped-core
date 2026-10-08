@@ -98,7 +98,8 @@ When a slot's path ends, it adds its radiance to the slot's own float sum and co
 - A pixel whose paths are deep finishes fewer samples per frame than a shallow one.
 
 The state is structure-of-arrays, one buffer per field group, so a stage reads only what it uses.
-**It is stored unpacked, behind accessors**, until per-stage timings show the bandwidth worth packing; ray origins stay 32-bit float whatever is packed.
+**The path state is stored unpacked, behind accessors**, until per-stage timings show the bandwidth worth packing; ray origins stay 32-bit float whatever is packed.
+ReSTIR's records are packed already, which [plans/restir-gi.md](plans/restir-gi.md) describes.
 
 At 1920×1080 with `k = 1`, unpacked, a frame holds roughly 250 MB of path state, 50 MB of hit records, 200 MB of shadow rays and a few index buffers of 8 MB each.
 

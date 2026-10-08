@@ -282,7 +282,7 @@ It drops the light of every later bounce, so its image is darker, and it is neve
 
 So the final shading needs pieces of its own:
 
-- **A persisted primary hit per pixel**, `traced.restir_visible`: shade at bounce 0 copies the `hit_record` and the camera ray into it.
+- **A persisted primary hit per pixel**, `traced.restir_visible`: shade at bounce 0 copies the `hit_record` and the camera ray's direction into it.
   G0 keeps it on draining frames only; a still frame of the camera-stop fix will write it whenever a path of the pixel passes bounce 0.
 - **A re-shade round after the drain**, built in G0: the counters are cleared, `wavefront_restir_gather` queues each pixel by its permutation, and the round's own sort runs.
   Then each permutation's shade kernel runs again in `wavefront_step::mode`'s re-shade mode.
@@ -340,20 +340,22 @@ Per-pixel records, structure of arrays as the wavefront's state is:
 | direct sum | a `float3`, padded | 16 | one |
 | sorted primary list | a slot index | 4 | one |
 
-That is ~256 bytes per traced pixel; the DI reservoir adds ~40 more.
+That is ~256 bytes per traced pixel as planned; the DI reservoir adds ~40 more.
+As built, with the spatial pass's reservoirs beside the two halves, the records take 388 bytes, which the table counts.
+Phase G1 has the layout.
 
 | traced extent | for | memory |
 |---|---|---|
-| 640x360 | 720p, upscaled 2x | ~59 MB |
-| 960x540 | 1080p, upscaled 2x | ~133 MB |
-| 1280x720 | 720p native | ~236 MB |
-| 1920x1080 | 1080p native | ~531 MB |
+| 640x360 | 720p, upscaled 2x | ~89 MB |
+| 960x540 | 1080p, upscaled 2x | ~201 MB |
+| 1280x720 | 720p native | ~358 MB |
+| 1920x1080 | 1080p native | ~805 MB |
 
 For comparison, the wavefront's own path state is about 500 MB at 1080p.
 
 **The records live on the accumulation slot, beside the path state, one set per extent.**
 `restir` sits beside `paths` and `scaled_restir` beside `scaled_paths`, in `impl::temporal_slot`, and the store's budget counts their bytes where it counts the paths'.
-A 720p view holding both carries ~295 MB; the full-size set is needed only while the young still frames feed the temporal member, and may be dropped after the fade.
+A 720p view holding both carries ~450 MB; the full-size set is needed only while the young still frames feed the temporal member, and may be dropped after the fade.
 
 **They reset on what the temporal member's history resets on**: the scene hash, kept on the `frame_samples` slot as `reset_hash`, and a camera cut.
 They do not reset on camera motion, which is what they exist to survive, nor on a change of extent ([The camera stops](#the-camera-stops)).
@@ -639,7 +641,7 @@ Whichever track reaches it first builds it, and the other uses it:
 **Phase G0: the candidate, with reuse off — built.**
 The throughput rebase, the direct sum, the candidate, the invalid rules, and the re-shade shading the candidate itself.
 `render_settings::restir` turns it on for a layer's restarting frames that feed a temporal denoiser.
-On the Cornell box the re-shade gives back each path's own estimate to ~2e-5, and the mean moves by ~2e-7.
+On the Cornell box the re-shade gives back each path's own estimate to ~5e-4, a half's rounding of its packed radiance, and the mean moves by ~2e-7.
 
 - **The estimator is today's**: with reuse off, a Cornell box agrees with the wavefront block by block, within the noise of the sample count.
   The roulette differs, so the comparison is statistical.
@@ -657,8 +659,15 @@ The other young still frames wait for the camera-stop fix.
 The view turns the history off after a scene change or a camera cut, on both of a slot's path states, the full-size and the scaled one.
 A visible point inside a medium, or on a material that collapses onto one wavelength, neither gives nor takes a history: its material decides, never a draw.
 A pixel whose path is left unfinished starts over at confidence 0, which costs reuse but no bias.
-The records are unpacked floats for now: ~376 bytes per traced pixel with both halves, ~780 MB at 1080p.
-Packing them is decided, and is the next step after D1.
+The records are packed, GI's and DI's together: 388 bytes per traced pixel with both halves, ~800 MB at 1080p, from 520 bytes unpacked.
+What finalize rebuilds the mean from stays a float, `T_1` and the direct sums, so the mean does not move.
+So do `x_s`, every position and weight, and the light part the re-shade subtracts from the direct sum.
+Packing moves the reuse passes' targets and the re-shade, by a half's rounding.
+Normals are octahedral in 32 bits, albedos and roughness halves, and confidences whole numbers in 8 bits beside the flags or the light's index.
+Whether a visible point is rough enough to reconnect from is a bit decided on the float, since a half rounds 0.2 below the threshold.
+Radiance is three halves under one shared power of two, so a sun's `L_i` keeps its precision where a plain half would stop at 65504.
+Each half is rounded to nearest in integer arithmetic first, since dx12 on NVIDIA truncates a float to a half, which would darken every one.
+The persisted primary hit keeps no ray origin: every camera ray leaves from the camera's position.
 History is reprojected through the frame's `previous_camera`, and reused only where that is the camera the records were kept under, `wavefront_state::restir_camera`.
 Frames between, of the megakernel or on the other path state, may have moved the camera, and then the history is not reused.
 So the full-size state, whose last ReSTIR frame was the previous stop's, starts each stop afresh.

@@ -86,6 +86,9 @@ const restir_surface_visible = 1u
 /// One inside a medium, or on a material that collapses onto one wavelength, is never shifted: it neither gives nor takes a history.
 /// That is the material's to decide, never a draw's, even where a reflection drawn there still makes a candidate of its own.
 const restir_surface_shiftable = 2u
+/// `restir_surface::kinds`: the visible point is rough enough to reconnect from, decided on its float roughness.
+/// The stored roughness is a half, which would put a material authored at exactly the threshold below it.
+const restir_surface_rough = 4u
 
 /// How many candidates a reservoir's confidence counts at most, so an old history cannot outweigh every new candidate.
 const restir_confidence_cap = 20.0
@@ -169,6 +172,38 @@ fun restir_index(slot: uint, history: bool){traced, wavefront_step} -> int:
     let upper = if history => not parity else parity
     let base = if upper => wavefront_step.width * wavefront_step.height else 0u
     return (base + slot) as int
+
+// ---- ReSTIR: the records as stored ----------------------------------------------------------------------------------
+
+fun pack_candidate(c: restir_candidate) -> packed_candidate:
+    return packed_candidate(c.rebase, c.source_pdf, c.direct, c.flags, c.direct_specular, c.x_s, pt.pack_unit(c.n_s), pt.pack_rgb(c.radiance), c.light_part, c.light_part_specular)
+
+fun unpack_candidate(p: packed_candidate) -> restir_candidate:
+    return restir_candidate(p.rebase, p.source_pdf, p.direct, p.flags, p.direct_specular, p.x_s, pt.unpack_unit(p.n_s), pt.unpack_rgb(p.radiance), p.light_part, p.light_part_specular)
+
+fun pack_surface(s: restir_surface) -> packed_surface:
+    let albedo = uint2(pt.pack_halves(s.albedo.x, s.albedo.y), pt.pack_halves(s.albedo.z, s.roughness))
+    let specular = uint2(pt.pack_halves(s.specular_albedo.x, s.specular_albedo.y), (pt.pack_halves(s.specular_albedo.z, 0.0) & 0xffffu) | (s.kinds << 16u))
+    return packed_surface(s.position, pt.pack_unit(s.normal), albedo, specular)
+
+fun unpack_surface(p: packed_surface) -> restir_surface:
+    let a_xy = unpack_half2x16(p.albedo_roughness.x)
+    let a_zr = unpack_half2x16(p.albedo_roughness.y)
+    let s_xy = unpack_half2x16(p.specular_kinds.x)
+    let s_z = unpack_half2x16(p.specular_kinds.y & 0xffffu).x
+    return restir_surface(p.position, p.specular_kinds.y >> 16u, pt.unpack_unit(p.normal), a_zr.y, float3(a_xy.x, a_xy.y, a_zr.x), float3(s_xy.x, s_xy.y, s_z))
+
+fun pack_reservoir(r: restir_reservoir) -> packed_reservoir:
+    return packed_reservoir(r.x_s, r.weight, pt.pack_unit(r.n_s), pt.pack_rgb(r.radiance), pt.pack_confidence(r.confidence) | (r.flags << 8u))
+
+fun unpack_reservoir(p: packed_reservoir) -> restir_reservoir:
+    return restir_reservoir(p.x_s, p.weight, pt.unpack_unit(p.n_s), (p.confidence_flags & 255u) as float, pt.unpack_rgb(p.radiance), p.confidence_flags >> 8u)
+
+fun pack_di(r: di_reservoir) -> packed_di_reservoir:
+    return packed_di_reservoir(r.point, r.weight, (r.light & 0xffffffu) | (pt.pack_confidence(r.confidence) << 24u))
+
+fun unpack_di(p: packed_di_reservoir) -> di_reservoir:
+    return di_reservoir(p.point, p.light_confidence & 0xffffffu, p.weight, (p.light_confidence >> 24u) as float)
 
 /// A surface record of no visible point.
 fun no_surface() -> restir_surface:
@@ -276,8 +311,8 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
     if restir_on():
-        traced.restir_candidates[s] = empty_candidate()
-        traced.restir_surfaces[restir_index(slot, false)] = no_surface()
+        traced.restir_candidates[s] = pack_candidate(empty_candidate())
+        traced.restir_surfaces[restir_index(slot, false)] = pack_surface(no_surface())
 
 /// Whether a free slot starts a sample now: always at a full fill, and below it with probability `fill / fill_full`.
 /// Below a full fill the draw advances the slot's own stream `rng`, so a slot passed over draws afresh the next time.
@@ -512,14 +547,14 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
     // A surface it meets through vacuum is the candidate's `x_s`.
     // A segment after a scatter, or one that left x_v by transmission, is part of `L_i` instead, and finalize folds it back into `direct`.
     if (st.flags & path_flag_split) != 0u and b == 1u and prev_nee_reachable:
-        let mut cand = traced.restir_candidates[s]
+        let mut cand = unpack_candidate(traced.restir_candidates[s])
         cand.direct += cand.rebase * (light.radiance - before.radiance)
         cand.direct_specular += cand.rebase * (light.specular - before.specular)
         light = before
         if (cand.flags & restir_flag_reflected) != 0u and hit_t >= 0.0 and not inside:
             cand.x_s = origin + dir * hit_t
             cand.flags = cand.flags | restir_flag_candidate
-        traced.restir_candidates[s] = cand
+        traced.restir_candidates[s] = pack_candidate(cand)
 
     // Only what this segment changed goes back: off a medium the ray, the throughput and the random state are as extend left them.
     if inside or (primary and hit_t < 0.0):
@@ -644,7 +679,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 
     // ReSTIR's visible point `x_v`: its own light is kept apart from what the continuation gathers, and its hit is kept to shade again.
     let restir_here = restir_on() and (st.flags & path_flag_primary) != 0u
-    let mut cand = if restir_here => traced.restir_candidates[s] else empty_candidate()
+    let mut cand = if restir_here => unpack_candidate(traced.restir_candidates[s]) else empty_candidate()
 
     if (st.flags & path_flag_primary) != 0u:
         // Linear view depth rather than the distance along the ray, which grows toward the image's edges.
@@ -687,12 +722,13 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     if light_waits or env_waits => push_shadow(slot)
 
     if restir_here:
-        traced.restir_visible[s] = visible_hit(hit, ray_origin, ray_dir)
+        traced.restir_visible[s] = visible_hit(hit, ray_dir)
         // Decided by the material, never by this frame's sample, so the history's domain never depends on a draw.
         let collapses = surface.transmission_dispersion_scale > 0.0 and surface.transmission_weight > 0.0
         let shiftable = all(md.sigma_t <= float3(0.0)) and not collapses
-        let kinds = restir_surface_visible | (if shiftable => restir_surface_shiftable else 0u)
-        traced.restir_surfaces[restir_index(slot, false)] = restir_surface(ray_origin + ray_dir * hit.t, kinds, n, p.roughness, p.albedo, p.specular_albedo)
+        let rough = p.roughness >= restir_reconnect_roughness
+        let kinds = restir_surface_visible | (if shiftable => restir_surface_shiftable else 0u) | (if rough => restir_surface_rough else 0u)
+        traced.restir_surfaces[restir_index(slot, false)] = pack_surface(restir_surface(ray_origin + ray_dir * hit.t, kinds, n, p.roughness, p.albedo, p.specular_albedo))
         st.flags = st.flags | path_flag_split
         cand.flags = cand.flags | restir_flag_visible
         if di_surface => cand.flags = cand.flags | restir_flag_di
@@ -706,11 +742,11 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         light = path_light(float3(0.0), float3(0.0))
     else if (st.flags & path_flag_split) != 0u and b == 1u:
         // ReSTIR's `x_s`: the normal a reconnection is weighed by, and whether it is rough enough to reconnect to at all.
-        let mut at_s = traced.restir_candidates[s]
+        let mut at_s = unpack_candidate(traced.restir_candidates[s])
         if (at_s.flags & restir_flag_candidate) != 0u:
             at_s.n_s = p.normal
             if p.roughness >= restir_reconnect_roughness => at_s.flags = at_s.flags | restir_flag_reconnectable
-            traced.restir_candidates[s] = at_s
+            traced.restir_candidates[s] = pack_candidate(at_s)
 
     let mut rng = p.rng
     let mut continues = not all(p.throughput <= float3(0.0))
@@ -752,7 +788,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     st.rng = rng
     traced.path_states[s] = st
     traced.path_lights[s] = light
-    if restir_here => traced.restir_candidates[s] = cand
+    if restir_here => traced.restir_candidates[s] = pack_candidate(cand)
     if continues:
         push_next(slot)
     else:
@@ -766,6 +802,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 /// Below that hemisphere a continuation is never a candidate: the pixel's own path keeps that light in `direct`.
 fun restir_target(surf: restir_surface, eye: float3, x_s: float3, radiance: float3) -> float:
     // From the point lifted off the surface, as shade placed the continuation, so a candidate's own `x_s` is never below it.
+    // The stored normal is octahedral, so a continuation within ~5e-5 radians of grazing may still read as below it and drop out.
     return restir_target_toward(surf, eye, normalize(x_s - (surf.position + surf.normal * 1e-3)), radiance)
 
 /// `restir_target` for light arriving from the unit direction `wi`, which ReSTIR DI's samples give directly.
@@ -817,10 +854,10 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
     let f = traced.frame[0]
     let s = slot as int
     let at = restir_index(slot, false)
-    let surf = traced.restir_surfaces[at]
-    let cand = traced.restir_candidates[s]
+    let surf = unpack_surface(traced.restir_surfaces[at])
+    let cand = unpack_candidate(traced.restir_candidates[s])
     if surf.kinds == 0u or (cand.flags & restir_flag_finished) == 0u:
-        traced.restir_reservoirs[at] = empty_reservoir(0.0)
+        traced.restir_reservoirs[at] = pack_reservoir(empty_reservoir(0.0))
         return
 
     let cam = scene.camera(..f.camera)
@@ -842,7 +879,7 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
     let mut hist_surf = surf
     let mut hist_eye = eye
     let history_on = (f.wavefront_flags & wavefront_flag_restir_history) != 0u
-    let takes = (surf.kinds & restir_surface_shiftable) != 0u and surf.roughness >= restir_reconnect_roughness
+    let takes = (surf.kinds & restir_surface_shiftable) != 0u and (surf.kinds & restir_surface_rough) != 0u
     if history_on and takes:
         let prev = scene.camera(..f.previous_camera)
         let ahead = dot(surf.position - prev.position, normalize(prev.forward))
@@ -850,8 +887,8 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
         let inside = ahead > 0.0 and q.x >= 0.0 and q.y >= 0.0 and q.x < image_size().x and q.y < image_size().y
         if inside:
             let prev_slot = (q.y as uint) * wavefront_step.width + (q.x as uint)
-            let hs = traced.restir_surfaces[restir_index(prev_slot, true)]
-            let hr = traced.restir_reservoirs[restir_index(prev_slot, true)]
+            let hs = unpack_surface(traced.restir_surfaces[restir_index(prev_slot, true)])
+            let hr = unpack_reservoir(traced.restir_reservoirs[restir_index(prev_slot, true)])
             let depth = dot(surf.position - eye, normalize(cam.forward))
             if restir_same_surface(surf, hs, depth):
                 hist = hr
@@ -901,13 +938,13 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
             kept = restir_reservoir(cand.x_s, total / p_c, cand.n_s, confidence, cand.radiance, cand.flags & restir_flag_reconnectable)
         else:
             kept = restir_reservoir(hist.x_s, total / p_h_here, hist.n_s, confidence, hist.radiance, hist.flags & restir_flag_reconnectable)
-    traced.restir_reservoirs[at] = kept
+    traced.restir_reservoirs[at] = pack_reservoir(kept)
 
 /// Whether the visible point `b` is the same surface as `a`, as both reuse passes accept one.
 /// A plane distance relative to the view depth `depth` and normals within 25°, on a surface `b` a sample may be reused from at all.
 fun restir_same_surface(a: restir_surface, b: restir_surface, depth: float) -> bool:
     if (b.kinds & restir_surface_shiftable) == 0u => return false
-    if b.roughness < restir_reconnect_roughness => return false
+    if (b.kinds & restir_surface_rough) == 0u => return false
     return restir_same_point(a, b, depth)
 
 /// Whether the visible point `b` lies on `a`'s surface: a plane distance relative to the view depth `depth`, and normals within 25°.
@@ -937,11 +974,11 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
     if slot >= wavefront_step.width * wavefront_step.height => return
     let f = traced.frame[0]
     let s = slot as int
-    let center = traced.restir_surfaces[restir_index(slot, false)]
-    let own = traced.restir_reservoirs[restir_index(slot, false)]
-    let takes = (center.kinds & restir_surface_shiftable) != 0u and center.roughness >= restir_reconnect_roughness
+    let center = unpack_surface(traced.restir_surfaces[restir_index(slot, false)])
+    let own = unpack_reservoir(traced.restir_reservoirs[restir_index(slot, false)])
+    let takes = (center.kinds & restir_surface_shiftable) != 0u and (center.kinds & restir_surface_rough) != 0u
     if not takes:
-        traced.restir_spatial[s] = own
+        traced.restir_spatial[s] = pack_reservoir(own)
         return
 
     let cam = scene.camera(..f.camera)
@@ -973,9 +1010,9 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
         // A second draw landing on the first neighbor's pixel would weigh one domain twice.
         let repeated = other == slot or (found > 0 and other == first)
         if repeated => continue
-        let ns = traced.restir_surfaces[restir_index(other, false)]
+        let ns = unpack_surface(traced.restir_surfaces[restir_index(other, false)])
         if not restir_same_surface(center, ns, depth) => continue
-        let nr = traced.restir_reservoirs[restir_index(other, false)]
+        let nr = unpack_reservoir(traced.restir_reservoirs[restir_index(other, false)])
         // A neighbor whose path did not finish saw no candidate: it would take a draw and weigh nothing.
         if nr.confidence <= 0.0 => continue
         if found == 0:
@@ -1052,7 +1089,7 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
             kept = restir_reservoir(n_res_0.x_s, total / p_0, n_res_0.n_s, confidence, n_res_0.radiance, n_res_0.flags)
         else:
             kept = restir_reservoir(n_res_1.x_s, total / p_1, n_res_1.n_s, confidence, n_res_1.radiance, n_res_1.flags)
-    traced.restir_spatial[s] = kept
+    traced.restir_spatial[s] = pack_reservoir(kept)
 
 /// Queues every pixel whose candidate the re-shade can shade, by the permutation its primary hit shades with, and clears every result.
 fun wavefront_restir_gather(slot: uint){traced, wavefront_step}:
@@ -1073,9 +1110,9 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
     let s = slot as int
     let f = traced.frame[0]
     let vis = traced.restir_visible[s]
-    let cand = traced.restir_candidates[s]
+    let cand = unpack_candidate(traced.restir_candidates[s])
     let spatial = (f.wavefront_flags & wavefront_flag_restir_spatial) != 0u
-    let kept = if spatial => traced.restir_spatial[s] else traced.restir_reservoirs[restir_index(slot, false)]
+    let kept = if spatial => unpack_reservoir(traced.restir_spatial[s]) else unpack_reservoir(traced.restir_reservoirs[restir_index(slot, false)])
 
     let mut n = normalize(instance_normal_to_world(inst, n_obj))
     let v = -normalize(vis.direction)
@@ -1087,7 +1124,7 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
         let local = openpbr.frame_from_quaternion(surface_in.geometry_tangent_frame, surface_in.geometry_handedness)
         authored = openpbr.frame(normalize(instance_to_world(inst, local.t)), normalize(instance_to_world(inst, local.b)), normalize(instance_to_world(inst, local.n)))
 
-    let x_v = vis.origin + vis.direction * vis.hit.t
+    let x_v = scene.camera(..f.camera).position + vis.direction * vis.hit.t
     let mut surface = surface_in
     apply_decals(mut surface, x_v, n, f.pixel_spread * vis.hit.t)
     let frame = openpbr.shading_frame(mut surface, n, v, authored, supplied_tangent_frame)
@@ -1114,7 +1151,7 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
     if replaces_light:
         own_light -= cand.light_part
         own_specular -= cand.light_part_specular
-        let di = if spatial => traced.restir_di_spatial[s] else traced.restir_di_reservoirs[restir_index(slot, false)]
+        let di = if spatial => unpack_di(traced.restir_di_spatial[s]) else unpack_di(traced.restir_di_reservoirs[restir_index(slot, false)])
         if di.weight > 0.0:
             let l = scene.light(..traced.lights[di.light as int])
             let mut wi = float3(0.0, 0.0, 1.0)
@@ -1234,14 +1271,14 @@ fun wavefront_restir_di_temporal(slot: uint){traced, wavefront_step}:
     let f = traced.frame[0]
     let s = slot as int
     let at = restir_index(slot, false)
-    let surf = traced.restir_surfaces[at]
+    let surf = unpack_surface(traced.restir_surfaces[at])
     let count = f.light_count
     let wanted = restir_flag_finished | restir_flag_di
     let finished = (traced.restir_candidates[s].flags & wanted) == wanted
     let lit = (surf.kinds & restir_surface_visible) != 0u and count > 0u
     let usable = lit and finished
     if not usable:
-        traced.restir_di_reservoirs[at] = empty_di(0.0)
+        traced.restir_di_reservoirs[at] = pack_di(empty_di(0.0))
         return
 
     let cam = scene.camera(..f.camera)
@@ -1277,9 +1314,9 @@ fun wavefront_restir_di_temporal(slot: uint){traced, wavefront_step}:
         let inside = ahead > 0.0 and q.x >= 0.0 and q.y >= 0.0 and q.x < image_size().x and q.y < image_size().y
         if inside:
             let prev_slot = (q.y as uint) * wavefront_step.width + (q.x as uint)
-            let hs = traced.restir_surfaces[restir_index(prev_slot, true)]
+            let hs = unpack_surface(traced.restir_surfaces[restir_index(prev_slot, true)])
             let depth = dot(surf.position - eye, normalize(cam.forward))
-            let hr = traced.restir_di_reservoirs[restir_index(prev_slot, true)]
+            let hr = unpack_di(traced.restir_di_reservoirs[restir_index(prev_slot, true)])
             // A light the table no longer holds is no sample: the history goes with it.
             let same = restir_same_point(surf, hs, depth) and hr.light < count
             if same:
@@ -1311,7 +1348,7 @@ fun wavefront_restir_di_temporal(slot: uint){traced, wavefront_step}:
             picked = di_reservoir(kept.point, kept.light, all_weight / p_c, confidence)
         else:
             picked = di_reservoir(hist.point, hist.light, all_weight / p_h, confidence)
-    traced.restir_di_reservoirs[at] = picked
+    traced.restir_di_reservoirs[at] = pack_di(picked)
 
 /// ReSTIR DI's spatial pass for `slot`: its temporal reservoir merged with two neighbors' of this frame, as GI's spatial pass.
 /// It shifts by the identity and traces no visibility ray.
@@ -1319,10 +1356,10 @@ fun wavefront_restir_di_spatial(slot: uint){traced, wavefront_step}:
     if slot >= wavefront_step.width * wavefront_step.height => return
     let f = traced.frame[0]
     let s = slot as int
-    let center = traced.restir_surfaces[restir_index(slot, false)]
-    let own = traced.restir_di_reservoirs[restir_index(slot, false)]
+    let center = unpack_surface(traced.restir_surfaces[restir_index(slot, false)])
+    let own = unpack_di(traced.restir_di_reservoirs[restir_index(slot, false)])
     if (center.kinds & restir_surface_visible) == 0u:
-        traced.restir_di_spatial[s] = own
+        traced.restir_di_spatial[s] = pack_di(own)
         return
 
     let cam = scene.camera(..f.camera)
@@ -1350,9 +1387,9 @@ fun wavefront_restir_di_spatial(slot: uint){traced, wavefront_step}:
         let other = (q.y as uint) * wavefront_step.width + (q.x as uint)
         let repeated = other == slot or (found > 0 and other == first)
         if repeated => continue
-        let ns = traced.restir_surfaces[restir_index(other, false)]
+        let ns = unpack_surface(traced.restir_surfaces[restir_index(other, false)])
         if not restir_same_point(center, ns, depth) => continue
-        let nr = traced.restir_di_reservoirs[restir_index(other, false)]
+        let nr = unpack_di(traced.restir_di_reservoirs[restir_index(other, false)])
         if nr.confidence <= 0.0 => continue
         if found == 0:
             n_res_0 = nr
@@ -1410,7 +1447,7 @@ fun wavefront_restir_di_spatial(slot: uint){traced, wavefront_step}:
             picked = di_reservoir(n_res_0.point, n_res_0.light, total / p_0, confidence)
         else:
             picked = di_reservoir(n_res_1.point, n_res_1.light, total / p_1, confidence)
-    traced.restir_di_spatial[s] = picked
+    traced.restir_di_spatial[s] = pack_di(picked)
 
 // ---- connect: the shadow rays ---------------------------------------------------------------------------------------
 
@@ -1443,12 +1480,12 @@ fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
                 light.specular += sr.specular
     traced.path_lights[slot as int] = light
     if to_direct:
-        let mut cand = traced.restir_candidates[slot as int]
+        let mut cand = unpack_candidate(traced.restir_candidates[slot as int])
         cand.direct += direct.radiance
         cand.direct_specular += direct.specular
         cand.light_part += light_part.radiance
         cand.light_part_specular += light_part.specular
-        traced.restir_candidates[slot as int] = cand
+        traced.restir_candidates[slot as int] = pack_candidate(cand)
 
 // ---- finalize: the paths that ended ---------------------------------------------------------------------------------
 
@@ -1466,7 +1503,7 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
     // The pixel's estimate puts the two back together in whatever frame the path ends, with the plain path tracer's expectation.
     // Not its sample: roulette then weighs the rebased throughput, which leaves out `T_1`.
     if (st.flags & path_flag_split) != 0u:
-        let mut cand = traced.restir_candidates[s]
+        let mut cand = unpack_candidate(traced.restir_candidates[s])
         cand.radiance = light.radiance
         light = path_light(cand.direct + cand.rebase * light.radiance, cand.direct_specular + cand.rebase * light.specular)
         // A continuation no shift can carry, a transmission or one through a medium, stays the pixel's own: its light joins `direct`.
@@ -1476,7 +1513,7 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
             cand.radiance = float3(0.0)
         // A path the mean drops as non-finite below is never re-shaded either, or it would poison the denoiser's history instead.
         if pt.is_finite(light.radiance) => cand.flags = cand.flags | restir_flag_finished
-        traced.restir_candidates[s] = cand
+        traced.restir_candidates[s] = pack_candidate(cand)
 
     // One non-finite path would poison its pixel for good, since the sum is never re-derived: dropping it costs one sample.
     if st.generation == f.generation and pt.is_finite(light.radiance):

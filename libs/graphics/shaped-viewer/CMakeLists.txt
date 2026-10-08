@@ -224,6 +224,7 @@ if(SC_BUILD_TESTS)
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
         tests/asset-loading-test.cc
+        tests/pt-packing-test.cc
     )
     # Over three times sg's WARP allowance: an unoptimized build runs the suite for five to six minutes, nearly all of it
     # the SGL compiler, unoptimized, compiling each test's material permutations afresh.
@@ -239,7 +240,9 @@ if(SC_BUILD_TESTS)
         shaped-viewer
         nexus
         babel-serializer # the capture test decodes the image back, which is how it catches a truncated write
+        shaped-graphics-language # pt_packing.sgl's own tests run on SGL's interpreter
     )
+    target_compile_definitions(shaped-viewer-test PRIVATE SV_SGL_MODULE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/shaders/sgl")
 
     sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
 

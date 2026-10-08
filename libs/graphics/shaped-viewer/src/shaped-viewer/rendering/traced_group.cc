@@ -63,14 +63,14 @@ void wavefront_state::ensure_restir(sg::context& ctx)
         return;
     auto const slots = isize(extent[0]) * isize(extent[1]);
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
-    restir_candidates = ctx.persistent.create_buffer<tracer::restir_candidate>(slots, usage);
+    restir_candidates = ctx.persistent.create_buffer<tracer::packed_candidate>(slots, usage);
     restir_visible = ctx.persistent.create_buffer<tracer::visible_hit>(slots, usage);
     restir_results = ctx.persistent.create_buffer<tracer::restir_result>(slots, usage);
-    restir_surfaces = ctx.persistent.create_buffer<tracer::restir_surface>(2 * slots, usage);
-    restir_reservoirs = ctx.persistent.create_buffer<tracer::restir_reservoir>(2 * slots, usage);
-    restir_spatial = ctx.persistent.create_buffer<tracer::restir_reservoir>(slots, usage);
-    restir_di_reservoirs = ctx.persistent.create_buffer<tracer::di_reservoir>(2 * slots, usage);
-    restir_di_spatial = ctx.persistent.create_buffer<tracer::di_reservoir>(slots, usage);
+    restir_surfaces = ctx.persistent.create_buffer<tracer::packed_surface>(2 * slots, usage);
+    restir_reservoirs = ctx.persistent.create_buffer<tracer::packed_reservoir>(2 * slots, usage);
+    restir_spatial = ctx.persistent.create_buffer<tracer::packed_reservoir>(slots, usage);
+    restir_di_reservoirs = ctx.persistent.create_buffer<tracer::packed_di_reservoir>(2 * slots, usage);
+    restir_di_spatial = ctx.persistent.create_buffer<tracer::packed_di_reservoir>(slots, usage);
 }
 
 isize wavefront_state::size_in_bytes() const

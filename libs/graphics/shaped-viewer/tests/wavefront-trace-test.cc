@@ -362,8 +362,8 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
                                                                    .generation = u32(f) + 1u});
         auto results = sg::data_future<sv::shaders::tracer::restir_result>();
         auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();
-        auto reservoirs = sg::data_future<sv::shaders::tracer::restir_reservoir>();
-        auto candidates = sg::data_future<sv::shaders::tracer::restir_candidate>();
+        auto reservoirs = sg::data_future<sv::shaders::tracer::packed_reservoir>();
+        auto candidates = sg::data_future<sv::shaders::tracer::packed_candidate>();
         // The frame writes the half its parity named before it flipped it.
         auto const written_half = isize(state.restir_parity ^ 1u);
         if (outcome == sg::routine_outcome::executed)
@@ -412,7 +412,7 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
             auto const& reservoir = kept.value()[written_half * slots + i];
             if (reservoir.weight <= 0.0f)
                 continue;
-            confidence_sum += reservoir.confidence;
+            confidence_sum += f32(reservoir.confidence_flags & 255u);
             ++keeping;
         }
         out.confidence = confidence_sum / f32(cc::max(keeping, 1));
@@ -826,7 +826,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's re-shade of a drained fra
 
     auto state = sv::wavefront_state::create(ctx, k_size, 4);
     auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();
-    auto candidates = sg::data_future<sv::shaders::tracer::restir_candidate>();
+    auto candidates = sg::data_future<sv::shaders::tracer::packed_candidate>();
     auto results = sg::data_future<sv::shaders::tracer::restir_result>();
     auto const kept = co_await drain_cornell(ctx, resources, scene, state, true,
                                              [&](sg::command_list& cmd)
@@ -881,6 +881,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's re-shade of a drained fra
     CHECK(shaded > slots / 3).context(cc::format("{} of {} pixels shaded again", shaded, slots));
     CHECK(reconnectable > slots / 3).context(cc::format("{} reconnectable candidates", reconnectable));
     CHECK(outside == 0);
+    // The stored `L_i` is a half per channel, rounded to nearest, so the re-shade is within 2^-11 of the path's own estimate.
     CHECK(worst_shade < 1e-3f).context(cc::format("the worst relative difference of the re-shade: {}", worst_shade));
     CC_LOG_INFO("ReSTIR G0 on the box: {} of {} re-shaded, worst {} against the paths, worst mean {}", shaded, slots,
                 worst_shade, worst_mean);

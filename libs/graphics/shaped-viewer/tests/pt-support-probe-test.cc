@@ -22,7 +22,7 @@ using namespace cc::primitive_defines;
 // What is checked is what each helper promises: the random stream is PCG's to the bit, a sampled direction is
 // unit and lies where its sampler says, a ray aimed at a rect lands at the distance it was aimed from, and the
 // environment is the SH sum it is written as.
-// `tests/shaders/pt_support_probe.sgl` writes eight float4s per item, in the order the checks below read them.
+// `tests/shaders/pt_support_probe.sgl` writes ten float4s per item, in the order the checks below read them.
 //
 // The lights travel as `sv::shaders::tracer::light_record` itself, so this is also where `scene.light`'s layout meets the C++ struct.
 
@@ -31,7 +31,7 @@ namespace
 static_assert(sizeof(sv_test::shaders::probe_light) == sizeof(sv::shaders::tracer::light_record),
               "probe_light in tests/shaders/pt_support_probe.sgl must match sv::shaders::tracer::light_record");
 
-constexpr isize results_per_item = 9;
+constexpr isize results_per_item = 10;
 constexpr float pi = 3.14159265358979323846f;
 
 /// The tracer's PCG step, on the CPU, which the GPU must reproduce to the bit.
@@ -293,6 +293,11 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
         CHECK(w[7][1] == (visible ? 1.0f : 0.0f)).context(where("light_visible_to_camera reads the flag through the layout"));
         CHECK(w[7][2] == 16.0f).context(where("roulette_after"));
         CHECK(w[7][3] == 4096.0f).context(where("scatter_cap"));
+
+        // ReSTIR's packing rounds to nearest whatever the backend's own conversion does, and packing it again changes nothing.
+        CHECK(w[9][0] == 1.0f + 1.0f / 1024.0f).context(where("a packed channel rounds to nearest"));
+        CHECK(w[9][1] == 1.0f).context(where("packing what came back gives the same bits"));
+        CHECK(w[9][2] < 1e-4f).context(where("a unit vector through its octahedral form"));
     }
 
     // Both branches of the rect test were taken, so neither set of checks above was vacuous.
