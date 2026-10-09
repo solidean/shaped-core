@@ -211,7 +211,7 @@ namespace babel::dds
 /// Errors on a missing magic, a header that contradicts itself, a format it cannot name, or a file too short for the subresources its header describes.
 /// Every subresource covers at least one input byte, so its records stay within about 48 times the input's size.
 /// The worst case is a 65536-layer cube array of 1 x 1 8-bit texels.
-[[nodiscard]] cc::result<data> read(cc::pinned_data<byte const> bytes);
+[[nodiscard]] cc::result<data> read(cc::pinned_data<byte const> const& bytes);
 
 /// Convenience: slurps the stream, then pins the slurped buffer (moved into the pin, not copied).
 [[nodiscard]] cc::result<data> read(cc::read_stream& in);

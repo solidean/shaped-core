@@ -403,7 +403,7 @@ isize data::slice_byte_size(int slice_width, int slice_height) const
 // reading
 // -------------------------------------------------------------------------------------------------
 
-cc::result<data> read(cc::pinned_data<byte const> bytes)
+cc::result<data> read(cc::pinned_data<byte const> const& bytes)
 {
     CC_RECORD_SCOPE("dds.read");
 
