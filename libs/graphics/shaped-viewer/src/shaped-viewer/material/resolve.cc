@@ -266,6 +266,7 @@ resolved_material resolve_material(material_type const& type, material const& ma
             // The geometric frequency picks the load code, so it is shape; which buffer it lands in is value.
             shape.add_pod(a.attribute->frequency);
             values.add_pod(a.attribute->hash);
+            values.add_pod(a.attribute->attribute);
             break;
 
         case material_frequency::material_texture:
@@ -285,6 +286,7 @@ resolved_material resolve_material(material_type const& type, material const& ma
             values.add_pod(a.sample->transform.bias);
             values.add_pod(a.sample->texture);
             values.add_pod(a.uv->hash);
+            values.add_pod(a.uv->attribute);
             // The seed is a value like any other: two materials whose maps have not landed show different placeholders
             // and therefore fill their blocks differently, so they cannot share one.
             values.add_pod_span_sized(a.fallback_constant);
