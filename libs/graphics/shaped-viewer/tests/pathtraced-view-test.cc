@@ -1045,6 +1045,59 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// An opaque surface has no interior, so its back face reflects exactly as its front face does.
+//
+// The camera looks down and the light comes in low, more than 85 degrees from the view over every pixel measured.
+// That puts each half vector past a dielectric's critical angle.
+// Read from inside, that angle reflects the whole lobe; read from outside, as an opaque surface always must be, it is only Schlick's share.
+ASYNC_INVOCABLE_TEST("sv - an opaque surface reflects the same from its back face as from its front",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 0.74f};
+    auto facing_up = sv_test::cornell_box{};
+    sv_test::cb_push_quad(facing_up, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          white);
+    auto facing_down = sv_test::cornell_box{};
+    sv_test::cb_push_quad(facing_down, tg::pos3f(-5, 0, -5), tg::pos3f(5, 0, -5), tg::pos3f(5, 0, 5),
+                          tg::pos3f(-5, 0, 5), white);
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+    auto up_scene = make_light_scene(resources, facing_up.positions, facing_up.materials, cam);
+    auto down_scene = make_light_scene(resources, facing_down.positions, facing_down.materials, cam);
+    REQUIRE(up_scene.has_value());
+    REQUIRE(down_scene.has_value());
+    up_scene.value().max_bounces = 1;
+    down_scene.value().max_bounces = 1;
+
+    auto const low = sv::light::directional(tg::vec3f(-1.0f, -0.04f, 0.0f)).lux(80);
+    auto const up_traced
+        = trace_under(&ctx, &resources, up_scene.value(), {table_of(cc::span<sv::light const>(&low, 1))});
+    auto const& up_images = co_await up_traced;
+    auto const down_traced
+        = trace_under(&ctx, &resources, down_scene.value(), {table_of(cc::span<sv::light const>(&low, 1))});
+    auto const& down_images = co_await down_traced;
+    REQUIRE(up_images.size() == 1);
+    REQUIRE(down_images.size() == 1);
+
+    auto const size = up_scene.value().size;
+    auto const front = mean_brightness(up_images[0], size, 2);
+    CHECK(front > 0.1f);
+    CHECK(tg::abs(mean_brightness(down_images[0], size, 2) - front) < 0.03f * front);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // A light the camera may see is seen at its own radiance, and one it may not is not seen at all.
 // The rect faces the camera and away from the floor, so the floor under it stays dark either way.
 ASYNC_INVOCABLE_TEST("sv - a light visible to the camera is seen at its radiance", (sg::context_handle const& ctx_h))

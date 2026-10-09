@@ -362,8 +362,8 @@ importance-samples the continuation — so what is left is coverage of the model
   It travelled an unbounded distance through an absorbing medium, so nothing survives — but that is only true for CLOSED
   geometry, and an open shell authored as solid loses paths rather than being told it is wrong.
 - **Total internal reflection reflects now**, in all three of the closure's halves at once.
-  `bsdf_sample_direction` turns a failed `refract` into the reflection about the same microfacet, `bsdf_eval` returns the
-  full lobe there rather than Schlick's share of it — Schlick has no critical angle and its tail never reaches 1 — and
+  `bsdf_sample_direction` turns a failed `refract` into the reflection about the same microfacet, `bsdf_eval` reflects the
+  refracting share of the base whole there rather than Schlick's share of it — Schlick has no critical angle and its tail never reaches 1 — and
   `bsdf_pdf` carries that density on the upper hemisphere, so the direction is scored by what drew it.
   Ending the sample was worth **28% of the light** through a lossless glass object, which is what
   `volumetric-furnace-test`'s index-1.5 case now measures and what it fails by against a build without this.
