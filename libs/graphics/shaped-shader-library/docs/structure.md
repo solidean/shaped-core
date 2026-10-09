@@ -115,6 +115,13 @@ The shape the seam is built for, and what is still `[planned]`:
   It is what reaches the backends [portable HLSL](portable-hlsl.md) does not, without DXC, Tint or naga on wasm; hand-written WGSL is the interim.
   **A tracer of it has landed**: `create_sgl_compiler(inner)` is one edge per format, SGL's pipeline in front of the compiler that was there already.
   It is not a chain in the sense below, since the hop is inside one edge: `preprocess` writes the target's text, and that text is what is cached, hashed and compiled.
+  **That `preprocess` is cached too**: in memory for the process, and persistently in `bcache::default_cache()`.
+  Its key is everything it reads, plus two fingerprints the build generates over SGL's sources with the prelude and over slib's own.
+  slib's also covers the sg headers whose enums the stored bytes hold.
+  So a repeat costs a lookup rather than the front end, and an edit to either compiler misses at its next build.
+  `SC_SG_COLD=shaders` turns the persistent tier off as it does DXC's.
+  A failed preprocess is never stored.
+  `sgl::describe`, which a hit group and a pipeline read first, has an in-memory memo beside it.
   It carries [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the tier-1 compute and raster fixtures.
   A package generates host types from it: groups, `@inline` constants, vertex inputs, render targets, and raster and ray-tracing pipelines.
   A ray-tracing pipeline's type is [raytracing-pipelines](raytracing-pipelines.md); the SGL compiler maps all six ray-tracing stages.

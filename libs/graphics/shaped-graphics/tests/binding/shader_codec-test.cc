@@ -53,6 +53,7 @@ sg::compiled_shader make_shader()
                                .visibility = sg::shader_stages(sg::shader_stage::compute),
                                .image_format = sg::pixel_format::rgba8_unorm});
     shader.bindings.push_back({.name = "Shadow",
+                               .reflected_name = "sgl_Shadow",
                                .space = 0,
                                .index = 4,
                                .count = 1,
@@ -83,8 +84,8 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
     {
         auto const& x = a.bindings[i];
         auto const& y = b.bindings[i];
-        if (x.name != y.name || x.group_index != y.group_index || x.space != y.space || x.index != y.index
-            || x.count != y.count || x.type != y.type)
+        if (x.name != y.name || x.reflected_name != y.reflected_name || x.group_index != y.group_index
+            || x.space != y.space || x.index != y.index || x.count != y.count || x.type != y.type)
             return false;
         if (x.block_size.has_value() != y.block_size.has_value())
             return false;
@@ -194,6 +195,24 @@ TEST("sg shader codec refuses a length larger than the blob holding it")
     // Both must come back as nothing rather than as a reservation the input chose.
     CHECK(!sg::impl::decode_compiled_shader(with_huge_length_at(entry_point_length_offset)).has_value());
     CHECK(!sg::impl::decode_compiled_shader(with_huge_length_at(bytecode_length_offset)).has_value());
+}
+
+TEST("sg shader codec round-trips a list of bindings alone, and refuses anything it did not write")
+{
+    auto const shader = make_shader();
+    auto const encoded = sg::impl::encode_bindings(shader.bindings);
+
+    auto const decoded = sg::impl::decode_bindings(encoded);
+    REQUIRE(decoded.has_value());
+    auto carrier = shader;
+    carrier.bindings = decoded.value();
+    CHECK(same(shader, carrier));
+
+    for (auto cut = isize(0); cut < encoded.size(); ++cut)
+        CHECK(!sg::impl::decode_bindings(cc::span<byte const>(encoded).first_n(cut)).has_value());
+    auto extended = encoded;
+    extended.push_back(byte(0));
+    CHECK(!sg::impl::decode_bindings(extended).has_value());
 }
 
 TEST("sg reflected footprint - a binding touched as its declaration allows, and a sampler not at all")

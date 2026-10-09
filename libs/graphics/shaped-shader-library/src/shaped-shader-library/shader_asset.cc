@@ -98,32 +98,42 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
             }
     cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });
 
-    bool recorded_dependencies = false;
+    auto const entry_of = [&](state& s) -> format_entry&
+    {
+        for (auto& e : s.formats)
+            if (e.format == format && is_same(e.options, key))
+                return e;
+        s.formats.push_back(format_entry{.format = format, .options = key});
+        return s.formats.back();
+    };
+
     auto shader = _state.lock(
         [&](state& s) -> sg::async_compiled_shader
         {
-            format_entry* entry = nullptr;
-            for (auto& e : s.formats)
-                if (e.format == format && is_same(e.options, key))
-                    entry = &e;
+            auto& entry = entry_of(s);
+            promote_pending(*library, s, entry);
+            return entry.current;
+        });
+    if (shader != nullptr)
+        return shader;
 
-            if (entry == nullptr)
+    // A first acquire for this format and option set compiles off the lock, as a reload does.
+    // A compile runs the front end and may wait on a persistent cache, which no other acquire of this asset should queue behind.
+    auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
+
+    // Whoever installs first wins, and a compile that lost the race is dropped: both came from the same source.
+    auto recorded_dependencies = false;
+    shader = _state.lock(
+        [&](state& s) -> sg::async_compiled_shader
+        {
+            auto& entry = entry_of(s);
+            if (entry.current == nullptr)
             {
-                s.formats.push_back(format_entry{.format = format, .options = key});
-                entry = &s.formats.back();
-            }
-
-            promote_pending(*library, s, *entry);
-
-            if (entry->current == nullptr) // first acquire for this format and option set
-            {
-                auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
-                entry->current = cc::move(outcome.shader);
-                entry->dependencies = cc::move(outcome.dependencies);
+                entry.current = cc::move(outcome.shader);
+                entry.dependencies = cc::move(outcome.dependencies);
                 recorded_dependencies = true;
             }
-
-            return entry->current;
+            return entry.current;
         });
 
     // A first compile is what resolves the includes, so the dependency set only becomes real here, on a consumer's thread.

@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-graphics-language/check/resources.hh>
@@ -7,6 +8,7 @@
 #include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::bound_samplers_space
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/impl/pipeline_fields.hh> // the pixel formats by name
+#include <shaped-shader-library/impl/sgl_emit_cache.hh>
 #include <shaped-shader-library/impl/sgl_library.hh>
 
 using namespace cc::primitive_defines;
@@ -180,7 +182,56 @@ public:
                                                                    slib::include_resolver resolve) const override
     {
         (void)resolve; // SGL has no include directive
+        return slib::impl::cached_sgl_preprocess(key_of(desc), [&] { return preprocess_now(desc); });
+    }
 
+    [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
+    {
+        // EMIT-4: what the emitted text needs of the compiler that builds it, whoever wired that compiler
+        auto inner = desc;
+        if (_target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan)
+            // a half is `float16_t`, which DXC compiles only with 16-bit types on, and SGL writes no spelling the flag changes
+            inner.dxc_args.push_back(cc::string("-enable-16bit-types"));
+        if (_target == sgl::emit::target::msl)
+            // `coherent(device)` and texture atomics, which a metallib compiles from MSL 3.2 on
+            inner.metal_language_version = "metal3.2";
+        return _inner->compile(inner);
+    }
+
+    [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
+    {
+        return _inner->reflect_layouts(shader);
+    }
+
+private:
+    /// Everything `preprocess_now` reads of `desc`, and the target it writes for.
+    /// The label is in it, since the front end may quote the name it is given.
+    [[nodiscard]] cc::hash128 key_of(slib::shader_source_description const& desc) const
+    {
+        auto& b = cc::byte_stream_builder::thread_local_scratch();
+        b.add_string(desc.source);
+        b.add_string(desc.entry_point);
+        b.add_pod(desc.stage);
+        b.add_string(desc.label);
+        b.add_pod(_target);
+        b.add_pod(i64(desc.options.size()));
+        for (auto const& o : desc.options)
+        {
+            b.add_string(o.name);
+            b.add_string(o.value);
+        }
+        b.add_pod(i64(desc.modules.size()));
+        for (auto const& m : desc.modules)
+        {
+            b.add_string(m.path);
+            b.add_string(m.text);
+        }
+        return cc::hash128::create(b.written_bytes(), 0);
+    }
+
+    /// SGL's front end and emitter, translated into what slib takes: what the cache stores.
+    [[nodiscard]] cc::result<slib::preprocessed_source> preprocess_now(slib::shader_source_description const& desc) const
+    {
         auto stage = sgl::check::stage::none;
         switch (desc.stage)
         {
@@ -292,25 +343,6 @@ public:
         return result;
     }
 
-    [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
-    {
-        // EMIT-4: what the emitted text needs of the compiler that builds it, whoever wired that compiler
-        auto inner = desc;
-        if (_target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan)
-            // a half is `float16_t`, which DXC compiles only with 16-bit types on, and SGL writes no spelling the flag changes
-            inner.dxc_args.push_back(cc::string("-enable-16bit-types"));
-        if (_target == sgl::emit::target::msl)
-            // `coherent(device)` and texture atomics, which a metallib compiles from MSL 3.2 on
-            inner.metal_language_version = "metal3.2";
-        return _inner->compile(inner);
-    }
-
-    [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
-    {
-        return _inner->reflect_layouts(shader);
-    }
-
-private:
     std::unique_ptr<slib::shader_compiler> _inner;
     sgl::emit::target _target;
 };

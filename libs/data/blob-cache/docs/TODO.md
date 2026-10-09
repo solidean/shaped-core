@@ -3,7 +3,7 @@
 ## Open
 
 - **Test binaries that compile shaders open the real default cache, and keep it past the run.**
-  The dxc and msl shader caches reach for `bcache::default_cache()` on their first miss, and no such test binary installs a `scoped_default_cache`.
+  The dxc and msl shader caches and slib's SGL edge reach for `bcache::default_cache()` on their first miss, and no such test binary installs a `scoped_default_cache`.
   So shaped-rendering's, shaped-viewer's, slib's, ssc-dxc's and sg-vulkan's tests read and write the developer's own cache file, which `default_cache.hh` says a test must not.
   The lazily opened default is a function-local static, so it closes at exit, after nexus's end-of-run check.
   On a singlethreaded build its actor is unthreaded and registers a pump, which is the "1 thread pump(s) still registered after the run" warning those binaries print.
